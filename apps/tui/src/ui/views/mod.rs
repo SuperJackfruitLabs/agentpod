@@ -5,5 +5,6 @@ pub mod files;
 pub mod git;
 pub mod login;
 pub mod providers;
+pub mod sandbox_detail;
 pub mod settings;
 pub mod terminal;

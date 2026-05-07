@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     match app.active_view {
         crate::app::View::Login => views::login::render(frame, app, chunks[1]),
         crate::app::View::Dashboard => views::dashboard::render(frame, app, chunks[1]),
-        crate::app::View::SandboxDetail => views::dashboard::render(frame, app, chunks[1]),
+        crate::app::View::SandboxDetail => views::sandbox_detail::render(frame, app, chunks[1]),
         crate::app::View::CreateSandbox => views::create_sandbox::render(frame, app, chunks[1]),
         crate::app::View::Chat => views::chat::render(frame, app, chunks[1]),
         crate::app::View::Terminal => views::terminal::render(frame, app, chunks[1]),
