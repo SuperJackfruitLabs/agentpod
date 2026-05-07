@@ -350,9 +350,11 @@ impl App {
             KeyCode::Char('1') => self.set_sandbox_detail_tab(SandboxDetailTab::Overview),
             KeyCode::Char('2') => self.set_sandbox_detail_tab(SandboxDetailTab::Stats),
             KeyCode::Char('3') => self.set_sandbox_detail_tab(SandboxDetailTab::Logs),
-            KeyCode::Char('r') if self.sandbox_detail.tab == SandboxDetailTab::Overview => {
-                self.refresh_sandbox_detail_overview().await;
-            }
+            KeyCode::Char('r') => match self.sandbox_detail.tab {
+                SandboxDetailTab::Overview => self.refresh_sandbox_detail_overview().await,
+                SandboxDetailTab::Stats => self.refresh_sandbox_detail_stats().await,
+                SandboxDetailTab::Logs => self.refresh_sandbox_detail_logs().await,
+            },
             _ => {}
         }
     }
@@ -378,6 +380,42 @@ impl App {
             }
         }
         self.sandbox_detail.loading_detail = false;
+    }
+
+    async fn refresh_sandbox_detail_stats(&mut self) {
+        let Some(sandbox_id) = self.sandbox_detail.sandbox_id.clone() else {
+            return;
+        };
+
+        self.sandbox_detail.loading_stats = true;
+        match self.api.get_sandbox_stats(&sandbox_id).await {
+            Ok(stats) => {
+                self.sandbox_detail.stats = Some(stats);
+                self.sandbox_detail.error = None;
+            }
+            Err(error) => {
+                self.sandbox_detail.error = Some(error.to_string());
+            }
+        }
+        self.sandbox_detail.loading_stats = false;
+    }
+
+    async fn refresh_sandbox_detail_logs(&mut self) {
+        let Some(sandbox_id) = self.sandbox_detail.sandbox_id.clone() else {
+            return;
+        };
+
+        self.sandbox_detail.loading_logs = true;
+        match self.api.get_sandbox_logs(&sandbox_id, 100).await {
+            Ok(logs) => {
+                self.sandbox_detail.logs = Some(logs);
+                self.sandbox_detail.error = None;
+            }
+            Err(error) => {
+                self.sandbox_detail.error = Some(error.to_string());
+            }
+        }
+        self.sandbox_detail.loading_logs = false;
     }
 
     /// Handle chat view keys

@@ -168,3 +168,109 @@ async fn test_sandbox_detail_r_refreshes_overview() {
     assert_eq!(app.sandbox_detail.sandbox.as_ref().unwrap().name, "Refreshed Sandbox");
     assert!(app.sandbox_detail.error.is_none());
 }
+
+#[tokio::test]
+async fn test_sandbox_detail_r_refreshes_stats_tab() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/stats"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "stats": {
+                "cpuPercent": 44.0,
+                "memoryUsage": 100,
+                "memoryLimit": 200,
+                "memoryPercent": 50.0,
+                "networkRx": 10,
+                "networkTx": 20,
+                "blockRead": 30,
+                "blockWrite": 40
+            }
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+    app.sandbox_detail.tab = SandboxDetailTab::Stats;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).await;
+
+    assert_eq!(app.sandbox_detail.stats.as_ref().unwrap().cpu_percent, 44.0);
+    assert!(app.sandbox_detail.error.is_none());
+}
+
+#[tokio::test]
+async fn test_sandbox_detail_r_refreshes_logs_tab() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/logs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "logs": "booting\nready",
+            "tail": 100
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+    app.sandbox_detail.tab = SandboxDetailTab::Logs;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).await;
+
+    assert_eq!(app.sandbox_detail.logs.as_deref(), Some("booting\nready"));
+    assert!(app.sandbox_detail.error.is_none());
+}
+
+#[tokio::test]
+async fn test_sandbox_detail_stats_failure_stays_on_stats_with_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/stats"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({"error": "stats unavailable"})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+    app.sandbox_detail.tab = SandboxDetailTab::Stats;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).await;
+
+    assert_eq!(app.active_view, View::SandboxDetail);
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Stats);
+    assert!(!app.sandbox_detail.loading_stats);
+    assert!(app.sandbox_detail.error.as_ref().unwrap().contains("500"));
+}
+
+#[tokio::test]
+async fn test_sandbox_detail_logs_failure_stays_on_logs_with_error() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/logs"))
+        .respond_with(ResponseTemplate::new(500).set_body_json(json!({"error": "logs unavailable"})))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+    app.sandbox_detail.tab = SandboxDetailTab::Logs;
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).await;
+
+    assert_eq!(app.active_view, View::SandboxDetail);
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Logs);
+    assert!(!app.sandbox_detail.loading_logs);
+    assert!(app.sandbox_detail.error.as_ref().unwrap().contains("500"));
+}
