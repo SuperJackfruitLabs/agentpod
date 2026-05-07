@@ -5,7 +5,7 @@ use crate::api::{sandboxes::CreateSandboxRequest, ApiClient};
 use crate::cli::Cli;
 use crate::config::Config;
 use crate::event::ApiResult;
-use crate::types::{Sandbox, SandboxStatus};
+use crate::types::{Sandbox, SandboxStats, SandboxStatus};
 use crate::ui;
 
 const CREATE_SANDBOX_FLAVORS: [&str; 7] = [
@@ -25,6 +25,7 @@ const CREATE_SANDBOX_ADDONS: [&str; 1] = ["code-server"];
 pub enum View {
     Login,
     Dashboard,
+    SandboxDetail,
     CreateSandbox,
     Chat,
     Terminal,
@@ -32,6 +33,41 @@ pub enum View {
     Git,
     Providers,
     Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SandboxDetailTab {
+    Overview,
+    Stats,
+    Logs,
+}
+
+pub struct SandboxDetailState {
+    pub sandbox_id: Option<String>,
+    pub tab: SandboxDetailTab,
+    pub sandbox: Option<Sandbox>,
+    pub stats: Option<SandboxStats>,
+    pub logs: Option<String>,
+    pub error: Option<String>,
+    pub loading_detail: bool,
+    pub loading_stats: bool,
+    pub loading_logs: bool,
+}
+
+impl SandboxDetailState {
+    fn new() -> Self {
+        Self {
+            sandbox_id: None,
+            tab: SandboxDetailTab::Overview,
+            sandbox: None,
+            stats: None,
+            logs: None,
+            error: None,
+            loading_detail: false,
+            loading_stats: false,
+            loading_logs: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,6 +133,7 @@ pub struct App {
     pub should_quit: bool,
     pub active_view: View,
     pub create_sandbox: CreateSandboxWizardState,
+    pub sandbox_detail: SandboxDetailState,
 
     // Login
     pub login_email: String,
@@ -135,6 +172,7 @@ impl App {
             should_quit: false,
             active_view,
             create_sandbox,
+            sandbox_detail: SandboxDetailState::new(),
             login_email: String::new(),
             login_password: String::new(),
             login_focus: 0,
@@ -172,7 +210,9 @@ impl App {
         // Global key handling
         match key.code {
             KeyCode::Char('q')
-                if self.active_view != View::Login && self.active_view != View::CreateSandbox =>
+                if self.active_view != View::Login
+                    && self.active_view != View::CreateSandbox
+                    && self.active_view != View::SandboxDetail =>
             {
                 self.should_quit = true;
                 return;
@@ -188,6 +228,7 @@ impl App {
         match self.active_view {
             View::Login => self.handle_login_keys(key).await,
             View::Dashboard => self.handle_dashboard_keys(key).await,
+            View::SandboxDetail => self.handle_sandbox_detail_keys(key).await,
             View::CreateSandbox => self.handle_create_sandbox_keys(key).await,
             View::Chat => self.handle_chat_keys(key).await,
             View::Terminal => self.handle_terminal_keys(key).await,
@@ -273,7 +314,7 @@ impl App {
                 }
             }
             KeyCode::Enter => {
-                // TODO: Open sandbox detail
+                self.open_selected_sandbox_detail().await;
             }
             KeyCode::Tab => {
                 self.active_view = View::Chat;
@@ -282,6 +323,12 @@ impl App {
                 self.active_view = View::Settings;
             }
             _ => {}
+        }
+    }
+
+    async fn handle_sandbox_detail_keys(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Esc {
+            self.active_view = View::Dashboard;
         }
     }
 
@@ -403,6 +450,37 @@ impl App {
     fn cancel_create_sandbox(&mut self) {
         self.create_sandbox = CreateSandboxWizardState::new(&self.config);
         self.active_view = View::Dashboard;
+    }
+
+    async fn open_selected_sandbox_detail(&mut self) {
+        let Some(snapshot) = self.sandboxes.get(self.selected_sandbox).cloned() else {
+            return;
+        };
+        let sandbox_id = snapshot.id.clone();
+
+        self.sandbox_detail = SandboxDetailState {
+            sandbox_id: Some(sandbox_id.clone()),
+            tab: SandboxDetailTab::Overview,
+            sandbox: Some(snapshot),
+            stats: None,
+            logs: None,
+            error: None,
+            loading_detail: true,
+            loading_stats: false,
+            loading_logs: false,
+        };
+        self.active_view = View::SandboxDetail;
+
+        match self.api.get_sandbox(&sandbox_id).await {
+            Ok(sandbox) => {
+                self.sandbox_detail.sandbox = Some(sandbox);
+                self.sandbox_detail.error = None;
+            }
+            Err(error) => {
+                self.sandbox_detail.error = Some(error.to_string());
+            }
+        }
+        self.sandbox_detail.loading_detail = false;
     }
 
     fn create_sandbox_next_step(&mut self) {

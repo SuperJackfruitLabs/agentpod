@@ -30,6 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     match app.active_view {
         crate::app::View::Login => views::login::render(frame, app, chunks[1]),
         crate::app::View::Dashboard => views::dashboard::render(frame, app, chunks[1]),
+        crate::app::View::SandboxDetail => views::dashboard::render(frame, app, chunks[1]),
         crate::app::View::CreateSandbox => views::create_sandbox::render(frame, app, chunks[1]),
         crate::app::View::Chat => views::chat::render(frame, app, chunks[1]),
         crate::app::View::Terminal => views::terminal::render(frame, app, chunks[1]),
@@ -58,6 +59,7 @@ fn render_tab_bar(frame: &mut Frame, app: &App, area: Rect) {
     let selected = match app.active_view {
         crate::app::View::Login => 0,
         crate::app::View::Dashboard => 0,
+        crate::app::View::SandboxDetail => 0,
         crate::app::View::CreateSandbox => 0,
         crate::app::View::Chat => 1,
         crate::app::View::Terminal => 2,
