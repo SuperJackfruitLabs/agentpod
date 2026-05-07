@@ -327,9 +327,57 @@ impl App {
     }
 
     async fn handle_sandbox_detail_keys(&mut self, key: KeyEvent) {
-        if key.code == KeyCode::Esc {
-            self.active_view = View::Dashboard;
+        match key.code {
+            KeyCode::Esc => {
+                self.active_view = View::Dashboard;
+            }
+            KeyCode::Tab => {
+                self.sandbox_detail.tab = match self.sandbox_detail.tab {
+                    SandboxDetailTab::Overview => SandboxDetailTab::Stats,
+                    SandboxDetailTab::Stats => SandboxDetailTab::Logs,
+                    SandboxDetailTab::Logs => SandboxDetailTab::Overview,
+                };
+                self.sandbox_detail.error = None;
+            }
+            KeyCode::BackTab => {
+                self.sandbox_detail.tab = match self.sandbox_detail.tab {
+                    SandboxDetailTab::Overview => SandboxDetailTab::Logs,
+                    SandboxDetailTab::Stats => SandboxDetailTab::Overview,
+                    SandboxDetailTab::Logs => SandboxDetailTab::Stats,
+                };
+                self.sandbox_detail.error = None;
+            }
+            KeyCode::Char('1') => self.set_sandbox_detail_tab(SandboxDetailTab::Overview),
+            KeyCode::Char('2') => self.set_sandbox_detail_tab(SandboxDetailTab::Stats),
+            KeyCode::Char('3') => self.set_sandbox_detail_tab(SandboxDetailTab::Logs),
+            KeyCode::Char('r') if self.sandbox_detail.tab == SandboxDetailTab::Overview => {
+                self.refresh_sandbox_detail_overview().await;
+            }
+            _ => {}
         }
+    }
+
+    fn set_sandbox_detail_tab(&mut self, tab: SandboxDetailTab) {
+        self.sandbox_detail.tab = tab;
+        self.sandbox_detail.error = None;
+    }
+
+    async fn refresh_sandbox_detail_overview(&mut self) {
+        let Some(sandbox_id) = self.sandbox_detail.sandbox_id.clone() else {
+            return;
+        };
+
+        self.sandbox_detail.loading_detail = true;
+        match self.api.get_sandbox(&sandbox_id).await {
+            Ok(sandbox) => {
+                self.sandbox_detail.sandbox = Some(sandbox);
+                self.sandbox_detail.error = None;
+            }
+            Err(error) => {
+                self.sandbox_detail.error = Some(error.to_string());
+            }
+        }
+        self.sandbox_detail.loading_detail = false;
     }
 
     /// Handle chat view keys

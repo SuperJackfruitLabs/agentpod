@@ -109,3 +109,62 @@ async fn test_dashboard_enter_uses_snapshot_when_detail_load_fails() {
     assert_eq!(app.sandbox_detail.sandbox.as_ref().unwrap().name, "List Sandbox");
     assert!(app.sandbox_detail.error.as_ref().unwrap().contains("500"));
 }
+
+#[tokio::test]
+async fn test_sandbox_detail_tab_navigation() {
+    let mock_server = MockServer::start().await;
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Stats);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Logs);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Overview);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Logs);
+}
+
+#[tokio::test]
+async fn test_sandbox_detail_number_keys_jump_tabs() {
+    let mock_server = MockServer::start().await;
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Stats);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Logs);
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)).await;
+    assert_eq!(app.sandbox_detail.tab, SandboxDetailTab::Overview);
+}
+
+#[tokio::test]
+async fn test_sandbox_detail_r_refreshes_overview() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(detail_response("sb-1", "Refreshed Sandbox")))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let mut app = test_app(mock_server.uri());
+    app.active_view = View::SandboxDetail;
+    app.sandbox_detail.sandbox_id = Some("sb-1".to_string());
+    app.sandbox_detail.sandbox = Some(sandbox("sb-1", "Old Sandbox", SandboxStatus::Running));
+
+    app.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)).await;
+
+    assert_eq!(app.sandbox_detail.sandbox.as_ref().unwrap().name, "Refreshed Sandbox");
+    assert!(app.sandbox_detail.error.is_none());
+}
