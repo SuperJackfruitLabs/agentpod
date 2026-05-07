@@ -43,6 +43,20 @@ pub struct Sandbox {
     pub updated_at: String,
 }
 
+/// Sandbox resource usage statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxStats {
+    pub cpu_percent: f64,
+    pub memory_usage: u64,
+    pub memory_limit: u64,
+    pub memory_percent: f64,
+    pub network_rx: u64,
+    pub network_tx: u64,
+    pub block_read: u64,
+    pub block_write: u64,
+}
+
 /// Container flavor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]

@@ -1,8 +1,8 @@
-use agentpod_tui::api::{ApiClient, sandboxes::CreateSandboxRequest};
+use agentpod_tui::api::{sandboxes::CreateSandboxRequest, ApiClient};
 use agentpod_tui::types::SandboxStatus;
 use serde_json::json;
-use wiremock::{MockServer, Mock, ResponseTemplate};
 use wiremock::matchers::{body_json, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
 async fn test_list_sandboxes_success() {
@@ -231,4 +231,57 @@ async fn test_restart_sandbox_success() {
     let result = client.restart_sandbox("sb-1").await;
 
     assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_get_sandbox_stats_success() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/stats"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "stats": {
+                "cpuPercent": 12.5,
+                "memoryUsage": 104857600,
+                "memoryLimit": 536870912,
+                "memoryPercent": 19.5,
+                "networkRx": 2048,
+                "networkTx": 4096,
+                "blockRead": 8192,
+                "blockWrite": 16384
+            }
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = ApiClient::new(&mock_server.uri(), Some("test-token".to_string()));
+    let result = client.get_sandbox_stats("sb-1").await.unwrap();
+
+    assert_eq!(result.cpu_percent, 12.5);
+    assert_eq!(result.memory_usage, 104857600);
+    assert_eq!(result.memory_limit, 536870912);
+    assert_eq!(result.memory_percent, 19.5);
+    assert_eq!(result.network_rx, 2048);
+    assert_eq!(result.network_tx, 4096);
+    assert_eq!(result.block_read, 8192);
+    assert_eq!(result.block_write, 16384);
+}
+
+#[tokio::test]
+async fn test_get_sandbox_logs_success() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/api/v2/sandboxes/sb-1/logs"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "logs": "line one\nline two",
+            "tail": 100
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let client = ApiClient::new(&mock_server.uri(), Some("test-token".to_string()));
+    let result = client.get_sandbox_logs("sb-1", 100).await.unwrap();
+
+    assert_eq!(result, "line one\nline two");
 }

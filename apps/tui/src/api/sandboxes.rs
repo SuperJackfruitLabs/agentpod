@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use super::ApiClient;
-use crate::types::Sandbox;
+use crate::types::{Sandbox, SandboxStats};
 
 /// Create sandbox request
 #[derive(Debug, Serialize)]
@@ -27,6 +27,18 @@ pub struct SandboxListResponse {
     pub sandboxes: Vec<Sandbox>,
 }
 
+/// Sandbox stats response
+#[derive(Debug, Deserialize)]
+pub struct SandboxStatsResponse {
+    pub stats: SandboxStats,
+}
+
+/// Sandbox logs response
+#[derive(Debug, Deserialize)]
+pub struct SandboxLogsResponse {
+    pub logs: String,
+}
+
 impl ApiClient {
     /// List all sandboxes
     pub async fn list_sandboxes(&self) -> Result<Vec<Sandbox>> {
@@ -37,6 +49,21 @@ impl ApiClient {
     /// Get a sandbox by ID
     pub async fn get_sandbox(&self, id: &str) -> Result<Sandbox> {
         self.get(&format!("/api/v2/sandboxes/{}", id)).await
+    }
+
+    /// Get sandbox resource usage statistics
+    pub async fn get_sandbox_stats(&self, id: &str) -> Result<SandboxStats> {
+        let response: SandboxStatsResponse =
+            self.get(&format!("/api/v2/sandboxes/{}/stats", id)).await?;
+        Ok(response.stats)
+    }
+
+    /// Get sandbox logs
+    pub async fn get_sandbox_logs(&self, id: &str, tail: u32) -> Result<String> {
+        let response: SandboxLogsResponse = self
+            .get(&format!("/api/v2/sandboxes/{}/logs?tail={}", id, tail))
+            .await?;
+        Ok(response.logs)
     }
 
     /// Create a new sandbox
