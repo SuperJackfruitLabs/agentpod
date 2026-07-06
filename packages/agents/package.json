@@ -20,8 +20,8 @@
   "devDependencies": {
     "@agentpod/tsconfig": "workspace:*",
     "@types/bun": "latest",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.20.0",
     "bun-types": "latest",
-    "typescript": "^5.6.0"
+    "typescript": "^5.9.3"
   }
 }
