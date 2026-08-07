@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
 import { initDatabase } from './db/drizzle.ts';
+import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
@@ -43,11 +44,15 @@ import { stationCleanupRoutes } from './routes/station-cleanup.ts';
 import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
+import { startNodeSweeper } from './services/node-sweeper.ts';
 
 validateConfig();
 
 console.log('Initializing database...');
 await initDatabase();
+
+const orphans = await resetOrphanedOnlineNodes();
+if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);
 
 const errorLogger = createLogger('error-handler');
 
@@ -158,6 +163,10 @@ export { app };
 // Without this, provisioning returns 400 ("provider not registered").
 registerEnabledProvisioners();
 console.log('Provisioners registered:', enabledProviders().join(', ') || '(none enabled)');
+
+// Expire silent nodes whose TCP close never fired (killed VM, dropped network).
+startNodeSweeper();
+console.log('Node heartbeat sweeper started (45s threshold)');
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {

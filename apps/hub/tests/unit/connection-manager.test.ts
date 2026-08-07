@@ -25,3 +25,19 @@ test("onlineNodeIds returns ids of currently connected nodes", () => {
   cm.unregister("node_2");
   expect(cm.onlineNodeIds()).toEqual([]);
 });
+
+test("isCurrent is true only for the currently registered send fn", () => {
+  const cm = new InMemoryConnectionManager();
+  const sendA = () => {};
+  const sendB = () => {};
+  cm.register("node_x", sendA);
+  expect(cm.isCurrent("node_x", sendA)).toBe(true);
+  expect(cm.isCurrent("node_x", sendB)).toBe(false);
+  // A reconnect replaces the entry — the old socket is no longer current.
+  cm.register("node_x", sendB);
+  expect(cm.isCurrent("node_x", sendA)).toBe(false);
+  expect(cm.isCurrent("node_x", sendB)).toBe(true);
+  // Unregistered node: nothing is current.
+  cm.unregister("node_x");
+  expect(cm.isCurrent("node_x", sendB)).toBe(false);
+});

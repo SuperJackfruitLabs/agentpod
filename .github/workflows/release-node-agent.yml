@@ -55,33 +55,63 @@ jobs:
             -o agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }} \
             ./cmd/agentpod-node
 
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
-          files: apps/node-agent/agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }}
+      - name: Upload binary to release (retry x3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name || inputs.tag }}
+        working-directory: apps/node-agent
+        run: |
+          # Create the release once (first arch to get here wins; races are benign).
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
+          ok=0
+          for i in 1 2 3; do
+            if gh release upload "$TAG" "agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }}" \
+                --repo "$GITHUB_REPOSITORY" --clobber; then
+              ok=1; break
+            fi
+            echo "upload attempt $i failed; retrying in $((i * 10))s"
+            sleep $((i * 10))
+          done
+          [ "$ok" = 1 ]
 
   static-assets:
     name: Upload static release assets
     runs-on: ubuntu-latest
     needs: build
+    # Run even when an arch failed — a partial release must still carry
+    # install.sh/.service (and sha256sums below needs this job).
+    if: ${{ !cancelled() }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Upload static assets to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
-          files: |
-            apps/node-agent/deploy/agentpod-node.service
-            apps/node-agent/scripts/install.sh
+      - name: Upload static assets to release (retry x3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name || inputs.tag }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
+          ok=0
+          for i in 1 2 3; do
+            if gh release upload "$TAG" \
+                apps/node-agent/deploy/agentpod-node.service \
+                apps/node-agent/scripts/install.sh \
+                --repo "$GITHUB_REPOSITORY" --clobber; then
+              ok=1; break
+            fi
+            echo "upload attempt $i failed; retrying in $((i * 10))s"
+            sleep $((i * 10))
+          done
+          [ "$ok" = 1 ]
 
   sha256sums:
     name: Publish SHA256SUMS
     runs-on: ubuntu-latest
     needs: static-assets
+    if: ${{ !cancelled() }}
 
     steps:
       - name: Download all release assets
@@ -98,8 +128,18 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
 
-      - name: Upload SHA256SUMS to release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name || inputs.tag }}
-          files: release-assets/SHA256SUMS
+      - name: Upload SHA256SUMS to release (retry x3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name || inputs.tag }}
+        run: |
+          ok=0
+          for i in 1 2 3; do
+            if gh release upload "$TAG" release-assets/SHA256SUMS \
+                --repo "$GITHUB_REPOSITORY" --clobber; then
+              ok=1; break
+            fi
+            echo "upload attempt $i failed; retrying in $((i * 10))s"
+            sleep $((i * 10))
+          done
+          [ "$ok" = 1 ]

@@ -14,6 +14,7 @@ import {
   beforeAll,
   afterAll,
 } from "bun:test";
+import { Hono } from "hono";
 import { rawSql } from "../../src/db/drizzle";
 import { createTestUser } from "../helpers/database";
 import {
@@ -23,6 +24,13 @@ import {
 } from "../../src/services/enrollment";
 import { listNodes } from "../../src/services/node-registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { nodeEnrollRoutes } from "../../src/routes/nodes";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Minimal test server (mirrors gateway.test.ts's pattern)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const testApp = new Hono().route("/public/nodes", nodeEnrollRoutes);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test fixtures
@@ -137,5 +145,30 @@ describe("Enrollment service", () => {
     // Exactly one must succeed; the other must be rejected (token already consumed)
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
+  });
+
+  test("credential-check returns 200 for a valid node credential", async () => {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { nodeId, nodeSecret } = await enrollNode(token, {
+      hostname: "credcheck-host", os: "linux", arch: "amd64", cpuCount: 1,
+    });
+    const res = await testApp.request("/public/nodes/credential-check", {
+      headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ valid: true });
+  });
+
+  test("credential-check returns 401 for a wrong secret and for a missing header", async () => {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { nodeId } = await enrollNode(token, {
+      hostname: "credcheck-bad-host", os: "linux", arch: "amd64", cpuCount: 1,
+    });
+    const bad = await testApp.request("/public/nodes/credential-check", {
+      headers: { Authorization: `Bearer ${nodeId}:wrong-secret` },
+    });
+    expect(bad.status).toBe(401);
+    const missing = await testApp.request("/public/nodes/credential-check");
+    expect(missing.status).toBe(401);
   });
 });

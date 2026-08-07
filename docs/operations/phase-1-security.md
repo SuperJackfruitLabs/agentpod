@@ -426,7 +426,7 @@ export function validateConfig(): void {
   if (devTokenPattern.test(config.betterAuth.session.secret)) {
     if (isProduction) {
       errors.push({
-        field: "SESSION_SECRET",
+        field: "BETTER_AUTH_SECRET",
         message: "Production session secret cannot contain dev/test patterns. Generate with: openssl rand -base64 32",
       });
     } else {
@@ -481,7 +481,7 @@ export function validateConfig(): void {
     // Session secret entropy
     if (!hasMinimumEntropy(config.betterAuth.session.secret, 32)) {
       errors.push({
-        field: "SESSION_SECRET",
+        field: "BETTER_AUTH_SECRET",
         message: "Session secret has insufficient entropy. Generate with: openssl rand -base64 32",
       });
     }
@@ -524,7 +524,7 @@ token: getEnv('API_TOKEN', process.env.NODE_ENV === 'production' ? undefined : '
 
 // Apply same pattern to:
 // - ENCRYPTION_KEY (line 48)
-// - SESSION_SECRET (line 119)
+// - BETTER_AUTH_SECRET (line 119)
 ```
 
 ### Integration
@@ -792,7 +792,7 @@ API_TOKEN=dev-token-change-in-production
 # Session secret for Better Auth cookie signing
 # Generate with: openssl rand -base64 32
 # REQUIRED in production (no default)
-SESSION_SECRET=dev-session-secret-change-in-production
+BETTER_AUTH_SECRET=dev-session-secret-change-in-production
 
 # Encryption key for storing provider API keys
 # Must be exactly 32 characters

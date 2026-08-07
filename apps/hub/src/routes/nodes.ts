@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { EnrollRequest } from "@agentpod/contract";
-import { enrollNode } from "../services/enrollment";
+import { enrollNode, verifyNodeCredential } from "../services/enrollment";
 import { listNodes } from "../services/node-registry";
 import { request as brokerRequest } from "../services/broker";
 
@@ -64,15 +64,31 @@ export const nodeRoutes = createNodeRoutes();
  *   Body: { token: string; hostInfo: HostInfo }
  *   Returns: { nodeId: string; nodeSecret: string }
  */
-export const nodeEnrollRoutes = new Hono().post(
-  "/enroll",
-  zValidator("json", EnrollRequest),
-  async (c) => {
-    const { token, hostInfo } = c.req.valid("json");
-    try {
-      return c.json(await enrollNode(token, hostInfo));
-    } catch (e) {
-      return c.json({ error: (e as Error).message }, 401);
+export const nodeEnrollRoutes = new Hono()
+  .post(
+    "/enroll",
+    zValidator("json", EnrollRequest),
+    async (c) => {
+      const { token, hostInfo } = c.req.valid("json");
+      try {
+        return c.json(await enrollNode(token, hostInfo));
+      } catch (e) {
+        return c.json({ error: (e as Error).message }, 401);
+      }
     }
-  }
-);
+  )
+  // Node-side credential probe (self-healing re-enroll, #161).
+  // Auth: Authorization: Bearer <nodeId>:<nodeSecret> — same scheme as the gateway.
+  // 200 {valid:true} when the stored credential is still valid on this hub;
+  // 401 {valid:false} otherwise. No state change.
+  .get("/credential-check", async (c) => {
+    const auth = c.req.header("Authorization") ?? "";
+    const token = auth.replace(/^Bearer\s+/, "");
+    const idx = token.indexOf(":");
+    const nodeId = idx !== -1 ? token.slice(0, idx) : "";
+    const nodeSecret = idx !== -1 ? token.slice(idx + 1) : "";
+    if (!nodeId || !nodeSecret || !(await verifyNodeCredential(nodeId, nodeSecret))) {
+      return c.json({ valid: false }, 401);
+    }
+    return c.json({ valid: true });
+  });

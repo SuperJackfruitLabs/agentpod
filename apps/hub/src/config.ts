@@ -115,8 +115,9 @@ export const config = {
     },
     // Session configuration
     session: {
-      // Session cookie secret (for signing)
-      secret: getEnv('SESSION_SECRET', 'dev-session-secret-change-in-production'),
+      // Better Auth signing secret. Docs and prod env already use BETTER_AUTH_SECRET;
+      // config is the single source of truth and passes it to betterAuth() explicitly.
+      secret: getEnv('BETTER_AUTH_SECRET', 'dev-session-secret-change-in-production'),
     },
   },
 

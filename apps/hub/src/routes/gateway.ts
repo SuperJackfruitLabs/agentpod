@@ -15,6 +15,7 @@ import { GatewayClientMessage } from "@agentpod/contract";
 import { verifyNodeCredential } from "../services/enrollment";
 import { setNodeStatus, setNodeAgentVersion } from "../services/node-registry";
 import { connectionManager } from "../services/connection-manager";
+import type { Send } from "../services/connection-manager";
 import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
 import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
@@ -30,6 +31,8 @@ export const gatewayRoutes = new Hono().get(
     const nodeId = colonIdx !== -1 ? token.slice(0, colonIdx) : token;
     const nodeSecret = colonIdx !== -1 ? token.slice(colonIdx + 1) : "";
     let authed: string | null = null;
+    // This connection's send fn — its identity is the connection epoch.
+    let send: Send | null = null;
     // Resolves true once auth completes, false if the connection is rejected or
     // closed first. onMessage awaits this so an early frame — notably the
     // one-shot `hello` the agent sends immediately on connect, which carries the
@@ -51,7 +54,8 @@ export const gatewayRoutes = new Hono().get(
           return;
         }
         authed = nodeId;
-        connectionManager.register(nodeId, (m) => ws.send(JSON.stringify(m)));
+        send = (m) => ws.send(JSON.stringify(m));
+        connectionManager.register(nodeId, send);
         await setNodeStatus(nodeId, "online");
         resolveAuth(true);
 
@@ -87,6 +91,12 @@ export const gatewayRoutes = new Hono().get(
           const version = parsed.data.version ?? null;
           await setNodeAgentVersion(authed, version);
         } else if (parsed.data.type === "heartbeat") {
+          // A heartbeating socket with no registry entry (swept, or lost to a
+          // close race) re-registers itself — server→node send must work for
+          // any node that is heartbeating. Never steal an existing entry.
+          if (send && !connectionManager.isOnline(authed)) {
+            connectionManager.register(authed, send);
+          }
           await setNodeStatus(authed, "online");
           connectionManager.send(authed, { type: "ack", ts: Date.now() });
         } else if (parsed.data.type === "health") {
@@ -101,7 +111,10 @@ export const gatewayRoutes = new Hono().get(
 
       async onClose() {
         resolveAuth(false); // unblock any onMessage awaiting auth on early close
-        if (authed) {
+        // Epoch guard: only the currently registered socket tears down. A late
+        // close from a replaced socket must not mark the fresh connection
+        // offline or drop its send entry.
+        if (authed && send && connectionManager.isCurrent(authed, send)) {
           clearNode(authed); // flush health cache immediately on disconnect
           dropNode(authed);
           connectionManager.unregister(authed);

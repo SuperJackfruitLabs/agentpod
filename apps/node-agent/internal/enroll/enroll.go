@@ -16,3 +16,21 @@ func Enroll(hubURL, token string, hi host.HostInfo) (string, string, error) {
   if r.StatusCode != 200 { return "", "", fmt.Errorf("enroll failed: %s", out.Error) }
   return out.NodeID, out.NodeSecret, nil
 }
+
+// CheckCredential asks the hub whether nodeID:nodeSecret is still a valid
+// identity there. (true, nil) on 200; (false, nil) on 401/403; error on
+// anything else (network failure, 5xx) so callers can distinguish "hub said
+// no" from "could not ask" — the latter must never destroy a stored identity.
+func CheckCredential(hubURL, nodeID, nodeSecret string) (bool, error) {
+  req, err := http.NewRequest("GET", hubURL+"/public/nodes/credential-check", nil)
+  if err != nil { return false, err }
+  req.Header.Set("Authorization", "Bearer "+nodeID+":"+nodeSecret)
+  r, err := http.DefaultClient.Do(req)
+  if err != nil { return false, err }
+  defer r.Body.Close()
+  switch r.StatusCode {
+  case 200: return true, nil
+  case 401, 403: return false, nil
+  default: return false, fmt.Errorf("credential-check: unexpected status %d", r.StatusCode)
+  }
+}
