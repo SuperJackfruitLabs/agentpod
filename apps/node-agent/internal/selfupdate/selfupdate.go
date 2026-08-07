@@ -214,18 +214,23 @@ func swapBinary(targetPath, tmpPath string) error {
 	return nil
 }
 
-// restartService restarts the agentpod-node service.
-// It probes for a user-scoped unit first; if active it uses --user, otherwise
-// it falls back to the system-scoped unit. Returns a wrapped ErrRestartFailed
-// when the restart command itself fails (binary already swapped at that point).
-func restartService(run func(name string, args ...string) error) error {
+// restartService restarts the agentpod-node service for the given GOOS.
+//
+// linux: probes for a user-scoped systemd unit first; if active uses --user,
+// else the system unit. darwin: the installer runs the agent as the LaunchAgent
+// gui/<uid>/dev.agentpod.node — kickstart -k kills and restarts it. Returns a
+// wrapped ErrRestartFailed when the restart command fails (the binary is
+// already swapped at that point).
+func restartService(goos string, run func(name string, args ...string) error) error {
 	if run == nil {
 		run = func(name string, args ...string) error {
 			return exec.Command(name, args...).Run()
 		}
 	}
 	var restartErr error
-	if run("systemctl", "--user", "is-active", "agentpod-node") == nil {
+	if goos == "darwin" {
+		restartErr = run("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/dev.agentpod.node", os.Getuid()))
+	} else if run("systemctl", "--user", "is-active", "agentpod-node") == nil {
 		restartErr = run("systemctl", "--user", "restart", "agentpod-node")
 	} else {
 		restartErr = run("systemctl", "restart", "agentpod-node")
@@ -346,7 +351,7 @@ func Update(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	// Restart the service. Even if this fails the binary has been updated.
-	if err := restartService(opts.RunCommand); err != nil {
+	if err := restartService(runtime.GOOS, opts.RunCommand); err != nil {
 		return updated, err
 	}
 

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -251,7 +252,7 @@ func TestRestartService(t *testing.T) {
 			// All calls succeed
 			return nil
 		}
-		if err := restartService(run); err != nil {
+		if err := restartService("linux", run); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		// Expected: is-active probe (succeeds) → user restart
@@ -279,7 +280,7 @@ func TestRestartService(t *testing.T) {
 			}
 			return nil
 		}
-		if err := restartService(run); err != nil {
+		if err := restartService("linux", run); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(calls) != 2 {
@@ -296,7 +297,7 @@ func TestRestartService(t *testing.T) {
 			// is-active fails, then restart also fails
 			return fmt.Errorf("systemctl error")
 		}
-		err := restartService(run)
+		err := restartService("linux", run)
 		if err == nil {
 			t.Fatal("expected error when restart fails")
 		}
@@ -324,6 +325,31 @@ func TestRestartService(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestRestartServiceDarwinUsesLaunchctlKickstart(t *testing.T) {
+	var calls [][]string
+	run := func(name string, args ...string) error {
+		calls = append(calls, append([]string{name}, args...))
+		return nil
+	}
+
+	if err := restartService("darwin", run); err != nil {
+		t.Fatalf("restartService: %v", err)
+	}
+
+	want := []string{"launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/dev.agentpod.node", os.Getuid())}
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], want) {
+		t.Fatalf("calls = %v, want exactly [%v]", calls, want)
+	}
+}
+
+func TestRestartServiceDarwinFailureWrapsErrRestartFailed(t *testing.T) {
+	run := func(name string, args ...string) error { return errors.New("no such service") }
+	err := restartService("darwin", run)
+	if !errors.Is(err, ErrRestartFailed) {
+		t.Fatalf("err = %v, want ErrRestartFailed", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -478,8 +504,13 @@ func TestUpdate(t *testing.T) {
 		if string(got) != string(content) {
 			t.Errorf("target: got %q want %q", got, content)
 		}
-		// Restart was called
-		if len(runCalls) < 2 {
+		// Restart was called. Update() passes the real runtime.GOOS through to
+		// restartService, so the exact call count is platform-dependent (linux:
+		// is-active probe + restart = 2; darwin: single launchctl kickstart = 1).
+		// The systemd- and launchd-specific call sequences are covered in detail
+		// by TestRestartService and TestRestartServiceDarwin*; here we only
+		// assert that Update() actually attempted a restart.
+		if len(runCalls) < 1 {
 			t.Errorf("expected restart calls, got %d", len(runCalls))
 		}
 	})

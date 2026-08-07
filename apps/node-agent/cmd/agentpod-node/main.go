@@ -75,7 +75,11 @@ func main() {
     if err != nil {
       if errors.Is(err, selfupdate.ErrRestartFailed) {
         fmt.Fprintln(os.Stderr, "update: binary swapped but service restart failed:", err)
-        fmt.Fprintln(os.Stderr, "restart the service manually: systemctl restart agentpod-node")
+        if runtime.GOOS == "darwin" {
+          fmt.Fprintf(os.Stderr, "restart it manually: launchctl kickstart -k gui/%d/dev.agentpod.node  (or re-run: apn run)\n", os.Getuid())
+        } else {
+          fmt.Fprintln(os.Stderr, "restart the service manually: systemctl restart agentpod-node")
+        }
         os.Exit(1)
       }
       fmt.Fprintln(os.Stderr, "update:", err)
