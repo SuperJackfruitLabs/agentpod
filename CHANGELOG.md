@@ -6,6 +6,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## [0.1.10] - 2026-08-07
+
+Trustworthy fleet: reconciliation, self-healing enrollment, and release hardening.
+
+### Fixed
+
+- **Heartbeat reconciliation & gateway closure** (#47)
+  - Epoch-guarded gateway close: nodes gracefully reconnect when hub restarts (no stale socket held).
+  - Heartbeat re-register: nodes refresh their registration on each heartbeat, catching enrollment drift.
+  - Boot reset: on startup, hub resets all online nodes to offline (sweeper catchup → reconnect).
+  - 45-second heartbeat sweeper: sweeps offline nodes and detects stale registrations.
+  
+- **Self-healing re-enrollment** (#161)
+  - Nodes detect stored credential rejection and automatically re-enroll (even mid-session).
+  - `enroll --force` CLI flag: operators can force re-enrollment to recover from credential drift.
+  - New `/public/nodes/credential-check` endpoint: diagnostic check (no auth required) to validate credentials before enrollment.
+
+### Changed
+
+- **Authentication configuration tidying** (#149)
+  - `BETTER_AUTH_SECRET` env var is now required; misconfiguration fails loudly at boot rather than silently degrading auth security.
+
+### Improved
+
+- **Release pipeline hardening** (#188)
+  - Release workflow now retries failed arch builds up to 3 times (transient network flakes).
+  - SHA256SUMS generation is decoupled from individual binary builds; SUMS publish even if one arch flakes.
+
+---
+
 ## [0.1.0] - 2026-06-29
 
 First tagged release of AgentPod **as a fleet/facilities console for agent runtimes**. The OpenCode era is frozen at [`v0.0.4-opencode`](#legacy-v004-opencode).
