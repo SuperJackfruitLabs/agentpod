@@ -24,22 +24,38 @@ func main() {
   if len(os.Args) < 2 { fmt.Println("usage: agentpod-node <enroll|run|detect|update|version>"); os.Exit(2) }
   switch os.Args[1] {
   case "enroll":
-    // Idempotency guard: if a valid config already exists on disk, skip the
-    // network call entirely. This makes "enroll && run" in the entrypoints
-    // safe across container restarts — the one-time token is not re-used.
-    if existing, err := config.Load(config.DefaultPath()); alreadyEnrolled(existing, err) {
-      fmt.Println("already enrolled:", existing.NodeID)
+    fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+    flagHub := fs.String("hub", "", "hub base URL")
+    flagToken := fs.String("token", "", "enrollment token")
+    flagForce := fs.Bool("force", false, "re-enroll even when a valid config exists")
+    fs.Parse(os.Args[2:])
+    existing, loadErr := config.Load(config.DefaultPath())
+    haveConfig := alreadyEnrolled(existing, loadErr)
+    hub, token, err := resolveEnrollArgs(*flagHub, *flagToken, os.Getenv)
+    if err != nil {
+      // Bare `enroll` on an already-enrolled machine stays a friendly no-op.
+      if haveConfig { fmt.Println("already enrolled:", existing.NodeID); return }
+      fmt.Fprintln(os.Stderr, err); os.Exit(1)
+    }
+    decision, reason := decideEnroll(existing, haveConfig, hub, *flagForce, enroll.CheckCredential)
+    switch decision {
+    case decisionKeep:
+      fmt.Printf("already enrolled: %s (%s)\n", existing.NodeID, reason)
+      return
+    case decisionKeepUnverified:
+      // Keep a possibly-valid identity; `run` retries connecting anyway.
+      fmt.Fprintf(os.Stderr, "warning: keeping existing config (%s)\n", reason)
       return
     }
-    fs := flag.NewFlagSet("enroll", flag.ExitOnError)
-    flagHub := fs.String("hub", "", "hub base URL"); flagToken := fs.String("token", "", "enrollment token")
-    fs.Parse(os.Args[2:])
-    hub, token, err := resolveEnrollArgs(*flagHub, *flagToken, os.Getenv)
-    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    if haveConfig { fmt.Printf("re-enrolling: %s\n", reason) }
     id, sec, err := enroll.Enroll(hub, token, host.Info())
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-    if err := config.Save(config.DefaultPath(), config.Config{Hub: hub, NodeID: id, NodeSecret: sec}); err != nil {
-      fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    // Preserve operator-set lifecycle commands across re-enrollment.
+    newCfg := config.Config{Hub: hub, NodeID: id, NodeSecret: sec,
+      HermesStartCmd: existing.HermesStartCmd, OpenClawStartCmd: existing.OpenClawStartCmd}
+    if err := config.Save(config.DefaultPath(), newCfg); err != nil {
+      fmt.Fprintln(os.Stderr, err); os.Exit(1)
+    }
     fmt.Println("enrolled:", id)
   case "run":
     runCmd() // implemented in Task 9
