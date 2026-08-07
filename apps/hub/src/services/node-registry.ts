@@ -79,10 +79,24 @@ export async function setNodeStatus(
   nodeId: string,
   status: "online" | "offline"
 ) {
+  // lastSeenAt means "last actual contact" — only online transitions bump it.
   await db
     .update(nodes)
-    .set({ status, lastSeenAt: new Date() })
+    .set(status === "online" ? { status, lastSeenAt: new Date() } : { status })
     .where(eq(nodes.id, nodeId));
+}
+
+/**
+ * Boot-time reconciliation: any row still marked online is an orphan from a
+ * previous hub process (no socket can exist yet). Returns the flipped count.
+ */
+export async function resetOrphanedOnlineNodes(): Promise<number> {
+  const rows = await db
+    .update(nodes)
+    .set({ status: "offline" })
+    .where(eq(nodes.status, "online"))
+    .returning({ id: nodes.id });
+  return rows.length;
 }
 
 export async function setNodeAgentVersion(

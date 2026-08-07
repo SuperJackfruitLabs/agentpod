@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
 import { initDatabase } from './db/drizzle.ts';
+import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
@@ -48,6 +49,9 @@ validateConfig();
 
 console.log('Initializing database...');
 await initDatabase();
+
+const orphans = await resetOrphanedOnlineNodes();
+if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);
 
 const errorLogger = createLogger('error-handler');
 
