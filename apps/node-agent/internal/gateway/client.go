@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"math/rand"
 	"strings"
 	"sync"
@@ -114,6 +115,9 @@ func runWithOpts(ctx context.Context, cfg config.Config, h Handler, opts runOpti
 			if opts.jitterFn != nil {
 				d += opts.jitterFn(d)
 			}
+			// Operators need the disconnect reason — a silent reconnect loop
+			// makes flapping connections undiagnosable.
+			log.Printf("gateway: connection lost: %v (reconnecting in %s)", err, d.Round(time.Millisecond))
 			attempt++
 			if !opts.sleepFn(ctx, d) {
 				break

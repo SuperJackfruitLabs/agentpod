@@ -1,8 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"log"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,5 +216,40 @@ func TestReconnectOnConnectedResetsAttempt(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not exit after cancel")
+	}
+}
+
+// TestReconnectLogsDisconnectReason verifies that each connection loss is
+// logged with the underlying error and the computed backoff — operators were
+// previously blind to why an agent kept reconnecting.
+func TestReconnectLogsDisconnectReason(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	done := make(chan error, 1)
+	go func() {
+		done <- runWithOpts(ctx, config.Config{}, stubHandler, runOptions{
+			dialFn: func(context.Context, config.Config, Handler, func()) error {
+				calls++
+				if calls >= 2 {
+					cancel()
+				}
+				return errors.New("websocket: close 1006 abnormal closure")
+			},
+			sleepFn:  func(ctx context.Context, d time.Duration) bool { return ctx.Err() == nil },
+			jitterFn: nil,
+		})
+	}()
+	<-done
+
+	out := buf.String()
+	if !strings.Contains(out, "close 1006 abnormal closure") {
+		t.Fatalf("disconnect reason not logged; log output: %q", out)
+	}
+	if !strings.Contains(out, "reconnecting in") {
+		t.Fatalf("backoff not logged; log output: %q", out)
 	}
 }
