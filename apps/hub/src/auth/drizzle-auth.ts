@@ -45,6 +45,10 @@ export const auth = betterAuth({
     provider: "pg",
   }),
 
+  // Explicit secret from config — do not rely on Better Auth's implicit
+  // BETTER_AUTH_SECRET env read.
+  secret: config.betterAuth.session.secret,
+
   // Base URL for callbacks
   baseURL: config.publicUrl,
 

@@ -8,7 +8,7 @@ Use this checklist before deploying to production. All items must be verified.
 
 ### Critical (Will Block Startup)
 - [ ] `API_TOKEN` - Generate: `openssl rand -base64 32`
-- [ ] `SESSION_SECRET` - Generate: `openssl rand -base64 32`
+- [ ] `BETTER_AUTH_SECRET` - Generate: `openssl rand -base64 32`
 - [ ] `ENCRYPTION_KEY` - Generate: `openssl rand -base64 24 | head -c 32`
 - [ ] `POSTGRES_PASSWORD` - Use strong password, not default
 

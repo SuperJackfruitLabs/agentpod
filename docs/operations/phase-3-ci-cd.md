@@ -125,7 +125,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgres://agentpod:test-password@localhost:5432/agentpod_test
           API_TOKEN: test-token
-          SESSION_SECRET: test-session-secret-32-chars-long
+          BETTER_AUTH_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!
 
       - name: Run integration tests
@@ -135,7 +135,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgres://agentpod:test-password@localhost:5432/agentpod_test
           API_TOKEN: test-token
-          SESSION_SECRET: test-session-secret-32-chars-long
+          BETTER_AUTH_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!
 
       - name: Run tests with coverage
@@ -145,7 +145,7 @@ jobs:
           NODE_ENV: test
           DATABASE_URL: postgres://agentpod:test-password@localhost:5432/agentpod_test
           API_TOKEN: test-token
-          SESSION_SECRET: test-session-secret-32-chars-long
+          BETTER_AUTH_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!
 
   # ===========================================================================

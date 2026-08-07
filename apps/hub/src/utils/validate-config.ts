@@ -46,7 +46,7 @@ export function validateConfig(): void {
   if (devTokenPattern.test(config.betterAuth.session.secret)) {
     if (isProduction) {
       errors.push({
-        field: "SESSION_SECRET",
+        field: "BETTER_AUTH_SECRET",
         message: "Production session secret cannot contain dev/test patterns. Generate with: openssl rand -base64 32",
       });
     } else {
@@ -93,7 +93,7 @@ export function validateConfig(): void {
 
     if (!hasMinimumEntropy(config.betterAuth.session.secret, 32)) {
       errors.push({
-        field: "SESSION_SECRET",
+        field: "BETTER_AUTH_SECRET",
         message: "Session secret has insufficient entropy. Generate with: openssl rand -base64 32",
       });
     }
