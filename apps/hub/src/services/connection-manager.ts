@@ -8,6 +8,8 @@ export interface NodeConnectionManager {
   isOnline(nodeId: string): boolean;
   onlineNodeIds(): string[];
   send(nodeId: string, msg: GatewayServerMessage): boolean;
+  /** True when `send` is the currently registered sender for nodeId (epoch guard). */
+  isCurrent(nodeId: string, send: Send): boolean;
 }
 
 export class InMemoryConnectionManager implements NodeConnectionManager {
@@ -34,6 +36,10 @@ export class InMemoryConnectionManager implements NodeConnectionManager {
     if (!s) return false;
     s(msg);
     return true;
+  }
+
+  isCurrent(nodeId: string, send: Send) {
+    return this.conns.get(nodeId) === send;
   }
 }
 

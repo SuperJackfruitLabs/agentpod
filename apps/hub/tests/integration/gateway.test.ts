@@ -29,6 +29,7 @@ import {
 import { listNodes } from "../../src/services/node-registry";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
+import { connectionManager } from "../../src/services/connection-manager";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal test server (avoids importing full index.ts which has many side effects)
@@ -191,6 +192,71 @@ test("heartbeat keeps node online and receives ack", async () => {
     ws.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
     const ack = await ackPromise;
     expect((ack as { type: string }).type).toBe("ack");
+
+    ws.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("a late close from a replaced socket does not mark the reconnected node offline", async () => {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  try {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { nodeId, nodeSecret } = await enrollNode(token, {
+      hostname: "race-host", os: "linux", arch: "amd64", cpuCount: 1,
+    });
+    const headers = { Authorization: `Bearer ${nodeId}:${nodeSecret}` };
+    const url = `ws://localhost:${server.port}/public/nodes/gateway`;
+
+    const wsOld = new WebSocket(url, { headers } as RequestInit & { headers: Record<string, string> });
+    await new Promise<void>((res, rej) => { wsOld.onopen = () => res(); wsOld.onerror = () => rej(new Error("old socket failed")); });
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Node reconnects on a new socket while the old one is still open.
+    const wsNew = new WebSocket(url, { headers } as RequestInit & { headers: Record<string, string> });
+    await new Promise<void>((res, rej) => { wsNew.onopen = () => res(); wsNew.onerror = () => rej(new Error("new socket failed")); });
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The OLD socket closes late.
+    wsOld.close();
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Node must still be online, and the NEW socket must still be routable.
+    const list = await listNodes(TEST_USER_ID);
+    expect(list.find((n) => n.id === nodeId)?.status).toBe("online");
+    const ackPromise = new Promise<unknown>((res) => { wsNew.onmessage = (e) => res(JSON.parse(String(e.data))); });
+    wsNew.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
+    expect(((await ackPromise) as { type: string }).type).toBe("ack");
+
+    wsNew.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("a heartbeat from a socket with no registry entry re-registers it", async () => {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  try {
+    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    const { nodeId, nodeSecret } = await enrollNode(token, {
+      hostname: "rereg-host", os: "linux", arch: "amd64", cpuCount: 1,
+    });
+    const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+      headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+    } as RequestInit & { headers: Record<string, string> });
+    await new Promise<void>((res, rej) => { ws.onopen = () => res(); ws.onerror = () => rej(new Error("connect failed")); });
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Simulate a sweep: the registry entry is gone but the socket is alive.
+    connectionManager.unregister(nodeId);
+    expect(connectionManager.isOnline(nodeId)).toBe(false);
+
+    const ackPromise = new Promise<unknown>((res) => { ws.onmessage = (e) => res(JSON.parse(String(e.data))); });
+    ws.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
+    expect(((await ackPromise) as { type: string }).type).toBe("ack");
+    // Server→node routing is restored, not just DB status.
+    expect(connectionManager.isOnline(nodeId)).toBe(true);
 
     ws.close();
   } finally {
