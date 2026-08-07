@@ -202,7 +202,9 @@ export type StationAuditRow = {
   nodeId: string;
   stationKey: string;
   verb: string;
-  paramsSummary: string | null;
+  // jsonb object from the hub (apps/hub/src/db/schema/audit.ts); string kept
+  // for backward compatibility with older rows.
+  paramsSummary: Record<string, unknown> | string | null;
   result: string;
   error: string | null;
   createdAt: string | Date;

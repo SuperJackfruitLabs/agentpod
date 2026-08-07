@@ -117,3 +117,43 @@ test("ActivityPanel Refresh button re-fetches activity", async () => {
 
   await waitFor(() => expect(api.activity).toHaveBeenCalledTimes(2));
 });
+
+test("ActivityPanel renders object paramsSummary as readable JSON, never [object Object]", async () => {
+  // The hub stores params_summary as jsonb and returns an OBJECT (see
+  // apps/hub/src/db/schema/audit.ts) — not the string the older mocks used.
+  vi.spyOn(api, "activity").mockResolvedValue([
+    {
+      id: "row_obj",
+      userId: "user_a",
+      nodeId: "node_1",
+      stationKey: "claude-code:abc",
+      verb: "cleanup.plan",
+      paramsSummary: { path: "/workspace", dryRun: true },
+      result: "ok",
+      error: null,
+      createdAt: "2026-08-07T14:00:00Z",
+    },
+    {
+      id: "row_empty",
+      userId: "user_a",
+      nodeId: "node_1",
+      stationKey: "claude-code:abc",
+      verb: "term.open",
+      paramsSummary: {},
+      result: "ok",
+      error: null,
+      createdAt: "2026-08-07T14:01:00Z",
+    },
+  ] as never);
+
+  const { getByText, container } = render(ActivityPanel, {
+    props: { stationId: "station_1" },
+  });
+
+  await waitFor(() => getByText("cleanup.plan"));
+  expect(container.textContent).not.toContain("[object Object]");
+  // Object params render as compact JSON…
+  getByText('{"path":"/workspace","dryRun":true}');
+  // …and an empty object renders nothing at all.
+  expect(container.textContent).not.toContain("{}");
+});
