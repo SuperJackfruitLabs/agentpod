@@ -236,10 +236,14 @@ EOF
   fi
   echo ""
   if [ "$SVC_OK" = "1" ]; then
-    echo "Running as a systemd --user service:"
-    echo "  status:  systemctl --user status agentpod-node"
-    echo "  logs:    journalctl --user -u agentpod-node -f"
-    echo "  To survive logout/reboot, an admin runs once:  sudo loginctl enable-linger $USER"
+    # install_launch_agent already printed the full darwin summary; only
+    # linux's systemd --user path needs its own summary here.
+    if [ "$OS" = "linux" ]; then
+      echo "Running as a systemd --user service:"
+      echo "  status:  systemctl --user status agentpod-node"
+      echo "  logs:    journalctl --user -u agentpod-node -f"
+      echo "  To survive logout/reboot, an admin runs once:  sudo loginctl enable-linger $USER"
+    fi
   else
     echo "To start it now:       apn run"
     echo "Persist without root:  tmux new -s apn 'apn run'   (or)   nohup apn run >~/agentpod-node.log 2>&1 &"
