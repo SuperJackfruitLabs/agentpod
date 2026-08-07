@@ -17,6 +17,7 @@ import {
   setNodeStatus,
   resetOrphanedOnlineNodes,
 } from "../../src/services/node-registry";
+import { sweepStaleNodes, OFFLINE_THRESHOLD_MS } from "../../src/services/node-sweeper";
 
 const TEST_USER_ID = "test-user-reconcile-001";
 
@@ -69,4 +70,38 @@ test("setNodeStatus offline does not bump lastSeenAt", async () => {
   const seenOffline = (await listNodes(TEST_USER_ID)).find((n) => n.id === nodeId)!.lastSeenAt;
   // "last seen" means last actual contact — an offline transition is not contact.
   expect(seenOffline).toBe(seenOnline);
+});
+
+test("sweeper expires online nodes silent past the threshold — and not before", async () => {
+  const staleId = await makeNode("sweep-stale-host");
+  const freshId = await makeNode("sweep-fresh-host");
+  await setNodeStatus(staleId, "online");
+  await setNodeStatus(freshId, "online");
+
+  // Age the stale node's lastSeenAt past the threshold.
+  const past = new Date(Date.now() - OFFLINE_THRESHOLD_MS - 1000);
+  // .toISOString(): rawSql shares its postgres.js client with drizzle(), which
+  // replaces the client's date serializers/parsers with identity passthroughs
+  // (drizzle-orm/postgres-js/driver.js `construct()`) so it can own timestamp
+  // (de)serialization for its own typed columns. A raw Date object handed to
+  // this shared client's tagged template therefore reaches postgres.js's wire
+  // encoder un-stringified and throws; a string parameter passes through untouched.
+  await rawSql`UPDATE nodes SET last_seen_at = ${past.toISOString()} WHERE id = ${staleId}`;
+
+  const swept = await sweepStaleNodes();
+  expect(swept).toContain(staleId);
+  expect(swept).not.toContain(freshId);
+
+  const list = await listNodes(TEST_USER_ID);
+  expect(list.find((n) => n.id === staleId)?.status).toBe("offline");
+  expect(list.find((n) => n.id === freshId)?.status).toBe("online");
+});
+
+test("sweeper treats online rows with NULL lastSeenAt as stale", async () => {
+  const nodeId = await makeNode("sweep-null-host");
+  await setNodeStatus(nodeId, "online");
+  await rawSql`UPDATE nodes SET last_seen_at = NULL WHERE id = ${nodeId}`;
+
+  const swept = await sweepStaleNodes();
+  expect(swept).toContain(nodeId);
 });

@@ -44,6 +44,7 @@ import { stationCleanupRoutes } from './routes/station-cleanup.ts';
 import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
+import { startNodeSweeper } from './services/node-sweeper.ts';
 
 validateConfig();
 
@@ -162,6 +163,10 @@ export { app };
 // Without this, provisioning returns 400 ("provider not registered").
 registerEnabledProvisioners();
 console.log('Provisioners registered:', enabledProviders().join(', ') || '(none enabled)');
+
+// Expire silent nodes whose TCP close never fired (killed VM, dropped network).
+startNodeSweeper();
+console.log('Node heartbeat sweeper started (45s threshold)');
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
