@@ -49,36 +49,77 @@ TOKEN="${ARGS[1]:-}"
 [[ -n "$TOKEN" ]] || { echo "ERROR: TOKEN is required" >&2; usage; }
 
 # ---------------------------------------------------------------------------
-# Install mode: system (root) vs user (rootless)
+# Release URL base (needed early: the re-exec helper below re-fetches this
+# script from here whenever $0 isn't a real file on disk).
 # ---------------------------------------------------------------------------
-if [ "$(id -u)" = "0" ]; then
-  MODE=system
-elif [ -n "$USER_INSTALL" ]; then
-  MODE=user
-elif command -v sudo >/dev/null 2>&1; then
-  echo "INFO: not running as root — re-executing with sudo for a system-wide install."
-  echo "      No sudo password on this host? Re-run rootless instead:"
-  echo "        curl -fsSL .../install.sh | bash -s -- --user $HUB_URL <TOKEN>"
-  exec sudo VERSION="${VERSION:-}" bash "$0" "$HUB_URL" "$TOKEN"
-else
-  echo "INFO: not root and 'sudo' not found — falling back to a rootless --user install."
-  MODE=user
-fi
+REPO="rakeshgangwar/agentpod"
+BASE_URL="https://github.com/${REPO}/releases"
+
+# ---------------------------------------------------------------------------
+# Re-exec helper. When this script runs as `curl … | bash`, $0 is the literal
+# string "bash" — not a path to a script file — so `exec … bash "$0" …`
+# becomes `bash bash …`, which fails with "cannot execute binary file" (exit
+# 126). Detect that case and re-fetch a runnable copy of the installer to
+# re-exec instead. Sets SCRIPT_PATH for the caller to use in its exec.
+# ---------------------------------------------------------------------------
+reexec_script_path() {
+  SCRIPT_PATH="$0"
+  if [ ! -f "$SCRIPT_PATH" ]; then
+    if [ -n "${VERSION:-}" ]; then
+      INSTALL_SH_URL="${BASE_URL}/download/${VERSION}/install.sh"
+    else
+      INSTALL_SH_URL="${BASE_URL}/latest/download/install.sh"
+    fi
+    # No trailing suffix after the X run: BSD mktemp (macOS's default — the
+    # OS this darwin re-exec path targets) only randomizes a run of X's at
+    # the very end of the template and silently returns the template
+    # unexpanded (a fixed, non-unique path) if anything follows it, e.g.
+    # ".sh". GNU mktemp handles a trailing suffix fine, but this form works
+    # identically on both.
+    SCRIPT_PATH="$(mktemp /tmp/agentpod-install.XXXXXX)"
+    curl -fsSL "$INSTALL_SH_URL" -o "$SCRIPT_PATH" || { echo "ERROR: cannot re-fetch installer for re-exec" >&2; exit 1; }
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # macOS: always a rootless per-user install (binary in ~/.local/bin, config in
-# the user's dir, service as a per-user LaunchAgent). A sudo invocation (the
-# console's copy-paste one-liner) re-execs as the invoking user.
+# the user's dir, service as a per-user LaunchAgent). Handled before the
+# generic sudo-escalation block below so a non-root macOS run goes straight
+# to MODE=user with no sudo prompt at all. A root invocation (the console's
+# copy-paste `sudo bash …` one-liner) re-execs as the invoking user.
 # ---------------------------------------------------------------------------
 if [ "$(uname -s)" = "Darwin" ]; then
   if [ "$(id -u)" = "0" ]; then
     if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
       echo "INFO: macOS install runs per-user — re-executing as ${SUDO_USER}."
-      exec sudo -u "$SUDO_USER" VERSION="${VERSION:-}" AGENTPOD_USER_INSTALL=1 bash "$0" "$HUB_URL" "$TOKEN"
+      reexec_script_path
+      exec sudo -u "$SUDO_USER" VERSION="${VERSION:-}" AGENTPOD_USER_INSTALL=1 bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
     fi
     echo "ERROR: macOS install must run as a regular user (not root)." >&2; exit 1
   fi
   MODE=user
+fi
+
+# ---------------------------------------------------------------------------
+# Install mode: system (root) vs user (rootless). Only reached when the macOS
+# block above didn't already set MODE — i.e. on Linux, or other non-Darwin
+# hosts (the macOS root paths above always exec or exit).
+# ---------------------------------------------------------------------------
+if [ -z "${MODE:-}" ]; then
+  if [ "$(id -u)" = "0" ]; then
+    MODE=system
+  elif [ -n "$USER_INSTALL" ]; then
+    MODE=user
+  elif command -v sudo >/dev/null 2>&1; then
+    echo "INFO: not running as root — re-executing with sudo for a system-wide install."
+    echo "      No sudo password on this host? Re-run rootless instead:"
+    echo "        curl -fsSL .../install.sh | bash -s -- --user $HUB_URL <TOKEN>"
+    reexec_script_path
+    exec sudo VERSION="${VERSION:-}" bash "$SCRIPT_PATH" "$HUB_URL" "$TOKEN"
+  else
+    echo "INFO: not root and 'sudo' not found — falling back to a rootless --user install."
+    MODE=user
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -100,10 +141,9 @@ esac
 echo "    OS=$OS  ARCH=$ARCH  MODE=$MODE"
 
 # ---------------------------------------------------------------------------
-# Release URL base
+# Release download base (REPO/BASE_URL are defined earlier, before the
+# mode/re-exec logic above that needs them)
 # ---------------------------------------------------------------------------
-REPO="rakeshgangwar/agentpod"
-BASE_URL="https://github.com/${REPO}/releases"
 if [[ -n "${VERSION:-}" ]]; then
   DOWNLOAD_BASE="${BASE_URL}/download/${VERSION}"; echo "    Pinned version: ${VERSION}"
 else
