@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -85,6 +86,12 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 		}
 		_, raw, err := c.Read(ctx)
 		if err != nil {
+			// Surface WHY the connection died (close code, EOF, reset) — the
+			// caller only ever sees a later "use of closed network connection"
+			// write failure, which hides the real cause.
+			if ctx.Err() == nil {
+				log.Printf("gateway: read loop closed: %v", err)
+			}
 			return
 		}
 
