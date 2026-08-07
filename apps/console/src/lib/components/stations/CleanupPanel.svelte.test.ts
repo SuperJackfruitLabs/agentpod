@@ -6,14 +6,7 @@ import * as api from "$lib/api/client";
 import CleanupPanel from "./CleanupPanel.svelte";
 
 beforeEach(() => vi.restoreAllMocks());
-afterEach(async () => {
-  cleanup();
-  // bits-ui's body-scroll-lock schedules a 24ms cleanup setTimeout when the
-  // confirm dialog unmounts; let it fire while the DOM still exists or it
-  // crashes with "document is not defined" after vitest tears the env down
-  // (deterministic on CI's Node 24).
-  await new Promise((r) => setTimeout(r, 40));
-});
+afterEach(cleanup); // scroll-lock timer flush lives in src/vitest-setup.ts
 
 const mockPlanItems = [
   { path: "/workspace/.cache/pip", size: 52428800, kind: "cache" },
