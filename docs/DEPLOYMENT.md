@@ -300,3 +300,12 @@ curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/in
   | sudo bash -s -- https://hub.<your-domain> <TOKEN>
 ```
 Or, from a repo checkout: `sudo bash apps/node-agent/scripts/install-node-agent.sh https://hub.<your-domain> <TOKEN>`.
+
+On macOS the same command always installs rootless (regardless of `sudo`) and (re)installs a per-user LaunchAgent — `~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`:
+```bash
+launchctl print gui/$(id -u)/dev.agentpod.node | head -20   # status
+tail -f ~/Library/Logs/agentpod-node.log                    # logs
+launchctl kickstart -k gui/$(id -u)/dev.agentpod.node       # restart
+launchctl bootout gui/$(id -u)/dev.agentpod.node && rm ~/Library/LaunchAgents/dev.agentpod.node.plist   # uninstall
+```
+It only runs while the user is logged in; system sleep suspends it and the node shows offline until wake.
