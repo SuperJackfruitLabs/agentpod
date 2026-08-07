@@ -6,6 +6,29 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.12 - TBD
+
+macOS installer rootless improvements and launchd-native update restart.
+
+### Added
+
+- **macOS rootless installer** (#193)
+  - Installs are now per-user and rootless; sets up a persistent launchd LaunchAgent (`~/Library/LaunchAgents/dev.agentpod.node.plist`) with RunAtLoad and KeepAlive enabled.
+  - Logs are written to `~/Library/Logs/agentpod-node.log`.
+  - Sudo invocations re-exec as the invoking user; installations are idempotent (bootout then bootstrap, with `load -w` fallback).
+  - KeepAlive enables one-click self-updates on macOS: the node exits on update, and launchd respawns it.
+
+### Changed
+
+- **Update restart on macOS** (#193)
+  - `apn update` now restarts via `launchctl kickstart -k gui/<uid>/dev.agentpod.node` on macOS instead of failing with a systemctl hint; Linux behavior unchanged.
+
+### Limitations
+
+- LaunchAgent runs only while the user is logged in; sleep suspends the node until wake (shown offline until login/wake).
+
+---
+
 ## [0.1.10] - 2026-08-07
 
 Trustworthy fleet: reconciliation, self-healing enrollment, and release hardening.
