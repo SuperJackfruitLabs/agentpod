@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — curl-based installer for the AgentPod node-agent.
 #
-# System-wide (needs root; installs a systemd service):
+# System-wide (needs root; installs a systemd service on Linux):
 #   curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
 #     | sudo bash -s -- <HUB_URL> <TOKEN>
 #
@@ -12,6 +12,10 @@
 #   HUB_URL   e.g. https://hub.agentpod.dev
 #   TOKEN     enrollment token issued by the hub
 #   --user    rootless install (no sudo): binary in ~/.local/bin, config in ~/.config
+#
+# macOS: always a rootless per-user install, regardless of sudo/--user — binary
+# in ~/.local/bin, service as a per-user LaunchAgent (~/Library/LaunchAgents).
+# A sudo invocation re-execs as the invoking (non-root) user automatically.
 #
 # Optional env:
 #   VERSION                 pin a release tag (e.g. v0.2.0); default: latest release
@@ -58,6 +62,22 @@ elif command -v sudo >/dev/null 2>&1; then
   exec sudo VERSION="${VERSION:-}" bash "$0" "$HUB_URL" "$TOKEN"
 else
   echo "INFO: not root and 'sudo' not found — falling back to a rootless --user install."
+  MODE=user
+fi
+
+# ---------------------------------------------------------------------------
+# macOS: always a rootless per-user install (binary in ~/.local/bin, config in
+# the user's dir, service as a per-user LaunchAgent). A sudo invocation (the
+# console's copy-paste one-liner) re-execs as the invoking user.
+# ---------------------------------------------------------------------------
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ "$(id -u)" = "0" ]; then
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+      echo "INFO: macOS install runs per-user — re-executing as ${SUDO_USER}."
+      exec sudo -u "$SUDO_USER" VERSION="${VERSION:-}" AGENTPOD_USER_INSTALL=1 bash "$0" "$HUB_URL" "$TOKEN"
+    fi
+    echo "ERROR: macOS install must run as a regular user (not root)." >&2; exit 1
+  fi
   MODE=user
 fi
 
@@ -143,6 +163,50 @@ path_hint() {
   esac
 }
 
+install_launch_agent() {
+  # Per-user LaunchAgent: survives reboot/terminal close, respawns on crash —
+  # and respawns after self-update's exit, which is what makes console
+  # one-click updates work on macOS (KeepAlive plays systemd Restart=always).
+  local plist_dir="$HOME/Library/LaunchAgents"
+  local plist="$plist_dir/dev.agentpod.node.plist"
+  local log="$HOME/Library/Logs/agentpod-node.log"
+  mkdir -p "$plist_dir" "$HOME/Library/Logs"
+  cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.agentpod.node</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${DEST_BIN}</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>${log}</string>
+  <key>StandardErrorPath</key><string>${log}</string>
+</dict>
+</plist>
+EOF
+  local uid; uid="$(id -u)"
+  # Idempotent re-install: tear down any loaded copy first (ignore failures).
+  launchctl bootout "gui/${uid}/dev.agentpod.node" >/dev/null 2>&1 || true
+  if launchctl bootstrap "gui/${uid}" "$plist" 2>/dev/null || launchctl load -w "$plist" 2>/dev/null; then
+    echo ""
+    echo "Running as a launchd LaunchAgent (survives reboot while you're logged in):"
+    echo "  status:     launchctl print gui/${uid}/dev.agentpod.node | head -20"
+    echo "  logs:       tail -f ${log}"
+    echo "  restart:    launchctl kickstart -k gui/${uid}/dev.agentpod.node"
+    echo "  uninstall:  launchctl bootout gui/${uid}/dev.agentpod.node && rm ${plist}"
+    echo "NOTE: a LaunchAgent only runs while you are logged in; system sleep"
+    echo "      suspends it — the node shows offline until wake (by design)."
+    return 0
+  fi
+  echo "WARNING: could not bootstrap the LaunchAgent — start manually with: apn run" >&2
+  return 1
+}
+
 if [ "$MODE" = "user" ]; then
   echo ""
   echo "Done. agentpod-node installed to ${DEST_BIN} (rootless — no sudo used)."
@@ -167,6 +231,8 @@ WantedBy=default.target
 EOF
     systemctl --user daemon-reload
     if systemctl --user enable --now agentpod-node >/dev/null 2>&1; then SVC_OK=1; fi
+  elif [ "$OS" = "darwin" ]; then
+    if install_launch_agent; then SVC_OK=1; fi
   fi
   echo ""
   if [ "$SVC_OK" = "1" ]; then
@@ -194,12 +260,4 @@ elif [ "$OS" = "linux" ]; then
   echo "Done. agentpod-node is running as a systemd service."
   echo "  status:  systemctl status agentpod-node"
   echo "  logs:    journalctl -u agentpod-node -f"
-
-elif [ "$OS" = "darwin" ]; then
-  # ---- system + macOS: no systemd ----
-  echo ""
-  echo "Done. agentpod-node is installed and enrolled."
-  echo "  Run interactively:  apn run"
-  echo "  Or set up a launchd plist (LaunchDaemon/LaunchAgent) with"
-  echo "    ProgramArguments: [\"${DEST_BIN}\", \"run\"]"
 fi
