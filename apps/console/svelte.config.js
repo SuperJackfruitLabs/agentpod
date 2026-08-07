@@ -1,12 +1,10 @@
 // adapter-static prerenders the app as an SPA (SSG) for web deployment
 import adapter from "@sveltejs/adapter-static";
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-import preprocessReact from "svelte-preprocess-react/preprocessReact";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
-  // preprocessReact must be last in the array
-  preprocess: [vitePreprocess(), preprocessReact()],
+  preprocess: [vitePreprocess()],
   kit: {
     adapter: adapter({
       // Fallback page for dynamic routes in SPA mode
