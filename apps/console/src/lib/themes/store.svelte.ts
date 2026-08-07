@@ -255,6 +255,12 @@ function applyColorScheme(colorScheme: ColorScheme) {
     "sidebar-border": "--sidebar-border",
     "sidebar-ring": "--sidebar-ring",
     radius: "--radius",
+    // Fleet status tokens derive from the scheme's accent colors
+    "cyber-emerald": "--status-running",
+    "cyber-amber": "--status-degraded",
+    "cyber-red": "--status-error",
+    "cyber-cyan": "--status-starting",
+    "cyber-magenta": "--status-sleeping",
   };
 
   // Apply each style property
