@@ -16,23 +16,23 @@ Trustworthy fleet: reconciliation, self-healing enrollment, and release hardenin
   - Epoch-guarded gateway close: nodes gracefully reconnect when hub restarts (no stale socket held).
   - Heartbeat re-register: nodes refresh their registration on each heartbeat, catching enrollment drift.
   - Boot reset: on startup, hub resets all online nodes to offline (sweeper catchup → reconnect).
-  - 45-second heartbeat sweeper: sweeps offline nodes and detects stale registrations.
+  - 45-second heartbeat sweeper: expires silent online nodes (no heartbeat for 3 missed 15s beats) and detects stale registrations.
   
 - **Self-healing re-enrollment** (#161)
-  - Nodes detect stored credential rejection and automatically re-enroll (even mid-session).
+  - Nodes detect stored credential rejection and automatically re-enroll the next time `enroll` runs (install/boot) — not mid-session.
   - `enroll --force` CLI flag: operators can force re-enrollment to recover from credential drift.
-  - New `/public/nodes/credential-check` endpoint: diagnostic check (no auth required) to validate credentials before enrollment.
+  - New `/public/nodes/credential-check` endpoint: a stateless credential probe (requires `Authorization: Bearer <nodeId>:<nodeSecret>`) used by the agent's self-healing enroll to check whether its stored credential is still valid before deciding to re-enroll.
 
 ### Changed
 
 - **Authentication configuration tidying** (#149)
-  - `BETTER_AUTH_SECRET` env var is now required; misconfiguration fails loudly at boot rather than silently degrading auth security.
+  - Config now reads `BETTER_AUTH_SECRET` and passes it explicitly to `betterAuth()` (was `SESSION_SECRET`, which Better Auth never read).
 
 ### Improved
 
 - **Release pipeline hardening** (#188)
-  - Release workflow now retries failed arch builds up to 3 times (transient network flakes).
-  - SHA256SUMS generation is decoupled from individual binary builds; SUMS publish even if one arch flakes.
+  - Release workflow now retries failed release-asset uploads up to 3 times (transient network flakes); arch builds themselves are not retried.
+  - SHA256SUMS generation is decoupled from individual binary builds; SUMS and static assets still publish even if one arch hard-fails.
 
 ---
 
