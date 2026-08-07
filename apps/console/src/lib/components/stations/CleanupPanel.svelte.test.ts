@@ -6,7 +6,7 @@ import * as api from "$lib/api/client";
 import CleanupPanel from "./CleanupPanel.svelte";
 
 beforeEach(() => vi.restoreAllMocks());
-afterEach(cleanup);
+afterEach(cleanup); // scroll-lock timer flush lives in src/vitest-setup.ts
 
 const mockPlanItems = [
   { path: "/workspace/.cache/pip", size: 52428800, kind: "cache" },

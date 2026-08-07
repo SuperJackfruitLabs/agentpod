@@ -47,6 +47,15 @@
     return d.toLocaleString();
   }
 
+  // The hub returns paramsSummary as a jsonb OBJECT; older rows/mocks may be
+  // strings. Render objects as compact JSON, hide empty ones.
+  function fmtParams(value: unknown): string | null {
+    if (value == null) return null;
+    if (typeof value === "string") return value || null;
+    const json = JSON.stringify(value);
+    return json === "{}" ? null : json;
+  }
+
   function resultBadgeClass(result: string): string {
     if (result === "ok") return statusBadgeClass("running");   // chart-2 green
     if (result === "error") return statusBadgeClass("error");  // destructive red
@@ -90,12 +99,12 @@
             <span class="shrink-0 font-mono text-xs font-semibold text-foreground">
               {row.verb}
             </span>
-            {#if row.paramsSummary}
+            {#if fmtParams(row.paramsSummary)}
               <span
                 class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-muted-foreground"
-                title={row.paramsSummary}
+                title={fmtParams(row.paramsSummary)}
               >
-                {row.paramsSummary}
+                {fmtParams(row.paramsSummary)}
               </span>
             {/if}
             <Badge

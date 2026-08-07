@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -85,6 +86,12 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 		}
 		_, raw, err := c.Read(ctx)
 		if err != nil {
+			// Surface WHY the connection died (close code, EOF, reset) — the
+			// caller only ever sees a later "use of closed network connection"
+			// write failure, which hides the real cause.
+			if ctx.Err() == nil {
+				log.Printf("gateway: read loop closed: %v", err)
+			}
 			return
 		}
 
@@ -117,6 +124,17 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 				var seqNext int64
 
 				emit := func(seq int, chunk string, eof bool, enc string) error {
+					// Stop streaming once the request is cancelled — and never
+					// pass reqCtx to the write itself: coder/websocket CLOSES
+					// THE WHOLE CONNECTION when a Write's ctx is cancelled
+					// mid-write (conn.go setupWriteTimeout → c.close()), so a
+					// single stream cancel (console navigating away from a
+					// logs tail) would tear down the entire gateway. Writes
+					// ride the connection-lifetime ctx instead; a few frames
+					// may land after cancel and are dropped by the hub.
+					if reqCtx.Err() != nil {
+						return reqCtx.Err()
+					}
 					atomic.StoreInt64(&seqNext, int64(seq)+1)
 					m := map[string]any{
 						"type":  "stream",
@@ -128,7 +146,7 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 					if enc != "" {
 						m["enc"] = enc
 					}
-					return writeMsg(reqCtx, m)
+					return writeMsg(ctx, m)
 				}
 
 				// Embed the request ID in context so handlers such as
