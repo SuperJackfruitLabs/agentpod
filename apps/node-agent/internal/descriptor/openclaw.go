@@ -159,21 +159,8 @@ func (o *openclawDescriptor) Health(key string) (Health, error) {
 
 	health := Health{}
 
-	// Compute disk usage by walking the workspace.
-	var diskBytes int64
-	_ = filepath.WalkDir(workspace, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if !d.IsDir() {
-			info, err := d.Info()
-			if err == nil {
-				diskBytes += info.Size()
-			}
-		}
-		return nil
-	})
-	health.DiskBytes = &diskBytes
+	// Disk usage from the shared async cache — never walk on the request path.
+	health.DiskBytes = diskUsage(workspace)
 
 	// Best-effort process check against the gateway.
 	running, note := openclawGatewayRunning()

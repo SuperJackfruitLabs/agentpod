@@ -190,15 +190,15 @@ func TestOpenClawHealth_ReturnsHealthStruct(t *testing.T) {
 	home := testdataOpenClawHome(t)
 	d := NewOpenClaw(home)
 
+	// DiskBytes populates asynchronously (cached background walk); files exist
+	// in testdata so it must be non-negative once computed.
+	disk := waitForHealthDiskBytes(t, func() (Health, error) { return d.Health("openclaw:hanuman") })
+	if disk < 0 {
+		t.Errorf("DiskBytes should be >= 0, got %d", disk)
+	}
 	h, err := d.Health("openclaw:hanuman")
 	if err != nil {
 		t.Fatalf("Health: %v", err)
-	}
-	// DiskBytes should be non-nil and non-negative (files exist in testdata).
-	if h.DiskBytes == nil {
-		t.Error("expected DiskBytes to be set")
-	} else if *h.DiskBytes < 0 {
-		t.Errorf("DiskBytes should be >= 0, got %d", *h.DiskBytes)
 	}
 	// Running is a best-effort bool; just verify no panic/error.
 	_ = h.Running

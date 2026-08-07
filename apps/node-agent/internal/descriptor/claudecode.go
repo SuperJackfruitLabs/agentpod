@@ -202,21 +202,9 @@ func (c *claudeCodeDescriptor) Health(key string) (Health, error) {
 
 	health := Health{}
 
-	// Disk usage by walking the workspace directory.
-	var diskBytes int64
-	_ = filepath.WalkDir(projPath, func(_ string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil // skip unreadable entries
-		}
-		if !d.IsDir() {
-			info, err := d.Info()
-			if err == nil {
-				diskBytes += info.Size()
-			}
-		}
-		return nil
-	})
-	health.DiskBytes = &diskBytes
+	// Disk usage from the shared async cache — never walk on the request path
+	// (a node_modules-laden workspace walk can exceed the hub's timeout).
+	health.DiskBytes = diskUsage(projPath)
 
 	// Best-effort: detect a running claude process.
 	running, note := claudeProcessRunning(projPath)

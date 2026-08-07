@@ -194,15 +194,14 @@ func TestOpenCodeHealth_ReturnsDiskBytes(t *testing.T) {
 	d := NewOpenCode(dataDir)
 
 	key := expectedOpenCodeKey(projPath)
+	// DiskBytes populates asynchronously (cached background walk).
+	disk := waitForHealthDiskBytes(t, func() (Health, error) { return d.Health(key) })
+	if disk <= 0 {
+		t.Errorf("DiskBytes should be > 0 for a workspace with a file, got %d", disk)
+	}
 	h, err := d.Health(key)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
-	}
-	if h.DiskBytes == nil {
-		t.Fatal("DiskBytes should be set")
-	}
-	if *h.DiskBytes <= 0 {
-		t.Errorf("DiskBytes should be > 0 for a workspace with a file, got %d", *h.DiskBytes)
 	}
 	// Running is best-effort; just ensure no panic.
 	_ = h.Running

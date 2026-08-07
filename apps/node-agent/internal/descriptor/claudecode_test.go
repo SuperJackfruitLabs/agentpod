@@ -261,15 +261,14 @@ func TestClaudeCodeHealth_ReturnsDiskBytes(t *testing.T) {
 	d := NewClaudeCode(home)
 
 	key := expectedClaudeKey(projA)
+	// DiskBytes populates asynchronously (cached background walk).
+	disk := waitForHealthDiskBytes(t, func() (Health, error) { return d.Health(key) })
+	if disk < 0 {
+		t.Errorf("DiskBytes should be >= 0, got %d", disk)
+	}
 	h, err := d.Health(key)
 	if err != nil {
 		t.Fatalf("Health: %v", err)
-	}
-	if h.DiskBytes == nil {
-		t.Fatal("DiskBytes should be set")
-	}
-	if *h.DiskBytes < 0 {
-		t.Errorf("DiskBytes should be >= 0, got %d", *h.DiskBytes)
 	}
 	// Running is best-effort; just ensure no panic.
 	_ = h.Running
