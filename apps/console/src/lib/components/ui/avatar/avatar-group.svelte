@@ -7,13 +7,16 @@
 		class: className,
 		children,
 		...restProps
-	}: WithElementRef<HTMLAttributes<HTMLDivElement>> & {} = $props();
+	}: WithElementRef<HTMLAttributes<HTMLDivElement>> = $props();
 </script>
 
 <div
 	bind:this={ref}
-	data-slot="select-label"
-	class={cn("px-1.5 py-1 text-xs text-muted-foreground", className)}
+	data-slot="avatar-group"
+	class={cn(
+		"cn-avatar-group group/avatar-group flex -space-x-2 *:data-[slot=avatar]:ring-2 *:data-[slot=avatar]:ring-background",
+		className
+	)}
 	{...restProps}
 >
 	{@render children?.()}

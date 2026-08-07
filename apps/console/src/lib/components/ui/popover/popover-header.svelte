@@ -7,13 +7,13 @@
 		class: className,
 		children,
 		...restProps
-	}: WithElementRef<HTMLAttributes<HTMLDivElement>> & {} = $props();
+	}: WithElementRef<HTMLAttributes<HTMLDivElement>> = $props();
 </script>
 
 <div
 	bind:this={ref}
-	data-slot="select-label"
-	class={cn("px-1.5 py-1 text-xs text-muted-foreground", className)}
+	data-slot="popover-header"
+	class={cn("flex flex-col gap-0.5 text-sm", className)}
 	{...restProps}
 >
 	{@render children?.()}
