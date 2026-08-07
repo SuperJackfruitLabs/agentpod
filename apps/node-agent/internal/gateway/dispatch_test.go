@@ -109,3 +109,96 @@ func TestServeLogsReadLoopExit(t *testing.T) {
 		t.Fatalf("read-loop exit not logged; log output: %q", buf.String())
 	}
 }
+
+// TestCancelStreamDoesNotKillConnection reproduces the fleet-wide disconnect
+// bug: cancelling an active stream while a chunk write is in flight closed
+// the ENTIRE gateway connection (coder/websocket closes the conn when a
+// Write's ctx is cancelled mid-write — conn.go setupWriteTimeout). The
+// connection must survive a stream cancel and keep serving other requests.
+func TestCancelStreamDoesNotKillConnection(t *testing.T) {
+	type serverConn struct {
+		c *websocket.Conn
+	}
+	connCh := make(chan serverConn, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		connCh <- serverConn{c}
+		// Keep the handler alive; the test drives the conn.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cli, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.CloseNow()
+	cli.SetReadLimit(-1)
+
+	// Streaming handler: emits 64KB chunks until emit errors (like a log tail).
+	chunk := strings.Repeat("x", 64*1024)
+	h := HandlerFunc(func(hctx context.Context, verb string, _ json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
+		if verb == "ping" {
+			return "pong", false, nil
+		}
+		for i := 0; ; i++ {
+			if err := emit(i, chunk, false, ""); err != nil {
+				return nil, true, nil
+			}
+		}
+	})
+	go serve(ctx, cli, h)
+
+	sc := <-connCh
+	sc.c.SetReadLimit(-1)
+	srvCtx := context.Background()
+
+	// Start the stream.
+	req, _ := json.Marshal(map[string]any{"type": "req", "id": "s1", "verb": "tail", "params": map[string]any{}})
+	if err := sc.c.Write(srvCtx, websocket.MessageText, req); err != nil {
+		t.Fatal(err)
+	}
+	// Read ONE frame, then stop reading so the agent's stream writes block on
+	// TCP backpressure — guaranteeing a write is in flight when cancel lands.
+	if _, _, err := sc.c.Read(srvCtx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // let buffers fill and a write block
+
+	cancelMsg, _ := json.Marshal(map[string]any{"type": "cancel", "id": "s1"})
+	if err := sc.c.Write(srvCtx, websocket.MessageText, cancelMsg); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // window where the old code closed the conn
+
+	// Drain stream frames and send a ping; the connection must still answer.
+	ping, _ := json.Marshal(map[string]any{"type": "req", "id": "p1", "verb": "ping", "params": map[string]any{}})
+	if err := sc.c.Write(srvCtx, websocket.MessageText, ping); err != nil {
+		t.Fatalf("ping write failed — connection already dead: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		readCtx, rcancel := context.WithTimeout(srvCtx, time.Second)
+		_, raw, err := sc.c.Read(readCtx)
+		rcancel()
+		if err != nil {
+			t.Fatalf("connection died after stream cancel: %v", err)
+		}
+		var m map[string]any
+		_ = json.Unmarshal(raw, &m)
+		if m["type"] == "res" && m["id"] == "p1" {
+			if ok, _ := m["ok"].(bool); !ok {
+				t.Fatalf("ping res not ok: %v", m)
+			}
+			return // connection survived the cancel
+		}
+	}
+	t.Fatal("never received ping res after stream cancel")
+}
