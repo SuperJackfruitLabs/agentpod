@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // buildClaudeCodeFixture creates a temporary Claude Code home and project
@@ -152,8 +154,8 @@ func TestClaudeCodeDetect_NonexistentProjectSkipped(t *testing.T) {
 	// Rewrite .claude.json with the ghost path.
 	claudeJSON := map[string]interface{}{
 		"projects": map[string]interface{}{
-			projA:  map[string]interface{}{},
-			ghost:  map[string]interface{}{},
+			projA: map[string]interface{}{},
+			ghost: map[string]interface{}{},
 		},
 	}
 	data, _ := json.Marshal(claudeJSON)
@@ -313,5 +315,98 @@ func TestClaudeCodeTailLogs_EmitsSessionJsonl(t *testing.T) {
 	}
 	if !strings.Contains(all, "proj-a") {
 		t.Errorf("expected session content referencing proj-a, got: %s", all)
+	}
+}
+
+// --- claude process detection (cwd-based) ---
+
+func TestParseLsofCwds(t *testing.T) {
+	// lsof -a -p <pids> -d cwd -Fn output: p<pid>, f<fd>, n<path> groups.
+	out := []byte("p2286\nfcwd\nn/Users/x/proj\np7938\nfcwd\nn/Users/x/other\n")
+	got := parseLsofCwds(out)
+	if got[2286] != "/Users/x/proj" || got[7938] != "/Users/x/other" {
+		t.Fatalf("parseLsofCwds = %v", got)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 entries, got %v", got)
+	}
+}
+
+func TestCwdWithinWorkspace(t *testing.T) {
+	cases := []struct {
+		cwd, ws string
+		want    bool
+	}{
+		{"/a/proj", "/a/proj", true},
+		{"/a/proj/sub", "/a/proj", true},
+		{"/a/project", "/a/proj", false}, // sibling with shared prefix
+		{"/a", "/a/proj", false},
+		{"/a/proj/", "/a/proj", true},
+	}
+	for _, c := range cases {
+		if got := cwdWithinWorkspace(c.cwd, c.ws); got != c.want {
+			t.Errorf("cwdWithinWorkspace(%q, %q) = %v, want %v", c.cwd, c.ws, got, c.want)
+		}
+	}
+}
+
+// TestMain lets this test binary act as its own "claude" stub: when
+// re-exec'd with CLAUDE_STUB_SLEEP set it just sleeps. Copying /bin/sleep is
+// not an option — macOS SIGKILLs relocated platform binaries (trust cache),
+// and a shell script's process name is "sh", invisible to pgrep '^claude'.
+func TestMain(m *testing.M) {
+	if os.Getenv("CLAUDE_STUB_SLEEP") != "" {
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// TestClaudeProcessRunning_DetectsSessionByCwd spawns a stub process named
+// "claude" with its cwd inside the workspace and expects detection; the old
+// `lsof -c claude +d` approach missed real sessions entirely (the claude CLI
+// rewrites its process title to a version string, and lsof exit 1 with valid
+// output was treated as no-match).
+func TestClaudeProcessRunning_DetectsSessionByCwd(t *testing.T) {
+	ws := t.TempDir()
+
+	// Stage the test binary itself under the name "claude" and run it with
+	// cwd = workspace (see TestMain).
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(stub, src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(stub)
+	cmd.Dir = ws
+	cmd.Env = append(os.Environ(), "CLAUDE_STUB_SLEEP=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	// Give the stub a moment to exec (and die loudly if it was killed).
+	time.Sleep(200 * time.Millisecond)
+	if cmd.ProcessState != nil {
+		t.Fatalf("stub exited prematurely: %v", cmd.ProcessState)
+	}
+	// Reap on cleanup — an unreaped defunct child named "claude" would leak
+	// into other pgrep-based tests (see the v0.1.9 zombie war story).
+	t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
+
+	running, note := claudeProcessRunning(ws)
+	if !running {
+		t.Fatalf("expected running=true for stub claude with cwd in workspace (note=%q)", note)
+	}
+
+	// And a workspace with no session reports stopped.
+	running, _ = claudeProcessRunning(t.TempDir())
+	if running {
+		t.Fatal("expected running=false for empty workspace")
 	}
 }
