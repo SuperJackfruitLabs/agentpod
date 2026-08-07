@@ -6,7 +6,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
-## v0.1.12 - TBD
+## v0.1.12 - 2026-08-08
 
 macOS installer rootless improvements and launchd-native update restart.
 
