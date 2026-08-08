@@ -79,7 +79,6 @@
   activeTab={activeTab}
   onTabChange={handleTabChange}
   sticky={true}
-  collapsible={true}
 >
   {#snippet leading()}
     <Button
