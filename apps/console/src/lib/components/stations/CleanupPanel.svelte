@@ -5,6 +5,7 @@
   import * as Card from "$lib/components/ui/card";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
+  import { Empty } from "$lib/components/ui/empty";
 
   interface Props {
     stationId: string;
@@ -104,11 +105,17 @@
 </script>
 
 <div class="flex flex-col gap-4 p-4">
-  <!-- Toolbar -->
+  <!-- Toolbar: Scan, total bytes, Apply — one row -->
   <div class="flex items-center gap-2">
     <Button size="sm" disabled={scanning} onclick={doScan}>
       {scanning ? "Scanning…" : "Scan"}
     </Button>
+
+    {#if scanned && items.length > 0}
+      <Badge variant="secondary" class="font-mono text-xs tabular-nums">
+        {formatBytes(totalBytes)}{#if selected.size > 0} · {formatBytes(selectedTotal)} selected{/if}
+      </Badge>
+    {/if}
 
     {#if scanned || items.length > 0}
       <Button variant="destructive" size="sm" disabled={applyDisabled} onclick={handleApplyClick}>
@@ -127,7 +134,7 @@
 
   <!-- Freed bytes feedback -->
   {#if removedBytes !== null}
-    <p class="text-sm text-emerald-600 dark:text-emerald-400">
+    <p class="text-sm text-status-running">
       Freed {formatBytes(removedBytes)}.
     </p>
   {/if}
@@ -135,53 +142,42 @@
   <!-- Plan results -->
   {#if scanned}
     {#if items.length === 0}
-      <p class="text-sm text-muted-foreground">Nothing to clean.</p>
+      <Empty title="Nothing to clean" />
     {:else}
-      <div class="flex flex-col gap-2">
-        <p class="text-xs text-muted-foreground">
-          Total: {formatBytes(totalBytes)}
-          {#if selected.size > 0}
-            &nbsp;·&nbsp;Selected: {formatBytes(selectedTotal)}
-          {/if}
-        </p>
-        <Card.Root class="overflow-hidden border-border/60">
-          <ul class="divide-y divide-border/40">
-            {#each items as item (item.path)}
-              <li
-                class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
+      <Card.Root class="overflow-hidden border-border/60">
+        <ul class="divide-y divide-border/40">
+          {#each items as item (item.path)}
+            <li
+              class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
+            >
+              <input
+                type="checkbox"
+                id="cleanup-{item.path}"
+                aria-label={item.path}
+                checked={selected.has(item.path)}
+                onchange={() => toggleItem(item.path)}
+                class="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+              />
+              <label
+                for="cleanup-{item.path}"
+                class="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-3"
               >
-                <input
-                  type="checkbox"
-                  id="cleanup-{item.path}"
-                  aria-label={item.path}
-                  checked={selected.has(item.path)}
-                  onchange={() => toggleItem(item.path)}
-                  class="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
-                />
-                <label
-                  for="cleanup-{item.path}"
-                  class="flex min-w-0 flex-1 cursor-pointer items-center justify-between gap-2"
-                >
-                  <span class="truncate font-mono text-xs text-foreground" title={item.path}>
-                    {item.path}
+                <span class="truncate font-mono text-xs text-foreground" title={item.path}>
+                  {item.path}
+                </span>
+                <span class="flex shrink-0 items-center gap-2">
+                  <span class="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    {item.kind}
                   </span>
-                  <span class="flex shrink-0 items-center gap-1.5">
-                    <Badge
-                      variant="secondary"
-                      class="rounded font-mono text-[10px] uppercase tracking-wide"
-                    >
-                      {item.kind}
-                    </Badge>
-                    <Badge variant="outline" class="font-mono text-[10px] tabular-nums">
-                      {formatBytes(item.size)}
-                    </Badge>
+                  <span class="font-mono text-xs tabular-nums text-muted-foreground">
+                    {formatBytes(item.size)}
                   </span>
-                </label>
-              </li>
-            {/each}
-          </ul>
-        </Card.Root>
-      </div>
+                </span>
+              </label>
+            </li>
+          {/each}
+        </ul>
+      </Card.Root>
     {/if}
   {/if}
 </div>

@@ -77,6 +77,20 @@ test("ActivityPanel shows 'No activity yet.' for empty array", async () => {
   });
 });
 
+test("ActivityPanel: empty array renders the Empty component (dashed placeholder, not a plain paragraph)", async () => {
+  vi.spyOn(api, "activity").mockResolvedValue([]);
+
+  const { getByText, container } = render(ActivityPanel, {
+    props: { stationId: "station_2b" },
+  });
+
+  await waitFor(() => {
+    const title = getByText("No activity yet");
+    expect(container.querySelector(".border-dashed")).toBeTruthy();
+    expect(container.querySelector(".border-dashed")?.contains(title)).toBe(true);
+  });
+});
+
 test("ActivityPanel shows loading state initially", async () => {
   let resolve!: (v: typeof mockRows) => void;
   const pending = new Promise<typeof mockRows>((r) => (resolve = r));

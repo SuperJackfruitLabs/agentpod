@@ -110,6 +110,23 @@ test("CleanupPanel: empty plan shows 'Nothing to clean'", async () => {
   });
 });
 
+test("CleanupPanel: empty plan renders the Empty component (dashed placeholder, not a plain paragraph)", async () => {
+  vi.spyOn(api, "cleanupPlan").mockResolvedValue({ items: [], totalBytes: 0 });
+
+  const { getByRole, getByText, container } = render(CleanupPanel, {
+    props: { stationId: "station_2b" },
+  });
+
+  fireEvent.click(getByRole("button", { name: /scan/i }));
+
+  await waitFor(() => {
+    const title = getByText("Nothing to clean");
+    // The Empty component renders its title inside a dashed-border placeholder.
+    expect(container.querySelector(".border-dashed")).toBeTruthy();
+    expect(container.querySelector(".border-dashed")?.contains(title)).toBe(true);
+  });
+});
+
 test("CleanupPanel: shows removedBytes feedback after successful apply", async () => {
   vi.spyOn(api, "cleanupPlan").mockResolvedValue(mockPlan);
   vi.spyOn(api, "cleanupApply").mockResolvedValue({ removedBytes: 52428800 });
