@@ -33,6 +33,11 @@ export default defineConfig(async () => ({
         changeOrigin: true,
         ws: true,
       },
+      // The connect screen's reachability probe (hub mounts health at the root).
+      "/health": {
+        target: process.env.DEV_HUB_URL ?? "http://localhost:3001",
+        changeOrigin: true,
+      },
     },
   },
 
