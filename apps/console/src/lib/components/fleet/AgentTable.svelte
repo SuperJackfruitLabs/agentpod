@@ -9,6 +9,7 @@
   import { Empty } from "$lib/components/ui/empty";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import StatusRibbon from "./StatusRibbon.svelte";
   import SearchIcon from "@lucide/svelte/icons/search";
 
   // ── External filter (from heatmap) ───────────────────────────────────────────
@@ -392,6 +393,16 @@
                   <span class="text-[10px]">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
                   <span class="font-medium text-foreground">{group.nodeName}</span>
                   <span class="text-muted-foreground/60">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
+                  <!-- The node's whole health in one strip -->
+                  <StatusRibbon
+                    size="sm"
+                    class="ml-1"
+                    items={group.agents.map((a) => ({
+                      id: a.stationId,
+                      label: a.agentName,
+                      status: a.status,
+                    }))}
+                  />
                 </button>
               </Table.Cell>
             </Table.Row>

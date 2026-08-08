@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { FleetAgent } from "@agentpod/contract";
+  import { Status } from "$lib/components/ui/status";
 
   let { agents }: { agents: FleetAgent[] } = $props();
 
@@ -30,7 +31,7 @@
           >
             <span class="text-foreground">{agent.agentName}</span>
             <span class="text-muted-foreground/60">·</span>
-            <span class="text-destructive/80">{agent.status}</span>
+            <Status form="text" status={agent.status} class="text-xs" />
           </a>
         </li>
       {/each}

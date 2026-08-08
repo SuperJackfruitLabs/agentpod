@@ -7,6 +7,7 @@
   import PageHeader from "$lib/components/page-header.svelte";
   import OverviewStats from "$lib/components/fleet/OverviewStats.svelte";
   import FleetHeatmap from "$lib/components/fleet/FleetHeatmap.svelte";
+  import StatusRibbon from "$lib/components/fleet/StatusRibbon.svelte";
   import NeedsAttention from "$lib/components/fleet/NeedsAttention.svelte";
   import RecentActivity from "$lib/components/fleet/RecentActivity.svelte";
   import ConnectBanner from "$lib/components/fleet/connect-banner.svelte";
@@ -73,7 +74,16 @@
   <title>Overview · AgentPod</title>
 </svelte:head>
 
-<PageHeader title="Overview" subtitle="Fleet control plane" />
+<PageHeader title="Overview" subtitle="Fleet control plane">
+  {#snippet ribbon()}
+    {#if agents.length > 0}
+      <StatusRibbon
+        size="xs"
+        items={agents.map((a) => ({ id: a.stationId, label: a.agentName, status: a.status }))}
+      />
+    {/if}
+  {/snippet}
+</PageHeader>
 
 <div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6 space-y-6">
   {#if isLoading}

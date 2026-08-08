@@ -4,6 +4,7 @@
   import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { Status } from "$lib/components/ui/status";
   import type { StationHealth } from "@agentpod/contract";
 
   interface Props {
@@ -70,10 +71,6 @@
   // True when the health note indicates the metrics belong to the shared gateway
   // process (composite OpenClaw stations where all subagents share one process).
   let isGateway = $derived(health?.note?.includes("gateway") ?? false);
-
-  const statusColorClass = $derived(
-    health?.running ? "text-status-running" : "text-status-stopped",
-  );
 
   async function doLifecycle(action: "start" | "stop" | "restart") {
     actionInFlight = true;
@@ -142,8 +139,8 @@
       <!-- Status -->
       <div class="rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Status</dt>
-        <dd class="font-mono text-lg {statusColorClass}">
-          {health.running ? "Running" : "Stopped"}
+        <dd>
+          <Status form="text" status={health.running ? "running" : "stopped"} class="text-lg" />
         </dd>
       </div>
 

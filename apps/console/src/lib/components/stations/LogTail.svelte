@@ -5,6 +5,7 @@
   import { Empty } from "$lib/components/ui/empty";
   import { cn } from "$lib/utils";
   import { chipClass } from "$lib/utils/toggle-chip";
+  import { statusTextClass } from "$lib/utils/status-badge";
   import SearchIcon from "@lucide/svelte/icons/search";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
@@ -280,11 +281,13 @@
     reconnecting: "Reconnecting…",
     closed: "Disconnected",
   };
-  const statusColor: Record<Status, string> = {
-    connecting: "text-status-starting",
-    connected: "text-status-running",
-    reconnecting: "text-status-starting",
-    closed: "text-status-error",
+  // Session lifecycle → shared status vocabulary, so log-stream state speaks
+  // the same color language as everything else in the console.
+  const statusToken: Record<Status, string> = {
+    connecting: "starting",
+    connected: "connected",
+    reconnecting: "starting",
+    closed: "error",
   };
   function levelClass(level: Level): string {
     if (level === "error") return "text-status-error";
@@ -303,7 +306,13 @@
   <!-- Toolbar -->
   <div class="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
     <TerminalIcon class="size-3.5 text-muted-foreground" aria-hidden="true" />
-    <span class={cn("shrink-0", statusColor[status])}>{statusLabel[status]}</span>
+    <!-- Live region: screen-reader users hear connection transitions
+         (connect/reconnect/give-up), not just sighted users. -->
+    <span
+      role="status"
+      aria-live="polite"
+      class={cn("shrink-0", statusTextClass(statusToken[status]))}>{statusLabel[status]}</span
+    >
     {#if status === "closed"}
       <Button variant="outline" size="xs" onclick={retryNow}>Retry</Button>
     {/if}

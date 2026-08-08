@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { FleetAgent } from "@agentpod/contract";
+  import StatusRibbon, { type RibbonItem } from "./StatusRibbon.svelte";
+  import { statusBadgeClass } from "$lib/utils/status-badge";
 
   let {
     agents,
@@ -10,19 +12,6 @@
     onSelectAgent: (stationId: string) => void;
     onFilterStatus: (status: string) => void;
   } = $props();
-
-  // ── Status → bg class ────────────────────────────────────────────────────────
-
-  const STATUS_CELL_CLASS: Record<string, string> = {
-    running: "bg-status-running",
-    stopped: "bg-status-stopped/50",
-    error: "bg-status-error",
-    unknown: "bg-status-stopped/25",
-  };
-
-  function cellBgClass(status: string): string {
-    return STATUS_CELL_CLASS[status] ?? "bg-status-stopped/25";
-  }
 
   function cellTitle(agent: FleetAgent): string {
     let title = `${agent.agentName} · ${agent.nodeName} · ${agent.status}`;
@@ -52,56 +41,57 @@
     return title;
   }
 
+  const items = $derived<RibbonItem[]>(
+    agents.map((a) => ({
+      id: a.stationId,
+      label: a.agentName,
+      status: a.status,
+      title: cellTitle(a),
+    })),
+  );
+
   // ── Legend ───────────────────────────────────────────────────────────────────
+  // One chip per RAW status present (styled via the shared token map), so
+  // degraded/starting/sleeping agents get a legend entry instead of silently
+  // falling through — the old four-value map made a degraded agent invisible.
 
-  const STATUSES = ["running", "stopped", "error", "unknown"] as const;
+  const LEGEND_ORDER = ["error", "degraded", "starting", "running", "sleeping", "stopped", "unknown"];
+  const legendRank = (status: string) => {
+    const i = LEGEND_ORDER.indexOf(status);
+    return i === -1 ? LEGEND_ORDER.length : i;
+  };
 
-  let statusCounts = $derived.by(() => {
-    const counts: Record<string, number> = { running: 0, stopped: 0, error: 0, unknown: 0 };
+  const statusCounts = $derived.by(() => {
+    const counts = new Map<string, number>();
     for (const agent of agents) {
-      counts[agent.status] = (counts[agent.status] ?? 0) + 1;
+      counts.set(agent.status, (counts.get(agent.status) ?? 0) + 1);
     }
     return counts;
   });
 
-  const LEGEND_CLASS: Record<string, string> = {
-    running: "bg-status-running/20 text-status-running border-status-running/40 hover:bg-status-running/30",
-    stopped: "bg-status-stopped/20 text-status-stopped border-status-stopped/40 hover:bg-status-stopped/30",
-    error: "bg-status-error/20 text-status-error border-status-error/40 hover:bg-status-error/30",
-    unknown: "bg-status-stopped/10 text-status-stopped/60 border-status-stopped/20 hover:bg-status-stopped/20",
-  };
+  const legendStatuses = $derived(
+    [...statusCounts.keys()].sort((a, b) => legendRank(a) - legendRank(b) || a.localeCompare(b)),
+  );
 </script>
 
 <div class="space-y-3">
   <!-- Grid of agent cells — one per agent, colored by live status -->
-  <div class="flex flex-wrap gap-1" aria-label="Fleet heatmap">
-    {#each agents as agent (agent.stationId)}
-      <button
-        type="button"
-        class="w-5 h-5 rounded-sm {cellBgClass(agent.status)} opacity-80 hover:opacity-100 transition-opacity focus:outline-none focus:ring-1 focus:ring-ring"
-        title={cellTitle(agent)}
-        aria-label="{agent.agentName} ({agent.status})"
-        data-testid="heatmap-cell"
-        data-status={agent.status}
-        onclick={() => onSelectAgent(agent.stationId)}
-      ></button>
-    {/each}
+  <div aria-label="Fleet heatmap">
+    <StatusRibbon {items} size="lg" onSelect={onSelectAgent} cellTestId="heatmap-cell" />
   </div>
 
   <!-- Legend: status chips with counts, each clickable to filter -->
   <div class="flex flex-wrap gap-2" aria-label="Heatmap legend">
-    {#each STATUSES as status}
-      {#if statusCounts[status] > 0}
-        <button
-          type="button"
-          class="font-mono text-[10px] px-2 py-0.5 rounded border transition-colors {LEGEND_CLASS[status]}"
-          data-testid="legend-chip"
-          data-status={status}
-          onclick={() => onFilterStatus(status)}
-        >
-          {status} · {statusCounts[status]}
-        </button>
-      {/if}
+    {#each legendStatuses as status (status)}
+      <button
+        type="button"
+        class="rounded-md border px-2 py-0.5 font-mono text-xs lowercase transition-opacity hover:opacity-80 {statusBadgeClass(status)}"
+        data-testid="legend-chip"
+        data-status={status}
+        onclick={() => onFilterStatus(status)}
+      >
+        {status} · {statusCounts.get(status)}
+      </button>
     {/each}
   </div>
 </div>
