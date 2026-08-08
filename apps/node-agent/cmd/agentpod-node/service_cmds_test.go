@@ -334,6 +334,96 @@ func TestRestartCmd(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// stop / start / restart entry points — the -h gate that keeps `apn stop -h`
+// (etc.) from ever reaching the real manager. fakeManager proves this: if
+// the gate were missing or misordered, stopCalled/startCalled/restartCalled
+// would flip true even though only -h was passed — the exact bug a user
+// probing help would otherwise trigger against a real launchd/systemd
+// service.
+// ---------------------------------------------------------------------------
+
+func TestStopEntry(t *testing.T) {
+	t.Run("dash_h_shows_help_and_never_calls_stop", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := stopEntry(mgr, []string{"-h"}, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if mgr.stopCalled {
+			t.Error("Stop() was called for -h — this would actually stop the real service")
+		}
+		if !strings.Contains(buf.String(), commandHelp("stop")) {
+			t.Errorf("missing command help, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("no_help_flag_calls_stop_normally", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := stopEntry(mgr, nil, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if !mgr.stopCalled {
+			t.Error("Stop() was not called")
+		}
+	})
+}
+
+func TestStartEntry(t *testing.T) {
+	t.Run("dash_h_shows_help_and_never_calls_start", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := startEntry(mgr, []string{"--help"}, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if mgr.startCalled {
+			t.Error("Start() was called for --help — this would actually start the real service")
+		}
+	})
+
+	t.Run("no_help_flag_calls_start_normally", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := startEntry(mgr, nil, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if !mgr.startCalled {
+			t.Error("Start() was not called")
+		}
+	})
+}
+
+func TestRestartEntry(t *testing.T) {
+	t.Run("dash_h_shows_help_and_never_calls_restart", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := restartEntry(mgr, []string{"-h"}, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if mgr.restartCalled {
+			t.Error("Restart() was called for -h — this would actually restart the real service")
+		}
+	})
+
+	t.Run("no_help_flag_calls_restart_normally", func(t *testing.T) {
+		mgr := &fakeManager{}
+		var buf bytes.Buffer
+		code := restartEntry(mgr, nil, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if !mgr.restartCalled {
+			t.Error("Restart() was not called")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // service install / uninstall
 // ---------------------------------------------------------------------------
 
@@ -414,6 +504,30 @@ func TestRunServiceVerbUnknown(t *testing.T) {
 	code := runServiceVerb("bogus", nil, mgr, &buf)
 	if code != 2 {
 		t.Errorf("exit code: got %d want 2", code)
+	}
+}
+
+// TestRunServiceVerbHelp covers `apn service -h`/`apn service --help`:
+// full "service" command help, exit 0, and neither Install() nor
+// Uninstall() gets called. The bare "usage: apn service <install|
+// uninstall>" + exit 2 stays reserved for a genuinely unknown subverb
+// (TestRunServiceVerbUnknown above).
+func TestRunServiceVerbHelp(t *testing.T) {
+	for _, verb := range []string{"-h", "--help"} {
+		t.Run(verb, func(t *testing.T) {
+			mgr := &fakeManager{}
+			var buf bytes.Buffer
+			code := runServiceVerb(verb, nil, mgr, &buf)
+			if code != 0 {
+				t.Errorf("exit code: got %d want 0", code)
+			}
+			if mgr.installCalled || mgr.uninstallCalled {
+				t.Error("Install()/Uninstall() must not be called for -h/--help")
+			}
+			if !strings.Contains(buf.String(), commandHelp("service")) {
+				t.Errorf("missing service command help, got:\n%s", buf.String())
+			}
+		})
 	}
 }
 

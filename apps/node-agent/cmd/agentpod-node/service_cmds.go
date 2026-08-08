@@ -225,17 +225,48 @@ func restartCmd(mgr service.Manager, out io.Writer) int {
 	return 0
 }
 
+// stopEntry/startEntry/restartEntry gate stopCmd/startCmd/restartCmd
+// behind maybeShowHelp: `apn stop -h` (etc.) must print command help and
+// exit 0 without ever touching mgr — these commands have no
+// flag.FlagSet of their own to catch -h via flag.ErrHelp, so main.go must
+// intercept it before calling the manager at all.
+func stopEntry(mgr service.Manager, args []string, out io.Writer) int {
+	if maybeShowHelp(out, "stop", args) {
+		return 0
+	}
+	return stopCmd(mgr, out)
+}
+
+func startEntry(mgr service.Manager, args []string, out io.Writer) int {
+	if maybeShowHelp(out, "start", args) {
+		return 0
+	}
+	return startCmd(mgr, out)
+}
+
+func restartEntry(mgr service.Manager, args []string, out io.Writer) int {
+	if maybeShowHelp(out, "restart", args) {
+		return 0
+	}
+	return restartCmd(mgr, out)
+}
+
 // ---------------------------------------------------------------------------
 // service install / uninstall
 // ---------------------------------------------------------------------------
 
-// runServiceVerb dispatches `apn service <verb>`.
+// runServiceVerb dispatches `apn service <verb>`. verb == "-h"/"--help"
+// shows apn service's own command help (never Install()/Uninstall()) —
+// a genuinely unknown subverb still gets the short usage line + exit 2.
 func runServiceVerb(verb string, args []string, mgr service.Manager, out io.Writer) int {
 	switch verb {
 	case "install":
 		return serviceInstallCmd(mgr, out)
 	case "uninstall":
 		return serviceUninstallCmd(mgr, out)
+	case "-h", "--help":
+		fmt.Fprintln(out, commandHelp("service"))
+		return 0
 	default:
 		fmt.Fprintln(out, "usage: apn service <install|uninstall>")
 		return 2

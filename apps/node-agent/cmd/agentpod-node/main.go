@@ -75,8 +75,10 @@ func main() {
     }
     fmt.Println("enrolled:", id)
   case "run":
+    if maybeShowHelp(os.Stdout, "run", os.Args[2:]) { os.Exit(0) }
     runCmd() // implemented in Task 9
   case "detect":
+    if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) { os.Exit(0) }
     detectCmd() // debug/ops: print detected stations as JSON
   case "update":
     fs := flag.NewFlagSet("update", flag.ExitOnError)
@@ -120,19 +122,23 @@ func main() {
       fmt.Println(res.Reason)
     }
   case "version":
+    if maybeShowHelp(os.Stdout, "version", os.Args[2:]) { os.Exit(0) }
     fmt.Printf("agentpod-node %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
   case "stop":
+    // stopEntry gates on -h/--help itself (see help.go's maybeShowHelp) —
+    // NewManager has no side effects of its own (it only inspects
+    // runtime.GOOS/uid), so it's safe to construct before that gate runs.
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-    os.Exit(stopCmd(mgr, os.Stdout))
+    os.Exit(stopEntry(mgr, os.Args[2:], os.Stdout))
   case "start":
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-    os.Exit(startCmd(mgr, os.Stdout))
+    os.Exit(startEntry(mgr, os.Args[2:], os.Stdout))
   case "restart":
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-    os.Exit(restartCmd(mgr, os.Stdout))
+    os.Exit(restartEntry(mgr, os.Args[2:], os.Stdout))
   case "status":
     jsonOut, done, code := parseStatusFlags(os.Args[2:], os.Stdout)
     if done { os.Exit(code) }

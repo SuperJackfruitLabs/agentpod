@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -83,5 +84,71 @@ func TestCommandHelpLogsMentionsPlatformSources(t *testing.T) {
 func TestCommandHelpUnknownReturnsEmpty(t *testing.T) {
 	if got := commandHelp("bogus"); got != "" {
 		t.Errorf("commandHelp(bogus) = %q, want empty", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// -h/--help interception gate — registry-driven so every command in
+// `commands` is provably covered, not just the four with their own
+// flag.FlagSet. This is the gate main.go's non-FlagSet cases (stop, start,
+// restart, service, run, detect, version) must check BEFORE doing any real
+// work, so `apn stop -h` can never actually stop the service, `apn run -h`
+// can never connect and block, etc.
+// ---------------------------------------------------------------------------
+
+func TestHelpRequested(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"dash_h_first", []string{"-h"}, true},
+		{"dash_dash_help_first", []string{"--help"}, true},
+		{"dash_h_with_trailing_args", []string{"-h", "extra"}, true},
+		{"no_args", nil, false},
+		{"unrelated_flag", []string{"--json"}, false},
+		{"help_not_first", []string{"--json", "-h"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := helpRequested(c.args); got != c.want {
+				t.Errorf("helpRequested(%v) = %v, want %v", c.args, got, c.want)
+			}
+		})
+	}
+}
+
+// TestMaybeShowHelpCoversEveryRegisteredCommand proves, for every command
+// registered in `commands`, that maybeShowHelp recognizes -h/--help and
+// prints that command's own detail text — and that it does NOT trigger for
+// ordinary (non-help) args, so it never swallows a command's real flags.
+func TestMaybeShowHelpCoversEveryRegisteredCommand(t *testing.T) {
+	for _, c := range commands {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if !maybeShowHelp(&buf, c.name, []string{"-h"}) {
+				t.Fatalf("maybeShowHelp(%q, [-h]) = false, want true", c.name)
+			}
+			if !strings.Contains(buf.String(), commandHelp(c.name)) {
+				t.Errorf("maybeShowHelp(%q) output missing its command help, got:\n%s", c.name, buf.String())
+			}
+		})
+
+		t.Run(c.name+"_double_dash_help", func(t *testing.T) {
+			var buf bytes.Buffer
+			if !maybeShowHelp(&buf, c.name, []string{"--help"}) {
+				t.Fatalf("maybeShowHelp(%q, [--help]) = false, want true", c.name)
+			}
+		})
+
+		t.Run(c.name+"_no_help_flag_does_not_intercept", func(t *testing.T) {
+			var buf bytes.Buffer
+			if maybeShowHelp(&buf, c.name, []string{"--json"}) {
+				t.Errorf("maybeShowHelp(%q, [--json]) = true, want false — must not swallow real flags", c.name)
+			}
+			if buf.Len() != 0 {
+				t.Errorf("maybeShowHelp(%q, [--json]) wrote output, want none:\n%s", c.name, buf.String())
+			}
+		})
 	}
 }
