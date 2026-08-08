@@ -97,7 +97,7 @@
   <span class="font-mono text-xs text-muted-foreground whitespace-nowrap">{relativeTime(value)}</span>
 {/snippet}
 
-<PageHeader title="Activity" subtitle="// fleet event log" />
+<PageHeader title="Activity" subtitle="Fleet event log" />
 
 <div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6 space-y-3">
   {#if isLoading}

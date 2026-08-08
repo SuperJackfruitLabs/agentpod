@@ -15,6 +15,8 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import * as nav from "$app/navigation";
+import { setSearchParam, resetReactivePageState } from "../../../mocks/reactive-page-state.svelte";
 import NodesOverview from "./NodesOverview.svelte";
 
 // Stub svelte-sonner (its runed dependency can't resolve in the jsdom test env)
@@ -22,7 +24,32 @@ vi.mock("svelte-sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-beforeEach(() => vi.restoreAllMocks());
+// ---------------------------------------------------------------------------
+// Reactive $app/state stub
+//
+// The default global stub (src/mocks/app-state.ts) is a plain non-reactive
+// object — fine for tests that only read the URL at mount time, but it can't
+// exercise NodesOverview's $effect that reacts to `page.url.searchParams`
+// changing on the same route (e.g. the command palette navigating
+// /nodes → /nodes?action=new-runtime without a remount). This file swaps in
+// reactive-page-state.svelte.ts, which wraps `url` in a real $state rune so
+// `setSearchParam` genuinely triggers the effect.
+// ---------------------------------------------------------------------------
+
+vi.mock("$app/state", async () => {
+  const mod = await import("../../../mocks/reactive-page-state.svelte");
+  return { page: mod.page };
+});
+
+vi.mock("$app/navigation", () => ({
+  goto: vi.fn(),
+  replaceState: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.restoreAllMocks();
+  resetReactivePageState();
+});
 afterEach(cleanup);
 
 const mockNodes = [
@@ -230,4 +257,89 @@ test("node with updateAvailable:false renders no Update button", async () => {
   });
 
   expect(queryByRole("button", { name: /^update$/i })).toBeNull();
+});
+
+// ── ?action= query param handling (open dialog / mint token from the command
+//    palette, including while already mounted on /nodes) ─────────────────────
+
+test("?action=new-runtime already in the URL at mount opens the New Runtime dialog and clears the param", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+  setSearchParam("action", "new-runtime");
+
+  const { getByText } = render(NodesOverview);
+
+  await waitFor(() => {
+    expect(getByText("New Runtime")).toBeTruthy();
+    expect(nav.replaceState).toHaveBeenCalledWith("/nodes", {});
+  });
+});
+
+test("?action=create-token already in the URL at mount mints a token and clears the param", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+  vi.spyOn(api, "createEnrollmentToken").mockResolvedValue({
+    token: "tok_mount_abc123",
+    expiresAt: "2026-12-31T00:00:00Z",
+  });
+  setSearchParam("action", "create-token");
+
+  const { getByText } = render(NodesOverview);
+
+  await waitFor(() => {
+    expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
+    expect(getByText(/tok_mount_abc123/)).toBeTruthy();
+    expect(nav.replaceState).toHaveBeenCalledWith("/nodes", {});
+  });
+});
+
+test("?action= appearing while already mounted on /nodes (same-route palette navigation, no remount) still opens the dialog", async () => {
+  // This is the regression case: SvelteKit doesn't remount NodesOverview when
+  // the command palette navigates /nodes → /nodes?action=new-runtime while
+  // /nodes is already showing. Mount with NO action param first — mirroring
+  // being parked on the page — then mutate the reactive page.url the same
+  // way a same-route goto() would, and assert the $effect (not onMount,
+  // which only ever runs once) picks it up.
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+
+  const { getByText, queryByText } = render(NodesOverview);
+
+  await waitFor(() => {
+    // No dialog on initial mount without the param.
+    expect(queryByText("New Runtime")).toBeNull();
+  });
+
+  setSearchParam("action", "new-runtime");
+
+  await waitFor(() => {
+    expect(getByText("New Runtime")).toBeTruthy();
+    expect(nav.replaceState).toHaveBeenCalledWith("/nodes", {});
+  });
+});
+
+test("?action= handling settles after replaceState clears the param — no reprocessing loop", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+  vi.spyOn(api, "createEnrollmentToken").mockResolvedValue({
+    token: "tok_once_abc123",
+    expiresAt: "2026-12-31T00:00:00Z",
+  });
+
+  render(NodesOverview);
+
+  setSearchParam("action", "create-token");
+
+  await waitFor(() => {
+    expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
+  });
+
+  // Mirror what real SvelteKit's replaceState("/nodes", {}) does: it updates
+  // the reactive page.url in place, clearing the query string. That re-runs
+  // the $effect with action=null — a no-op — so nothing further happens.
+  setSearchParam("action", null);
+  await waitFor(() => {
+    expect(nav.replaceState).toHaveBeenCalledTimes(1);
+  });
+
+  // Give any (incorrect) re-processing a chance to happen, then confirm it didn't.
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
+  expect(nav.replaceState).toHaveBeenCalledTimes(1);
 });

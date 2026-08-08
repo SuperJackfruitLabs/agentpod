@@ -152,6 +152,38 @@ test("shows a loading affordance while listNodes() is pending, then the Nodes gr
   expect(queryByText("Loading nodes…")).toBeNull();
 });
 
+test("clicking New runtime calls goto('/nodes?action=new-runtime')", async () => {
+  vi.mocked(api.listNodes).mockResolvedValue([]);
+  const gotoSpy = vi.mocked(nav.goto);
+
+  commandPalette.open();
+  const { getByText } = render(CommandPalette);
+
+  await waitFor(() => {
+    expect(getByText("New runtime")).toBeTruthy();
+  });
+
+  fireEvent.click(getByText("New runtime"));
+
+  expect(gotoSpy).toHaveBeenCalledWith("/nodes?action=new-runtime");
+});
+
+test("clicking Create enrollment token calls goto('/nodes?action=create-token')", async () => {
+  vi.mocked(api.listNodes).mockResolvedValue([]);
+  const gotoSpy = vi.mocked(nav.goto);
+
+  commandPalette.open();
+  const { getByText } = render(CommandPalette);
+
+  await waitFor(() => {
+    expect(getByText("Create enrollment token")).toBeTruthy();
+  });
+
+  fireEvent.click(getByText("Create enrollment token"));
+
+  expect(gotoSpy).toHaveBeenCalledWith("/nodes?action=create-token");
+});
+
 test("clicking Settings calls goto('/settings')", async () => {
   vi.mocked(api.listNodes).mockResolvedValue([]);
   const gotoSpy = vi.mocked(nav.goto);

@@ -74,20 +74,32 @@
       // keep fallback ["docker", "cloudflare"]
     }
     await loadData();
+  });
 
-    // ?action auto-open (runs once; guards against missing searchParams in test env)
+  // ?action=<new-runtime|create-token> handling. This must be a reactive
+  // $effect rather than onMount: SvelteKit does not remount this component
+  // on same-route navigation, e.g. the command palette navigating from
+  // /nodes to /nodes?action=new-runtime while /nodes is already mounted.
+  // Reading page.url.searchParams inside $effect re-runs the branch
+  // whenever the reactive URL changes, including in place.
+  //
+  // Loop guard: replaceState below clears the "action" param, which updates
+  // the reactive page.url (in real SvelteKit) and re-runs this effect with
+  // action=null — a no-op — so it settles after one pass and never loops.
+  // The optional chaining also guards test/SSR environments where
+  // page.url.searchParams may be absent.
+  $effect(() => {
     const action = (page.url as { searchParams?: URLSearchParams } | undefined)?.searchParams?.get("action") ?? null;
+    if (!action) return;
     if (action === "new-runtime") {
       showNewRuntimeDialog = true;
     } else if (action === "create-token") {
       handleCreateToken();
     }
-    if (action) {
-      try {
-        replaceState("/nodes", {});
-      } catch {
-        // non-critical in environments where history is unavailable
-      }
+    try {
+      replaceState("/nodes", {});
+    } catch {
+      // non-critical in environments where history is unavailable
     }
   });
 
