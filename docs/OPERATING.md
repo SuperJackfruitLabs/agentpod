@@ -27,7 +27,7 @@ curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/in
 ```
 (If not root and `sudo` is absent, the installer auto-falls back to this rootless mode. For a `systemd --user` service to survive logout/reboot, run `sudo loginctl enable-linger <user>` once.)
 
-**macOS** — the same one-liner (with or without `sudo`/`--user`) always installs rootless: binary in `~/.local/bin`, enrolled as the invoking user, service registered as a per-user LaunchAgent (`~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`). A `sudo ... | bash` invocation re-execs itself as `$SUDO_USER` automatically.
+**macOS** — the same one-liner (with or without `sudo`/`--user`) always installs rootless: binary in `~/.local/bin`, enrolled as the invoking user, service registered as a per-user LaunchAgent (`~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`). The `curl | sudo bash` form above re-execs itself as `$SUDO_USER` automatically, piped invocation included.
 
 ```bash
 launchctl print gui/$(id -u)/dev.agentpod.node | head -20                        # status
@@ -38,10 +38,12 @@ launchctl bootout gui/$(id -u)/dev.agentpod.node && rm ~/Library/LaunchAgents/de
 
 A LaunchAgent only runs while you're logged in — system sleep suspends it, and the node shows offline until wake (by design).
 
-The installer downloads the prebuilt binary for your platform (linux/darwin × amd64/arm64) from the latest GitHub Release, then:
+The installer downloads the prebuilt binary for your platform (linux/darwin × amd64/arm64) from the latest GitHub Release, then — for a **system-wide Linux install (root, no `--user`)**:
 1. Installs it to `/usr/local/bin/agentpod-node`.
 2. Runs `agentpod-node enroll --hub <HUB_URL> --token <TOKEN>` — writes config to `/root/.config/agentpod-node/config.json`.
 3. Installs and enables the systemd unit `agentpod-node.service`.
+
+(Rootless and macOS installs use the different paths and service mechanism described above instead.)
 
 The installer is idempotent: re-running upgrades the binary and re-enrolls. Binaries are published on every `v*` tag by `.github/workflows/release-node-agent.yml`.
 
@@ -104,9 +106,9 @@ Stations are discovered per harness:
 |---------|-------------------|
 | **Hermes** | Reads `~/.hermes/profiles/` + `hermes profile` output |
 | **OpenClaw** | Reads `~/.openclaw/agents/` |
-| **Claude Code** | Detected as leaf workspaces (project dirs containing `.claude/`) |
-| **Codex** | Detected as leaf workspaces (project dirs with `~/.codex/` config) |
-| **OpenCode** | Detected via running process or workspace markers |
+| **Claude Code** | Project paths read from `~/.claude.json` (fallback: `~/.claude/projects/` enumeration) |
+| **Codex** | Declared manually (Codex records no stable per-project history) |
+| **OpenCode** | Worktree paths read from `opencode.db` (fallback: project dir enumeration) |
 
 ---
 

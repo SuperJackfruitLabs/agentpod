@@ -100,9 +100,6 @@ ENCRYPTION_KEY=<run: openssl rand -hex 16>  # 16 hex-pairs = 32 bytes
 API_TOKEN=<run: openssl rand -hex 24>
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
-# Disable OpenCode sync (not needed for the fleet console).
-ENABLE_OPENCODE_SYNC=false
-
 # Disable MetaMCP integration (not part of fleet console).
 METAMCP_ENABLED=false
 
@@ -138,9 +135,13 @@ chmod 600 /etc/agentpod/hub.env
 
 ```bash
 cd /opt/agentpod
-git fetch && git checkout redesign/fleet-console && git pull
+git fetch origin main && git checkout main && git merge --ff-only FETCH_HEAD
 pnpm install --frozen-lockfile
 ```
+
+> Production deploys from **`main`**. Note: on a checkout whose fetch refspec
+> does not update `origin/main`, a plain `git pull` can under-shoot — the
+> `merge --ff-only FETCH_HEAD` form above is reliable either way.
 
 Install the systemd unit (already in the repo):
 
@@ -301,7 +302,7 @@ curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/in
 ```
 Or, from a repo checkout: `sudo bash apps/node-agent/scripts/install-node-agent.sh https://hub.<your-domain> <TOKEN>`.
 
-On macOS the same command always installs rootless (regardless of `sudo`) and (re)installs a per-user LaunchAgent — `~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`:
+On macOS the same command — piped and all — always installs rootless (regardless of `sudo`, re-execing as the invoking user) and (re)installs a per-user LaunchAgent — `~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`:
 ```bash
 launchctl print gui/$(id -u)/dev.agentpod.node | head -20   # status
 tail -f ~/Library/Logs/agentpod-node.log                    # logs

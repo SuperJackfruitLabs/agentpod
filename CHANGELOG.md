@@ -6,6 +6,34 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.12 - 2026-08-08
+
+macOS installer rootless improvements and launchd-native update restart.
+
+### Added
+
+- **macOS rootless installer** (#193)
+  - Installs are now per-user and rootless; sets up a persistent launchd LaunchAgent (`~/Library/LaunchAgents/dev.agentpod.node.plist`) with RunAtLoad and KeepAlive enabled.
+  - Logs are written to `~/Library/Logs/agentpod-node.log`.
+  - Sudo invocations re-exec as the invoking user, including when the installer is piped (`curl | sudo bash`); installations are idempotent (bootout then bootstrap, with `load -w` fallback).
+  - KeepAlive enables one-click self-updates on macOS: the node exits on update, and launchd respawns it.
+
+### Changed
+
+- **Update restart on macOS** (#193)
+  - `apn update` now restarts via `launchctl kickstart -k gui/<uid>/dev.agentpod.node` on macOS instead of failing with a systemctl hint; Linux behavior unchanged.
+
+### Fixed
+
+- **Piped-invocation re-exec** (#193)
+  - The sudo/darwin re-exec added by this release used `bash "$0"`, which resolves to the literal string `"bash"` (not a file) under a piped `curl | bash` invocation — every re-exec case (macOS root-with-`SUDO_USER`, and the generic Linux sudo escalation) failed with `bash: bash: cannot execute binary file`. Re-exec now re-fetches a runnable copy of the installer when `$0` isn't a real file on disk, so the documented piped one-liners work as shipped. A non-root macOS invocation also no longer wastes a needless sudo re-exec before dropping back to a user install.
+
+### Limitations
+
+- LaunchAgent runs only while the user is logged in; sleep suspends the node until wake (shown offline until login/wake).
+
+---
+
 ## [0.1.10] - 2026-08-07
 
 Trustworthy fleet: reconciliation, self-healing enrollment, and release hardening.

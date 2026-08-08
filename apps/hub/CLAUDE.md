@@ -1,67 +1,26 @@
-# Management API
+# Hub
 
-## Overview
+Fleet-console backend: Bun + Hono (chained routes, `AppType` export) + Drizzle/Postgres. Entry: `src/index.ts` — boot order matters: config validation → `initDatabase()` (migrations auto-apply on boot) → `resetOrphanedOnlineNodes()` → route mounting → provisioner registration → node sweeper.
 
-Backend service for Portable Command Center that orchestrates:
-- Project lifecycle (create, delete, start, stop)
-- Container management via Coolify API
-- Repository management via Forgejo API
-- LLM credential management
-
-## Tech Stack
-
-- **Runtime**: Bun
-- **Framework**: Hono (SST team's choice)
-- **Validation**: Zod with @hono/zod-validator
-- **Database**: PostgreSQL via Drizzle ORM
-
-## Development Commands
+## Commands
 
 ```bash
-bun run dev      # Start with hot reload
-bun run start    # Start production server
-bun run typecheck # Run TypeScript type checking
-bun test         # Run tests
+DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
+bun run dev          # :3001
+bun run typecheck    # KNOWN RED: pre-existing tsc errors in stations.ts files; they do not fail bun test — don't "fix" in passing
 ```
 
-## Project Structure
+Test DB requirements (pgvector image + env override): see root `CLAUDE.md` / `TESTING.md`.
 
-```
-src/
-├── index.ts        # Hono app entry point
-├── config.ts       # Environment configuration
-├── routes/         # API route handlers
-├── services/       # Business logic & external API clients
-├── models/         # Data models & database operations
-├── db/             # Database schema & migrations
-└── utils/          # Shared utilities
-```
+## Architecture facts that bite
 
-## API Routes
+- **Node gateway** (`routes/gateway.ts`, WSS `/public/nodes/gateway`, auth `Bearer <nodeId>:<nodeSecret>`): onMessage must await `authReady` (one-shot frames race async auth); teardown is epoch-guarded (`connectionManager.isCurrent`) so a late close from a replaced socket can't kill a fresh connection; a heartbeat on an unregistered socket re-registers it.
+- **Sweeper** (`services/node-sweeper.ts`): every 15s, expires online nodes silent >45s (agent heartbeats every 15s) with the same full teardown as a real close. False positives self-heal via heartbeat re-register.
+- **Broker** (`services/broker.ts`): request/stream correlation by UUID; `request()` never rejects — resolves `{ok:false, error}` on timeout/offline/disconnect.
+- **Auth**: Better Auth, session cookies; secret comes from config (`BETTER_AUTH_SECRET`) passed explicitly to `betterAuth({secret})`. First signup becomes admin, then signup closes (`system_settings`).
+- **Stations**: presence in the `stations` table = adopted; there is no `adopted` column. Observe routes (`/api/stations/:id/...`) proxy to the node via broker and 502 on node-side failure.
+- **Errors skip CORS**: an exception thrown before Hono's CORS middleware finishes means the browser reports a CORS error — read the hub log for the real failure before chasing CORS.
 
-- `GET /health` - Health check (public)
-- `GET /api/info` - API information (public)
-- `GET /api/projects` - List all projects (auth required)
-- `POST /api/projects` - Create new project (auth required)
-- `DELETE /api/projects/:id` - Delete project (auth required)
-- `POST /api/projects/:id/start` - Start container (auth required)
-- `POST /api/projects/:id/stop` - Stop container (auth required)
+## Tests
 
-## Authentication
-
-Uses Bearer token authentication. Set `API_TOKEN` in `.env`.
-
-```bash
-curl -H "Authorization: Bearer your-token" http://localhost:3001/api/projects
-```
-
-## Environment
-
-Copy `.env.example` to `.env` and fill in the values.
-
-## Code Style
-
-- Use Hono's chained route syntax for type-safe RPC
-- Export `AppType` from index.ts for Hono Client
-- Use Zod schemas for request validation
-- Keep routes thin, business logic in services
+Unit next to code or `tests/unit/`; DB-touching in `tests/integration/` (per-file row cleanup in `afterAll`). WS/gateway tests build a minimal Hono app — never import `src/index.ts` (it starts the sweeper and boot hooks).
