@@ -299,6 +299,69 @@ test("FileBrowser: shows a metadata card instead of fetching binary files", asyn
   expect(getByText(/2\.0 KB/)).toBeTruthy();
 });
 
+// ─── Cache invalidation (ConfigEditor save → FileBrowser refetch) ───────────
+
+test("FileBrowser: invalidate() evicts the cache and refetches when the path is the active tab", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false }) // initial open
+    .mockResolvedValueOnce({ content: "# Hello, edited", truncated: false }); // post-save refetch
+
+  const { getByText, component } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: true },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+
+  await waitFor(() => {
+    expect(getByText("# Hello")).toBeTruthy();
+  });
+  expect(api.readFile).toHaveBeenCalledTimes(1);
+
+  // Simulate ConfigEditor's onSaved firing for the file that's currently
+  // the active tab — mirrors the station page's
+  // `onSaved={(p) => fileBrowser?.invalidate(p)}` wiring.
+  component.invalidate("README.md");
+
+  await waitFor(() => {
+    expect(api.readFile).toHaveBeenCalledTimes(2);
+    expect(getByText("# Hello, edited")).toBeTruthy();
+  });
+});
+
+test("FileBrowser: invalidate() on a non-active path evicts the cache without refetching", async () => {
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce([mockDir, mockFile])
+    .mockResolvedValueOnce([mockSubFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false }) // README.md
+    .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false }); // src/index.ts
+
+  const { getByText, getByRole, component } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: true },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  fireEvent.click(getByText("index.ts"));
+  await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+
+  // README.md was edited elsewhere but isn't the active tab (index.ts is) —
+  // its cache entry is evicted but no refetch happens until it's reopened.
+  component.invalidate("README.md");
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+
+  fireEvent.click(getByRole("tab", { name: "README.md" }));
+  await waitFor(() => expect(api.readFile).toHaveBeenCalledTimes(3));
+});
+
 test("FileBrowser: closes a tab with its close button", async () => {
   vi.spyOn(api, "listFiles")
     .mockResolvedValueOnce([mockDir, mockFile])

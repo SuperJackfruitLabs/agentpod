@@ -3,6 +3,7 @@
   import { MonacoEditor } from "$lib/components/ui/monaco-editor";
   import { MarkdownViewer } from "$lib/components/ui/markdown";
   import FileIcon from "$lib/components/file-icon.svelte";
+  import { BINARY_EXTS, extOf } from "$lib/utils/file-ext";
 
   interface Props {
     entry: FsEntry;
@@ -14,20 +15,11 @@
 
   let { entry, content, truncated, loading, error }: Props = $props();
 
-  const BINARY_EXTS = new Set([
-    "png", "jpg", "jpeg", "gif", "webp", "svg", "ico",
-    "woff", "woff2", "ttf", "zip", "gz", "tar", "bin", "exe", "pdf",
-  ]);
   const MARKDOWN_EXTS = new Set(["md", "mdx", "markdown"]);
   // A literal NUL byte is the simplest cross-platform signal that a file
   // Monaco would otherwise render as "plaintext" is actually binary data
   // that slipped past the extension check.
   const NUL_BYTE = String.fromCharCode(0);
-
-  function extOf(name: string): string {
-    const idx = name.lastIndexOf(".");
-    return idx === -1 || idx === name.length - 1 ? "" : name.slice(idx + 1).toLowerCase();
-  }
 
   const ext = $derived(extOf(entry.name));
   const isBinary = $derived(BINARY_EXTS.has(ext));

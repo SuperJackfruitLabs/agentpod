@@ -79,6 +79,10 @@ test("LogTail appends multiple lines in order", async () => {
   MockEventSource.instance!.fireMessage("line two");
   MockEventSource.instance!.fireMessage("line three");
 
+  // Lines beyond the first in a synchronous burst are batched and flush on
+  // a trailing timer (LogTail batches ingestion at most once per 50ms).
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
   await waitFor(() => {
     expect(getByText(/line one/)).toBeTruthy();
     expect(getByText(/line two/)).toBeTruthy();
@@ -86,32 +90,32 @@ test("LogTail appends multiple lines in order", async () => {
   });
 });
 
-test(
-  "LogTail caps rendered lines at MAX_LINES=10000 and keeps most recent",
-  async () => {
-    vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
-    (globalThis as unknown as Record<string, unknown>).EventSource = MockEventSource;
+test("LogTail caps rendered lines at MAX_LINES=10000 and keeps most recent", async () => {
+  vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
+  (globalThis as unknown as Record<string, unknown>).EventSource = MockEventSource;
 
-    render(LogTail, { props: { stationId: "s1" } });
-    await waitFor(() => expect(MockEventSource.instance).toBeTruthy());
+  render(LogTail, { props: { stationId: "s1" } });
+  await waitFor(() => expect(MockEventSource.instance).toBeTruthy());
 
-    // Fire 10_500 log lines — 500 more than MAX_LINES
-    for (let i = 1; i <= 10_500; i++) {
-      MockEventSource.instance!.fireMessage(`logline-${i}`);
-    }
+  // Fire 10_500 log lines — 500 more than MAX_LINES — all synchronously.
+  // LogTail batches ingestion (flushes the reactive `lines` array at most
+  // once per 50ms), so this burst lands in one leading flush (line 1) plus
+  // one trailing flush (lines 2..10500) instead of 10,500 separate
+  // array-copy + derived recomputes.
+  for (let i = 1; i <= 10_500; i++) {
+    MockEventSource.instance!.fireMessage(`logline-${i}`);
+  }
 
-    await waitFor(
-      () => {
-        // The header counter must reflect the cap (10000), not the total (10500)
-        expect(document.body.textContent).toMatch(/\b10000 lines\b/);
-        // The most-recent line must be visible
-        expect(document.body.textContent).toContain("logline-10500");
-      },
-      { timeout: 15000 }
-    );
-  },
-  20000 // vitest test-level timeout
-);
+  // Let the trailing batch-flush timer fire once.
+  await new Promise((resolve) => setTimeout(resolve, 60));
+
+  await waitFor(() => {
+    // The header counter must reflect the cap (10000), not the total (10500)
+    expect(document.body.textContent).toMatch(/\b10000 lines\b/);
+    // The most-recent line must be visible
+    expect(document.body.textContent).toContain("logline-10500");
+  });
+});
 
 test("filters by level chip and search text", async () => {
   vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
@@ -125,6 +129,11 @@ test("filters by level chip and search text", async () => {
   MockEventSource.instance!.fireMessage("ERROR boom");
   MockEventSource.instance!.fireMessage("WARN slow");
   MockEventSource.instance!.fireMessage("INFO ok");
+
+  // "boom" (message 1) flushes immediately; "slow"/"ok" batch onto the
+  // trailing 50ms flush — wait for it so all three chip counts are settled
+  // before filtering.
+  await new Promise((resolve) => setTimeout(resolve, 60));
 
   await waitFor(() => expect(getByText(/boom/)).toBeTruthy());
 
@@ -176,6 +185,10 @@ test("pauses follow on scroll-up and shows new-lines pill", async () => {
   MockEventSource.instance!.fireMessage("one");
   MockEventSource.instance!.fireMessage("two");
   MockEventSource.instance!.fireMessage("three");
+
+  // "one" flushes immediately (pill shows "1 new line"); "two"/"three"
+  // land on the trailing batch flush.
+  await new Promise((resolve) => setTimeout(resolve, 60));
 
   await waitFor(() => expect(getByText(/3 new lines/)).toBeTruthy());
 

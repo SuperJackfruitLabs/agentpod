@@ -55,6 +55,10 @@
   /** Path of the file currently open in the ConfigEditor modal, or null. */
   let configEditorPath = $state<string | null>(null);
 
+  /** Instance ref so ConfigEditor's onSaved can evict FileBrowser's stale
+   *  content cache for the saved path (see FileBrowser.invalidate). */
+  let fileBrowser: FileBrowser | undefined = $state();
+
   const hasTerminal = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("terminal")
   );
@@ -160,6 +164,7 @@
   {#snippet filesContent()}
     <div class="flex-1 min-h-[320px]">
       <FileBrowser
+        bind:this={fileBrowser}
         {stationId}
         {canWrite}
         onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
@@ -209,6 +214,7 @@
         {stationId}
         path={configEditorPath}
         onClose={() => (configEditorPath = null)}
+        onSaved={(p) => fileBrowser?.invalidate(p)}
       />
     {/if}
   </Dialog.Content>

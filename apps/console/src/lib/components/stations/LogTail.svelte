@@ -119,15 +119,48 @@
   let containerEl = $state<HTMLElement | null>(null);
   let scrollTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function handleLine(raw: string) {
-    const line = classify(raw);
-    const next = [...lines, line];
+  // Incoming SSE messages can arrive in tight synchronous bursts (a fast
+  // reconnect replaying thousands of buffered lines). Copying `lines` and
+  // re-running the filter/count deriveds on every single message is O(n²)
+  // over a burst. Instead, land each line in a plain (non-reactive) array
+  // and flush the batch into the reactive `lines` at most once per
+  // FLUSH_INTERVAL_MS — one array copy and one derived recompute per flush,
+  // not per message. The first message after an idle period flushes
+  // immediately (leading edge) so a single trickling line still shows up
+  // right away; a trailing timer then coalesces whatever arrives during the
+  // following window.
+  const FLUSH_INTERVAL_MS = 50;
+  let pendingLines: LogLine[] = [];
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function flushPending() {
+    if (pendingLines.length === 0) return;
+    const batch = pendingLines;
+    pendingLines = [];
+
+    const next = [...lines, ...batch];
     lines = next.length > MAX_LINES ? next.slice(-MAX_LINES) : next;
 
     if (follow) {
       queueScrollToBottom();
     } else {
-      newLinesCount += 1;
+      newLinesCount += batch.length;
+    }
+  }
+
+  function handleLine(raw: string) {
+    pendingLines.push(classify(raw));
+
+    if (flushTimer === null) {
+      // Idle → flush this line right away, then hold the gate open for
+      // FLUSH_INTERVAL_MS so anything else that arrives in that window
+      // (including further lines pushed synchronously by the caller, e.g.
+      // a burst) lands in a single trailing flush.
+      flushPending();
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        flushPending();
+      }, FLUSH_INTERVAL_MS);
     }
   }
 
@@ -230,6 +263,10 @@
     if (scrollTimer !== null) {
       clearTimeout(scrollTimer);
       scrollTimer = null;
+    }
+    if (flushTimer !== null) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
     }
     es?.close();
     es = null;

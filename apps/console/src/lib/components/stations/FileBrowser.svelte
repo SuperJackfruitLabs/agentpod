@@ -10,6 +10,7 @@
   import FileTree from "./file-tree.svelte";
   import FilePreview from "./file-preview.svelte";
   import FileQuickOpen from "./file-quick-open.svelte";
+  import { BINARY_EXTS, extOf } from "$lib/utils/file-ext";
 
   interface Props {
     stationId: string;
@@ -24,11 +25,6 @@
   }
 
   let { stationId, canWrite = false, onOpenConfigEditor }: Props = $props();
-
-  const BINARY_EXTS = new Set([
-    "png", "jpg", "jpeg", "gif", "webp", "svg", "ico",
-    "woff", "woff2", "ttf", "zip", "gz", "tar", "bin", "exe", "pdf",
-  ]);
 
   // ── Tree ↔ preview bridge state ──────────────────────────────────────────────
   /** Every FsEntry the tree (or quick-open) has discovered, keyed by path —
@@ -124,11 +120,6 @@
   }
 
   // ── Preview / tab helpers ────────────────────────────────────────────────────
-  function extOf(path: string): string {
-    const idx = path.lastIndexOf(".");
-    return idx === -1 || idx === path.length - 1 ? "" : path.slice(idx + 1).toLowerCase();
-  }
-
   function isBinaryPath(path: string): boolean {
     return BINARY_EXTS.has(extOf(path));
   }
@@ -174,6 +165,23 @@
     next.delete(activePath);
     contentCache = next;
     if (entry) await openFile(entry);
+  }
+
+  /** Evict a path's cached content — e.g. after ConfigEditor saves it out of
+   *  band, so the preview cache doesn't keep serving pre-edit content. If
+   *  the path is the currently active tab, refetch it immediately so the
+   *  visible preview updates too. Called by the station page via
+   *  `bind:this` after ConfigEditor's onSaved fires. */
+  export function invalidate(path: string) {
+    if (contentCache.has(path)) {
+      const next = new Map(contentCache);
+      next.delete(path);
+      contentCache = next;
+    }
+    if (activePath === path) {
+      const entry = entryIndex.get(path);
+      if (entry) openFile(entry);
+    }
   }
 
   function closeTab(path: string) {
