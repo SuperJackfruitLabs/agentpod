@@ -180,6 +180,7 @@
                   aria-controls="{tabsId}-panel-{tab.id}"
                   aria-selected={activeTab === tab.id}
                   aria-disabled={tab.disabled ? "true" : undefined}
+                  aria-label={tab.label}
                   tabindex={activeTab === tab.id ? 0 : -1}
                   class={cn(
                     "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",

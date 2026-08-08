@@ -1,6 +1,7 @@
 import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, FleetAgent, FleetStats } from "@agentpod/contract";
 import { goto } from "$app/navigation";
 import { clearAuthSession } from "$lib/stores/auth.svelte";
+import { apiError, networkError } from "./http-error";
 
 /** Resolves the hub base URL at call time so it reflects the runtime connection. */
 function hubUrl(): string {
@@ -26,12 +27,18 @@ export function handleUnauthorized(): void {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${hubUrl()}${path}`, { credentials: "include", ...init });
+  const requestLine = `${init?.method ?? "GET"} ${path}`;
+  let res: Response;
+  try {
+    res = await fetch(`${hubUrl()}${path}`, { credentials: "include", ...init });
+  } catch (err) {
+    throw networkError(requestLine, err);
+  }
   if (res.status === 401) {
     handleUnauthorized();
-    throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
+    throw await apiError(res, requestLine);
   }
-  if (!res.ok) throw new Error(`${init?.method ?? "GET"} ${path} → ${res.status}`);
+  if (!res.ok) throw await apiError(res, requestLine);
   // 204 No Content (and other empty bodies, e.g. DELETE/start/stop) have nothing
   // to parse — calling res.json() on them throws "Unexpected end of JSON input".
   if (res.status === 204 || res.headers.get("content-length") === "0") {
@@ -129,11 +136,17 @@ export async function readFile(
   stationId: string,
   path: string
 ): Promise<{ content: string; truncated: boolean }> {
-  const res = await fetch(
-    `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}`,
-    { credentials: "include" }
-  );
-  if (!res.ok) throw new Error(`GET /api/stations/${stationId}/file → ${res.status}`);
+  const requestLine = `GET /api/stations/${stationId}/file`;
+  let res: Response;
+  try {
+    res = await fetch(
+      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}`,
+      { credentials: "include" }
+    );
+  } catch (err) {
+    throw networkError(requestLine, err);
+  }
+  if (!res.ok) throw await apiError(res, requestLine);
   return {
     content: await res.text(),
     truncated: res.headers.get("X-Truncated") === "true",

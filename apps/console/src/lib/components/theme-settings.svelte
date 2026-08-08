@@ -377,6 +377,7 @@
               onclick={() => handleDeleteCustomTheme(customTheme.id, customTheme.name)}
               class="h-8 w-8 text-muted-foreground hover:text-destructive"
               data-testid="delete-theme-{customTheme.id}"
+              aria-label="Delete theme {customTheme.name}"
             >
               <Trash2Icon class="h-4 w-4" />
             </Button>

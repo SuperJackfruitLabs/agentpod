@@ -17,6 +17,7 @@ import type {
   UserRole,
 } from "@agentpod/types";
 import { handleUnauthorized } from "./client";
+import { apiError, networkError } from "./http-error";
 // =============================================================================
 // API Client Helper
 // =============================================================================
@@ -49,29 +50,25 @@ async function apiRequest<T>(
   };
   // Auth is via the session cookie (credentials: "include"), same as api/client.ts.
 
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  const requestLine = `${options.method ?? "GET"} ${path}`;
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (err) {
+    throw networkError(requestLine, err);
+  }
 
   if (response.status === 401) {
     handleUnauthorized();
-    throw new Error(`API Error: ${response.status}`);
+    throw await apiError(response, requestLine);
   }
 
   if (!response.ok) {
-    const errorBody = await response.text();
-    let errorMessage: string;
-
-    try {
-      const parsed = JSON.parse(errorBody);
-      errorMessage = parsed.message || parsed.error || `API Error: ${response.status}`;
-    } catch {
-      errorMessage = errorBody || `API Error: ${response.status}`;
-    }
-
-    throw new Error(errorMessage);
+    throw await apiError(response, requestLine);
   }
 
   // Handle empty responses

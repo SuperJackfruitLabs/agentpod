@@ -326,7 +326,7 @@
             {#if renameTarget?.path === entry.path}
               <input
                 type="text"
-                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-[12px] font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring/50"
+                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-[12px] font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring"
                 bind:value={renameName}
                 onkeydown={handleRenameKeydown}
                 use:autofocus

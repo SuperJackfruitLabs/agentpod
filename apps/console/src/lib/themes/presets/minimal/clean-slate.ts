@@ -29,7 +29,7 @@ export const cleanSlate: ThemePreset = {
       "destructive-foreground": "#ffffff",
       border: "#e2e8f0",
       input: "#e2e8f0",
-      ring: "#94a3b8",
+      ring: "#64748b",
       "chart-1": "#0ea5e9",
       "chart-2": "#22c55e",
       "chart-3": "#f59e0b",

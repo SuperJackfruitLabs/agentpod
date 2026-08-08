@@ -90,9 +90,10 @@
       <Button
         variant="ghost"
         size="icon"
-        onclick={() => goto("/admin/users")}
+        href="/admin/users"
         class="h-8 w-8"
-        title="Back to Users"
+        title="Back to users"
+        aria-label="Back to users"
       >
         <ArrowLeftIcon class="h-4 w-4" />
       </Button>
