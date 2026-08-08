@@ -128,6 +128,25 @@ test("shows provider in each row", async () => {
   });
 });
 
+test("Node column links to the node when present, shows a dash otherwise", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+
+  const { getAllByTestId, getByText } = render(RuntimesPage);
+
+  await waitFor(() => {
+    expect(getAllByTestId("runtime-row").length).toBe(2);
+  });
+
+  // my-runtime has nodeId "node-xyz" → truncated link to /nodes/node-xyz
+  const link = getByText("node-xyz".slice(0, 8)).closest("a");
+  expect(link).toBeTruthy();
+  expect(link?.getAttribute("href")).toBe("/nodes/node-xyz");
+
+  // cf-runtime has nodeId null → dash, no link
+  expect(getByText("—")).toBeTruthy();
+});
+
 test("shows a Created column with relative time for each row", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
   vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });

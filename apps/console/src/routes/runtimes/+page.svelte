@@ -18,7 +18,6 @@
   import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
   import { statusBadgeClass } from "$lib/utils/status-badge";
   import { relativeTime } from "$lib/utils/relative-time";
-  import { chipClass } from "$lib/utils/toggle-chip";
   import NewRuntimeDialog from "$lib/components/fleet/NewRuntimeDialog.svelte";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ContainerIcon from "@lucide/svelte/icons/container";
@@ -117,9 +116,9 @@
   }
 
   // ── Columns ──────────────────────────────────────────────────────────────────
-  // Cell snippets (nameCell, statusCell, createdCell, actionsCell) are declared
-  // in the markup below; referencing them here is safe because these arrow
-  // functions only run later, when FlexRender invokes them — by then the
+  // Cell snippets (nameCell, nodeCell, statusCell, createdCell, actionsCell) are
+  // declared in the markup below; referencing them here is safe because these
+  // arrow functions only run later, when FlexRender invokes them — by then the
   // snippet bindings are already initialized.
   const columns: ColumnDef<ProvisionedRuntime>[] = [
     {
@@ -130,6 +129,13 @@
     {
       accessorKey: "provider",
       header: "Provider",
+    },
+    {
+      id: "node",
+      header: "Node",
+      enableSorting: false,
+      accessorFn: (row) => row.nodeId ?? "",
+      cell: (ctx) => renderSnippet(nodeCell, { value: ctx.getValue<string>() }),
     },
     {
       accessorKey: "status",
@@ -155,6 +161,19 @@
   <span class="font-mono text-sm font-medium">{value}</span>
 {/snippet}
 
+{#snippet nodeCell({ value }: { value: string })}
+  {#if value}
+    <a
+      href="/nodes/{value}"
+      class="font-mono text-xs text-muted-foreground truncate hover:text-primary transition-colors"
+    >
+      {value.slice(0, 8)}
+    </a>
+  {:else}
+    <span class="text-muted-foreground/30">—</span>
+  {/if}
+{/snippet}
+
 {#snippet statusCell({ value }: { value: string })}
   <Badge variant="outline" class={statusBadgeClass(value)} data-testid="status-badge">
     {value}
@@ -173,7 +192,7 @@
         type="button"
         disabled={!!actionInFlight[rt.id]}
         onclick={() => handleStart(rt)}
-        class="{chipClass(false, 'running')} px-2 py-1 text-[10px] uppercase tracking-wider disabled:cursor-not-allowed disabled:opacity-50"
+        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
         data-testid="start-btn"
       >
         Start
@@ -186,7 +205,7 @@
         type="button"
         disabled={!!actionInFlight[rt.id]}
         onclick={() => handleStop(rt)}
-        class="{chipClass(false, 'stopped')} px-2 py-1 text-[10px] uppercase tracking-wider disabled:cursor-not-allowed disabled:opacity-50"
+        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
         data-testid="stop-btn"
       >
         Stop
@@ -198,7 +217,7 @@
       <button
         type="button"
         onclick={() => (destroyTarget = rt)}
-        class="{chipClass(false, 'error')} px-2 py-1 text-[10px] uppercase tracking-wider"
+        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-status-error/50 text-status-error hover:bg-status-error/10"
         data-testid="destroy-btn"
       >
         Destroy
@@ -254,9 +273,7 @@
 
   {:else}
     <!-- Runtimes table -->
-    <div data-testid="runtimes-table">
-      <DataTable {columns} data={runtimes} rowTestId="runtime-row" />
-    </div>
+    <DataTable {columns} data={runtimes} rowTestId="runtime-row" />
   {/if}
 </div>
 
