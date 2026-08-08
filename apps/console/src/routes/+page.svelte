@@ -122,10 +122,15 @@
     </div>
 
   {:else}
-    <!-- Stat band -->
+    <!-- Stat band: health first, inventory second -->
     {#if stats}
-      <OverviewStats {stats} />
+      <OverviewStats {stats} {agents} />
     {/if}
+
+    <!-- Needs attention: full width when something's wrong, one quiet line
+         when healthy — the panel earns its size, it doesn't sit at equal
+         weight with a log of things that happened. -->
+    <NeedsAttention {agents} />
 
     <!-- Fleet heatmap — clicking a cell navigates to /agents filtered by that station -->
     <div class="rounded-lg border p-4 space-y-2">
@@ -137,10 +142,6 @@
       />
     </div>
 
-    <!-- Dashboard panels: Needs Attention + Recent Activity -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <NeedsAttention {agents} />
-      <RecentActivity />
-    </div>
+    <RecentActivity />
   {/if}
 </div>

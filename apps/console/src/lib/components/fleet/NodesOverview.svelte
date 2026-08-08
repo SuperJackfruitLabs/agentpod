@@ -3,9 +3,13 @@
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { replaceState } from "$app/navigation";
-  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode } from "$lib/api/client";
+  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, getFleet } from "$lib/api/client";
   import { toast } from "svelte-sonner";
-  import type { NodeSummary, ProvisionedRuntime } from "@agentpod/contract";
+  import type { NodeSummary, ProvisionedRuntime, FleetAgent } from "@agentpod/contract";
+  import * as Table from "$lib/components/ui/table";
+  import { Status } from "$lib/components/ui/status";
+  import StatusRibbon from "./StatusRibbon.svelte";
+  import { tokenFor } from "$lib/utils/status-badge";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
@@ -16,7 +20,7 @@
   import Loader2Icon from "@lucide/svelte/icons/loader-2";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
-  import { statusBadgeClass } from "$lib/utils/status-badge";
+
   import { chipClass } from "$lib/utils/toggle-chip";
   import { enrollmentCommand } from "$lib/utils/enrollment-command";
   import { cn } from "$lib/utils";
@@ -27,6 +31,19 @@
   let lastToken = $state<string | null>(null);
   let isMinting = $state(false);
   let mintError = $state<string | null>(null);
+
+  // Fleet agents, grouped per node, drive the Agents column (count + ribbon).
+  let fleetAgents = $state<FleetAgent[]>([]);
+
+  const agentsByNode = $derived.by(() => {
+    const m = new Map<string, FleetAgent[]>();
+    for (const a of fleetAgents) {
+      const list = m.get(a.nodeId) ?? [];
+      list.push(a);
+      m.set(a.nodeId, list);
+    }
+    return m;
+  });
 
   // Runtime provisioning state
   let runtimes = $state<ProvisionedRuntime[]>([]);
@@ -54,10 +71,15 @@
       error = null;
     }
     try {
-      const [nodesResult, runtimesResult] = await Promise.allSettled([
+      const [nodesResult, runtimesResult, fleetResult] = await Promise.allSettled([
         listNodes(),
         listRuntimes(),
+        getFleet(),
       ]);
+      if (fleetResult.status === "fulfilled") {
+        fleetAgents = fleetResult.value.agents;
+      }
+      // fleet agents failing is non-fatal — the Agents column shows "—"
       if (nodesResult.status === "fulfilled") {
         nodes = nodesResult.value;
         error = null;
@@ -263,82 +285,123 @@
       </div>
     </div>
 
-  <!-- Node cards + provisioning cards grid -->
+  <!-- Provisioning cards + nodes table -->
   {:else}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <!-- Provisioning cards (runtimes that are still spinning up) -->
-      {#each provisioningRuntimes as rt (rt.id)}
-        <div class="h-full rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-1">
-          <div class="flex items-start justify-between gap-2">
-            <p class="text-sm font-medium leading-tight truncate">
-              {rt.name}
-            </p>
-            <Badge variant="secondary" class="shrink-0 gap-1.5">
-              <Loader2Icon class="h-3 w-3 animate-spin" />
-              provisioning
-            </Badge>
-          </div>
-          <p class="text-sm text-muted-foreground">
-            {rt.provider} · {rt.resourceTier}
-          </p>
-          {#if rt.harness && rt.harness !== "none"}
-            <Badge variant="outline" class="text-xs border-primary/40 text-primary">
-              {rt.harness}
-            </Badge>
-          {/if}
-        </div>
-      {/each}
-
-      <!-- Online / offline node cards -->
-      {#each nodes as node (node.id)}
-        <a
-          href="/nodes/{node.id}"
-          class="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
-        >
-          <div class="h-full rounded-lg border bg-card p-4 space-y-1 transition-colors group-hover:border-primary/50">
-            <div class="flex items-start justify-between gap-2">
-              <p class="text-sm font-medium leading-tight truncate">
-                {node.hostname}
-              </p>
-              <Badge variant="outline" class="shrink-0 {statusBadgeClass(node.status)}">
-                {node.status}
-              </Badge>
-            </div>
-            <p class="text-sm text-muted-foreground">
-              <Metric>{node.arch}</Metric> · <Metric>{node.cpuCount}</Metric> CPU
-            </p>
-            <p class="text-xs text-muted-foreground/70">
-              {node.os}
-            </p>
-            <p class="text-xs text-muted-foreground/60">
-              <Metric>{node.agentVersion ?? "—"}</Metric>
-            </p>
-            {#if node.updateAvailable}
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs text-status-degraded">
-                  Update available · <Metric>{node.agentVersion} → {node.latestVersion}</Metric>
-                </span>
-                <button
-                  type="button"
-                  disabled={!!updatingNodes[node.id]}
-                  onclick={(e) => { e.stopPropagation(); e.preventDefault(); handleUpdate(node.id); }}
-                  class={cn(
-                    chipClass(false),
-                    "text-xs hover:border-primary hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed",
-                  )}
-                >
-                  {updatingNodes[node.id] ? "Updating…" : "Update"}
-                </button>
+    <div class="space-y-4">
+      <!-- Provisioning cards (runtimes still spinning up) — cards stay here
+           because provisioning is a status story, not a row of facts -->
+      {#if provisioningRuntimes.length > 0}
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {#each provisioningRuntimes as rt (rt.id)}
+            <div class="h-full rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-1">
+              <div class="flex items-start justify-between gap-2">
+                <p class="text-sm font-medium leading-tight truncate">
+                  {rt.name}
+                </p>
+                <Badge variant="secondary" class="shrink-0 gap-1.5">
+                  <Loader2Icon class="h-3 w-3 animate-spin" />
+                  provisioning
+                </Badge>
               </div>
-            {/if}
-            {#if node.provisioned}
-              <Badge variant="outline" class="text-xs border-primary/40 text-primary">
-                provisioned · {node.provisioned.provider}
-              </Badge>
-            {/if}
-          </div>
-        </a>
-      {/each}
+              <p class="text-sm text-muted-foreground">
+                {rt.provider} · {rt.resourceTier}
+              </p>
+              {#if rt.harness && rt.harness !== "none"}
+                <Badge variant="outline" class="text-xs border-primary/40 text-primary">
+                  {rt.harness}
+                </Badge>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Nodes as an ops table: host · status · agents · facts · update -->
+      <div class="overflow-x-auto rounded-lg border">
+        <Table.Root>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head>Host</Table.Head>
+              <Table.Head>Status</Table.Head>
+              <Table.Head>Agents</Table.Head>
+              <Table.Head class="hidden sm:table-cell">CPUs</Table.Head>
+              <Table.Head class="hidden md:table-cell">OS</Table.Head>
+              <Table.Head class="hidden sm:table-cell">Version</Table.Head>
+              <Table.Head><span class="sr-only">Update</span></Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {#each nodes as node (node.id)}
+              {@const nodeAgents = agentsByNode.get(node.id) ?? []}
+              {@const runningCount = nodeAgents.filter((a) => tokenFor(a.status) === "running").length}
+              <Table.Row data-testid="node-row">
+                <Table.Cell>
+                  <a
+                    href="/nodes/{node.id}"
+                    class="text-sm font-medium hover:text-primary transition-colors"
+                  >
+                    {node.hostname}
+                  </a>
+                  {#if node.provisioned}
+                    <Badge variant="outline" class="ml-2 text-xs border-primary/40 text-primary">
+                      provisioned · {node.provisioned.provider}
+                    </Badge>
+                  {/if}
+                </Table.Cell>
+                <Table.Cell>
+                  <Status form="badge" status={node.status} />
+                </Table.Cell>
+                <Table.Cell>
+                  {#if nodeAgents.length > 0}
+                    <div class="flex items-center gap-2">
+                      <StatusRibbon
+                        size="sm"
+                        items={nodeAgents.map((a) => ({
+                          id: a.stationId,
+                          label: a.agentName,
+                          status: a.status,
+                        }))}
+                      />
+                      <Metric class="text-xs text-muted-foreground">{runningCount}/{nodeAgents.length}</Metric>
+                    </div>
+                  {:else}
+                    <span class="text-xs text-muted-foreground">—</span>
+                  {/if}
+                </Table.Cell>
+                <Table.Cell class="hidden sm:table-cell">
+                  <Metric class="text-xs text-muted-foreground">{node.cpuCount}</Metric>
+                </Table.Cell>
+                <Table.Cell class="hidden md:table-cell text-xs text-muted-foreground">
+                  {node.os} · <Metric>{node.arch}</Metric>
+                </Table.Cell>
+                <Table.Cell class="hidden sm:table-cell">
+                  <Metric class="text-xs text-muted-foreground">{node.agentVersion ?? "—"}</Metric>
+                </Table.Cell>
+                <Table.Cell class="text-right">
+                  {#if node.updateAvailable}
+                    <div class="flex items-center justify-end gap-2 whitespace-nowrap">
+                      <span class="text-xs text-status-degraded">
+                        <Metric>{node.agentVersion} → {node.latestVersion}</Metric>
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!!updatingNodes[node.id]}
+                        onclick={() => handleUpdate(node.id)}
+                        class={cn(
+                          chipClass(false),
+                          "text-xs hover:border-primary hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed",
+                        )}
+                      >
+                        {updatingNodes[node.id] ? "Updating…" : "Update"}
+                      </button>
+                    </div>
+                  {/if}
+                </Table.Cell>
+              </Table.Row>
+            {/each}
+          </Table.Body>
+        </Table.Root>
+      </div>
     </div>
   {/if}
 </div>

@@ -34,11 +34,11 @@ const healthNulls: StationHealth = {
 test("HealthPanel renders running state and numeric pid", async () => {
   vi.spyOn(api, "stationHealth").mockResolvedValue(healthFull);
 
-  const { getByText } = render(HealthPanel, { props: { stationId: "station_1" } });
+  const { getByText, getAllByText } = render(HealthPanel, { props: { stationId: "station_1" } });
 
   await waitFor(() => {
-    // running should appear (e.g. "Running" badge text)
-    expect(getByText(/running/i)).toBeTruthy();
+    // running appears (status dot sr-only label + visible text label)
+    expect(getAllByText(/running/i).length).toBeGreaterThanOrEqual(1);
     // pid should appear
     expect(getByText(/12345/)).toBeTruthy();
   });
@@ -92,22 +92,23 @@ test("HealthPanel: no lifecycle buttons rendered when canLifecycle is false (def
   expect(queryByRole("button", { name: /^restart$/i })).toBeNull();
 });
 
-test("HealthPanel: lifecycle buttons visible when canLifecycle is true", async () => {
+test("HealthPanel: controls are state-aware — running shows Stop/Restart, never Start", async () => {
   vi.spyOn(api, "stationHealth").mockResolvedValue(healthFull);
 
-  const { getByRole } = render(HealthPanel, {
+  const { getByRole, queryByRole } = render(HealthPanel, {
     props: { stationId: "station_lc", canLifecycle: true },
   });
 
   await waitFor(() => {
-    expect(getByRole("button", { name: /^start$/i })).toBeTruthy();
     expect(getByRole("button", { name: /^stop$/i })).toBeTruthy();
     expect(getByRole("button", { name: /^restart$/i })).toBeTruthy();
   });
+  // A running agent must not offer the one action that does nothing.
+  expect(queryByRole("button", { name: /^start$/i })).toBeNull();
 });
 
-test("HealthPanel: Start calls lifecycle immediately without a dialog", async () => {
-  vi.spyOn(api, "stationHealth").mockResolvedValue(healthFull);
+test("HealthPanel: Start (on a stopped agent) calls lifecycle immediately without a dialog", async () => {
+  vi.spyOn(api, "stationHealth").mockResolvedValue(healthNulls);
   vi.spyOn(api, "lifecycle").mockResolvedValue(healthFull);
 
   const { getByRole, queryByRole } = render(HealthPanel, {
@@ -115,6 +116,9 @@ test("HealthPanel: Start calls lifecycle immediately without a dialog", async ()
   });
 
   await waitFor(() => expect(getByRole("button", { name: /^start$/i })).toBeTruthy());
+  // A stopped agent shows only Start.
+  expect(queryByRole("button", { name: /^stop$/i })).toBeNull();
+  expect(queryByRole("button", { name: /^restart$/i })).toBeNull();
 
   fireEvent.click(getByRole("button", { name: /^start$/i }));
 
