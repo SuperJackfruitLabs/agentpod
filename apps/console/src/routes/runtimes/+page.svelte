@@ -158,6 +158,10 @@
   ];
 </script>
 
+<svelte:head>
+  <title>Runtimes · AgentPod</title>
+</svelte:head>
+
 {#snippet nameCell({ value }: { value: string })}
   <span class="font-mono text-sm font-medium">{value}</span>
 {/snippet}

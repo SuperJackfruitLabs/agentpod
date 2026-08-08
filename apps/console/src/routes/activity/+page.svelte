@@ -79,6 +79,10 @@
   ];
 </script>
 
+<svelte:head>
+  <title>Activity · AgentPod</title>
+</svelte:head>
+
 {#snippet verbCell({ value }: { value: string })}
   <span class="font-mono text-xs font-medium">{value}</span>
 {/snippet}

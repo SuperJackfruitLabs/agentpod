@@ -74,6 +74,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>{user?.email ?? "User"} · Admin · AgentPod</title>
+</svelte:head>
+
 <main class="flex h-screen flex-col overflow-hidden">
   <!-- Header -->
   <PageHeader

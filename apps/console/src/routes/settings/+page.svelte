@@ -18,6 +18,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>Settings · AgentPod</title>
+</svelte:head>
+
 <PageHeader title="Settings" />
 
 <div class="container mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
