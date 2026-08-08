@@ -25,6 +25,7 @@
     sticky?: boolean;
     actions?: Snippet;
     leading?: Snippet;
+    tabsId?: string;
   }
 
   let {
@@ -38,9 +39,59 @@
     sticky = true,
     actions = undefined,
     leading = undefined,
+    tabsId = "page-tabs",
   }: Props = $props();
 
   const Icon = $derived(icon);
+
+  let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
+
+  function activateTab(tab: Tab) {
+    if (tab.disabled) return;
+    onTabChange?.(tab.id);
+  }
+
+  function focusTabAt(index: number) {
+    const count = tabs.length;
+    if (count === 0) return;
+    const wrapped = ((index % count) + count) % count;
+    tabRefs[wrapped]?.focus();
+  }
+
+  function handleTablistKeydown(event: KeyboardEvent) {
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
+    const focusedIndex = tabRefs.findIndex((el) => el === document.activeElement);
+    const fromIndex = focusedIndex >= 0 ? focusedIndex : Math.max(currentIndex, 0);
+
+    switch (event.key) {
+      case "ArrowRight":
+        event.preventDefault();
+        focusTabAt(fromIndex + 1);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        focusTabAt(fromIndex - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusTabAt(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusTabAt(tabs.length - 1);
+        break;
+      case "Enter":
+      case " ": {
+        const target = event.target as HTMLElement;
+        const index = tabRefs.findIndex((el) => el === target);
+        if (index >= 0) {
+          event.preventDefault();
+          activateTab(tabs[index]);
+        }
+        break;
+      }
+    }
+  }
 
   const statusText: Record<StatusVariant, string> = {
     running: "text-status-running",
@@ -110,17 +161,26 @@
     </div>
 
     {#if tabs.length > 0}
-      <div class="scrollbar-hide -mb-px flex gap-1 overflow-x-auto" role="tablist">
-        {#each tabs as tab (tab.id)}
+      <!-- svelte-ignore a11y_interactive_supports_focus -- roving tabindex lives on the individual tab buttons, not the tablist container -->
+      <div
+        class="scrollbar-hide -mb-px flex gap-1 overflow-x-auto"
+        role="tablist"
+        onkeydown={handleTablistKeydown}
+      >
+        {#each tabs as tab, i (tab.id)}
           <Tooltip.Root>
             <Tooltip.Trigger>
               {#snippet child({ props })}
                 <button
                   {...props}
+                  bind:this={tabRefs[i]}
                   type="button"
                   role="tab"
+                  id="{tabsId}-tab-{tab.id}"
+                  aria-controls="{tabsId}-panel-{tab.id}"
                   aria-selected={activeTab === tab.id}
-                  disabled={tab.disabled}
+                  aria-disabled={tab.disabled ? "true" : undefined}
+                  tabindex={activeTab === tab.id ? 0 : -1}
                   class={cn(
                     "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
                     tab.disabled
@@ -129,7 +189,7 @@
                         ? "border-primary text-foreground"
                         : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
                   )}
-                  onclick={() => !tab.disabled && onTabChange?.(tab.id)}
+                  onclick={() => activateTab(tab)}
                 >
                   {#if tab.disabled}
                     <LockIcon class="h-3.5 w-3.5" aria-hidden="true" />

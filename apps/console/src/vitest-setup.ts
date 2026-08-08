@@ -10,6 +10,19 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// jsdom has no ResizeObserver. bits-ui's floating-layer (used by Tooltip,
+// Popover, Select, ...) instantiates one as soon as its content mounts —
+// e.g. when a focusable tab receives focus and its tooltip opens. Without a
+// stub, any test that focuses such an element throws
+// "ResizeObserver is not a constructor" as an unhandled exception.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class ResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // Unmount components, then let bits-ui's 24ms body-scroll-lock cleanup timer
 // fire while the DOM still exists. Without the flush, the last dialog-using
 // test in a file races vitest's environment teardown and crashes with

@@ -37,12 +37,7 @@
   aria-current={isActive ? "page" : undefined}
 >
   <div class="relative">
-    <Icon
-      class={cn(
-        "h-5 w-5 transition-transform",
-        isActive && "scale-110"
-      )}
-    />
+    <Icon class="h-5 w-5" />
     {#if badge && badge > 0}
       <span
         class={cn(

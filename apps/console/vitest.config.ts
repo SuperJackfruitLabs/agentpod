@@ -8,7 +8,7 @@ import type { Plugin } from "vite";
  * processes them.  bits-ui's select-viewport.svelte (and potentially others)
  * contain style blocks that call preprocessCSS internally, which fails in the
  * jsdom test environment under Vite 6 because PartialEnvironment is unavailable.
- * Project components like lottie-icon.svelte and theme-toggle.svelte also have
+ * Project components like theme-toggle.svelte also have
  * <style> blocks that trigger the same failure.
  * Tests never need CSS to function, so stripping these blocks is safe.
  */
