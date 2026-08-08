@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { getFleet, createEnrollmentToken } from "$lib/api/client";
+  import { startPolling } from "$lib/utils/poll";
   import type { FleetStats, FleetAgent } from "@agentpod/contract";
   import PageHeader from "$lib/components/page-header.svelte";
   import OverviewStats from "$lib/components/fleet/OverviewStats.svelte";
@@ -31,17 +32,22 @@
     goto("/agents?status=" + status);
   }
 
-  async function loadFleet() {
-    isLoading = true;
-    error = null;
+  async function loadFleet(background = false) {
+    if (!background) {
+      isLoading = true;
+      error = null;
+    }
     try {
       const result = await getFleet();
       stats = result.stats;
       agents = result.agents;
+      error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load fleet";
+      // Background refreshes keep the last good data on screen — the shell's
+      // hub-unreachable banner carries the staleness signal instead.
+      if (!background) error = e instanceof Error ? e.message : "Couldn't load the fleet.";
     } finally {
-      isLoading = false;
+      if (!background) isLoading = false;
     }
   }
 
@@ -57,10 +63,15 @@
     }
   }
 
-  onMount(async () => {
-    await loadFleet();
+  onMount(() => {
+    void loadFleet();
+    return startPolling(() => void loadFleet(true), 30_000);
   });
 </script>
+
+<svelte:head>
+  <title>Overview · AgentPod</title>
+</svelte:head>
 
 <PageHeader title="Overview" subtitle="Fleet control plane" />
 
@@ -79,7 +90,7 @@
       role="alert"
     >
       <p class="text-sm text-destructive">{error}</p>
-      <Button variant="outline" size="sm" onclick={loadFleet}>Retry</Button>
+      <Button variant="outline" size="sm" onclick={() => loadFleet()}>Retry</Button>
     </div>
 
   {:else if agents.length === 0}

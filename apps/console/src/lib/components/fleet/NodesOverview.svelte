@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { replaceState } from "$app/navigation";
   import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode } from "$lib/api/client";
@@ -46,9 +47,11 @@
     return stored ?? import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001";
   }
 
-  async function loadData() {
-    isLoading = true;
-    error = null;
+  async function loadData(background = false) {
+    if (!background) {
+      isLoading = true;
+      error = null;
+    }
     try {
       const [nodesResult, runtimesResult] = await Promise.allSettled([
         listNodes(),
@@ -56,30 +59,36 @@
       ]);
       if (nodesResult.status === "fulfilled") {
         nodes = nodesResult.value;
-      } else {
+        error = null;
+      } else if (!background) {
+        // Background refreshes keep the last good data on screen; the shell's
+        // hub-unreachable banner carries the staleness signal.
         error =
           nodesResult.reason instanceof Error
             ? nodesResult.reason.message
-            : "Failed to load nodes";
+            : "Couldn't load nodes.";
       }
       if (runtimesResult.status === "fulfilled") {
         runtimes = runtimesResult.value;
       }
       // runtimes failing is non-fatal — keep the previous value
     } finally {
-      isLoading = false;
+      if (!background) isLoading = false;
     }
   }
 
-  onMount(async () => {
-    // Fetch enabled providers; fall back to defaults on failure
-    try {
-      const res = await listRuntimeProviders();
-      if (res.providers.length > 0) providers = res.providers;
-    } catch {
-      // keep fallback ["docker", "cloudflare"]
-    }
-    await loadData();
+  onMount(() => {
+    void (async () => {
+      // Fetch enabled providers; fall back to defaults on failure
+      try {
+        const res = await listRuntimeProviders();
+        if (res.providers.length > 0) providers = res.providers;
+      } catch {
+        // keep fallback ["docker", "cloudflare"]
+      }
+      await loadData();
+    })();
+    return startPolling(() => void loadData(true), 30_000);
   });
 
   // ?action=<new-runtime|create-token> handling. This must be a reactive
@@ -232,7 +241,7 @@
       role="alert"
     >
       <p class="text-sm text-destructive">{error}</p>
-      <Button variant="outline" size="sm" onclick={loadData}>Retry</Button>
+      <Button variant="outline" size="sm" onclick={() => loadData()}>Retry</Button>
     </div>
 
   <!-- Empty state: no nodes and no provisioning runtimes → connect banner or in-place token -->

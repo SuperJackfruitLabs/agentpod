@@ -3,19 +3,28 @@
   import { listActivity } from "$lib/api/client";
   import type { ActivityRow } from "$lib/api/client";
   import { relativeTime } from "$lib/utils/relative-time";
+  import { Button } from "$lib/components/ui/button";
 
   let rows = $state<ActivityRow[]>([]);
   let isLoading = $state(true);
+  let error = $state<string | null>(null);
 
-  onMount(async () => {
+  async function load() {
+    isLoading = true;
+    error = null;
     try {
       const all = await listActivity();
       rows = all.slice(0, 6);
-    } catch {
-      // non-fatal: show empty state
+    } catch (e) {
+      // A failed fetch must never masquerade as "No activity yet".
+      error = e instanceof Error ? e.message : "Couldn't load activity.";
     } finally {
       isLoading = false;
     }
+  }
+
+  onMount(() => {
+    void load();
   });
 </script>
 
@@ -23,12 +32,19 @@
   <div class="flex items-center justify-between">
     <p class="text-sm font-medium">Recent activity</p>
     <a href="/activity" class="text-xs text-primary hover:underline" data-testid="view-all-activity">
-      view all →
+      View all
     </a>
   </div>
 
   {#if isLoading}
     <p class="text-xs text-muted-foreground">Loading…</p>
+  {:else if error}
+    <div class="flex items-center justify-between gap-2" role="alert" data-testid="activity-error">
+      <p class="text-xs text-destructive">{error}</p>
+      <Button variant="outline" size="sm" class="h-6 px-2 text-xs" onclick={() => load()}>
+        Retry
+      </Button>
+    </div>
   {:else if rows.length === 0}
     <p class="text-xs text-muted-foreground" data-testid="no-activity">No activity yet</p>
   {:else}
