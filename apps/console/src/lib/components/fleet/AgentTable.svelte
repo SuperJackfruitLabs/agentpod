@@ -293,7 +293,7 @@
           onclick={(e) => handleUpdate(e, agent.nodeId)}
           class="text-xs px-2 py-0.5 rounded-md border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {updatingNodes[agent.nodeId] ? "updating…" : "Update"}
+          {updatingNodes[agent.nodeId] ? "Updating…" : "Update"}
         </button>
       {/if}
     </Table.Cell>

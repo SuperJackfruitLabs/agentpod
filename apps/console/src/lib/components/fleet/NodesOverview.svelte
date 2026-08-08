@@ -47,6 +47,7 @@
   }
 
   async function loadData() {
+    isLoading = true;
     error = null;
     try {
       const [nodesResult, runtimesResult] = await Promise.allSettled([

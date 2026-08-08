@@ -40,6 +40,7 @@
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   async function loadRuntimes() {
+    isLoading = true;
     error = null;
     try {
       runtimes = await listRuntimes();
@@ -192,10 +193,10 @@
         type="button"
         disabled={!!actionInFlight[rt.id]}
         onclick={() => handleStart(rt)}
-        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
         data-testid="start-btn"
       >
-        Start
+        {actionInFlight[rt.id] ? "Starting…" : "Start"}
       </button>
     {/if}
 
@@ -205,10 +206,10 @@
         type="button"
         disabled={!!actionInFlight[rt.id]}
         onclick={() => handleStop(rt)}
-        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
         data-testid="stop-btn"
       >
-        Stop
+        {actionInFlight[rt.id] ? "Stopping…" : "Stop"}
       </button>
     {/if}
 
@@ -217,7 +218,7 @@
       <button
         type="button"
         onclick={() => (destroyTarget = rt)}
-        class="rounded-md border px-2 py-1 text-[10px] uppercase tracking-wider whitespace-nowrap transition-colors border-status-error/50 text-status-error hover:bg-status-error/10"
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-error/50 text-status-error hover:bg-status-error/10"
         data-testid="destroy-btn"
       >
         Destroy

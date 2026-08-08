@@ -35,9 +35,13 @@
     loadAdopted(id);
   }
 
-  onMount(() => {
+  function retryAll() {
     loadStations();
     loadNode();
+  }
+
+  onMount(() => {
+    retryAll();
   });
 
   let updating = $state(false);
@@ -106,7 +110,7 @@
           update: {node.agentVersion} → {node.latestVersion}
         </span>
         <Button variant="outline" size="sm" disabled={updating} onclick={handleUpdate}>
-          {updating ? "updating…" : "Update"}
+          {updating ? "Updating…" : "Update"}
         </Button>
       {/if}
     {/if}
@@ -122,7 +126,7 @@
   {#if stations.error}
     <div class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4" role="alert">
       <p class="text-sm text-destructive">{stations.error}</p>
-      <Button variant="outline" size="sm" onclick={loadStations}>Retry</Button>
+      <Button variant="outline" size="sm" onclick={retryAll}>Retry</Button>
     </div>
   {/if}
 
