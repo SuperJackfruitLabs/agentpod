@@ -58,6 +58,7 @@
   /** Instance ref so ConfigEditor's onSaved can evict FileBrowser's stale
    *  content cache for the saved path (see FileBrowser.invalidate). */
   let fileBrowser: FileBrowser | undefined = $state();
+  let configEditor: ConfigEditor | undefined = $state();
 
   const hasTerminal = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("terminal")
@@ -200,7 +201,15 @@
 <Dialog.Root
   open={configEditorPath !== null && canWrite}
   onOpenChange={(open) => {
-    if (!open) configEditorPath = null;
+    // Escape/overlay-close must go through the editor's unsaved-changes guard;
+    // the editor calls onClose (below) once closing is actually safe.
+    if (!open) {
+      if (configEditor) {
+        configEditor.requestClose();
+      } else {
+        configEditorPath = null;
+      }
+    }
   }}
 >
   <Dialog.Content
@@ -209,6 +218,7 @@
   >
     {#if configEditorPath !== null && canWrite}
       <ConfigEditor
+        bind:this={configEditor}
         {stationId}
         path={configEditorPath}
         onClose={() => (configEditorPath = null)}

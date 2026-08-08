@@ -14,7 +14,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
+import { render, waitFor, fireEvent, cleanup, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import * as nav from "$app/navigation";
 import ProvisionedNodeControls from "./ProvisionedNodeControls.svelte";
@@ -109,7 +109,7 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
   vi.spyOn(api, "destroyRuntime").mockResolvedValue(undefined as unknown as void);
   const gotoSpy = vi.spyOn(nav, "goto").mockResolvedValue(undefined);
 
-  const { getAllByRole, getByPlaceholderText } = render(ProvisionedNodeControls, {
+  const { getAllByRole, getByRole } = render(ProvisionedNodeControls, {
     props: { node: dockerNode, onRefresh: vi.fn() },
   });
 
@@ -117,12 +117,12 @@ test("Destroy: type hostname enables confirm button → calls destroyRuntime(run
   const [triggerBtn] = getAllByRole("button", { name: /destroy/i });
   fireEvent.click(triggerBtn);
 
-  // Wait for dialog to open and find the confirm input (placeholder is the hostname)
+  // Wait for dialog to open and find the confirm input
   await waitFor(() => {
-    expect(getByPlaceholderText("box1.local")).toBeTruthy();
+    expect(getByRole("dialog")).toBeTruthy();
   });
 
-  const input = getByPlaceholderText("box1.local");
+  const input = within(getByRole("dialog")).getByRole("textbox");
 
   // Wrong input: dialog confirm button still disabled (last "Destroy" button = dialog's)
   fireEvent.input(input, { target: { value: "wrong" } });
@@ -154,16 +154,18 @@ test("Destroy failure: shows inline error, dialog closes, does NOT navigate", as
   vi.spyOn(api, "destroyRuntime").mockRejectedValue(new Error("destroy failed: quota"));
   const gotoSpy = vi.spyOn(nav, "goto").mockResolvedValue(undefined);
 
-  const { getAllByRole, getByPlaceholderText, queryByPlaceholderText, getByText } = render(ProvisionedNodeControls, {
+  const { getAllByRole, getByRole, queryByRole, getByText } = render(ProvisionedNodeControls, {
     props: { node: dockerNode, onRefresh: vi.fn() },
   });
 
   const [triggerBtn] = getAllByRole("button", { name: /destroy/i });
   fireEvent.click(triggerBtn);
 
-  await waitFor(() => expect(getByPlaceholderText("box1.local")).toBeTruthy());
+  await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
-  fireEvent.input(getByPlaceholderText("box1.local"), { target: { value: "box1.local" } });
+  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
+    target: { value: "box1.local" },
+  });
   await waitFor(() => {
     const btns = getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
     expect(btns[btns.length - 1].disabled).toBe(false);
@@ -176,7 +178,7 @@ test("Destroy failure: shows inline error, dialog closes, does NOT navigate", as
     // (a) error text is visible on the page
     expect(getByText(/destroy failed/i)).toBeTruthy();
     // (b) dialog is closed — confirm input no longer in the DOM
-    expect(queryByPlaceholderText("box1.local")).toBeNull();
+    expect(queryByRole("dialog")).toBeNull();
     // (c) navigation did NOT happen
     expect(gotoSpy).not.toHaveBeenCalled();
   });

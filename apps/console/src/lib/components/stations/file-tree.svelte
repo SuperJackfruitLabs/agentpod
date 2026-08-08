@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { listFiles, writeFile, mkdir, move, del } from "$lib/api/client";
+  import { toast } from "svelte-sonner";
   import type { FsEntry } from "@agentpod/contract";
   import { ChevronRight, ChevronDown, Loader2, Trash2, FilePlus, FolderPlus, Pencil } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
@@ -168,8 +169,10 @@
     try {
       await del(stationId, path, { recursive: deleteTarget.type === "dir" });
       onDeleted?.(path);
-    } catch {
-      // TODO: surface error
+    } catch (err) {
+      toast.error(`Couldn't delete ${deleteTarget.name}`, {
+        description: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       deleteTarget = null;
     }
@@ -186,8 +189,10 @@
         } else {
           await writeFile(stationId, name, "");
         }
-      } catch {
-        // TODO: surface error
+      } catch (err) {
+        toast.error(`Couldn't create ${name}`, {
+          description: err instanceof Error ? err.message : undefined,
+        });
       } finally {
         newItemMode = null;
         newItemName = "";
@@ -214,8 +219,10 @@
       try {
         await move(stationId, renameTarget.path, newPath);
         onRenamed?.(renameTarget.path, newPath, newName);
-      } catch {
-        // TODO: surface error
+      } catch (err) {
+        toast.error(`Couldn't rename ${renameTarget.name}`, {
+          description: err instanceof Error ? err.message : undefined,
+        });
       } finally {
         renameTarget = null;
         renameName = "";
@@ -319,7 +326,7 @@
             {#if renameTarget?.path === entry.path}
               <input
                 type="text"
-                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-[12px] font-mono outline-none"
+                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-[12px] font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring/50"
                 bind:value={renameName}
                 onkeydown={handleRenameKeydown}
                 use:autofocus
@@ -374,6 +381,7 @@
   title="Delete {deleteTarget?.name ?? ''}"
   message="This will permanently delete {deleteTarget?.name ?? ''}. This action cannot be undone."
   confirmPhrase={deleteTarget?.name ?? ""}
+  confirmLabel={deleteTarget?.type === "dir" ? "Delete folder" : "Delete file"}
   onConfirm={handleDelete}
   onCancel={() => (deleteTarget = null)}
 />

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { beforeNavigate } from "$app/navigation";
   import { readFile, writeFile } from "$lib/api/client";
   import { diffLines } from "diff";
   import { MonacoEditor } from "$lib/components/ui/monaco-editor";
@@ -23,6 +24,7 @@
   let isLoading = $state(true);
   let loadError = $state<string | null>(null);
   let showConfirm = $state(false);
+  let showDiscardConfirm = $state(false);
   let isSaving = $state(false);
   let saveError = $state<string | null>(null);
   let backupPath = $state<string | null>(null);
@@ -50,6 +52,32 @@
       loadError = err instanceof Error ? err.message : "Failed to load file";
     } finally {
       isLoading = false;
+    }
+  });
+
+  // ── Close guard ──────────────────────────────────────────────────────────────
+  // Every close path (Close button, dialog Escape/overlay-click via the host's
+  // onOpenChange) must funnel through here so unsaved edits are never dropped
+  // silently.
+  export function requestClose() {
+    if (hasChanges) {
+      showDiscardConfirm = true;
+    } else {
+      onClose?.();
+    }
+  }
+
+  function handleBeforeUnload(e: BeforeUnloadEvent) {
+    if (hasChanges) e.preventDefault();
+  }
+
+  beforeNavigate((nav) => {
+    if (
+      hasChanges &&
+      nav.type !== "leave" &&
+      !window.confirm(`You have unsaved changes to ${path}. Leave without saving?`)
+    ) {
+      nav.cancel();
     }
   });
 
@@ -90,7 +118,7 @@
           variant="outline"
           size="sm"
           class="h-7 px-2 text-[11px] font-sans"
-          onclick={onClose}
+          onclick={requestClose}
         >
           Close
         </Button>
@@ -158,11 +186,28 @@
   {/if}
 </div>
 
+<svelte:window onbeforeunload={handleBeforeUnload} />
+
+<!-- ── Discard-changes ConfirmDialog ── -->
+<ConfirmDialog
+  open={showDiscardConfirm}
+  title="Discard changes?"
+  message="You have unsaved changes to {path}. Close without saving?"
+  confirmLabel="Discard changes"
+  destructive
+  onConfirm={() => {
+    showDiscardConfirm = false;
+    onClose?.();
+  }}
+  onCancel={() => (showDiscardConfirm = false)}
+/>
+
 <!-- ── Save ConfirmDialog ── -->
 <ConfirmDialog
   open={showConfirm}
   title="Save changes to {path}"
   message="Save changes to {path}? A timestamped backup will be created."
+  confirmLabel="Save changes"
   onConfirm={handleSave}
   onCancel={() => (showConfirm = false)}
 />

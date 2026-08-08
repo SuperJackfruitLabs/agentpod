@@ -8,7 +8,8 @@
     title: string;
     message: string;
     confirmPhrase: string;
-    confirmLabel?: string;
+    /** Names the action ("Destroy runtime", "Delete file") — a bare "Confirm" must never ship. */
+    confirmLabel: string;
     onConfirm: () => void;
     onCancel: () => void;
   }
@@ -18,7 +19,7 @@
     title,
     message,
     confirmPhrase,
-    confirmLabel = "Confirm",
+    confirmLabel,
     onConfirm,
     onCancel,
   }: Props = $props();
@@ -54,7 +55,6 @@
       <input
         type="text"
         class="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground outline-none transition-[color,box-shadow] focus:border-ring focus:ring-2 focus:ring-ring/50"
-        placeholder={confirmPhrase}
         bind:value={typed}
         use:autofocus
       />

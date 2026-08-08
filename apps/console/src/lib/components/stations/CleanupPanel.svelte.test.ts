@@ -1,5 +1,5 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
+import { render, waitFor, fireEvent, cleanup, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 // Static import ensures module is compiled during file collection, so the
 // first test doesn't pay the compilation cost inside its waitFor window.
@@ -50,7 +50,7 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
   vi.spyOn(api, "cleanupPlan").mockResolvedValue(mockPlan);
   vi.spyOn(api, "cleanupApply").mockResolvedValue({ removedBytes: 52428800 });
 
-  const { getByRole, getByPlaceholderText } = render(CleanupPanel, {
+  const { getByRole } = render(CleanupPanel, {
     props: { stationId: "station_1" },
   });
 
@@ -80,16 +80,16 @@ test("CleanupPanel: selecting an item enables Apply; confirming calls cleanupApp
   expect(api.cleanupApply).not.toHaveBeenCalled();
 
   // Type the confirm phrase (= stationId)
-  const input = getByPlaceholderText("station_1");
+  const input = within(getByRole("dialog")).getByRole("textbox");
   fireEvent.input(input, { target: { value: "station_1" } });
 
-  // Confirm button unlocks
+  // Confirm button unlocks — labeled with the action, never a bare "Confirm"
   await waitFor(() => {
-    const confirmBtn = getByRole("button", { name: /confirm/i }) as HTMLButtonElement;
+    const confirmBtn = getByRole("button", { name: "Delete items" }) as HTMLButtonElement;
     expect(confirmBtn.disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: /confirm/i }));
+  fireEvent.click(getByRole("button", { name: "Delete items" }));
 
   await waitFor(() => {
     expect(api.cleanupApply).toHaveBeenCalledWith("station_1", ["/workspace/.cache/pip"]);
@@ -131,7 +131,7 @@ test("CleanupPanel: shows removedBytes feedback after successful apply", async (
   vi.spyOn(api, "cleanupPlan").mockResolvedValue(mockPlan);
   vi.spyOn(api, "cleanupApply").mockResolvedValue({ removedBytes: 52428800 });
 
-  const { getByRole, getByPlaceholderText, getByText } = render(CleanupPanel, {
+  const { getByRole, getByText } = render(CleanupPanel, {
     props: { stationId: "station_3" },
   });
 
@@ -151,12 +151,14 @@ test("CleanupPanel: shows removedBytes feedback after successful apply", async (
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Type confirm phrase and confirm
-  fireEvent.input(getByPlaceholderText("station_3"), { target: { value: "station_3" } });
+  fireEvent.input(within(getByRole("dialog")).getByRole("textbox"), {
+    target: { value: "station_3" },
+  });
   await waitFor(() => {
-    const btn = getByRole("button", { name: /confirm/i }) as HTMLButtonElement;
+    const btn = getByRole("button", { name: "Delete items" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
-  fireEvent.click(getByRole("button", { name: /confirm/i }));
+  fireEvent.click(getByRole("button", { name: "Delete items" }));
 
   // Freed bytes feedback should appear
   await waitFor(() => {

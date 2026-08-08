@@ -250,7 +250,7 @@
       title="{pendingAction === 'stop' ? 'Stop' : 'Restart'} station"
       message="This will {pendingAction} the station process. Type the station ID below to confirm."
       confirmPhrase={stationId}
-      confirmLabel="Confirm"
+      confirmLabel={pendingAction === "stop" ? "Stop agent" : "Restart agent"}
       onConfirm={handleDialogConfirm}
       onCancel={handleDialogCancel}
     />
