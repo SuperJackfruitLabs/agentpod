@@ -4,25 +4,11 @@
   import type { ActivityRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { relativeTime } from "$lib/utils/relative-time";
 
   let rows = $state<ActivityRow[]>([]);
   let isLoading = $state(true);
   let error = $state<string | null>(null);
-
-  /** Human-readable relative time: "just now", "5m ago", "2h ago", "3d ago" */
-  function relativeTime(dateStr: string): string {
-    try {
-      const diff = Date.now() - new Date(dateStr).getTime();
-      const m = Math.floor(diff / 60000);
-      if (m < 1) return "just now";
-      if (m < 60) return `${m}m ago`;
-      const h = Math.floor(m / 60);
-      if (h < 24) return `${h}h ago`;
-      return `${Math.floor(h / 24)}d ago`;
-    } catch {
-      return "?";
-    }
-  }
 
   /** CSS classes for a result badge (ok → status-running, error → status-error, else muted) */
   function resultClass(result: string | undefined): string {

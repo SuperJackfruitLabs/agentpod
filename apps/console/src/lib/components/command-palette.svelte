@@ -54,11 +54,11 @@
   <Command.List>
     <Command.Empty>No results found.</Command.Empty>
     <Command.Group heading="Actions">
-      <Command.Item onSelect={() => run(() => goto("/?action=new-runtime"))}>
+      <Command.Item onSelect={() => run(() => goto("/nodes?action=new-runtime"))}>
         <PlusCircleIcon class="mr-2 size-4" />
         New runtime
       </Command.Item>
-      <Command.Item onSelect={() => run(() => goto("/?action=create-token"))}>
+      <Command.Item onSelect={() => run(() => goto("/nodes?action=create-token"))}>
         <KeyRoundIcon class="mr-2 size-4" />
         Create enrollment token
       </Command.Item>
