@@ -106,9 +106,9 @@ Stations are discovered per harness:
 |---------|-------------------|
 | **Hermes** | Reads `~/.hermes/profiles/` + `hermes profile` output |
 | **OpenClaw** | Reads `~/.openclaw/agents/` |
-| **Claude Code** | Detected as leaf workspaces (project dirs containing `.claude/`) |
-| **Codex** | Detected as leaf workspaces (project dirs with `~/.codex/` config) |
-| **OpenCode** | Detected via running process or workspace markers |
+| **Claude Code** | Project paths read from `~/.claude.json` (fallback: `~/.claude/projects/` enumeration) |
+| **Codex** | Declared manually (Codex records no stable per-project history) |
+| **OpenCode** | Worktree paths read from `opencode.db` (fallback: project dir enumeration) |
 
 ---
 

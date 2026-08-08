@@ -1,51 +1,36 @@
 # Contributing
 
-## Git Setup
+AgentPod lives on GitHub: https://github.com/rakeshgangwar/agentpod
 
-This repository is mirrored to both GitHub and Forgejo. A single `git push` updates both.
+## Branch flow
 
-### Remote Configuration
+- Day-to-day work lands on **`develop`**.
+- Releases go `develop` → PR → **`main`** (required checks: `contract`, `hub`, `node-agent`, `console`).
+- Tagging `v*` on `main` triggers `release-node-agent.yml`, which publishes the node-agent binaries, `install.sh`, the systemd unit, and `SHA256SUMS` as release assets.
+
+## Commit style
+
+Conventional-commit prefixes, scoped by area — match `git log`:
 
 ```
-origin	https://github.com/rakeshgangwar/CodeOpen.git (fetch)
-origin	https://github.com/rakeshgangwar/CodeOpen.git (push)
-origin	https://forgejo.superchotu.com/rakeshgangwar/CodeOpen.git (push)
+feat(node-agent): …
+fix(hub): …
+fix(console): …
+ci(release-node-agent): …
+docs: …
+test(console): …
 ```
 
-### Commands
+## Before you push
 
-| Command | Action |
-|---------|--------|
-| `git push` | Pushes to **both** GitHub and Forgejo |
-| `git pull` | Pulls from GitHub (primary) |
-
-### Setting Up Dual Push (New Clone)
-
-If you clone this repo fresh and want to push to both remotes:
+Run the suites for whatever you touched (see [TESTING.md](TESTING.md) for details and environment requirements):
 
 ```bash
-# Add Forgejo as additional push URL
-git remote set-url --add --push origin https://forgejo.superchotu.com/rakeshgangwar/CodeOpen.git
-
-# Verify
-git remote -v
+cd apps/hub && bun test          # needs the test postgres — see TESTING.md
+cd apps/node-agent && go test -race ./...
+cd apps/console && pnpm check && pnpm test
 ```
 
-### Forgejo Credentials
+## Deployment
 
-For Forgejo HTTPS authentication, use git credential store:
-
-```bash
-# Enable credential store
-git config --global credential.helper store
-
-# Add credentials (replace YOUR_TOKEN with Forgejo API token)
-echo "https://USERNAME:YOUR_TOKEN@forgejo.superchotu.com" >> ~/.git-credentials
-```
-
-### Repository URLs
-
-| Platform | URL |
-|----------|-----|
-| GitHub | https://github.com/rakeshgangwar/CodeOpen |
-| Forgejo | https://forgejo.superchotu.com/rakeshgangwar/CodeOpen |
+Operators: see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (hub/VPS + console/Cloudflare Pages) and [docs/OPERATING.md](docs/OPERATING.md) (day-2 operations).
