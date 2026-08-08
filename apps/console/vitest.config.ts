@@ -30,7 +30,11 @@ function stripAllSvelteStyles(): Plugin {
 export default defineConfig({
   plugins: [stripAllSvelteStyles(), svelte({ hot: false })],
   resolve: {
-    conditions: ["browser"],
+    // "svelte" is required alongside "browser" so packages that only expose
+    // a component build behind the "svelte" export condition (e.g.
+    // paneforge, which backs $lib/components/ui/resizable) resolve at all —
+    // without it Vite fails with "No known conditions for '.' specifier".
+    conditions: ["browser", "svelte"],
     alias: {
       $lib: path.resolve(__dirname, "./src/lib"),
       // SvelteKit runtime modules — resolved to stubs in the jsdom environment.
