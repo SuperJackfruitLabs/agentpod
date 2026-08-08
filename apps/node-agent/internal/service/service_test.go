@@ -26,10 +26,14 @@ func TestNewManager_PlatformSelection(t *testing.T) {
 		}
 	})
 
-	t.Run("linux_not_yet_implemented", func(t *testing.T) {
-		_, err := newManager("linux", 501, nil)
-		if err == nil {
-			t.Fatal("expected error on linux (Task 2)")
+	t.Run("linux_non_root_returns_systemd_manager", func(t *testing.T) {
+		run := func(name string, args ...string) (string, error) { return "", nil }
+		mgr, err := newManager("linux", 501, run)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := mgr.(*systemdManager); !ok {
+			t.Fatalf("got %T, want *systemdManager", mgr)
 		}
 	})
 

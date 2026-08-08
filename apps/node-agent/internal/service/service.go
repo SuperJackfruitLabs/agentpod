@@ -58,9 +58,16 @@ func newManager(goos string, uid int, run Runner) (Manager, error) {
 		}
 		return newLaunchdManager(home, uid, run), nil
 	case "linux":
-		// Task 2 adds systemdManager (user/system scope, mirroring
-		// selfupdate.restartService's --user probe).
-		return nil, errors.New("service: linux support not yet implemented")
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("service: resolve home dir: %w", err)
+		}
+		probe := run
+		if probe == nil {
+			probe = execRunner
+		}
+		userScope := uid != 0 || userUnitActive(probe)
+		return newSystemdManager(run, userScope, home, uid), nil
 	default:
 		return nil, fmt.Errorf("service: unsupported platform %q", goos)
 	}
