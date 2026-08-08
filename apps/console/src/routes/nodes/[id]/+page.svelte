@@ -90,6 +90,10 @@
   );
 </script>
 
+<svelte:head>
+  <title>{node?.hostname ?? "Node"} · AgentPod</title>
+</svelte:head>
+
 <PageHeader title={node?.hostname ?? id} status={headerStatus}>
   {#snippet leading()}
     <a

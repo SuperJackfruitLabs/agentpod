@@ -2,6 +2,8 @@
   // Orchestrator only — composes the shared admin/* components on top of
   // DataTable's manualPagination mode; server owns search/filter/paging.
   import { onMount } from "svelte";
+  import { page } from "$app/state";
+  import { goto } from "$app/navigation";
   import { toast } from "svelte-sonner";
   import {
     listUsers,
@@ -42,14 +44,42 @@
   let signupEnabled = $state(true);
   let signupLoading = $state(false);
 
+  // Filters and pagination are seeded from the URL and written back on every
+  // change, so "banned users, page 2" is bookmarkable and survives refresh.
+  const initialParams = page.url.searchParams;
+  const initialRole = initialParams?.get("role");
+  const initialStatus = initialParams?.get("status");
+
   // Server-driven pagination (0-based, matches DataTable's manual mode)
-  let pageIndex = $state(0);
+  let pageIndex = $state(Math.max(0, (Number(initialParams?.get("page")) || 1) - 1));
   let pageCount = $derived(total > 0 ? Math.ceil(total / PAGE_SIZE) : 0);
 
   // Filters (server-side — refetched on Search/refresh, not client-filtered)
-  let searchQuery = $state("");
-  let roleFilter = $state<UserRole | "all">("all");
-  let bannedFilter = $state<"all" | "banned" | "active">("all");
+  let searchQuery = $state(initialParams?.get("search") ?? "");
+  let roleFilter = $state<UserRole | "all">(
+    initialRole === "user" || initialRole === "admin" ? initialRole : "all"
+  );
+  let bannedFilter = $state<"all" | "banned" | "active">(
+    initialStatus === "banned" || initialStatus === "active" ? initialStatus : "all"
+  );
+
+  function syncFiltersToUrl() {
+    // Guarded: test/SSR environments mock page.url with a plain object.
+    try {
+      const url = new URL(page.url);
+      const setOrDelete = (key: string, value: string, defaultValue: string) => {
+        if (value === defaultValue) url.searchParams.delete(key);
+        else url.searchParams.set(key, value);
+      };
+      setOrDelete("search", searchQuery.trim(), "");
+      setOrDelete("role", roleFilter, "all");
+      setOrDelete("status", bannedFilter, "all");
+      setOrDelete("page", String(pageIndex + 1), "1");
+      void goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+    } catch {
+      // URL sync is progressive enhancement — never block the actual filter.
+    }
+  }
   let hasActiveFilters = $derived(
     searchQuery.trim() !== "" || roleFilter !== "all" || bannedFilter !== "all"
   );
@@ -94,10 +124,12 @@
 
   function handleSearch() {
     pageIndex = 0;
+    syncFiltersToUrl();
     loadData();
   }
   function goToPage(index: number) {
     pageIndex = index;
+    syncFiltersToUrl();
     loadData();
   }
   function openBanDialog(user: AdminUserView) {
@@ -152,6 +184,10 @@
     { id: "actions", header: "Actions", enableSorting: false, cell: (ctx) => renderSnippet(actionsCell, { user: ctx.row.original }) },
   ];
 </script>
+
+<svelte:head>
+  <title>Users · Admin · AgentPod</title>
+</svelte:head>
 
 {#snippet userCell({ user }: { user: AdminUserView })}
   <a href="/admin/users/{user.id}" class="flex items-center gap-3 hover:text-primary transition-colors">

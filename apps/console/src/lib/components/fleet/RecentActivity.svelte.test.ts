@@ -77,12 +77,26 @@ test("'view all →' link points to /activity", async () => {
   });
 });
 
-test("shows empty state gracefully when listActivity throws", async () => {
-  vi.spyOn(api, "listActivity").mockRejectedValue(new Error("network error"));
+test("fetch failure shows an error with Retry — never the 'No activity yet' empty state", async () => {
+  // Regression: a network failure used to render the same empty state as a
+  // genuinely idle fleet, hiding outages from the operator.
+  const spy = vi.spyOn(api, "listActivity").mockRejectedValue(new Error("network error"));
 
-  const { getByTestId } = render(RecentActivity);
+  const { getByTestId, queryByTestId, getByRole, getByText } = render(RecentActivity);
 
   await waitFor(() => {
-    expect(getByTestId("no-activity")).toBeTruthy();
+    expect(getByTestId("activity-error")).toBeTruthy();
+  });
+  expect(queryByTestId("no-activity")).toBeNull();
+
+  // Retry re-fetches and renders the rows on success.
+  spy.mockResolvedValue([
+    { id: "a1", verb: "fs.read", stationKey: "st", nodeId: "node-1", createdAt: new Date().toISOString() },
+  ] as never);
+  const { fireEvent } = await import("@testing-library/svelte");
+  await fireEvent.click(getByRole("button", { name: /retry/i }));
+
+  await waitFor(() => {
+    expect(getByText("fs.read")).toBeTruthy();
   });
 });

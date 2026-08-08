@@ -3,7 +3,7 @@
   import { onMount, onDestroy } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { initConnection } from "$lib/stores/connection.svelte";
+  import { initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
   import { auth, initAuth } from "$lib/stores/auth.svelte";
   import { themeStore } from "$lib/themes/store.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
@@ -42,6 +42,8 @@
     }
   }
 
+  let stopReachabilityProbe: (() => void) | undefined;
+
   onMount(async () => {
     themeStore.initialize();
 
@@ -49,10 +51,14 @@
     await initAuth();
     isInitializing = false;
 
+    // Keep connection.reachable honest for the whole session (shell banner).
+    stopReachabilityProbe = startReachabilityProbe();
+
     window.addEventListener("keydown", handleGlobalKeydown);
   });
 
   onDestroy(() => {
+    stopReachabilityProbe?.();
     if (typeof window !== "undefined") {
       window.removeEventListener("keydown", handleGlobalKeydown);
     }

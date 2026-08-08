@@ -7,6 +7,7 @@
 
 import { setAuthApiUrl, clearAuthSession } from "./auth.svelte";
 import { probeHealth, getStoredApiUrl, setStoredApiUrl, clearStoredApiUrl } from "$lib/api/connection-web";
+import { startPolling } from "$lib/utils/poll";
 
 // =============================================================================
 // Types
@@ -33,6 +34,15 @@ let connectionStatus = $state<ConnectionStatus>({
 let isLoading = $state(false);
 let isInitialized = $state(false);
 
+/**
+ * Whether the hub answered the most recent periodic /health probe. Starts
+ * true (optimistic until proven otherwise) and is only meaningful while
+ * connected. Distinct from `connected`, which reflects the one-time
+ * connect/boot handshake — this tracks reachability NOW, so the shell can
+ * stop claiming "Connected" after the hub goes away mid-session.
+ */
+let reachable = $state(true);
+
 // =============================================================================
 // Derived State
 // =============================================================================
@@ -44,6 +54,7 @@ export const connection = {
   get isInitialized() { return isInitialized; },
   get apiUrl() { return connectionStatus.apiUrl; },
   get error() { return connectionStatus.error; },
+  get reachable() { return reachable; },
 };
 
 // =============================================================================
@@ -72,6 +83,7 @@ export async function connect(apiUrl: string, _apiKey?: string): Promise<boolean
       };
       setStoredApiUrl(normalised);
       setAuthApiUrl(normalised);
+      reachable = true;
       return true;
     } else {
       connectionStatus = {
@@ -156,8 +168,28 @@ export async function disconnect(): Promise<void> {
   };
   isInitialized = false;
   isLoading = false;
+  reachable = true;
   // Also clear auth so a previous hub's identity doesn't persist on switch.
   clearAuthSession();
+}
+
+/**
+ * Periodically re-probe /health so `connection.reachable` reflects the hub's
+ * CURRENT reachability instead of the boot-time snapshot. Visibility-aware
+ * (skips hidden tabs, probes immediately on tab return). Returns a stop
+ * function for layout cleanup.
+ */
+export function startReachabilityProbe(intervalMs = 30_000): () => void {
+  const probe = async () => {
+    if (!connectionStatus.connected || !connectionStatus.apiUrl) return;
+    try {
+      reachable = await probeHealth(connectionStatus.apiUrl);
+    } catch {
+      reachable = false;
+    }
+    connectionStatus.lastTested = new Date().toISOString();
+  };
+  return startPolling(() => void probe(), intervalMs);
 }
 
 /**

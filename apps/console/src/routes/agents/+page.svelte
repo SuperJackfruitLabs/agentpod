@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { getFleet } from "$lib/api/client";
   import type { FleetAgent } from "@agentpod/contract";
@@ -36,23 +37,33 @@
     return filter;
   });
 
-  async function loadFleet() {
-    isLoading = true;
-    error = null;
+  async function loadFleet(background = false) {
+    if (!background) {
+      isLoading = true;
+      error = null;
+    }
     try {
       const result = await getFleet();
       agents = result.agents;
+      error = null;
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load fleet";
+      // Background refreshes keep the last good data on screen; the shell's
+      // hub-unreachable banner carries the staleness signal.
+      if (!background) error = e instanceof Error ? e.message : "Couldn't load the fleet.";
     } finally {
-      isLoading = false;
+      if (!background) isLoading = false;
     }
   }
 
-  onMount(async () => {
-    await loadFleet();
+  onMount(() => {
+    void loadFleet();
+    return startPolling(() => void loadFleet(true), 30_000);
   });
 </script>
+
+<svelte:head>
+  <title>Agents · AgentPod</title>
+</svelte:head>
 
 <PageHeader title="Agents" subtitle="Every agent in the fleet" />
 
@@ -70,7 +81,7 @@
       role="alert"
     >
       <p class="text-sm text-destructive">{error}</p>
-      <Button variant="outline" size="sm" onclick={loadFleet}>Retry</Button>
+      <Button variant="outline" size="sm" onclick={() => loadFleet()}>Retry</Button>
     </div>
 
   {:else}

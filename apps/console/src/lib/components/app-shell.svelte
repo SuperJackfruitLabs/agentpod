@@ -4,7 +4,9 @@
   import { cn } from "$lib/utils";
   import { BottomNav, BottomNavItem } from "$lib/components/ui/bottom-nav";
   import { auth } from "$lib/stores/auth.svelte";
+  import { connection } from "$lib/stores/connection.svelte";
   import LayoutDashboard from "@lucide/svelte/icons/layout-dashboard";
+  import WifiOff from "@lucide/svelte/icons/wifi-off";
   import Boxes from "@lucide/svelte/icons/boxes";
   import Server from "@lucide/svelte/icons/server";
   import ContainerIcon from "@lucide/svelte/icons/container";
@@ -162,6 +164,20 @@
       !hideBottomNav && "pb-16 md:pb-0",
     )}
   >
+    <!-- Hub reachability banner — the shell must never claim a live view of a
+         hub that stopped answering (periodic /health probe drives this). -->
+    {#if connection.isConnected && !connection.reachable}
+      <div
+        role="status"
+        aria-live="polite"
+        data-testid="hub-unreachable-banner"
+        class="flex items-center justify-center gap-2 border-b border-status-error/30 bg-status-error/10 px-4 py-1.5 text-xs text-status-error"
+      >
+        <WifiOff class="h-3.5 w-3.5" aria-hidden="true" />
+        <span>Hub unreachable — data may be stale. Retrying…</span>
+      </div>
+    {/if}
+
     <!-- Page content -->
     <main class="flex-1 flex flex-col">
       {@render children?.()}

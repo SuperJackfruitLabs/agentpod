@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import type { Snippet } from "svelte";
   import { page } from "$app/stores";
+  import { goto } from "$app/navigation";
   import HealthPanel from "$lib/components/stations/HealthPanel.svelte";
   import LogTail from "$lib/components/stations/LogTail.svelte";
   import FileBrowser from "$lib/components/stations/FileBrowser.svelte";
@@ -27,7 +28,15 @@
   const stationId = $derived($page.params.stationId as string);
 
   type Tab = "health" | "logs" | "files" | "terminal" | "cleanup" | "activity";
-  let activeTab = $state<Tab>("health");
+  const VALID_TABS: readonly Tab[] = ["health", "logs", "files", "terminal", "cleanup", "activity"];
+
+  // The active tab lives in the URL (?tab=logs) so station views are
+  // deep-linkable, survive refresh, and participate in back/forward.
+  // An absent or unknown param falls back to "health".
+  const activeTab = $derived.by<Tab>(() => {
+    const t = $page.url.searchParams?.get("tab");
+    return VALID_TABS.includes(t as Tab) ? (t as Tab) : "health";
+  });
 
   /** Base id PageHeader builds its tab/panel ids from — kept in one place so
    *  the tablist's aria-controls and the tabpanels' ids/aria-labelledby
@@ -51,6 +60,8 @@
   });
 
   let station = $state<StationRow | null>(null);
+  let stationLoad = $state<"loading" | "loaded" | "notFound" | "error">("loading");
+  let stationLoadError = $state<string | null>(null);
 
   /** Path of the file currently open in the ConfigEditor modal, or null. */
   let configEditorPath = $state<string | null>(null);
@@ -76,13 +87,23 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("cleanup")
   );
 
-  onMount(async () => {
+  async function loadStation() {
+    stationLoad = "loading";
+    stationLoadError = null;
     try {
       const rows = await listStations(nodeId);
       station = rows.find((r) => r.id === stationId) ?? null;
-    } catch {
-      // Capabilities will stay null — Terminal tab won't appear
+      // A resolved fetch with no matching row means the station is gone —
+      // a dead deep link must say so instead of rendering a broken shell.
+      stationLoad = station ? "loaded" : "notFound";
+    } catch (e) {
+      stationLoad = "error";
+      stationLoadError = e instanceof Error ? e.message : "Couldn't load this agent.";
     }
+  }
+
+  onMount(() => {
+    void loadStation();
   });
 
   const tabs = $derived.by(() => [
@@ -95,7 +116,13 @@
   ]);
 
   function handleTabChange(tabId: string) {
-    activeTab = tabId as Tab;
+    const url = new URL($page.url);
+    if (tabId === "health") {
+      url.searchParams.delete("tab");
+    } else {
+      url.searchParams.set("tab", tabId);
+    }
+    void goto(url, { noScroll: true, keepFocus: true });
   }
 </script>
 
@@ -120,11 +147,15 @@
   {/if}
 {/snippet}
 
+<svelte:head>
+  <title>{station?.displayName ?? "Agent"} · AgentPod</title>
+</svelte:head>
+
 <!-- Themed header: station name, harness badge, back link, and tab bar -->
 <PageHeader
-  title={station?.displayName ?? stationId}
+  title={station?.displayName ?? (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
   subtitle={station?.workspacePath ?? undefined}
-  {tabs}
+  tabs={stationLoad === "notFound" || stationLoad === "error" ? [] : tabs}
   activeTab={activeTab}
   onTabChange={handleTabChange}
   sticky={true}
@@ -148,6 +179,31 @@
 
 <!-- Panel content -->
 <div class="container mx-auto flex max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 md:py-6 min-h-0">
+  {#if stationLoad === "notFound"}
+    <div
+      class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+      data-testid="station-not-found"
+    >
+      <p class="text-sm font-medium">Agent not found</p>
+      <p class="max-w-sm text-sm text-muted-foreground">
+        This agent is no longer on the node — it may have been removed or renamed.
+      </p>
+      <Button href="/nodes/{nodeId}" variant="outline" size="sm">Back to node</Button>
+    </div>
+  {:else if stationLoad === "error"}
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{stationLoadError}</p>
+      <Button variant="outline" size="sm" onclick={() => loadStation()}>Retry</Button>
+    </div>
+  {:else}
+    {@render stationPanels()}
+  {/if}
+</div>
+
+{#snippet stationPanels()}
   {@render mountedPanel("health", healthContent)}
   {#snippet healthContent()}
     <HealthPanel {stationId} {canLifecycle} matrixId={station?.matrixId ?? null} />
@@ -196,7 +252,7 @@
       <ActivityPanel {stationId} />
     </div>
   {/snippet}
-</div>
+{/snippet}
 
 <!-- ── ConfigEditor dialog (opened via "Edit (diff)" in the FileBrowser) ── -->
 <Dialog.Root
