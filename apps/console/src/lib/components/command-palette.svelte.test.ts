@@ -63,11 +63,11 @@ test("when open: renders a search input and static actions", async () => {
   vi.mocked(api.listNodes).mockResolvedValue([]);
 
   commandPalette.open();
-  const { getByRole, getByText } = render(CommandPalette);
+  const { getByPlaceholderText, getByText } = render(CommandPalette);
 
   await waitFor(() => {
-    // Search input
-    expect(getByRole("textbox")).toBeTruthy();
+    // Search input (bits-ui Command.Input renders role="combobox", not "textbox")
+    expect(getByPlaceholderText("Search fleet commands, nodes…")).toBeTruthy();
     // Static actions
     expect(getByText("New runtime")).toBeTruthy();
     expect(getByText("Settings")).toBeTruthy();
@@ -78,10 +78,10 @@ test("when closed: palette is not visible", async () => {
   vi.mocked(api.listNodes).mockResolvedValue([]);
 
   commandPalette.close();
-  const { queryByRole } = render(CommandPalette);
+  const { queryByPlaceholderText } = render(CommandPalette);
 
   // The dialog content should not be in the DOM when closed
-  expect(queryByRole("textbox")).toBeNull();
+  expect(queryByPlaceholderText("Search fleet commands, nodes…")).toBeNull();
 });
 
 test("node from listNodes appears as an item after open", async () => {
@@ -99,13 +99,13 @@ test("typing 'zzz' filters out the node item", async () => {
   vi.mocked(api.listNodes).mockResolvedValue(mockNodes as never);
 
   commandPalette.open();
-  const { getByRole, queryByText } = render(CommandPalette);
+  const { getByPlaceholderText, queryByText } = render(CommandPalette);
 
   await waitFor(() => {
-    expect(getByRole("textbox")).toBeTruthy();
+    expect(getByPlaceholderText("Search fleet commands, nodes…")).toBeTruthy();
   });
 
-  const input = getByRole("textbox");
+  const input = getByPlaceholderText("Search fleet commands, nodes…");
   await fireEvent.input(input, { target: { value: "zzz" } });
 
   expect(queryByText("box1")).toBeNull();
