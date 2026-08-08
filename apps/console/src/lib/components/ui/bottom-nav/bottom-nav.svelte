@@ -14,8 +14,8 @@
   class={cn(
     // Positioning - fixed to bottom, hidden on tablet+
     "fixed bottom-0 inset-x-0 z-50 md:hidden",
-    // Background with blur effect using semantic colors
-    "bg-background/95 backdrop-blur-lg supports-[backdrop-filter]:bg-background/80",
+    // Solid flat background using semantic colors
+    "bg-background",
     // Border using semantic color
     "border-t border-border",
     // Safe area padding for iOS devices (uses env() CSS function)

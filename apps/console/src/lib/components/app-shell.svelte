@@ -105,33 +105,26 @@
     class={cn(
       "hidden md:flex flex-col shrink-0",
       "w-16 lg:w-56 sticky top-0 h-screen",
-      "border-r border-border/50",
-      "bg-background/95 backdrop-blur-lg supports-[backdrop-filter]:bg-background/80",
+      "border-r bg-background",
       "z-40",
     )}
     aria-label="Main navigation"
   >
     <!-- Brand / logo -->
-    <div class="p-3 lg:p-4 border-b border-border/30 shrink-0">
-      <div class="flex items-center gap-3">
-        <div
-          class="w-8 h-8 rounded-sm flex items-center justify-center shrink-0
-                 bg-primary/10
-                 border border-primary/30"
-        >
-          <Server class="w-4 h-4 text-primary" />
+    <div class="p-3 lg:px-4 lg:py-4 border-b shrink-0">
+      <div class="flex items-center gap-2.5">
+        <div class="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+          <Server class="size-4" />
         </div>
-        <span class="hidden lg:block text-sm font-mono font-bold tracking-wider truncate">
-          AgentPod
-        </span>
+        <span class="hidden lg:block truncate text-sm font-semibold tracking-tight">AgentPod</span>
       </div>
     </div>
 
-    <!-- Nav items — grouped with uppercase section labels -->
+    <!-- Nav items — grouped with section labels -->
     <nav class="flex-1 p-2 overflow-y-auto">
       {#each navGroups as group (group.label)}
         <!-- Group label — hidden on collapsed (icon-only) sidebar -->
-        <p class="hidden lg:block font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/50 px-2 pt-3 pb-1 first:pt-1">
+        <p class="hidden lg:block px-2 pt-4 pb-1 text-xs font-medium text-muted-foreground first:pt-1">
           {group.label}
         </p>
         <div class="space-y-0.5 mb-1">
@@ -140,21 +133,15 @@
             <a
               href={item.href}
               class={cn(
-                "flex items-center gap-3 px-2 py-2.5 rounded-sm",
-                "font-mono text-sm transition-colors",
+                "flex items-center gap-3 rounded-md px-2 py-2 text-sm font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                 active
-                  ? "text-primary bg-primary/8"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+                  ? "bg-accent text-foreground"
+                  : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
               )}
               aria-current={active ? "page" : undefined}
             >
-              <item.icon
-                class={cn(
-                  "h-5 w-5 shrink-0 transition-transform",
-                  active && "scale-110",
-                )}
-              />
+              <item.icon class="h-4 w-4 shrink-0" />
               <span class="hidden lg:block truncate">{item.label}</span>
             </a>
           {/each}
