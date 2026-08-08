@@ -2,13 +2,20 @@
  * relative-time.ts
  *
  * Human-readable relative time: "just now", "5m ago", "2h ago", "3d ago".
- * Shared by RecentActivity (fleet overview) and the activity page — both
- * previously carried identical copies of this helper.
+ * Shared by RecentActivity (fleet overview), the activity page, and
+ * file-preview's "modified" timestamp — all previously carried identical
+ * (or near-identical) copies of this helper.
+ *
+ * `null` (file-preview's "no timestamp available" case) → "unknown".
+ * Unparseable date strings → "?" (also covers `new Date()` throwing, which
+ * doesn't happen for string input in practice, but is guarded regardless).
  */
 
-export function relativeTime(dateStr: string): string {
+export function relativeTime(dateStr: string | null): string {
+  if (dateStr === null) return "unknown";
   try {
     const diff = Date.now() - new Date(dateStr).getTime();
+    if (Number.isNaN(diff)) return "?";
     const m = Math.floor(diff / 60000);
     if (m < 1) return "just now";
     if (m < 60) return `${m}m ago`;

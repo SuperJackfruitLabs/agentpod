@@ -4,6 +4,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Empty } from "$lib/components/ui/empty";
   import { cn } from "$lib/utils";
+  import { chipClass } from "$lib/utils/toggle-chip";
   import SearchIcon from "@lucide/svelte/icons/search";
   import DownloadIcon from "@lucide/svelte/icons/download";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
@@ -325,12 +326,7 @@
     <div class="flex items-center gap-1" role="group" aria-label="Filter by level">
       <button
         type="button"
-        class={cn(
-          "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-          levelFilter === "all"
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-border text-muted-foreground hover:text-foreground",
-        )}
+        class={chipClass(levelFilter === "all")}
         aria-pressed={levelFilter === "all"}
         onclick={() => (levelFilter = "all")}
       >
@@ -338,12 +334,7 @@
       </button>
       <button
         type="button"
-        class={cn(
-          "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-          levelFilter === "error"
-            ? "border-status-error bg-status-error/10 text-status-error"
-            : "border-border text-muted-foreground hover:text-foreground",
-        )}
+        class={chipClass(levelFilter === "error", "error")}
         aria-pressed={levelFilter === "error"}
         onclick={() => (levelFilter = "error")}
       >
@@ -351,12 +342,7 @@
       </button>
       <button
         type="button"
-        class={cn(
-          "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-          levelFilter === "warn"
-            ? "border-status-degraded bg-status-degraded/10 text-status-degraded"
-            : "border-border text-muted-foreground hover:text-foreground",
-        )}
+        class={chipClass(levelFilter === "warn", "degraded")}
         aria-pressed={levelFilter === "warn"}
         onclick={() => (levelFilter = "warn")}
       >
@@ -364,12 +350,7 @@
       </button>
       <button
         type="button"
-        class={cn(
-          "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-          levelFilter === "info"
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-border text-muted-foreground hover:text-foreground",
-        )}
+        class={chipClass(levelFilter === "info")}
         aria-pressed={levelFilter === "info"}
         onclick={() => (levelFilter = "info")}
       >
@@ -379,12 +360,7 @@
 
     <button
       type="button"
-      class={cn(
-        "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-        follow
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground",
-      )}
+      class={chipClass(follow)}
       aria-pressed={follow}
       onclick={() => (follow ? (follow = false) : jumpToBottom())}
     >
@@ -393,12 +369,7 @@
 
     <button
       type="button"
-      class={cn(
-        "rounded-md border px-2 py-1 whitespace-nowrap transition-colors",
-        wrap
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border text-muted-foreground hover:text-foreground",
-      )}
+      class={chipClass(wrap)}
       aria-pressed={wrap}
       onclick={() => (wrap = !wrap)}
     >

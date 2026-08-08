@@ -2,6 +2,7 @@
   import type { FleetAgent } from "@agentpod/contract";
   import { updateNode } from "$lib/api/client";
   import { statusBadgeClass, tokenFor, type StatusToken } from "$lib/utils/status-badge";
+  import { chipClass } from "$lib/utils/toggle-chip";
   import { Badge } from "$lib/components/ui/badge";
   import * as Table from "$lib/components/ui/table";
   import { Empty } from "$lib/components/ui/empty";
@@ -242,15 +243,6 @@
         description: err instanceof Error ? err.message : "Unknown error",
       });
     }
-  }
-
-  function chipClass(active: boolean): string {
-    return cn(
-      "rounded-md border px-2.5 py-1.5 text-xs transition-colors whitespace-nowrap",
-      active
-        ? "border-primary bg-primary/10 text-primary"
-        : "border-border text-muted-foreground hover:text-foreground"
-    );
   }
 </script>
 
