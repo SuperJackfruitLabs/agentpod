@@ -17,7 +17,14 @@
 
 export type StatusToken = "running" | "degraded" | "starting" | "stopped" | "error" | "sleeping";
 
-function tokenFor(status: string): StatusToken {
+/**
+ * Maps any status string (node status, agent/station status, or anything
+ * else that flows through the shared status vocab) onto one of the six
+ * canonical status tokens. Exported so callers that need to rank/group by
+ * status token (e.g. AgentTable's status-severity sort) reuse this exact
+ * classification instead of re-deriving it.
+ */
+export function tokenFor(status: string): StatusToken {
   switch (status.toLowerCase()) {
     case "running":
     case "online":

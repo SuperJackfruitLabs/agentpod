@@ -1,9 +1,13 @@
 <script lang="ts">
   import type { FleetAgent } from "@agentpod/contract";
   import { updateNode } from "$lib/api/client";
-  import { statusBadgeClass } from "$lib/utils/status-badge";
+  import { statusBadgeClass, tokenFor, type StatusToken } from "$lib/utils/status-badge";
   import { Badge } from "$lib/components/ui/badge";
+  import * as Table from "$lib/components/ui/table";
+  import { Empty } from "$lib/components/ui/empty";
+  import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
+  import SearchIcon from "@lucide/svelte/icons/search";
 
   // ── External filter (from heatmap) ───────────────────────────────────────────
 
@@ -48,6 +52,83 @@
   let groupByNode = $state(true);
   let filterUpdateAvailable = $state(false);
 
+  // ── Sorting ───────────────────────────────────────────────────────────────────
+  // Tri-state per column: click cycles none → asc → desc → none. Sorting
+  // applies to the fully-flattened row set in flat view, and independently
+  // within each node group in grouped view — group order itself never
+  // changes on sort, only the agents inside each group.
+
+  type SortKey = "agent" | "node" | "status" | "cpu" | "mem" | "uptime";
+  type SortDir = "asc" | "desc";
+
+  let sortKey = $state<SortKey | null>(null);
+  let sortDir = $state<SortDir | null>(null);
+
+  function toggleSort(key: SortKey) {
+    if (sortKey !== key) {
+      sortKey = key;
+      sortDir = "asc";
+    } else if (sortDir === "asc") {
+      sortDir = "desc";
+    } else {
+      sortKey = null;
+      sortDir = null;
+    }
+  }
+
+  function ariaSortFor(key: SortKey): "ascending" | "descending" | undefined {
+    if (sortKey !== key) return undefined;
+    return sortDir === "asc" ? "ascending" : "descending";
+  }
+
+  // Status severity order, low → high. An operator scanning the table wants
+  // error/degraded states surfaced first, then in-flight starting/running
+  // states, with intentionally-idle sleeping and fully-stopped agents last:
+  //   error < degraded < starting < running < sleeping < stopped
+  const STATUS_SEVERITY: Record<StatusToken, number> = {
+    error: 0,
+    degraded: 1,
+    starting: 2,
+    running: 3,
+    sleeping: 4,
+    stopped: 5,
+  };
+
+  // Null health readings (no live metric yet) always sort to the bottom, in
+  // both ascending and descending order — a missing reading isn't smaller or
+  // larger than a real one, it's absent, so direction only orders the
+  // non-null values.
+  function compareNullable(a: number | null, b: number | null, dir: SortDir): number {
+    if (a === null && b === null) return 0;
+    if (a === null) return 1;
+    if (b === null) return -1;
+    return dir === "asc" ? a - b : b - a;
+  }
+
+  function compareAgents(a: FleetAgent, b: FleetAgent, key: SortKey, dir: SortDir): number {
+    switch (key) {
+      case "agent":
+        return dir === "asc"
+          ? a.agentName.localeCompare(b.agentName)
+          : b.agentName.localeCompare(a.agentName);
+      case "node":
+        return dir === "asc"
+          ? a.nodeName.localeCompare(b.nodeName)
+          : b.nodeName.localeCompare(a.nodeName);
+      case "status": {
+        const ra = STATUS_SEVERITY[tokenFor(a.status)];
+        const rb = STATUS_SEVERITY[tokenFor(b.status)];
+        return dir === "asc" ? ra - rb : rb - ra;
+      }
+      case "cpu":
+        return compareNullable(a.cpuPct, b.cpuPct, dir);
+      case "mem":
+        return compareNullable(a.memBytes, b.memBytes, dir);
+      case "uptime":
+        return compareNullable(a.uptimeSec, b.uptimeSec, dir);
+    }
+  }
+
   // ── Filtered agents ($derived) ────────────────────────────────────────────────
 
   let filteredAgents = $derived.by(() => {
@@ -76,6 +157,14 @@
     return result;
   });
 
+  // Flat, fully-sorted row list — used by the flat (non-grouped) view.
+  let sortedFlatAgents = $derived.by(() => {
+    if (!sortKey || !sortDir) return filteredAgents;
+    const key = sortKey;
+    const dir = sortDir;
+    return [...filteredAgents].sort((a, b) => compareAgents(a, b, key, dir));
+  });
+
   // ── Grouped agents ($derived) ─────────────────────────────────────────────────
 
   interface NodeGroup {
@@ -87,6 +176,8 @@
   let groupedAgents = $derived.by((): NodeGroup[] => {
     const groups = new Map<string, NodeGroup>();
 
+    // Group membership + group order are derived from filteredAgents (not the
+    // sorted set) so sorting never reshuffles which group appears first.
     for (const agent of filteredAgents) {
       if (!groups.has(agent.nodeId)) {
         groups.set(agent.nodeId, {
@@ -98,7 +189,17 @@
       groups.get(agent.nodeId)!.agents.push(agent);
     }
 
-    return Array.from(groups.values());
+    const result = Array.from(groups.values());
+
+    if (sortKey && sortDir) {
+      const key = sortKey;
+      const dir = sortDir;
+      for (const group of result) {
+        group.agents = [...group.agents].sort((a, b) => compareAgents(a, b, key, dir));
+      }
+    }
+
+    return result;
   });
 
   // ── Collapse state (keyed by nodeId) ─────────────────────────────────────────
@@ -142,185 +243,175 @@
       });
     }
   }
+
+  function chipClass(active: boolean): string {
+    return cn(
+      "rounded-md border px-2.5 py-1.5 text-xs transition-colors whitespace-nowrap",
+      active
+        ? "border-primary bg-primary/10 text-primary"
+        : "border-border text-muted-foreground hover:text-foreground"
+    );
+  }
 </script>
+
+<!-- ONE row snippet shared by both the grouped and flat branches below. -->
+{#snippet agentRow(agent: FleetAgent)}
+  <Table.Row>
+    <Table.Cell>
+      <a
+        href="/nodes/{agent.nodeId}/stations/{agent.stationId}"
+        class="text-sm text-foreground hover:text-primary transition-colors"
+      >
+        {agent.agentName}
+      </a>
+    </Table.Cell>
+    <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
+      {agent.harness}
+    </Table.Cell>
+    <Table.Cell class="hidden md:table-cell text-xs text-muted-foreground">
+      {agent.nodeName}
+    </Table.Cell>
+    <Table.Cell>
+      <Badge variant="outline" class={statusBadgeClass(agent.status)}>
+        {agent.status}
+      </Badge>
+    </Table.Cell>
+    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="cpu-cell">
+      {formatCpu(agent.cpuPct)}
+    </Table.Cell>
+    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="mem-cell">
+      {formatMem(agent.memBytes)}
+    </Table.Cell>
+    <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="uptime-cell">
+      {formatUptime(agent.uptimeSec)}
+    </Table.Cell>
+    <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
+      {agent.agentVersion ?? "—"}
+    </Table.Cell>
+    <Table.Cell>
+      {#if agent.updateAvailable}
+        <button
+          type="button"
+          disabled={!!updatingNodes[agent.nodeId]}
+          onclick={(e) => handleUpdate(e, agent.nodeId)}
+          class="text-xs px-2 py-0.5 rounded-md border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {updatingNodes[agent.nodeId] ? "updating…" : "Update"}
+        </button>
+      {/if}
+    </Table.Cell>
+  </Table.Row>
+{/snippet}
+
+<!-- Sortable header cell: real <button> inside the <th>, aria-sort on the <th>. -->
+{#snippet sortHead(key: SortKey, label: string, extraClass = "")}
+  <Table.Head class={cn("text-xs font-medium text-muted-foreground", extraClass)} aria-sort={ariaSortFor(key)}>
+    <button
+      type="button"
+      class="flex items-center gap-1 bg-transparent p-0 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+      onclick={() => toggleSort(key)}
+    >
+      {label}
+      {#if sortKey === key}
+        <span aria-hidden="true">{sortDir === "asc" ? "↑" : "↓"}</span>
+      {/if}
+    </button>
+  </Table.Head>
+{/snippet}
 
 <div class="space-y-3">
   <!-- Toolbar: search + filter pills + group toggle -->
   <div class="flex items-center gap-2 flex-wrap">
-    <input
-      type="search"
-      placeholder="search agents…"
-      bind:value={searchQuery}
-      class="flex-1 min-w-[180px] font-mono text-sm px-3 py-1.5 rounded-sm border border-border/50 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 transition-colors"
-      aria-label="Search agents"
-    />
+    <div class="relative min-w-[180px] flex-1">
+      <SearchIcon
+        class="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <input
+        type="search"
+        placeholder="Search agents…"
+        bind:value={searchQuery}
+        class="h-8 w-full rounded-md border bg-transparent py-1.5 pl-7 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        aria-label="Search agents"
+      />
+    </div>
 
     <!-- Filter pill: updates only -->
     <button
       type="button"
       onclick={() => (filterUpdateAvailable = !filterUpdateAvailable)}
-      class="font-mono text-xs px-2.5 py-1.5 rounded-sm border transition-colors whitespace-nowrap
-        {filterUpdateAvailable
-          ? 'border-primary text-primary bg-primary/10'
-          : 'border-border/50 text-muted-foreground hover:text-foreground hover:border-border'}"
+      class={chipClass(filterUpdateAvailable)}
       aria-pressed={filterUpdateAvailable}
     >
-      updates only
+      Updates only
     </button>
 
     <!-- Group toggle -->
     <button
       type="button"
+      data-testid="group-toggle"
       onclick={() => (groupByNode = !groupByNode)}
-      class="font-mono text-xs px-2.5 py-1.5 rounded-sm border border-border/50 text-muted-foreground hover:text-foreground hover:border-border transition-colors whitespace-nowrap"
+      class={chipClass(groupByNode)}
+      aria-pressed={groupByNode}
     >
-      {groupByNode ? "group: node ▾" : "flat ▾"}
+      {groupByNode ? "Grouped" : "Flat"}
     </button>
   </div>
 
   <!-- Dense table -->
-  <div class="border border-border/50 rounded-sm overflow-hidden">
-    <table class="w-full border-collapse">
-      <thead>
-        <tr class="border-b border-border/30 bg-muted/20">
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2">Agent</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden sm:table-cell">Harness</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden md:table-cell">Node</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2">Status</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden lg:table-cell">CPU</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden lg:table-cell">Mem</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden lg:table-cell">Uptime</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2 hidden sm:table-cell">Version</th>
-          <th class="font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground text-left px-3 py-2">Update</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#if groupByNode}
+  <div class="rounded-lg border overflow-hidden">
+    <Table.Root>
+      <Table.Header>
+        <Table.Row>
+          {@render sortHead("agent", "Agent")}
+          <Table.Head class="hidden sm:table-cell text-xs font-medium text-muted-foreground">Harness</Table.Head>
+          {@render sortHead("node", "Node", "hidden md:table-cell")}
+          {@render sortHead("status", "Status")}
+          {@render sortHead("cpu", "CPU", "hidden lg:table-cell")}
+          {@render sortHead("mem", "Mem", "hidden lg:table-cell")}
+          {@render sortHead("uptime", "Uptime", "hidden lg:table-cell")}
+          <Table.Head class="hidden sm:table-cell text-xs font-medium text-muted-foreground">Version</Table.Head>
+          <Table.Head class="text-xs font-medium text-muted-foreground">Update</Table.Head>
+        </Table.Row>
+      </Table.Header>
+      <Table.Body>
+        {#if filteredAgents.length === 0}
+          <Table.Row>
+            <Table.Cell colspan={9} class="p-0">
+              <Empty title="No agents match the current filter" icon={SearchIcon} class="border-none rounded-none" />
+            </Table.Cell>
+          </Table.Row>
+        {:else if groupByNode}
           {#each groupedAgents as group (group.nodeId)}
             <!-- Group header row -->
-            <tr class="border-b border-border/20 bg-muted/10">
-              <td colspan="9" class="px-3 py-1.5">
+            <Table.Row class="bg-muted/20 hover:bg-muted/20">
+              <Table.Cell colspan={9} class="py-1.5">
                 <button
                   type="button"
                   onclick={() => toggleGroup(group.nodeId)}
-                  class="flex items-center gap-2 font-mono text-[10px] text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+                  class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                   data-testid="group-header"
                 >
-                  <span class="text-[9px]">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
-                  <span>{group.nodeName}</span>
-                  <span class="text-muted-foreground/40">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
+                  <span class="text-[10px]">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
+                  <span class="font-medium text-foreground">{group.nodeName}</span>
+                  <span class="text-muted-foreground/60">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
                 </button>
-              </td>
-            </tr>
+              </Table.Cell>
+            </Table.Row>
 
             {#if !collapsedGroups[group.nodeId]}
               {#each group.agents as agent (agent.stationId)}
-                <tr class="border-b border-border/10 hover:bg-accent/20 transition-colors">
-                  <td class="px-3 py-2">
-                    <a
-                      href="/nodes/{agent.nodeId}/stations/{agent.stationId}"
-                      class="font-mono text-sm text-foreground hover:text-primary transition-colors"
-                    >
-                      {agent.agentName}
-                    </a>
-                  </td>
-                  <td class="px-3 py-2 hidden sm:table-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{agent.harness}</span>
-                  </td>
-                  <td class="px-3 py-2 hidden md:table-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{agent.nodeName}</span>
-                  </td>
-                  <td class="px-3 py-2">
-                    <Badge variant="outline" class={statusBadgeClass(agent.status)}>
-                      {agent.status}
-                    </Badge>
-                  </td>
-                  <td class="px-3 py-2 hidden lg:table-cell" data-testid="cpu-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{formatCpu(agent.cpuPct)}</span>
-                  </td>
-                  <td class="px-3 py-2 hidden lg:table-cell" data-testid="mem-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{formatMem(agent.memBytes)}</span>
-                  </td>
-                  <td class="px-3 py-2 hidden lg:table-cell" data-testid="uptime-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{formatUptime(agent.uptimeSec)}</span>
-                  </td>
-                  <td class="px-3 py-2 hidden sm:table-cell">
-                    <span class="font-mono text-xs text-muted-foreground">{agent.agentVersion ?? "—"}</span>
-                  </td>
-                  <td class="px-3 py-2">
-                    {#if agent.updateAvailable}
-                      <button
-                        type="button"
-                        disabled={!!updatingNodes[agent.nodeId]}
-                        onclick={(e) => handleUpdate(e, agent.nodeId)}
-                        class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {updatingNodes[agent.nodeId] ? "updating…" : "Update"}
-                      </button>
-                    {/if}
-                  </td>
-                </tr>
+                {@render agentRow(agent)}
               {/each}
             {/if}
           {/each}
         {:else}
           <!-- Flat view -->
-          {#each filteredAgents as agent (agent.stationId)}
-            <tr class="border-b border-border/10 hover:bg-accent/20 transition-colors">
-              <td class="px-3 py-2">
-                <a
-                  href="/nodes/{agent.nodeId}/stations/{agent.stationId}"
-                  class="font-mono text-sm text-foreground hover:text-primary transition-colors"
-                >
-                  {agent.agentName}
-                </a>
-              </td>
-              <td class="px-3 py-2 hidden sm:table-cell">
-                <span class="font-mono text-xs text-muted-foreground">{agent.harness}</span>
-              </td>
-              <td class="px-3 py-2 hidden md:table-cell">
-                <span class="font-mono text-xs text-muted-foreground">{agent.nodeName}</span>
-              </td>
-              <td class="px-3 py-2">
-                <Badge variant="outline" class={statusBadgeClass(agent.status)}>
-                  {agent.status}
-                </Badge>
-              </td>
-              <td class="px-3 py-2 hidden lg:table-cell" data-testid="cpu-cell">
-                <span class="font-mono text-xs text-muted-foreground">{formatCpu(agent.cpuPct)}</span>
-              </td>
-              <td class="px-3 py-2 hidden lg:table-cell" data-testid="mem-cell">
-                <span class="font-mono text-xs text-muted-foreground">{formatMem(agent.memBytes)}</span>
-              </td>
-              <td class="px-3 py-2 hidden lg:table-cell" data-testid="uptime-cell">
-                <span class="font-mono text-xs text-muted-foreground">{formatUptime(agent.uptimeSec)}</span>
-              </td>
-              <td class="px-3 py-2 hidden sm:table-cell">
-                <span class="font-mono text-xs text-muted-foreground">{agent.agentVersion ?? "—"}</span>
-              </td>
-              <td class="px-3 py-2">
-                {#if agent.updateAvailable}
-                  <button
-                    type="button"
-                    disabled={!!updatingNodes[agent.nodeId]}
-                    onclick={(e) => handleUpdate(e, agent.nodeId)}
-                    class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {updatingNodes[agent.nodeId] ? "updating…" : "Update"}
-                  </button>
-                {/if}
-              </td>
-            </tr>
+          {#each sortedFlatAgents as agent (agent.stationId)}
+            {@render agentRow(agent)}
           {/each}
         {/if}
-      </tbody>
-    </table>
-
-    <!-- Empty filtered state -->
-    {#if filteredAgents.length === 0}
-      <div class="py-8 text-center">
-        <p class="text-sm font-mono text-muted-foreground">// no agents match the current filter</p>
-      </div>
-    {/if}
+      </Table.Body>
+    </Table.Root>
   </div>
 </div>

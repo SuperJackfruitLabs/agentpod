@@ -6,6 +6,7 @@
   import PageHeader from "$lib/components/page-header.svelte";
   import AgentTable from "$lib/components/fleet/AgentTable.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { Button } from "$lib/components/ui/button";
 
   interface ExternalFilter {
     stationId?: string;
@@ -29,6 +30,8 @@
   });
 
   async function loadFleet() {
+    isLoading = true;
+    error = null;
     try {
       const result = await getFleet();
       agents = result.agents;
@@ -44,7 +47,7 @@
   });
 </script>
 
-<PageHeader title="Agents" subtitle="// every agent in the fleet" />
+<PageHeader title="Agents" subtitle="Every agent in the fleet" />
 
 <div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6">
   {#if isLoading}
@@ -55,8 +58,12 @@
     </div>
 
   {:else if error}
-    <div class="cyber-card p-4 border-destructive/50">
-      <p class="text-sm font-mono text-destructive">{error}</p>
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadFleet}>Retry</Button>
     </div>
 
   {:else}
