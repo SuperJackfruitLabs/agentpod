@@ -73,19 +73,41 @@
 				{#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
 					<Table.Row>
 						{#each headerGroup.headers as header (header.id)}
+							{@const sorted = header.column.getIsSorted()}
+							{@const toggleSort = header.column.getToggleSortingHandler()}
 							<Table.Head
-								class={header.column.getCanSort() ? "cursor-pointer select-none" : undefined}
-								onclick={header.column.getToggleSortingHandler()}
+								aria-sort={sorted === "asc"
+									? "ascending"
+									: sorted === "desc"
+										? "descending"
+										: undefined}
 							>
 								{#if !header.isPlaceholder}
-									<FlexRender
-										content={header.column.columnDef.header}
-										context={header.getContext()}
-									/>
-									{#if header.column.getIsSorted() === "asc"}<span aria-hidden="true"> ↑</span
-										>{/if}
-									{#if header.column.getIsSorted() === "desc"}<span aria-hidden="true"> ↓</span
-										>{/if}
+									{#if header.column.getCanSort()}
+										<button
+											type="button"
+											class="flex cursor-pointer select-none items-center gap-1 bg-transparent p-0 font-medium"
+											onclick={toggleSort}
+											onkeydown={(event) => {
+												if (event.key === "Enter" || event.key === " ") {
+													event.preventDefault();
+													toggleSort?.(event);
+												}
+											}}
+										>
+											<FlexRender
+												content={header.column.columnDef.header}
+												context={header.getContext()}
+											/>
+											{#if sorted === "asc"}<span aria-hidden="true"> ↑</span>{/if}
+											{#if sorted === "desc"}<span aria-hidden="true"> ↓</span>{/if}
+										</button>
+									{:else}
+										<FlexRender
+											content={header.column.columnDef.header}
+											context={header.getContext()}
+										/>
+									{/if}
 								{/if}
 							</Table.Head>
 						{/each}
