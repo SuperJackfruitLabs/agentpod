@@ -22,7 +22,6 @@
     "@xterm/xterm": "^5.5.0",
     "better-auth": "^1.4.6",
     "diff": "^9.0.0",
-    "lottie-web": "^5.13.0",
     "marked": "^17.0.1",
     "material-file-icons": "^2.4.0",
     "monaco-editor": "^0.55.1",

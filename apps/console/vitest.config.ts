@@ -39,10 +39,6 @@ export default defineConfig({
       "$app/navigation": path.resolve(__dirname, "./src/mocks/app-navigation.ts"),
       "$app/environment": path.resolve(__dirname, "./src/mocks/app-environment.ts"),
       "$app/stores": path.resolve(__dirname, "./src/mocks/app-stores.ts"),
-      // lottie-web uses HTMLCanvasElement.getContext at module load time which
-      // jsdom does not support. Stub it out so tests can import any component
-      // that transitively imports lottie-icon.svelte (e.g. page-header.svelte).
-      "lottie-web": path.resolve(__dirname, "./src/mocks/lottie-web.ts"),
     },
   },
   test: {
