@@ -80,13 +80,10 @@
     return stations.adopted.some((s) => s.stationKey === key);
   }
 
+  // Pass the raw status through — the shared token map classifies all values
+  // (online→running, error→error, …); collapsing here hid error states.
   const headerStatus = $derived(
-    node
-      ? {
-          label: node.status,
-          variant: (node.status === "online" ? "running" : "stopped") as "running" | "stopped",
-        }
-      : undefined,
+    node ? { label: node.status, variant: node.status } : undefined,
   );
 </script>
 

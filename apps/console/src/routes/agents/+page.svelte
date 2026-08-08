@@ -6,6 +6,7 @@
   import type { FleetAgent } from "@agentpod/contract";
   import PageHeader from "$lib/components/page-header.svelte";
   import AgentTable from "$lib/components/fleet/AgentTable.svelte";
+  import StatusRibbon from "$lib/components/fleet/StatusRibbon.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Button } from "$lib/components/ui/button";
 
@@ -65,7 +66,16 @@
   <title>Agents · AgentPod</title>
 </svelte:head>
 
-<PageHeader title="Agents" subtitle="Every agent in the fleet" />
+<PageHeader title="Agents" subtitle="Every agent in the fleet">
+  {#snippet ribbon()}
+    {#if agents.length > 0}
+      <StatusRibbon
+        size="xs"
+        items={agents.map((a) => ({ id: a.stationId, label: a.agentName, status: a.status }))}
+      />
+    {/if}
+  {/snippet}
+</PageHeader>
 
 <div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6">
   {#if isLoading}

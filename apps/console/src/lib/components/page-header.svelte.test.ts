@@ -11,8 +11,10 @@ describe("PageHeader", () => {
     });
     expect(screen.getByRole("heading", { name: "hermes-01" })).toBeTruthy();
     expect(screen.getByText("~/projects/hermes")).toBeTruthy();
-    const badge = screen.getByText("Running");
+    // Status renders through the shared <Status> component: lowercase mono.
+    const badge = screen.getByText("running");
     expect(badge.closest("[class*='text-status-running']")).toBeTruthy();
+    expect(badge.className).toContain("font-mono");
   });
 
   it("fires onTabChange when an enabled tab is clicked, not for disabled tabs", async () => {

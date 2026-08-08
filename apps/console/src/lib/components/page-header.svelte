@@ -2,6 +2,7 @@
   import type { Snippet, Component } from "svelte";
   import { cn } from "$lib/utils";
   import * as Tooltip from "$lib/components/ui/tooltip";
+  import { Status } from "$lib/components/ui/status";
   import LockIcon from "@lucide/svelte/icons/lock";
 
   export interface Tab {
@@ -12,19 +13,22 @@
     disabledReason?: string;
   }
 
-  type StatusVariant = "running" | "starting" | "stopped" | "error" | "sleeping" | "degraded";
+  // Any raw status string — normalized by the shared <Status> component.
 
   interface Props {
     title: string;
     icon?: Component;
     subtitle?: string;
-    status?: { label: string; variant: StatusVariant; animate?: boolean };
+    status?: { label: string; variant: string; animate?: boolean };
     tabs?: Tab[];
     activeTab?: string;
     onTabChange?: (tabId: string) => void;
     sticky?: boolean;
     actions?: Snippet;
     leading?: Snippet;
+    /** Signature status strip rendered flush under the header border
+     *  (pass a 3px `<StatusRibbon size="xs">` scoped to this page). */
+    ribbon?: Snippet;
     tabsId?: string;
   }
 
@@ -39,6 +43,7 @@
     sticky = true,
     actions = undefined,
     leading = undefined,
+    ribbon = undefined,
     tabsId = "page-tabs",
   }: Props = $props();
 
@@ -93,22 +98,6 @@
     }
   }
 
-  const statusText: Record<StatusVariant, string> = {
-    running: "text-status-running",
-    starting: "text-status-starting",
-    stopped: "text-status-stopped",
-    error: "text-status-error",
-    sleeping: "text-status-sleeping",
-    degraded: "text-status-degraded",
-  };
-  const statusBg: Record<StatusVariant, string> = {
-    running: "bg-status-running",
-    starting: "bg-status-starting",
-    stopped: "bg-status-stopped",
-    error: "bg-status-error",
-    sleeping: "bg-status-sleeping",
-    degraded: "bg-status-degraded",
-  };
 </script>
 
 <header
@@ -131,21 +120,7 @@
           <div class="flex items-center gap-2.5 overflow-hidden">
             <h1 class="truncate text-lg font-semibold tracking-tight">{title}</h1>
             {#if status}
-              <span
-                class={cn(
-                  "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
-                  statusText[status.variant],
-                )}
-              >
-                <span
-                  class={cn(
-                    "size-1.5 rounded-full",
-                    statusBg[status.variant],
-                    status.animate && "animate-pulse",
-                  )}
-                ></span>
-                {status.label}
-              </span>
+              <Status form="badge" status={status.variant} label={status.label} />
             {/if}
           </div>
           {#if subtitle}
@@ -210,4 +185,8 @@
       </div>
     {/if}
   </div>
+  {#if ribbon}
+    <!-- The fleet, as chrome: a full-bleed 3px strip flush against the border -->
+    {@render ribbon()}
+  {/if}
 </header>

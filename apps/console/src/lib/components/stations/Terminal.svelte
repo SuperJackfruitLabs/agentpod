@@ -5,6 +5,7 @@
   import { themeStore } from "$lib/themes/store.svelte";
   import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils";
+  import { Status as StatusIndicator } from "$lib/components/ui/status";
   import SearchIcon from "@lucide/svelte/icons/search";
   import ChevronUpIcon from "@lucide/svelte/icons/chevron-up";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
@@ -77,6 +78,21 @@
     const _scheme = themeStore.colorSchemeId;
     if (term) {
       term.options.theme = computeXtermTheme();
+    }
+  });
+
+  // Follow font-pairing switches too: re-resolve the concrete mono stack
+  // (xterm can't read CSS variables) and refit to the new cell metrics.
+  $effect(() => {
+    const _font = themeStore.fontPairingId;
+    if (term) {
+      const themeMono = getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-mono")
+        .trim();
+      if (themeMono) {
+        term.options.fontFamily = `${themeMono}, ui-monospace, Menlo, monospace`;
+        fitAddon?.fit();
+      }
     }
   });
 
@@ -244,12 +260,19 @@
       });
   }
 
-  const statusDotClass = $derived(
-    status === "connected"
-      ? "bg-status-running"
-      : status === "closed"
-        ? "bg-status-error"
-        : "bg-status-starting",
+  // Session lifecycle → shared status vocabulary + a spoken label, so the
+  // connection dot is never a color-only signal.
+  const sessionStatus = $derived(
+    status === "connected" ? "connected" : status === "closed" ? "error" : "starting",
+  );
+  const sessionLabel = $derived(
+    status === "connecting"
+      ? "Connecting…"
+      : status === "connected"
+        ? "Connected"
+        : status === "reconnecting"
+          ? "Reconnecting…"
+          : closeMessage,
   );
 
   // ── Mount / teardown ───────────────────────────────────────────────────────
@@ -270,12 +293,38 @@
 
       if (!containerEl) return;
 
+      // xterm measures cell width via canvas font strings, which CANNOT
+      // resolve CSS variables — passing var(--font-mono) makes it measure a
+      // fallback font while drawing another, rendering the huge-letter-spacing
+      // "s t r e t c h e d" prompt. Resolve the theme's mono stack to concrete
+      // family names first, and wait for the webfont so metrics are real.
+      const themeMono = getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-mono")
+        .trim();
+      const fontFamily = [
+        themeMono || null,
+        "ui-monospace, 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      try {
+        await Promise.race([
+          document.fonts.load(`13px ${themeMono.split(",")[0] ?? "monospace"}`),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ]);
+      } catch {
+        // Font loading is best-effort; fallback metrics are still consistent.
+      }
+      if (!containerEl) return;
+
       term = new Terminal({
         cursorBlink: true,
         fontSize: 13,
-        fontFamily:
-          "var(--font-mono), ui-monospace, 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+        fontFamily,
         theme: computeXtermTheme(),
+        // Mirrors terminal output into an ARIA live buffer — without this the
+        // entire terminal is invisible to screen readers.
+        screenReaderMode: true,
       });
 
       fitAddon = new FitAddon();
@@ -361,14 +410,14 @@
 >
   <!-- Toolbar -->
   <div class="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 shrink-0">
-    <span
-      class={cn(
-        "size-2 shrink-0 rounded-full",
-        statusDotClass,
-        (status === "connecting" || status === "reconnecting") && "animate-pulse",
-      )}
-      aria-hidden="true"
-    ></span>
+    <span role="status" aria-live="polite" class="inline-flex shrink-0">
+      <StatusIndicator
+        form="dot"
+        status={sessionStatus}
+        label={sessionLabel}
+        animate={status === "connecting" || status === "reconnecting"}
+      />
+    </span>
     <span class="shrink-0 truncate font-mono text-xs text-muted-foreground">{stationId}</span>
 
     {#if status === "closed"}
