@@ -36,6 +36,7 @@ export function tokenFor(status: string): StatusToken {
     case "error":
     case "unhealthy":
     case "crashed":
+    case "banned":
       return "error";
 
     case "starting":

@@ -8,6 +8,7 @@
   import { Spinner } from "$lib/components/ui/spinner";
   import Server from "@lucide/svelte/icons/server";
   import Circle from "@lucide/svelte/icons/circle";
+  import { statusTextClass } from "$lib/utils/status-badge";
 
   // Form state
   let apiUrl = $state(import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001");
@@ -173,7 +174,7 @@
       <div class="space-y-5">
         <!-- Connection Info -->
         <div class="flex items-center gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
-          <Circle class="h-2.5 w-2.5 text-chart-2 fill-current" />
+          <Circle class="h-2.5 w-2.5 fill-current {statusTextClass('connected')}" />
           <span class="text-muted-foreground">Connected to</span>
           <span class="truncate text-foreground">{connection.apiUrl}</span>
         </div>

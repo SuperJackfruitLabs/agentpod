@@ -15,7 +15,7 @@ import { statusBadgeClass, statusTextClass, statusBgClass } from "./status-badge
 // Status → expected token groupings, mirroring tokenFor() in status-badge.ts
 const GROUPS: Record<string, string[]> = {
   running: ["running", "online", "healthy", "active", "connected"],
-  error: ["error", "unhealthy", "crashed"],
+  error: ["error", "unhealthy", "crashed", "banned"],
   starting: ["starting", "stopping", "warning", "pending"],
   degraded: ["degraded"],
   sleeping: ["sleeping", "hibernated"],

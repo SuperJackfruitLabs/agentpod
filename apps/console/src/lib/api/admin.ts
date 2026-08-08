@@ -245,13 +245,10 @@ export async function getAuditLog(options: AuditLogOptions = {}): Promise<AuditL
  */
 export async function checkIsAdmin(): Promise<boolean> {
   try {
-    console.log("[Admin] Checking admin status...");
     // Try to fetch admin stats - this will fail if not admin
-    const stats = await getAdminStats();
-    console.log("[Admin] Admin check succeeded, stats:", stats);
+    await getAdminStats();
     return true;
-  } catch (err) {
-    console.log("[Admin] Admin check failed:", err);
+  } catch {
     return false;
   }
 }

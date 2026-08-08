@@ -152,7 +152,7 @@
             if (v) selectedColorCategory = v as ColorSchemeCategory | "all";
           }}
         >
-          <Select.Trigger class="w-48 font-mono text-sm bg-background/50 border-border/50 focus:border-primary focus:ring-1 focus:ring-primary">
+          <Select.Trigger class="w-48">
             {selectedColorCategory === "all" ? "All Categories" : getColorCategoryLabel(selectedColorCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
@@ -209,8 +209,8 @@
 
             <!-- Selected Indicator -->
             {#if isSelected}
-              <div class="absolute top-1 right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center shadow-[0_0_8px_var(--primary)]">
-                <CheckIcon class="h-3 w-3 text-black" />
+              <div class="absolute top-1 right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                <CheckIcon class="h-3 w-3 text-primary-foreground" />
               </div>
             {/if}
           </button>
@@ -261,7 +261,7 @@
             if (v) selectedFontCategory = v as FontPairingCategory | "all";
           }}
         >
-          <Select.Trigger class="w-48 font-mono text-sm bg-background/50 border-border/50 focus:border-primary focus:ring-1 focus:ring-primary">
+          <Select.Trigger class="w-48">
             {selectedFontCategory === "all" ? "All Categories" : getFontCategoryLabel(selectedFontCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
@@ -325,8 +325,8 @@
 
             <!-- Selected Indicator -->
             {#if isSelected}
-              <div class="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center shadow-[0_0_8px_var(--primary)]">
-                <CheckIcon class="h-3 w-3 text-black" />
+              <div class="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                <CheckIcon class="h-3 w-3 text-primary-foreground" />
               </div>
             {/if}
           </button>
@@ -391,6 +391,7 @@
     title="Delete theme"
     message={`Delete "${pendingDeleteName}"? This can't be undone.`}
     confirmLabel="Delete"
+    destructive
     onConfirm={handleConfirmDelete}
     onCancel={handleCancelDelete}
   />

@@ -99,6 +99,7 @@ test("deleting a custom theme opens a confirm dialog and only deletes after conf
 
   // Confirming triggers the delete.
   const confirmBtn = getByText("Delete", { selector: "button" });
+  expect(confirmBtn.className).toContain("bg-destructive");
   await fireEvent.click(confirmBtn);
 
   expect(themeStoreMock.deleteCustomTheme).toHaveBeenCalledWith(customTheme.id);
