@@ -134,114 +134,109 @@
   </div>
 {:else if health}
   <div class="p-4 space-y-4">
-    <!-- Responsive stat-tile grid: 1 col mobile → 2 cols sm -->
-    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <!-- Status -->
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
-        <dt class="text-xs text-muted-foreground">Status</dt>
-        <dd>
-          <Status form="text" status={health.running ? "running" : "stopped"} class="text-lg" />
-        </dd>
-      </div>
+    <!-- Status row: the one fact this panel exists for, full width, with the
+         contextual action beside it — Start/Stop/Restart are state-aware
+         instead of three always-on buttons. -->
+    <div class="flex flex-wrap items-center gap-3 rounded-lg border p-3" data-testid="status-row">
+      <Status
+        form="dot"
+        status={health.running ? "running" : "stopped"}
+        animate={actionInFlight}
+      />
+      <Status form="text" status={health.running ? "running" : "stopped"} class="text-sm" />
+      {#if health.running && health.uptimeSec !== null}
+        <span class="text-xs text-muted-foreground">
+          up <span class="font-mono tabular-nums">{fmtUptime(health.uptimeSec)}</span
+          >{#if isGateway}<span class="ml-1">(gateway)</span>{/if}
+        </span>
+      {/if}
+      {#if canLifecycle}
+        <div class="ml-auto flex flex-wrap gap-2">
+          {#if health.running}
+            <Button variant="outline" size="sm" disabled={actionInFlight} onclick={handleStop}>
+              {inFlightAction === "stop" ? "Stopping…" : "Stop"}
+            </Button>
+            <Button variant="outline" size="sm" disabled={actionInFlight} onclick={handleRestart}>
+              {inFlightAction === "restart" ? "Restarting…" : "Restart"}
+            </Button>
+          {:else}
+            <Button variant="default" size="sm" disabled={actionInFlight} onclick={handleStart}>
+              {inFlightAction === "start" ? "Starting…" : "Start"}
+            </Button>
+          {/if}
+        </div>
+      {/if}
+    </div>
+    {#if actionError}
+      <p class="text-sm text-destructive" role="alert">{actionError}</p>
+    {/if}
 
-      <!-- PID -->
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
-        <dt class="text-xs text-muted-foreground">PID</dt>
-        <dd class="font-mono text-lg text-foreground">
-          {fmt(health.pid)}{#if isGateway && health.pid !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-        </dd>
-      </div>
-
-      <!-- CPU -->
+    <!-- Live metrics -->
+    <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <div class="rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">CPU</dt>
-        <dd class="font-mono text-lg text-foreground">
+        <dd class="font-mono tabular-nums text-lg text-foreground">
           {health.cpuPct !== null ? `${health.cpuPct}%` : "—"}{#if isGateway && health.cpuPct !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
         </dd>
       </div>
 
-      <!-- Memory -->
       <div class="rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Memory</dt>
-        <dd class="font-mono text-lg text-foreground">
+        <dd class="font-mono tabular-nums text-lg text-foreground">
           {fmtBytes(health.memBytes)}{#if isGateway && health.memBytes !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
         </dd>
       </div>
 
-      <!-- Disk -->
       <div class="rounded-lg border p-3 flex flex-col gap-1">
         <dt class="text-xs text-muted-foreground">Disk</dt>
-        <dd class="font-mono text-lg text-foreground">{fmtBytes(health.diskBytes)}</dd>
+        <dd class="font-mono tabular-nums text-lg text-foreground">{fmtBytes(health.diskBytes)}</dd>
       </div>
 
-      <!-- Uptime -->
       <div class="rounded-lg border p-3 flex flex-col gap-1">
-        <dt class="text-xs text-muted-foreground">Uptime</dt>
-        <dd class="font-mono text-lg text-foreground">
-          {fmtUptime(health.uptimeSec)}{#if isGateway && health.uptimeSec !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-        </dd>
-      </div>
-
-      <!-- Last Activity -->
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
-        <dt class="text-xs text-muted-foreground">Last Activity</dt>
+        <dt class="text-xs text-muted-foreground">Last activity</dt>
         <dd class="font-mono text-sm text-foreground">{fmtStr(health.lastActivity)}</dd>
       </div>
-
-      <!-- Note -->
-      <div class="rounded-lg border p-3 flex flex-col gap-1">
-        <dt class="text-xs text-muted-foreground">Note</dt>
-        <dd class="font-mono text-sm text-foreground">{fmtStr(health.note)}</dd>
-      </div>
-
-      <!-- Matrix ID (conditional) -->
-      {#if matrixId}
-        <div class="rounded-lg border p-3 flex flex-col gap-1 sm:col-span-2">
-          <dt class="text-xs text-muted-foreground">Matrix</dt>
-          <dd class="font-mono text-sm">
-            <a
-              href="https://matrix.to/#/{matrixId}"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="text-primary hover:underline break-all"
-            >{matrixId}</a>
-          </dd>
-        </div>
-      {/if}
     </dl>
 
-    <!-- Lifecycle controls -->
-    {#if canLifecycle}
-      <div class="pt-2 border-t flex flex-wrap gap-2">
-        <Button
-          variant="default"
-          size="sm"
-          disabled={actionInFlight}
-          onclick={handleStart}
-        >
-          {inFlightAction === "start" ? "Starting…" : "Start"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={actionInFlight}
-          onclick={handleStop}
-        >
-          {inFlightAction === "stop" ? "Stopping…" : "Stop"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={actionInFlight}
-          onclick={handleRestart}
-        >
-          {inFlightAction === "restart" ? "Restarting…" : "Restart"}
-        </Button>
-      </div>
-      {#if actionError}
-        <p class="text-sm text-destructive">{actionError}</p>
-      {/if}
-    {/if}
+    <!-- Process plumbing, out of the way but one click deep -->
+    <details class="rounded-lg border">
+      <summary class="cursor-pointer select-none px-3 py-2 text-xs text-muted-foreground">
+        Process details
+      </summary>
+      <dl class="grid grid-cols-1 gap-3 p-3 pt-1 sm:grid-cols-2">
+        <div class="flex flex-col gap-1">
+          <dt class="text-xs text-muted-foreground">PID</dt>
+          <dd class="font-mono tabular-nums text-sm text-foreground">
+            {fmt(health.pid)}{#if isGateway && health.pid !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
+          </dd>
+        </div>
+        {#if !health.running || health.uptimeSec === null}
+          <div class="flex flex-col gap-1">
+            <dt class="text-xs text-muted-foreground">Uptime</dt>
+            <dd class="font-mono tabular-nums text-sm text-foreground">{fmtUptime(health.uptimeSec)}</dd>
+          </div>
+        {/if}
+        {#if health.note}
+          <div class="flex flex-col gap-1 sm:col-span-2">
+            <dt class="text-xs text-muted-foreground">Note</dt>
+            <dd class="font-mono text-sm text-foreground">{fmtStr(health.note)}</dd>
+          </div>
+        {/if}
+        {#if matrixId}
+          <div class="flex flex-col gap-1 sm:col-span-2">
+            <dt class="text-xs text-muted-foreground">Matrix</dt>
+            <dd class="font-mono text-sm">
+              <a
+                href="https://matrix.to/#/{matrixId}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="text-primary hover:underline break-all"
+              >{matrixId}</a>
+            </dd>
+          </div>
+        {/if}
+      </dl>
+    </details>
   </div>
 
   {#if canLifecycle}
