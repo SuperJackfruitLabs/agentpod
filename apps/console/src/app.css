@@ -1005,34 +1005,6 @@ article,
   display: inline;
 }
 
-/* Glitch effect for headers */
-@keyframes glitch {
-  0%, 90%, 100% {
-    transform: translate(0);
-    text-shadow: none;
-  }
-  92% {
-    transform: translate(-2px, 1px);
-    text-shadow: 2px 0 var(--chart-5);
-  }
-  94% {
-    transform: translate(2px, -1px);
-    text-shadow: -2px 0 var(--primary);
-  }
-  96% {
-    transform: translate(-1px, 2px);
-    text-shadow: 1px 0 var(--chart-2);
-  }
-  98% {
-    transform: translate(1px, -2px);
-    text-shadow: -1px 0 var(--chart-5);
-  }
-}
-
-.glitch-hover:hover {
-  animation: glitch 0.5s ease-in-out;
-}
-
 /* Border glow animation */
 @keyframes border-glow {
   0%, 100% {
