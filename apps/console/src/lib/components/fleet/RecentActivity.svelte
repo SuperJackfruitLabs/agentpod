@@ -30,7 +30,7 @@
 
 <div class="rounded-lg border p-4 space-y-2" data-testid="recent-activity">
   <div class="flex items-center justify-between">
-    <p class="text-sm font-medium">Recent activity</p>
+    <h2 class="t-section">Recent activity</h2>
     <a href="/activity" class="text-xs text-primary hover:underline" data-testid="view-all-activity">
       View all
     </a>

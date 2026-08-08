@@ -108,7 +108,7 @@
       </span>
       {#if node.updateAvailable}
         <span class="text-xs text-status-degraded">
-          update: {node.agentVersion} → {node.latestVersion}
+          Update available · <span class="font-mono tabular-nums">{node.agentVersion} → {node.latestVersion}</span>
         </span>
         <Button variant="outline" size="sm" disabled={updating} onclick={handleUpdate}>
           {updating ? "Updating…" : "Update"}
@@ -135,7 +135,7 @@
   <section class="space-y-3">
     <div class="flex items-center justify-between gap-4">
       <div>
-        <h2 class="text-lg font-semibold">Detected Stations</h2>
+        <h2 class="t-section">Detected stations</h2>
         <p class="text-sm text-muted-foreground">Ready to adopt</p>
       </div>
       {#if stations.detected.filter((s) => !isAlreadyAdopted(s.key)).length > 0}
@@ -154,7 +154,7 @@
     {#if stations.isLoading}
       <div class="flex flex-col gap-2">
         {#each [1, 2] as _}
-          <Skeleton class="h-16 rounded-xl" />
+          <Skeleton class="h-16 rounded-lg" />
         {/each}
       </div>
     {:else if stations.detected.length === 0}
@@ -196,14 +196,14 @@
   <!-- Adopted Stations section -->
   <section class="space-y-3">
     <div>
-      <h2 class="text-lg font-semibold">Adopted Stations</h2>
+      <h2 class="t-section">Adopted stations</h2>
       <p class="text-sm text-muted-foreground">Active workspaces</p>
     </div>
 
     {#if stations.isLoading}
       <div class="flex flex-col gap-2">
         {#each [1, 2] as _}
-          <Skeleton class="h-12 rounded-xl" />
+          <Skeleton class="h-12 rounded-lg" />
         {/each}
       </div>
     {:else if stations.adopted.length === 0}

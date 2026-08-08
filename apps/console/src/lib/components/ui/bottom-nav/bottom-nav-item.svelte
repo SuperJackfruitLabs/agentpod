@@ -43,7 +43,7 @@
         class={cn(
           "absolute -top-1 -right-1 min-w-[16px] h-4 px-1",
           "flex items-center justify-center",
-          "text-[10px] font-semibold rounded-full",
+          "text-xs font-semibold rounded-full",
           // Using semantic destructive color for attention badge
           "bg-destructive text-destructive-foreground"
         )}
@@ -54,7 +54,7 @@
   </div>
   <span
     class={cn(
-      "text-[11px] font-medium leading-none transition-colors",
+      "text-xs font-medium leading-none transition-colors",
       isActive ? "text-foreground" : "text-muted-foreground"
     )}
   >

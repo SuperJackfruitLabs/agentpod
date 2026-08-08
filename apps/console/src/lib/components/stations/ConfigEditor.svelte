@@ -106,18 +106,18 @@
     <span class="truncate text-foreground">{path}</span>
     <div class="ml-auto flex items-center gap-2 shrink-0">
       {#if backupPath}
-        <span class="text-[11px] text-muted-foreground font-sans">
+        <span class="text-xs text-muted-foreground font-sans">
           Backup: <span class="font-mono">{backupPath}</span>
         </span>
       {/if}
       {#if saveError}
-        <span class="text-[11px] text-destructive font-sans">{saveError}</span>
+        <span class="text-xs text-destructive font-sans">{saveError}</span>
       {/if}
       {#if onClose}
         <Button
           variant="outline"
           size="sm"
-          class="h-7 px-2 text-[11px] font-sans"
+          class="h-7 px-2 text-xs font-sans"
           onclick={requestClose}
         >
           Close
@@ -126,7 +126,7 @@
       <Button
         variant="default"
         size="sm"
-        class="h-7 px-2 text-[11px] font-sans"
+        class="h-7 px-2 text-xs font-sans"
         disabled={!hasChanges || isSaving}
         onclick={() => (showConfirm = true)}
       >
@@ -157,12 +157,12 @@
       <!-- Diff view — rendered below the editor whenever there are pending changes -->
       {#if hasChanges}
         <div class="flex flex-col flex-1 overflow-auto border-t border-border bg-muted/10">
-          <div class="px-3 py-1 text-[11px] font-sans text-muted-foreground border-b border-border/60">
+          <div class="px-3 py-1 text-xs font-sans text-muted-foreground border-b border-border/60">
             Diff (original → buffer)
           </div>
           <div
             data-testid="diff-view"
-            class="flex-1 overflow-auto p-2 font-mono text-[12px] leading-relaxed"
+            class="flex-1 overflow-auto p-2 font-mono text-xs leading-relaxed"
           >
             {#each diff as part, i (i)}
               {#if part.added}

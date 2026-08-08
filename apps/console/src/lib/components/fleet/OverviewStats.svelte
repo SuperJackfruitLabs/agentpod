@@ -8,7 +8,7 @@
   <!-- Nodes stat -->
   <div class="rounded-lg border p-4 space-y-1">
     <div class="text-xs text-muted-foreground">Nodes online</div>
-    <div class="font-mono text-2xl font-semibold text-foreground" data-testid="stat-nodes">
+    <div class="t-metric text-foreground" data-testid="stat-nodes">
       {stats.nodes.online}<span class="text-muted-foreground text-lg">/{stats.nodes.total}</span>
     </div>
   </div>
@@ -16,7 +16,7 @@
   <!-- Agents stat -->
   <div class="rounded-lg border p-4 space-y-1">
     <div class="text-xs text-muted-foreground">Agents</div>
-    <div class="font-mono text-2xl font-semibold text-foreground" data-testid="stat-agents">
+    <div class="t-metric text-foreground" data-testid="stat-agents">
       {stats.agents.total}
     </div>
   </div>
@@ -27,7 +27,7 @@
   >
     <div class="text-xs text-muted-foreground">Updates available</div>
     <div
-      class="font-mono text-2xl font-semibold {stats.updatesAvailable > 0 ? 'text-status-degraded' : 'text-foreground'}"
+      class="t-metric {stats.updatesAvailable > 0 ? 'text-status-degraded' : 'text-foreground'}"
       data-testid="stat-updates"
     >
       {stats.updatesAvailable}

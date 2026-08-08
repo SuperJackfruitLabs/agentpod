@@ -241,7 +241,7 @@
     <Button
       variant="ghost"
       size="sm"
-      class="h-7 gap-1 px-2 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+      class="h-7 gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
       onclick={() => { newItemMode = "file"; newItemName = ""; }}
       title="New File"
     >
@@ -251,7 +251,7 @@
     <Button
       variant="ghost"
       size="sm"
-      class="h-7 gap-1 px-2 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+      class="h-7 gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
       onclick={() => { newItemMode = "dir"; newItemName = ""; }}
       title="New Folder"
     >
@@ -265,7 +265,7 @@
     <div class="shrink-0 px-2 py-1.5 border-b border-border/60 bg-muted/5">
       <input
         type="text"
-        class="h-7 w-full rounded border border-input bg-background px-2 text-[13px] font-mono outline-none focus:border-ring"
+        class="h-7 w-full rounded border border-input bg-background px-2 text-sm font-mono outline-none focus:border-ring"
         placeholder={newItemMode === "dir" ? "Folder name" : "File name"}
         bind:value={newItemName}
         onkeydown={handleNewItemKeydown}
@@ -296,7 +296,7 @@
           <!-- Main entry button -->
           <button
             type="button"
-            class="flex flex-1 items-center gap-1.5 py-1.5 text-[13px] font-mono text-left pr-1 pl-1 min-w-0"
+            class="flex flex-1 items-center gap-1.5 py-1.5 text-sm font-mono text-left pr-1 pl-1 min-w-0"
             onclick={() => handleEntryClick(entry)}
           >
             {#if entry.type === "dir"}
@@ -326,7 +326,7 @@
             {#if renameTarget?.path === entry.path}
               <input
                 type="text"
-                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-[12px] font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring"
+                class="h-6 w-24 shrink-0 rounded border border-input bg-background px-1 text-xs font-mono outline-none focus:border-ring focus:ring-2 focus:ring-ring"
                 bind:value={renameName}
                 onkeydown={handleRenameKeydown}
                 use:autofocus

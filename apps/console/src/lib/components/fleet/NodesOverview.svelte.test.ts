@@ -117,7 +117,7 @@ test("shows empty state when listNodes returns an empty array", async () => {
   const { getByText } = render(NodesOverview);
 
   await waitFor(() => {
-    expect(getByText(/no nodes yet/i)).toBeTruthy();
+    expect(getByText(/connect your first node/i)).toBeTruthy();
   });
 });
 
@@ -151,7 +151,7 @@ test("mint failure shows inline mintError without replacing the node grid", asyn
     expect(getByText("vps1.example.com")).toBeTruthy();
     expect(getByText("vps2.example.com")).toBeTruthy();
     // Full-page error banner is NOT shown (no cyber-card border-destructive replacing the grid)
-    expect(queryByText(/no nodes yet/i)).toBeNull();
+    expect(queryByText(/connect your first node/i)).toBeNull();
   });
 });
 

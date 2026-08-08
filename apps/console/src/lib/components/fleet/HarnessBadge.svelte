@@ -10,6 +10,6 @@
   let { harness, class: className }: Props = $props();
 </script>
 
-<Badge variant="outline" class={cn("font-mono text-[10px] text-primary border-primary/40", className)}>
+<Badge variant="outline" class={cn("font-mono text-xs text-primary border-primary/40", className)}>
   {harness}
 </Badge>

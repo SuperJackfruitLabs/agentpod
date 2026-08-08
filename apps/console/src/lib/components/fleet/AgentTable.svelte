@@ -10,6 +10,7 @@
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import StatusRibbon from "./StatusRibbon.svelte";
+  import { Metric } from "$lib/components/ui/metric";
   import SearchIcon from "@lucide/svelte/icons/search";
 
   // ── External filter (from heatmap) ───────────────────────────────────────────
@@ -275,16 +276,16 @@
       </Badge>
     </Table.Cell>
     <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="cpu-cell">
-      {formatCpu(agent.cpuPct)}
+      <Metric>{formatCpu(agent.cpuPct)}</Metric>
     </Table.Cell>
     <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="mem-cell">
-      {formatMem(agent.memBytes)}
+      <Metric>{formatMem(agent.memBytes)}</Metric>
     </Table.Cell>
     <Table.Cell class="hidden lg:table-cell text-xs text-muted-foreground" data-testid="uptime-cell">
-      {formatUptime(agent.uptimeSec)}
+      <Metric>{formatUptime(agent.uptimeSec)}</Metric>
     </Table.Cell>
     <Table.Cell class="hidden sm:table-cell text-xs text-muted-foreground">
-      {agent.agentVersion ?? "—"}
+      <Metric>{agent.agentVersion ?? "—"}</Metric>
     </Table.Cell>
     <Table.Cell>
       {#if agent.updateAvailable}
@@ -390,7 +391,7 @@
                   class="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                   data-testid="group-header"
                 >
-                  <span class="text-[10px]">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
+                  <span class="text-xs">{collapsedGroups[group.nodeId] ? "▶" : "▾"}</span>
                   <span class="font-medium text-foreground">{group.nodeName}</span>
                   <span class="text-muted-foreground/60">· {group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
                   <!-- The node's whole health in one strip -->
