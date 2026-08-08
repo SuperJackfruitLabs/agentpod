@@ -101,3 +101,10 @@ Each screen moves fully onto the new base; cyber classes are deleted with their 
 ## Delivery
 
 Work happens on `ui-revamp`, PR'd, merged after CI passes, and deployed via the existing Cloudflare pipeline.
+
+## Scope dispositions (recorded during implementation)
+
+- **Image/binary preview** (file browser): the hub exposes no binary-read endpoint and backend changes are a non-goal, so image/binary files render a typed metadata card (icon, name, type, size, mtime) instead of pixels. Revisit if a binary endpoint ships.
+- **Timestamp normalization** (log viewer): descoped from the v1 rebuild — lines render their timestamps as received. The viewer's level detection and search operate on ANSI-stripped text. Follow-up if mixed-format logs prove painful in dogfooding.
+- **⌘P "go to file"**: implemented as the file browser's own quick-open (capped BFS over the station fs API), not as a global command-palette entry — the palette has no station context outside the station page. Revisit if global file search is wanted.
+- **Screenshot passes**: deferred to a single visual pass at PR time (the console requires an authenticated hub session, making per-phase automated screenshots impractical mid-program); dogfood checklist for the live fleet: WebGL terminal renderer, ⌘P inside a focused Monaco pane, fullscreen Escape vs xterm, copy-on-select across browsers, `/` log-search shortcut.
