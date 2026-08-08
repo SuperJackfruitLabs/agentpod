@@ -47,7 +47,11 @@ func statusCmd(mgr service.Manager, cfg config.Config, cfgErr error, checkCred f
 	// launchctl/systemctl query. Report the error and stop instead.
 	st, err := mgr.Status()
 	if err != nil {
-		fmt.Fprintln(out, "error: reading service status:", err)
+		if jsonOut {
+			writeStatusErrorJSON(out, err)
+		} else {
+			fmt.Fprintln(out, "error: reading service status:", err)
+		}
 		return 1
 	}
 
@@ -72,6 +76,23 @@ func statusCmd(mgr service.Manager, cfg config.Config, cfgErr error, checkCred f
 		return 0
 	}
 	return 1
+}
+
+// writeStatusErrorJSON emits a valid, machine-parseable JSON error object
+// when --json is set and mgr.Status() itself failed — `{"error": "..."}`
+// rather than the plain-text "error: ..." line, so a `apn status --json`
+// caller's JSON decoder never has to fall back to text sniffing.
+func writeStatusErrorJSON(out io.Writer, statusErr error) {
+	payload := struct {
+		Error string `json:"error"`
+	}{Error: fmt.Sprintf("reading service status: %v", statusErr)}
+
+	b, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return
+	}
+	fmt.Fprintln(out, string(b))
 }
 
 func writeStatusJSON(out io.Writer, st service.Status, cfg config.Config, reachable, credValid bool) {
@@ -333,48 +354,70 @@ func statFile(path string) error {
 // resolveUnitPathForLogs returns the systemd unit path used by buildLogsCmd
 // for --user-unit vs -u scope selection on linux. A no-op on any other
 // platform (unitPath is unused there). If Status() itself errors, it prints
-// a one-line warning and falls back to "" (system-scope journalctl) rather
-// than failing `apn logs` outright — logs are a best-effort diagnostic, not
-// worth blocking on a status query that's separately reported by `apn
-// status`. goos is injected (not read from runtime.GOOS) so this is
-// testable on any host, matching internal/service's own goos-injection
-// pattern.
-func resolveUnitPathForLogs(goos string, mgr service.Manager, out io.Writer) string {
+// a one-line warning to errOut and falls back to "" (system-scope
+// journalctl) rather than failing `apn logs` outright — logs are a
+// best-effort diagnostic, not worth blocking on a status query that's
+// separately reported by `apn status`. errOut is deliberately distinct from
+// the out writer logsCmd uses for its own CLI-level messages: `apn logs -f`
+// streams actual log content over the same fd as out, so a diagnostic
+// written there would corrupt a piped/redirected log stream (e.g. `apn
+// logs -f | tee file`). goos is injected (not read from runtime.GOOS) so
+// this is testable on any host, matching internal/service's own
+// goos-injection pattern.
+func resolveUnitPathForLogs(goos string, mgr service.Manager, errOut io.Writer) string {
 	if goos != "linux" || mgr == nil {
 		return ""
 	}
 	st, err := mgr.Status()
 	if err != nil {
-		fmt.Fprintln(out, "warning: could not read service status (falling back to system-scope journalctl):", err)
+		fmt.Fprintln(errOut, "warning: could not read service status (falling back to system-scope journalctl):", err)
 		return ""
 	}
 	return st.UnitPath
 }
 
-// logsCmd parses `apn logs` flags and runs the resulting command with stdio
-// passthrough. All platform/argv decisions delegate to resolveLogsCmd, which
-// is what's under test — this function itself is exec.Cmd.Run() plumbing.
-func logsCmd(mgr service.Manager, args []string, out io.Writer) int {
+// prepareLogsCmd resolves `apn logs`'s flags, platform, and scope into a
+// ready-to-run *exec.Cmd — without ever calling Run(). This is the seam
+// logsCmd's tests use: homeDir/stat are injectable and goos is a parameter,
+// so every branch (including the linux Status()-error warning landing on
+// errOut, never out) is covered without touching the real filesystem,
+// home directory, or a real tail/journalctl process.
+//
+// Return contract: cmd == nil means "stop here, do not exec" (flag parse
+// error, unresolvable home dir, or resolveLogsCmd's missing-log-file
+// error) — code is the caller's exit code in that case. cmd != nil means
+// code is always 0 and the caller should wire stdio and Run() it.
+func prepareLogsCmd(goos string, mgr service.Manager, homeDir func() (string, error), args []string, out, errOut io.Writer, stat func(string) error) (*exec.Cmd, int) {
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(out)
 	follow := fs.Bool("f", false, "follow log output")
 	lines := fs.Int("n", 50, "number of lines to show")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return nil, 2
 	}
 
-	home, err := os.UserHomeDir()
+	home, err := homeDir()
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
-		return 1
+		return nil, 1
 	}
 
-	unitPath := resolveUnitPathForLogs(runtime.GOOS, mgr, out)
+	unitPath := resolveUnitPathForLogs(goos, mgr, errOut)
 
-	cmd, err := resolveLogsCmd(runtime.GOOS, home, unitPath, logsOptions{Follow: *follow, Lines: *lines}, statFile)
+	cmd, err := resolveLogsCmd(goos, home, unitPath, logsOptions{Follow: *follow, Lines: *lines}, stat)
 	if err != nil {
 		fmt.Fprintln(out, err)
-		return 1
+		return nil, 1
+	}
+	return cmd, 0
+}
+
+// logsCmd is prepareLogsCmd's production wrapper: real platform/home dir/
+// filesystem, then exec.Cmd.Run() with stdio passthrough.
+func logsCmd(mgr service.Manager, args []string, out, errOut io.Writer) int {
+	cmd, code := prepareLogsCmd(runtime.GOOS, mgr, os.UserHomeDir, args, out, errOut, statFile)
+	if cmd == nil {
+		return code
 	}
 	cmd.Stdout, cmd.Stderr, cmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 	if err := cmd.Run(); err != nil {

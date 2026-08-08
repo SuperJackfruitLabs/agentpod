@@ -139,6 +139,32 @@ func TestStatusCmd(t *testing.T) {
 		}
 	})
 
+	t.Run("status_error_json_mode_emits_valid_json_error_object", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("launchctl print: permission denied")}
+		checkCred := func(hub, id, secret string) (bool, error) {
+			t.Fatal("checkCred must not be called when Status() itself failed")
+			return false, nil
+		}
+		var buf bytes.Buffer
+		code := statusCmd(mgr, cfg, nil, checkCred, true, &buf)
+		if code != 1 {
+			t.Errorf("exit code: got %d want 1", code)
+		}
+
+		var got struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+			t.Fatalf("--json error output is not valid JSON: %v\noutput:\n%s", err, buf.String())
+		}
+		if !strings.Contains(got.Error, "permission denied") {
+			t.Errorf("error field: got %q, want it to mention the underlying error", got.Error)
+		}
+		if strings.Contains(buf.String(), "\"Service\"") {
+			t.Errorf("should not include a Service block in the error JSON, got:\n%s", buf.String())
+		}
+	})
+
 	t.Run("json_output_unmarshals_into_expected_shape", func(t *testing.T) {
 		mgr := &fakeManager{status: running}
 		checkCred := func(hub, id, secret string) (bool, error) { return true, nil }
@@ -420,39 +446,83 @@ func TestBuildLogsCmd(t *testing.T) {
 }
 
 func TestResolveUnitPathForLogs(t *testing.T) {
-	t.Run("linux_status_error_warns_and_falls_back_to_system_scope", func(t *testing.T) {
+	t.Run("linux_status_error_warns_on_errOut_and_falls_back_to_system_scope", func(t *testing.T) {
 		mgr := &fakeManager{statusErr: errors.New("systemctl show: permission denied")}
-		var buf bytes.Buffer
-		got := resolveUnitPathForLogs("linux", mgr, &buf)
+		var errBuf bytes.Buffer
+		got := resolveUnitPathForLogs("linux", mgr, &errBuf)
 		if got != "" {
 			t.Errorf("unitPath: got %q want empty (fallback)", got)
 		}
-		if !strings.Contains(buf.String(), "warning:") || !strings.Contains(buf.String(), "permission denied") {
-			t.Errorf("missing warning, got:\n%s", buf.String())
+		if !strings.Contains(errBuf.String(), "warning:") || !strings.Contains(errBuf.String(), "permission denied") {
+			t.Errorf("missing warning on errOut, got:\n%s", errBuf.String())
 		}
 	})
 
 	t.Run("linux_status_ok_uses_unit_path", func(t *testing.T) {
 		mgr := &fakeManager{status: service.Status{UnitPath: "/etc/systemd/system/agentpod-node.service"}}
-		var buf bytes.Buffer
-		got := resolveUnitPathForLogs("linux", mgr, &buf)
+		var errBuf bytes.Buffer
+		got := resolveUnitPathForLogs("linux", mgr, &errBuf)
 		if got != mgr.status.UnitPath {
 			t.Errorf("unitPath: got %q want %q", got, mgr.status.UnitPath)
 		}
-		if buf.Len() != 0 {
-			t.Errorf("expected no warning on success, got:\n%s", buf.String())
+		if errBuf.Len() != 0 {
+			t.Errorf("expected no warning on success, got:\n%s", errBuf.String())
 		}
 	})
 
 	t.Run("darwin_never_calls_status", func(t *testing.T) {
 		mgr := &fakeManager{statusErr: errors.New("should not be reached")}
-		var buf bytes.Buffer
-		got := resolveUnitPathForLogs("darwin", mgr, &buf)
+		var errBuf bytes.Buffer
+		got := resolveUnitPathForLogs("darwin", mgr, &errBuf)
 		if got != "" {
 			t.Errorf("unitPath: got %q want empty", got)
 		}
-		if buf.Len() != 0 {
-			t.Errorf("expected no output on darwin, got:\n%s", buf.String())
+		if errBuf.Len() != 0 {
+			t.Errorf("expected no output on darwin, got:\n%s", errBuf.String())
+		}
+	})
+}
+
+// TestPrepareLogsCmd exercises the exec-free wiring `logsCmd` uses (flags →
+// scope resolution → argv), proving that resolveUnitPathForLogs's warning
+// reaches the dedicated errOut writer and never the out writer — the out
+// writer is also what a piped `apn logs -f | tee file` would inherit as
+// stdout, so a diagnostic landing there would corrupt the log stream.
+func TestPrepareLogsCmd(t *testing.T) {
+	t.Run("linux_status_error_warning_goes_to_errOut_never_out", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("systemctl show: permission denied")}
+		homeDir := func() (string, error) { return "/home/x", nil }
+		var outBuf, errBuf bytes.Buffer
+
+		cmd, code := prepareLogsCmd("linux", mgr, homeDir, nil, &outBuf, &errBuf, func(string) error { return nil })
+		if code != 0 || cmd == nil {
+			t.Fatalf("expected a resolved cmd with code 0, got cmd=%v code=%d", cmd, code)
+		}
+		if cmd.Args[0] != "journalctl" {
+			t.Errorf("expected journalctl argv, got %v", cmd.Args)
+		}
+		if strings.Contains(outBuf.String(), "warning:") {
+			t.Errorf("warning leaked into out — would corrupt a piped log stream, got:\n%s", outBuf.String())
+		}
+		if !strings.Contains(errBuf.String(), "warning:") || !strings.Contains(errBuf.String(), "permission denied") {
+			t.Errorf("missing warning on errOut, got:\n%s", errBuf.String())
+		}
+	})
+
+	t.Run("darwin_missing_log_file_still_reports_on_out", func(t *testing.T) {
+		mgr := &fakeManager{}
+		homeDir := func() (string, error) { return "/Users/x", nil }
+		var outBuf, errBuf bytes.Buffer
+
+		cmd, code := prepareLogsCmd("darwin", mgr, homeDir, nil, &outBuf, &errBuf, func(string) error { return os.ErrNotExist })
+		if cmd != nil {
+			t.Fatalf("expected no cmd for a missing log file, got %v", cmd)
+		}
+		if code != 1 {
+			t.Errorf("exit code: got %d want 1", code)
+		}
+		if !strings.Contains(outBuf.String(), "no log file yet") {
+			t.Errorf("missing friendly error on out, got:\n%s", outBuf.String())
 		}
 	})
 }

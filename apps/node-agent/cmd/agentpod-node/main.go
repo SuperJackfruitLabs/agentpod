@@ -121,7 +121,7 @@ func main() {
   case "logs":
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
-    os.Exit(logsCmd(mgr, os.Args[2:], os.Stdout))
+    os.Exit(logsCmd(mgr, os.Args[2:], os.Stdout, os.Stderr))
   case "service":
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
