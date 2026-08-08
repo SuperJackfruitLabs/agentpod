@@ -332,7 +332,7 @@
     <button
       type="button"
       onclick={() => (filterUpdateAvailable = !filterUpdateAvailable)}
-      class={chipClass(filterUpdateAvailable)}
+      class={cn(chipClass(filterUpdateAvailable), "px-2.5 py-1.5 text-xs")}
       aria-pressed={filterUpdateAvailable}
     >
       Updates only
@@ -343,7 +343,7 @@
       type="button"
       data-testid="group-toggle"
       onclick={() => (groupByNode = !groupByNode)}
-      class={chipClass(groupByNode)}
+      class={cn(chipClass(groupByNode), "px-2.5 py-1.5 text-xs")}
       aria-pressed={groupByNode}
     >
       {groupByNode ? "Grouped" : "Flat"}
