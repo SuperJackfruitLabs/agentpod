@@ -1,7 +1,7 @@
 # apn Service CLI — Design
 
 **Date:** 2026-08-08
-**Goal:** `apn` absorbs platform service management: `stop|start|restart|status|logs` top-level verbs + `apn service install|uninstall`, with `install.sh` thinning to download → enroll → `apn service install`. Ships as v0.1.13.
+**Goal:** `apn` absorbs platform service management (`stop|start|restart|status|logs` + `apn service install|uninstall`), gains a real help system, and `install.sh` thins to download → enroll → `apn service install`. Ships as v0.1.13.
 
 ## Command surface
 
@@ -27,6 +27,46 @@ New `internal/service` package:
 - Templates: `//go:embed` plist + unit text, parameterized on binary path (absolute, via `os.Executable` + `EvalSymlinks`) and log path.
 - `selfupdate.restartService` refactors to delegate to `service.Restart` — one restart implementation. Behavior contract (exact argv on both platforms) preserved by existing tests.
 - `main.go` gains the verbs; existing `enroll|run|detect|update|version` unchanged.
+
+## Help & CLI UX
+
+Today `apn` prints a bare `usage: agentpod-node <enroll|run|detect|update|version>` and nothing else. This slice gives it a real help system — stdlib only (no cobra; the binary stays dependency-light):
+
+- `apn` (no args), `apn help`, `apn -h` / `apn --help` → structured help: one-line description of the tool, usage line, commands grouped by purpose with one-line descriptions, a short examples block, and the version.
+
+```
+agentpod-node (apn) — AgentPod fleet node agent  v0.1.13
+
+Usage: apn <command> [flags]
+
+Service:
+  status      Show local service + hub connection state (--json for scripts)
+  start       Enable and start the background service
+  stop        Stop and disable the service (sticky across reboots)
+  restart     Restart the running service
+  logs        Show service logs (-f to follow, -n N for last N lines)
+  service     install | uninstall the platform service (launchd/systemd)
+
+Node:
+  enroll      Enroll this machine with a hub (--hub, --token, --force)
+  run         Run the agent in the foreground
+  detect      Print detected harness stations as JSON
+
+Maintenance:
+  update      Self-update from the latest release (--check, --force)
+  version     Print version and platform
+
+Examples:
+  apn status
+  apn logs -f
+  apn enroll --hub https://hub.example.com --token <TOKEN>
+
+Run 'apn help <command>' or 'apn <command> -h' for command details.
+```
+
+- `apn help <command>` and `apn <command> -h` → per-command help: purpose, flags (each FlagSet gets proper `Usage` text — several currently print bare flag defaults), platform notes where behavior differs (e.g. `stop` semantics, where `logs` reads from).
+- `apn <unknown>` → "unknown command" + the closest match if the edit distance is small ("did you mean 'status'?") + pointer to `apn help`. Exit 2.
+- Help text lives beside the command definitions in `main.go`/a small `help.go`, asserted by unit tests (every registered command appears in top-level help; help exits 0; unknown command exits 2).
 
 ## Installer thinning
 
