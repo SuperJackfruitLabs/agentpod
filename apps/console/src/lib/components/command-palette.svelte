@@ -10,18 +10,25 @@
   import SettingsIcon from "@lucide/svelte/icons/settings";
 
   let nodes = $state<{ id: string; hostname: string }[]>([]);
+  let loading = $state(false);
 
   // Load node list whenever the palette opens, mirroring the old component's
   // on-open fetch (results reset to empty on failure so a bad fetch doesn't
-  // leave stale entries around).
+  // leave stale entries around). `loading` tracks the in-flight request so
+  // the Nodes section shows a loading affordance instead of silently
+  // rendering nothing while listNodes() resolves.
   $effect(() => {
     if (commandPalette.isOpen) {
+      loading = true;
       listNodes()
         .then((fetched) => {
           nodes = fetched.map((n) => ({ id: n.id, hostname: n.hostname }));
         })
         .catch(() => {
           nodes = [];
+        })
+        .finally(() => {
+          loading = false;
         });
     }
   });
@@ -64,7 +71,10 @@
         Settings
       </Command.Item>
     </Command.Group>
-    {#if nodes.length > 0}
+    {#if loading}
+      <Command.Separator />
+      <Command.Loading>Loading nodes…</Command.Loading>
+    {:else if nodes.length > 0}
       <Command.Separator />
       <Command.Group heading="Nodes">
         {#each nodes as node (node.id)}

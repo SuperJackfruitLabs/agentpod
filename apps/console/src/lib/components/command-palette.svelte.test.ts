@@ -127,6 +127,31 @@ test("clicking a node item calls goto('/nodes/node_1')", async () => {
   expect(gotoSpy).toHaveBeenCalledWith("/nodes/node_1");
 });
 
+test("shows a loading affordance while listNodes() is pending, then the Nodes group once it resolves", async () => {
+  let resolveNodes!: (nodes: typeof mockNodes) => void;
+  const pending = new Promise<typeof mockNodes>((resolve) => {
+    resolveNodes = resolve;
+  });
+  vi.mocked(api.listNodes).mockReturnValue(pending as never);
+
+  commandPalette.open();
+  const { getByText, queryByText } = render(CommandPalette);
+
+  // Static actions render instantly; the Nodes section is still pending.
+  await waitFor(() => {
+    expect(getByText("New runtime")).toBeTruthy();
+    expect(getByText("Loading nodes…")).toBeTruthy();
+  });
+  expect(queryByText("box1")).toBeNull();
+
+  resolveNodes(mockNodes);
+
+  await waitFor(() => {
+    expect(getByText("box1")).toBeTruthy();
+  });
+  expect(queryByText("Loading nodes…")).toBeNull();
+});
+
 test("clicking Settings calls goto('/settings')", async () => {
   vi.mocked(api.listNodes).mockResolvedValue([]);
   const gotoSpy = vi.mocked(nav.goto);
