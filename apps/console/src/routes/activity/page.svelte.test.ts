@@ -1,13 +1,17 @@
 /**
  * activity/page.svelte.test.ts
  *
- * Tests for the /activity page (fleet-wide audit log).
+ * Tests for the /activity page (fleet-wide audit log), rendered on the
+ * shared DataTable (Plan A).
  * Asserts:
  *  - renders a PageHeader with title "Activity"
- *  - renders activity rows from a mocked listActivity()
- *  - shows the verb, stationKey, result, and relative time for each row
- *  - empty state: "no activity yet" when listActivity returns []
+ *  - renders activity rows from a mocked listActivity(), with verb,
+ *    stationKey, and result all present per row (rows found via the
+ *    DataTable's `rowTestId="activity-row"`)
+ *  - shows relative time for each row
+ *  - empty state: "No activity yet" when listActivity returns []
  *  - error state when listActivity rejects
+ *  - listActivity called once on mount
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
@@ -81,19 +85,20 @@ test("renders the Activity page header", async () => {
 test("renders activity rows with verb, stationKey, and result", async () => {
   vi.spyOn(api, "listActivity").mockResolvedValue(mockRows);
 
-  const { getByText, getAllByTestId } = render(ActivityPage);
+  const { getAllByTestId } = render(ActivityPage);
 
   await waitFor(() => {
-    expect(getByText("terminal.open")).toBeTruthy();
-    expect(getByText("fs.write")).toBeTruthy();
-    expect(getByText("opencode:abc")).toBeTruthy();
-    expect(getByText("hermes:xyz")).toBeTruthy();
-  });
+    const activityRows = getAllByTestId("activity-row");
+    expect(activityRows).toHaveLength(2);
 
-  const resultBadges = getAllByTestId("result-badge");
-  expect(resultBadges.length).toBe(2);
-  expect(resultBadges[0].textContent).toContain("ok");
-  expect(resultBadges[1].textContent).toContain("error");
+    expect(activityRows[0].textContent).toContain("terminal.open");
+    expect(activityRows[0].textContent).toContain("opencode:abc");
+    expect(activityRows[0].textContent).toContain("ok");
+
+    expect(activityRows[1].textContent).toContain("fs.write");
+    expect(activityRows[1].textContent).toContain("hermes:xyz");
+    expect(activityRows[1].textContent).toContain("error");
+  });
 });
 
 test("shows relative time for each row", async () => {
@@ -115,7 +120,7 @@ test("shows empty state when listActivity returns []", async () => {
 
   await waitFor(() => {
     const emptyState = getByTestId("empty-state");
-    expect(emptyState.textContent).toContain("no activity yet");
+    expect(emptyState.textContent).toContain("No activity yet");
   });
 });
 

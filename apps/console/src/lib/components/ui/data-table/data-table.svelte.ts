@@ -55,7 +55,17 @@ export function createSvelteTable<TData extends RowData>(options: TableOptions<T
 	function updateOptions() {
 		table.setOptions(() => {
 			return mergeObjects(resolvedOptions, options, {
-				state: mergeObjects(state, options.state || {}),
+				// `() => state` (a thunk), not `state` — mergeObjects snapshots
+				// plain values by reference at call time, and updateOptions()
+				// only runs once reactively (its body never reads a tracked
+				// value, so the effect never re-fires). Internally-managed
+				// state — e.g. pagination, which has no getter of its own in
+				// `options.state` below — is only ever written by reassigning
+				// `state` inside onStateChange, so table.getState() must
+				// re-resolve the current `state` value on every read, not the
+				// mount-time snapshot, or nextPage()/previousPage() etc. would
+				// silently stop updating after the very first render.
+				state: mergeObjects(() => state, options.state || {}),
 
 				onStateChange: (updater: Updater<TableState>) => {
 					if (updater instanceof Function) state = updater(state);

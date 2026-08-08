@@ -22,6 +22,7 @@
 		pageSize = 50,
 		filterValue = $bindable(""),
 		class: className = undefined,
+		rowTestId = undefined,
 	}: {
 		columns: ColumnDef<T>[];
 		data: T[];
@@ -30,6 +31,8 @@
 		pageSize?: number;
 		filterValue?: string;
 		class?: string;
+		/** Optional `data-testid` applied to every rendered body row. */
+		rowTestId?: string;
 	} = $props();
 
 	let sorting = $state<SortingState>([]);
@@ -115,18 +118,26 @@
 				{/each}
 			</Table.Header>
 			<Table.Body>
-				{#each table.getRowModel().rows as row (row.id)}
+				{#if table.getRowModel().rows.length === 0}
 					<Table.Row>
-						{#each row.getVisibleCells() as cell (cell.id)}
-							<Table.Cell>
-								<FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
-							</Table.Cell>
-						{/each}
+						<Table.Cell colspan={columns.length} class="p-0">
+							<Empty title="No matching rows" class="rounded-none border-0" />
+						</Table.Cell>
 					</Table.Row>
-				{/each}
+				{:else}
+					{#each table.getRowModel().rows as row (row.id)}
+						<Table.Row data-testid={rowTestId}>
+							{#each row.getVisibleCells() as cell (cell.id)}
+								<Table.Cell>
+									<FlexRender content={cell.column.columnDef.cell} context={cell.getContext()} />
+								</Table.Cell>
+							{/each}
+						</Table.Row>
+					{/each}
+				{/if}
 			</Table.Body>
 		</Table.Root>
-		{#if table.getPageCount() > 1}
+		{#if table.getRowModel().rows.length > 0 && table.getPageCount() > 1}
 			<div class="flex items-center justify-end gap-2 border-t px-3 py-2">
 				<span class="text-xs text-muted-foreground">
 					Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()}
