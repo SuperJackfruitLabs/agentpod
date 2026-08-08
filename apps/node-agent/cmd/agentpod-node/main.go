@@ -4,7 +4,8 @@ import ("context"; "errors"; "flag"; "fmt"; "os"; "runtime"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/config"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/enroll"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/host"
-  "github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate")
+  "github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
+  "github.com/rakeshgangwar/agentpod/node-agent/internal/service")
 
 // version is the agent's build version. Overridden at link time via:
 //
@@ -21,10 +22,26 @@ func alreadyEnrolled(cfg config.Config, loadErr error) bool {
 }
 
 func main() {
-  if len(os.Args) < 2 { fmt.Println("usage: agentpod-node <enroll|run|detect|update|version>"); os.Exit(2) }
+  if len(os.Args) < 2 { fmt.Println(helpText(version)); os.Exit(0) }
   switch os.Args[1] {
+  case "help", "-h", "--help":
+    if os.Args[1] == "help" && len(os.Args) > 2 {
+      name := os.Args[2]
+      if !isCommand(name) {
+        fmt.Printf("unknown command: %q\n", name)
+        os.Exit(2)
+      }
+      fmt.Println(commandHelp(name))
+      os.Exit(0)
+    }
+    fmt.Println(helpText(version))
+    os.Exit(0)
   case "enroll":
     fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+    fs.Usage = func() {
+      fmt.Fprintln(fs.Output(), commandHelp("enroll"))
+      fs.PrintDefaults()
+    }
     flagHub := fs.String("hub", "", "hub base URL")
     flagToken := fs.String("token", "", "enrollment token")
     flagForce := fs.Bool("force", false, "re-enroll even when a valid config exists")
@@ -58,11 +75,17 @@ func main() {
     }
     fmt.Println("enrolled:", id)
   case "run":
+    if maybeShowHelp(os.Stdout, "run", os.Args[2:]) { os.Exit(0) }
     runCmd() // implemented in Task 9
   case "detect":
+    if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) { os.Exit(0) }
     detectCmd() // debug/ops: print detected stations as JSON
   case "update":
     fs := flag.NewFlagSet("update", flag.ExitOnError)
+    fs.Usage = func() {
+      fmt.Fprintln(fs.Output(), commandHelp("update"))
+      fs.PrintDefaults()
+    }
     check := fs.Bool("check", false, "resolve and report current/latest version, no changes")
     force := fs.Bool("force", false, "update even when already on the latest version")
     fs.Parse(os.Args[2:])
@@ -99,8 +122,47 @@ func main() {
       fmt.Println(res.Reason)
     }
   case "version":
+    if maybeShowHelp(os.Stdout, "version", os.Args[2:]) { os.Exit(0) }
     fmt.Printf("agentpod-node %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
+  case "stop":
+    // stopEntry gates on -h/--help itself (see help.go's maybeShowHelp) —
+    // NewManager has no side effects of its own (it only inspects
+    // runtime.GOOS/uid), so it's safe to construct before that gate runs.
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(stopEntry(mgr, os.Args[2:], os.Stdout))
+  case "start":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(startEntry(mgr, os.Args[2:], os.Stdout))
+  case "restart":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(restartEntry(mgr, os.Args[2:], os.Stdout))
+  case "status":
+    jsonOut, done, code := parseStatusFlags(os.Args[2:], os.Stdout)
+    if done { os.Exit(code) }
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    cfg, cfgErr := config.Load(config.DefaultPath())
+    os.Exit(statusCmd(mgr, cfg, cfgErr, enroll.CheckCredential, jsonOut, os.Stdout))
+  case "logs":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(logsCmd(mgr, os.Args[2:], os.Stdout, os.Stderr))
+  case "service":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    var verb string; var rest []string
+    if len(os.Args) > 2 { verb = os.Args[2] }
+    if len(os.Args) > 3 { rest = os.Args[3:] }
+    os.Exit(runServiceVerb(verb, rest, mgr, os.Stdout))
   default:
-    fmt.Println("unknown command:", os.Args[1]); os.Exit(2)
+    fmt.Printf("unknown command: %q\n", os.Args[1])
+    if s := suggestCommand(os.Args[1]); s != "" {
+      fmt.Printf("did you mean '%s'?\n", s)
+    }
+    fmt.Println("run 'apn help' for usage.")
+    os.Exit(2)
   }
 }

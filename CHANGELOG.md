@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.13 - 2026-08-08
+
+`apn` service CLI: status/stop/start/restart/logs, `service install`/`uninstall`, a grouped help system, and a thinner installer.
+
+### Added
+
+- **Service verbs** (#199)
+  - `apn status [--json]`, `apn stop`, `apn start`, `apn restart`, `apn logs [-f] [-n N]` operate the node-agent's OS service (systemd on Linux, launchd LaunchAgent on macOS) through a new `internal/service.Manager`.
+  - `apn stop` is sticky: it stops **and disables** the service so it doesn't respawn on its own; `apn start` re-enables and starts it.
+  - `apn status` reports local service state (installed/enabled/running/version) plus hub reachability and credential validity; exits 0 only when both are healthy.
+- **`apn service install` / `apn service uninstall`** (#199) — install or remove the platform service directly from the binary, backed by embedded service templates (systemd user/system units, launchd plist).
+- **Help system** (#199) — grouped top-level help (`apn`, `apn help`, `-h`/`--help`), per-command help (`apn help <command>`), and did-you-mean suggestions for unknown commands. `-h`/`--help` now gates every command, including `stop`/`start`/`restart`/`run`/`detect`/`version`/`service` — previously only the four commands with a `flag.FlagSet` (enroll, update, status, logs) recognized `-h`; the others executed the real action (e.g. `apn stop -h` used to actually stop the service).
+
+### Changed
+
+- **Installer thinning** (#199) — `install.sh` no longer inlines the systemd unit heredoc or the LaunchAgent plist heredoc, and no longer downloads `agentpod-node.service` for a system install; it downloads the binary, enrolls, then delegates service setup to `"$DEST_BIN" service install`. The `.service` release asset still ships (for direct consumers) — the installer just stops fetching it.
+- **`apn update`'s restart delegates to `internal/service`** (#199) — the darwin/linux restart logic in selfupdate now goes through `service.NewManagerForRestart` instead of hand-built `launchctl`/`systemctl` argv.
+
+---
+
 ## v0.1.12 - 2026-08-08
 
 macOS installer rootless improvements and launchd-native update restart.
