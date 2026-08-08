@@ -254,7 +254,6 @@ function applyColorScheme(colorScheme: ColorScheme) {
     "sidebar-accent-foreground": "--sidebar-accent-foreground",
     "sidebar-border": "--sidebar-border",
     "sidebar-ring": "--sidebar-ring",
-    radius: "--radius",
     // Fleet status tokens derive from the scheme's accent colors
     "cyber-emerald": "--status-running",
     "cyber-amber": "--status-degraded",
@@ -271,6 +270,9 @@ function applyColorScheme(colorScheme: ColorScheme) {
     }
   }
 
+  // Radius is a fixed design token (app.css), not a per-scheme value; guard against
+  // a stale inline value left over from before this change within a live session.
+  root.style.removeProperty("--radius");
 }
 
 function applyFontPairing(fontPairing: FontPairing) {

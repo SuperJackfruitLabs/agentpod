@@ -27,5 +27,6 @@ describe("Field", () => {
     });
     expect(screen.getByText("Node name")).toBeTruthy();
     expect(screen.getByText("Name is required")).toBeTruthy();
+    expect(screen.queryByText("Shown in the fleet list.")).toBeNull();
   });
 });

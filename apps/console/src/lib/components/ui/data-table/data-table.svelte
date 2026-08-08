@@ -65,7 +65,7 @@
 </script>
 
 {#if data.length === 0}
-	<Empty title={emptyTitle} description={emptyDescription} />
+	<Empty title={emptyTitle} description={emptyDescription} class={className} />
 {:else}
 	<div class={cn("rounded-lg border", className)}>
 		<Table.Root>

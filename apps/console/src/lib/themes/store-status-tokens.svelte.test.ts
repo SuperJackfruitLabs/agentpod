@@ -38,4 +38,12 @@ describe("status token application", () => {
     expect(root.style.getPropertyValue("--status-starting")).toBe(styles["cyber-cyan"]);
     expect(root.style.getPropertyValue("--status-sleeping")).toBe(styles["cyber-magenta"]);
   });
+
+  it("does not set an inline --radius override, leaving the CSS default in app.css to govern", () => {
+    const scheme = colorSchemesMap.get("twitter") ?? [...colorSchemesMap.values()][0];
+    themeStore.setColorScheme(scheme.id);
+
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue("--radius")).toBe("");
+  });
 });
