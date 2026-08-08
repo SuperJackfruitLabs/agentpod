@@ -18,6 +18,8 @@ cd apps/console && pnpm check && pnpm test && pnpm build
 
 Hub tests REQUIRE both: a **pgvector** postgres on `:5434` (`docker run -d --name agentpod-test-postgres -e POSTGRES_USER=agentpod -e POSTGRES_PASSWORD=agentpod-dev-password -e POSTGRES_DB=agentpod -p 5434:5432 pgvector/pgvector:pg16`) and the explicit `DATABASE_URL` override — bun auto-loads `apps/hub/.env`, which may pin a dev DB. Details: `TESTING.md`.
 
+On an enrolled node, `apn status|stop|start|restart|logs [-f]` and `apn service install|uninstall` manage the node-agent service (systemd on Linux, LaunchAgent on macOS) — see `docs/OPERATING.md`.
+
 ## Workflow
 
 - TDD: failing test first, including a regression test for every bug fix.

@@ -19,7 +19,7 @@ curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/in
   | sudo bash -s -- https://hub.<your-domain> <enrollment-token-from-console>
 ```
 
-**Rootless** — for key-only hosts where the login user has no `sudo` password. Pass `--user`; it installs into `~/.local/bin`, enrolls as you, and (if a user systemd manager is available) sets up a `systemd --user` service, otherwise prints run instructions (`apn run` / `tmux`):
+**Rootless** — for key-only hosts where the login user has no `sudo` password. Pass `--user`; it installs into `~/.local/bin`, enrolls as you, then runs `apn service install` (systemd `--user` on Linux) — falling back to run instructions (`apn run` / `tmux`) if no user service manager is available:
 
 ```bash
 curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
@@ -27,13 +27,17 @@ curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/in
 ```
 (If not root and `sudo` is absent, the installer auto-falls back to this rootless mode. For a `systemd --user` service to survive logout/reboot, run `sudo loginctl enable-linger <user>` once.)
 
-**macOS** — the same one-liner (with or without `sudo`/`--user`) always installs rootless: binary in `~/.local/bin`, enrolled as the invoking user, service registered as a per-user LaunchAgent (`~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`). The `curl | sudo bash` form above re-execs itself as `$SUDO_USER` automatically, piped invocation included.
+**macOS** — the same one-liner (with or without `sudo`/`--user`) always installs rootless: binary in `~/.local/bin`, enrolled as the invoking user, service registered via `apn service install` as a per-user LaunchAgent (label `dev.agentpod.node`). The `curl | sudo bash` form above re-execs itself as `$SUDO_USER` automatically, piped invocation included.
+
+Manage the service with the `apn` verbs, on either platform:
 
 ```bash
-launchctl print gui/$(id -u)/dev.agentpod.node | head -20                        # status
-tail -f ~/Library/Logs/agentpod-node.log                                         # logs
-launchctl kickstart -k gui/$(id -u)/dev.agentpod.node                            # restart
-launchctl bootout gui/$(id -u)/dev.agentpod.node && rm ~/Library/LaunchAgents/dev.agentpod.node.plist   # uninstall
+apn status              # installed / running / hub reachability
+apn logs -f             # follow service logs
+apn restart             # restart in place
+apn stop                # stop and disable (sticky — survives reboot until `apn start`)
+apn start                # re-enable and start
+apn service uninstall   # stop, disable, and remove the service
 ```
 
 A LaunchAgent only runs while you're logged in — system sleep suspends it, and the node shows offline until wake (by design).
@@ -41,11 +45,13 @@ A LaunchAgent only runs while you're logged in — system sleep suspends it, and
 The installer downloads the prebuilt binary for your platform (linux/darwin × amd64/arm64) from the latest GitHub Release, then — for a **system-wide Linux install (root, no `--user`)**:
 1. Installs it to `/usr/local/bin/agentpod-node`.
 2. Runs `agentpod-node enroll --hub <HUB_URL> --token <TOKEN>` — writes config to `/root/.config/agentpod-node/config.json`.
-3. Installs and enables the systemd unit `agentpod-node.service`.
+3. Runs `apn service install`, which installs and enables the systemd unit `agentpod-node.service`.
 
 (Rootless and macOS installs use the different paths and service mechanism described above instead.)
 
-The installer is idempotent: re-running upgrades the binary and re-enrolls. Binaries are published on every `v*` tag by `.github/workflows/release-node-agent.yml`.
+The installer is idempotent: re-running upgrades the binary, re-enrolls, and re-installs the service. Binaries are published on every `v*` tag by `.github/workflows/release-node-agent.yml`.
+
+> **Under the hood:** the `apn` verbs wrap the native service manager — on Linux, `systemctl [--user] status|restart|stop|start|enable|disable agentpod-node` + `journalctl [--user-unit|-u] agentpod-node -f`; on macOS, `launchctl print/kickstart/bootout gui/$(id -u)/dev.agentpod.node` + `tail -f ~/Library/Logs/agentpod-node.log`. Reach for the raw commands only when diagnosing the service manager itself — `apn status` / `apn logs` / `apn restart` are the day-to-day path.
 
 ### Option A′ — from a repo checkout (build from source)
 
@@ -69,16 +75,15 @@ apn enroll --hub https://hub.<your-domain> --token <TOKEN>
 
 # 2. Run (reads config automatically):
 apn run
-# Or, install the systemd unit and let systemd manage it:
-#   cp apps/node-agent/deploy/agentpod-node.service /etc/systemd/system/
-#   systemctl daemon-reload && systemctl enable --now agentpod-node
+# Or, let apn manage it as a persistent service (systemd on Linux, LaunchAgent on macOS):
+#   apn service install
 ```
 
 ### Verify enrollment
 
 ```bash
-systemctl status agentpod-node
-journalctl -u agentpod-node -f
+apn status
+apn logs -f
 # Expected: "connected to hub" — the node appears online in the console, labelled "no tunnel"
 ```
 
@@ -218,13 +223,13 @@ Hermes stations that have a Matrix identity configured display the **Matrix ID**
 ## 8. Troubleshooting
 
 **Node not appearing online after enroll:**
-- Check `journalctl -u agentpod-node -f` on the host for connection errors.
+- Check `apn logs -f` on the host for connection errors.
 - Confirm `PROVISIONING_HUB_URL` or `--hub` URL is reachable from the host (not `127.0.0.1`).
 - Check the hub log: `journalctl -u agentpod-hub -n 50 --no-pager`.
 
 **Terminal disconnects and does not reconnect:**
 - The node-agent holds the PTY master; a node-agent restart will lose unattached sessions.
-- Ensure `agentpod-node` is running (`systemctl status agentpod-node`).
+- Ensure `agentpod-node` is running (`apn status`).
 
 **Provisioned container does not auto-enroll:**
 - Confirm `PROVISIONING_HUB_URL` is set to the container-reachable hub URL (not `127.0.0.1`).

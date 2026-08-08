@@ -295,18 +295,11 @@ systemctl status agentpod-hub --no-pager
 
 If the console changed: rebuild locally with `PUBLIC_HUB_URL=https://hub.<your-domain> pnpm --filter @agentpod/console build` and redeploy `apps/console/build/` to Cloudflare Pages (Wrangler or push to the connected branch).
 
-Node-agent upgrades: re-run the curl installer on each host (idempotent):
+Node-agent upgrades: re-run the curl installer on each host (idempotent — it re-installs the binary, re-enrolls, and re-runs `apn service install`):
 ```bash
 curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
   | sudo bash -s -- https://hub.<your-domain> <TOKEN>
 ```
 Or, from a repo checkout: `sudo bash apps/node-agent/scripts/install-node-agent.sh https://hub.<your-domain> <TOKEN>`.
 
-On macOS the same command — piped and all — always installs rootless (regardless of `sudo`, re-execing as the invoking user) and (re)installs a per-user LaunchAgent — `~/Library/LaunchAgents/dev.agentpod.node.plist`, label `dev.agentpod.node`:
-```bash
-launchctl print gui/$(id -u)/dev.agentpod.node | head -20   # status
-tail -f ~/Library/Logs/agentpod-node.log                    # logs
-launchctl kickstart -k gui/$(id -u)/dev.agentpod.node       # restart
-launchctl bootout gui/$(id -u)/dev.agentpod.node && rm ~/Library/LaunchAgents/dev.agentpod.node.plist   # uninstall
-```
-It only runs while the user is logged in; system sleep suspends it and the node shows offline until wake.
+On macOS the same command — piped and all — always installs rootless (regardless of `sudo`, re-execing as the invoking user) and (re)installs a per-user LaunchAgent via `apn service install`. Manage it with the `apn` verbs — `apn status`, `apn logs -f`, `apn restart` — it only runs while the user is logged in; system sleep suspends it and the node shows offline until wake. See [docs/OPERATING.md](./OPERATING.md#1-enroll-a-node) for the full verb list and the raw-launchctl/systemctl fallback.
