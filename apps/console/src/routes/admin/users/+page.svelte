@@ -28,7 +28,6 @@
   import { formatDate } from "$lib/utils/format-date";
   import { statusBadgeClass } from "$lib/utils/status-badge";
   import { cn } from "$lib/utils";
-  import PlusIcon from "@lucide/svelte/icons/plus";
   import BanIcon from "@lucide/svelte/icons/ban";
   import CheckIcon from "@lucide/svelte/icons/check";
 
@@ -41,6 +40,7 @@
   let stats = $state<AdminStatsType | null>(null);
   let error = $state<string | null>(null);
   let signupEnabled = $state(true);
+  let signupLoading = $state(false);
 
   // Server-driven pagination (0-based, matches DataTable's manual mode)
   let pageIndex = $state(0);
@@ -124,6 +124,7 @@
   }
 
   async function handleToggleSignup() {
+    signupLoading = true;
     try {
       if (signupEnabled) {
         await disableSignup();
@@ -136,6 +137,8 @@
       }
     } catch (e) {
       toast.error("Failed to update signup settings", { description: (e as Error).message });
+    } finally {
+      signupLoading = false;
     }
   }
 
@@ -199,23 +202,16 @@
   </div>
 {/snippet}
 
-<PageHeader title="Admin" subtitle="User management">
-  {#snippet actions()}
-    <Button onclick={openCreateUserDialog} data-testid="create-user-btn">
-      <PlusIcon class="h-4 w-4 mr-2" />
-      Create user
-    </Button>
-  {/snippet}
-</PageHeader>
+<PageHeader title="Admin" subtitle="User management" />
 
 <div class="container mx-auto max-w-6xl space-y-6 px-4 py-6">
   {#if stats}
     <AdminStats {stats} />
   {/if}
 
-  <AdminSettingsBar {signupEnabled} onToggle={handleToggleSignup} onCreateUser={openCreateUserDialog} />
+  <AdminSettingsBar {signupEnabled} {signupLoading} onToggle={handleToggleSignup} onCreateUser={openCreateUserDialog} />
 
-  <UserFilters bind:searchQuery bind:roleFilter bind:bannedFilter onSearch={handleSearch} onRefresh={loadData} {isLoading} />
+  <UserFilters bind:searchQuery bind:roleFilter bind:bannedFilter onSearch={handleSearch} onRefresh={loadData} onFilterChange={handleSearch} {isLoading} />
 
   {#if isLoading}
     <div class="space-y-2">

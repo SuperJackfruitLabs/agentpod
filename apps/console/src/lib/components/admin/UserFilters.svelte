@@ -23,6 +23,10 @@
     onSearch: () => void;
     onRefresh: () => void;
     isLoading: boolean;
+    /** Fired after roleFilter/bannedFilter updates from a Select change — the
+     * two selects auto-apply immediately (parity with the pre-rebuild page);
+     * only the text search waits for onSearch/Enter. */
+    onFilterChange?: () => void;
   }
 
   let {
@@ -32,6 +36,7 @@
     onSearch,
     onRefresh,
     isLoading,
+    onFilterChange,
   }: Props = $props();
 
   const roleFilterLabel: Record<RoleFilter, string> = {
@@ -65,7 +70,10 @@
     type="single"
     value={roleFilter}
     onValueChange={(v) => {
-      if (v) roleFilter = v as RoleFilter;
+      if (v) {
+        roleFilter = v as RoleFilter;
+        onFilterChange?.();
+      }
     }}
   >
     <Select.Trigger class="w-32">
@@ -83,7 +91,10 @@
     type="single"
     value={bannedFilter}
     onValueChange={(v) => {
-      if (v) bannedFilter = v as BannedFilter;
+      if (v) {
+        bannedFilter = v as BannedFilter;
+        onFilterChange?.();
+      }
     }}
   >
     <Select.Trigger class="w-32">

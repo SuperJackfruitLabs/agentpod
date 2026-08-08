@@ -12,10 +12,39 @@
  *  - signup toggle calls enable/disableSignup
  *  - pagination Next calls listUsers with offset = pageSize
  *  - create-user flow validates password length before calling createUser
+ *  - role-select change auto-applies: triggers a listUsers refetch with the role param
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, waitFor, cleanup, screen } from "@testing-library/svelte";
+
+// bits-ui's Select opens on `pointerdown` (not `click`) and picks an item on
+// `pointerup`, and touches `hasPointerCapture`/`releasePointerCapture` along
+// the way — jsdom implements neither a `PointerEvent` constructor nor those
+// capture methods. Polyfill just enough for the role-select interaction test
+// below (same polyfill as RoleDialog.svelte.test.ts, scoped to this file).
+if (typeof window.PointerEvent === "undefined") {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error jsdom has no native PointerEvent
+  window.PointerEvent = PointerEventPolyfill;
+}
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {};
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {};
+}
 
 // ---------------------------------------------------------------------------
 // SvelteKit stubs
@@ -257,23 +286,23 @@ test("create-user flow validates password length before calling createUser", asy
     totalPages: 1,
   });
 
-  const { getByTestId, getByLabelText, getByText } = render(UsersPage);
+  const { getByRole, getByLabelText, getByText } = render(UsersPage);
 
-  await waitFor(() => {
-    expect(getByTestId("create-user-btn")).toBeTruthy();
-  });
-
-  await fireEvent.click(getByTestId("create-user-btn"));
+  // AdminSettingsBar owns the single persistent "Create user" entry point
+  // (the PageHeader no longer duplicates it) — one match until the dialog opens.
+  const openBtn = await waitFor(() => getByRole("button", { name: /^create user$/i }));
+  await fireEvent.click(openBtn);
 
   const nameInput = await waitFor(() => getByLabelText(/name/i));
   await fireEvent.input(nameInput, { target: { value: "Jane Doe" } });
   await fireEvent.input(getByLabelText(/email/i), { target: { value: "jane@x.test" } });
   await fireEvent.input(getByLabelText(/password/i), { target: { value: "short" } });
 
-  // Two "Create user" buttons exist (header CTA + dialog submit) — the
-  // dialog's confirm button is the one rendered last (bits-ui portals the
-  // dialog content to the end of <body>), matching the runtimes test's
-  // established pattern for disambiguating a dialog's own action button.
+  // Two "Create user" buttons now exist (AdminSettingsBar CTA + dialog
+  // submit) — the dialog's confirm button is the one rendered last (bits-ui
+  // portals the dialog content to the end of <body>), matching the
+  // runtimes test's established pattern for disambiguating a dialog's own
+  // action button.
   const createButtons = screen.getAllByRole("button", { name: /^create user$/i });
   await fireEvent.click(createButtons[createButtons.length - 1]);
 
@@ -281,4 +310,38 @@ test("create-user flow validates password length before calling createUser", asy
     expect(getByText(/at least 8 characters/i)).toBeTruthy();
   });
   expect(adminApi.createUser).not.toHaveBeenCalled();
+});
+
+test("role-select change auto-applies: triggers a listUsers refetch with the role param", async () => {
+  vi.mocked(adminApi.listUsers).mockResolvedValue({
+    users: [makeUser()],
+    total: 1,
+    limit: 20,
+    offset: 0,
+    page: 1,
+    totalPages: 1,
+  });
+
+  const { getAllByTestId, getByRole } = render(UsersPage);
+
+  await waitFor(() => {
+    expect(getAllByTestId("user-row").length).toBe(1);
+  });
+  expect(adminApi.listUsers).toHaveBeenCalledTimes(1);
+
+  // Open the Role filter Select and pick "Admin" — parity with the
+  // pre-rebuild page, this must refetch immediately (no separate Search
+  // click required). bits-ui's Select trigger opens on pointerdown and picks
+  // an item on pointerup (same interaction as RoleDialog.svelte.test.ts).
+  const roleTrigger = getByRole("button", { name: /^all roles$/i });
+  await fireEvent.pointerDown(roleTrigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+
+  const adminOption = await waitFor(() => screen.getByRole("option", { name: /^admin$/i }));
+  await fireEvent.pointerUp(adminOption, { pointerId: 1, button: 0, pointerType: "mouse" });
+
+  await waitFor(() => {
+    expect(adminApi.listUsers).toHaveBeenCalledTimes(2);
+  });
+  const secondCallOptions = vi.mocked(adminApi.listUsers).mock.calls[1][0];
+  expect(secondCallOptions).toMatchObject({ role: "admin", offset: 0 });
 });
