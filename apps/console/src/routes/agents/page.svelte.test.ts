@@ -12,6 +12,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import { setSearchParam, resetReactivePageState } from "../../mocks/reactive-page-state.svelte";
 
 // ---------------------------------------------------------------------------
 // SvelteKit stubs
@@ -22,11 +23,12 @@ vi.mock("$app/navigation", () => ({
   replaceState: vi.fn(),
 }));
 
-vi.mock("$app/state", () => ({
-  page: {
-    url: { pathname: "/agents", searchParams: null },
-  },
-}));
+// Reactive $app/state stub — a plain static stub can't exercise the
+// ?updates=1 deep-link test below, which needs a real URLSearchParams.
+vi.mock("$app/state", async () => {
+  const mod = await import("../../mocks/reactive-page-state.svelte");
+  return { page: mod.page };
+});
 
 // ---------------------------------------------------------------------------
 // Sonner stub (used transitively by AgentTable → toast)
@@ -46,7 +48,10 @@ import AgentsPage from "./+page.svelte";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-beforeEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  vi.restoreAllMocks();
+  resetReactivePageState();
+});
 afterEach(cleanup);
 
 const mockAgents = [
@@ -137,5 +142,25 @@ test("calls getFleet on mount", async () => {
 
   await waitFor(() => {
     expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+test("?updates=1 seeds the updates-only pill pressed and shows only update-available agents", async () => {
+  setSearchParam("updates", "1");
+  vi.spyOn(api, "getFleet").mockResolvedValue({
+    stats: mockStats,
+    agents: [
+      { ...mockAgents[0], updateAvailable: true },
+      { ...mockAgents[1], updateAvailable: false },
+    ],
+  });
+
+  const { getByRole, getByText, queryByText } = render(AgentsPage);
+
+  await waitFor(() => {
+    const pill = getByRole("button", { name: /updates only/i });
+    expect(pill.getAttribute("aria-pressed")).toBe("true");
+    expect(getByText("hanuman")).toBeTruthy();
+    expect(queryByText("kubera")).toBeNull();
   });
 });

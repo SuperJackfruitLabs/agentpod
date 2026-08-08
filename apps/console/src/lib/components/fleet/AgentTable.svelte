@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { FleetAgent } from "@agentpod/contract";
   import { updateNode } from "$lib/api/client";
   import { statusBadgeClass, tokenFor, type StatusToken } from "$lib/utils/status-badge";
@@ -15,6 +16,7 @@
   interface ExternalFilter {
     stationId?: string;
     status?: string;
+    updatesOnly?: boolean;
   }
 
   let {
@@ -51,7 +53,10 @@
 
   let searchQuery = $state("");
   let groupByNode = $state(true);
-  let filterUpdateAvailable = $state(false);
+  // Seeded once from the incoming deep-link (?updates=1 → externalFilter.updatesOnly)
+  // so the URL wins on first render; the pill stays freely user-toggleable afterwards.
+  // untrack: intentionally captures the initial prop value only.
+  let filterUpdateAvailable = $state(untrack(() => externalFilter?.updatesOnly ?? false));
 
   // ── Sorting ───────────────────────────────────────────────────────────────────
   // Tri-state per column: click cycles none → asc → desc → none. Sorting
