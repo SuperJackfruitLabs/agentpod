@@ -81,7 +81,7 @@
   {#if isLoading}
     <div class="space-y-3">
       {#each [1, 2, 3] as _}
-        <Skeleton class="h-10 rounded-sm" />
+        <Skeleton class="h-10 rounded-lg" />
       {/each}
     </div>
 

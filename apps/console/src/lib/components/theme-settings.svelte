@@ -175,7 +175,7 @@
           <button
             type="button"
             onclick={() => handleColorSchemeChange(scheme.id)}
-            class="relative flex flex-col rounded border overflow-hidden transition-all
+            class="relative flex flex-col rounded border overflow-hidden transition-colors
               {isSelected
                 ? 'border-primary ring-2 ring-primary'
                 : 'border-border/30 hover:border-primary/50'}"
@@ -283,7 +283,7 @@
           <button
             type="button"
             onclick={() => handleFontPairingChange(pairing.id)}
-            class="relative p-4 rounded border text-left transition-all
+            class="relative p-4 rounded border text-left transition-colors
               {isSelected
                 ? 'border-primary ring-2 ring-primary bg-primary/5'
                 : 'border-border/30 hover:border-primary/50 bg-background/50'}"
@@ -312,13 +312,13 @@
 
             <!-- Font Names -->
             <div class="mt-3 pt-3 border-t border-border/30 flex flex-wrap gap-2">
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-muted font-mono">
                 {pairing.fonts["font-body"]}
               </span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-muted font-mono">
                 {pairing.fonts["font-heading"]}
               </span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded bg-muted font-mono">
+              <span class="text-xs px-1.5 py-0.5 rounded bg-muted font-mono">
                 {pairing.fonts["font-mono"]}
               </span>
             </div>

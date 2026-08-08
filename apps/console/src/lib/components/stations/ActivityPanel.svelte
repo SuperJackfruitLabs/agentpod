@@ -87,7 +87,7 @@
       <ul class="divide-y divide-border/40">
         {#each rows as row (row.id)}
           <li
-            class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 py-2.5 text-[13px] transition-colors hover:bg-muted/40"
+            class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-4 py-2.5 text-sm transition-colors hover:bg-muted/40"
             data-testid="activity-row"
           >
             <span
@@ -101,7 +101,7 @@
             </span>
             {#if fmtParams(row.paramsSummary)}
               <span
-                class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11px] text-muted-foreground"
+                class="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-xs text-muted-foreground"
                 title={fmtParams(row.paramsSummary)}
               >
                 {fmtParams(row.paramsSummary)}
@@ -109,7 +109,7 @@
             {/if}
             <Badge
               variant="outline"
-              class="text-[11px] uppercase tracking-wide {resultBadgeClass(row.result)}"
+              class="text-xs uppercase tracking-wide {resultBadgeClass(row.result)}"
             >
               {row.result}
             </Badge>

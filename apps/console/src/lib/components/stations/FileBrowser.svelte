@@ -233,7 +233,7 @@
               tabindex="0"
               aria-selected={f.path === activePath}
               aria-label={f.name}
-              class="group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-[12px] font-mono cursor-pointer
+              class="group flex shrink-0 items-center gap-1.5 border-b-2 px-2 py-1.5 text-xs font-mono cursor-pointer
                 {f.path === activePath ? 'border-primary bg-background text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}"
               onclick={() => openFile(entryIndex.get(f.path) ?? fallbackEntry(f))}
               onkeydown={(e: KeyboardEvent) => {
@@ -290,7 +290,7 @@
                 <Button
                   variant="outline"
                   size="sm"
-                  class="h-7 px-2 text-[11px] font-sans"
+                  class="h-7 px-2 text-xs font-sans"
                   onclick={() => onOpenConfigEditor!(activePath!)}
                 >
                   Edit (diff)

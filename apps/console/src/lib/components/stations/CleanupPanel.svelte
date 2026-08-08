@@ -166,7 +166,7 @@
                   {item.path}
                 </span>
                 <span class="flex shrink-0 items-center gap-2">
-                  <span class="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <span class="text-xs uppercase tracking-wide text-muted-foreground">
                     {item.kind}
                   </span>
                   <span class="font-mono text-xs tabular-nums text-muted-foreground">

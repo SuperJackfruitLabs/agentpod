@@ -129,7 +129,7 @@
 
     <!-- Fleet heatmap — clicking a cell navigates to /agents filtered by that station -->
     <div class="rounded-lg border p-4 space-y-2">
-      <p class="text-sm font-medium">Fleet health</p>
+      <h2 class="t-section">Fleet health</h2>
       <FleetHeatmap
         {agents}
         onSelectAgent={handleSelectAgent}

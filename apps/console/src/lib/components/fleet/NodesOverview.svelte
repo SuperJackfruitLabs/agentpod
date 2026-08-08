@@ -11,6 +11,7 @@
   import { Skeleton } from "$lib/components/ui/skeleton";
   import PageHeader from "$lib/components/page-header.svelte";
   import EnrollmentCommand from "./EnrollmentCommand.svelte";
+  import { Metric } from "$lib/components/ui/metric";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import Loader2Icon from "@lucide/svelte/icons/loader-2";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
@@ -230,7 +231,7 @@
   {#if isLoading}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       {#each [1, 2, 3] as _}
-        <Skeleton class="h-36 rounded-xl" />
+        <Skeleton class="h-36 rounded-lg" />
       {/each}
     </div>
 
@@ -281,7 +282,7 @@
             {rt.provider} · {rt.resourceTier}
           </p>
           {#if rt.harness && rt.harness !== "none"}
-            <Badge variant="outline" class="text-[10px] border-primary/40 text-primary">
+            <Badge variant="outline" class="text-xs border-primary/40 text-primary">
               {rt.harness}
             </Badge>
           {/if}
@@ -304,18 +305,18 @@
               </Badge>
             </div>
             <p class="text-sm text-muted-foreground">
-              {node.arch} · {node.cpuCount} CPU
+              <Metric>{node.arch}</Metric> · <Metric>{node.cpuCount}</Metric> CPU
             </p>
             <p class="text-xs text-muted-foreground/70">
               {node.os}
             </p>
             <p class="text-xs text-muted-foreground/60">
-              v: {node.agentVersion ?? "unknown"}
+              <Metric>{node.agentVersion ?? "—"}</Metric>
             </p>
             {#if node.updateAvailable}
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-[10px] text-status-degraded">
-                  update: {node.agentVersion} → {node.latestVersion}
+                <span class="text-xs text-status-degraded">
+                  Update available · <Metric>{node.agentVersion} → {node.latestVersion}</Metric>
                 </span>
                 <button
                   type="button"
@@ -331,7 +332,7 @@
               </div>
             {/if}
             {#if node.provisioned}
-              <Badge variant="outline" class="text-[10px] border-primary/40 text-primary">
+              <Badge variant="outline" class="text-xs border-primary/40 text-primary">
                 provisioned · {node.provisioned.provider}
               </Badge>
             {/if}

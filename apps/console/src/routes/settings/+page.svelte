@@ -28,13 +28,13 @@
 
   <!-- Appearance -->
   <div class="rounded-lg border bg-card p-6 space-y-4">
-    <p class="text-sm font-medium">Appearance</p>
+    <h2 class="t-section">Appearance</h2>
     <ThemeSettings />
   </div>
 
   <!-- Connection -->
   <div class="rounded-lg border bg-card p-6 space-y-4">
-    <p class="text-sm font-medium">Connection</p>
+    <h2 class="t-section">Connection</h2>
     <div class="space-y-1">
       <p class="text-xs text-muted-foreground">Connected to</p>
       <p class="font-mono text-sm break-all rounded border bg-muted/30 p-2">
@@ -48,7 +48,7 @@
 
   <!-- Account -->
   <div class="rounded-lg border bg-card p-6 space-y-4">
-    <p class="text-sm font-medium">Account</p>
+    <h2 class="t-section">Account</h2>
     {#if auth.user}
       <div class="space-y-2 text-sm">
         {#if auth.user.name}

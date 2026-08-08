@@ -723,6 +723,46 @@
   --color-status-sleeping: var(--status-sleeping);
 }
 
+/* ============================================
+   TYPE ROLES
+   Five named roles carry the whole UI type scale — use these instead of
+   ad-hoc size/weight combos or arbitrary text-[Npx] escapes.
+     t-page    page title (PageHeader h1)
+     t-section section heading inside a page
+     t-body    default prose/control text
+     t-label   field labels, dt's, table column headers (muted)
+     t-metric  big mono numbers (stat bands); pairs with <Metric> for cells
+   ============================================ */
+@utility t-page {
+  font-size: 1.125rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility t-section {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 600;
+}
+@utility t-body {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+@utility t-label {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+@utility t-metric {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -798,6 +838,13 @@ article,
   ::-webkit-scrollbar-track,
   ::-webkit-scrollbar-thumb {
     transition: none;
+  }
+
+  /* Spinners/skeleton pulses are informational but non-essential motion —
+     the loading state still reads from the static shape. */
+  .animate-spin,
+  .animate-pulse {
+    animation: none;
   }
 }
 

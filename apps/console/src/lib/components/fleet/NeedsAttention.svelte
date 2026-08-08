@@ -16,7 +16,7 @@
 </script>
 
 <div class="rounded-lg border p-4 space-y-2" data-testid="needs-attention">
-  <p class="text-sm font-medium">Needs attention</p>
+  <h2 class="t-section">Needs attention</h2>
 
   {#if notRunning.length === 0 && offlineNodes === 0 && updatesAvailable === 0}
     <p class="text-xs text-status-running" data-testid="all-healthy">all healthy ✓</p>

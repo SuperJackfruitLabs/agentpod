@@ -41,6 +41,7 @@
           stroke-linecap="round"
           stroke-linejoin="round"
           class="text-primary"
+          aria-hidden="true"
         >
           <rect width="20" height="8" x="2" y="2" rx="2" ry="2" />
           <rect width="20" height="8" x="2" y="14" rx="2" ry="2" />
@@ -52,12 +53,12 @@
 
     <!-- Content -->
     <div class="flex-1 min-w-0">
-      <h3 class="font-semibold text-base">
-        [fleet] Connect your first node
-      </h3>
+      <h2 class="t-section text-base">
+        Connect your first node
+      </h2>
       <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
-        No nodes yet. Generate an enrollment token and run the agent on any
-        server — it will appear here once it comes online.
+        Create an enrollment token, run the installer on any machine, and it
+        appears here the moment it connects.
       </p>
 
       <!-- Code hint -->

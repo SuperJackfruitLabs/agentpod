@@ -99,7 +99,7 @@
     {/if}
   </Command.List>
   {#if capped}
-    <div class="border-t border-border/60 px-3 py-1.5 text-[11px] text-muted-foreground">
+    <div class="border-t border-border/60 px-3 py-1.5 text-xs text-muted-foreground">
       Search capped — refine your query
     </div>
   {/if}
