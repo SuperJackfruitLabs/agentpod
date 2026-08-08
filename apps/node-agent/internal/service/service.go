@@ -43,6 +43,31 @@ func NewManager(run Runner) (Manager, error) {
 	return newManager(runtime.GOOS, os.Getuid(), run)
 }
 
+// NewManagerForRestart builds a Manager for an explicit goos (rather than
+// runtime.GOOS), mirroring selfupdate.restartService's legacy platform
+// selection exactly: darwin gets the launchd manager (no uid==0 guard —
+// the old code never had one), and — matching the old code's plain
+// if/else — anything else falls through to the systemd manager, scoped by
+// an *unconditional* `systemctl --user is-active` probe (never
+// short-circuited on uid, unlike NewManager's scope selection). It exists
+// solely so selfupdate can delegate to Manager.Restart() without
+// duplicating argv-building or platform-selection logic.
+func NewManagerForRestart(goos string, run Runner) (Manager, error) {
+	uid := os.Getuid()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("service: resolve home dir: %w", err)
+	}
+	if goos == "darwin" {
+		return newLaunchdManager(home, uid, run), nil
+	}
+	probe := run
+	if probe == nil {
+		probe = execRunner
+	}
+	return newSystemdManager(run, userUnitActive(probe), home, uid), nil
+}
+
 // newManager is the GOOS/uid-injectable core of NewManager, kept separate so
 // the platform-selection branches are unit-testable without root privileges
 // or a second OS.

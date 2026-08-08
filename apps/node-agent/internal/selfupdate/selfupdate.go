@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
 
 // ErrRestartFailed is returned when the service restart command fails.
@@ -214,29 +216,29 @@ func swapBinary(targetPath, tmpPath string) error {
 	return nil
 }
 
-// restartService restarts the agentpod-node service for the given GOOS.
+// restartService restarts the agentpod-node service for the given GOOS by
+// delegating to the internal/service package's platform managers.
 //
 // linux: probes for a user-scoped systemd unit first; if active uses --user,
 // else the system unit. darwin: the installer runs the agent as the LaunchAgent
 // gui/<uid>/dev.agentpod.node — kickstart -k kills and restarts it. Returns a
-// wrapped ErrRestartFailed when the restart command fails (the binary is
-// already swapped at that point).
+// wrapped ErrRestartFailed when manager selection or the restart command
+// fails (the binary is already swapped at that point).
 func restartService(goos string, run func(name string, args ...string) error) error {
 	if run == nil {
 		run = func(name string, args ...string) error {
 			return exec.Command(name, args...).Run()
 		}
 	}
-	var restartErr error
-	if goos == "darwin" {
-		restartErr = run("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%d/dev.agentpod.node", os.Getuid()))
-	} else if run("systemctl", "--user", "is-active", "agentpod-node") == nil {
-		restartErr = run("systemctl", "--user", "restart", "agentpod-node")
-	} else {
-		restartErr = run("systemctl", "restart", "agentpod-node")
+	runner := func(name string, args ...string) (string, error) {
+		return "", run(name, args...)
 	}
-	if restartErr != nil {
-		return fmt.Errorf("%w: %v", ErrRestartFailed, restartErr)
+	mgr, err := service.NewManagerForRestart(goos, runner)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrRestartFailed, err)
+	}
+	if err := mgr.Restart(); err != nil {
+		return fmt.Errorf("%w: %v", ErrRestartFailed, err)
 	}
 	return nil
 }
