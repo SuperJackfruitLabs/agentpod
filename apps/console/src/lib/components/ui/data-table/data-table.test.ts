@@ -108,6 +108,10 @@ describe("DataTable", () => {
 
 	describe("manual pagination", () => {
 		const singleRowData: Row[] = [{ name: "agent-0", status: "running" }];
+		const fiveRowData: Row[] = Array.from({ length: 5 }, (_, i) => ({
+			name: `agent-${i}`,
+			status: "running",
+		}));
 
 		it("renders the footer using the server pageCount despite data holding only one page", () => {
 			render(DataTable, {
@@ -122,7 +126,24 @@ describe("DataTable", () => {
 			expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
 		});
 
-		it("fires onPageChange with the target index when Next is clicked, without re-slicing data", async () => {
+		it("does not re-slice data client-side: a small pageSize still renders every row the server sent", () => {
+			// pageSize=2 against 5 rows would leave only 2 visible if the component
+			// re-paginated client-side; manual mode must trust the server's page as-is.
+			render(DataTable, {
+				columns,
+				data: fiveRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 0,
+				pageSize: 2,
+			} as never);
+
+			for (const row of fiveRowData) {
+				expect(screen.getByText(row.name)).toBeTruthy();
+			}
+		});
+
+		it("fires onPageChange with the target index when Next is clicked", async () => {
 			const onPageChange = vi.fn();
 			render(DataTable, {
 				columns,
@@ -137,8 +158,23 @@ describe("DataTable", () => {
 
 			expect(onPageChange).toHaveBeenCalledTimes(1);
 			expect(onPageChange).toHaveBeenCalledWith(1);
-			// No client-side slicing of `data`: the single row passed in still renders.
-			expect(screen.getByText("agent-0")).toBeTruthy();
+		});
+
+		it("fires onPageChange with the target index when Previous is clicked from pageIndex 1", async () => {
+			const onPageChange = vi.fn();
+			render(DataTable, {
+				columns,
+				data: singleRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 1,
+				onPageChange,
+			} as never);
+
+			await fireEvent.click(screen.getByRole("button", { name: "Previous" }));
+
+			expect(onPageChange).toHaveBeenCalledTimes(1);
+			expect(onPageChange).toHaveBeenCalledWith(0);
 		});
 
 		it("disables Previous at pageIndex 0 and does not fire onPageChange", async () => {

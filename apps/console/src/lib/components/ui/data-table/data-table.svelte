@@ -73,7 +73,7 @@
 			...(manualPagination
 				? {
 						get pagination() {
-							return { pageIndex, pageSize: data.length || pageSize };
+							return { pageIndex, pageSize };
 						},
 					}
 				: {}),
