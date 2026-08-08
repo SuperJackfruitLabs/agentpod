@@ -44,15 +44,15 @@ test("renders updatesAvailable count", () => {
   expect(updatesEl.textContent?.trim()).toBe("5");
 });
 
-test("updatesAvailable > 0 applies accent class (text-status-running)", () => {
+test("updatesAvailable > 0 applies accent class (text-status-degraded)", () => {
   const stats: FleetStats = { ...baseStats, updatesAvailable: 2 };
   const { getByTestId } = render(OverviewStats, { props: { stats } });
   const updatesEl = getByTestId("stat-updates");
-  expect(updatesEl.className).toContain("text-status-running");
+  expect(updatesEl.className).toContain("text-status-degraded");
 });
 
-test("updatesAvailable === 0 does not apply text-status-running to updates stat", () => {
+test("updatesAvailable === 0 does not apply text-status-degraded to updates stat", () => {
   const { getByTestId } = render(OverviewStats, { props: { stats: baseStats } });
   const updatesEl = getByTestId("stat-updates");
-  expect(updatesEl.className).not.toContain("text-status-running");
+  expect(updatesEl.className).not.toContain("text-status-degraded");
 });

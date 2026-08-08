@@ -23,11 +23,11 @@
 
   <!-- Updates available stat — accent when >0 -->
   <div
-    class="rounded-lg border p-4 space-y-1 {stats.updatesAvailable > 0 ? 'border-status-running/50' : ''}"
+    class="rounded-lg border p-4 space-y-1 {stats.updatesAvailable > 0 ? 'border-status-degraded/50' : ''}"
   >
     <div class="text-xs text-muted-foreground">Updates available</div>
     <div
-      class="font-mono text-2xl font-semibold {stats.updatesAvailable > 0 ? 'text-status-running' : 'text-foreground'}"
+      class="font-mono text-2xl font-semibold {stats.updatesAvailable > 0 ? 'text-status-degraded' : 'text-foreground'}"
       data-testid="stat-updates"
     >
       {stats.updatesAvailable}
