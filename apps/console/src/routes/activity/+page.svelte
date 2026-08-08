@@ -24,16 +24,16 @@
     }
   }
 
-  /** CSS classes for a result badge (ok → green, error → red, else muted) */
+  /** CSS classes for a result badge (ok → status-running, error → status-error, else muted) */
   function resultClass(result: string | undefined): string {
     if (!result) return "text-muted-foreground/50 border-muted-foreground/30 bg-muted/20";
     switch (result.toLowerCase()) {
       case "ok":
-        return "text-chart-2 border-chart-2 bg-chart-2/10";
+        return "text-status-running";
       case "error":
-        return "text-destructive border-destructive bg-destructive/10";
+        return "text-status-error";
       default:
-        return "text-muted-foreground/70 border-muted-foreground/30 bg-muted/20";
+        return "text-muted-foreground";
     }
   }
 

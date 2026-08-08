@@ -1,146 +1,82 @@
 /**
  * status-badge.test.ts
  *
- * Unit tests for statusBadgeClass — the theme-robust outline badge helper.
+ * Unit tests for statusBadgeClass / statusTextClass / statusBgClass — the
+ * theme-robust status helpers built on the `--status-*` design tokens
+ * (Plan A). Each helper is a full-literal Tailwind class lookup (no string
+ * interpolation) so the classes remain scannable by Tailwind's JIT.
+ *
  * Run: cd apps/console && pnpm test status-badge
  */
 
 import { test, expect, describe } from "vitest";
-import { statusBadgeClass } from "./status-badge";
+import { statusBadgeClass, statusTextClass, statusBgClass } from "./status-badge";
+
+// Status → expected token groupings, mirroring tokenFor() in status-badge.ts
+const GROUPS: Record<string, string[]> = {
+  running: ["running", "online", "healthy", "active", "connected"],
+  error: ["error", "unhealthy", "crashed"],
+  starting: ["starting", "stopping", "warning", "pending"],
+  degraded: ["degraded"],
+  sleeping: ["sleeping", "hibernated"],
+  stopped: ["stopped", "offline", "unknown", "something-random"],
+};
 
 describe("statusBadgeClass", () => {
-  // ── chart-2 (green) group ──────────────────────────────────────────────────
-  test("running → chart-2 outline", () => {
-    const cls = statusBadgeClass("running");
-    expect(cls).toContain("text-chart-2");
-    expect(cls).toContain("border-chart-2");
-    expect(cls).toContain("bg-chart-2/10");
+  for (const [token, statuses] of Object.entries(GROUPS)) {
+    for (const status of statuses) {
+      test(`${status} → status-${token} outline (full literal)`, () => {
+        const cls = statusBadgeClass(status);
+        expect(cls).toContain(`text-status-${token}`);
+        expect(cls).toContain(`border-status-${token}`);
+        expect(cls).toContain(`bg-status-${token}/10`);
+      });
+    }
+  }
+
+  test("case normalization: RUNNING (uppercase) → status-running", () => {
+    expect(statusBadgeClass("RUNNING")).toContain("text-status-running");
   });
 
-  test("online → chart-2 outline", () => {
-    const cls = statusBadgeClass("online");
-    expect(cls).toContain("text-chart-2");
-    expect(cls).toContain("border-chart-2");
-    expect(cls).toContain("bg-chart-2/10");
+  test("case normalization: Connected (mixed-case) → status-running", () => {
+    expect(statusBadgeClass("Connected")).toContain("text-status-running");
   });
 
-  test("healthy → chart-2 outline", () => {
-    const cls = statusBadgeClass("healthy");
-    expect(cls).toContain("text-chart-2");
-    expect(cls).toContain("border-chart-2");
-    expect(cls).toContain("bg-chart-2/10");
+  test("returns exactly the full literal string for running", () => {
+    expect(statusBadgeClass("running")).toBe(
+      "text-status-running border-status-running bg-status-running/10",
+    );
   });
 
-  test("active → chart-2 outline", () => {
-    const cls = statusBadgeClass("active");
-    expect(cls).toContain("text-chart-2");
-    expect(cls).toContain("border-chart-2");
-    expect(cls).toContain("bg-chart-2/10");
+  test("returns exactly the full literal string for degraded", () => {
+    expect(statusBadgeClass("degraded")).toBe(
+      "text-status-degraded border-status-degraded bg-status-degraded/10",
+    );
   });
+});
 
-  // ── destructive group ──────────────────────────────────────────────────────
-  test("error → destructive outline", () => {
-    const cls = statusBadgeClass("error");
-    expect(cls).toContain("text-destructive");
-    expect(cls).toContain("border-destructive");
-    expect(cls).toContain("bg-destructive/10");
+describe("statusTextClass", () => {
+  for (const [token, statuses] of Object.entries(GROUPS)) {
+    test(`${statuses[0]} → text-status-${token} only`, () => {
+      const cls = statusTextClass(statuses[0]);
+      expect(cls).toBe(`text-status-${token}`);
+    });
+  }
+
+  test("case normalization applies", () => {
+    expect(statusTextClass("ERROR")).toBe("text-status-error");
   });
+});
 
-  test("unhealthy → destructive outline", () => {
-    const cls = statusBadgeClass("unhealthy");
-    expect(cls).toContain("text-destructive");
-    expect(cls).toContain("border-destructive");
-    expect(cls).toContain("bg-destructive/10");
-  });
+describe("statusBgClass", () => {
+  for (const [token, statuses] of Object.entries(GROUPS)) {
+    test(`${statuses[0]} → bg-status-${token} (solid)`, () => {
+      const cls = statusBgClass(statuses[0]);
+      expect(cls).toBe(`bg-status-${token}`);
+    });
+  }
 
-  test("crashed → destructive outline", () => {
-    const cls = statusBadgeClass("crashed");
-    expect(cls).toContain("text-destructive");
-    expect(cls).toContain("border-destructive");
-    expect(cls).toContain("bg-destructive/10");
-  });
-
-  // ── chart-4 (amber) group ──────────────────────────────────────────────────
-  test("starting → chart-4 outline", () => {
-    const cls = statusBadgeClass("starting");
-    expect(cls).toContain("text-chart-4");
-    expect(cls).toContain("border-chart-4");
-    expect(cls).toContain("bg-chart-4/10");
-  });
-
-  test("stopping → chart-4 outline", () => {
-    const cls = statusBadgeClass("stopping");
-    expect(cls).toContain("text-chart-4");
-    expect(cls).toContain("border-chart-4");
-    expect(cls).toContain("bg-chart-4/10");
-  });
-
-  test("warning → chart-4 outline", () => {
-    const cls = statusBadgeClass("warning");
-    expect(cls).toContain("text-chart-4");
-    expect(cls).toContain("border-chart-4");
-    expect(cls).toContain("bg-chart-4/10");
-  });
-
-  test("pending → chart-4 outline", () => {
-    const cls = statusBadgeClass("pending");
-    expect(cls).toContain("text-chart-4");
-    expect(cls).toContain("border-chart-4");
-    expect(cls).toContain("bg-chart-4/10");
-  });
-
-  // ── chart-5 group ──────────────────────────────────────────────────────────
-  test("sleeping → chart-5 outline", () => {
-    const cls = statusBadgeClass("sleeping");
-    expect(cls).toContain("text-chart-5");
-    expect(cls).toContain("border-chart-5");
-    expect(cls).toContain("bg-chart-5/10");
-  });
-
-  test("hibernated → chart-5 outline", () => {
-    const cls = statusBadgeClass("hibernated");
-    expect(cls).toContain("text-chart-5");
-    expect(cls).toContain("border-chart-5");
-    expect(cls).toContain("bg-chart-5/10");
-  });
-
-  // ── muted-foreground group ─────────────────────────────────────────────────
-  test("stopped → muted-foreground outline", () => {
-    const cls = statusBadgeClass("stopped");
-    expect(cls).toContain("text-muted-foreground");
-    expect(cls).toContain("border-muted-foreground");
-    expect(cls).toContain("bg-muted-foreground/10");
-  });
-
-  test("offline → muted-foreground outline", () => {
-    const cls = statusBadgeClass("offline");
-    expect(cls).toContain("text-muted-foreground");
-    expect(cls).toContain("border-muted-foreground");
-    expect(cls).toContain("bg-muted-foreground/10");
-  });
-
-  test("unknown → muted-foreground outline", () => {
-    const cls = statusBadgeClass("unknown");
-    expect(cls).toContain("text-muted-foreground");
-    expect(cls).toContain("border-muted-foreground");
-    expect(cls).toContain("bg-muted-foreground/10");
-  });
-
-  test("unrecognized status → muted-foreground outline (default)", () => {
-    const cls = statusBadgeClass("something-random");
-    expect(cls).toContain("text-muted-foreground");
-    expect(cls).toContain("border-muted-foreground");
-    expect(cls).toContain("bg-muted-foreground/10");
-  });
-
-  // ── case normalization ─────────────────────────────────────────────────────
-  test("RUNNING (uppercase) → chart-2 outline", () => {
-    const cls = statusBadgeClass("RUNNING");
-    expect(cls).toContain("text-chart-2");
-  });
-
-  test("Connected (mixed-case) → chart-2 outline", () => {
-    const cls = statusBadgeClass("Connected");
-    expect(cls).toContain("text-chart-2");
+  test("case normalization applies", () => {
+    expect(statusBgClass("SLEEPING")).toBe("bg-status-sleeping");
   });
 });

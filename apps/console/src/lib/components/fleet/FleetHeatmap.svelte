@@ -14,14 +14,14 @@
   // ── Status → bg class ────────────────────────────────────────────────────────
 
   const STATUS_CELL_CLASS: Record<string, string> = {
-    running: "bg-chart-2",
-    stopped: "bg-muted",
-    error: "bg-destructive",
-    unknown: "bg-muted/40",
+    running: "bg-status-running",
+    stopped: "bg-status-stopped/50",
+    error: "bg-status-error",
+    unknown: "bg-status-stopped/25",
   };
 
   function cellBgClass(status: string): string {
-    return STATUS_CELL_CLASS[status] ?? "bg-muted/40";
+    return STATUS_CELL_CLASS[status] ?? "bg-status-stopped/25";
   }
 
   function cellTitle(agent: FleetAgent): string {
@@ -65,10 +65,10 @@
   });
 
   const LEGEND_CLASS: Record<string, string> = {
-    running: "bg-chart-2/20 text-chart-2 border-chart-2/40 hover:bg-chart-2/30",
-    stopped: "bg-muted text-muted-foreground border-border hover:bg-muted/80",
-    error: "bg-destructive/20 text-destructive border-destructive/40 hover:bg-destructive/30",
-    unknown: "bg-muted/40 text-muted-foreground/60 border-border/40 hover:bg-muted/60",
+    running: "bg-status-running/20 text-status-running border-status-running/40 hover:bg-status-running/30",
+    stopped: "bg-status-stopped/20 text-status-stopped border-status-stopped/40 hover:bg-status-stopped/30",
+    error: "bg-status-error/20 text-status-error border-status-error/40 hover:bg-status-error/30",
+    unknown: "bg-status-stopped/10 text-status-stopped/60 border-status-stopped/20 hover:bg-status-stopped/20",
   };
 </script>
 

@@ -1,52 +1,84 @@
 /**
  * status-badge.ts
  *
- * Theme-robust outline status badge helper.
- * Returns Tailwind classes that are legible under all 20 colour schemes because
- * they use *token* colours (not hard-coded hex) with the outline pattern:
- *   text-<token>  border-<token>  bg-<token>/10
+ * Theme-robust status helpers built on the `--status-*` design tokens
+ * (Plan A: app.css defines `--status-running/degraded/starting/stopped/
+ * error/sleeping` for light+dark, mapped to Tailwind via `--color-status-*`;
+ * the theme store writes them per-scheme from the five `cyber-*` accents).
+ *
+ * All three exports are literal lookups — never string interpolation — so
+ * every class stays Tailwind-scannable (JIT needs full class names present
+ * verbatim in source).
  *
  * Usage:
  *   import { statusBadgeClass } from "$lib/utils/status-badge";
  *   <Badge variant="outline" class={statusBadgeClass(node.status)}>{node.status}</Badge>
  */
 
-type Token =
-  | "chart-2"          // green  — running / online / healthy / active / connected
-  | "destructive"      // red    — error / unhealthy / crashed
-  | "chart-4"          // amber  — starting / stopping / warning / pending
-  | "chart-5"          // purple — sleeping / hibernated
-  | "muted-foreground"; // grey  — stopped / offline / unknown / default
+export type StatusToken = "running" | "degraded" | "starting" | "stopped" | "error" | "sleeping";
 
-function tokenFor(status: string): Token {
+function tokenFor(status: string): StatusToken {
   switch (status.toLowerCase()) {
     case "running":
     case "online":
     case "healthy":
     case "active":
     case "connected":
-      return "chart-2";
+      return "running";
 
     case "error":
     case "unhealthy":
     case "crashed":
-      return "destructive";
+      return "error";
 
     case "starting":
     case "stopping":
     case "warning":
     case "pending":
-      return "chart-4";
+      return "starting";
+
+    case "degraded":
+      return "degraded";
 
     case "sleeping":
     case "hibernated":
-      return "chart-5";
+      return "sleeping";
 
     // stopped / offline / unknown / anything else
     default:
-      return "muted-foreground";
+      return "stopped";
   }
 }
+
+/** Outline badge: text + border + 10%-opacity bg, on the status token. */
+const BADGE: Record<StatusToken, string> = {
+  running: "text-status-running border-status-running bg-status-running/10",
+  degraded: "text-status-degraded border-status-degraded bg-status-degraded/10",
+  starting: "text-status-starting border-status-starting bg-status-starting/10",
+  stopped: "text-status-stopped border-status-stopped bg-status-stopped/10",
+  error: "text-status-error border-status-error bg-status-error/10",
+  sleeping: "text-status-sleeping border-status-sleeping bg-status-sleeping/10",
+};
+
+/** Text-only variant, for inline status labels that don't need a badge shell. */
+const TEXT: Record<StatusToken, string> = {
+  running: "text-status-running",
+  degraded: "text-status-degraded",
+  starting: "text-status-starting",
+  stopped: "text-status-stopped",
+  error: "text-status-error",
+  sleeping: "text-status-sleeping",
+};
+
+/** Solid background variant, for heatmap cells / dots that carry no text of their own. */
+const BG: Record<StatusToken, string> = {
+  running: "bg-status-running",
+  degraded: "bg-status-degraded",
+  starting: "bg-status-starting",
+  stopped: "bg-status-stopped",
+  error: "bg-status-error",
+  sleeping: "bg-status-sleeping",
+};
 
 /**
  * Returns the CSS class string for a status badge.
@@ -54,6 +86,15 @@ function tokenFor(status: string): Token {
  * outline badge resets remove conflicting bg/text defaults.
  */
 export function statusBadgeClass(status: string): string {
-  const t = tokenFor(status);
-  return `text-${t} border-${t} bg-${t}/10`;
+  return BADGE[tokenFor(status)];
+}
+
+/** Returns just the text-color class for a status. */
+export function statusTextClass(status: string): string {
+  return TEXT[tokenFor(status)];
+}
+
+/** Returns the solid background-color class for a status. */
+export function statusBgClass(status: string): string {
+  return BG[tokenFor(status)];
 }
