@@ -5,15 +5,19 @@
   import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode } from "$lib/api/client";
   import { toast } from "svelte-sonner";
   import type { NodeSummary, ProvisionedRuntime } from "@agentpod/contract";
-  import * as Card from "$lib/components/ui/card";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import PageHeader from "$lib/components/page-header.svelte";
+  import EnrollmentCommand from "./EnrollmentCommand.svelte";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import Loader2Icon from "@lucide/svelte/icons/loader-2";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
   import { statusBadgeClass } from "$lib/utils/status-badge";
+  import { chipClass } from "$lib/utils/toggle-chip";
+  import { enrollmentCommand } from "$lib/utils/enrollment-command";
+  import { cn } from "$lib/utils";
 
   let nodes = $state<NodeSummary[]>([]);
   let isLoading = $state(true);
@@ -43,6 +47,7 @@
   }
 
   async function loadData() {
+    error = null;
     try {
       const [nodesResult, runtimesResult] = await Promise.allSettled([
         listNodes(),
@@ -165,7 +170,7 @@
   let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handleCopyEnrollCmd() {
-    const cmd = `curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- ${resolvedHubUrl()} ${lastToken}`;
+    const cmd = enrollmentCommand(resolvedHubUrl(), lastToken ?? "");
     navigator.clipboard.writeText(cmd).then(() => {
       copied = true;
       if (copyTimeout) clearTimeout(copyTimeout);
@@ -177,20 +182,11 @@
   }
 </script>
 
-<section class="space-y-6">
-  <!-- Header row -->
-  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-    <div>
-      <h2 class="text-2xl font-bold tracking-tight">Nodes</h2>
-      <p class="text-sm text-muted-foreground font-mono">// connected machines</p>
-    </div>
-    <div class="flex flex-col items-start sm:items-end gap-2">
+<PageHeader title="Nodes" subtitle="Connected machines">
+  {#snippet actions()}
+    <div class="flex flex-col items-end gap-1.5">
       <div class="flex gap-2 flex-wrap justify-end">
-        <Button
-          onclick={() => (showNewRuntimeDialog = true)}
-          variant="outline"
-          class="font-mono text-xs uppercase tracking-wider w-full sm:w-auto"
-        >
+        <Button onclick={() => (showNewRuntimeDialog = true)} variant="outline">
           <PlusIcon class="h-4 w-4 mr-2" />
           New runtime
         </Button>
@@ -200,11 +196,7 @@
           to avoid duplicate accessible buttons.
         -->
         {#if isLoading || nodes.length > 0 || provisioningRuntimes.length > 0}
-          <Button
-            onclick={handleCreateToken}
-            disabled={isMinting}
-            class="font-mono text-xs uppercase tracking-wider w-full sm:w-auto"
-          >
+          <Button onclick={handleCreateToken} disabled={isMinting}>
             <PlusIcon class="h-4 w-4 mr-2" />
             {isMinting ? "Creating…" : "Create enrollment token"}
           </Button>
@@ -212,28 +204,15 @@
       </div>
       {#if mintError}<p class="text-xs text-destructive">{mintError}</p>{/if}
     </div>
-  </div>
+  {/snippet}
+</PageHeader>
 
+<div class="container mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
   <!-- Enrollment command block (only when nodes/runtimes already exist; in empty state it shows in-place) -->
   {#if lastToken && (nodes.length > 0 || provisioningRuntimes.length > 0)}
-    <div class="cyber-card p-4 space-y-2">
-      <p class="text-xs font-mono text-muted-foreground">// run this on the target node to connect it</p>
-      <div class="flex items-start gap-2">
-        <code class="flex-1 block text-sm font-mono break-all text-primary">
-          curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- {resolvedHubUrl()} {lastToken}
-        </code>
-        <button
-          type="button"
-          onclick={handleCopyEnrollCmd}
-          class="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border transition-colors
-            {copied
-              ? 'border-chart-2 text-chart-2 bg-chart-2/10'
-              : 'border-primary/40 text-primary/70 hover:border-primary hover:text-primary bg-transparent'}"
-          aria-label="Copy enrollment command"
-        >
-          {copied ? "copied ✓" : "copy"}
-        </button>
-      </div>
+    <div class="space-y-2">
+      <p class="text-xs text-muted-foreground">Run this on the target node to connect it</p>
+      <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
     </div>
   {/if}
 
@@ -247,8 +226,12 @@
 
   <!-- Error state -->
   {:else if error}
-    <div class="cyber-card p-4 border-destructive/50">
-      <p class="text-sm font-mono text-destructive">{error}</p>
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadData}>Retry</Button>
     </div>
 
   <!-- Empty state: no nodes and no provisioning runtimes → connect banner or in-place token -->
@@ -256,25 +239,12 @@
     <div class="flex flex-col items-center py-8">
       <div class="w-full max-w-2xl">
         {#if lastToken}
-          <div class="cyber-card p-6 space-y-3">
-            <p class="text-xs font-mono text-muted-foreground">// enrollment token created — run this on the target node to connect it</p>
-            <div class="flex items-start gap-2">
-              <code class="flex-1 block text-sm font-mono break-all text-primary">
-                curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- {resolvedHubUrl()} {lastToken}
-              </code>
-              <button
-                type="button"
-                onclick={handleCopyEnrollCmd}
-                class="shrink-0 font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border transition-colors
-                  {copied
-                    ? 'border-chart-2 text-chart-2 bg-chart-2/10'
-                    : 'border-primary/40 text-primary/70 hover:border-primary hover:text-primary bg-transparent'}"
-                aria-label="Copy enrollment command"
-              >
-                {copied ? "copied ✓" : "copy"}
-              </button>
-            </div>
-            <p class="text-xs font-mono text-muted-foreground/60">// the node will appear below once it connects</p>
+          <div class="space-y-3">
+            <p class="text-xs text-muted-foreground">
+              Enrollment token created — run this on the target node to connect it
+            </p>
+            <EnrollmentCommand token={lastToken} hubUrl={resolvedHubUrl()} {copied} onCopy={handleCopyEnrollCmd} />
+            <p class="text-xs text-muted-foreground/60">The node will appear below once it connects</p>
           </div>
         {:else}
           <ConnectBanner onCreateToken={handleCreateToken} />
@@ -287,94 +257,80 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <!-- Provisioning cards (runtimes that are still spinning up) -->
       {#each provisioningRuntimes as rt (rt.id)}
-        <Card.Root class="h-full border-primary/30 bg-primary/5">
-          <Card.Header>
-            <div class="flex items-start justify-between gap-2">
-              <Card.Title class="font-mono text-sm leading-tight truncate">
-                {rt.name}
-              </Card.Title>
-              <Badge variant="secondary" class="shrink-0 gap-1.5">
-                <Loader2Icon class="h-3 w-3 animate-spin" />
-                provisioning
-              </Badge>
-            </div>
-          </Card.Header>
-          <Card.Content class="space-y-1">
-            <p class="text-sm font-mono text-muted-foreground">
-              {rt.provider} · {rt.resourceTier}
+        <div class="h-full rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-1">
+          <div class="flex items-start justify-between gap-2">
+            <p class="text-sm font-medium leading-tight truncate">
+              {rt.name}
             </p>
-            {#if rt.harness && rt.harness !== "none"}
-              <Badge
-                variant="outline"
-                class="font-mono text-[10px] border-primary/40 text-primary"
-              >
-                {rt.harness}
-              </Badge>
-            {/if}
-          </Card.Content>
-        </Card.Root>
+            <Badge variant="secondary" class="shrink-0 gap-1.5">
+              <Loader2Icon class="h-3 w-3 animate-spin" />
+              provisioning
+            </Badge>
+          </div>
+          <p class="text-sm text-muted-foreground">
+            {rt.provider} · {rt.resourceTier}
+          </p>
+          {#if rt.harness && rt.harness !== "none"}
+            <Badge variant="outline" class="text-[10px] border-primary/40 text-primary">
+              {rt.harness}
+            </Badge>
+          {/if}
+        </div>
       {/each}
 
       <!-- Online / offline node cards -->
       {#each nodes as node (node.id)}
         <a
           href="/nodes/{node.id}"
-          class="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-xl"
+          class="block group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
         >
-          <Card.Root class="h-full transition-colors group-hover:border-primary/50">
-            <Card.Header>
-              <div class="flex items-start justify-between gap-2">
-                <Card.Title class="font-mono text-sm leading-tight truncate">
-                  {node.hostname}
-                </Card.Title>
-                <Badge
-                  variant="outline"
-                  class="shrink-0 {statusBadgeClass(node.status)}"
+          <div class="h-full rounded-lg border bg-card p-4 space-y-1 transition-colors group-hover:border-primary/50">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-sm font-medium leading-tight truncate">
+                {node.hostname}
+              </p>
+              <Badge variant="outline" class="shrink-0 {statusBadgeClass(node.status)}">
+                {node.status}
+              </Badge>
+            </div>
+            <p class="text-sm text-muted-foreground">
+              {node.arch} · {node.cpuCount} CPU
+            </p>
+            <p class="text-xs text-muted-foreground/70">
+              {node.os}
+            </p>
+            <p class="text-xs text-muted-foreground/60">
+              v: {node.agentVersion ?? "unknown"}
+            </p>
+            {#if node.updateAvailable}
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-[10px] text-status-degraded">
+                  update: {node.agentVersion} → {node.latestVersion}
+                </span>
+                <button
+                  type="button"
+                  disabled={!!updatingNodes[node.id]}
+                  onclick={(e) => { e.stopPropagation(); e.preventDefault(); handleUpdate(node.id); }}
+                  class={cn(
+                    chipClass(false),
+                    "text-xs hover:border-primary hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed",
+                  )}
                 >
-                  {node.status}
-                </Badge>
+                  {updatingNodes[node.id] ? "Updating…" : "Update"}
+                </button>
               </div>
-            </Card.Header>
-            <Card.Content class="space-y-1">
-              <p class="text-sm font-mono text-muted-foreground">
-                {node.arch} · {node.cpuCount} CPU
-              </p>
-              <p class="text-xs font-mono text-muted-foreground/70">
-                {node.os}
-              </p>
-              <p class="text-xs font-mono text-muted-foreground/60">
-                v: {node.agentVersion ?? "unknown"}
-              </p>
-              {#if node.updateAvailable}
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-[10px] font-mono text-yellow-500/90">
-                    update: {node.agentVersion} → {node.latestVersion}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={!!updatingNodes[node.id]}
-                    onclick={(e) => { e.stopPropagation(); e.preventDefault(); handleUpdate(node.id); }}
-                    class="font-mono text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                  >
-                    {updatingNodes[node.id] ? "updating…" : "Update"}
-                  </button>
-                </div>
-              {/if}
-              {#if node.provisioned}
-                <Badge
-                  variant="outline"
-                  class="font-mono text-[10px] border-primary/40 text-primary"
-                >
-                  provisioned · {node.provisioned.provider}
-                </Badge>
-              {/if}
-            </Card.Content>
-          </Card.Root>
+            {/if}
+            {#if node.provisioned}
+              <Badge variant="outline" class="text-[10px] border-primary/40 text-primary">
+                provisioned · {node.provisioned.provider}
+              </Badge>
+            {/if}
+          </div>
         </a>
       {/each}
     </div>
   {/if}
-</section>
+</div>
 
 <!-- New runtime provisioning dialog -->
 <NewRuntimeDialog
