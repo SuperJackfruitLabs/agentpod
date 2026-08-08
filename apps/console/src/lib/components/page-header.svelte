@@ -1,343 +1,211 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
-  import type { Component } from "svelte";
-  import ChevronUpIcon from "@lucide/svelte/icons/chevron-up";
-  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
-  import LockIcon from "@lucide/svelte/icons/lock";
-  import LottieIcon from "$lib/components/lottie-icon.svelte";
+  import type { Snippet, Component } from "svelte";
+  import { cn } from "$lib/utils";
   import * as Tooltip from "$lib/components/ui/tooltip";
-
-  // =============================================================================
-  // Types
-  // =============================================================================
+  import LockIcon from "@lucide/svelte/icons/lock";
 
   export interface Tab {
     id: string;
     label: string;
-    icon?: Component | string;
+    icon?: Component;
     disabled?: boolean;
     disabledReason?: string;
   }
 
-  /** Icon can be a static component, emoji string, or animated lottie path */
-  export type PageIcon = 
-    | Component  // Lucide icon component
-    | string     // Emoji string
-    | { type: "animated"; path: string };  // Lottie animation
-
-  // =============================================================================
-  // Props
-  // =============================================================================
+  type StatusVariant = "running" | "starting" | "stopped" | "error" | "sleeping" | "degraded";
 
   interface Props {
-    /** Page title */
     title: string;
-    /** Page icon - shown in collapsed mode (Lucide component, emoji string, or animated icon) */
-    icon?: PageIcon;
-    /** Optional subtitle/description */
+    icon?: Component;
     subtitle?: string;
-    /** Optional status indicator */
-    status?: {
-      label: string;
-      variant: "running" | "starting" | "stopped" | "error" | "sleeping";
-      animate?: boolean;
-    };
-    /** Tabs configuration */
+    status?: { label: string; variant: StatusVariant; animate?: boolean };
     tabs?: Tab[];
-    /** Currently active tab ID */
     activeTab?: string;
-    /** Callback when tab changes */
     onTabChange?: (tabId: string) => void;
-    /** Whether the header is sticky */
     sticky?: boolean;
-    /** Whether header can collapse (manual toggle) */
-    collapsible?: boolean;
-    /** Actions slot - for buttons on the right side of the header (desktop) */
     actions?: Snippet;
-    /** Leading slot - for back button or other leading content */
     leading?: Snippet;
+    tabsId?: string;
   }
 
   let {
     title,
-    icon,
-    subtitle,
-    status,
+    icon = undefined,
+    subtitle = undefined,
+    status = undefined,
     tabs = [],
     activeTab = "",
-    onTabChange,
+    onTabChange = undefined,
     sticky = true,
-    collapsible = false,
-    actions,
-    leading,
+    actions = undefined,
+    leading = undefined,
+    tabsId = "page-tabs",
   }: Props = $props();
 
-  // =============================================================================
-  // Icon Type Detection
-  // =============================================================================
-  
-  function isAnimatedIcon(ic: PageIcon | undefined): ic is { type: "animated"; path: string } {
-    return ic !== undefined && typeof ic === "object" && "type" in ic && ic.type === "animated";
+  const Icon = $derived(icon);
+
+  let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
+
+  function activateTab(tab: Tab) {
+    if (tab.disabled) return;
+    onTabChange?.(tab.id);
   }
 
-  function isComponentIcon(ic: PageIcon | undefined): ic is Component {
-    return ic !== undefined && typeof ic === "function";
+  function focusTabAt(index: number) {
+    const count = tabs.length;
+    if (count === 0) return;
+    const wrapped = ((index % count) + count) % count;
+    tabRefs[wrapped]?.focus();
   }
 
-  function isEmojiIcon(ic: PageIcon | undefined): ic is string {
-    return ic !== undefined && typeof ic === "string";
-  }
+  function handleTablistKeydown(event: KeyboardEvent) {
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
+    const focusedIndex = tabRefs.findIndex((el) => el === document.activeElement);
+    const fromIndex = focusedIndex >= 0 ? focusedIndex : Math.max(currentIndex, 0);
 
-  // =============================================================================
-  // Collapse State
-  // =============================================================================
-
-  let isCollapsed = $state(false);
-  let isMobile = $state(false);
-
-  // Auto-collapse on mobile screens
-  $effect(() => {
-    if (typeof window === "undefined") return;
-
-    function checkMobile() {
-      const mobile = window.innerWidth < 640; // sm breakpoint
-      isMobile = mobile;
-      // Auto-collapse on mobile when collapsible is enabled
-      if (collapsible && mobile && !isCollapsed) {
-        isCollapsed = true;
+    switch (event.key) {
+      case "ArrowRight":
+        event.preventDefault();
+        focusTabAt(fromIndex + 1);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        focusTabAt(fromIndex - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusTabAt(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusTabAt(tabs.length - 1);
+        break;
+      case "Enter":
+      case " ": {
+        const target = event.target as HTMLElement;
+        const index = tabRefs.findIndex((el) => el === target);
+        if (index >= 0) {
+          event.preventDefault();
+          activateTab(tabs[index]);
+        }
+        break;
       }
     }
-
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  });
-
-  function toggleCollapse() {
-    isCollapsed = !isCollapsed;
   }
 
-  // =============================================================================
-  // Handlers
-  // =============================================================================
-
-  function handleTabClick(tabId: string) {
-    onTabChange?.(tabId);
-  }
-
-  function getStatusClass(variant: string): string {
-    switch (variant) {
-      case "running": return "status-running";
-      case "starting": return "status-starting";
-      case "stopped": return "status-stopped";
-      case "sleeping": return "status-sleeping";
-      case "error": return "status-error";
-      default: return "status-stopped";
-    }
-  }
+  const statusText: Record<StatusVariant, string> = {
+    running: "text-status-running",
+    starting: "text-status-starting",
+    stopped: "text-status-stopped",
+    error: "text-status-error",
+    sleeping: "text-status-sleeping",
+    degraded: "text-status-degraded",
+  };
+  const statusBg: Record<StatusVariant, string> = {
+    running: "bg-status-running",
+    starting: "bg-status-starting",
+    stopped: "bg-status-stopped",
+    error: "bg-status-error",
+    sleeping: "bg-status-sleeping",
+    degraded: "bg-status-degraded",
+  };
 </script>
 
 <header
-  class="z-40 border-b border-border/30 bg-background/80 backdrop-blur-md pt-[env(safe-area-inset-top,0px)] {sticky ? 'sticky top-0' : ''}"
+  class={cn(
+    "z-40 border-b bg-background/90 backdrop-blur-md pt-[env(safe-area-inset-top,0px)]",
+    sticky && "sticky top-0",
+  )}
 >
-  <div class="container mx-auto px-4 sm:px-6 max-w-7xl">
-    <!-- Collapsible Title Section (hidden on mobile when collapsed) -->
-    <div 
-      class="overflow-hidden transition-all duration-300 ease-out"
-      style="max-height: {collapsible && isCollapsed ? '0px' : '200px'}; opacity: {collapsible && isCollapsed ? '0' : '1'}"
-    >
-      <!-- Top section: Title, status, actions -->
-      <div class="py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div class="flex items-center gap-4 min-w-0">
-          <!-- Leading content (back button, etc.) -->
-          {#if leading}
-            {@render leading()}
-            <div class="h-6 w-px bg-border/50 hidden sm:block"></div>
+  <div class="container mx-auto max-w-7xl px-4 sm:px-6">
+    <div class="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 items-center gap-3">
+        {#if leading}
+          {@render leading()}
+          <div class="hidden h-6 w-px bg-border sm:block"></div>
+        {/if}
+        {#if Icon}
+          <Icon class="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        {/if}
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center gap-2.5 overflow-hidden">
+            <h1 class="truncate text-lg font-semibold tracking-tight">{title}</h1>
+            {#if status}
+              <span
+                class={cn(
+                  "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+                  statusText[status.variant],
+                )}
+              >
+                <span
+                  class={cn(
+                    "size-1.5 rounded-full",
+                    statusBg[status.variant],
+                    status.animate && "animate-pulse",
+                  )}
+                ></span>
+                {status.label}
+              </span>
+            {/if}
+          </div>
+          {#if subtitle}
+            <p class="mt-0.5 truncate font-mono text-xs text-muted-foreground">{subtitle}</p>
           {/if}
-          
-          <!-- Title and status -->
-          <div class="min-w-0 flex-1 flex items-center gap-3">
-            <!-- Icon in expanded mode -->
-            {#if icon}
-              <div class="flex items-center justify-center shrink-0 text-primary">
-                {#if isAnimatedIcon(icon)}
-                  <LottieIcon src={icon.path} size={24} loop autoplay />
-                {:else if isEmojiIcon(icon)}
-                  <span class="text-2xl">{icon}</span>
-                {:else if isComponentIcon(icon)}
-                  {@const IconComponent = icon}
-                  <IconComponent class="h-6 w-6" />
-                {/if}
-              </div>
-            {/if}
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-3 overflow-hidden">
-                <h1 class="text-xl sm:text-2xl font-bold truncate glitch-hover">
-                  {title}
-                </h1>
-                {#if status}
-                  <div class="status-indicator {getStatusClass(status.variant)} shrink-0">
-                    <span class="status-dot {status.animate ? 'animate-pulse-dot' : ''}"></span>
-                    <span>{status.label}</span>
-                  </div>
-                {/if}
-              </div>
-              {#if subtitle}
-                <p class="text-xs font-mono text-muted-foreground truncate mt-0.5">
-                  {subtitle}
-                </p>
-              {/if}
-            </div>
-          </div>
         </div>
-        
-        <!-- Actions (only in expanded state on non-collapsible headers) -->
-        {#if actions && !collapsible}
-          <div class="flex items-center gap-2 shrink-0">
-            {@render actions()}
-          </div>
-        {/if}
       </div>
+      {#if actions}
+        <div class="flex shrink-0 items-center gap-2">
+          {@render actions()}
+        </div>
+      {/if}
     </div>
-    
-    <!-- Tab Navigation Bar (always visible) -->
-    {#if tabs.length > 0}
-      <div class="flex items-center gap-1 sm:gap-2 py-1 sm:py-0">
-        <!-- LEFT: Back button + Icon (only when collapsed) -->
-        {#if collapsible && isCollapsed}
-          <div class="flex items-center gap-1.5 shrink-0">
-            {#if leading}
-              {@render leading()}
-            {/if}
-          </div>
-        {/if}
 
-        <!-- CENTER: Tabs - take remaining space, centered on mobile -->
-        <nav class="flex-1 flex justify-center sm:justify-start gap-0.5 sm:gap-1 overflow-x-auto pb-px -mb-px scrollbar-hide">
-          {#each tabs as tab}
-            <Tooltip.Root>
-              <Tooltip.Trigger>
+    {#if tabs.length > 0}
+      <!-- svelte-ignore a11y_interactive_supports_focus -- roving tabindex lives on the individual tab buttons, not the tablist container -->
+      <div
+        class="scrollbar-hide -mb-px flex gap-1 overflow-x-auto"
+        role="tablist"
+        onkeydown={handleTablistKeydown}
+      >
+        {#each tabs as tab, i (tab.id)}
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
                 <button
+                  {...props}
+                  bind:this={tabRefs[i]}
                   type="button"
-                  disabled={tab.disabled}
-                  class="px-2.5 sm:px-4 py-2 sm:py-2.5 font-mono text-xs uppercase tracking-wider whitespace-nowrap
-                         border-b-2 transition-colors flex items-center justify-center gap-2 touch-manipulation
-                         {tab.disabled
-                           ? 'border-transparent text-muted-foreground/50 cursor-not-allowed'
-                           : activeTab === tab.id 
-                             ? 'border-primary text-primary' 
-                             : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border/50'}"
-                  onclick={() => !tab.disabled && handleTabClick(tab.id)}
+                  role="tab"
+                  id="{tabsId}-tab-{tab.id}"
+                  aria-controls="{tabsId}-panel-{tab.id}"
+                  aria-selected={activeTab === tab.id}
+                  aria-disabled={tab.disabled ? "true" : undefined}
+                  tabindex={activeTab === tab.id ? 0 : -1}
+                  class={cn(
+                    "flex items-center gap-2 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors",
+                    tab.disabled
+                      ? "cursor-not-allowed border-transparent text-muted-foreground/50"
+                      : activeTab === tab.id
+                        ? "border-primary text-foreground"
+                        : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+                  )}
+                  onclick={() => activateTab(tab)}
                 >
                   {#if tab.disabled}
-                    <LockIcon class="h-3.5 w-3.5 text-muted-foreground/50" />
+                    <LockIcon class="h-3.5 w-3.5" aria-hidden="true" />
                   {:else if tab.icon}
-                    {#if typeof tab.icon === "string"}
-                      <span class="text-sm">{tab.icon}</span>
-                    {:else}
-                      {@const IconComponent = tab.icon}
-                      <IconComponent class="h-4 w-4" />
-                    {/if}
+                    {@const TabIcon = tab.icon}
+                    <TabIcon class="h-4 w-4" aria-hidden="true" />
                   {/if}
-                  <!-- Label hidden on mobile, shown on sm+ -->
                   <span class="hidden sm:inline">{tab.label}</span>
                 </button>
-              </Tooltip.Trigger>
-              <!-- Tooltip: show disabledReason if disabled, otherwise show label on mobile -->
-              <Tooltip.Content class={tab.disabled ? "" : "sm:hidden"}>
-                <p>{tab.disabled && tab.disabledReason ? tab.disabledReason : tab.label}</p>
-              </Tooltip.Content>
-            </Tooltip.Root>
-          {/each}
-        </nav>
-
-        <!-- RIGHT: Status badge + Actions + Collapse toggle -->
-        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <!-- Status badge (only when collapsed) -->
-          {#if collapsible && isCollapsed && status}
-            <div class="status-indicator {getStatusClass(status.variant)} shrink-0 text-xs py-0.5 px-1.5">
-              <span class="status-dot {status.animate ? 'animate-pulse-dot' : ''}"></span>
-              <span class="hidden sm:inline">{status.label}</span>
-            </div>
-          {/if}
-
-          <!-- Actions - hidden on mobile, shown on sm+ -->
-          {#if collapsible && actions}
-            <div class="hidden sm:flex items-center gap-2">
-              {@render actions()}
-            </div>
-          {/if}
-
-          <!-- Collapse toggle button - hidden on mobile -->
-          {#if collapsible}
-            <button
-              onclick={toggleCollapse}
-              class="hidden sm:block p-1.5 rounded border border-border/30 hover:border-primary/50 
-                     hover:bg-primary/5 transition-colors"
-              title={isCollapsed ? "Expand header" : "Collapse header"}
-            >
-              {#if isCollapsed}
-                <ChevronDownIcon class="h-4 w-4 text-muted-foreground" />
-              {:else}
-                <ChevronUpIcon class="h-4 w-4 text-muted-foreground" />
-              {/if}
-            </button>
-          {/if}
-        </div>
-      </div>
-    {:else if collapsible}
-      <!-- No tabs, but collapsible - show toggle in a minimal bar -->
-      <div class="flex items-center justify-between py-2">
-        {#if isCollapsed}
-          <div class="flex items-center gap-2 min-w-0">
-            {#if leading}
-              {@render leading()}
-            {/if}
-            <!-- Icon or fallback to title -->
-            {#if icon}
-              <div 
-                class="flex items-center justify-center w-8 h-8 rounded border border-primary/30 bg-primary/5"
-                title={title}
-              >
-                {#if isAnimatedIcon(icon)}
-                  <LottieIcon src={icon.path} size={20} loop autoplay />
-                {:else if isEmojiIcon(icon)}
-                  <span class="text-lg">{icon}</span>
-                {:else if isComponentIcon(icon)}
-                  {@const IconComponent = icon}
-                  <IconComponent class="h-5 w-5 text-primary" />
-                {/if}
-              </div>
-            {:else}
-              <span class="font-mono text-sm font-medium truncate text-primary max-w-[120px]">{title}</span>
-            {/if}
-            {#if status}
-              <div class="status-indicator {getStatusClass(status.variant)} shrink-0 text-xs">
-                <span class="status-dot {status.animate ? 'animate-pulse-dot' : ''}"></span>
-              </div>
-            {/if}
-          </div>
-        {:else}
-          <div></div>
-        {/if}
-        
-        <div class="flex items-center gap-2">
-          {#if actions}
-            {@render actions()}
-          {/if}
-          <button
-            onclick={toggleCollapse}
-            class="p-1.5 rounded border border-border/30 hover:border-primary/50 
-                   hover:bg-primary/5 transition-colors"
-            title={isCollapsed ? "Expand header" : "Collapse header"}
-          >
-            {#if isCollapsed}
-              <ChevronDownIcon class="h-4 w-4 text-muted-foreground" />
-            {:else}
-              <ChevronUpIcon class="h-4 w-4 text-muted-foreground" />
-            {/if}
-          </button>
-        </div>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content class={tab.disabled ? "" : "sm:hidden"}>
+              <p>{tab.disabled && tab.disabledReason ? tab.disabledReason : tab.label}</p>
+            </Tooltip.Content>
+          </Tooltip.Root>
+        {/each}
       </div>
     {/if}
   </div>

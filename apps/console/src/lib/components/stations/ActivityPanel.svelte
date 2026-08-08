@@ -4,8 +4,8 @@
   import type { StationAuditRow } from "$lib/api/client";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
-  import { statusBadgeClass } from "$lib/utils/status-badge";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { Empty } from "$lib/components/ui/empty";
   import * as Card from "$lib/components/ui/card";
 
   interface Props {
@@ -57,9 +57,9 @@
   }
 
   function resultBadgeClass(result: string): string {
-    if (result === "ok") return statusBadgeClass("running");   // chart-2 green
-    if (result === "error") return statusBadgeClass("error");  // destructive red
-    return statusBadgeClass("stopped");                        // muted default
+    if (result === "ok") return "text-status-running border-status-running bg-status-running/10";
+    if (result === "error") return "text-status-error border-status-error bg-status-error/10";
+    return "text-status-stopped border-status-stopped bg-status-stopped/10";
   }
 </script>
 
@@ -81,7 +81,7 @@
   {:else if error}
     <p class="text-sm text-destructive py-2">{error}</p>
   {:else if rows.length === 0}
-    <p class="text-sm text-muted-foreground py-2">No activity yet.</p>
+    <Empty title="No activity yet" />
   {:else}
     <Card.Root class="overflow-hidden border-border/60">
       <ul class="divide-y divide-border/40">

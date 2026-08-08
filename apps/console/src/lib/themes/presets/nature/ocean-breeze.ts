@@ -91,7 +91,7 @@ export const oceanBreeze: ThemePreset = {
       "cyber-emerald": "#80f5e0",
       "cyber-magenta": "#ddd0ff",
       "cyber-amber": "#ffe8a0",
-      "cyber-red": "#ffc5c5",
+      "cyber-red": "#ff8a8a",
       "cyber-glow": "0 0 20px rgba(56, 189, 248, 0.3)",
       "cyber-glow-emerald": "0 0 20px rgba(45, 212, 191, 0.3)",
     },

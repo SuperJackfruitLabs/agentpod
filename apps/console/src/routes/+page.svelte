@@ -10,6 +10,7 @@
   import RecentActivity from "$lib/components/fleet/RecentActivity.svelte";
   import ConnectBanner from "$lib/components/fleet/connect-banner.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { Button } from "$lib/components/ui/button";
 
   let stats = $state<FleetStats | null>(null);
   let agents = $state<FleetAgent[]>([]);
@@ -31,6 +32,8 @@
   }
 
   async function loadFleet() {
+    isLoading = true;
+    error = null;
     try {
       const result = await getFleet();
       stats = result.stats;
@@ -59,20 +62,24 @@
   });
 </script>
 
-<PageHeader title="Overview" subtitle="// fleet control plane" />
+<PageHeader title="Overview" subtitle="Fleet control plane" />
 
 <div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6 space-y-6">
   {#if isLoading}
     <!-- Loading skeleton for stat cards -->
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
       {#each [1, 2, 3] as _}
-        <Skeleton class="h-20 rounded-xl" />
+        <Skeleton class="h-20 rounded-lg" />
       {/each}
     </div>
 
   {:else if error}
-    <div class="cyber-card p-4 border-destructive/50">
-      <p class="text-sm font-mono text-destructive">{error}</p>
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadFleet}>Retry</Button>
     </div>
 
   {:else if agents.length === 0}
@@ -80,12 +87,12 @@
     <div class="flex flex-col items-center py-8">
       <div class="w-full max-w-2xl">
         {#if lastToken}
-          <div class="cyber-card p-6 space-y-3">
-            <p class="text-xs font-mono text-muted-foreground">// enrollment token created — run this on the target node to connect it</p>
+          <div class="rounded-lg border p-6 space-y-3">
+            <p class="text-xs text-muted-foreground">Enrollment token created — run this on the target node to connect it</p>
             <code class="block text-sm font-mono break-all text-primary">
               curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh | sudo bash -s -- {lastToken}
             </code>
-            <p class="text-xs font-mono text-muted-foreground/60">// the node will appear in the fleet once it connects</p>
+            <p class="text-xs text-muted-foreground/60">The node will appear in the fleet once it connects</p>
           </div>
         {:else}
           <ConnectBanner onCreateToken={handleCreateToken} />
@@ -100,8 +107,8 @@
     {/if}
 
     <!-- Fleet heatmap — clicking a cell navigates to /agents filtered by that station -->
-    <div class="cyber-card p-4 space-y-2">
-      <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">// fleet health</span>
+    <div class="rounded-lg border p-4 space-y-2">
+      <p class="text-sm font-medium">Fleet health</p>
       <FleetHeatmap
         {agents}
         onSelectAgent={handleSelectAgent}

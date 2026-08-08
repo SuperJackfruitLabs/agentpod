@@ -8,7 +8,7 @@ import type { Plugin } from "vite";
  * processes them.  bits-ui's select-viewport.svelte (and potentially others)
  * contain style blocks that call preprocessCSS internally, which fails in the
  * jsdom test environment under Vite 6 because PartialEnvironment is unavailable.
- * Project components like lottie-icon.svelte and theme-toggle.svelte also have
+ * Project components like theme-toggle.svelte also have
  * <style> blocks that trigger the same failure.
  * Tests never need CSS to function, so stripping these blocks is safe.
  */
@@ -30,7 +30,11 @@ function stripAllSvelteStyles(): Plugin {
 export default defineConfig({
   plugins: [stripAllSvelteStyles(), svelte({ hot: false })],
   resolve: {
-    conditions: ["browser"],
+    // "svelte" is required alongside "browser" so packages that only expose
+    // a component build behind the "svelte" export condition (e.g.
+    // paneforge, which backs $lib/components/ui/resizable) resolve at all —
+    // without it Vite fails with "No known conditions for '.' specifier".
+    conditions: ["browser", "svelte"],
     alias: {
       $lib: path.resolve(__dirname, "./src/lib"),
       // SvelteKit runtime modules — resolved to stubs in the jsdom environment.
@@ -39,10 +43,6 @@ export default defineConfig({
       "$app/navigation": path.resolve(__dirname, "./src/mocks/app-navigation.ts"),
       "$app/environment": path.resolve(__dirname, "./src/mocks/app-environment.ts"),
       "$app/stores": path.resolve(__dirname, "./src/mocks/app-stores.ts"),
-      // lottie-web uses HTMLCanvasElement.getContext at module load time which
-      // jsdom does not support. Stub it out so tests can import any component
-      // that transitively imports lottie-icon.svelte (e.g. page-header.svelte).
-      "lottie-web": path.resolve(__dirname, "./src/mocks/lottie-web.ts"),
     },
   },
   test: {

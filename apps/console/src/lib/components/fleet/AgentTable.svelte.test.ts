@@ -322,3 +322,121 @@ test("null externalFilter shows all agents", async () => {
     expect(getByText("kubera")).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests — sorting (Task 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * `statusBadgeClass` / the severity ranking accept any status string (the
+ * mapping is shared across node + agent status vocab), but `FleetAgent.status`
+ * is typed to the current 4-value contract enum. The cast here is intentional
+ * so these sort tests can exercise the full six-token severity order that
+ * AgentTable documents and sorts by.
+ */
+function makeAgentWithStatus(
+  status: string,
+  overrides: Partial<FleetAgent> & { stationId: string }
+): FleetAgent {
+  return { ...makeAgent(overrides), status } as unknown as FleetAgent;
+}
+
+test("sorting by Status orders rows by severity: error < degraded < starting < running < sleeping < stopped", async () => {
+  const scrambledOrder = ["stopped", "sleeping", "running", "starting", "degraded", "error"];
+  const agentsList = scrambledOrder.map((status, i) =>
+    makeAgentWithStatus(status, {
+      stationId: `s${i}`,
+      agentName: status,
+      nodeId: `n${i}`,
+      nodeName: `node${i}`,
+    })
+  );
+
+  const { getByRole, getByTestId, container } = render(AgentTable, {
+    props: { agents: agentsList },
+  });
+
+  // Switch to flat view so row order is directly comparable.
+  await fireEvent.click(getByTestId("group-toggle"));
+  await fireEvent.click(getByRole("button", { name: /^status$/i }));
+
+  await waitFor(() => {
+    const names = Array.from(container.querySelectorAll('a[href^="/nodes/"]')).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(names).toEqual(["error", "degraded", "starting", "running", "sleeping", "stopped"]);
+  });
+});
+
+test("sorting by CPU keeps null cpuPct rows last in both ascending and descending order", async () => {
+  const agentsList = [
+    makeAgent({ stationId: "s1", agentName: "a", nodeId: "n1", nodeName: "node1", cpuPct: 10 }),
+    makeAgent({ stationId: "s2", agentName: "b", nodeId: "n2", nodeName: "node2", cpuPct: null }),
+    makeAgent({ stationId: "s3", agentName: "c", nodeId: "n3", nodeName: "node3", cpuPct: 30 }),
+    makeAgent({ stationId: "s4", agentName: "d", nodeId: "n4", nodeName: "node4", cpuPct: null }),
+    makeAgent({ stationId: "s5", agentName: "e", nodeId: "n5", nodeName: "node5", cpuPct: 20 }),
+  ];
+
+  const { getByRole, getByTestId, container } = render(AgentTable, {
+    props: { agents: agentsList },
+  });
+
+  await fireEvent.click(getByTestId("group-toggle"));
+  await fireEvent.click(getByRole("button", { name: /^cpu$/i }));
+
+  await waitFor(() => {
+    const names = Array.from(container.querySelectorAll('a[href^="/nodes/"]')).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(names).toEqual(["a", "e", "c", "b", "d"]);
+  });
+
+  // Toggle to descending — numeric order flips, nulls still sink to the bottom.
+  await fireEvent.click(getByRole("button", { name: /^cpu$/i }));
+
+  await waitFor(() => {
+    const names = Array.from(container.querySelectorAll('a[href^="/nodes/"]')).map((el) =>
+      el.textContent?.trim()
+    );
+    expect(names).toEqual(["c", "e", "a", "b", "d"]);
+  });
+});
+
+test("sortable column headers expose aria-sort, toggling asc → desc → none", async () => {
+  const { getByRole } = render(AgentTable, { props: { agents: twoAgents } });
+
+  const header = getByRole("columnheader", { name: /^agent$/i });
+  expect(header.getAttribute("aria-sort")).toBeNull();
+
+  const button = getByRole("button", { name: /^agent$/i });
+
+  await fireEvent.click(button);
+  expect(header.getAttribute("aria-sort")).toBe("ascending");
+
+  await fireEvent.click(button);
+  expect(header.getAttribute("aria-sort")).toBe("descending");
+
+  await fireEvent.click(button);
+  expect(header.getAttribute("aria-sort")).toBeNull();
+});
+
+test("sorting within groups reorders agents but leaves group order untouched", async () => {
+  const agentsList = [
+    makeAgent({ stationId: "s1", agentName: "zeta", nodeId: "n1", nodeName: "node1" }),
+    makeAgent({ stationId: "s2", agentName: "alpha", nodeId: "n1", nodeName: "node1" }),
+    makeAgent({ stationId: "s3", agentName: "yankee", nodeId: "n2", nodeName: "node2" }),
+    makeAgent({ stationId: "s4", agentName: "bravo", nodeId: "n2", nodeName: "node2" }),
+  ];
+
+  const { getByRole, container } = render(AgentTable, { props: { agents: agentsList } });
+
+  // Default view is grouped by node — leave it grouped and sort by Agent.
+  await fireEvent.click(getByRole("button", { name: /^agent$/i }));
+
+  await waitFor(() => {
+    const sequence = Array.from(
+      container.querySelectorAll('[data-testid="group-header"], a[href^="/nodes/"]')
+    ).map((el) => (el.getAttribute("data-testid") === "group-header" ? "group" : el.textContent?.trim()));
+    expect(sequence).toEqual(["group", "alpha", "zeta", "group", "bravo", "yankee"]);
+  });
+});

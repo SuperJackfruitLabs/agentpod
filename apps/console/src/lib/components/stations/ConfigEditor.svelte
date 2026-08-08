@@ -10,9 +10,12 @@
     stationId: string;
     path: string;
     onClose?: () => void;
+    /** Called after a successful save so callers (e.g. FileBrowser, via the
+     *  station page) can evict any stale cached content for this path. */
+    onSaved?: (path: string) => void;
   }
 
-  let { stationId, path, onClose }: Props = $props();
+  let { stationId, path, onClose, onSaved }: Props = $props();
 
   // ── State ────────────────────────────────────────────────────────────────────
   let original = $state("");
@@ -59,6 +62,7 @@
       const result = await writeFile(stationId, path, buffer, { backup: true });
       original = buffer;
       backupPath = result.backupPath ?? null;
+      onSaved?.(path);
     } catch (err) {
       saveError = err instanceof Error ? err.message : "Failed to save";
     } finally {

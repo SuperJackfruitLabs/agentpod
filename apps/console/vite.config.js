@@ -11,14 +11,14 @@ export default defineConfig(async () => ({
 
   // Mark dev-only packages as external for SSR builds (they're dynamically imported only in dev mode)
   ssr: {
-    external: ["html2canvas"],
+    external: [],
   },
   optimizeDeps: {
-    exclude: ["html2canvas"],
+    exclude: [],
   },
   build: {
     rollupOptions: {
-      external: ["html2canvas"],
+      external: [],
     },
   },
 }));

@@ -2,11 +2,9 @@
   import { onMount } from "svelte";
   import { stationHealth, lifecycle } from "$lib/api/client";
   import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
-  import * as Card from "$lib/components/ui/card";
-  import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
+  import { Skeleton } from "$lib/components/ui/skeleton";
   import type { StationHealth } from "@agentpod/contract";
-  import { statusBadgeClass } from "$lib/utils/status-badge";
 
   interface Props {
     stationId: string;
@@ -26,7 +24,9 @@
   let actionInFlight = $state(false);
   let actionError = $state<string | null>(null);
 
-  onMount(async () => {
+  async function loadHealth() {
+    isLoading = true;
+    error = null;
     try {
       health = await stationHealth(stationId);
     } catch (err) {
@@ -34,6 +34,10 @@
     } finally {
       isLoading = false;
     }
+  }
+
+  onMount(() => {
+    loadHealth();
   });
 
   function fmt(v: number | null): string {
@@ -65,6 +69,10 @@
   // True when the health note indicates the metrics belong to the shared gateway
   // process (composite OpenClaw stations where all subagents share one process).
   let isGateway = $derived(health?.note?.includes("gateway") ?? false);
+
+  const statusColorClass = $derived(
+    health?.running ? "text-status-running" : "text-status-stopped",
+  );
 
   async function doLifecycle(action: "start" | "stop" | "restart") {
     actionInFlight = true;
@@ -106,127 +114,135 @@
 </script>
 
 {#if isLoading}
-  <p class="text-sm text-muted-foreground p-3">Loading health data…</p>
+  <div class="p-4 space-y-3">
+    <p class="text-sm text-muted-foreground">Loading health data…</p>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      {#each Array(8) as _, i (i)}
+        <Skeleton class="h-14 rounded-lg" />
+      {/each}
+    </div>
+  </div>
 {:else if error}
-  <p class="text-sm text-destructive p-3">{error}</p>
+  <div class="p-4">
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadHealth}>Retry</Button>
+    </div>
+  </div>
 {:else if health}
-  <Card.Root class="border-0 shadow-none rounded-none">
-    <Card.Content class="py-4 space-y-4">
-      <!-- Responsive stat grid: 1 col mobile → 2 cols sm -->
-      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-        <!-- Status -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</dt>
-          <dd>
-            <Badge
-              variant="outline"
-              class={statusBadgeClass(health.running ? "running" : "stopped")}
-            >
-              {health.running ? "Running" : "Stopped"}
-            </Badge>
+  <div class="p-4 space-y-4">
+    <!-- Responsive stat-tile grid: 1 col mobile → 2 cols sm -->
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <!-- Status -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Status</dt>
+        <dd class="font-mono text-lg {statusColorClass}">
+          {health.running ? "Running" : "Stopped"}
+        </dd>
+      </div>
+
+      <!-- PID -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">PID</dt>
+        <dd class="font-mono text-lg text-foreground">
+          {fmt(health.pid)}{#if isGateway && health.pid !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
+        </dd>
+      </div>
+
+      <!-- CPU -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">CPU</dt>
+        <dd class="font-mono text-lg text-foreground">
+          {health.cpuPct !== null ? `${health.cpuPct}%` : "—"}{#if isGateway && health.cpuPct !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
+        </dd>
+      </div>
+
+      <!-- Memory -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Memory</dt>
+        <dd class="font-mono text-lg text-foreground">
+          {fmtBytes(health.memBytes)}{#if isGateway && health.memBytes !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
+        </dd>
+      </div>
+
+      <!-- Disk -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Disk</dt>
+        <dd class="font-mono text-lg text-foreground">{fmtBytes(health.diskBytes)}</dd>
+      </div>
+
+      <!-- Uptime -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Uptime</dt>
+        <dd class="font-mono text-lg text-foreground">
+          {fmtUptime(health.uptimeSec)}{#if isGateway && health.uptimeSec !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
+        </dd>
+      </div>
+
+      <!-- Last Activity -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Last Activity</dt>
+        <dd class="font-mono text-sm text-foreground">{fmtStr(health.lastActivity)}</dd>
+      </div>
+
+      <!-- Note -->
+      <div class="rounded-lg border p-3 flex flex-col gap-1">
+        <dt class="text-xs text-muted-foreground">Note</dt>
+        <dd class="font-mono text-sm text-foreground">{fmtStr(health.note)}</dd>
+      </div>
+
+      <!-- Matrix ID (conditional) -->
+      {#if matrixId}
+        <div class="rounded-lg border p-3 flex flex-col gap-1 sm:col-span-2">
+          <dt class="text-xs text-muted-foreground">Matrix</dt>
+          <dd class="font-mono text-sm">
+            <a
+              href="https://matrix.to/#/{matrixId}"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-primary hover:underline break-all"
+            >{matrixId}</a>
           </dd>
         </div>
-
-        <!-- PID -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">PID</dt>
-          <dd class="font-mono text-sm text-foreground">
-            {fmt(health.pid)}{#if isGateway && health.pid !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-          </dd>
-        </div>
-
-        <!-- CPU -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">CPU</dt>
-          <dd class="font-mono text-sm text-foreground">
-            {health.cpuPct !== null ? `${health.cpuPct}%` : "—"}{#if isGateway && health.cpuPct !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-          </dd>
-        </div>
-
-        <!-- Memory -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Memory</dt>
-          <dd class="font-mono text-sm text-foreground">
-            {fmtBytes(health.memBytes)}{#if isGateway && health.memBytes !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-          </dd>
-        </div>
-
-        <!-- Disk -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Disk</dt>
-          <dd class="font-mono text-sm text-foreground">{fmtBytes(health.diskBytes)}</dd>
-        </div>
-
-        <!-- Uptime -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Uptime</dt>
-          <dd class="font-mono text-sm text-foreground">
-            {fmtUptime(health.uptimeSec)}{#if isGateway && health.uptimeSec !== null}<span class="text-muted-foreground text-xs ml-1">(gateway)</span>{/if}
-          </dd>
-        </div>
-
-        <!-- Last Activity -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Activity</dt>
-          <dd class="font-mono text-sm text-foreground">{fmtStr(health.lastActivity)}</dd>
-        </div>
-
-        <!-- Note -->
-        <div class="flex flex-col gap-1">
-          <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Note</dt>
-          <dd class="font-mono text-sm text-foreground">{fmtStr(health.note)}</dd>
-        </div>
-
-        <!-- Matrix ID (conditional) -->
-        {#if matrixId}
-          <div class="flex flex-col gap-1 sm:col-span-2">
-            <dt class="text-xs font-medium text-muted-foreground uppercase tracking-wide">Matrix</dt>
-            <dd class="font-mono text-sm">
-              <a
-                href="https://matrix.to/#/{matrixId}"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="text-primary hover:underline break-all"
-              >{matrixId}</a>
-            </dd>
-          </div>
-        {/if}
-      </dl>
-
-      <!-- Lifecycle controls -->
-      {#if canLifecycle}
-        <div class="pt-2 border-t border-border/40 flex flex-wrap gap-2">
-          <Button
-            variant="default"
-            size="sm"
-            disabled={actionInFlight}
-            onclick={handleStart}
-          >
-            Start
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={actionInFlight}
-            onclick={handleStop}
-          >
-            Stop
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={actionInFlight}
-            onclick={handleRestart}
-          >
-            Restart
-          </Button>
-        </div>
-        {#if actionError}
-          <p class="text-sm text-destructive">{actionError}</p>
-        {/if}
       {/if}
-    </Card.Content>
-  </Card.Root>
+    </dl>
+
+    <!-- Lifecycle controls -->
+    {#if canLifecycle}
+      <div class="pt-2 border-t flex flex-wrap gap-2">
+        <Button
+          variant="default"
+          size="sm"
+          disabled={actionInFlight}
+          onclick={handleStart}
+        >
+          Start
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={actionInFlight}
+          onclick={handleStop}
+        >
+          Stop
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={actionInFlight}
+          onclick={handleRestart}
+        >
+          Restart
+        </Button>
+      </div>
+      {#if actionError}
+        <p class="text-sm text-destructive">{actionError}</p>
+      {/if}
+    {/if}
+  </div>
 
   {#if canLifecycle}
     <TypeToConfirmDialog

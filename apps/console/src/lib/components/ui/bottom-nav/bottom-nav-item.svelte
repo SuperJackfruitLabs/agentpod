@@ -31,18 +31,13 @@
     // Focus states (accessibility)
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     // Active/inactive states using semantic colors
-    isActive ? "text-primary" : "text-muted-foreground",
+    isActive ? "text-foreground" : "text-muted-foreground",
     className
   )}
   aria-current={isActive ? "page" : undefined}
 >
   <div class="relative">
-    <Icon
-      class={cn(
-        "h-5 w-5 transition-transform",
-        isActive && "scale-110"
-      )}
-    />
+    <Icon class="h-5 w-5" />
     {#if badge && badge > 0}
       <span
         class={cn(
@@ -59,15 +54,15 @@
   </div>
   <span
     class={cn(
-      "text-[10px] font-medium leading-none transition-colors",
-      isActive ? "text-primary" : "text-muted-foreground"
+      "text-[11px] font-medium leading-none transition-colors",
+      isActive ? "text-foreground" : "text-muted-foreground"
     )}
   >
     {label}
   </span>
-  
+
   <!-- Active indicator line -->
   {#if isActive}
-    <span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-primary rounded-full"></span>
+    <span class="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-foreground rounded-full"></span>
   {/if}
 </a>

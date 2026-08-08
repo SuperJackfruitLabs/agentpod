@@ -11,6 +11,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip";
   import AppShell from "$lib/components/app-shell.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
+  import { Spinner } from "$lib/components/ui/spinner";
 
   let { children } = $props();
   let isInitializing = $state(true);
@@ -74,23 +75,10 @@
 
   <div class="min-h-screen bg-background text-foreground">
     {#if shouldShowLoading}
-      <!-- Cyber-styled loading state -->
-      <div class="noise-overlay"></div>
-      <div class="min-h-screen grid-bg mesh-gradient flex items-center justify-center">
-        <div class="text-center animate-fade-in-up">
-          <div class="relative">
-            <!-- Outer ring -->
-            <div class="w-16 h-16 rounded-full border-2 border-primary/20 mx-auto"></div>
-            <!-- Spinning ring -->
-            <div class="absolute inset-0 w-16 h-16 rounded-full border-2 border-transparent border-t-[var(--primary)] mx-auto animate-spin"></div>
-            <!-- Center dot -->
-            <div class="absolute inset-0 flex items-center justify-center">
-              <div class="w-2 h-2 rounded-full bg-primary animate-pulse-dot"></div>
-            </div>
-          </div>
-          <p class="mt-6 text-sm font-mono text-muted-foreground tracking-wider uppercase">
-            Initializing<span class="typing-cursor"></span>
-          </p>
+      <div class="flex min-h-screen items-center justify-center bg-background">
+        <div class="flex flex-col items-center gap-3">
+          <Spinner size="lg" />
+          <p class="text-sm text-muted-foreground">Connecting…</p>
         </div>
       </div>
     {:else if showAppShell}

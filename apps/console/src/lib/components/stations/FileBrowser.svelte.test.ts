@@ -2,6 +2,24 @@ import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import type { FsEntry } from "@agentpod/contract";
+
+// Mock MonacoEditor with a textarea stub so jsdom tests can read its value —
+// same pattern as ConfigEditor.svelte.test.ts.
+vi.mock("$lib/components/ui/monaco-editor", async () => {
+  const { default: MonacoEditorStub } = await import(
+    "../ui/monaco-editor/monaco-editor.stub.svelte"
+  );
+  return { MonacoEditor: MonacoEditorStub };
+});
+
+// Mock MarkdownViewer: shiki-backed rendering doesn't run reliably in jsdom.
+vi.mock("$lib/components/ui/markdown", async () => {
+  const { default: MarkdownViewerStub } = await import(
+    "../ui/markdown/markdown-viewer.stub.svelte"
+  );
+  return { MarkdownViewer: MarkdownViewerStub };
+});
+
 // Static import ensures module is compiled during file collection, so the
 // first test doesn't pay the ~4s compilation cost inside its waitFor window.
 import FileBrowser from "./FileBrowser.svelte";
@@ -32,6 +50,14 @@ const mockSubFile: FsEntry = {
   type: "file",
   size: 512,
   modified: "2026-06-27T09:00:00Z",
+};
+
+const mockLogo: FsEntry = {
+  name: "logo.png",
+  path: "logo.png",
+  type: "file",
+  size: 2048,
+  modified: "2026-06-27T08:00:00Z",
 };
 
 test("FileBrowser renders root entries (dir + file)", async () => {
@@ -195,4 +221,173 @@ test("FileBrowser: write actions are hidden when canWrite is false", async () =>
   expect(queryByRole("button", { name: /new folder/i })).toBeNull();
   expect(queryByRole("button", { name: "Delete README.md" })).toBeNull();
   expect(queryByRole("button", { name: "Rename README.md" })).toBeNull();
+});
+
+// ─── Tabs / preview rebuild tests ────────────────────────────────────────────
+
+test("FileBrowser: opens multiple files as tabs and switches between them without refetching", async () => {
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce([mockDir, mockFile]) // root load
+    .mockResolvedValueOnce([mockSubFile]); // src/ expand load
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false }) // README.md
+    .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false }); // src/index.ts
+
+  const { getByText, getByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  fireEvent.click(getByText("index.ts"));
+  await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+
+  // Two files opened → two readFile calls, one per file.
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+
+  // Switch back to the first tab: its content is shown again with no extra fetch.
+  fireEvent.click(getByRole("tab", { name: "README.md" }));
+  await waitFor(() => {
+    expect(getByRole("tab", { name: "README.md" }).getAttribute("aria-selected")).toBe("true");
+  });
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+});
+
+test("FileBrowser: renders markdown files with a Rendered/Source toggle", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
+  vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello world", truncated: false });
+
+  const { getByText, getByRole, container } = render(FileBrowser, {
+    props: { stationId: "station_1" },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+
+  // Default view is Rendered → the mocked MarkdownViewer output is visible.
+  await waitFor(() => {
+    const stub = container.querySelector('[data-testid="markdown-viewer-stub"]');
+    expect(stub).toBeTruthy();
+    expect(stub!.textContent).toContain("# Hello world");
+  });
+
+  fireEvent.click(getByRole("button", { name: /^source$/i }));
+
+  // Source view swaps in the mocked Monaco editor with the same content.
+  await waitFor(() => {
+    const textarea = getByRole("textbox") as HTMLTextAreaElement;
+    expect(textarea.value).toBe("# Hello world");
+  });
+});
+
+test("FileBrowser: shows a metadata card instead of fetching binary files", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  const readFileSpy = vi.spyOn(api, "readFile");
+
+  const { getByText } = render(FileBrowser, { props: { stationId: "station_1" } });
+
+  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
+  fireEvent.click(getByText("logo.png"));
+
+  await waitFor(() => {
+    expect(getByText(/preview not available/i)).toBeTruthy();
+  });
+  expect(readFileSpy).not.toHaveBeenCalled();
+  // 2048 bytes → "2.0 KB" via the metadata card's size formatting.
+  expect(getByText(/2\.0 KB/)).toBeTruthy();
+});
+
+// ─── Cache invalidation (ConfigEditor save → FileBrowser refetch) ───────────
+
+test("FileBrowser: invalidate() evicts the cache and refetches when the path is the active tab", async () => {
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false }) // initial open
+    .mockResolvedValueOnce({ content: "# Hello, edited", truncated: false }); // post-save refetch
+
+  const { getByText, component } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: true },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+
+  await waitFor(() => {
+    expect(getByText("# Hello")).toBeTruthy();
+  });
+  expect(api.readFile).toHaveBeenCalledTimes(1);
+
+  // Simulate ConfigEditor's onSaved firing for the file that's currently
+  // the active tab — mirrors the station page's
+  // `onSaved={(p) => fileBrowser?.invalidate(p)}` wiring.
+  component.invalidate("README.md");
+
+  await waitFor(() => {
+    expect(api.readFile).toHaveBeenCalledTimes(2);
+    expect(getByText("# Hello, edited")).toBeTruthy();
+  });
+});
+
+test("FileBrowser: invalidate() on a non-active path evicts the cache without refetching", async () => {
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce([mockDir, mockFile])
+    .mockResolvedValueOnce([mockSubFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false }) // README.md
+    .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false }); // src/index.ts
+
+  const { getByText, getByRole, component } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: true },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  fireEvent.click(getByText("index.ts"));
+  await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+
+  // README.md was edited elsewhere but isn't the active tab (index.ts is) —
+  // its cache entry is evicted but no refetch happens until it's reopened.
+  component.invalidate("README.md");
+  expect(api.readFile).toHaveBeenCalledTimes(2);
+
+  fireEvent.click(getByRole("tab", { name: "README.md" }));
+  await waitFor(() => expect(api.readFile).toHaveBeenCalledTimes(3));
+});
+
+test("FileBrowser: closes a tab with its close button", async () => {
+  vi.spyOn(api, "listFiles")
+    .mockResolvedValueOnce([mockDir, mockFile])
+    .mockResolvedValueOnce([mockSubFile]);
+  vi.spyOn(api, "readFile")
+    .mockResolvedValueOnce({ content: "# Hello", truncated: false })
+    .mockResolvedValueOnce({ content: "export const x = 1;", truncated: false });
+
+  const { getByText, getByRole, queryByRole } = render(FileBrowser, {
+    props: { stationId: "station_1" },
+  });
+
+  await waitFor(() => expect(getByText("README.md")).toBeTruthy());
+  fireEvent.click(getByText("README.md"));
+  await waitFor(() => expect(getByRole("tab", { name: "README.md" })).toBeTruthy());
+
+  fireEvent.click(getByText("src"));
+  await waitFor(() => expect(getByText("index.ts")).toBeTruthy());
+  fireEvent.click(getByText("index.ts"));
+  await waitFor(() => expect(getByRole("tab", { name: "index.ts" })).toBeTruthy());
+
+  fireEvent.click(getByRole("button", { name: "Close README.md" }));
+
+  await waitFor(() => {
+    expect(queryByRole("tab", { name: "README.md" })).toBeNull();
+    expect(getByRole("tab", { name: "index.ts" })).toBeTruthy();
+  });
+  expect(getByRole("tab", { name: "index.ts" }).getAttribute("aria-selected")).toBe("true");
 });

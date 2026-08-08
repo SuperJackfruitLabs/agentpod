@@ -41,9 +41,20 @@ function decodeBase64(b64: string): string {
 
 // ─── Public interface ─────────────────────────────────────────────────────────
 
+/** Reason the terminal connection ended, passed to an `onClose` callback. */
+export type TerminalCloseReason = "exit" | "error" | "closed";
+
 export interface TerminalClient {
   /** Register a callback that fires whenever the server sends data. */
   onData(cb: (text: string) => void): void;
+  /**
+   * Register a callback that fires exactly once when the connection ends —
+   * unless it ended because the caller itself called `close()`, in which
+   * case no callback fires (the caller already knows). Last registration
+   * wins. Reasons: "exit" (server sent `{t:"exit"}`), "error" (socket
+   * error), "closed" (an unprompted clean close, e.g. network drop).
+   */
+  onClose(cb: (reason: TerminalCloseReason) => void): void;
   /** Send text input to the remote PTY. Buffered if the socket isn't open yet. */
   send(text: string): void;
   /** Notify the remote PTY of a terminal resize. */
@@ -57,9 +68,21 @@ export function createTerminalClient(stationId: string): TerminalClient {
   const ws = new WebSocket(wsUrl);
 
   let dataCallback: ((text: string) => void) | null = null;
+  let closeCallback: ((reason: TerminalCloseReason) => void) | null = null;
+
+  /** True once `close()` has been called by the caller — suppresses onClose. */
+  let manualClose = false;
+  /** True once onClose has fired, so it never fires a second time. */
+  let closeFired = false;
 
   /** Messages queued while the socket is still in CONNECTING state. */
   const sendQueue: string[] = [];
+
+  function emitClose(reason: TerminalCloseReason) {
+    if (closeFired || manualClose) return;
+    closeFired = true;
+    closeCallback?.(reason);
+  }
 
   ws.onopen = () => {
     // Flush any messages that were sent before the socket opened
@@ -81,8 +104,19 @@ export function createTerminalClient(stationId: string): TerminalClient {
       const text = decodeBase64(msg.data);
       dataCallback?.(text);
     } else if (msg.t === "exit") {
+      emitClose("exit");
       ws.close();
     }
+  };
+
+  ws.onerror = () => {
+    emitClose("error");
+  };
+
+  ws.onclose = () => {
+    // Any close not already accounted for above (server/network drop) is a
+    // "closed" event, unless it was the direct result of us calling close().
+    emitClose("closed");
   };
 
   function sendRaw(payload: string) {
@@ -99,6 +133,10 @@ export function createTerminalClient(stationId: string): TerminalClient {
       dataCallback = cb;
     },
 
+    onClose(cb) {
+      closeCallback = cb;
+    },
+
     send(text) {
       const data = encodeBase64(text);
       sendRaw(JSON.stringify({ t: "input", data }));
@@ -109,6 +147,7 @@ export function createTerminalClient(stationId: string): TerminalClient {
     },
 
     close() {
+      manualClose = true;
       ws.close();
     },
   };

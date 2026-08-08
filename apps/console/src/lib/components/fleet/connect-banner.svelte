@@ -20,14 +20,14 @@
 </script>
 
 <div
-  class="rounded border border-primary/30 bg-gradient-to-r from-primary/5 to-primary/10 p-6"
+  class="rounded-lg border bg-card p-6"
   data-testid="connect-banner"
 >
   <div class="flex items-start gap-5">
     <!-- Icon -->
     <div class="flex-shrink-0">
       <div
-        class="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 border border-primary/30 shadow-[0_0_16px_var(--primary)/15]"
+        class="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 border border-primary/30"
       >
         <!-- Server / node icon -->
         <svg
@@ -52,10 +52,10 @@
 
     <!-- Content -->
     <div class="flex-1 min-w-0">
-      <h3 class="font-mono font-semibold text-primary text-base">
+      <h3 class="font-semibold text-base">
         [fleet] Connect your first node
       </h3>
-      <p class="mt-2 text-sm text-muted-foreground font-mono leading-relaxed">
+      <p class="mt-2 text-sm text-muted-foreground leading-relaxed">
         No nodes yet. Generate an enrollment token and run the agent on any
         server — it will appear here once it comes online.
       </p>
@@ -67,11 +67,7 @@
 
       <!-- CTA -->
       <div class="mt-4 flex items-center gap-3">
-        <Button
-          size="sm"
-          class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground"
-          onclick={onCreateToken}
-        >
+        <Button size="sm" onclick={onCreateToken}>
           Create enrollment token
         </Button>
       </div>

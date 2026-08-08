@@ -74,20 +74,48 @@
       // keep fallback ["docker", "cloudflare"]
     }
     await loadData();
+  });
 
-    // ?action auto-open (runs once; guards against missing searchParams in test env)
+  // ?action=<new-runtime|create-token> handling. This must be a reactive
+  // $effect rather than onMount: SvelteKit does not remount this component
+  // on same-route navigation, e.g. the command palette navigating from
+  // /nodes to /nodes?action=new-runtime while /nodes is already mounted.
+  // Reading page.url.searchParams inside $effect re-runs the branch
+  // whenever the reactive URL changes, including in place.
+  //
+  // Loop guard: `replaceState` does NOT reassign the reactive `page.url` in
+  // real SvelteKit (it's the shallow-routing API — it patches the history
+  // entry, not the page store), and the history entry it writes can still
+  // carry the stale "?action=…" query, so a browser back-navigation onto
+  // that entry can reconstruct page.url WITH the param again. We can't rely
+  // on the param "clearing itself" reactively, so we track the last-handled
+  // action value explicitly:
+  //   - an action value equal to the one already handled is ignored (blocks
+  //     back-nav from reprocessing the same stale param), and
+  //   - `handledAction` resets to null whenever the URL has NO action param,
+  //     so a later *new* palette invocation (which always drives a real
+  //     goto() navigation, clearing the param at some point along the way)
+  //     is still processed.
+  // The optional chaining also guards test/SSR environments where
+  // page.url.searchParams may be absent.
+  let handledAction = $state<string | null>(null);
+  $effect(() => {
     const action = (page.url as { searchParams?: URLSearchParams } | undefined)?.searchParams?.get("action") ?? null;
+    if (!action) {
+      handledAction = null;
+      return;
+    }
+    if (action === handledAction) return;
+    handledAction = action;
     if (action === "new-runtime") {
       showNewRuntimeDialog = true;
     } else if (action === "create-token") {
       handleCreateToken();
     }
-    if (action) {
-      try {
-        replaceState("/nodes", {});
-      } catch {
-        // non-critical in environments where history is unavailable
-      }
+    try {
+      replaceState("/nodes", {});
+    } catch {
+      // non-critical in environments where history is unavailable
     }
   });
 

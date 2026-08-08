@@ -242,3 +242,28 @@ test("HealthPanel: no Matrix row when matrixId prop is omitted", async () => {
 
   expect(queryByText(/matrix/i)).toBeNull();
 });
+
+// ─── Fetch failure + retry ────────────────────────────────────────────────────
+
+test("HealthPanel: fetch failure shows inline error card with Retry; retrying re-fetches and succeeds", async () => {
+  const spy = vi
+    .spyOn(api, "stationHealth")
+    .mockRejectedValueOnce(new Error("network down"))
+    .mockResolvedValueOnce(healthFull);
+
+  const { getByText, getByRole, queryByText } = render(HealthPanel, {
+    props: { stationId: "station_retry" },
+  });
+
+  await waitFor(() => expect(getByText(/network down/i)).toBeTruthy());
+
+  const retryBtn = getByRole("button", { name: /^retry$/i });
+  fireEvent.click(retryBtn);
+
+  await waitFor(() => {
+    expect(queryByText(/network down/i)).toBeNull();
+    expect(getByText(/12345/)).toBeTruthy();
+  });
+
+  expect(spy).toHaveBeenCalledTimes(2);
+});

@@ -2,10 +2,6 @@
 
 @import "tw-animate-css";
 
-/* assistant-ui styles */
-@import "@assistant-ui/styles/index.css";
-@import "@assistant-ui/styles/markdown.css";
-
 @custom-variant dark (&:is(.dark *));
 
 /* ============================================
@@ -602,7 +598,7 @@
   --font-heading: 'Inter';
   --font-mono: 'JetBrains Mono';
   
-  --radius: 0.625rem;
+  --radius: 0.375rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.129 0.042 264.695);
   --card: oklch(1 0 0);
@@ -634,6 +630,13 @@
   --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
   --sidebar-border: oklch(0.70 0.013 255.508);
   --sidebar-ring: oklch(0.50 0.04 256.788);
+  /* Fleet status tokens — overridden per color scheme by the theme store */
+  --status-running: oklch(0.723 0.192 149.58);
+  --status-degraded: oklch(0.769 0.188 70.08);
+  --status-starting: oklch(0.715 0.143 215.221);
+  --status-stopped: var(--muted-foreground);
+  --status-error: oklch(0.577 0.245 27.325);
+  --status-sleeping: oklch(0.606 0.25 292.717);
 }
 
 .dark {
@@ -668,6 +671,12 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+  --status-running: oklch(0.792 0.209 151.711);
+  --status-degraded: oklch(0.828 0.189 84.429);
+  --status-starting: oklch(0.789 0.154 211.53);
+  --status-stopped: var(--muted-foreground);
+  --status-error: oklch(0.704 0.191 22.216);
+  --status-sleeping: oklch(0.702 0.183 293.541);
 }
 
 @theme inline {
@@ -706,6 +715,12 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-status-running: var(--status-running);
+  --color-status-degraded: var(--status-degraded);
+  --color-status-starting: var(--status-starting);
+  --color-status-stopped: var(--status-stopped);
+  --color-status-error: var(--status-error);
+  --color-status-sleeping: var(--status-sleeping);
 }
 
 @layer base {
@@ -988,34 +1003,6 @@ article,
 
 .streaming-text-container {
   display: inline;
-}
-
-/* Glitch effect for headers */
-@keyframes glitch {
-  0%, 90%, 100% {
-    transform: translate(0);
-    text-shadow: none;
-  }
-  92% {
-    transform: translate(-2px, 1px);
-    text-shadow: 2px 0 var(--chart-5);
-  }
-  94% {
-    transform: translate(2px, -1px);
-    text-shadow: -2px 0 var(--primary);
-  }
-  96% {
-    transform: translate(-1px, 2px);
-    text-shadow: 1px 0 var(--chart-2);
-  }
-  98% {
-    transform: translate(1px, -2px);
-    text-shadow: -1px 0 var(--chart-5);
-  }
-}
-
-.glitch-hover:hover {
-  animation: glitch 0.5s ease-in-out;
 }
 
 /* Border glow animation */
@@ -1453,193 +1440,6 @@ article,
 .health-indicator.unhealthy {
   color: var(--destructive);
   border-color: color-mix(in oklch, var(--destructive) 30%, transparent);
-}
-
-/* assistant-ui custom styles */
-@layer components {
-  /* Thread container */
-  .aui-thread-root {
-    --aui-thread-background: var(--background);
-    --aui-thread-foreground: var(--foreground);
-    height: 100%;
-  }
-
-  /* Messages */
-  .aui-assistant-message {
-    background: var(--muted);
-    border-radius: var(--radius);
-  }
-
-  .aui-user-message {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    border-radius: var(--radius);
-  }
-
-  /* Composer (input area) */
-  .aui-composer-root {
-    border-top: 1px solid var(--border);
-    background: var(--background);
-  }
-
-  .aui-composer-input {
-    background: var(--input);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-  }
-
-  .aui-composer-input:focus {
-    outline: 2px solid var(--ring);
-    outline-offset: 2px;
-  }
-
-  /* Send button */
-  .aui-composer-send {
-    background: var(--primary);
-    color: var(--primary-foreground);
-    border-radius: var(--radius);
-  }
-
-  .aui-composer-send:hover {
-    opacity: 0.9;
-  }
-
-  .aui-composer-send:disabled {
-    opacity: 0.5;
-  }
-
-  /* Markdown content */
-  .aui-md {
-    color: var(--foreground);
-  }
-
-  .aui-md pre {
-    background: var(--muted);
-    border-radius: var(--radius);
-    overflow-x: auto;
-  }
-
-  .aui-md code {
-    background: var(--muted);
-    padding: 0.2em 0.4em;
-    border-radius: calc(var(--radius) - 2px);
-    font-size: 0.875em;
-  }
-
-  .aui-md pre code {
-    background: transparent;
-    padding: 0;
-  }
-
-  /* Tables */
-  .aui-md-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 1em 0;
-    font-size: 0.875em;
-  }
-
-  .aui-md-thead {
-    background: var(--muted);
-  }
-
-  .aui-md-tr {
-    border-bottom: 1px solid var(--border);
-  }
-
-  .aui-md-th {
-    padding: 0.75em 1em;
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid var(--border);
-  }
-
-  .aui-md-td {
-    padding: 0.75em 1em;
-    text-align: left;
-  }
-
-  /* Task list checkboxes */
-  .aui-md-checkbox {
-    appearance: none;
-    -webkit-appearance: none;
-    width: 1rem;
-    height: 1rem;
-    border: 1.5px solid var(--border);
-    border-radius: 0.25rem;
-    background: var(--background);
-    vertical-align: middle;
-    cursor: default;
-    position: relative;
-  }
-
-  .aui-md-checkbox:checked {
-    background: var(--primary);
-    border-color: var(--primary);
-  }
-
-  .aui-md-checkbox:checked::after {
-    content: '';
-    position: absolute;
-    left: 4px;
-    top: 1px;
-    width: 4px;
-    height: 8px;
-    border: solid var(--primary-foreground);
-    border-width: 0 2px 2px 0;
-    transform: rotate(45deg);
-  }
-
-  /* Task list items (with checkboxes) - remove bullet */
-  .aui-md-ul:has(.aui-md-checkbox) {
-    list-style: none;
-    padding-left: 0;
-  }
-
-  .aui-md-li:has(> .aui-md-checkbox) {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-  }
-
-  /* Scroll area */
-  .aui-thread-viewport {
-    scrollbar-width: thin;
-    scrollbar-color: var(--muted-foreground) transparent;
-  }
-
-  .aui-thread-viewport::-webkit-scrollbar {
-    width: 8px;
-  }
-
-  .aui-thread-viewport::-webkit-scrollbar-thumb {
-    background: var(--muted-foreground);
-    border-radius: 4px;
-  }
-
-  .aui-thread-viewport::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  /* Agent switch animation (triggered by keyboard shortcut) */
-  @keyframes agent-switch {
-    0% {
-      transform: scale(1);
-      box-shadow: 0 0 0 0 oklch(var(--primary) / 0.4);
-    }
-    50% {
-      transform: scale(1.03);
-      box-shadow: 0 0 0 4px oklch(var(--primary) / 0.2);
-    }
-    100% {
-      transform: scale(1);
-      box-shadow: 0 0 0 0 oklch(var(--primary) / 0);
-    }
-  }
-
-  .animate-agent-switch {
-    animation: agent-switch 0.3s ease-out;
-  }
 }
 
 /* ============================================
