@@ -93,7 +93,7 @@
 
 <div class="flex flex-col gap-0.5 rounded-xl border bg-card p-2">
   {#if roots.length === 0}
-    <p class="text-sm text-muted-foreground p-2">No stations adopted.</p>
+    <p class="text-sm text-muted-foreground p-2">No agents added.</p>
   {:else}
     {#each roots as root (root.id)}
       {@render stationNode(root, 0)}

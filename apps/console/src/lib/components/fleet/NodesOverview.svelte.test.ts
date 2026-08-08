@@ -290,10 +290,11 @@ test("?action=new-runtime already in the URL at mount opens the New Runtime dial
   vi.spyOn(api, "listNodes").mockResolvedValue([]);
   setSearchParam("action", "new-runtime");
 
-  const { getByText } = render(NodesOverview);
+  const { getByRole } = render(NodesOverview);
 
   await waitFor(() => {
-    expect(getByText("New Runtime")).toBeTruthy();
+    // The dialog itself (not the header's "New runtime" button) must open.
+    expect(getByRole("dialog")).toBeTruthy();
     expect(nav.replaceState).toHaveBeenCalledWith("/nodes", {});
   });
 });
@@ -324,17 +325,17 @@ test("?action= appearing while already mounted on /nodes (same-route palette nav
   // which only ever runs once) picks it up.
   vi.spyOn(api, "listNodes").mockResolvedValue([]);
 
-  const { getByText, queryByText } = render(NodesOverview);
+  const { getByRole, queryByRole } = render(NodesOverview);
 
   await waitFor(() => {
     // No dialog on initial mount without the param.
-    expect(queryByText("New Runtime")).toBeNull();
+    expect(queryByRole("dialog")).toBeNull();
   });
 
   setSearchParam("action", "new-runtime");
 
   await waitFor(() => {
-    expect(getByText("New Runtime")).toBeTruthy();
+    expect(getByRole("dialog")).toBeTruthy();
     expect(nav.replaceState).toHaveBeenCalledWith("/nodes", {});
   });
 });

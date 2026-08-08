@@ -71,7 +71,7 @@ test("Create button is disabled when name is empty", () => {
     },
   });
 
-  const createBtn = getByRole("button", { name: /^create$/i }) as HTMLButtonElement;
+  const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   expect(createBtn.disabled).toBe(true);
 });
 
@@ -94,7 +94,7 @@ test("filling name and clicking Create calls provisionRuntime with correct value
   fireEvent.input(nameInput, { target: { value: "my-box" } });
 
   // Create button should be enabled now (provider defaults to "docker", tier defaults to "small")
-  const createBtn = getByRole("button", { name: /^create$/i }) as HTMLButtonElement;
+  const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
   fireEvent.click(createBtn);
@@ -139,7 +139,7 @@ test("provisionRuntime is called with harness field (default none) when creating
   const nameInput = getByPlaceholderText("Runtime name");
   fireEvent.input(nameInput, { target: { value: "test-box" } });
 
-  const createBtn = getByRole("button", { name: /^create$/i }) as HTMLButtonElement;
+  const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
   fireEvent.click(createBtn);
@@ -168,7 +168,7 @@ test("failed provisionRuntime shows inline error and does NOT call onClose", asy
   const nameInput = getByPlaceholderText("Runtime name");
   fireEvent.input(nameInput, { target: { value: "fail-box" } });
 
-  const createBtn = getByRole("button", { name: /^create$/i }) as HTMLButtonElement;
+  const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
   await waitFor(() => expect(createBtn.disabled).toBe(false));
 
   fireEvent.click(createBtn);

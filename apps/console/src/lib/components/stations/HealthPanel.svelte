@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { stationHealth, lifecycle } from "$lib/api/client";
-  import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
+  import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Status } from "$lib/components/ui/status";
@@ -32,7 +32,7 @@
     try {
       health = await stationHealth(stationId);
     } catch (err) {
-      error = err instanceof Error ? err.message : "Failed to load health";
+      error = err instanceof Error ? err.message : "Couldn’t read this agent’s health — the node may be offline.";
     } finally {
       isLoading = false;
     }
@@ -115,7 +115,7 @@
 
 {#if isLoading}
   <div class="p-4 space-y-3">
-    <p class="text-sm text-muted-foreground">Loading health data…</p>
+    
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       {#each Array(8) as _, i (i)}
         <Skeleton class="h-14 rounded-lg" />
@@ -240,12 +240,15 @@
   </div>
 
   {#if canLifecycle}
-    <TypeToConfirmDialog
+    <!-- Stop/restart are reversible, routine actions — a plain confirm is
+         the right escalation. Type-to-confirm stays reserved for destroy
+         and permanent deletion. -->
+    <ConfirmDialog
       open={dialogOpen}
-      title="{pendingAction === 'stop' ? 'Stop' : 'Restart'} station"
-      message="This will {pendingAction} the station process. Type the station ID below to confirm."
-      confirmPhrase={stationId}
+      title="{pendingAction === 'stop' ? 'Stop' : 'Restart'} agent"
+      message="This will {pendingAction} the agent process."
       confirmLabel={pendingAction === "stop" ? "Stop agent" : "Restart agent"}
+      destructive={pendingAction === "stop"}
       onConfirm={handleDialogConfirm}
       onCancel={handleDialogCancel}
     />

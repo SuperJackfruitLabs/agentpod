@@ -37,7 +37,7 @@
       await goto("/");
     } catch (err) {
       destroyDialogOpen = false;
-      destroyError = err instanceof Error ? err.message : "Destroy failed";
+      destroyError = err instanceof Error ? err.message : "Couldn’t destroy the runtime.";
     } finally {
       destroyInFlight = false;
     }
@@ -51,7 +51,7 @@
       await stopRuntime(provisioned.runtimeId);
       onRefresh();
     } catch (err) {
-      actionError = err instanceof Error ? err.message : "Stop failed";
+      actionError = err instanceof Error ? err.message : "Couldn’t stop the runtime.";
     } finally {
       stopInFlight = false;
     }
@@ -65,7 +65,7 @@
       await startRuntime(provisioned.runtimeId);
       onRefresh();
     } catch (err) {
-      actionError = err instanceof Error ? err.message : "Start failed";
+      actionError = err instanceof Error ? err.message : "Couldn’t start the runtime.";
     } finally {
       startInFlight = false;
     }
@@ -130,7 +130,7 @@
   <TypeToConfirmDialog
     open={destroyDialogOpen}
     title="Destroy runtime"
-    message="This will permanently destroy the runtime and remove the node from the fleet. This action cannot be undone."
+    message="This will permanently destroy the runtime and remove the node from the fleet. This action can’t be undone."
     confirmPhrase={node.hostname}
     confirmLabel="Destroy"
     onConfirm={handleDestroy}

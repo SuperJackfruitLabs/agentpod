@@ -162,7 +162,7 @@ export async function initAuth(): Promise<void> {
     // Session fetch failed (network error, etc.) — stay unauthenticated but
     // surface the error so the UI can reflect the failed restore attempt.
     console.warn("[Auth] Failed to restore session:", err);
-    error = err instanceof Error ? err.message : "Failed to restore session";
+    error = err instanceof Error ? err.message : "Couldn’t restore your session.";
   } finally {
     isLoading = false;
     isInitialized = true;
@@ -194,7 +194,7 @@ export async function login(): Promise<boolean> {
 
     return true;
   } catch (err) {
-    error = err instanceof Error ? err.message : "Failed to start login";
+    error = err instanceof Error ? err.message : "Couldn’t start sign-in.";
     return false;
   } finally {
     isLoading = false;
@@ -240,7 +240,7 @@ export async function loginWithEmail(emailInput: string, password: string): Prom
 
     return true;
   } catch (err) {
-    error = err instanceof Error ? err.message : "Failed to sign in";
+    error = err instanceof Error ? err.message : "Couldn’t sign in.";
     return false;
   } finally {
     isLoading = false;
@@ -286,7 +286,7 @@ export async function signUp(emailInput: string, password: string, name: string)
 
     return true;
   } catch (err) {
-    error = err instanceof Error ? err.message : "Failed to sign up";
+    error = err instanceof Error ? err.message : "Couldn’t create the account.";
     return false;
   } finally {
     isLoading = false;

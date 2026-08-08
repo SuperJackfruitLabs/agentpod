@@ -5,7 +5,7 @@
  * RED → implement +page.svelte → GREEN.
  *
  * Asserts:
- *  - Disconnected → shows the connect (setup) form: API Endpoint field + Connect button
+ *  - Disconnected → shows the connect (setup) form: Hub URL field + Connect button
  *  - Connected → shows the sign-in form, and toggling switches to signup (Name field appears)
  *  - Connected + signup disabled → toggle is blocked and the disabled message is shown
  */
@@ -95,7 +95,7 @@ beforeEach(() => {
 
 test("disconnected shows the connect form", () => {
   const { getByLabelText, getByRole } = render(LoginPage);
-  expect(getByLabelText("API Endpoint")).toBeTruthy();
+  expect(getByLabelText("Hub URL")).toBeTruthy();
   expect(getByRole("button", { name: "Connect" })).toBeTruthy();
 });
 

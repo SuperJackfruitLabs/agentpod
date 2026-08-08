@@ -181,7 +181,7 @@ test("FileBrowser: new folder button calls mkdir", async () => {
   });
 });
 
-test("FileBrowser: 'Edit (diff)' button calls onOpenConfigEditor with the file path", async () => {
+test("FileBrowser: 'Edit' button calls onOpenConfigEditor with the file path", async () => {
   vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
   vi.spyOn(api, "readFile").mockResolvedValue({ content: "# Hello", truncated: false });
 
@@ -196,12 +196,12 @@ test("FileBrowser: 'Edit (diff)' button calls onOpenConfigEditor with the file p
   // Click the file to open the preview
   fireEvent.click(getByText("README.md"));
 
-  // Wait for file content to load and "Edit (diff)" to appear
+  // Wait for file content to load and "Edit" to appear
   await waitFor(() => {
-    expect(getByRole("button", { name: /edit \(diff\)/i })).toBeTruthy();
+    expect(getByRole("button", { name: /^edit$/i })).toBeTruthy();
   });
 
-  fireEvent.click(getByRole("button", { name: /edit \(diff\)/i }));
+  fireEvent.click(getByRole("button", { name: /^edit$/i }));
 
   expect(onOpenConfigEditor).toHaveBeenCalledWith("README.md");
 });
@@ -292,7 +292,7 @@ test("FileBrowser: shows a metadata card instead of fetching binary files", asyn
   fireEvent.click(getByText("logo.png"));
 
   await waitFor(() => {
-    expect(getByText(/preview not available/i)).toBeTruthy();
+    expect(getByText(/can’t preview this file type/i)).toBeTruthy();
   });
   expect(readFileSpy).not.toHaveBeenCalled();
   // 2048 bytes → "2.0 KB" via the metadata card's size formatting.

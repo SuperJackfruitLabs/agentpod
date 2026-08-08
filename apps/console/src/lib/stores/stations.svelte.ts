@@ -17,7 +17,7 @@ export const stations = {
 export async function loadDetected(nodeId: string): Promise<void> {
   isLoading = true; error = null;
   try { detected = await api.listDetected(nodeId); }
-  catch (e) { error = e instanceof Error ? e.message : "failed to load detected stations"; }
+  catch (e) { error = e instanceof Error ? e.message : "Couldn’t load detected agents."; }
   finally { isLoading = false; }
 }
 
@@ -27,13 +27,13 @@ export async function adopt(nodeId: string, keys: string[]): Promise<void> {
     await api.adoptStations(nodeId, keys);
     adopted = await api.listStations(nodeId);
   }
-  catch (e) { error = e instanceof Error ? e.message : "failed to adopt stations"; }
+  catch (e) { error = e instanceof Error ? e.message : "Couldn’t add the agents."; }
   finally { isLoading = false; }
 }
 
 export async function loadAdopted(nodeId: string): Promise<void> {
   isLoading = true; error = null;
   try { adopted = await api.listStations(nodeId); }
-  catch (e) { error = e instanceof Error ? e.message : "failed to load adopted stations"; }
+  catch (e) { error = e instanceof Error ? e.message : "Couldn’t load your agents."; }
   finally { isLoading = false; }
 }

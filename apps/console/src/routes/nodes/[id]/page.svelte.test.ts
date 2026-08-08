@@ -7,9 +7,9 @@
  * Asserts:
  *  - renders hostname + status badge
  *  - detected station card's Adopt button calls adopt(id, [key])
- *  - "Adopt all" calls adopt(id, allUnadoptedKeys)
+ *  - "Add all agents" calls adopt(id, allUnadoptedKeys)
  *  - detected-empty state renders "No stations detected"
- *  - adopted-empty state renders "No stations adopted yet"
+ *  - adopted-empty state renders the added-empty state
  *  - StationTree renders adopted stations (presence via station name)
  */
 
@@ -128,9 +128,9 @@ test("detected station card's Adopt button calls adopt(id, [key])", async () => 
 
   await waitFor(() => {
     expect(getByText("Workspace")).toBeTruthy();
-    expect((getByText("Adopt") as HTMLButtonElement).disabled).toBe(false);
+    expect((getByText("Add agent") as HTMLButtonElement).disabled).toBe(false);
   });
-  getByText("Adopt").click();
+  getByText("Add agent").click();
 
   await waitFor(() => {
     expect(adoptSpy).toHaveBeenCalledWith("node_1", ["claude://workspace"]);
@@ -146,14 +146,14 @@ test("Adopt all calls adopt(id, allUnadoptedKeys)", async () => {
   const { getByText } = render(NodeDetailPage);
 
   // The stations store toggles a single shared `isLoading` flag across its
-  // concurrent loadDetected/loadAdopted calls, so the "Adopt all" button can
+  // concurrent loadDetected/loadAdopted calls, so the "Add all agents" button can
   // briefly render present-but-disabled before both loaders settle. Wait for
   // it to be enabled (not merely present) before clicking.
   await waitFor(() => {
-    const btn = getByText("Adopt all") as HTMLButtonElement;
+    const btn = getByText("Add all agents") as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
-  getByText("Adopt all").click();
+  getByText("Add all agents").click();
 
   await waitFor(() => {
     expect(adoptSpy).toHaveBeenCalledWith("node_1", [
@@ -171,7 +171,7 @@ test("shows detected-empty state", async () => {
   const { getByText } = render(NodeDetailPage);
 
   await waitFor(() => {
-    expect(getByText("No stations detected")).toBeTruthy();
+    expect(getByText("No agents found on this node")).toBeTruthy();
   });
 });
 
@@ -183,7 +183,7 @@ test("shows adopted-empty state", async () => {
   const { getByText } = render(NodeDetailPage);
 
   await waitFor(() => {
-    expect(getByText("No stations adopted yet")).toBeTruthy();
+    expect(getByText("No agents added yet")).toBeTruthy();
   });
 });
 

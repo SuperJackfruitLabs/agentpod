@@ -65,12 +65,11 @@ test("HealthPanel shows loading then data", async () => {
 
   const { getByText, queryByText } = render(HealthPanel, { props: { stationId: "station_3" } });
 
-  // loading state
-  expect(getByText(/loading/i)).toBeTruthy();
+  // loading state: skeleton only, no data yet
+  expect(queryByText(/12345/)).toBeNull();
 
   resolve(healthFull);
   await waitFor(() => {
-    expect(queryByText(/loading/i)).toBeNull();
     expect(getByText(/12345/)).toBeTruthy();
   });
 });
@@ -129,7 +128,7 @@ test("HealthPanel: Start (on a stopped agent) calls lifecycle immediately withou
   expect(queryByRole("dialog")).toBeNull();
 });
 
-test("HealthPanel: Stop opens type-to-confirm dialog; confirming calls lifecycle stop", async () => {
+test("HealthPanel: Stop opens confirm dialog; confirming calls lifecycle stop", async () => {
   vi.spyOn(api, "stationHealth").mockResolvedValue(healthFull);
   vi.spyOn(api, "lifecycle").mockResolvedValue(healthFull);
 
@@ -147,26 +146,17 @@ test("HealthPanel: Stop opens type-to-confirm dialog; confirming calls lifecycle
   // lifecycle must NOT be called before confirming
   expect(api.lifecycle).not.toHaveBeenCalled();
 
-  // Type the confirm phrase (= stationId)
+  // Routine stop is a plain confirm (no type-to-confirm), labeled with the action
   const dialog = getByRole("dialog");
-  fireEvent.input(within(dialog).getByRole("textbox"), {
-    target: { value: "station_lc" },
-  });
-
-  // Confirm button unlocks — labeled with the action, never a bare "Confirm"
-  await waitFor(() => {
-    const btn = getByRole("button", { name: "Stop agent" }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
-  });
-
-  fireEvent.click(getByRole("button", { name: "Stop agent" }));
+  expect(within(dialog).queryByRole("textbox")).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Stop agent" }));
 
   await waitFor(() =>
     expect(api.lifecycle).toHaveBeenCalledWith("station_lc", "stop"),
   );
 });
 
-test("HealthPanel: Restart opens type-to-confirm dialog; confirming calls lifecycle restart", async () => {
+test("HealthPanel: Restart opens confirm dialog; confirming calls lifecycle restart", async () => {
   vi.spyOn(api, "stationHealth").mockResolvedValue(healthFull);
   vi.spyOn(api, "lifecycle").mockResolvedValue(healthFull);
 
@@ -181,16 +171,8 @@ test("HealthPanel: Restart opens type-to-confirm dialog; confirming calls lifecy
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   const dialog = getByRole("dialog");
-  fireEvent.input(within(dialog).getByRole("textbox"), {
-    target: { value: "station_lc" },
-  });
-
-  await waitFor(() => {
-    const btn = getByRole("button", { name: "Restart agent" }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
-  });
-
-  fireEvent.click(getByRole("button", { name: "Restart agent" }));
+  expect(within(dialog).queryByRole("textbox")).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Restart agent" }));
 
   await waitFor(() =>
     expect(api.lifecycle).toHaveBeenCalledWith("station_lc", "restart"),

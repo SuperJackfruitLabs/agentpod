@@ -72,8 +72,8 @@
     <Dialog.Overlay />
     <Dialog.Content showCloseButton={false}>
       <Dialog.Header>
-        <Dialog.Title class="font-mono">New Runtime</Dialog.Title>
-        <Dialog.Description>Provision a new managed node-agent runtime.</Dialog.Description>
+        <Dialog.Title>New runtime</Dialog.Title>
+        <Dialog.Description>Create a container that runs an agent for you.</Dialog.Description>
       </Dialog.Header>
 
       <div class="space-y-4 py-2">
@@ -161,7 +161,7 @@
           disabled={!name.trim() || isCreating}
           class="font-mono"
         >
-          {isCreating ? "Creating…" : "Create"}
+          {isCreating ? "Creating…" : "Create runtime"}
         </Button>
       </Dialog.Footer>
     </Dialog.Content>

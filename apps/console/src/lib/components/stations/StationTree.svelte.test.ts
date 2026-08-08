@@ -104,7 +104,7 @@ test("StationTree shows empty state when no stations", () => {
     },
   });
 
-  expect(getByText("No stations adopted.")).toBeTruthy();
+  expect(getByText("No agents added.")).toBeTruthy();
 });
 
 test("StationTree toggle expand/collapse on parent with children", async () => {

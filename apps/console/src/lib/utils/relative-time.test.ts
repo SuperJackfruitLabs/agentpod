@@ -2,7 +2,7 @@
  * relative-time.test.ts
  *
  * Unit tests for relativeTime(dateStr) — widened to accept `string | null`
- * so file-preview.svelte's local copy (which handled `null` → "unknown")
+ * so file-preview.svelte's local copy (which handled `null` → "—")
  * can be deleted in favor of this shared util. Existing callers
  * (RecentActivity, activity page) never pass null and keep their behavior.
  *
@@ -18,7 +18,7 @@ function isoAgo(ms: number): string {
 
 describe("relativeTime", () => {
   test("null → \"unknown\"", () => {
-    expect(relativeTime(null)).toBe("unknown");
+    expect(relativeTime(null)).toBe("—");
   });
 
   test("just now (< 1 minute ago)", () => {

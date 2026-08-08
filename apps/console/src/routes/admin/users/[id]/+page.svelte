@@ -46,7 +46,7 @@
       user = response.user;
     } catch (e) {
       const err = e as Error;
-      error = err.message || "Failed to load user";
+      error = err.message || "Couldn’t load this user.";
     } finally {
       isLoading = false;
     }
@@ -67,7 +67,7 @@
       loadUser();
     } catch (e) {
       const err = e as Error;
-      toast.error("Failed to unban user", { description: err.message });
+      toast.error("Couldn’t unban user", { description: err.message });
     } finally {
       actionLoading = false;
     }
@@ -81,9 +81,9 @@
 <main class="flex h-screen flex-col overflow-hidden">
   <!-- Header -->
   <PageHeader
-    title={user?.name || user?.email || "User Details"}
+    title={user?.name || user?.email || "User details"}
     icon={UserIcon}
-    subtitle={user?.email || "Loading..."}
+    subtitle={user?.email ?? undefined}
     status={user
       ? user.banned
         ? { label: "Banned", variant: "error" }
@@ -156,7 +156,7 @@
                 data-testid="change-role"
               >
                 <ShieldIcon class="mr-2 h-4 w-4" />
-                Change Role
+                Change role
               </Button>
               {#if user.banned}
                 <Button variant="outline" onclick={handleUnban} disabled={actionLoading}>
@@ -171,7 +171,7 @@
                   class="border-destructive/50 text-destructive hover:bg-destructive/10"
                 >
                   <BanIcon class="mr-2 h-4 w-4" />
-                  Ban User
+                  Ban user
                 </Button>
               {/if}
             </div>
@@ -200,7 +200,7 @@
               <p class="font-mono text-xs">{formatDate(user.createdAt, "long")}</p>
             </div>
             <div>
-              <p class="text-xs text-muted-foreground">Email Verified</p>
+              <p class="text-xs text-muted-foreground">Email verified</p>
               <p class="text-xs">{user.emailVerified ? "Yes" : "No"}</p>
             </div>
           </div>

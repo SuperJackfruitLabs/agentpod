@@ -791,15 +791,15 @@
    for readability.
    ============================================ */
 
-/* Large surfaces that should transition smoothly */
+/* Large chrome surfaces that should transition smoothly on theme switches.
+   Content containers (section/article) are deliberately excluded — a 0.5s
+   background crossfade on them makes live data refreshes read as lag. */
 body,
 main,
 aside,
 header,
 footer,
 nav,
-section,
-article,
 [data-slot="content"],
 [data-slot="sidebar"],
 [role="dialog"],

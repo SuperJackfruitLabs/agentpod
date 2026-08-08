@@ -60,12 +60,12 @@
         <div class="flex max-w-sm flex-col items-center gap-2 rounded-lg border border-dashed border-border p-8 text-center">
           <FileIcon filename={entry.name} size="lg" />
           <p class="text-sm font-medium text-foreground">{entry.name}</p>
-          <p class="text-xs text-muted-foreground">Binary/Image file</p>
+          <p class="text-xs text-muted-foreground">Binary file</p>
           <p class="text-xs text-muted-foreground">
             {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
           </p>
           <p class="text-xs text-muted-foreground/80">
-            Preview not available over the station API
+            Can’t preview this file type
           </p>
         </div>
       </div>
@@ -114,7 +114,7 @@
 
   {#if content !== null && !isBinary}
     <div class="shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
-      {(isMarkdown ? "markdown" : ext || "plaintext").toUpperCase()} · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
+      {isMarkdown ? "Markdown" : ext || "plain text"} · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
     </div>
   {/if}
 </div>

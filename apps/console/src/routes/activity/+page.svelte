@@ -37,7 +37,7 @@
     try {
       rows = await listActivity();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load activity";
+      error = e instanceof Error ? e.message : "Couldn’t load activity.";
     } finally {
       isLoading = false;
     }
@@ -52,12 +52,12 @@
   const columns: ColumnDef<ActivityRow>[] = [
     {
       accessorKey: "verb",
-      header: "Verb",
+      header: "Action",
       cell: (ctx) => renderSnippet(verbCell, { value: ctx.getValue<string>() }),
     },
     {
       id: "station",
-      header: "Station",
+      header: "Agent",
       accessorFn: (row) => row.stationKey ?? "—",
     },
     {

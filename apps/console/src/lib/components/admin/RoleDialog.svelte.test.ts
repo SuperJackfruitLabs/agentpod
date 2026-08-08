@@ -71,7 +71,7 @@ test("update is disabled while the selected role matches the user's current role
   const { getByRole } = render(RoleDialog, {
     props: { open: true, user, onChanged: vi.fn() },
   });
-  const updateBtn = getByRole("button", { name: /update role/i }) as HTMLButtonElement;
+  const updateBtn = getByRole("button", { name: /change role/i }) as HTMLButtonElement;
   expect(updateBtn.disabled).toBe(true);
 });
 
@@ -102,7 +102,7 @@ test("confirming an elevation calls updateUserRole and fires onChanged on succes
   const adminOption = await waitFor(() => getByRole("option", { name: /^admin$/i }));
   await fireEvent.pointerUp(adminOption, { pointerId: 1, button: 0, pointerType: "mouse" });
 
-  const updateBtn = getByRole("button", { name: /update role/i }) as HTMLButtonElement;
+  const updateBtn = getByRole("button", { name: /change role/i }) as HTMLButtonElement;
   await waitFor(() => expect(updateBtn.disabled).toBe(false));
   await fireEvent.click(updateBtn);
 
