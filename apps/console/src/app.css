@@ -760,24 +760,16 @@ footer,
 nav,
 section,
 article,
-.cyber-card,
-.grid-bg,
-.mesh-gradient,
 [data-slot="content"],
 [data-slot="sidebar"],
 [role="dialog"],
 [role="menu"],
 [data-radix-popper-content-wrapper] {
-  transition: 
+  transition:
     background-color 0.5s ease,
     background 0.5s ease,
     border-color 0.3s ease,
     box-shadow 0.3s ease;
-}
-
-/* Noise overlay opacity transition */
-.noise-overlay {
-  transition: opacity 0.5s ease;
 }
 
 /* Scrollbars should also transition */
@@ -798,10 +790,6 @@ article,
   nav,
   section,
   article,
-  .cyber-card,
-  .grid-bg,
-  .mesh-gradient,
-  .noise-overlay,
   [data-slot="content"],
   [data-slot="sidebar"],
   [role="dialog"],
@@ -811,235 +799,6 @@ article,
   ::-webkit-scrollbar-thumb {
     transition: none;
   }
-}
-
-/* ============================================
-   TERMINAL/CYBERPUNK DESIGN SYSTEM
-   ============================================ */
-
-:root {
-  --noise-opacity: 0.03;
-}
-
-.dark {
-  --noise-opacity: 0.05;
-}
-
-/* Noise texture overlay */
-.noise-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 9999;
-  opacity: var(--noise-opacity);
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
-}
-
-/* Grid background pattern */
-.grid-bg {
-  background-image: 
-    linear-gradient(to right, oklch(0.5 0 0 / 0.05) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(0.5 0 0 / 0.05) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-
-.dark .grid-bg {
-  background-image: 
-    linear-gradient(to right, oklch(1 0 0 / 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, oklch(1 0 0 / 0.03) 1px, transparent 1px);
-}
-
-/* Gradient mesh background */
-.mesh-gradient {
-  background:
-    radial-gradient(ellipse at 20% 20%, color-mix(in oklch, var(--primary) 8%, transparent) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, color-mix(in oklch, var(--chart-2) 6%, transparent) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, color-mix(in oklch, var(--chart-5) 4%, transparent) 0%, transparent 60%);
-}
-
-.dark .mesh-gradient {
-  background:
-    radial-gradient(ellipse at 20% 20%, color-mix(in oklch, var(--primary) 12%, transparent) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, color-mix(in oklch, var(--chart-2) 8%, transparent) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, color-mix(in oklch, var(--chart-5) 5%, transparent) 0%, transparent 60%);
-}
-
-/* ============================================
-   ANIMATIONS
-   ============================================ */
-
-/* Staggered fade-in animation */
-@keyframes fade-in-up {
-  0% {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes fade-in {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
-}
-
-.animate-fade-in-up {
-  animation: fade-in-up 0.5s ease-out forwards;
-}
-
-.animate-fade-in {
-  animation: fade-in 0.3s ease-out forwards;
-}
-
-/* Pulse animation for status indicators */
-@keyframes pulse-dot {
-  0%, 100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.2);
-    opacity: 0.7;
-  }
-}
-
-.animate-pulse-dot {
-  animation: pulse-dot 1.5s ease-in-out infinite;
-}
-
-/* Typing cursor animation */
-@keyframes blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
-}
-
-.typing-cursor::after {
-  content: '_';
-  animation: blink 1s step-end infinite;
-  color: var(--primary);
-}
-
-/* ============================================
-   CYBERPUNK CARD STYLES
-   ============================================ */
-
-.cyber-card {
-  background: hsl(var(--card) / 0.6);
-  backdrop-filter: blur(12px);
-  border: 1px solid hsl(var(--border) / 0.5);
-  border-radius: 4px;
-  position: relative;
-  overflow: hidden;
-  transition: all 0.3s ease;
-}
-
-.dark .cyber-card {
-  background: hsl(var(--card) / 0.7);
-  border-color: hsl(var(--border) / 0.5);
-}
-
-.cyber-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--primary) 20%,
-    var(--primary) 80%,
-    transparent
-  );
-  opacity: 0.5;
-}
-
-.cyber-card:hover {
-  border-color: color-mix(in oklch, var(--primary) 30%, transparent);
-  box-shadow:
-    0 4px 24px hsl(var(--background) / 0.1),
-    0 0 30px color-mix(in oklch, var(--primary) 5%, transparent);
-  transform: translateY(-2px);
-}
-
-.dark .cyber-card:hover {
-  border-color: color-mix(in oklch, var(--primary) 40%, transparent);
-  box-shadow:
-    0 4px 24px hsl(var(--background) / 0.3),
-    0 0 40px color-mix(in oklch, var(--primary) 10%, transparent);
-}
-
-/* Corner accents for cards */
-.corner-accent {
-  position: relative;
-}
-
-.corner-accent::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  right: 0;
-  width: 24px;
-  height: 24px;
-  border-right: 2px solid var(--primary);
-  border-bottom: 2px solid var(--primary);
-  opacity: 0.3;
-  transition: opacity 0.3s ease;
-}
-
-.corner-accent:hover::after {
-  opacity: 0.6;
-}
-
-/* ============================================
-   STATUS INDICATORS
-   ============================================ */
-
-.status-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 2px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  font-family: var(--font-mono), ui-monospace, monospace;
-}
-
-.status-running {
-  color: var(--chart-2);
-  background: color-mix(in oklch, var(--chart-2) 10%, transparent);
-  border: 1px solid color-mix(in oklch, var(--chart-2) 30%, transparent);
-}
-
-.status-running .status-dot {
-  background: var(--chart-2);
-  box-shadow: 0 0 8px var(--chart-2);
-}
-
-.status-error {
-  color: var(--destructive);
-  background: color-mix(in oklch, var(--destructive) 10%, transparent);
-  border: 1px solid color-mix(in oklch, var(--destructive) 30%, transparent);
-}
-
-.status-error .status-dot {
-  background: var(--destructive);
-  box-shadow: 0 0 8px var(--destructive);
-}
-
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
 }
 
 /* ============================================
