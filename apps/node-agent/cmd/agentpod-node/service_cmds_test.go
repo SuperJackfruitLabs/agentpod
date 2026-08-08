@@ -208,6 +208,53 @@ func TestStatusCmd(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// status flag parsing (-h / --json / bad flags)
+// ---------------------------------------------------------------------------
+
+func TestParseStatusFlags(t *testing.T) {
+	t.Run("no_flags_defaults_to_text_output", func(t *testing.T) {
+		var buf bytes.Buffer
+		jsonOut, done, code := parseStatusFlags(nil, &buf)
+		if done {
+			t.Fatalf("expected done=false, got done=true code=%d out=%s", code, buf.String())
+		}
+		if jsonOut {
+			t.Error("jsonOut: got true want false")
+		}
+	})
+
+	t.Run("json_flag_parsed", func(t *testing.T) {
+		var buf bytes.Buffer
+		jsonOut, done, _ := parseStatusFlags([]string{"--json"}, &buf)
+		if done {
+			t.Fatalf("expected done=false, got done=true out=%s", buf.String())
+		}
+		if !jsonOut {
+			t.Error("jsonOut: got false want true")
+		}
+	})
+
+	t.Run("dash_h_prints_command_help_and_exits_0", func(t *testing.T) {
+		var buf bytes.Buffer
+		_, done, code := parseStatusFlags([]string{"-h"}, &buf)
+		if !done || code != 0 {
+			t.Fatalf("got done=%v code=%d, want done=true code=0", done, code)
+		}
+		if !strings.Contains(buf.String(), "credential") {
+			t.Errorf("expected command help on out, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("bad_flag_exits_2", func(t *testing.T) {
+		var buf bytes.Buffer
+		_, done, code := parseStatusFlags([]string{"--bogus"}, &buf)
+		if !done || code != 2 {
+			t.Fatalf("got done=%v code=%d, want done=true code=2", done, code)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // stop / start / restart
 // ---------------------------------------------------------------------------
 
@@ -523,6 +570,37 @@ func TestPrepareLogsCmd(t *testing.T) {
 		}
 		if !strings.Contains(outBuf.String(), "no log file yet") {
 			t.Errorf("missing friendly error on out, got:\n%s", outBuf.String())
+		}
+	})
+
+	t.Run("dash_h_prints_command_help_and_exits_0", func(t *testing.T) {
+		mgr := &fakeManager{}
+		homeDir := func() (string, error) { return "/Users/x", nil }
+		var outBuf, errBuf bytes.Buffer
+
+		cmd, code := prepareLogsCmd("darwin", mgr, homeDir, []string{"-h"}, &outBuf, &errBuf, func(string) error { return nil })
+		if cmd != nil {
+			t.Fatalf("expected no cmd for -h, got %v", cmd)
+		}
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if !strings.Contains(outBuf.String(), "journalctl") {
+			t.Errorf("expected command help on out, got:\n%s", outBuf.String())
+		}
+	})
+
+	t.Run("bad_flag_still_exits_2", func(t *testing.T) {
+		mgr := &fakeManager{}
+		homeDir := func() (string, error) { return "/Users/x", nil }
+		var outBuf, errBuf bytes.Buffer
+
+		cmd, code := prepareLogsCmd("darwin", mgr, homeDir, []string{"--bogus"}, &outBuf, &errBuf, func(string) error { return nil })
+		if cmd != nil {
+			t.Fatalf("expected no cmd for a bad flag, got %v", cmd)
+		}
+		if code != 2 {
+			t.Errorf("exit code: got %d want 2", code)
 		}
 	})
 }

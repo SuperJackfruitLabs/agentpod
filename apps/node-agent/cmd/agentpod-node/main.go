@@ -22,10 +22,26 @@ func alreadyEnrolled(cfg config.Config, loadErr error) bool {
 }
 
 func main() {
-  if len(os.Args) < 2 { fmt.Println("usage: agentpod-node <enroll|run|detect|update|version>"); os.Exit(2) }
+  if len(os.Args) < 2 { fmt.Println(helpText(version)); os.Exit(0) }
   switch os.Args[1] {
+  case "help", "-h", "--help":
+    if os.Args[1] == "help" && len(os.Args) > 2 {
+      name := os.Args[2]
+      if !isCommand(name) {
+        fmt.Printf("unknown command: %q\n", name)
+        os.Exit(2)
+      }
+      fmt.Println(commandHelp(name))
+      os.Exit(0)
+    }
+    fmt.Println(helpText(version))
+    os.Exit(0)
   case "enroll":
     fs := flag.NewFlagSet("enroll", flag.ExitOnError)
+    fs.Usage = func() {
+      fmt.Fprintln(fs.Output(), commandHelp("enroll"))
+      fs.PrintDefaults()
+    }
     flagHub := fs.String("hub", "", "hub base URL")
     flagToken := fs.String("token", "", "enrollment token")
     flagForce := fs.Bool("force", false, "re-enroll even when a valid config exists")
@@ -64,6 +80,10 @@ func main() {
     detectCmd() // debug/ops: print detected stations as JSON
   case "update":
     fs := flag.NewFlagSet("update", flag.ExitOnError)
+    fs.Usage = func() {
+      fmt.Fprintln(fs.Output(), commandHelp("update"))
+      fs.PrintDefaults()
+    }
     check := fs.Bool("check", false, "resolve and report current/latest version, no changes")
     force := fs.Bool("force", false, "update even when already on the latest version")
     fs.Parse(os.Args[2:])
@@ -114,10 +134,12 @@ func main() {
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
     os.Exit(restartCmd(mgr, os.Stdout))
   case "status":
+    jsonOut, done, code := parseStatusFlags(os.Args[2:], os.Stdout)
+    if done { os.Exit(code) }
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
     cfg, cfgErr := config.Load(config.DefaultPath())
-    os.Exit(statusCmd(mgr, cfg, cfgErr, enroll.CheckCredential, parseStatusJSON(os.Args[2:]), os.Stdout))
+    os.Exit(statusCmd(mgr, cfg, cfgErr, enroll.CheckCredential, jsonOut, os.Stdout))
   case "logs":
     mgr, err := service.NewManager(nil)
     if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
@@ -130,6 +152,11 @@ func main() {
     if len(os.Args) > 3 { rest = os.Args[3:] }
     os.Exit(runServiceVerb(verb, rest, mgr, os.Stdout))
   default:
-    fmt.Println("unknown command:", os.Args[1]); os.Exit(2)
+    fmt.Printf("unknown command: %q\n", os.Args[1])
+    if s := suggestCommand(os.Args[1]); s != "" {
+      fmt.Printf("did you mean '%s'?\n", s)
+    }
+    fmt.Println("run 'apn help' for usage.")
+    os.Exit(2)
   }
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -25,15 +26,27 @@ const serviceUnitName = "agentpod-node"
 // status
 // ---------------------------------------------------------------------------
 
-// parseStatusJSON parses `apn status`'s flag set and reports whether --json
-// was passed. Errors are non-fatal (best-effort) so main.go's case can stay
-// a one-liner that calls this inline.
-func parseStatusJSON(args []string) bool {
+// parseStatusFlags parses `apn status`'s flag set (currently just --json)
+// and reports whether main.go should stop here. done=true means the
+// caller's job is finished — print nothing further, exit with code
+// (0 for -h/--help, having already printed command help + flag defaults to
+// out; 2 for a bad flag). done=false means parsing succeeded normally and
+// the caller should proceed to statusCmd with jsonOut.
+func parseStatusFlags(args []string, out io.Writer) (jsonOut, done bool, code int) {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-	jsonOut := fs.Bool("json", false, "machine-readable JSON output")
-	_ = fs.Parse(args)
-	return *jsonOut
+	fs.SetOutput(out)
+	fs.Usage = func() {
+		fmt.Fprintln(out, commandHelp("status"))
+		fs.PrintDefaults()
+	}
+	j := fs.Bool("json", false, "machine-readable JSON output")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return false, true, 0
+		}
+		return false, true, 2
+	}
+	return *j, false, 0
 }
 
 // statusCmd assembles and prints `apn status`'s local-service and hub
@@ -390,9 +403,16 @@ func resolveUnitPathForLogs(goos string, mgr service.Manager, errOut io.Writer) 
 func prepareLogsCmd(goos string, mgr service.Manager, homeDir func() (string, error), args []string, out, errOut io.Writer, stat func(string) error) (*exec.Cmd, int) {
 	fs := flag.NewFlagSet("logs", flag.ContinueOnError)
 	fs.SetOutput(out)
+	fs.Usage = func() {
+		fmt.Fprintln(out, commandHelp("logs"))
+		fs.PrintDefaults()
+	}
 	follow := fs.Bool("f", false, "follow log output")
 	lines := fs.Int("n", 50, "number of lines to show")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, 0
+		}
 		return nil, 2
 	}
 
