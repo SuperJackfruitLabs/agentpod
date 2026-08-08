@@ -29,12 +29,25 @@
   type Tab = "health" | "logs" | "files" | "terminal" | "cleanup" | "activity";
   let activeTab = $state<Tab>("health");
 
-  /** Tabs the user has switched to at least once — kept mounted after that
-   *  so logs/files/terminal panels don't lose their SSE stream, tree state,
-   *  or scrollback when the user tabs away and back. */
-  let visited = $state(new Set<Tab>(["health"]));
+  /** Base id PageHeader builds its tab/panel ids from — kept in one place so
+   *  the tablist's aria-controls and the tabpanels' ids/aria-labelledby
+   *  can't drift apart. */
+  const tabsId = "page-tabs";
+
+  /** Heavy tabs (SSE stream / file tree / terminal session) the user has
+   *  switched to at least once — kept mounted after that so tab switches no
+   *  longer drop the log stream, tree state, or terminal scrollback. Health/
+   *  cleanup/activity intentionally stay plain if-mounted below: they fetch
+   *  fresh data on every mount (e.g. Activity's onMount fetch), and keeping
+   *  them alive would make that data go stale while the tab is hidden. */
+  let visitedHeavyTabs = $state(new Set<Tab>());
   $effect(() => {
-    if (!visited.has(activeTab)) visited = new Set(visited).add(activeTab);
+    if (
+      (activeTab === "logs" || activeTab === "files" || activeTab === "terminal") &&
+      !visitedHeavyTabs.has(activeTab)
+    ) {
+      visitedHeavyTabs = new Set(visitedHeavyTabs).add(activeTab);
+    }
   });
 
   let station = $state<StationRow | null>(null);
@@ -81,14 +94,22 @@
   }
 </script>
 
-{#snippet panel(id: Tab, content: Snippet)}
-  {#if visited.has(id)}
+{#snippet keepAlivePanel(id: Tab, content: Snippet)}
+  {#if visitedHeavyTabs.has(id)}
     <div
       role="tabpanel"
-      id="page-tabs-panel-{id}"
-      aria-labelledby="page-tabs-tab-{id}"
+      id="{tabsId}-panel-{id}"
+      aria-labelledby="{tabsId}-tab-{id}"
       class={activeTab === id ? "contents" : "hidden"}
     >
+      {@render content()}
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet mountedPanel(id: Tab, content: Snippet)}
+  {#if activeTab === id}
+    <div role="tabpanel" id="{tabsId}-panel-{id}" aria-labelledby="{tabsId}-tab-{id}">
       {@render content()}
     </div>
   {/if}
@@ -102,6 +123,7 @@
   activeTab={activeTab}
   onTabChange={handleTabChange}
   sticky={true}
+  {tabsId}
 >
   {#snippet leading()}
     <Button
@@ -122,19 +144,19 @@
 
 <!-- Panel content -->
 <div class="container mx-auto flex max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 md:py-6 min-h-0">
-  {@render panel("health", healthContent)}
+  {@render mountedPanel("health", healthContent)}
   {#snippet healthContent()}
     <HealthPanel {stationId} {canLifecycle} matrixId={station?.matrixId ?? null} />
   {/snippet}
 
-  {@render panel("logs", logsContent)}
+  {@render keepAlivePanel("logs", logsContent)}
   {#snippet logsContent()}
     <div class="flex-1 min-h-[320px]">
       <LogTail {stationId} />
     </div>
   {/snippet}
 
-  {@render panel("files", filesContent)}
+  {@render keepAlivePanel("files", filesContent)}
   {#snippet filesContent()}
     <div class="flex-1 min-h-[320px]">
       <FileBrowser
@@ -146,7 +168,7 @@
   {/snippet}
 
   {#if hasTerminal}
-    {@render panel("terminal", terminalContent)}
+    {@render keepAlivePanel("terminal", terminalContent)}
     {#snippet terminalContent()}
       <div class="flex-1 min-h-[320px]">
         <Terminal {stationId} />
@@ -155,7 +177,7 @@
   {/if}
 
   {#if hasCleanup}
-    {@render panel("cleanup", cleanupContent)}
+    {@render mountedPanel("cleanup", cleanupContent)}
     {#snippet cleanupContent()}
       <div class="min-h-[200px]">
         <CleanupPanel {stationId} />
@@ -163,7 +185,7 @@
     {/snippet}
   {/if}
 
-  {@render panel("activity", activityContent)}
+  {@render mountedPanel("activity", activityContent)}
   {#snippet activityContent()}
     <div class="min-h-[200px]">
       <ActivityPanel {stationId} />
@@ -178,7 +200,10 @@
     if (!open) configEditorPath = null;
   }}
 >
-  <Dialog.Content class="flex h-[80vh] max-w-4xl flex-col overflow-hidden p-0" showCloseButton={false}>
+  <Dialog.Content
+    class="flex h-[80vh] max-w-4xl sm:max-w-4xl flex-col overflow-hidden p-0"
+    showCloseButton={false}
+  >
     {#if configEditorPath !== null && canWrite}
       <ConfigEditor
         {stationId}
