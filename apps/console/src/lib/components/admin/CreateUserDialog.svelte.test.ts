@@ -59,8 +59,13 @@ test("submitting an invalid email blocks the call and shows a field error", asyn
 
   fillForm(getByLabelText, { name: "Jo", email: "not-an-email", password: "longenough" });
 
+  // Regression: the submit button must live inside the form as type="submit"
+  // so Enter in any field submits (jsdom can't simulate implicit submission,
+  // so we assert the wiring and dispatch submit on the form directly).
   const submitBtn = getByRole("button", { name: /create user/i });
-  await fireEvent.click(submitBtn);
+  expect(submitBtn.getAttribute("type")).toBe("submit");
+  expect(submitBtn.closest("form")).not.toBeNull();
+  await fireEvent.submit(submitBtn.closest("form")!);
 
   await waitFor(() => {
     expect(getByText(/valid email/i)).toBeTruthy();
@@ -76,10 +81,11 @@ test("submitting a short password blocks the call and shows a field error", asyn
   fillForm(getByLabelText, { name: "Jo", email: "jo@example.com", password: "short" });
 
   const submitBtn = getByRole("button", { name: /create user/i });
-  await fireEvent.click(submitBtn);
+  await fireEvent.submit(submitBtn.closest("form")!);
 
   await waitFor(() => {
-    expect(getByText(/8 characters/i)).toBeTruthy();
+    // The error string, not the "Minimum 8 characters" helper description.
+    expect(getByText("Password must be at least 8 characters")).toBeTruthy();
     expect(adminApi.createUser).not.toHaveBeenCalled();
   });
 });
@@ -95,7 +101,7 @@ test("valid submission calls createUser with the entered values and fires onCrea
   fillForm(getByLabelText, { name: "Jo Doe", email: "jo@example.com", password: "longenough" });
 
   const submitBtn = getByRole("button", { name: /create user/i });
-  await fireEvent.click(submitBtn);
+  await fireEvent.submit(submitBtn.closest("form")!);
 
   await waitFor(() => {
     expect(adminApi.createUser).toHaveBeenCalledWith({

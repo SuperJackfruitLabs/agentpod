@@ -187,7 +187,7 @@
   title="Apply cleanup"
   message="This will permanently remove the selected {selectedPaths.length} item{selectedPaths.length === 1 ? '' : 's'}. Type the station ID below to confirm."
   confirmPhrase={stationId}
-  confirmLabel="Confirm"
+  confirmLabel="Delete items"
   onConfirm={handleDialogConfirm}
   onCancel={handleDialogCancel}
 />

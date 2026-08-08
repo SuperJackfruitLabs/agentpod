@@ -6,7 +6,8 @@
     open: boolean;
     title: string;
     message: string;
-    confirmLabel?: string;
+    /** Names the action ("Delete file", "Save changes") — a bare "Confirm" must never ship. */
+    confirmLabel: string;
     destructive?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
@@ -16,7 +17,7 @@
     open,
     title,
     message,
-    confirmLabel = "Confirm",
+    confirmLabel,
     destructive = false,
     onConfirm,
     onCancel,

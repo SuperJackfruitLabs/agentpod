@@ -29,7 +29,7 @@ export const graphite: ThemePreset = {
       "destructive-foreground": "#fafafa",
       border: "#e5e5e5",
       input: "#e5e5e5",
-      ring: "#a3a3a3",
+      ring: "#737373",
       "chart-1": "#525252",
       "chart-2": "#737373",
       "chart-3": "#a3a3a3",

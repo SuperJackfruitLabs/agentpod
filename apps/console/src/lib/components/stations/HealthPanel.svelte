@@ -22,6 +22,7 @@
   let dialogOpen = $state(false);
   let pendingAction = $state<"stop" | "restart" | null>(null);
   let actionInFlight = $state(false);
+  let inFlightAction = $state<"start" | "stop" | "restart" | null>(null);
   let actionError = $state<string | null>(null);
 
   async function loadHealth() {
@@ -76,13 +77,15 @@
 
   async function doLifecycle(action: "start" | "stop" | "restart") {
     actionInFlight = true;
+    inFlightAction = action;
     actionError = null;
     try {
       health = await lifecycle(stationId, action);
     } catch (err) {
-      actionError = err instanceof Error ? err.message : "Action failed";
+      actionError = err instanceof Error ? err.message : `Couldn't ${action} the agent.`;
     } finally {
       actionInFlight = false;
+      inFlightAction = null;
     }
   }
 
@@ -219,7 +222,7 @@
           disabled={actionInFlight}
           onclick={handleStart}
         >
-          Start
+          {inFlightAction === "start" ? "Starting…" : "Start"}
         </Button>
         <Button
           variant="outline"
@@ -227,7 +230,7 @@
           disabled={actionInFlight}
           onclick={handleStop}
         >
-          Stop
+          {inFlightAction === "stop" ? "Stopping…" : "Stop"}
         </Button>
         <Button
           variant="outline"
@@ -235,7 +238,7 @@
           disabled={actionInFlight}
           onclick={handleRestart}
         >
-          Restart
+          {inFlightAction === "restart" ? "Restarting…" : "Restart"}
         </Button>
       </div>
       {#if actionError}
@@ -250,7 +253,7 @@
       title="{pendingAction === 'stop' ? 'Stop' : 'Restart'} station"
       message="This will {pendingAction} the station process. Type the station ID below to confirm."
       confirmPhrase={stationId}
-      confirmLabel="Confirm"
+      confirmLabel={pendingAction === "stop" ? "Stop agent" : "Restart agent"}
       onConfirm={handleDialogConfirm}
       onCancel={handleDialogCancel}
     />

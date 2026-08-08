@@ -114,7 +114,7 @@
   </Button>
 
   <!-- Refresh -->
-  <Button variant="outline" onclick={onRefresh} disabled={isLoading}>
+  <Button variant="outline" onclick={onRefresh} disabled={isLoading} aria-label="Refresh users">
     <RefreshIcon class="h-4 w-4 {isLoading ? 'animate-spin' : ''}" />
   </Button>
 </div>

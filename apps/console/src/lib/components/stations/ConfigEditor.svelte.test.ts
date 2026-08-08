@@ -1,5 +1,5 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
+import { render, waitFor, fireEvent, cleanup, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 
 // Mock the MonacoEditor with a textarea stub so jsdom tests can drive the buffer.
@@ -84,7 +84,7 @@ test("ConfigEditor: Save opens ConfirmDialog and writeFile is called with backup
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Confirm the save
-  fireEvent.click(getByRole("button", { name: /confirm/i }));
+  fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
 
   await waitFor(() => {
     expect(api.writeFile).toHaveBeenCalledWith(
@@ -114,7 +114,7 @@ test("ConfigEditor: after save, original is updated and Save becomes disabled ag
 
   fireEvent.click(getByRole("button", { name: /save/i }));
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
-  fireEvent.click(getByRole("button", { name: /confirm/i }));
+  fireEvent.click(within(getByRole("dialog")).getByRole("button", { name: "Save changes" }));
 
   // After save, buffer === original → Save disabled again
   await waitFor(() => {

@@ -90,9 +90,10 @@
       <Button
         variant="ghost"
         size="icon"
-        onclick={() => goto("/admin/users")}
+        href="/admin/users"
         class="h-8 w-8"
-        title="Back to Users"
+        title="Back to users"
+        aria-label="Back to users"
       >
         <ArrowLeftIcon class="h-4 w-4" />
       </Button>
@@ -156,7 +157,7 @@
               {#if user.banned}
                 <Button variant="outline" onclick={handleUnban} disabled={actionLoading}>
                   <CheckIcon class="mr-2 h-4 w-4" />
-                  Unban
+                  {actionLoading ? "Unbanning…" : "Unban"}
                 </Button>
               {:else}
                 <Button

@@ -12,7 +12,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, fireEvent, cleanup, screen } from "@testing-library/svelte";
+import { render, waitFor, fireEvent, cleanup, screen, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 
 // ---------------------------------------------------------------------------
@@ -192,7 +192,7 @@ test("clicking Destroy opens type-to-confirm dialog; typing the runtime name and
   vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
   const destroySpy = vi.spyOn(api, "destroyRuntime").mockResolvedValue(undefined);
 
-  const { getAllByTestId, getByPlaceholderText } = render(RuntimesPage);
+  const { getAllByTestId } = render(RuntimesPage);
 
   // Wait for runtime rows to render
   await waitFor(() => {
@@ -203,11 +203,10 @@ test("clicking Destroy opens type-to-confirm dialog; typing the runtime name and
   const [firstDestroyBtn] = getAllByTestId("destroy-btn");
   await fireEvent.click(firstDestroyBtn);
 
-  // TypeToConfirmDialog's placeholder is the confirm phrase — the runtime's name
   await waitFor(() => {
-    expect(getByPlaceholderText("my-runtime")).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
-  const input = getByPlaceholderText("my-runtime");
+  const input = within(screen.getByRole("dialog")).getByRole("textbox");
 
   // Wrong input: dialog's confirm button (last "Destroy" button) stays disabled
   await fireEvent.input(input, { target: { value: "wrong" } });

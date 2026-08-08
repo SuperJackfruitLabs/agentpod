@@ -190,7 +190,7 @@
     {#if user.banned}
       <Button variant="ghost" size="sm" onclick={() => handleUnban(user)} disabled={!!actionLoading[user.id]} data-testid="unban-btn">
         <CheckIcon class="h-4 w-4 mr-1" />
-        Unban
+        {actionLoading[user.id] ? "Unbanning…" : "Unban"}
       </Button>
     {:else}
       <Button variant="ghost" size="sm" onclick={() => openBanDialog(user)} disabled={!!actionLoading[user.id]} data-testid="ban-btn" class="text-destructive hover:text-destructive hover:bg-destructive/10">

@@ -377,6 +377,7 @@
               onclick={() => handleDeleteCustomTheme(customTheme.id, customTheme.name)}
               class="h-8 w-8 text-muted-foreground hover:text-destructive"
               data-testid="delete-theme-{customTheme.id}"
+              aria-label="Delete theme {customTheme.name}"
             >
               <Trash2Icon class="h-4 w-4" />
             </Button>
@@ -403,8 +404,9 @@
       <div class="flex items-center gap-2">
         <Input
           bind:value={customThemeName}
-          placeholder="My custom theme..."
+          placeholder="My custom theme…"
           class="flex-1"
+          onkeydown={(e: KeyboardEvent) => e.key === "Enter" && handleSaveCustomTheme()}
         />
         <Button onclick={handleSaveCustomTheme} disabled={!customThemeName.trim()}>
           Save

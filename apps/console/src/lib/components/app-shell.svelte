@@ -140,9 +140,10 @@
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
               )}
               aria-current={active ? "page" : undefined}
+              aria-label={item.label}
             >
               <item.icon class="h-4 w-4 shrink-0" />
-              <span class="hidden lg:block truncate">{item.label}</span>
+              <span class="hidden lg:block truncate" aria-hidden="true">{item.label}</span>
             </a>
           {/each}
         </div>

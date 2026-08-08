@@ -1,5 +1,5 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
+import { render, waitFor, fireEvent, cleanup, within } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import type { FsEntry } from "@agentpod/contract";
 
@@ -126,7 +126,7 @@ test("FileBrowser: delete button opens type-to-confirm dialog and calls del on c
   vi.spyOn(api, "listFiles").mockResolvedValue([mockFile]);
   vi.spyOn(api, "del").mockResolvedValue({ ok: true });
 
-  const { getByText, getByRole, getByPlaceholderText } = render(FileBrowser, {
+  const { getByText, getByRole } = render(FileBrowser, {
     props: { stationId: "station_1", canWrite: true },
   });
 
@@ -139,16 +139,16 @@ test("FileBrowser: delete button opens type-to-confirm dialog and calls del on c
   await waitFor(() => expect(getByRole("dialog")).toBeTruthy());
 
   // Type the confirm phrase (the file name)
-  const input = getByPlaceholderText("README.md");
+  const input = within(getByRole("dialog")).getByRole("textbox");
   fireEvent.input(input, { target: { value: "README.md" } });
 
-  // Confirm button should now be enabled
+  // Confirm button should now be enabled — labeled with the action
   await waitFor(() => {
-    const btn = getByRole("button", { name: /confirm/i }) as HTMLButtonElement;
+    const btn = getByRole("button", { name: "Delete file" }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
 
-  fireEvent.click(getByRole("button", { name: /confirm/i }));
+  fireEvent.click(getByRole("button", { name: "Delete file" }));
 
   await waitFor(() => {
     expect(api.del).toHaveBeenCalledWith("station_1", "README.md", { recursive: false });

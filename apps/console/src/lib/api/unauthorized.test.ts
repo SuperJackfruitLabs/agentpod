@@ -72,7 +72,7 @@ afterEach(() => {
 test("401 on protected route (/) → clearAuthSession called, goto('/login') called, request rejects", async () => {
   stubFetch(401);
 
-  await expect(listNodes()).rejects.toThrow("401");
+  await expect(listNodes()).rejects.toThrow("Your session has expired — sign in again.");
   expect(mockClearAuthSession).toHaveBeenCalledOnce();
   expect(mockGoto).toHaveBeenCalledOnce();
   expect(mockGoto).toHaveBeenCalledWith("/login");
@@ -82,7 +82,7 @@ test("401 on /nodes/x → same redirect behaviour (protected sub-path)", async (
   vi.stubGlobal("location", { pathname: "/nodes/abc-123" });
   stubFetch(401);
 
-  await expect(listNodes()).rejects.toThrow("401");
+  await expect(listNodes()).rejects.toThrow("Your session has expired — sign in again.");
   expect(mockClearAuthSession).toHaveBeenCalledOnce();
   expect(mockGoto).toHaveBeenCalledWith("/login");
 });
@@ -91,7 +91,7 @@ test("401 while already on /login → goto NOT called (loop guard)", async () =>
   vi.stubGlobal("location", { pathname: "/login" });
   stubFetch(401);
 
-  await expect(listNodes()).rejects.toThrow("401");
+  await expect(listNodes()).rejects.toThrow("Your session has expired — sign in again.");
   expect(mockGoto).not.toHaveBeenCalled();
   expect(mockClearAuthSession).not.toHaveBeenCalled();
 });
@@ -99,7 +99,7 @@ test("401 while already on /login → goto NOT called (loop guard)", async () =>
 test("non-401 error (403) → goto NOT called, request still rejects", async () => {
   stubFetch(403);
 
-  await expect(listNodes()).rejects.toThrow("403");
+  await expect(listNodes()).rejects.toThrow("You don't have permission to do that.");
   expect(mockGoto).not.toHaveBeenCalled();
   expect(mockClearAuthSession).not.toHaveBeenCalled();
 });
