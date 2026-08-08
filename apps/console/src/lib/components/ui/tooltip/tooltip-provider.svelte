@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { Tooltip as TooltipPrimitive } from "bits-ui";
 
-	let { delayDuration = 0, ...restProps }: TooltipPrimitive.ProviderProps = $props();
+	// First tooltip waits; subsequent peers open instantly (bits-ui skipDelayDuration).
+	let { delayDuration = 500, ...restProps }: TooltipPrimitive.ProviderProps = $props();
 </script>
 
 <TooltipPrimitive.Provider {delayDuration} {...restProps} />

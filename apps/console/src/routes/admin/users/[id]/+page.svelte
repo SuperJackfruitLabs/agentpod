@@ -157,7 +157,7 @@
               {#if user.banned}
                 <Button variant="outline" onclick={handleUnban} disabled={actionLoading}>
                   <CheckIcon class="mr-2 h-4 w-4" />
-                  Unban
+                  {actionLoading ? "Unbanning…" : "Unban"}
                 </Button>
               {:else}
                 <Button

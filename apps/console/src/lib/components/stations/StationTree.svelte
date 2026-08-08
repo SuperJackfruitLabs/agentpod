@@ -53,7 +53,7 @@
       {#if hasChildren}
         <button
           type="button"
-          class="flex items-center justify-center w-5 h-5 p-0 bg-transparent border-0 cursor-pointer shrink-0 text-muted-foreground"
+          class="flex items-center justify-center w-6 h-6 p-0 bg-transparent border-0 cursor-pointer shrink-0 text-muted-foreground"
           onclick={() => toggle(station.id)}
           aria-expanded={isOpen}
         >

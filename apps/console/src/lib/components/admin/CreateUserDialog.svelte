@@ -16,6 +16,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Button } from "$lib/components/ui/button";
   import { Field } from "$lib/components/ui/field";
+  import { Spinner } from "$lib/components/ui/spinner";
   import { toast } from "svelte-sonner";
   import { createUser } from "$lib/api/admin";
   import type { UserRole } from "@agentpod/types";
@@ -61,6 +62,12 @@
   function validate(): boolean {
     emailError = EMAIL_RE.test(email.trim()) ? null : "Enter a valid email address";
     passwordError = password.length >= 8 ? null : "Password must be at least 8 characters";
+    // Put the cursor where the fix is needed.
+    if (emailError) {
+      document.getElementById("new-user-email")?.focus();
+    } else if (passwordError) {
+      document.getElementById("new-user-password")?.focus();
+    }
     return !emailError && !passwordError;
   }
 
@@ -76,12 +83,12 @@
         name: name.trim(),
         role,
       });
-      toast.success(`User ${email} created successfully`);
+      toast.success(`${email} added`);
       open = false;
       onCreated();
     } catch (e) {
       const err = e as Error;
-      toast.error("Failed to create user", { description: err.message });
+      toast.error("Couldn't create user", { description: err.message });
     } finally {
       isCreating = false;
     }
@@ -94,10 +101,13 @@
     <Dialog.Content showCloseButton={false}>
       <Dialog.Header>
         <Dialog.Title>Create user</Dialog.Title>
-        <Dialog.Description>Create a new user account (bypasses signup restrictions)</Dialog.Description>
+        <Dialog.Description>Create an account directly, even when public signup is off.</Dialog.Description>
       </Dialog.Header>
 
+      <!-- novalidate: our Field-level validation owns the errors (inline, focused)
+           instead of the browser's native bubbles. -->
       <form
+        novalidate
         onsubmit={(e) => {
           e.preventDefault();
           handleSubmit();
@@ -107,8 +117,9 @@
         <Field label="Name" for="new-user-name">
           <Input
             id="new-user-name"
+            name="name"
             type="text"
-            placeholder="John Doe"
+            autocomplete="off"
             bind:value={name}
             required
             disabled={isCreating}
@@ -118,8 +129,11 @@
         <Field label="Email" for="new-user-email" error={emailError ?? undefined}>
           <Input
             id="new-user-email"
+            name="email"
             type="email"
             placeholder="user@example.com"
+            autocomplete="off"
+            spellcheck={false}
             bind:value={email}
             required
             disabled={isCreating}
@@ -134,8 +148,10 @@
         >
           <Input
             id="new-user-password"
+            name="new-password"
             type="password"
             placeholder="••••••••"
+            autocomplete="new-password"
             bind:value={password}
             required
             minlength={8}
@@ -161,23 +177,30 @@
           </Select.Root>
           {#if role === "admin"}
             <p class="text-xs text-destructive">
-              Warning: Admins have full access to manage all users and system settings.
+              Admins have full access to manage all users and system settings.
             </p>
           {/if}
         </Field>
-      </form>
 
-      <Dialog.Footer>
-        <Button variant="outline" onclick={() => (open = false)} disabled={isCreating}>
-          Cancel
-        </Button>
-        <Button
-          onclick={handleSubmit}
-          disabled={isCreating || !name.trim() || !email.trim() || !password}
-        >
-          {isCreating ? "Creating…" : "Create user"}
-        </Button>
-      </Dialog.Footer>
+        <!-- Footer lives INSIDE the form so Enter in any field submits natively. -->
+        <Dialog.Footer>
+          <Button
+            type="button"
+            variant="outline"
+            onclick={() => (open = false)}
+            disabled={isCreating}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={isCreating || !name.trim() || !email.trim() || !password}
+          >
+            {#if isCreating}<Spinner size="sm" class="text-primary-foreground" />{/if}
+            {isCreating ? "Creating…" : "Create user"}
+          </Button>
+        </Dialog.Footer>
+      </form>
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>

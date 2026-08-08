@@ -9,6 +9,7 @@
    */
   import { Switch } from "$lib/components/ui/switch";
   import { Button } from "$lib/components/ui/button";
+  import { Label } from "$lib/components/ui/label";
   import PlusIcon from "@lucide/svelte/icons/plus";
 
   interface Props {
@@ -26,8 +27,8 @@
 <div class="flex flex-wrap items-center justify-between gap-4 rounded-lg border p-4">
   <!-- Signup toggle -->
   <div class="flex items-center gap-3">
-    <span class="text-xs text-muted-foreground">Public signup</span>
-    <Switch checked={signupEnabled} onCheckedChange={onToggle} disabled={signupLoading} />
+    <Label for="signup-switch" class="text-xs font-normal text-muted-foreground">Public signup</Label>
+    <Switch id="signup-switch" checked={signupEnabled} onCheckedChange={onToggle} disabled={signupLoading} />
     <span class="text-xs text-muted-foreground">
       {signupEnabled ? "Anyone can register" : "Admin invitation only"}
     </span>

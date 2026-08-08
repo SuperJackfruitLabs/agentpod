@@ -404,8 +404,9 @@
       <div class="flex items-center gap-2">
         <Input
           bind:value={customThemeName}
-          placeholder="My custom theme..."
+          placeholder="My custom theme…"
           class="flex-1"
+          onkeydown={(e: KeyboardEvent) => e.key === "Enter" && handleSaveCustomTheme()}
         />
         <Button onclick={handleSaveCustomTheme} disabled={!customThemeName.trim()}>
           Save

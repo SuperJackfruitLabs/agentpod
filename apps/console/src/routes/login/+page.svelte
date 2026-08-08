@@ -148,8 +148,11 @@
         <Field label="API Endpoint" for="api-url" description="Enter your AgentPod Management API URL">
           <Input
             id="api-url"
+            name="hub-url"
             type="url"
             placeholder="http://localhost:3001"
+            autocomplete="url"
+            spellcheck={false}
             bind:value={apiUrl}
             required
             class="font-mono text-sm"
@@ -189,8 +192,10 @@
             <Field label="Name" for="name">
               <Input
                 id="name"
+                name="name"
                 type="text"
                 placeholder="Your name"
+                autocomplete="name"
                 bind:value={name}
                 required
                 disabled={auth.isLoading}
@@ -201,8 +206,11 @@
           <Field label="Email" for="email">
             <Input
               id="email"
+              name="email"
               type="email"
               placeholder="you@example.com"
+              autocomplete="email"
+              spellcheck={false}
               bind:value={email}
               required
               disabled={auth.isLoading}
@@ -216,8 +224,10 @@
           >
             <Input
               id="password"
+              name="password"
               type="password"
               placeholder="••••••••"
+              autocomplete={authMode === "signup" ? "new-password" : "current-password"}
               bind:value={password}
               required
               minlength={8}
