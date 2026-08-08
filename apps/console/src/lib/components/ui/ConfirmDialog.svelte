@@ -7,6 +7,7 @@
     title: string;
     message: string;
     confirmLabel?: string;
+    destructive?: boolean;
     onConfirm: () => void;
     onCancel: () => void;
   }
@@ -16,6 +17,7 @@
     title,
     message,
     confirmLabel = "Confirm",
+    destructive = false,
     onConfirm,
     onCancel,
   }: Props = $props();
@@ -35,7 +37,7 @@
       </Dialog.Header>
       <Dialog.Footer>
         <Button variant="outline" onclick={onCancel}>Cancel</Button>
-        <Button onclick={onConfirm}>{confirmLabel}</Button>
+        <Button variant={destructive ? "destructive" : "default"} onclick={onConfirm}>{confirmLabel}</Button>
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Portal>

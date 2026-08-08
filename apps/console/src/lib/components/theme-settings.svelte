@@ -12,6 +12,9 @@
   import * as Select from "$lib/components/ui/select";
   import * as Tabs from "$lib/components/ui/tabs";
   import { Button } from "$lib/components/ui/button";
+  import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
+  import { cn } from "$lib/utils";
+  import { chipClass } from "$lib/utils/toggle-chip";
   import CheckIcon from "@lucide/svelte/icons/check";
   import SunIcon from "@lucide/svelte/icons/sun";
   import MoonIcon from "@lucide/svelte/icons/moon";
@@ -26,6 +29,11 @@
   let selectedFontCategory = $state<FontPairingCategory | "all">("all");
   let customThemeName = $state("");
   let showSaveDialog = $state(false);
+
+  // Delete-confirmation state for saved custom themes
+  let deleteDialogOpen = $state(false);
+  let pendingDeleteId = $state<string | null>(null);
+  let pendingDeleteName = $state("");
 
   // Filter color schemes by category
   const filteredColorSchemes = $derived(
@@ -67,8 +75,21 @@
     showSaveDialog = false;
   }
 
-  function handleDeleteCustomTheme(id: string) {
-    themeStore.deleteCustomTheme(id);
+  function handleDeleteCustomTheme(id: string, name: string) {
+    pendingDeleteId = id;
+    pendingDeleteName = name;
+    deleteDialogOpen = true;
+  }
+
+  function handleConfirmDelete() {
+    if (pendingDeleteId) themeStore.deleteCustomTheme(pendingDeleteId);
+    deleteDialogOpen = false;
+    pendingDeleteId = null;
+  }
+
+  function handleCancelDelete() {
+    deleteDialogOpen = false;
+    pendingDeleteId = null;
   }
 
   function handleApplyCustomTheme(theme: { id: string; name: string; colorSchemeId: string; fontPairingId: string; createdAt: number; updatedAt: number }) {
@@ -88,23 +109,21 @@
 <div class="space-y-8">
   <!-- Mode Selector -->
   <div class="space-y-3">
-    <Label class="text-xs font-mono uppercase tracking-wider text-primary">Color Mode</Label>
+    <Label class="text-sm font-medium">Color mode</Label>
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
       {#each modeOptions as option}
+        {@const active = themeStore.mode === option.value}
         <button
           type="button"
           onclick={() => handleModeChange(option.value)}
-          class="flex flex-col items-center gap-2 p-3 rounded border transition-all font-mono
-            {themeStore.mode === option.value
-              ? 'border-primary bg-primary/10 text-primary'
-              : 'border-border/30 bg-background/50 hover:border-primary/30 hover:bg-primary/5'}"
+          class={cn(chipClass(active), "flex flex-col items-center gap-2 p-3")}
         >
           <option.icon class="h-5 w-5" />
           <span class="text-xs font-medium">{option.label}</span>
         </button>
       {/each}
     </div>
-    <p class="text-xs text-muted-foreground font-mono">
+    <p class="text-xs text-muted-foreground">
       {#if themeStore.mode === "system"}
         Following your system preference ({themeStore.resolvedMode})
       {:else if themeStore.mode === "auto"}
@@ -117,25 +136,9 @@
 
   <!-- Tabs for Color Scheme and Font Pairing -->
   <Tabs.Root value="colors" class="w-full">
-    <Tabs.List class="grid w-full grid-cols-2 bg-background/30 border border-border/30 rounded p-1 h-auto">
-      <Tabs.Trigger 
-        value="colors"
-        class="font-mono text-[10px] uppercase tracking-wider py-1.5 rounded transition-all
-               !border-transparent !shadow-none !h-auto
-               data-[state=active]:!bg-primary/10 data-[state=active]:!text-primary
-               data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-muted/50"
-      >
-        Color Schemes
-      </Tabs.Trigger>
-      <Tabs.Trigger 
-        value="fonts"
-        class="font-mono text-[10px] uppercase tracking-wider py-1.5 rounded transition-all
-               !border-transparent !shadow-none !h-auto
-               data-[state=active]:!bg-primary/10 data-[state=active]:!text-primary
-               data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-muted/50"
-      >
-        Font Pairings
-      </Tabs.Trigger>
+    <Tabs.List class="grid w-full grid-cols-2">
+      <Tabs.Trigger value="colors">Color Schemes</Tabs.Trigger>
+      <Tabs.Trigger value="fonts">Font Pairings</Tabs.Trigger>
     </Tabs.List>
 
     <!-- Color Schemes Tab -->
@@ -149,7 +152,7 @@
             if (v) selectedColorCategory = v as ColorSchemeCategory | "all";
           }}
         >
-          <Select.Trigger class="w-48 font-mono text-sm bg-background/50 border-border/50 focus:border-primary focus:ring-1 focus:ring-primary">
+          <Select.Trigger class="w-48">
             {selectedColorCategory === "all" ? "All Categories" : getColorCategoryLabel(selectedColorCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
@@ -165,7 +168,7 @@
       </div>
 
       <!-- Color Scheme Grid -->
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-y-auto pr-1 cyber-scrollbar">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-y-auto pr-1">
         {#each filteredColorSchemes as scheme}
           {@const isSelected = themeStore.colorSchemeId === scheme.id}
           {@const colors = themeStore.getColorSchemePreview(scheme.id)}
@@ -174,7 +177,7 @@
             onclick={() => handleColorSchemeChange(scheme.id)}
             class="relative flex flex-col rounded border overflow-hidden transition-all
               {isSelected
-                ? 'border-primary ring-1 ring-primary/30 shadow-[0_0_12px_var(--primary)/15]'
+                ? 'border-primary ring-2 ring-primary'
                 : 'border-border/30 hover:border-primary/50'}"
           >
             <!-- Color Preview - show both light and dark -->
@@ -206,8 +209,8 @@
 
             <!-- Selected Indicator -->
             {#if isSelected}
-              <div class="absolute top-1 right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center shadow-[0_0_8px_var(--primary)]">
-                <CheckIcon class="h-3 w-3 text-black" />
+              <div class="absolute top-1 right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                <CheckIcon class="h-3 w-3 text-primary-foreground" />
               </div>
             {/if}
           </button>
@@ -258,7 +261,7 @@
             if (v) selectedFontCategory = v as FontPairingCategory | "all";
           }}
         >
-          <Select.Trigger class="w-48 font-mono text-sm bg-background/50 border-border/50 focus:border-primary focus:ring-1 focus:ring-primary">
+          <Select.Trigger class="w-48">
             {selectedFontCategory === "all" ? "All Categories" : getFontCategoryLabel(selectedFontCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
@@ -274,7 +277,7 @@
       </div>
 
       <!-- Font Pairing Grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1 cyber-scrollbar">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
         {#each filteredFontPairings as pairing}
           {@const isSelected = themeStore.fontPairingId === pairing.id}
           <button
@@ -282,7 +285,7 @@
             onclick={() => handleFontPairingChange(pairing.id)}
             class="relative p-4 rounded border text-left transition-all
               {isSelected
-                ? 'border-primary ring-1 ring-primary/30 shadow-[0_0_12px_var(--primary)/15] bg-primary/5'
+                ? 'border-primary ring-2 ring-primary bg-primary/5'
                 : 'border-border/30 hover:border-primary/50 bg-background/50'}"
           >
             <!-- Font Preview -->
@@ -322,8 +325,8 @@
 
             <!-- Selected Indicator -->
             {#if isSelected}
-              <div class="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center shadow-[0_0_8px_var(--primary)]">
-                <CheckIcon class="h-3 w-3 text-black" />
+              <div class="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                <CheckIcon class="h-3 w-3 text-primary-foreground" />
               </div>
             {/if}
           </button>
@@ -354,7 +357,7 @@
   <!-- Saved Custom Themes -->
   {#if themeStore.customThemes.length > 0}
     <div class="space-y-3">
-      <Label class="text-xs font-mono uppercase tracking-wider text-primary">Saved Combinations</Label>
+      <Label class="text-sm font-medium">Saved combinations</Label>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         {#each themeStore.customThemes as customTheme}
           <div class="flex items-center justify-between p-3 rounded border border-border/30 bg-background/50 hover:border-primary/30 transition-colors">
@@ -363,7 +366,7 @@
               onclick={() => handleApplyCustomTheme(customTheme)}
               class="flex-1 text-left"
             >
-              <p class="text-sm font-mono font-medium">{customTheme.name}</p>
+              <p class="text-sm font-medium">{customTheme.name}</p>
               <p class="text-xs text-muted-foreground font-mono">
                 {customTheme.colorSchemeId} + {customTheme.fontPairingId}
               </p>
@@ -371,8 +374,9 @@
             <Button
               variant="ghost"
               size="icon"
-              onclick={() => handleDeleteCustomTheme(customTheme.id)}
+              onclick={() => handleDeleteCustomTheme(customTheme.id, customTheme.name)}
               class="h-8 w-8 text-muted-foreground hover:text-destructive"
+              data-testid="delete-theme-{customTheme.id}"
             >
               <Trash2Icon class="h-4 w-4" />
             </Button>
@@ -382,42 +386,43 @@
     </div>
   {/if}
 
+  <ConfirmDialog
+    open={deleteDialogOpen}
+    title="Delete theme"
+    message={`Delete "${pendingDeleteName}"? This can't be undone.`}
+    confirmLabel="Delete"
+    destructive
+    onConfirm={handleConfirmDelete}
+    onCancel={handleCancelDelete}
+  />
+
   <!-- Save Current Combination -->
   <div class="space-y-3">
-    <Label class="text-xs font-mono uppercase tracking-wider text-primary">Save Current Combination</Label>
+    <Label class="text-sm font-medium">Save current combination</Label>
     {#if showSaveDialog}
       <div class="flex items-center gap-2">
         <Input
           bind:value={customThemeName}
           placeholder="My custom theme..."
-          class="flex-1 font-mono bg-background/50 border-border/50 focus:border-primary focus:ring-1 focus:ring-primary"
+          class="flex-1"
         />
-        <Button
-          onclick={handleSaveCustomTheme}
-          disabled={!customThemeName.trim()}
-          class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground"
-        >
+        <Button onclick={handleSaveCustomTheme} disabled={!customThemeName.trim()}>
           Save
         </Button>
         <Button
           variant="outline"
           onclick={() => { showSaveDialog = false; customThemeName = ""; }}
-          class="font-mono text-xs uppercase tracking-wider border-border/50"
         >
           Cancel
         </Button>
       </div>
     {:else}
-      <Button
-        variant="outline"
-        onclick={() => showSaveDialog = true}
-        class="w-full font-mono text-xs uppercase tracking-wider border-border/50 hover:border-primary hover:text-primary"
-      >
+      <Button variant="outline" onclick={() => showSaveDialog = true} class="w-full">
         <SaveIcon class="h-4 w-4 mr-2" />
         Save "{themeStore.currentColorScheme?.label}" + "{themeStore.currentFontPairing?.label}"
       </Button>
     {/if}
-    <p class="text-xs text-muted-foreground font-mono">
+    <p class="text-xs text-muted-foreground">
       Mix and match any color scheme with any font pairing. Save your favorite combinations for quick access.
     </p>
   </div>

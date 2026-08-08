@@ -29,12 +29,6 @@ vi.mock("svelte-sonner", () => ({
   },
 }));
 
-// Stub theme-toggle — its themes/store.svelte.ts calls window.matchMedia at
-// module load time, which jsdom does not implement.
-vi.mock("$lib/components/theme-toggle.svelte", () => ({
-  default: function ThemeToggleStub() {},
-}));
-
 vi.mock("$app/state", () => ({
   page: {
     params: { id: "u1" },
@@ -110,4 +104,35 @@ test("renders a role control", async () => {
     text.toLowerCase().includes("admin") ||
     !!container.querySelector('[data-testid="change-role"]');
   expect(hasRole).toBe(true);
+});
+
+test("banned user renders the Banned status label", async () => {
+  const { getUser } = await import("$lib/api/admin");
+  vi.mocked(getUser).mockResolvedValueOnce({
+    user: {
+      id: "u1",
+      email: "u@x",
+      name: "U",
+      role: "user",
+      banned: true,
+      bannedReason: "Spam",
+      bannedAt: "2026-07-01T00:00:00Z",
+      emailVerified: true,
+      image: null,
+      createdAt: "2026-06-29T00:00:00Z",
+      updatedAt: "2026-06-29T00:00:00Z",
+      sandboxCount: 0,
+      runningSandboxCount: 0,
+    },
+    usage: {
+      sandboxCount: 0,
+      runningSandboxCount: 0,
+      totalCpuCores: 0,
+      totalMemoryGb: 0,
+    },
+  });
+
+  const { container } = render(UserDetailPage);
+  await new Promise((r) => setTimeout(r, 0));
+  expect(container.textContent).toContain("Banned");
 });

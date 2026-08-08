@@ -11,6 +11,7 @@
   interface ExternalFilter {
     stationId?: string;
     status?: string;
+    updatesOnly?: boolean;
   }
 
   let agents = $state<FleetAgent[]>([]);
@@ -18,15 +19,21 @@
   let error = $state<string | null>(null);
 
   // Derive the external filter from the URL query params reactively.
-  // ?station=<id> → filter by stationId; ?status=<s> → filter by status.
+  // ?station=<id> → filter by stationId; ?status=<s> → filter by status
+  // (station wins when both are present); ?updates=1 → updatesOnly, which
+  // composes with either — AgentTable applies every present filter together.
   let externalFilter = $derived.by((): ExternalFilter | null => {
     const params = (page.url as { searchParams?: URLSearchParams | null }).searchParams;
     if (!params) return null;
     const station = params.get("station");
-    if (station) return { stationId: station };
     const status = params.get("status");
-    if (status) return { status };
-    return null;
+    const updatesOnly = params.get("updates") === "1";
+    if (!station && !status && !updatesOnly) return null;
+    const filter: ExternalFilter = {};
+    if (station) filter.stationId = station;
+    else if (status) filter.status = status;
+    if (updatesOnly) filter.updatesOnly = true;
+    return filter;
   });
 
   async function loadFleet() {

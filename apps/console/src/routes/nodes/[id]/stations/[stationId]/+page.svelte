@@ -13,7 +13,7 @@
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import { Button } from "$lib/components/ui/button";
-  import { Badge } from "$lib/components/ui/badge";
+  import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
   import * as Dialog from "$lib/components/ui/dialog";
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
   import HeartPulseIcon from "@lucide/svelte/icons/heart-pulse";
@@ -139,9 +139,7 @@
       <ArrowLeftIcon class="h-4 w-4" />
     </Button>
     {#if station?.harness}
-      <Badge variant="outline" class="font-mono text-xs uppercase tracking-wider shrink-0">
-        {station.harness}
-      </Badge>
+      <HarnessBadge harness={station.harness} class="shrink-0" />
     {/if}
   {/snippet}
 </PageHeader>

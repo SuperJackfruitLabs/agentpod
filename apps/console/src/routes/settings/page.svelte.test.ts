@@ -112,3 +112,8 @@ test("renders a Sign out control", () => {
     !!container.querySelector('[data-testid="sign-out"]');
   expect(hasSignOut).toBe(true);
 });
+
+test("shows a 'Connected to' label for the hub URL", () => {
+  const { getByText } = render(SettingsPage);
+  expect(getByText("Connected to")).toBeTruthy();
+});

@@ -50,7 +50,7 @@
       {#if updatesAvailable > 0}
         <li>
           <a
-            href="/agents?status=running"
+            href="/agents?updates=1"
             class="text-xs flex items-center gap-1.5 hover:text-primary transition-colors"
             data-testid="attention-updates"
           >

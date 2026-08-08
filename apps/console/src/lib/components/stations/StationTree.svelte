@@ -2,7 +2,7 @@
   import { untrack } from "svelte";
   import { ChevronRight, ChevronDown } from "@lucide/svelte";
   import type { StationRow } from "$lib/api/client";
-  import { Badge } from "$lib/components/ui/badge";
+  import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
 
   interface Props {
     stations: StationRow[];
@@ -75,12 +75,7 @@
           {station.displayName}
         </span>
         <div class="flex items-center gap-1 shrink-0 ml-auto">
-          <Badge
-            variant="outline"
-            class="font-mono text-[10px] text-primary border-primary/40"
-          >
-            {station.harness}
-          </Badge>
+          <HarnessBadge harness={station.harness} />
           <span class="text-xs text-muted-foreground">{station.kind}</span>
         </div>
       </a>

@@ -8,14 +8,19 @@
     listRuntimeProviders,
   } from "$lib/api/client";
   import type { ProvisionedRuntime } from "@agentpod/contract";
+  import type { ColumnDef } from "@tanstack/table-core";
   import PageHeader from "$lib/components/page-header.svelte";
-  import * as Dialog from "$lib/components/ui/dialog";
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
+  import { Empty } from "$lib/components/ui/empty";
+  import { DataTable, renderSnippet } from "$lib/components/ui/data-table";
+  import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
   import { statusBadgeClass } from "$lib/utils/status-badge";
+  import { relativeTime } from "$lib/utils/relative-time";
   import NewRuntimeDialog from "$lib/components/fleet/NewRuntimeDialog.svelte";
   import PlusIcon from "@lucide/svelte/icons/plus";
+  import ContainerIcon from "@lucide/svelte/icons/container";
   import { toast } from "svelte-sonner";
 
   // ── State ───────────────────────────────────────────────────────────────────
@@ -25,32 +30,18 @@
   let error = $state<string | null>(null);
   let showNewRuntimeDialog = $state(false);
 
-  /** Runtime targeted for destruction; drives the confirm dialog. */
+  /** Runtime targeted for destruction; drives the type-to-confirm dialog. */
   let destroyTarget = $state<ProvisionedRuntime | null>(null);
   let isDestroying = $state(false);
 
   /** Per-runtime in-flight flag for start/stop to disable buttons. */
   let actionInFlight = $state<Record<string, boolean>>({});
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  function relativeTime(dateStr: string): string {
-    try {
-      const diff = Date.now() - new Date(dateStr).getTime();
-      const m = Math.floor(diff / 60000);
-      if (m < 1) return "just now";
-      if (m < 60) return `${m}m ago`;
-      const h = Math.floor(m / 60);
-      if (h < 24) return `${h}h ago`;
-      return `${Math.floor(h / 24)}d ago`;
-    } catch {
-      return "?";
-    }
-  }
-
   // ── Data loading ─────────────────────────────────────────────────────────────
 
   async function loadRuntimes() {
+    isLoading = true;
+    error = null;
     try {
       runtimes = await listRuntimes();
     } catch (e) {
@@ -124,16 +115,122 @@
       delete actionInFlight[rt.id];
     }
   }
+
+  // ── Columns ──────────────────────────────────────────────────────────────────
+  // Cell snippets (nameCell, nodeCell, statusCell, createdCell, actionsCell) are
+  // declared in the markup below; referencing them here is safe because these
+  // arrow functions only run later, when FlexRender invokes them — by then the
+  // snippet bindings are already initialized.
+  const columns: ColumnDef<ProvisionedRuntime>[] = [
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: (ctx) => renderSnippet(nameCell, { value: ctx.getValue<string>() }),
+    },
+    {
+      accessorKey: "provider",
+      header: "Provider",
+    },
+    {
+      id: "node",
+      header: "Node",
+      enableSorting: false,
+      accessorFn: (row) => row.nodeId ?? "",
+      cell: (ctx) => renderSnippet(nodeCell, { value: ctx.getValue<string>() }),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      enableSorting: false,
+      cell: (ctx) => renderSnippet(statusCell, { value: ctx.getValue<string>() }),
+    },
+    {
+      accessorKey: "createdAt",
+      header: "Created",
+      cell: (ctx) => renderSnippet(createdCell, { value: ctx.getValue<string>() }),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: (ctx) => renderSnippet(actionsCell, { rt: ctx.row.original }),
+    },
+  ];
 </script>
 
-<!-- ── Page header with "New runtime" CTA ─────────────────────────────────── -->
-<PageHeader title="Runtimes" subtitle="// provisioned containers">
-  {#snippet actions()}
-    <Button
-      onclick={() => (showNewRuntimeDialog = true)}
-      class="font-mono text-xs uppercase tracking-wider"
-      data-testid="new-runtime-btn"
+{#snippet nameCell({ value }: { value: string })}
+  <span class="font-mono text-sm font-medium">{value}</span>
+{/snippet}
+
+{#snippet nodeCell({ value }: { value: string })}
+  {#if value}
+    <a
+      href="/nodes/{value}"
+      class="font-mono text-xs text-muted-foreground truncate hover:text-primary transition-colors"
     >
+      {value.slice(0, 8)}
+    </a>
+  {:else}
+    <span class="text-muted-foreground/30">—</span>
+  {/if}
+{/snippet}
+
+{#snippet statusCell({ value }: { value: string })}
+  <Badge variant="outline" class={statusBadgeClass(value)} data-testid="status-badge">
+    {value}
+  </Badge>
+{/snippet}
+
+{#snippet createdCell({ value }: { value: string })}
+  <span class="whitespace-nowrap text-xs text-muted-foreground">{relativeTime(value)}</span>
+{/snippet}
+
+{#snippet actionsCell({ rt }: { rt: ProvisionedRuntime })}
+  <div class="flex items-center gap-1.5">
+    <!-- Start: shown when runtime is stopped or in error -->
+    {#if rt.status === "stopped" || rt.status === "error"}
+      <button
+        type="button"
+        disabled={!!actionInFlight[rt.id]}
+        onclick={() => handleStart(rt)}
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
+        data-testid="start-btn"
+      >
+        {actionInFlight[rt.id] ? "Starting…" : "Start"}
+      </button>
+    {/if}
+
+    <!-- Stop: shown when runtime is online -->
+    {#if rt.status === "online"}
+      <button
+        type="button"
+        disabled={!!actionInFlight[rt.id]}
+        onclick={() => handleStop(rt)}
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+        data-testid="stop-btn"
+      >
+        {actionInFlight[rt.id] ? "Stopping…" : "Stop"}
+      </button>
+    {/if}
+
+    <!-- Destroy: hidden during provisioning or when already destroyed -->
+    {#if rt.status !== "provisioning" && rt.status !== "destroyed"}
+      <button
+        type="button"
+        onclick={() => (destroyTarget = rt)}
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-error/50 text-status-error hover:bg-status-error/10"
+        data-testid="destroy-btn"
+      >
+        Destroy
+      </button>
+    {/if}
+  </div>
+{/snippet}
+
+<!-- ── Page header with "New runtime" CTA ─────────────────────────────────── -->
+<PageHeader title="Runtimes" subtitle="Provisioned containers">
+  {#snippet actions()}
+    <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="new-runtime-btn">
       <PlusIcon class="h-4 w-4 mr-2" />
       New runtime
     </Button>
@@ -152,129 +249,32 @@
 
   {:else if error}
     <!-- Error state -->
-    <div class="cyber-card p-4 border-destructive/50">
-      <p class="text-sm font-mono text-destructive">{error}</p>
+    <div
+      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      role="alert"
+    >
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadRuntimes}>Retry</Button>
     </div>
 
   {:else if runtimes.length === 0}
     <!-- Empty state -->
-    <div class="cyber-card p-8 text-center space-y-4" data-testid="empty-state">
-      <p class="font-mono text-sm text-muted-foreground">// no runtimes yet</p>
-      <p class="font-mono text-xs text-muted-foreground/60">
-        // provision your first runtime to get started
-      </p>
-      <Button
-        onclick={() => (showNewRuntimeDialog = true)}
-        class="font-mono text-xs uppercase tracking-wider"
-        data-testid="empty-new-runtime-btn"
+    <div data-testid="empty-state">
+      <Empty
+        title="No runtimes yet"
+        description="Provision your first runtime to get started"
+        icon={ContainerIcon}
       >
-        <PlusIcon class="h-4 w-4 mr-2" />
-        Provision runtime
-      </Button>
+        <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="empty-new-runtime-btn">
+          <PlusIcon class="h-4 w-4 mr-2" />
+          Provision runtime
+        </Button>
+      </Empty>
     </div>
 
   {:else}
     <!-- Runtimes table -->
-    <div class="cyber-card overflow-hidden" data-testid="runtimes-table">
-      <!-- Column header row -->
-      <div
-        class="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-x-4 px-4 py-2 border-b border-border/30"
-        style="background: hsl(var(--muted) / 0.3);"
-      >
-        <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Name / ID</span>
-        <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Provider</span>
-        <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Status</span>
-        <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Node</span>
-        <span class="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">Actions</span>
-      </div>
-
-      <!-- Data rows -->
-      <ul class="divide-y divide-border/20">
-        {#each runtimes as rt (rt.id)}
-          <li
-            class="grid grid-cols-[2fr_1fr_1fr_1fr_auto] gap-x-4 px-4 py-3 items-center hover:bg-primary/3 transition-colors"
-            data-testid="runtime-row"
-          >
-            <!-- Name / ID -->
-            <div class="min-w-0">
-              <p class="font-mono text-sm text-foreground font-medium truncate">{rt.name}</p>
-              <p class="font-mono text-[10px] text-muted-foreground/50 truncate">{rt.id.slice(0, 12)}</p>
-            </div>
-
-            <!-- Provider -->
-            <span class="font-mono text-xs text-muted-foreground/80 truncate">{rt.provider}</span>
-
-            <!-- Status badge -->
-            <span>
-              <Badge
-                variant="outline"
-                class={statusBadgeClass(rt.status)}
-                data-testid="status-badge"
-              >
-                {rt.status}
-              </Badge>
-            </span>
-
-            <!-- Linked node (click navigates to node detail) -->
-            <span class="font-mono text-xs text-muted-foreground/60 truncate">
-              {#if rt.nodeId}
-                <a href="/nodes/{rt.nodeId}" class="hover:text-primary transition-colors">
-                  {rt.nodeId.slice(0, 8)}
-                </a>
-              {:else}
-                <span class="text-muted-foreground/30">—</span>
-              {/if}
-            </span>
-
-            <!-- Per-row actions -->
-            <div class="flex items-center gap-1.5">
-              <!-- Start: shown when runtime is stopped or in error -->
-              {#if rt.status === "stopped" || rt.status === "error"}
-                <button
-                  type="button"
-                  disabled={!!actionInFlight[rt.id]}
-                  onclick={() => handleStart(rt)}
-                  class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border transition-colors
-                    border-chart-2/50 text-chart-2 hover:border-chart-2 hover:bg-chart-2/10
-                    disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-testid="start-btn"
-                >
-                  Start
-                </button>
-              {/if}
-
-              <!-- Stop: shown when runtime is online -->
-              {#if rt.status === "online"}
-                <button
-                  type="button"
-                  disabled={!!actionInFlight[rt.id]}
-                  onclick={() => handleStop(rt)}
-                  class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border transition-colors
-                    border-muted-foreground/50 text-muted-foreground hover:border-muted-foreground hover:bg-muted/20
-                    disabled:opacity-50 disabled:cursor-not-allowed"
-                  data-testid="stop-btn"
-                >
-                  Stop
-                </button>
-              {/if}
-
-              <!-- Destroy: hidden during provisioning or when already destroyed -->
-              {#if rt.status !== "provisioning" && rt.status !== "destroyed"}
-                <button
-                  type="button"
-                  onclick={() => (destroyTarget = rt)}
-                  class="font-mono text-[10px] uppercase tracking-wider px-2 py-1 rounded border transition-colors
-                    border-destructive/50 text-destructive hover:border-destructive hover:bg-destructive/10"
-                  data-testid="destroy-btn"
-                >
-                  Destroy
-                </button>
-              {/if}
-            </div>
-          </li>
-        {/each}
-      </ul>
-    </div>
+    <DataTable {columns} data={runtimes} rowTestId="runtime-row" />
   {/if}
 </div>
 
@@ -286,40 +286,13 @@
   onCreated={handleRuntimeCreated}
 />
 
-<!-- ── Destroy confirmation dialog ──────────────────────────────────────────── -->
-<Dialog.Root
+<!-- ── Destroy confirmation dialog (type-to-confirm) ────────────────────────── -->
+<TypeToConfirmDialog
   open={destroyTarget !== null}
-  onOpenChange={(open) => {
-    if (!open) destroyTarget = null;
-  }}
->
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false}>
-      <Dialog.Header>
-        <Dialog.Title class="font-mono">Destroy Runtime</Dialog.Title>
-        <Dialog.Description>
-          Permanently destroy <strong>{destroyTarget?.name}</strong>? This action cannot be
-          undone.
-        </Dialog.Description>
-      </Dialog.Header>
-      <Dialog.Footer>
-        <Button
-          variant="outline"
-          onclick={() => (destroyTarget = null)}
-          disabled={isDestroying}
-        >
-          Cancel
-        </Button>
-        <Button
-          variant="destructive"
-          onclick={handleDestroyConfirm}
-          disabled={isDestroying}
-          data-testid="confirm-destroy-btn"
-        >
-          {isDestroying ? "Destroying…" : "Destroy"}
-        </Button>
-      </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Portal>
-</Dialog.Root>
+  title="Destroy runtime"
+  message="This will permanently destroy the runtime. This action cannot be undone."
+  confirmPhrase={destroyTarget?.name ?? ""}
+  confirmLabel="Destroy"
+  onConfirm={handleDestroyConfirm}
+  onCancel={() => (destroyTarget = null)}
+/>

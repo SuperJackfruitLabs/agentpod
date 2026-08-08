@@ -4,9 +4,10 @@
  * Tests for the /runtimes page.
  * Asserts:
  *  - renders a PageHeader with title "Runtimes"
- *  - renders runtime rows (name, provider, status) from a mocked listRuntimes
- *  - empty state: "no runtimes yet" when listRuntimes returns []
- *  - destroy button triggers destroyRuntime after confirm dialog
+ *  - renders runtime rows (name, provider, status, created) from a mocked listRuntimes
+ *  - empty state: "No runtimes yet" when listRuntimes returns []
+ *  - destroy button opens a type-to-confirm dialog; typing the runtime name and
+ *    confirming triggers destroyRuntime
  *  - error state when listRuntimes rejects
  */
 
@@ -127,6 +128,39 @@ test("shows provider in each row", async () => {
   });
 });
 
+test("Node column links to the node when present, shows a dash otherwise", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+
+  const { getAllByTestId, getByText } = render(RuntimesPage);
+
+  await waitFor(() => {
+    expect(getAllByTestId("runtime-row").length).toBe(2);
+  });
+
+  // my-runtime has nodeId "node-xyz" → truncated link to /nodes/node-xyz
+  const link = getByText("node-xyz".slice(0, 8)).closest("a");
+  expect(link).toBeTruthy();
+  expect(link?.getAttribute("href")).toBe("/nodes/node-xyz");
+
+  // cf-runtime has nodeId null → dash, no link
+  expect(getByText("—")).toBeTruthy();
+});
+
+test("shows a Created column with relative time for each row", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+
+  const { getAllByText, getAllByTestId } = render(RuntimesPage);
+
+  await waitFor(() => {
+    expect(getAllByTestId("runtime-row").length).toBe(2);
+  });
+
+  // Both fixtures share the same createdAt (5 minutes ago) → two "5m ago" cells
+  expect(getAllByText("5m ago").length).toBe(2);
+});
+
 test("shows Stop button for online runtime and Start button for stopped runtime", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
   vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
@@ -153,12 +187,12 @@ test("shows Destroy buttons for non-provisioning, non-destroyed runtimes", async
   });
 });
 
-test("clicking Destroy opens confirm dialog and confirming calls destroyRuntime", async () => {
+test("clicking Destroy opens type-to-confirm dialog; typing the runtime name and confirming calls destroyRuntime", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
   vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
   const destroySpy = vi.spyOn(api, "destroyRuntime").mockResolvedValue(undefined);
 
-  const { getAllByTestId } = render(RuntimesPage);
+  const { getAllByTestId, getByPlaceholderText } = render(RuntimesPage);
 
   // Wait for runtime rows to render
   await waitFor(() => {
@@ -169,15 +203,29 @@ test("clicking Destroy opens confirm dialog and confirming calls destroyRuntime"
   const [firstDestroyBtn] = getAllByTestId("destroy-btn");
   await fireEvent.click(firstDestroyBtn);
 
-  // Wait for the confirm button to appear (rendered via dialog portal in document.body)
+  // TypeToConfirmDialog's placeholder is the confirm phrase — the runtime's name
   await waitFor(() => {
-    const confirmBtn = screen.getByTestId("confirm-destroy-btn");
-    expect(confirmBtn).toBeTruthy();
+    expect(getByPlaceholderText("my-runtime")).toBeTruthy();
+  });
+  const input = getByPlaceholderText("my-runtime");
+
+  // Wrong input: dialog's confirm button (last "Destroy" button) stays disabled
+  await fireEvent.input(input, { target: { value: "wrong" } });
+  await waitFor(() => {
+    const btns = screen.getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
+    expect(btns[btns.length - 1].disabled).toBe(true);
   });
 
-  // Click confirm — triggers destroyRuntime
-  const confirmBtn = screen.getByTestId("confirm-destroy-btn");
-  await fireEvent.click(confirmBtn);
+  // Correct input enables the confirm button
+  await fireEvent.input(input, { target: { value: "my-runtime" } });
+  await waitFor(() => {
+    const btns = screen.getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
+    expect(btns[btns.length - 1].disabled).toBe(false);
+  });
+
+  // Click confirm (last "Destroy" button = dialog's confirm button) — triggers destroyRuntime
+  const btns = screen.getAllByRole("button", { name: /destroy/i }) as HTMLButtonElement[];
+  await fireEvent.click(btns[btns.length - 1]);
 
   await waitFor(() => {
     expect(destroySpy).toHaveBeenCalledOnce();
@@ -193,7 +241,7 @@ test("shows empty state when listRuntimes returns []", async () => {
 
   await waitFor(() => {
     const emptyState = getByTestId("empty-state");
-    expect(emptyState.textContent).toContain("no runtimes yet");
+    expect(emptyState.textContent).toContain("No runtimes yet");
   });
 });
 

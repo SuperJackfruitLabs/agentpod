@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { FleetAgent } from "@agentpod/contract";
   import { updateNode } from "$lib/api/client";
   import { statusBadgeClass, tokenFor, type StatusToken } from "$lib/utils/status-badge";
+  import { chipClass } from "$lib/utils/toggle-chip";
   import { Badge } from "$lib/components/ui/badge";
   import * as Table from "$lib/components/ui/table";
   import { Empty } from "$lib/components/ui/empty";
@@ -14,6 +16,7 @@
   interface ExternalFilter {
     stationId?: string;
     status?: string;
+    updatesOnly?: boolean;
   }
 
   let {
@@ -50,7 +53,10 @@
 
   let searchQuery = $state("");
   let groupByNode = $state(true);
-  let filterUpdateAvailable = $state(false);
+  // Seeded once from the incoming deep-link (?updates=1 → externalFilter.updatesOnly)
+  // so the URL wins on first render; the pill stays freely user-toggleable afterwards.
+  // untrack: intentionally captures the initial prop value only.
+  let filterUpdateAvailable = $state(untrack(() => externalFilter?.updatesOnly ?? false));
 
   // ── Sorting ───────────────────────────────────────────────────────────────────
   // Tri-state per column: click cycles none → asc → desc → none. Sorting
@@ -243,15 +249,6 @@
       });
     }
   }
-
-  function chipClass(active: boolean): string {
-    return cn(
-      "rounded-md border px-2.5 py-1.5 text-xs transition-colors whitespace-nowrap",
-      active
-        ? "border-primary bg-primary/10 text-primary"
-        : "border-border text-muted-foreground hover:text-foreground"
-    );
-  }
 </script>
 
 <!-- ONE row snippet shared by both the grouped and flat branches below. -->
@@ -296,7 +293,7 @@
           onclick={(e) => handleUpdate(e, agent.nodeId)}
           class="text-xs px-2 py-0.5 rounded-md border transition-colors border-primary/50 text-primary hover:border-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {updatingNodes[agent.nodeId] ? "updating…" : "Update"}
+          {updatingNodes[agent.nodeId] ? "Updating…" : "Update"}
         </button>
       {/if}
     </Table.Cell>
@@ -340,7 +337,7 @@
     <button
       type="button"
       onclick={() => (filterUpdateAvailable = !filterUpdateAvailable)}
-      class={chipClass(filterUpdateAvailable)}
+      class={cn(chipClass(filterUpdateAvailable), "px-2.5 py-1.5 text-xs")}
       aria-pressed={filterUpdateAvailable}
     >
       Updates only
@@ -351,7 +348,7 @@
       type="button"
       data-testid="group-toggle"
       onclick={() => (groupByNode = !groupByNode)}
-      class={chipClass(groupByNode)}
+      class={cn(chipClass(groupByNode), "px-2.5 py-1.5 text-xs")}
       aria-pressed={groupByNode}
     >
       {groupByNode ? "Grouped" : "Flat"}

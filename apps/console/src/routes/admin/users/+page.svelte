@@ -1,99 +1,77 @@
 <script lang="ts">
-  import { goto } from "$app/navigation";
+  // Orchestrator only — composes the shared admin/* components on top of
+  // DataTable's manualPagination mode; server owns search/filter/paging.
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
-  import { 
-    listUsers, 
-    getAdminStats, 
-    banUser, 
-    unbanUser, 
-    updateUserRole,
+  import {
+    listUsers,
+    getAdminStats,
     getSignupStatus,
     enableSignup,
     disableSignup,
-    createUser,
+    unbanUser,
     type ListUsersOptions,
-    type CreateUserInput,
   } from "$lib/api/admin";
-  import type { AdminUserView, AdminStats, UserRole } from "@agentpod/types";
+  import type { AdminUserView, AdminStats as AdminStatsType, UserRole } from "@agentpod/types";
+  import type { ColumnDef } from "@tanstack/table-core";
+  import { DataTable, renderSnippet } from "$lib/components/ui/data-table";
   import { Button } from "$lib/components/ui/button";
-  import { Input } from "$lib/components/ui/input";
-  import { Label } from "$lib/components/ui/label";
-  import * as Select from "$lib/components/ui/select";
-  import * as Dialog from "$lib/components/ui/dialog";
+  import { Badge, badgeVariants } from "$lib/components/ui/badge";
+  import { Skeleton } from "$lib/components/ui/skeleton";
   import PageHeader from "$lib/components/page-header.svelte";
-
-  import UsersIcon from "@lucide/svelte/icons/users";
-  import SearchIcon from "@lucide/svelte/icons/search";
-  import RefreshIcon from "@lucide/svelte/icons/refresh-cw";
-  import ShieldIcon from "@lucide/svelte/icons/shield";
+  import AdminStats from "$lib/components/admin/AdminStats.svelte";
+  import AdminSettingsBar from "$lib/components/admin/AdminSettingsBar.svelte";
+  import UserFilters from "$lib/components/admin/UserFilters.svelte";
+  import BanUserDialog from "$lib/components/admin/BanUserDialog.svelte";
+  import RoleDialog from "$lib/components/admin/RoleDialog.svelte";
+  import CreateUserDialog from "$lib/components/admin/CreateUserDialog.svelte";
+  import { formatDate } from "$lib/utils/format-date";
+  import { statusBadgeClass } from "$lib/utils/status-badge";
+  import { cn } from "$lib/utils";
   import BanIcon from "@lucide/svelte/icons/ban";
   import CheckIcon from "@lucide/svelte/icons/check";
-  import ChevronLeftIcon from "@lucide/svelte/icons/chevron-left";
-  import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
-  import PlusIcon from "@lucide/svelte/icons/plus";
-  import ToggleLeftIcon from "@lucide/svelte/icons/toggle-left";
-  import ToggleRightIcon from "@lucide/svelte/icons/toggle-right";
 
-  // State
+  const PAGE_SIZE = 20;
+
+  // Data
   let isLoading = $state(true);
   let users = $state<AdminUserView[]>([]);
-  let stats = $state<AdminStats | null>(null);
+  let total = $state(0);
+  let stats = $state<AdminStatsType | null>(null);
   let error = $state<string | null>(null);
-
-  // Signup status
   let signupEnabled = $state(true);
   let signupLoading = $state(false);
 
-  // Pagination
-  let page = $state(1);
-  let limit = $state(20);
-  let total = $state(0);
-  let totalPages = $derived(Math.ceil(total / limit));
+  // Server-driven pagination (0-based, matches DataTable's manual mode)
+  let pageIndex = $state(0);
+  let pageCount = $derived(total > 0 ? Math.ceil(total / PAGE_SIZE) : 0);
 
-  // Filters
+  // Filters (server-side — refetched on Search/refresh, not client-filtered)
   let searchQuery = $state("");
   let roleFilter = $state<UserRole | "all">("all");
   let bannedFilter = $state<"all" | "banned" | "active">("all");
+  let hasActiveFilters = $derived(
+    searchQuery.trim() !== "" || roleFilter !== "all" || bannedFilter !== "all"
+  );
+  let emptyDescription = $derived(
+    hasActiveFilters ? "Try adjusting your filters" : "No users exist yet"
+  );
 
   // Dialogs
   let showBanDialog = $state(false);
   let showRoleDialog = $state(false);
   let showCreateUserDialog = $state(false);
   let selectedUser = $state<AdminUserView | null>(null);
-  let banReason = $state("");
-  let newRole = $state<UserRole>("user");
-  let actionLoading = $state(false);
+  let actionLoading = $state<Record<string, boolean>>({});
 
-  // Create user form
-  let newUserEmail = $state("");
-  let newUserPassword = $state("");
-  let newUserName = $state("");
-  let newUserRole = $state<UserRole>("user");
-  let createUserLoading = $state(false);
-
-  // Load data
   async function loadData() {
     isLoading = true;
     error = null;
-
     try {
-      const options: ListUsersOptions = {
-        limit,
-        offset: (page - 1) * limit,
-      };
-
-      if (searchQuery.trim()) {
-        options.search = searchQuery.trim();
-      }
-
-      if (roleFilter !== "all") {
-        options.role = roleFilter;
-      }
-
-      if (bannedFilter !== "all") {
-        options.banned = bannedFilter === "banned";
-      }
+      const options: ListUsersOptions = { limit: PAGE_SIZE, offset: pageIndex * PAGE_SIZE };
+      if (searchQuery.trim()) options.search = searchQuery.trim();
+      if (roleFilter !== "all") options.role = roleFilter;
+      if (bannedFilter !== "all") options.banned = bannedFilter === "banned";
 
       const [usersResponse, statsResponse, signupResponse] = await Promise.all([
         listUsers(options),
@@ -106,99 +84,45 @@
       stats = statsResponse;
       signupEnabled = signupResponse.enabled;
     } catch (e) {
-      const err = e as Error;
-      error = err.message || "Failed to load users";
+      error = (e as Error).message || "Failed to load users";
     } finally {
       isLoading = false;
     }
   }
 
-  // Initial load
-  onMount(() => {
-    loadData();
-  });
+  onMount(loadData);
 
-  // Handle search
   function handleSearch() {
-    page = 1;
+    pageIndex = 0;
     loadData();
   }
-
-  // Handle pagination
-  function goToPage(newPage: number) {
-    if (newPage >= 1 && newPage <= totalPages) {
-      page = newPage;
-      loadData();
-    }
+  function goToPage(index: number) {
+    pageIndex = index;
+    loadData();
   }
-
-  // Handle ban
   function openBanDialog(user: AdminUserView) {
     selectedUser = user;
-    banReason = "";
     showBanDialog = true;
   }
-
-  async function handleBan() {
-    if (!selectedUser || !banReason.trim()) return;
-
-    actionLoading = true;
-    try {
-      await banUser(selectedUser.id, banReason.trim());
-      toast.success(`${selectedUser.email} has been banned`);
-      showBanDialog = false;
-      selectedUser = null;
-      banReason = "";
-      loadData();
-    } catch (e) {
-      const err = e as Error;
-      toast.error("Failed to ban user", { description: err.message });
-    } finally {
-      actionLoading = false;
-    }
+  function openRoleDialog(user: AdminUserView) {
+    selectedUser = user;
+    showRoleDialog = true;
   }
+  const openCreateUserDialog = () => (showCreateUserDialog = true);
 
-  // Handle unban
   async function handleUnban(user: AdminUserView) {
-    actionLoading = true;
+    actionLoading[user.id] = true;
     try {
       await unbanUser(user.id);
       toast.success(`${user.email} has been unbanned`);
-      loadData();
+      await loadData();
     } catch (e) {
-      const err = e as Error;
-      toast.error("Failed to unban user", { description: err.message });
+      toast.error("Failed to unban user", { description: (e as Error).message });
     } finally {
-      actionLoading = false;
+      delete actionLoading[user.id];
     }
   }
 
-  // Handle role change
-  function openRoleDialog(user: AdminUserView) {
-    selectedUser = user;
-    newRole = user.role;
-    showRoleDialog = true;
-  }
-
-  async function handleRoleChange() {
-    if (!selectedUser || newRole === selectedUser.role) return;
-
-    actionLoading = true;
-    try {
-      await updateUserRole(selectedUser.id, newRole);
-      toast.success(`${selectedUser.email} is now ${newRole}`);
-      showRoleDialog = false;
-      selectedUser = null;
-      loadData();
-    } catch (e) {
-      const err = e as Error;
-      toast.error("Failed to update role", { description: err.message });
-    } finally {
-      actionLoading = false;
-    }
-  }
-
-  // Handle signup toggle
   async function handleToggleSignup() {
     signupLoading = true;
     try {
@@ -212,581 +136,109 @@
         toast.success("Public signup enabled");
       }
     } catch (e) {
-      const err = e as Error;
-      toast.error("Failed to update signup settings", { description: err.message });
+      toast.error("Failed to update signup settings", { description: (e as Error).message });
     } finally {
       signupLoading = false;
     }
   }
 
-  // Handle create user
-  function openCreateUserDialog() {
-    newUserEmail = "";
-    newUserPassword = "";
-    newUserName = "";
-    newUserRole = "user";
-    showCreateUserDialog = true;
-  }
-
-  async function handleCreateUser() {
-    if (!newUserEmail.trim() || !newUserPassword || !newUserName.trim()) return;
-
-    createUserLoading = true;
-    try {
-      const input: CreateUserInput = {
-        email: newUserEmail.trim(),
-        password: newUserPassword,
-        name: newUserName.trim(),
-        role: newUserRole,
-      };
-      
-      await createUser(input);
-      toast.success(`User ${newUserEmail} created successfully`);
-      showCreateUserDialog = false;
-      loadData();
-    } catch (e) {
-      const err = e as Error;
-      toast.error("Failed to create user", { description: err.message });
-    } finally {
-      createUserLoading = false;
-    }
-  }
-
-  // Format date
-  function formatDate(dateStr: string): string {
-    return new Date(dateStr).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
+  // Cell snippets are declared below; referenced here safely — they only run
+  // later, when FlexRender invokes them (see runtimes/+page.svelte).
+  const columns: ColumnDef<AdminUserView>[] = [
+    { id: "user", header: "User", enableSorting: false, cell: (ctx) => renderSnippet(userCell, { user: ctx.row.original }) },
+    { id: "role", header: "Role", enableSorting: false, cell: (ctx) => renderSnippet(roleCell, { user: ctx.row.original }) },
+    { id: "status", header: "Status", enableSorting: false, cell: (ctx) => renderSnippet(statusCell, { user: ctx.row.original }) },
+    { accessorKey: "createdAt", header: "Joined", enableSorting: false, cell: (ctx) => renderSnippet(joinedCell, { value: ctx.getValue<string>() }) },
+    { id: "actions", header: "Actions", enableSorting: false, cell: (ctx) => renderSnippet(actionsCell, { user: ctx.row.original }) },
+  ];
 </script>
 
-<div class="noise-overlay"></div>
-<main class="h-screen flex flex-col grid-bg mesh-gradient overflow-hidden">
-  <!-- Header -->
-  <PageHeader
-    title="Admin"
-    icon={ShieldIcon}
-    subtitle="// user management"
-  />
-
-  <!-- Content -->
-  <div class="flex-1 overflow-y-auto">
-    <div class="container mx-auto px-4 py-6 max-w-6xl space-y-6 animate-fade-in">
-      <!-- Stats Cards -->
-      {#if stats}
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div class="cyber-card corner-accent p-4 text-center">
-            <p class="text-2xl font-bold font-mono">{stats.totalUsers}</p>
-            <p class="text-xs text-muted-foreground font-mono uppercase tracking-wider">Total Users</p>
-          </div>
-          <div class="cyber-card corner-accent p-4 text-center">
-            <p class="text-2xl font-bold font-mono text-primary">{stats.adminUsers}</p>
-            <p class="text-xs text-muted-foreground font-mono uppercase tracking-wider">Admins</p>
-          </div>
-          <div class="cyber-card corner-accent p-4 text-center">
-            <p class="text-2xl font-bold font-mono text-destructive">{stats.bannedUsers}</p>
-            <p class="text-xs text-muted-foreground font-mono uppercase tracking-wider">Banned</p>
-          </div>
-          <div class="cyber-card corner-accent p-4 text-center">
-            <p class="text-2xl font-bold font-mono text-chart-2">{stats.usersThisWeek}</p>
-            <p class="text-xs text-muted-foreground font-mono uppercase tracking-wider">This Week</p>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Settings Bar -->
-      <div class="cyber-card corner-accent p-4">
-        <div class="flex flex-wrap items-center justify-between gap-4">
-          <!-- Signup Toggle -->
-          <div class="flex items-center gap-3">
-            <span class="font-mono text-xs uppercase tracking-wider text-muted-foreground">Public Signup:</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onclick={handleToggleSignup}
-              disabled={signupLoading}
-              class="font-mono text-xs gap-2 {signupEnabled ? 'text-chart-2' : 'text-destructive'}"
-            >
-              {#if signupLoading}
-                <span class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
-              {:else if signupEnabled}
-                <ToggleRightIcon class="h-5 w-5" />
-              {:else}
-                <ToggleLeftIcon class="h-5 w-5" />
-              {/if}
-              {signupEnabled ? "Enabled" : "Disabled"}
-            </Button>
-            <span class="text-xs text-muted-foreground font-mono">
-              {signupEnabled ? "(anyone can register)" : "(admin invitation only)"}
-            </span>
-          </div>
-
-          <!-- Create User Button -->
-          <Button
-            onclick={openCreateUserDialog}
-            class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground"
-          >
-            <PlusIcon class="h-4 w-4 mr-2" />
-            Create User
-          </Button>
-        </div>
+{#snippet userCell({ user }: { user: AdminUserView })}
+  <a href="/admin/users/{user.id}" class="flex items-center gap-3 hover:text-primary transition-colors">
+    {#if user.image}
+      <img src={user.image} alt={user.name} class="h-8 w-8 rounded-full" />
+    {:else}
+      <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
+        {user.name?.[0] || user.email[0]}
       </div>
-
-      <!-- Filters -->
-      <div class="cyber-card corner-accent p-4">
-        <div class="flex flex-wrap items-center gap-4">
-          <!-- Search -->
-          <div class="flex-1 min-w-[200px]">
-            <div class="relative">
-              <SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                type="text"
-                placeholder="Search by email or name..."
-                bind:value={searchQuery}
-                onkeydown={(e) => e.key === "Enter" && handleSearch()}
-                class="pl-10 font-mono text-sm bg-background/50 border-border/50 focus:border-primary"
-              />
-            </div>
-          </div>
-
-          <!-- Role Filter -->
-          <Select.Root
-            type="single"
-            value={roleFilter}
-            onValueChange={(v) => {
-              if (v) {
-                roleFilter = v as typeof roleFilter;
-                page = 1;
-                loadData();
-              }
-            }}
-          >
-            <Select.Trigger class="w-32 font-mono text-xs bg-background/50 border-border/50">
-              {roleFilter === "all" ? "All Roles" : roleFilter === "admin" ? "Admin" : "User"}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="all" label="All Roles" />
-              <Select.Item value="admin" label="Admin" />
-              <Select.Item value="user" label="User" />
-            </Select.Content>
-          </Select.Root>
-
-          <!-- Banned Filter -->
-          <Select.Root
-            type="single"
-            value={bannedFilter}
-            onValueChange={(v) => {
-              if (v) {
-                bannedFilter = v as typeof bannedFilter;
-                page = 1;
-                loadData();
-              }
-            }}
-          >
-            <Select.Trigger class="w-32 font-mono text-xs bg-background/50 border-border/50">
-              {bannedFilter === "all" ? "All Status" : bannedFilter === "banned" ? "Banned" : "Active"}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="all" label="All Status" />
-              <Select.Item value="active" label="Active" />
-              <Select.Item value="banned" label="Banned" />
-            </Select.Content>
-          </Select.Root>
-
-          <!-- Search Button -->
-          <Button
-            onclick={handleSearch}
-            class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground"
-          >
-            <SearchIcon class="h-4 w-4 mr-2" />
-            Search
-          </Button>
-
-          <!-- Refresh -->
-          <Button
-            variant="outline"
-            onclick={loadData}
-            disabled={isLoading}
-            class="font-mono text-xs uppercase tracking-wider border-border/50"
-          >
-            <RefreshIcon class="h-4 w-4 {isLoading ? 'animate-spin' : ''}" />
-          </Button>
-        </div>
-      </div>
-
-      <!-- Users Table -->
-      <div class="cyber-card corner-accent overflow-hidden">
-        {#if isLoading}
-          <div class="flex items-center justify-center py-12">
-            <div class="relative w-8 h-8">
-              <div class="absolute inset-0 rounded-full border-2 border-primary/20"></div>
-              <div class="absolute inset-0 rounded-full border-2 border-transparent border-t-[var(--primary)] animate-spin"></div>
-            </div>
-            <span class="ml-3 text-muted-foreground font-mono text-sm">Loading users...</span>
-          </div>
-        {:else if error}
-          <div class="p-6 text-center">
-            <p class="text-destructive font-mono text-sm">{error}</p>
-            <Button
-              variant="outline"
-              onclick={loadData}
-              class="mt-4 font-mono text-xs uppercase tracking-wider"
-            >
-              Retry
-            </Button>
-          </div>
-        {:else if users.length === 0}
-          <div class="p-12 text-center">
-            <UsersIcon class="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <p class="text-muted-foreground font-mono">No users found</p>
-          </div>
-        {:else}
-          <div class="overflow-x-auto">
-            <table class="w-full">
-              <thead class="bg-background/30 border-b border-border/30">
-                <tr>
-                  <th class="text-left px-4 py-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">User</th>
-                  <th class="text-left px-4 py-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">Role</th>
-                  <th class="text-left px-4 py-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">Status</th>
-                  <th class="text-left px-4 py-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">Joined</th>
-                  <th class="text-right px-4 py-3 font-mono text-xs uppercase tracking-wider text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border/20">
-                {#each users as user}
-                  <tr class="hover:bg-muted/20 transition-colors">
-                    <!-- User Info -->
-                    <td class="px-4 py-3">
-                      <button
-                        onclick={() => goto(`/admin/users/${user.id}`)}
-                        class="flex items-center gap-3 text-left hover:text-primary transition-colors"
-                      >
-                        {#if user.image}
-                          <img src={user.image} alt={user.name} class="w-8 h-8 rounded-full" />
-                        {:else}
-                          <div class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-mono text-xs">
-                            {user.name?.[0] || user.email[0]}
-                          </div>
-                        {/if}
-                        <div>
-                          <p class="font-mono text-sm">{user.name || "—"}</p>
-                          <p class="font-mono text-xs text-muted-foreground">{user.email}</p>
-                        </div>
-                      </button>
-                    </td>
-
-                    <!-- Role -->
-                    <td class="px-4 py-3">
-                      <button
-                        onclick={() => openRoleDialog(user)}
-                        class="px-2 py-1 rounded font-mono text-xs uppercase tracking-wider border transition-colors
-                               {user.role === 'admin'
-                                 ? 'bg-primary/10 text-primary border-primary/30 hover:bg-primary/20'
-                                 : 'bg-muted/20 text-muted-foreground border-border/30 hover:bg-muted/30'}"
-                      >
-                        {user.role}
-                      </button>
-                    </td>
-
-                    <!-- Status -->
-                    <td class="px-4 py-3">
-                      <div class="flex flex-col gap-1">
-                        {#if user.banned}
-                          <span class="status-indicator status-error">
-                            <span class="status-dot"></span>
-                            Banned
-                          </span>
-                        {:else}
-                          <span class="status-indicator status-running">
-                            <span class="status-dot"></span>
-                            Active
-                          </span>
-                        {/if}
-                      </div>
-                    </td>
-
-                    <!-- Joined -->
-                    <td class="px-4 py-3 font-mono text-xs text-muted-foreground">
-                      {formatDate(user.createdAt)}
-                    </td>
-
-                    <!-- Actions -->
-                    <td class="px-4 py-3 text-right">
-                      <div class="flex items-center justify-end gap-2">
-                        <!-- Ban/Unban actions -->
-                        {#if user.banned}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onclick={() => handleUnban(user)}
-                            disabled={actionLoading}
-                            class="font-mono text-xs text-chart-2 hover:text-chart-2 hover:bg-chart-2/10"
-                          >
-                            <CheckIcon class="h-4 w-4 mr-1" />
-                            Unban
-                          </Button>
-                        {:else}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onclick={() => openBanDialog(user)}
-                            disabled={actionLoading}
-                            class="font-mono text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
-                          >
-                            <BanIcon class="h-4 w-4 mr-1" />
-                            Ban
-                          </Button>
-                        {/if}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onclick={() => goto(`/admin/users/${user.id}`)}
-                          class="font-mono text-xs uppercase tracking-wider border-border/50 hover:border-primary"
-                        >
-                          View
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Pagination -->
-          {#if totalPages > 1}
-            <div class="flex items-center justify-between px-4 py-3 border-t border-border/30 bg-background/30">
-              <p class="font-mono text-xs text-muted-foreground">
-                Showing {(page - 1) * limit + 1} - {Math.min(page * limit, total)} of {total}
-              </p>
-              <div class="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onclick={() => goToPage(page - 1)}
-                  disabled={page === 1}
-                  class="font-mono text-xs"
-                >
-                  <ChevronLeftIcon class="h-4 w-4" />
-                </Button>
-                <span class="font-mono text-xs">
-                  Page {page} of {totalPages}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onclick={() => goToPage(page + 1)}
-                  disabled={page === totalPages}
-                  class="font-mono text-xs"
-                >
-                  <ChevronRightIcon class="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          {/if}
-        {/if}
-      </div>
+    {/if}
+    <div>
+      <p class="text-sm font-medium">{user.name || "—"}</p>
+      <p class="text-xs text-muted-foreground">{user.email}</p>
     </div>
+  </a>
+{/snippet}
+
+{#snippet roleCell({ user }: { user: AdminUserView })}
+  <button type="button" onclick={() => openRoleDialog(user)} data-testid="role-badge" class={cn(badgeVariants({ variant: user.role === "admin" ? "default" : "outline" }), "cursor-pointer")}>
+    {user.role}
+  </button>
+{/snippet}
+
+{#snippet statusCell({ user }: { user: AdminUserView })}
+  <Badge variant="outline" class={statusBadgeClass(user.banned ? "banned" : "active")}>
+    {user.banned ? "Banned" : "Active"}
+  </Badge>
+{/snippet}
+
+{#snippet joinedCell({ value }: { value: string })}
+  <span class="text-xs text-muted-foreground whitespace-nowrap">{formatDate(value)}</span>
+{/snippet}
+
+{#snippet actionsCell({ user }: { user: AdminUserView })}
+  <div class="flex items-center justify-end gap-2">
+    {#if user.banned}
+      <Button variant="ghost" size="sm" onclick={() => handleUnban(user)} disabled={!!actionLoading[user.id]} data-testid="unban-btn">
+        <CheckIcon class="h-4 w-4 mr-1" />
+        Unban
+      </Button>
+    {:else}
+      <Button variant="ghost" size="sm" onclick={() => openBanDialog(user)} disabled={!!actionLoading[user.id]} data-testid="ban-btn" class="text-destructive hover:text-destructive hover:bg-destructive/10">
+        <BanIcon class="h-4 w-4 mr-1" />
+        Ban
+      </Button>
+    {/if}
+    <Button variant="outline" size="sm" href="/admin/users/{user.id}">View</Button>
   </div>
-</main>
+{/snippet}
 
-<!-- Ban Dialog -->
-<Dialog.Root bind:open={showBanDialog}>
-  <Dialog.Content class="sm:max-w-md cyber-card border-destructive/30">
-    <Dialog.Header>
-      <Dialog.Title class="font-mono text-destructive">[ban_user]</Dialog.Title>
-      <Dialog.Description class="font-mono text-xs">
-        Ban {selectedUser?.email}? They will be logged out and unable to access the platform.
-      </Dialog.Description>
-    </Dialog.Header>
-    <div class="py-4">
-      <label for="ban-reason" class="font-mono text-xs uppercase tracking-wider text-destructive block mb-2">
-        Reason (required)
-      </label>
-      <textarea
-        id="ban-reason"
-        bind:value={banReason}
-        placeholder="Enter the reason for banning this user..."
-        class="w-full h-24 p-3 text-sm font-mono border border-destructive/30 rounded bg-background/50 resize-none
-               focus:border-destructive focus:ring-1 focus:ring-destructive focus:outline-none"
-      ></textarea>
+<PageHeader title="Admin" subtitle="User management" />
+
+<div class="container mx-auto max-w-6xl space-y-6 px-4 py-6">
+  {#if stats}
+    <AdminStats {stats} />
+  {/if}
+
+  <AdminSettingsBar {signupEnabled} {signupLoading} onToggle={handleToggleSignup} onCreateUser={openCreateUserDialog} />
+
+  <UserFilters bind:searchQuery bind:roleFilter bind:bannedFilter onSearch={handleSearch} onRefresh={loadData} onFilterChange={handleSearch} {isLoading} />
+
+  {#if isLoading}
+    <div class="space-y-2">
+      {#each [1, 2, 3] as _}
+        <Skeleton class="h-12 rounded-sm" />
+      {/each}
     </div>
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => showBanDialog = false}
-        class="font-mono text-xs uppercase tracking-wider border-border/50"
-      >
-        Cancel
-      </Button>
-      <Button
-        onclick={handleBan}
-        disabled={actionLoading || !banReason.trim()}
-        class="font-mono text-xs uppercase tracking-wider bg-destructive hover:bg-destructive/90 text-destructive-foreground disabled:opacity-50"
-      >
-        {#if actionLoading}
-          <span class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        {/if}
-        {actionLoading ? "Banning..." : "Ban User"}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
-
-<!-- Role Dialog -->
-<Dialog.Root bind:open={showRoleDialog}>
-  <Dialog.Content class="sm:max-w-md cyber-card border-primary/30">
-    <Dialog.Header>
-      <Dialog.Title class="font-mono text-primary">[change_role]</Dialog.Title>
-      <Dialog.Description class="font-mono text-xs">
-        Change role for {selectedUser?.email}
-      </Dialog.Description>
-    </Dialog.Header>
-    <div class="py-4">
-      <!-- svelte-ignore a11y_label_has_associated_control - Select component handles its own accessibility -->
-      <label class="font-mono text-xs uppercase tracking-wider text-primary block mb-2">
-        New Role
-      </label>
-      <Select.Root
-        type="single"
-        value={newRole}
-        onValueChange={(v) => {
-          if (v) newRole = v as UserRole;
-        }}
-      >
-        <Select.Trigger class="w-full font-mono text-sm bg-background/50 border-border/50">
-          {newRole === "admin" ? "Admin" : "User"}
-        </Select.Trigger>
-        <Select.Content>
-          <Select.Item value="user" label="User" />
-          <Select.Item value="admin" label="Admin" />
-        </Select.Content>
-      </Select.Root>
-      {#if newRole === "admin"}
-        <p class="mt-2 text-xs text-chart-4 font-mono">
-          Warning: Admins have full access to manage all users and system settings.
-        </p>
-      {/if}
+  {:else if error}
+    <div class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4" role="alert">
+      <p class="text-sm text-destructive">{error}</p>
+      <Button variant="outline" size="sm" onclick={loadData}>Retry</Button>
     </div>
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => showRoleDialog = false}
-        class="font-mono text-xs uppercase tracking-wider border-border/50"
-      >
-        Cancel
-      </Button>
-      <Button
-        onclick={handleRoleChange}
-        disabled={actionLoading || newRole === selectedUser?.role}
-        class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
-      >
-        {#if actionLoading}
-          <span class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        {/if}
-        {actionLoading ? "Updating..." : "Update Role"}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+  {:else}
+    <DataTable
+      {columns}
+      data={users}
+      emptyTitle="No users found"
+      {emptyDescription}
+      manualPagination
+      {pageCount}
+      bind:pageIndex
+      onPageChange={goToPage}
+      rowTestId="user-row"
+    />
+  {/if}
+</div>
 
-<!-- Create User Dialog -->
-<Dialog.Root bind:open={showCreateUserDialog}>
-  <Dialog.Content class="sm:max-w-md cyber-card border-primary/30">
-    <Dialog.Header>
-      <Dialog.Title class="font-mono text-primary">[create_user]</Dialog.Title>
-      <Dialog.Description class="font-mono text-xs">
-        Create a new user account (bypasses signup restrictions)
-      </Dialog.Description>
-    </Dialog.Header>
-    <form onsubmit={(e) => { e.preventDefault(); handleCreateUser(); }} class="space-y-4 py-4">
-      <div class="space-y-2">
-        <Label for="new-user-name" class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Name
-        </Label>
-        <Input
-          id="new-user-name"
-          type="text"
-          placeholder="John Doe"
-          bind:value={newUserName}
-          required
-          class="font-mono text-sm bg-background/50 border-border/50 focus:border-primary"
-        />
-      </div>
-      <div class="space-y-2">
-        <Label for="new-user-email" class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Email
-        </Label>
-        <Input
-          id="new-user-email"
-          type="email"
-          placeholder="user@example.com"
-          bind:value={newUserEmail}
-          required
-          class="font-mono text-sm bg-background/50 border-border/50 focus:border-primary"
-        />
-      </div>
-      <div class="space-y-2">
-        <Label for="new-user-password" class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Password
-        </Label>
-        <Input
-          id="new-user-password"
-          type="password"
-          placeholder="••••••••"
-          bind:value={newUserPassword}
-          required
-          minlength={8}
-          class="font-mono text-sm bg-background/50 border-border/50 focus:border-primary"
-        />
-        <p class="text-xs text-muted-foreground font-mono">Minimum 8 characters</p>
-      </div>
-      <div class="space-y-2">
-        <Label class="font-mono text-xs uppercase tracking-wider text-muted-foreground">
-          Role
-        </Label>
-        <Select.Root
-          type="single"
-          value={newUserRole}
-          onValueChange={(v) => {
-            if (v) newUserRole = v as UserRole;
-          }}
-        >
-          <Select.Trigger class="w-full font-mono text-sm bg-background/50 border-border/50">
-            {newUserRole === "admin" ? "Admin" : "User"}
-          </Select.Trigger>
-          <Select.Content>
-            <Select.Item value="user" label="User" />
-            <Select.Item value="admin" label="Admin" />
-          </Select.Content>
-        </Select.Root>
-        {#if newUserRole === "admin"}
-          <p class="text-xs text-chart-4 font-mono">
-            Warning: Admins have full access to manage all users and system settings.
-          </p>
-        {/if}
-      </div>
-    </form>
-    <Dialog.Footer>
-      <Button
-        variant="outline"
-        onclick={() => showCreateUserDialog = false}
-        class="font-mono text-xs uppercase tracking-wider border-border/50"
-      >
-        Cancel
-      </Button>
-      <Button
-        onclick={handleCreateUser}
-        disabled={createUserLoading || !newUserEmail.trim() || !newUserPassword || !newUserName.trim()}
-        class="font-mono text-xs uppercase tracking-wider bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50"
-      >
-        {#if createUserLoading}
-          <span class="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-2"></span>
-        {/if}
-        {createUserLoading ? "Creating..." : "Create User"}
-      </Button>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
+<BanUserDialog bind:open={showBanDialog} user={selectedUser} onBanned={loadData} />
+<RoleDialog bind:open={showRoleDialog} user={selectedUser} onChanged={loadData} />
+<CreateUserDialog bind:open={showCreateUserDialog} onCreated={loadData} />

@@ -211,6 +211,29 @@ test("clicking 'Create enrollment token' calls createEnrollmentToken and shows t
   });
 });
 
+test("error branch's Retry button refetches and renders nodes on success", async () => {
+  vi.spyOn(api, "listNodes")
+    .mockRejectedValueOnce(new Error("network down"))
+    .mockResolvedValueOnce(mockNodes);
+
+  const { getByRole, getByText, queryByText } = render(NodesOverview);
+
+  await waitFor(() => {
+    expect(getByText("network down")).toBeTruthy();
+  });
+
+  const retryBtn = getByRole("button", { name: /retry/i });
+  await fireEvent.click(retryBtn);
+
+  await waitFor(() => {
+    expect(api.listNodes).toHaveBeenCalledTimes(2);
+    expect(getByText("vps1.example.com")).toBeTruthy();
+    expect(getByText("vps2.example.com")).toBeTruthy();
+    // The error banner is gone now that the retry succeeded.
+    expect(queryByText("network down")).toBeNull();
+  });
+});
+
 // ── Update button TDD tests ────────────────────────────────────────────────────
 
 test("node with updateAvailable:true renders Update button and version upgrade text", async () => {

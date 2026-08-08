@@ -90,3 +90,15 @@ test("shows empty list heading but no all-healthy when there are attention items
   expect(queryByTestId("all-healthy")).toBeNull();
   expect(getByTestId("attention-agent")).toBeTruthy();
 });
+
+test("shows update count linking to the updates deep-link /agents?updates=1", () => {
+  const agents = [
+    makeAgent({ stationId: "s1", status: "running", updateAvailable: true }),
+    makeAgent({ stationId: "s2", status: "running", updateAvailable: false }),
+  ];
+
+  const { getByTestId } = render(NeedsAttention, { props: { agents } });
+  const updatesLink = getByTestId("attention-updates");
+  expect(updatesLink.textContent).toContain("1 update available");
+  expect(updatesLink.getAttribute("href")).toBe("/agents?updates=1");
+});

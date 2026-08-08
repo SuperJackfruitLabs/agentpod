@@ -3,7 +3,14 @@
   import * as Select from "$lib/components/ui/select";
   import { Input } from "$lib/components/ui/input";
   import { Button } from "$lib/components/ui/button";
+  import { Field } from "$lib/components/ui/field";
   import { provisionRuntime } from "$lib/api/client";
+
+  // Select components report their value as `string | string[]`; every
+  // Select.Root here uses type="single", so coerce back to a plain string
+  // (falling back when the array is empty) in one place.
+  const single = (v: string | string[], fallback: string) =>
+    Array.isArray(v) ? (v[0] ?? fallback) : v;
 
   interface Props {
     open: boolean;
@@ -71,13 +78,12 @@
 
       <div class="space-y-4 py-2">
         <!-- Provider select -->
-        <div class="space-y-1.5">
-          <label class="text-sm font-medium font-mono" for="runtime-provider">Provider</label>
+        <Field label="Provider" for="runtime-provider">
           <Select.Root
             type="single"
             value={provider}
             onValueChange={(v: string | string[]) => {
-              provider = Array.isArray(v) ? (v[0] ?? "") : v;
+              provider = single(v, "");
             }}
           >
             <Select.Trigger class="w-full" id="runtime-provider">
@@ -89,11 +95,10 @@
               {/each}
             </Select.Content>
           </Select.Root>
-        </div>
+        </Field>
 
         <!-- Name input -->
-        <div class="space-y-1.5">
-          <label class="text-sm font-medium font-mono" for="runtime-name">Name</label>
+        <Field label="Name" for="runtime-name">
           <Input
             id="runtime-name"
             placeholder="Runtime name"
@@ -101,16 +106,15 @@
             class="font-mono"
             disabled={isCreating}
           />
-        </div>
+        </Field>
 
         <!-- Resource tier select -->
-        <div class="space-y-1.5">
-          <label class="text-sm font-medium font-mono" for="runtime-tier">Resource tier</label>
+        <Field label="Resource tier" for="runtime-tier">
           <Select.Root
             type="single"
             value={resourceTier}
             onValueChange={(v: string | string[]) => {
-              resourceTier = Array.isArray(v) ? (v[0] ?? "small") : v;
+              resourceTier = single(v, "small");
             }}
           >
             <Select.Trigger class="w-full" id="runtime-tier">
@@ -122,16 +126,15 @@
               {/each}
             </Select.Content>
           </Select.Root>
-        </div>
+        </Field>
 
         <!-- Harness select -->
-        <div class="space-y-1.5">
-          <label class="text-sm font-medium font-mono" for="runtime-harness">Harness</label>
+        <Field label="Harness" for="runtime-harness">
           <Select.Root
             type="single"
             value={harness}
             onValueChange={(v: string | string[]) => {
-              harness = Array.isArray(v) ? (v[0] ?? "none") : v;
+              harness = single(v, "none");
             }}
           >
             <Select.Trigger class="w-full" id="runtime-harness">
@@ -143,7 +146,7 @@
               {/each}
             </Select.Content>
           </Select.Root>
-        </div>
+        </Field>
 
         <!-- Inline error -->
         {#if error}

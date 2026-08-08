@@ -89,7 +89,7 @@
       size="sm"
       disabled={destroyInFlight}
       onclick={() => (destroyDialogOpen = true)}
-      class="font-mono text-xs uppercase tracking-wider"
+      class="text-xs"
     >
       {destroyInFlight ? "Destroying…" : "Destroy"}
     </Button>
@@ -101,7 +101,7 @@
         size="sm"
         disabled={stopInFlight}
         onclick={handleStop}
-        class="font-mono text-xs uppercase tracking-wider"
+        class="text-xs"
       >
         {stopInFlight ? "Stopping…" : "Stop"}
       </Button>
@@ -111,7 +111,7 @@
         size="sm"
         disabled={startInFlight}
         onclick={handleStart}
-        class="font-mono text-xs uppercase tracking-wider"
+        class="text-xs"
       >
         {startInFlight ? "Starting…" : "Start"}
       </Button>
