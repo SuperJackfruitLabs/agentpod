@@ -83,14 +83,30 @@
   // Reading page.url.searchParams inside $effect re-runs the branch
   // whenever the reactive URL changes, including in place.
   //
-  // Loop guard: replaceState below clears the "action" param, which updates
-  // the reactive page.url (in real SvelteKit) and re-runs this effect with
-  // action=null — a no-op — so it settles after one pass and never loops.
+  // Loop guard: `replaceState` does NOT reassign the reactive `page.url` in
+  // real SvelteKit (it's the shallow-routing API — it patches the history
+  // entry, not the page store), and the history entry it writes can still
+  // carry the stale "?action=…" query, so a browser back-navigation onto
+  // that entry can reconstruct page.url WITH the param again. We can't rely
+  // on the param "clearing itself" reactively, so we track the last-handled
+  // action value explicitly:
+  //   - an action value equal to the one already handled is ignored (blocks
+  //     back-nav from reprocessing the same stale param), and
+  //   - `handledAction` resets to null whenever the URL has NO action param,
+  //     so a later *new* palette invocation (which always drives a real
+  //     goto() navigation, clearing the param at some point along the way)
+  //     is still processed.
   // The optional chaining also guards test/SSR environments where
   // page.url.searchParams may be absent.
+  let handledAction = $state<string | null>(null);
   $effect(() => {
     const action = (page.url as { searchParams?: URLSearchParams } | undefined)?.searchParams?.get("action") ?? null;
-    if (!action) return;
+    if (!action) {
+      handledAction = null;
+      return;
+    }
+    if (action === handledAction) return;
+    handledAction = action;
     if (action === "new-runtime") {
       showNewRuntimeDialog = true;
     } else if (action === "create-token") {

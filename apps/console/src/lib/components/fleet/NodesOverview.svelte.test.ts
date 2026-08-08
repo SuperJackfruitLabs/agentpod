@@ -13,6 +13,7 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
+import { tick } from "svelte";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
 import * as nav from "$app/navigation";
@@ -315,7 +316,55 @@ test("?action= appearing while already mounted on /nodes (same-route palette nav
   });
 });
 
-test("?action= handling settles after replaceState clears the param — no reprocessing loop", async () => {
+// ── Loop-guard semantics ─────────────────────────────────────────────────────
+//
+// IMPORTANT: real SvelteKit's replaceState() does NOT reassign the reactive
+// page.url (it patches the history entry, not the page store) — so the
+// $effect can't rely on the param "clearing itself" reactively. Worse, the
+// history entry it writes can still carry the stale "?action=…" query, so a
+// browser back-navigation onto that entry can reconstruct page.url WITH the
+// param again. NodesOverview instead tracks the last-handled action value
+// explicitly and only resets that tracker when the URL has NO action param.
+// These two tests exercise both sides of that contract, without assuming
+// replaceState ever touches page.url itself (the mock above deliberately
+// doesn't — see the "$app/navigation" mock, which leaves page.url alone).
+
+test("?action= genuine second palette invocation reprocesses once the URL has passed through an action-less state", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([]);
+  vi.spyOn(api, "createEnrollmentToken").mockResolvedValue({
+    token: "tok_once_abc123",
+    expiresAt: "2026-12-31T00:00:00Z",
+  });
+
+  render(NodesOverview);
+
+  // First palette invocation.
+  setSearchParam("action", "create-token");
+  await waitFor(() => {
+    expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
+    expect(nav.replaceState).toHaveBeenCalledTimes(1);
+  });
+
+  // Some later real navigation clears the param (e.g. the user browses
+  // elsewhere and back, or a subsequent goto() lands back on a bare /nodes)
+  // — simulated directly here since replaceState itself does not do this.
+  // `tick()` lets the $effect actually observe this intermediate action-less
+  // state (Svelte batches same-microtask state changes, so two synchronous
+  // setSearchParam calls with no yield in between would otherwise collapse
+  // into one effect run that never sees action=null).
+  setSearchParam("action", null);
+  await tick();
+
+  // A second, genuine palette invocation of the same action.
+  setSearchParam("action", "create-token");
+
+  await waitFor(() => {
+    expect(api.createEnrollmentToken).toHaveBeenCalledTimes(2);
+    expect(nav.replaceState).toHaveBeenCalledTimes(2);
+  });
+});
+
+test("?action= the same value re-appearing WITHOUT an intervening action-less state (browser back-nav onto the stale history entry) does NOT reprocess", async () => {
   vi.spyOn(api, "listNodes").mockResolvedValue([]);
   vi.spyOn(api, "createEnrollmentToken").mockResolvedValue({
     token: "tok_once_abc123",
@@ -325,18 +374,15 @@ test("?action= handling settles after replaceState clears the param — no repro
   render(NodesOverview);
 
   setSearchParam("action", "create-token");
-
   await waitFor(() => {
     expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
   });
 
-  // Mirror what real SvelteKit's replaceState("/nodes", {}) does: it updates
-  // the reactive page.url in place, clearing the query string. That re-runs
-  // the $effect with action=null — a no-op — so nothing further happens.
-  setSearchParam("action", null);
-  await waitFor(() => {
-    expect(nav.replaceState).toHaveBeenCalledTimes(1);
-  });
+  // Simulate a browser back-navigation reconstructing page.url with the same
+  // stale "?action=create-token" — a *new* URL object (as a real navigation
+  // would produce) but the identical action value, with no action-less state
+  // in between. The handledAction guard must block reprocessing here.
+  setSearchParam("action", "create-token");
 
   // Give any (incorrect) re-processing a chance to happen, then confirm it didn't.
   await new Promise((resolve) => setTimeout(resolve, 0));
