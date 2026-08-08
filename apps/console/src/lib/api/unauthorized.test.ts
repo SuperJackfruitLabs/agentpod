@@ -3,7 +3,7 @@
  *
  * TDD: 401 responses from http() (client.ts) must clear the auth session and
  * redirect to /login — unless the current path is already a public route
- * (/login, /setup), in which case no redirect should fire (loop guard).
+ * (/login), in which case no redirect should fire (loop guard).
  *
  * Run: cd apps/console && pnpm test src/lib/api/unauthorized.test.ts
  */
@@ -89,15 +89,6 @@ test("401 on /nodes/x → same redirect behaviour (protected sub-path)", async (
 
 test("401 while already on /login → goto NOT called (loop guard)", async () => {
   vi.stubGlobal("location", { pathname: "/login" });
-  stubFetch(401);
-
-  await expect(listNodes()).rejects.toThrow("401");
-  expect(mockGoto).not.toHaveBeenCalled();
-  expect(mockClearAuthSession).not.toHaveBeenCalled();
-});
-
-test("401 while on /setup → goto NOT called (loop guard)", async () => {
-  vi.stubGlobal("location", { pathname: "/setup" });
   stubFetch(401);
 
   await expect(listNodes()).rejects.toThrow("401");

@@ -12,14 +12,13 @@ function hubUrl(): string {
 /**
  * Handle a 401 Unauthorized response by clearing the local auth session and
  * redirecting to /login.  Guards against redirect loops: does nothing when the
- * current path is already a public route (/login, /setup) or when running
+ * current path is already a public route (/login) or when running
  * server-side (typeof window === "undefined").
  */
 export function handleUnauthorized(): void {
   if (
     typeof window !== "undefined" &&
-    !window.location.pathname.startsWith("/login") &&
-    !window.location.pathname.startsWith("/setup")
+    !window.location.pathname.startsWith("/login")
   ) {
     clearAuthSession();
     goto("/login");

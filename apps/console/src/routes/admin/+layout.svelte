@@ -13,7 +13,7 @@
   onMount(async () => {
     // Check if connected and authenticated first
     if (!connection.isConnected) {
-      goto("/setup");
+      goto("/login");
       return;
     }
     if (!auth.isAuthenticated) {

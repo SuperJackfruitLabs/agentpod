@@ -29,12 +29,6 @@ vi.mock("svelte-sonner", () => ({
   },
 }));
 
-// Stub theme-toggle — its themes/store.svelte.ts calls window.matchMedia at
-// module load time, which jsdom does not implement.
-vi.mock("$lib/components/theme-toggle.svelte", () => ({
-  default: function ThemeToggleStub() {},
-}));
-
 vi.mock("$app/state", () => ({
   page: {
     params: { id: "u1" },

@@ -21,7 +21,7 @@
   let currentPath = $derived(page.url.pathname);
 
   // Public routes that don't require authentication (no AppShell/BottomNav)
-  const publicRoutes = ["/login", "/setup"];
+  const publicRoutes = ["/login"];
 
   // Derived: check if current route is public
   let isPublicRoute = $derived(publicRoutes.some(route => currentPath.startsWith(route)));
@@ -32,7 +32,7 @@
   let shouldShowLoading = $derived(isInitializing);
 
   // Derived: should we show the AppShell with bottom navigation?
-  // Hide on public routes (login/setup) and show on all authenticated routes
+  // Hide on public routes (login) and show on all authenticated routes
   let showAppShell = $derived(!isPublicRoute && !shouldShowLoading);
 
   function handleGlobalKeydown(e: KeyboardEvent) {
@@ -87,7 +87,7 @@
         {@render children()}
       </AppShell>
     {:else}
-      <!-- Public routes (login/setup): render without AppShell -->
+      <!-- Public routes (login): render without AppShell -->
       {@render children()}
     {/if}
   </div>

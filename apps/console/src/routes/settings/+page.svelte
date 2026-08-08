@@ -11,7 +11,7 @@
 
   async function handleDisconnect() {
     await disconnect();
-    goto("/setup");
+    goto("/login");
   }
 
   async function handleSignOut() {

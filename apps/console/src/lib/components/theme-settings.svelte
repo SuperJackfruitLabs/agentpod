@@ -165,7 +165,7 @@
       </div>
 
       <!-- Color Scheme Grid -->
-      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-y-auto pr-1 cyber-scrollbar">
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[350px] overflow-y-auto pr-1">
         {#each filteredColorSchemes as scheme}
           {@const isSelected = themeStore.colorSchemeId === scheme.id}
           {@const colors = themeStore.getColorSchemePreview(scheme.id)}
@@ -274,7 +274,7 @@
       </div>
 
       <!-- Font Pairing Grid -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1 cyber-scrollbar">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[350px] overflow-y-auto pr-1">
         {#each filteredFontPairings as pairing}
           {@const isSelected = themeStore.fontPairingId === pairing.id}
           <button
