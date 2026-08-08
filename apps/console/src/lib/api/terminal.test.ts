@@ -50,6 +50,11 @@ class MockWebSocket {
   fireMessage(data: unknown) {
     this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }));
   }
+
+  /** Test helper: simulate a socket-level error (no accompanying close). */
+  fireError() {
+    this.onerror?.(new Event("error"));
+  }
 }
 
 // ─── Setup / teardown ────────────────────────────────────────────────────────
@@ -164,4 +169,63 @@ test("close() closes the underlying socket", () => {
   client.close();
 
   expect(MockWebSocket.instance!.readyState).toBe(3); // CLOSED
+});
+
+// ─── onClose ─────────────────────────────────────────────────────────────────
+
+test("server {t:'exit'} fires onClose('exit')", () => {
+  const client = createTerminalClient("s1");
+  const reasons: string[] = [];
+  client.onClose((reason) => reasons.push(reason));
+
+  MockWebSocket.instance!.open();
+  MockWebSocket.instance!.fireMessage({ t: "exit" });
+
+  expect(reasons).toEqual(["exit"]);
+});
+
+test("socket error fires onClose('error')", () => {
+  const client = createTerminalClient("s1");
+  const reasons: string[] = [];
+  client.onClose((reason) => reasons.push(reason));
+
+  MockWebSocket.instance!.open();
+  MockWebSocket.instance!.fireError();
+
+  expect(reasons).toEqual(["error"]);
+});
+
+test("an unprompted clean close fires onClose('closed')", () => {
+  const client = createTerminalClient("s1");
+  const reasons: string[] = [];
+  client.onClose((reason) => reasons.push(reason));
+
+  MockWebSocket.instance!.open();
+  // Server/network drops the socket without a {t:"exit"} message and without
+  // the client having called close() itself.
+  MockWebSocket.instance!.onclose?.(new CloseEvent("close"));
+
+  expect(reasons).toEqual(["closed"]);
+});
+
+test("close() then the resulting socket close does not double-fire onClose", () => {
+  const client = createTerminalClient("s1");
+  const reasons: string[] = [];
+  client.onClose((reason) => reasons.push(reason));
+
+  MockWebSocket.instance!.open();
+  client.close(); // mock synchronously invokes ws.onclose, as a real close would (async)
+
+  expect(reasons).toEqual([]);
+});
+
+test("{t:'exit'} then the resulting ws.close() does not double-fire onClose", () => {
+  const client = createTerminalClient("s1");
+  const reasons: string[] = [];
+  client.onClose((reason) => reasons.push(reason));
+
+  MockWebSocket.instance!.open();
+  MockWebSocket.instance!.fireMessage({ t: "exit" }); // client reacts by closing the socket
+
+  expect(reasons).toEqual(["exit"]);
 });
