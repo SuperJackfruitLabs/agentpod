@@ -4,7 +4,8 @@ import ("context"; "errors"; "flag"; "fmt"; "os"; "runtime"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/config"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/enroll"
   "github.com/rakeshgangwar/agentpod/node-agent/internal/host"
-  "github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate")
+  "github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
+  "github.com/rakeshgangwar/agentpod/node-agent/internal/service")
 
 // version is the agent's build version. Overridden at link time via:
 //
@@ -100,6 +101,34 @@ func main() {
     }
   case "version":
     fmt.Printf("agentpod-node %s %s/%s\n", version, runtime.GOOS, runtime.GOARCH)
+  case "stop":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(stopCmd(mgr, os.Stdout))
+  case "start":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(startCmd(mgr, os.Stdout))
+  case "restart":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(restartCmd(mgr, os.Stdout))
+  case "status":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    cfg, cfgErr := config.Load(config.DefaultPath())
+    os.Exit(statusCmd(mgr, cfg, cfgErr, enroll.CheckCredential, parseStatusJSON(os.Args[2:]), os.Stdout))
+  case "logs":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    os.Exit(logsCmd(mgr, os.Args[2:], os.Stdout))
+  case "service":
+    mgr, err := service.NewManager(nil)
+    if err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
+    var verb string; var rest []string
+    if len(os.Args) > 2 { verb = os.Args[2] }
+    if len(os.Args) > 3 { rest = os.Args[3:] }
+    os.Exit(runServiceVerb(verb, rest, mgr, os.Stdout))
   default:
     fmt.Println("unknown command:", os.Args[1]); os.Exit(2)
   }
