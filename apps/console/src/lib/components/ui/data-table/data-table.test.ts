@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/svelte";
 import DataTable from "./data-table.svelte";
 import type { ColumnDef } from "@tanstack/table-core";
@@ -103,6 +103,76 @@ describe("DataTable", () => {
 			render(DataTable, { columns, data } as never);
 			expect(screen.queryByText(/Page \d+ of \d+/)).toBeNull();
 			expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+		});
+	});
+
+	describe("manual pagination", () => {
+		const singleRowData: Row[] = [{ name: "agent-0", status: "running" }];
+
+		it("renders the footer using the server pageCount despite data holding only one page", () => {
+			render(DataTable, {
+				columns,
+				data: singleRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 0,
+			} as never);
+
+			expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+			expect(screen.getByRole("button", { name: "Next" })).toBeTruthy();
+		});
+
+		it("fires onPageChange with the target index when Next is clicked, without re-slicing data", async () => {
+			const onPageChange = vi.fn();
+			render(DataTable, {
+				columns,
+				data: singleRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 0,
+				onPageChange,
+			} as never);
+
+			await fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+			expect(onPageChange).toHaveBeenCalledTimes(1);
+			expect(onPageChange).toHaveBeenCalledWith(1);
+			// No client-side slicing of `data`: the single row passed in still renders.
+			expect(screen.getByText("agent-0")).toBeTruthy();
+		});
+
+		it("disables Previous at pageIndex 0 and does not fire onPageChange", async () => {
+			const onPageChange = vi.fn();
+			render(DataTable, {
+				columns,
+				data: singleRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 0,
+				onPageChange,
+			} as never);
+
+			const previousButton = screen.getByRole("button", {
+				name: "Previous",
+			}) as HTMLButtonElement;
+			expect(previousButton.disabled).toBe(true);
+
+			await fireEvent.click(previousButton);
+			expect(onPageChange).not.toHaveBeenCalled();
+		});
+
+		it("disables Next at the last page (pageIndex === pageCount - 1)", () => {
+			render(DataTable, {
+				columns,
+				data: singleRowData,
+				manualPagination: true,
+				pageCount: 3,
+				pageIndex: 2,
+			} as never);
+
+			const nextButton = screen.getByRole("button", { name: "Next" }) as HTMLButtonElement;
+			expect(nextButton.disabled).toBe(true);
+			expect(screen.getByText("Page 3 of 3")).toBeTruthy();
 		});
 	});
 });
