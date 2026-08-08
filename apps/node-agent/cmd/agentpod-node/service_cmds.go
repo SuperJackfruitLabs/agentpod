@@ -40,9 +40,16 @@ func parseStatusJSON(args []string) bool {
 // blocks. Exit code is 0 iff the service is running AND the stored hub
 // credential is valid (scriptable); 1 otherwise.
 func statusCmd(mgr service.Manager, cfg config.Config, cfgErr error, checkCred func(hub, id, secret string) (bool, error), jsonOut bool, out io.Writer) int {
-	// Status() failing degrades to a zero-value Status (not installed, not
-	// running) rather than aborting `apn status` itself.
-	st, _ := mgr.Status()
+	// Status() failing means we genuinely don't know the service's state —
+	// rendering a zero-value block ("installed: no / running: no") would
+	// misread as "not installed" and send an operator toward `apn service
+	// install` when the real problem is e.g. a permission-denied
+	// launchctl/systemctl query. Report the error and stop instead.
+	st, err := mgr.Status()
+	if err != nil {
+		fmt.Fprintln(out, "error: reading service status:", err)
+		return 1
+	}
 
 	enrolled := cfgErr == nil && cfg.NodeID != "" && cfg.NodeSecret != ""
 
@@ -207,9 +214,16 @@ func serviceInstallCmd(mgr service.Manager, out io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(out, "installed and started.")
-	if st, err := mgr.Status(); err == nil {
-		printServiceSummary(runtime.GOOS, st.UnitPath, out)
+	// A Status() failure here is cosmetic — the install itself already
+	// succeeded — so it gets a one-line warning instead of silently
+	// dropping the operating summary (which would look like install just
+	// printed nothing further, with no explanation).
+	st, err := mgr.Status()
+	if err != nil {
+		fmt.Fprintln(out, "warning: could not read service status for the summary:", err)
+		return 0
 	}
+	printServiceSummary(runtime.GOOS, st.UnitPath, out)
 	return 0
 }
 
@@ -316,6 +330,27 @@ func statFile(path string) error {
 	return err
 }
 
+// resolveUnitPathForLogs returns the systemd unit path used by buildLogsCmd
+// for --user-unit vs -u scope selection on linux. A no-op on any other
+// platform (unitPath is unused there). If Status() itself errors, it prints
+// a one-line warning and falls back to "" (system-scope journalctl) rather
+// than failing `apn logs` outright — logs are a best-effort diagnostic, not
+// worth blocking on a status query that's separately reported by `apn
+// status`. goos is injected (not read from runtime.GOOS) so this is
+// testable on any host, matching internal/service's own goos-injection
+// pattern.
+func resolveUnitPathForLogs(goos string, mgr service.Manager, out io.Writer) string {
+	if goos != "linux" || mgr == nil {
+		return ""
+	}
+	st, err := mgr.Status()
+	if err != nil {
+		fmt.Fprintln(out, "warning: could not read service status (falling back to system-scope journalctl):", err)
+		return ""
+	}
+	return st.UnitPath
+}
+
 // logsCmd parses `apn logs` flags and runs the resulting command with stdio
 // passthrough. All platform/argv decisions delegate to resolveLogsCmd, which
 // is what's under test — this function itself is exec.Cmd.Run() plumbing.
@@ -334,12 +369,7 @@ func logsCmd(mgr service.Manager, args []string, out io.Writer) int {
 		return 1
 	}
 
-	var unitPath string
-	if runtime.GOOS == "linux" && mgr != nil {
-		if st, err := mgr.Status(); err == nil {
-			unitPath = st.UnitPath
-		}
-	}
+	unitPath := resolveUnitPathForLogs(runtime.GOOS, mgr, out)
 
 	cmd, err := resolveLogsCmd(runtime.GOOS, home, unitPath, logsOptions{Follow: *follow, Lines: *lines}, statFile)
 	if err != nil {

@@ -119,6 +119,26 @@ func TestStatusCmd(t *testing.T) {
 		}
 	})
 
+	t.Run("status_error_exit_1_no_misleading_service_block", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("launchctl print: permission denied")}
+		checkCred := func(hub, id, secret string) (bool, error) {
+			t.Fatal("checkCred must not be called when Status() itself failed")
+			return false, nil
+		}
+		var buf bytes.Buffer
+		code := statusCmd(mgr, cfg, nil, checkCred, false, &buf)
+		if code != 1 {
+			t.Errorf("exit code: got %d want 1", code)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "error:") || !strings.Contains(out, "permission denied") {
+			t.Errorf("missing actionable error output, got:\n%s", out)
+		}
+		if strings.Contains(out, "installed:") || strings.Contains(out, "running:") {
+			t.Errorf("should not render a misleading service block when Status() failed, got:\n%s", out)
+		}
+	})
+
 	t.Run("json_output_unmarshals_into_expected_shape", func(t *testing.T) {
 		mgr := &fakeManager{status: running}
 		checkCred := func(hub, id, secret string) (bool, error) { return true, nil }
@@ -265,6 +285,28 @@ func TestRunServiceVerbInstall(t *testing.T) {
 			t.Errorf("exit code: got %d want 1", code)
 		}
 	})
+
+	t.Run("status_error_after_successful_install_warns_but_still_exits_0", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("launchctl print: permission denied")}
+		var buf bytes.Buffer
+		code := runServiceVerb("install", nil, mgr, &buf)
+		if code != 0 {
+			t.Errorf("exit code: got %d want 0", code)
+		}
+		if !mgr.installCalled {
+			t.Error("Install() was not called")
+		}
+		out := buf.String()
+		if !strings.Contains(out, "installed and started.") {
+			t.Errorf("missing install confirmation, got:\n%s", out)
+		}
+		if !strings.Contains(out, "warning:") || !strings.Contains(out, "permission denied") {
+			t.Errorf("missing status warning, got:\n%s", out)
+		}
+		if strings.Contains(out, "apn status") {
+			t.Errorf("should not print the platform summary when status is unknown, got:\n%s", out)
+		}
+	})
 }
 
 func TestRunServiceVerbUninstall(t *testing.T) {
@@ -373,6 +415,44 @@ func TestBuildLogsCmd(t *testing.T) {
 		want := []string{"journalctl", "-n", "100", "-u", "agentpod-node"}
 		if !reflect.DeepEqual(cmd.Args, want) {
 			t.Errorf("argv: got %v want %v", cmd.Args, want)
+		}
+	})
+}
+
+func TestResolveUnitPathForLogs(t *testing.T) {
+	t.Run("linux_status_error_warns_and_falls_back_to_system_scope", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("systemctl show: permission denied")}
+		var buf bytes.Buffer
+		got := resolveUnitPathForLogs("linux", mgr, &buf)
+		if got != "" {
+			t.Errorf("unitPath: got %q want empty (fallback)", got)
+		}
+		if !strings.Contains(buf.String(), "warning:") || !strings.Contains(buf.String(), "permission denied") {
+			t.Errorf("missing warning, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("linux_status_ok_uses_unit_path", func(t *testing.T) {
+		mgr := &fakeManager{status: service.Status{UnitPath: "/etc/systemd/system/agentpod-node.service"}}
+		var buf bytes.Buffer
+		got := resolveUnitPathForLogs("linux", mgr, &buf)
+		if got != mgr.status.UnitPath {
+			t.Errorf("unitPath: got %q want %q", got, mgr.status.UnitPath)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("expected no warning on success, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("darwin_never_calls_status", func(t *testing.T) {
+		mgr := &fakeManager{statusErr: errors.New("should not be reached")}
+		var buf bytes.Buffer
+		got := resolveUnitPathForLogs("darwin", mgr, &buf)
+		if got != "" {
+			t.Errorf("unitPath: got %q want empty", got)
+		}
+		if buf.Len() != 0 {
+			t.Errorf("expected no output on darwin, got:\n%s", buf.String())
 		}
 	})
 }
