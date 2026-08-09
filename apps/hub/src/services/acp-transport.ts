@@ -19,7 +19,10 @@
  *     JSON-RPC and must never be forwarded to the SDK.
  */
 
+import { z } from "zod";
 import * as broker from "./broker";
+
+const OpenResponseSchema = z.object({ sessionId: z.string().min(1) });
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +84,13 @@ export async function openAcpWire(
       `Couldn't start the agent process — ${opened.error ?? "unknown error"}.`
     );
   }
-  const sessionId = (opened.data as { sessionId: string }).sessionId;
+  const parsedOpen = OpenResponseSchema.safeParse(opened.data);
+  if (!parsedOpen.success) {
+    throw new Error(
+      "Couldn't start the agent process — malformed open response."
+    );
+  }
+  const { sessionId } = parsedOpen.data;
 
   let resolveClosed!: (reason: string) => void;
   const closed = new Promise<string>((resolve) => {
@@ -89,9 +98,10 @@ export async function openAcpWire(
   });
 
   let controller: ReadableStreamDefaultController<Uint8Array>;
+  let writableController: WritableStreamDefaultController;
   let done = false;
 
-  /** Terminate readable and settle closed exactly once. */
+  /** Terminate readable, error writable, and settle closed exactly once. */
   const finish = (reason: string) => {
     if (done) return;
     done = true;
@@ -99,6 +109,12 @@ export async function openAcpWire(
       controller.close();
     } catch {
       // Controller already closed/errored (e.g. consumer cancelled) — fine.
+    }
+    try {
+      // Fail SDK writes fast after the wire ends instead of dropping them.
+      writableController.error(new Error(`ACP wire closed (${reason})`));
+    } catch {
+      // Writable already errored/closed — fine.
     }
     resolveClosed(reason);
   };
@@ -108,9 +124,25 @@ export async function openAcpWire(
       controller = c;
     },
     cancel() {
-      // Consumer tore down the read side (SDK connection closed) — detach.
-      attach.cancel();
-      finish("eof");
+      // Consumer tore down the read side (SDK connection closed) — run the
+      // same teardown as close() so the agent process is not leaked on the node.
+      void close();
+    },
+  });
+
+  const writable = new WritableStream<Uint8Array>({
+    start(c) {
+      writableController = c;
+    },
+    write(bytes) {
+      // CRITICAL: input frames are keyed by the ACP SESSION id from acp.open,
+      // not the attach stream id. After finish() the stream is errored, so
+      // write() is never called on a dead wire.
+      broker.sendFrame(nodeId, {
+        type: "input",
+        id: sessionId,
+        data: Buffer.from(bytes).toString("base64"),
+      });
     },
   });
 
@@ -136,19 +168,6 @@ export async function openAcpWire(
       if (eof) finish("eof");
     }
   );
-
-  const writable = new WritableStream<Uint8Array>({
-    write(bytes) {
-      if (done) return;
-      // CRITICAL: input frames are keyed by the ACP SESSION id from acp.open,
-      // not the attach stream id.
-      broker.sendFrame(nodeId, {
-        type: "input",
-        id: sessionId,
-        data: Buffer.from(bytes).toString("base64"),
-      });
-    },
-  });
 
   let closeStarted = false;
   const close = async (): Promise<void> => {

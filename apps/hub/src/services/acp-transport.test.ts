@@ -89,6 +89,7 @@ async function connectFakeNode(
     attachIdRef?: [string | null];
     holdStream?: boolean;
     failOpen?: string; // respond to acp.open with ok:false and this error
+    malformedOpen?: boolean; // respond to acp.open with ok:true but no sessionId
   } = {}
 ): Promise<WebSocket> {
   const ws = new WebSocket(
@@ -152,7 +153,16 @@ async function connectFakeNode(
           break;
 
         case "acp.open":
-          if (opts.failOpen) {
+          if (opts.malformedOpen) {
+            ws.send(
+              JSON.stringify({
+                type: "res",
+                id: msg.id,
+                ok: true,
+                data: { pid: 4321 }, // no sessionId
+              })
+            );
+          } else if (opts.failOpen) {
             ws.send(
               JSON.stringify({
                 type: "res",
@@ -409,7 +419,109 @@ test(
 
       expect(await wire.closed).toBe("agent process exited (code 1)");
 
+      // After exit the writable is errored — SDK writes fail fast instead of
+      // silently vanishing.
+      const writer = wire.writable.getWriter();
+      writer.closed.catch(() => {}); // observe the rejection
+      await expect(
+        writer.write(new TextEncoder().encode('{"jsonrpc":"2.0"}\n'))
+      ).rejects.toThrow();
+      writer.releaseLock();
+
       await wire.close();
+      fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "a JSON-RPC line split across two chunks arrives byte-identical through readable",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-split-host");
+
+      // One protocol line split mid-JSON: neither half parses on its own, so
+      // the exit-marker probe must pass the bytes through untouched.
+      const line =
+        '{"jsonrpc":"2.0","id":3,"method":"session/update","params":{"x":1}}\n';
+      const half1 = line.slice(0, 25);
+      const half2 = line.slice(25);
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        streamChunks: [b64(half1), b64(half2)],
+      });
+
+      const wire = await openAcpWire(nodeId, STATION_KEY);
+
+      const text = await readAllText(wire.readable);
+      expect(text).toBe(line);
+      expect(await wire.closed).toBe("eof");
+
+      await wire.close();
+      fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "consumer readable.cancel() runs full teardown: node receives acp.close, closed settles, close() is a no-op",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-rcancel-host");
+
+      const capturedNodeMsgs: string[] = [];
+      const attachIdRef: [string | null] = [null];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        holdStream: true,
+        capturedNodeMsgs,
+        attachIdRef,
+      });
+
+      const wire = await openAcpWire(nodeId, STATION_KEY);
+      await pollUntil(() => attachIdRef[0]);
+
+      // Consumer-side teardown (what the SDK does on connection close) — must
+      // NOT leak the agent process on the node.
+      await wire.readable.cancel();
+
+      // Node received the best-effort acp.close keyed by the session id…
+      const closeReq = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        ) as { params: { sessionId: string } } | undefined;
+      });
+      expect(closeReq.params.sessionId).toBe(FAKE_SESSION_ID);
+
+      // …and a cancel for the attach stream.
+      const cancelFrame = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "cancel"
+        ) as { id: string } | undefined;
+      });
+      expect(cancelFrame.id).toBe(attachIdRef[0]!);
+
+      // closed settles.
+      await wire.closed;
+
+      // A subsequent wire.close() is a no-op — still exactly one acp.close.
+      await wire.close();
+      await new Promise((r) => setTimeout(r, 150));
+      const closeReqs = parsedNodeMsgs(capturedNodeMsgs).filter(
+        (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+      );
+      expect(closeReqs).toHaveLength(1);
+
       fakeNode.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
@@ -500,6 +612,23 @@ test(
       ).rejects.toThrow("Couldn't start the agent process — node offline.");
 
       fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+
+      // ok:true but no sessionId → malformed open response.
+      const malformed = await enrollTestNode("acpwire-malformed-host");
+      const malformedNode = await connectFakeNode(
+        server.port!,
+        malformed.nodeId,
+        malformed.nodeSecret,
+        { malformedOpen: true }
+      );
+      await expect(
+        openAcpWire(malformed.nodeId, STATION_KEY)
+      ).rejects.toThrow(
+        "Couldn't start the agent process — malformed open response."
+      );
+
+      malformedNode.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
       server.stop(true);
