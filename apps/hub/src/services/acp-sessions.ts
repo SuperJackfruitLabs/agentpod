@@ -20,7 +20,7 @@
  * at `waiting` and a grace timer ends it).
  */
 
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
 import {
   client,
   ndJsonStream,
@@ -80,6 +80,12 @@ interface LiveSession {
   seq: number;
   /** Serializes event/row writes so seq order matches insert order. */
   chain: Promise<void>;
+  /**
+   * Incremented at each prompt dispatch; the turn-completion handler captures
+   * it and no-ops unless it still matches, so a stale turn's late response
+   * (after cancelTurn + a new prompt) can never clobber the new turn's status.
+   */
+  turnEpoch: number;
   /** Parked ask-mode permission requests keyed by the request event's seq. */
   pending: Map<number, (resp: RequestPermissionResponse) => void>;
   ended: boolean;
@@ -221,7 +227,14 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
     clearTimeout(live.graceTimer);
     live.graceTimer = null;
   }
+  const hadParked = live.pending.size > 0;
   rejectPendingPermissions(live);
+  if (hadParked) {
+    // The cancelled outcomes travel to the agent through SDK microtasks and a
+    // synchronous broker send; yield one macrotask so they flush before the
+    // wire is torn down (otherwise the agent may never see them).
+    await new Promise((r) => setTimeout(r, 0));
+  }
   const { done } = setStatus(live, "ended", {
     extra: { reason },
     endedReason: reason,
@@ -242,6 +255,14 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
     // Wire already closed — fine.
   }
   await done;
+  if (connectionManager.isOnline(live.nodeId)) {
+    // The wire's best-effort acp.close was deliverable — clear the orphan
+    // marker so the node-online hook won't re-close this process later.
+    await db
+      .update(acpSessions)
+      .set({ nodeSessionId: null })
+      .where(eq(acpSessions.id, live.id));
+  }
 }
 
 /**
@@ -359,6 +380,7 @@ export async function createSession(
     status: "starting",
     seq: 0,
     chain: Promise.resolve(),
+    turnEpoch: 0,
     pending: new Map(),
     ended: false,
     wire: null,
@@ -368,23 +390,25 @@ export async function createSession(
     graceTimer: null,
   };
   // Register before any await so a concurrent createSession is refused
-  // (fresh-process semantics: single session per station in slice 2).
+  // (fresh-process semantics: single session per station in slice 2). Every
+  // failure exit below MUST run finalizeEnd, which removes these entries —
+  // a leaked entry would wedge the station with 409s until restart.
   liveByStation.set(stationId, live);
   liveById.set(id, live);
 
-  await db.insert(acpSessions).values({
-    id,
-    stationId,
-    userId,
-    mode,
-    status: "starting",
-    endedReason: null,
-    nodeSessionId: null,
-    createdAt: now,
-    lastEventAt: now,
-  });
-
   try {
+    await db.insert(acpSessions).values({
+      id,
+      stationId,
+      userId,
+      mode,
+      status: "starting",
+      endedReason: null,
+      nodeSessionId: null,
+      createdAt: now,
+      lastEventAt: now,
+    });
+
     const wire = await openAcpWire(station.nodeId, station.stationKey);
     live.wire = wire;
 
@@ -478,14 +502,31 @@ export async function promptSession(
   const { done: statusWritten } = setStatus(live, "working");
   await Promise.all([promptWritten, statusWritten]);
 
-  // Audit the action, never the prompt text.
-  const audit = await recordAudit(db, {
-    userId,
-    nodeId: live.nodeId,
-    stationKey: live.stationKey,
-    verb: "acp.prompt",
-    params: { chars: text.length },
-  });
+  // Audit the action, never the prompt text. An audit failure must not strand
+  // the session at `working`: revert to idle with an error event and rethrow.
+  let audit: Awaited<ReturnType<typeof recordAudit>>;
+  try {
+    audit = await recordAudit(db, {
+      userId,
+      nodeId: live.nodeId,
+      stationKey: live.stationKey,
+      verb: "acp.prompt",
+      params: { chars: text.length },
+    });
+  } catch (err) {
+    persistEvent(live, "error", {
+      message: "Couldn't record the audit entry — prompt aborted.",
+    });
+    await setStatus(live, "idle").done;
+    throw err;
+  }
+
+  // Stale-turn guard: only the completion of the CURRENT turn may transition
+  // status (a late response from a cancelled turn must not reset a new one).
+  live.turnEpoch += 1;
+  const epoch = live.turnEpoch;
+  const isCurrentTurn = () =>
+    !live.ended && live.turnEpoch === epoch && live.status === "working";
 
   // The turn runs in the background; its completion restores idle. Callers
   // observe progress via subscribe()/acp_events, not this promise.
@@ -496,7 +537,7 @@ export async function promptSession(
     })
     .then(async () => {
       await audit.done("ok");
-      if (!live.ended && live.status === "working") {
+      if (isCurrentTurn()) {
         await setStatus(live, "idle").done;
       }
     })
@@ -505,8 +546,8 @@ export async function promptSession(
         .done("error", err instanceof Error ? err.message : String(err))
         .catch(() => {});
       // Wire-level failures transition the session via handleWireClosed; only
-      // recover to idle when the session itself is still alive and working.
-      if (!live.ended && live.status === "working") {
+      // recover to idle when this turn is still the live one.
+      if (isCurrentTurn()) {
         await setStatus(live, "idle").done;
       }
     });
@@ -583,10 +624,39 @@ export async function endSession(
     .where(and(eq(acpSessions.id, sessionId), eq(acpSessions.userId, userId)));
   if (!rows[0]) throw new Error("Session not found.");
   if (rows[0].status === "ended") return;
+  await appendEndedState(sessionId, reason);
+}
+
+/**
+ * Append a state-ended event (seq = MAX(seq)+1) and mark a NON-LIVE row ended.
+ * Live sessions go through finalizeEnd instead (in-memory seq counter).
+ */
+async function appendEndedState(sessionId: string, reason: string): Promise<void> {
+  const [agg] = await db
+    .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
+    .from(acpEvents)
+    .where(eq(acpEvents.sessionId, sessionId));
+  const seq = Number(agg?.maxSeq ?? 0) + 1;
+  const createdAt = new Date();
+  const payload = { status: "ended", reason };
+  await db.insert(acpEvents).values({
+    sessionId,
+    seq,
+    type: "state",
+    payload,
+    createdAt,
+  });
   await db
     .update(acpSessions)
-    .set({ status: "ended", endedReason: reason, lastEventAt: new Date() })
+    .set({ status: "ended", endedReason: reason, lastEventAt: createdAt })
     .where(eq(acpSessions.id, sessionId));
+  fanOut(sessionId, {
+    sessionId,
+    seq,
+    type: "state",
+    payload,
+    createdAt: createdAt.toISOString(),
+  });
 }
 
 /** Subscribe to live events; replay is the caller's job (read acp_events). */
@@ -620,23 +690,7 @@ export async function reconcileOnBoot(): Promise<void> {
     .where(ne(acpSessions.status, "ended"));
 
   for (const row of stale) {
-    const [agg] = await db
-      .select({ maxSeq: sql<number>`COALESCE(MAX(${acpEvents.seq}), 0)` })
-      .from(acpEvents)
-      .where(eq(acpEvents.sessionId, row.id));
-    const nextSeq = Number(agg?.maxSeq ?? 0) + 1;
-    const now = new Date();
-    await db.insert(acpEvents).values({
-      sessionId: row.id,
-      seq: nextSeq,
-      type: "state",
-      payload: { status: "ended", reason: "hub restarted" },
-      createdAt: now,
-    });
-    await db
-      .update(acpSessions)
-      .set({ status: "ended", endedReason: "hub restarted", lastEventAt: now })
-      .where(eq(acpSessions.id, row.id));
+    await appendEndedState(row.id, "hub restarted");
 
     if (!row.nodeSessionId) continue;
     // stationId deliberately has no FK — the station may be gone.
@@ -650,12 +704,17 @@ export async function reconcileOnBoot(): Promise<void> {
       void broker.request(nodeId, "acp.close", {
         sessionId: row.nodeSessionId,
       });
+      await db
+        .update(acpSessions)
+        .set({ nodeSessionId: null })
+        .where(eq(acpSessions.id, row.id));
     } else {
-      log.info("ACP reconcile: orphaned agent process not closable now", {
+      // Kept as an orphan marker (non-null node_session_id on an ended row):
+      // the node-online hook below closes it when the node next connects.
+      log.info("ACP reconcile: orphaned agent process awaits node reconnect", {
         sessionId: row.id,
         nodeSessionId: row.nodeSessionId,
         stationId: row.stationId,
-        nodeOnline: Boolean(nodeId && connectionManager.isOnline(nodeId)),
       });
     }
   }
@@ -664,3 +723,54 @@ export async function reconcileOnBoot(): Promise<void> {
     log.info(`ACP reconcile: ended ${stale.length} stale session(s) from before restart`);
   }
 }
+
+// ─── Orphaned-process cleanup on node reconnect ──────────────────────────────
+
+/**
+ * Close agent processes orphaned by a hub restart once their node is back.
+ *
+ * Orphan marker: an ENDED session row that still carries node_session_id
+ * (live/normal ends clear it when the close was deliverable). Fires one
+ * best-effort acp.close per orphan and clears the marker so it's once-only.
+ * Never touches non-ended rows, so live sessions are safe.
+ */
+async function closeOrphanedProcesses(nodeId: string): Promise<void> {
+  const orphans = await db
+    .select({
+      id: acpSessions.id,
+      nodeSessionId: acpSessions.nodeSessionId,
+    })
+    .from(acpSessions)
+    .innerJoin(stations, eq(stations.id, acpSessions.stationId))
+    .where(
+      and(
+        eq(stations.nodeId, nodeId),
+        eq(acpSessions.status, "ended"),
+        isNotNull(acpSessions.nodeSessionId)
+      )
+    );
+  for (const orphan of orphans) {
+    // Best-effort: broker.request never rejects; result is ignored.
+    void broker.request(nodeId, "acp.close", {
+      sessionId: orphan.nodeSessionId!,
+    });
+    await db
+      .update(acpSessions)
+      .set({ nodeSessionId: null })
+      .where(eq(acpSessions.id, orphan.id));
+    log.info("ACP orphan cleanup: closed agent process on reconnected node", {
+      sessionId: orphan.id,
+      nodeId,
+      nodeSessionId: orphan.nodeSessionId,
+    });
+  }
+}
+
+// In production no node is connected when reconcileOnBoot runs, so the
+// boot-time close path never fires — the real cleanup happens here, when
+// each affected node next connects.
+connectionManager.onNodeOnline((nodeId) => {
+  closeOrphanedProcesses(nodeId).catch((err) => {
+    log.error("ACP orphan cleanup failed", { nodeId, error: String(err) });
+  });
+});

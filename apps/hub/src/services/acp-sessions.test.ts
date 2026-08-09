@@ -286,6 +286,12 @@ test(
       const evts = await eventsFor(rows[0]!.id);
       expect(evts.some((e) => e.type === "error")).toBe(true);
 
+      // The failure exit cleaned the live maps: a retry hits the open failure
+      // again — NOT the single-session guard (which would wedge the station).
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
       // Offline node.
       fake.close();
       await new Promise((r) => setTimeout(r, 200));
@@ -318,15 +324,11 @@ test(
       await promptSession(TEST_USER, row.id, "please do the thing");
 
       // Turn ends back at idle (skip seq 1 = the create-time idle event).
-      await pollForEvent(
+      const { all } = await pollForEvent(
         row.id,
-        (e) =>
-          e.type === "state" &&
-          (e.payload as { status?: string }).status === "idle" &&
-          true,
+        (e) => stateWith("idle")(e) && (e as { seq: number }).seq > 1,
         8000
       );
-      const { all } = await pollForEvent(row.id, (e) => e.type === "agent-update");
 
       // Ordering by seq: user-prompt < state working < agent-update < final idle.
       const types = all.map((e) => e.type);
@@ -648,6 +650,236 @@ test(
 );
 
 test(
+  "stale-turn epoch: a cancelled turn's late completion cannot clobber the next turn's status",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-epoch-host", {
+      stationKey: "acp-epoch-station",
+      hangPrompt: true,
+      ignoreCancel: true, // prompts stay pending until releasePrompt()
+    });
+    try {
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+
+      // Turn #1 hangs; cancel it (the fake ignores the cancel, so the SDK
+      // request for turn #1 stays pending).
+      await promptSession(TEST_USER, row.id, "task one");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "working";
+      });
+      await cancelTurn(TEST_USER, row.id);
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      // Turn #2 starts.
+      await promptSession(TEST_USER, row.id, "task two");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "working";
+      });
+      const before = (await eventsFor(row.id)).length;
+
+      // NOW turn #1's late response arrives (oldest pending prompt).
+      fake.releasePrompt("end_turn");
+      await new Promise((r) => setTimeout(r, 300));
+
+      // Status must stay working and no spurious state event may appear.
+      const mid = await getSession(TEST_USER, row.id);
+      expect(mid?.status).toBe("working");
+      const after = await eventsFor(row.id);
+      expect(after.length).toBe(before);
+
+      // Turn #2's own completion still lands normally.
+      fake.releasePrompt("end_turn");
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "concurrent createSession for the same station: exactly one wins, the other gets the active-session error",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-race-host", {
+      stationKey: "acp-race-station",
+    });
+    try {
+      const results = await Promise.allSettled([
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+      ]);
+      const won = results.filter((r) => r.status === "fulfilled");
+      const lost = results.filter((r) => r.status === "rejected");
+      expect(won).toHaveLength(1);
+      expect(lost).toHaveLength(1);
+      expect(String((lost[0] as PromiseRejectedResult).reason)).toContain(
+        "An active session already exists for this agent."
+      );
+
+      const winner = (won[0] as PromiseFulfilledResult<{ id: string }>).value;
+      await endSession(TEST_USER, winner.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "endSession mid-parked-ask: parked permission resolves with the cancelled outcome; permission-answer {cancelled:true} persisted",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-endpark-host", {
+      stationKey: "acp-endpark-station",
+      permission: { toolKind: "execute" },
+    });
+    try {
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+
+      await promptSession(TEST_USER, row.id, "risky operation");
+      const { hit: permReq } = await pollForEvent(
+        row.id,
+        (e) => e.type === "permission-request"
+      );
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "waiting";
+      });
+
+      await endSession(TEST_USER, row.id, "user closed mid-permission");
+
+      // The agent received the SDK's cancelled outcome for the parked request.
+      await pollUntil(() => fake.permissionOutcomes.length === 1);
+      expect(fake.permissionOutcomes[0]).toEqual({ outcome: "cancelled" });
+
+      // permission-answer {cancelled:true} persisted with the request's seq.
+      const evts = await eventsFor(row.id);
+      const answer = evts.find((e) => e.type === "permission-answer")!;
+      expect((answer.payload as { cancelled?: boolean }).cancelled).toBe(true);
+      expect((answer.payload as { requestSeq: number }).requestSeq).toBe(
+        (permReq as { seq: number }).seq
+      );
+
+      const ended = await getSession(TEST_USER, row.id);
+      expect(ended?.status).toBe("ended");
+      expect(ended?.endedReason).toBe("user closed mid-permission");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "boot orphan cleanup: node offline at reconcile keeps the marker; the node's next connect triggers acp.close exactly once",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpsess-orphan-host");
+      // Adopt the station WITHOUT connecting the node (DB-only).
+      const [station] = await adoptStations(TEST_USER, nodeId, ["acp-orphan-station"], [
+        {
+          key: "acp-orphan-station",
+          harness: "opencode",
+          kind: "leaf",
+          displayName: "Orphan Station",
+          parentKey: null,
+          workspacePath: "/workspace/orphan",
+          capabilities: ["health", "acp"],
+          matrixId: null,
+          adopted: false,
+        },
+      ]);
+      const staleId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+        id: staleId,
+        stationId: station!.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "working",
+        endedReason: null,
+        nodeSessionId: "acp-proc-orphan-9",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      // Boot reconcile with the node offline: row ends, marker survives.
+      await reconcileOnBoot();
+      const afterBoot = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, staleId));
+      expect(afterBoot[0]!.status).toBe("ended");
+      expect(afterBoot[0]!.nodeSessionId).toBe("acp-proc-orphan-9");
+
+      // Node connects → hook fires the best-effort acp.close…
+      const fake = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, {
+        stationKey: "acp-orphan-station",
+      });
+      await pollUntil(() =>
+        parsedNodeMsgs(fake.nodeMsgs).find(
+          (m) =>
+            m.type === "req" &&
+            (m as { verb?: string }).verb === "acp.close" &&
+            (m as { params?: { sessionId?: string } }).params?.sessionId ===
+              "acp-proc-orphan-9"
+        )
+      );
+      // …and clears the marker so it's once-only.
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId));
+        return r[0]?.nodeSessionId === null;
+      });
+
+      // Reconnect: no second acp.close for the already-cleared orphan.
+      fake.close();
+      await new Promise((r) => setTimeout(r, 200));
+      const fake2 = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, {
+        stationKey: "acp-orphan-station",
+      });
+      await new Promise((r) => setTimeout(r, 300));
+      expect(
+        parsedNodeMsgs(fake2.nodeMsgs).filter(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        )
+      ).toHaveLength(0);
+
+      fake2.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
   "node offline mid-session: status waiting with reason, then grace timer ends the session",
   async () => {
     _setOfflineGraceMsForTest(300);
@@ -750,6 +982,21 @@ test(
         )
       );
       expect(closeReq).toBeTruthy();
+
+      // Boot-time close clears the marker (once-only); the station-less
+      // orphan keeps its marker (transcript row survives, nothing to close).
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId));
+        return r[0]?.nodeSessionId === null;
+      });
+      const orphanRow = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, orphanId));
+      expect(orphanRow[0]!.nodeSessionId).toBe("acp-proc-gone-7");
 
       fake.close();
       await new Promise((r) => setTimeout(r, 100));

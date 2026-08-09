@@ -38,8 +38,10 @@ export interface FakeAcpNodeOpts {
   workspacePath?: string;
   /** When set, session/prompt issues a session/request_permission. Mutable. */
   permission?: FakePermissionConfig | null;
-  /** Hold the prompt turn open until session/cancel arrives. */
+  /** Hold the prompt turn open until session/cancel arrives (or releasePrompt). */
   hangPrompt?: boolean;
+  /** Ignore session/cancel: a hanging prompt stays open until releasePrompt(). */
+  ignoreCancel?: boolean;
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
 }
@@ -53,6 +55,8 @@ export interface FakeAcpNode {
   agentReceived: Array<Record<string, unknown>>;
   /** Outcomes the agent received for its permission requests, in order. */
   permissionOutcomes: unknown[];
+  /** Complete the OLDEST still-hanging prompt turn with the given stopReason. */
+  releasePrompt(stopReason?: string): void;
   close(): void;
 }
 
@@ -110,7 +114,7 @@ export async function connectFakeAcpNode(
   let attachId: string | null = null;
   let streamSeq = 0;
   let inputBuffer = "";
-  let pendingPromptId: string | number | null = null;
+  const pendingPrompts: Array<string | number> = [];
   let permCounter = 0;
   const outQueue: string[] = [];
   const pendingAgentRequests = new Map<
@@ -138,17 +142,26 @@ export async function connectFakeAcpNode(
     );
   };
 
-  const respondPrompt = (result: Record<string, unknown>) => {
-    if (pendingPromptId === null) return;
-    sendAgent({ jsonrpc: "2.0", id: pendingPromptId, result });
-    pendingPromptId = null;
+  /** Respond to a SPECIFIC prompt request (the turn's own id). */
+  const respondTo = (id: string | number, result: Record<string, unknown>) => {
+    const i = pendingPrompts.indexOf(id);
+    if (i === -1) return;
+    pendingPrompts.splice(i, 1);
+    sendAgent({ jsonrpc: "2.0", id, result });
+  };
+
+  /** Respond to the OLDEST pending prompt (cancel + releasePrompt semantics). */
+  const respondOldest = (result: Record<string, unknown>) => {
+    const id = pendingPrompts.shift();
+    if (id === undefined) return;
+    sendAgent({ jsonrpc: "2.0", id, result });
   };
 
   const runPromptTurn = async (msg: {
     id: string | number;
     params: { sessionId: string };
   }) => {
-    pendingPromptId = msg.id;
+    pendingPrompts.push(msg.id);
     sendAgent({
       jsonrpc: "2.0",
       method: "session/update",
@@ -191,19 +204,19 @@ export async function connectFakeAcpNode(
       const outcome = result?.outcome;
       permissionOutcomes.push(outcome ?? resp);
       if (!outcome || outcome.outcome === "cancelled") {
-        respondPrompt({ stopReason: "cancelled" });
+        respondTo(msg.id, { stopReason: "cancelled" });
         return;
       }
       if (
         outcome.outcome === "selected" &&
         String(outcome.optionId).startsWith("reject")
       ) {
-        respondPrompt({ stopReason: "end_turn" });
+        respondTo(msg.id, { stopReason: "end_turn" });
         return;
       }
     }
 
-    if (opts.hangPrompt) return; // held open until session/cancel
+    if (opts.hangPrompt) return; // held open until session/cancel or releasePrompt
 
     sendAgent({
       jsonrpc: "2.0",
@@ -216,7 +229,7 @@ export async function connectFakeAcpNode(
         },
       },
     });
-    respondPrompt({ stopReason: "end_turn" });
+    respondTo(msg.id, { stopReason: "end_turn" });
   };
 
   const handleAgentMsg = (msg: Record<string, unknown>) => {
@@ -235,7 +248,7 @@ export async function connectFakeAcpNode(
     } else if (method === "session/prompt") {
       void runPromptTurn(msg as { id: string | number; params: { sessionId: string } });
     } else if (method === "session/cancel") {
-      respondPrompt({ stopReason: "cancelled" });
+      if (!opts.ignoreCancel) respondOldest({ stopReason: "cancelled" });
     } else if (method === undefined && id !== undefined) {
       // Response to an agent-initiated request (e.g. request_permission).
       pendingAgentRequests.get(String(id))?.(msg);
@@ -350,6 +363,7 @@ export async function connectFakeAcpNode(
     nodeMsgs,
     agentReceived,
     permissionOutcomes,
+    releasePrompt: (stopReason = "end_turn") => respondOldest({ stopReason }),
     close: () => ws.close(),
   };
 }
