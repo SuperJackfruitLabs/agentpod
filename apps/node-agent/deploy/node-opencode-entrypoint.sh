@@ -16,36 +16,19 @@ mkdir -p /workspace
 #             name is a sanitised workspace path (leading '/' stripped, '/' → '-'),
 #             e.g. /workspace → "workspace".
 #
-# We seed BOTH so detection works regardless of whether sqlite3 is available.
-
+# We deliberately only seed the FALLBACK directory here. An earlier version of
+# this script also hand-seeded opencode.db (the PRIMARY path) with a sqlite3
+# heredoc matching a specific schema snapshot; that broke when opencode-ai was
+# bumped past the version that schema was captured from (`opencode serve`
+# refused to start against the pre-seeded db: "Database is not empty and has
+# no session table"). Chasing opencode's internal schema across every future
+# version bump is brittle, so instead: opencode creates and owns its own
+# opencode.db on first run, and this image does not install `sqlite3` (see
+# Dockerfile.opencode), which makes the PRIMARY path unavailable in-container
+# and forces Detect() onto this directory fallback unconditionally — the
+# schema of opencode's self-created db becomes irrelevant to detection.
 OPENCODE_DATA="${HOME:-/root}/.local/share/opencode"
-OPENCODE_DB="${OPENCODE_DATA}/opencode.db"
-
-# Create the data-dir structure opencode.go's Detect() requires.
 mkdir -p "${OPENCODE_DATA}/project/workspace"
-
-# PRIMARY: seed opencode.db with a project row for /workspace.
-# Schema matches the real opencode.db (id text PK, worktree text NOT NULL,
-# sandboxes text NOT NULL, time_created/time_updated integer NOT NULL).
-sqlite3 "${OPENCODE_DB}" <<'SQL'
-CREATE TABLE IF NOT EXISTS project (
-  id            text    PRIMARY KEY,
-  worktree      text    NOT NULL,
-  vcs           text,
-  name          text,
-  icon_url      text,
-  icon_color    text,
-  time_created  integer NOT NULL,
-  time_updated  integer NOT NULL,
-  time_initialized integer,
-  sandboxes     text    NOT NULL,
-  commands      text
-);
-INSERT OR IGNORE INTO project
-  (id, worktree, time_created, time_updated, sandboxes)
-VALUES
-  ('agentpod-workspace', '/workspace', unixepoch() * 1000, unixepoch() * 1000, '[]');
-SQL
 
 # Enroll reads AGENTPOD_HUB_URL and AGENTPOD_ENROLL_TOKEN from the environment.
 /agentpod-node enroll
