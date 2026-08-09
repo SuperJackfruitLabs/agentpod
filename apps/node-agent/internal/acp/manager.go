@@ -3,8 +3,12 @@ package acp
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"sync"
 )
+
+// ErrEmptyArgv is returned by Open when argv has no command to run.
+var ErrEmptyArgv = errors.New("acp: empty argv")
 
 // Manager owns the set of live ACP sessions keyed both by session ID and by
 // station key. All public methods are safe for concurrent use.
@@ -35,6 +39,10 @@ func newSessionID() string {
 // stdout is streamed to subscribers in chunks; stderr is discarded to a
 // bounded ring (last 4 KiB) exposed via s.StderrTail() for exit reasons.
 func (m *Manager) Open(key string, argv []string, dir string, env []string) (*Session, error) {
+	if len(argv) == 0 {
+		return nil, ErrEmptyArgv
+	}
+
 	m.mu.Lock()
 	// Fast path: session already alive for this key.
 	if id, ok := m.byKey[key]; ok {
@@ -43,10 +51,18 @@ func (m *Manager) Open(key string, argv []string, dir string, env []string) (*Se
 			return s, nil
 		}
 	}
+	// Pick an ID that is not in use, retrying on (astronomically unlikely)
+	// random collision.
+	id := newSessionID()
+	for {
+		if _, taken := m.byID[id]; !taken {
+			break
+		}
+		id = newSessionID()
+	}
 	m.mu.Unlock()
 
 	// Spawn the session outside the lock (process creation may be slow).
-	id := newSessionID()
 	s, err := newSession(id, argv, dir, env)
 	if err != nil {
 		return nil, err

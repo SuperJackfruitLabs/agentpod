@@ -5,6 +5,7 @@ package acp
 
 import (
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,6 +16,11 @@ import (
 // stdoutChunkBytes is the read-buffer size for the stdout streaming loop.
 const stdoutChunkBytes = 32 * 1024
 
+// subChanBuffer is the per-subscriber chunk buffer. A subscriber whose
+// callback falls more than subChanBuffer chunks behind is dropped
+// (unsubscribed) rather than allowed to stall the stdout read loop.
+const subChanBuffer = 64
+
 // stderrRingBytes is the maximum number of stderr bytes retained for exit
 // reasons (last 4 KiB).
 const stderrRingBytes = 4 * 1024
@@ -23,6 +29,19 @@ const stderrRingBytes = 4 * 1024
 // SIGKILL.
 const closeGrace = 3 * time.Second
 
+// subscriber is one registered stdout consumer: a buffered chunk queue fed by
+// the read loop and drained by a dedicated dispatcher goroutine.
+type subscriber struct {
+	ch   chan []byte
+	quit chan struct{}
+	stop sync.Once
+}
+
+// shutdown detaches the subscriber's dispatcher (idempotent).
+func (sub *subscriber) shutdown() {
+	sub.stop.Do(func() { close(sub.quit) })
+}
+
 // Session wraps a single ACP child process wired over plain stdio pipes.
 // It is safe for concurrent use.
 type Session struct {
@@ -30,8 +49,10 @@ type Session struct {
 	cmd   *exec.Cmd
 	stdin io.WriteCloser
 
+	writeMu sync.Mutex // serializes Write so JSON-RPC frames never interleave
+
 	mu         sync.Mutex
-	subs       map[int]func(chunk []byte)
+	subs       map[int]*subscriber
 	subSeq     int
 	stderrRing []byte
 	exitFns    []func(reason string)
@@ -74,7 +95,7 @@ func newSession(id string, argv []string, dir string, env []string) (*Session, e
 		id:    id,
 		cmd:   cmd,
 		stdin: stdin,
-		subs:  make(map[int]func(chunk []byte)),
+		subs:  make(map[int]*subscriber),
 		done:  make(chan struct{}),
 	}
 
@@ -88,7 +109,10 @@ func newSession(id string, argv []string, dir string, env []string) (*Session, e
 	return s, nil
 }
 
-// stdoutLoop streams child stdout to subscribers in chunks.
+// stdoutLoop streams child stdout to subscriber queues in chunks. Delivery is
+// a non-blocking send to each subscriber's buffered channel — the read loop
+// never blocks on a consumer. A subscriber whose queue overflows is dropped
+// (unsubscribed) so a stalled consumer cannot wedge the session.
 func (s *Session) stdoutLoop(r io.Reader, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -99,20 +123,52 @@ func (s *Session) stdoutLoop(r io.Reader, wg *sync.WaitGroup) {
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 
-			// Snapshot subscribers under the lock, invoke outside it so a
-			// callback may safely call back into the session.
 			s.mu.Lock()
-			fns := make([]func([]byte), 0, len(s.subs))
-			for _, fn := range s.subs {
-				fns = append(fns, fn)
+			for id, sub := range s.subs {
+				select {
+				case sub.ch <- chunk:
+				default:
+					// Slow consumer: drop the subscriber, not the stream.
+					delete(s.subs, id)
+					sub.shutdown()
+					log.Printf("acp: session %s dropped slow subscriber (queue overflow)", s.id)
+				}
 			}
 			s.mu.Unlock()
-			for _, fn := range fns {
-				fn(chunk)
-			}
 		}
 		if err != nil {
-			return
+			break
+		}
+	}
+
+	// Session output is over: detach all subscribers so their dispatcher
+	// goroutines drain any buffered chunks and exit.
+	s.mu.Lock()
+	subs := s.subs
+	s.subs = make(map[int]*subscriber)
+	s.mu.Unlock()
+	for _, sub := range subs {
+		sub.shutdown()
+	}
+}
+
+// dispatch delivers queued chunks to one subscriber's callback in order. On
+// shutdown it drains whatever is already buffered, then exits. A callback
+// that blocks forever pins only this goroutine — never the read loop.
+func (s *Session) dispatch(sub *subscriber, fn func(chunk []byte)) {
+	for {
+		select {
+		case c := <-sub.ch:
+			fn(c)
+		case <-sub.quit:
+			for {
+				select {
+				case c := <-sub.ch:
+					fn(c)
+				default:
+					return
+				}
+			}
 		}
 	}
 }
@@ -159,10 +215,12 @@ func (s *Session) reap(readers *sync.WaitGroup) {
 	s.exitFns = nil
 	s.mu.Unlock()
 
+	// Close done BEFORE firing callbacks: a callback may call s.Close(),
+	// which blocks on done — firing first would deadlock forever.
+	close(s.done)
 	for _, fn := range fns {
 		fn(reason)
 	}
-	close(s.done)
 }
 
 // ID returns the unique session identifier (e.g. "acp_1a2b3c4d").
@@ -170,27 +228,46 @@ func (s *Session) ID() string {
 	return s.id
 }
 
-// Write sends p to the child's stdin.
+// Write sends p to the child's stdin. Concurrent calls are serialized, so
+// each call's bytes reach the child contiguously — a JSON-RPC frame written
+// in one call is never interleaved with another writer's frame.
 func (s *Session) Write(p []byte) error {
+	s.writeMu.Lock()
 	_, err := s.stdin.Write(p)
+	s.writeMu.Unlock()
 	return err
 }
 
 // Subscribe registers fn to receive child stdout chunks and returns an
-// unsubscribe function. Callbacks are invoked sequentially from the stdout
-// read loop; a slow callback backpressures the child rather than dropping
-// data (ACP frames must not be lost).
+// unsubscribe function.
+//
+// Delivery contract (Task 4 relies on this): chunks are delivered in order by
+// a dedicated per-subscriber goroutine feeding from a buffered queue of
+// subChanBuffer chunks. The stdout read loop never blocks on a subscriber —
+// if fn falls more than subChanBuffer chunks behind, the subscriber is
+// DROPPED (auto-unsubscribed, logged) rather than allowed to stall the
+// session or lose stream position for other subscribers. A dropped or
+// unsubscribed consumer receives no further chunks after its buffered
+// backlog drains.
 func (s *Session) Subscribe(fn func(chunk []byte)) (unsub func()) {
+	sub := &subscriber{
+		ch:   make(chan []byte, subChanBuffer),
+		quit: make(chan struct{}),
+	}
+
 	s.mu.Lock()
 	id := s.subSeq
 	s.subSeq++
-	s.subs[id] = fn
+	s.subs[id] = sub
 	s.mu.Unlock()
+
+	go s.dispatch(sub, fn)
 
 	return func() {
 		s.mu.Lock()
 		delete(s.subs, id)
 		s.mu.Unlock()
+		sub.shutdown()
 	}
 }
 
@@ -253,8 +330,14 @@ func (s *Session) closeStdin() {
 }
 
 // signal delivers sig to the child's process group, falling back to the
-// process itself if the group lookup fails.
+// process itself if the group lookup fails. It is a no-op once the child has
+// been reaped (guards against signaling a reused pid).
 func (s *Session) signal(sig syscall.Signal) {
+	select {
+	case <-s.done:
+		return // child already reaped; pid may have been reused
+	default:
+	}
 	if s.cmd.Process == nil {
 		return
 	}
