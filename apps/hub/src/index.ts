@@ -40,11 +40,15 @@ import { fleetActivityRoutes } from './routes/activity-fleet.ts';
 import { stationWriteRoutes } from './routes/station-writes.ts';
 import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
+// ACP session routes (REST session management + console session WebSocket)
+import { stationAcpRoutes } from './routes/station-acp.ts';
 // Middleware
 import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
+// ACP session boot reconciliation (hub-owned sessions do not survive restarts)
+import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
 validateConfig();
 
@@ -53,6 +57,10 @@ await initDatabase();
 
 const orphans = await resetOrphanedOnlineNodes();
 if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);
+
+// Mark ACP sessions from before the restart ended + best-effort close orphaned
+// agent processes on nodes that are already back online.
+await reconcileAcpSessions();
 
 const errorLogger = createLogger('error-handler');
 
@@ -113,7 +121,8 @@ const app = new Hono()
   // Station write routes (fs.write/mkdir/move/delete — capability-gated, audited)
   .route('/api', stationWriteRoutes)                       // POST /api/stations/:id/fs/{write,mkdir,move,delete}
   .route('/api', stationLifecycleRoutes)                   // POST /api/stations/:id/lifecycle
-  .route('/api', stationCleanupRoutes);                    // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationAcpRoutes);                        // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
 
 app.onError((err, c) => {
   const requestId = c.req.header('x-request-id') || crypto.randomUUID();

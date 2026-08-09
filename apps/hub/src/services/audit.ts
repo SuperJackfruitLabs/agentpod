@@ -58,6 +58,7 @@ const SAFE_PARAM_KEYS = new Set<string>([
   "kind",
   "size",
   "totalBytes",
+  "chars",
   "pathCount",
 ]);
 

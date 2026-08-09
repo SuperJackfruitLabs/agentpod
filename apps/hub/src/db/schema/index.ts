@@ -22,3 +22,6 @@ export * from "./stations";
 
 // Station audit log (write ops + terminal events, fleet console)
 export * from "./audit";
+
+// ACP sessions + event log (fleet console)
+export * from "./acp";
