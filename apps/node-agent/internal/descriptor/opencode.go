@@ -391,14 +391,18 @@ func (o *openCodeDescriptor) TailLogs(ctx context.Context, key string, follow bo
 	}
 
 	logDir := filepath.Join(o.dataDir, "log")
-	logFiles := collectOpenCodeLogFiles(logDir)
+	collect := func() []string { return collectOpenCodeLogFiles(logDir) }
+	logFiles := collect()
 
 	if !follow {
 		// One-shot: emit the last N lines of existing content.
 		return emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit)
 	}
 
-	// Follow mode: emit the last N lines first, then poll for appends.
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = waitForLogFiles(ctx, collect)
 	if err := emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit); err != nil {
 		return err
 	}

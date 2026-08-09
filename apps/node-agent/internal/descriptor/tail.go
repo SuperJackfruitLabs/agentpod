@@ -2,12 +2,51 @@ package descriptor
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
+	"time"
 )
 
 // tailDefaultN is the default number of lines returned by the initial log emit.
 const tailDefaultN = 500
+
+// tailWaitInterval is how often follow-mode TailLogs implementations poll
+// for the first log file to appear when none exist yet. See
+// waitForLogFiles.
+const tailWaitInterval = 1 * time.Second
+
+// waitForLogFiles blocks until collect() returns at least one file or ctx is
+// cancelled, polling every tailWaitInterval. If collect() already has
+// results on the first call, it returns immediately without waiting for a
+// tick. Returns nil if ctx is cancelled before any file appears.
+//
+// Follow-mode TailLogs implementations call this before starting their
+// append-polling loop so that a harness which hasn't written any log files
+// yet doesn't cause the stream to close immediately — see the dogfooding bug
+// (2026-08-09): follow-mode with zero matching log files returned right
+// away, the hub then closed the SSE instantly, and the console's Logs tab
+// retry-looped into "Disconnected" for any harness that hadn't written logs
+// yet.
+func waitForLogFiles(ctx context.Context, collect func() []string) []string {
+	if files := collect(); len(files) > 0 {
+		return files
+	}
+
+	ticker := time.NewTicker(tailWaitInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if files := collect(); len(files) > 0 {
+				return files
+			}
+		}
+	}
+}
 
 // tailMaxBytes is the maximum number of bytes read from the end of a log file
 // for the initial emit. Files larger than this are seeked so only the tail
