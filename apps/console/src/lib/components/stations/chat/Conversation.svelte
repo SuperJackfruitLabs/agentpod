@@ -14,10 +14,11 @@
    * carry edge-triggered collapse state that unkeyed reuse would corrupt.
    *
    * An sr-only polite live region announces new permission requests
-   * ("Agent asks to <title>") and working/idle/ended status flips.
+   * ("Agent asks to <title>"). Session STATUS is deliberately not announced
+   * here — ChatHeader's role="status" region owns that, and two owners meant
+   * every flip was read twice.
    */
   import { onDestroy } from "svelte";
-  import type { AcpSessionStatus } from "@agentpod/contract";
   import ArrowDownIcon from "@lucide/svelte/icons/arrow-down";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
   import { Empty } from "$lib/components/ui/empty";
@@ -30,11 +31,10 @@
 
   interface Props {
     items: ChatItem[];
-    status: AcpSessionStatus;
     onAnswer: (requestSeq: number, optionId: string) => void;
   }
 
-  let { items, status, onAnswer }: Props = $props();
+  let { items, onAnswer }: Props = $props();
 
   /** Stable identity per item — tool/permission items mutate in place across
    * folds (status updates, answers) and streaming items grow, so the key must
@@ -145,15 +145,9 @@
   });
 
   // ── Screen-reader announcements ───────────────────────────────────────────
-  const STATUS_ANNOUNCEMENTS: Partial<Record<AcpSessionStatus, string>> = {
-    working: "Agent is working.",
-    idle: "Agent is idle.",
-    ended: "Session ended.",
-  };
 
   let announcement = $state("");
   let announcedPermSeq: number | null = null;
-  let prevStatus: AcpSessionStatus | null = null;
 
   // A newly arrived UNANSWERED permission request (including one already
   // parked when the transcript mounts) is the most actionable thing in the
@@ -168,20 +162,6 @@
       announcedPermSeq = perm.requestSeq;
       announcement = `Agent asks to ${perm.title}`;
     }
-  });
-
-  // Status FLIPS only — the initial value is visible in the header already.
-  $effect(() => {
-    const s = status;
-    if (prevStatus !== null && s !== prevStatus) {
-      // "starting" doubles as the transcript's placeholder before any state
-      // event lands, so its resolution to idle is bookkeeping, not news — the
-      // agent never did anything to become idle from.
-      const placeholderResolved = prevStatus === "starting" && s === "idle";
-      const msg = placeholderResolved ? undefined : STATUS_ANNOUNCEMENTS[s];
-      if (msg) announcement = msg;
-    }
-    prevStatus = s;
   });
 </script>
 

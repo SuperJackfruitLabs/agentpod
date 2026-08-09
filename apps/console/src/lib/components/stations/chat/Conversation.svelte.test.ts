@@ -79,7 +79,7 @@ test("renders every item kind", async () => {
   ];
 
   const { getByText, getByTestId } = render(Conversation, {
-    props: { items, status: "idle", onAnswer: vi.fn() },
+    props: { items, onAnswer: vi.fn() },
   });
 
   // user bubble + pending opacity
@@ -106,7 +106,7 @@ test("renders every item kind", async () => {
 
 test("empty state renders Empty copy", () => {
   const { getByText } = render(Conversation, {
-    props: { items: [], status: "starting", onAnswer: vi.fn() },
+    props: { items: [], onAnswer: vi.fn() },
   });
   expect(getByText("No conversation yet.")).toBeTruthy();
   expect(getByText("Send a prompt to start talking to this agent.")).toBeTruthy();
@@ -115,7 +115,7 @@ test("empty state renders Empty copy", () => {
 test("permission answers are curried with the item's requestSeq", async () => {
   const onAnswer = vi.fn();
   const { getByText } = render(Conversation, {
-    props: { items: [permissionItem({ requestSeq: 9, seq: 9 })], status: "waiting", onAnswer },
+    props: { items: [permissionItem({ requestSeq: 9, seq: 9 })], onAnswer },
   });
 
   await fireEvent.click(getByText("Allow"));
@@ -124,7 +124,7 @@ test("permission answers are curried with the item's requestSeq", async () => {
 
 test("aria-live region announces the latest permission request", async () => {
   const { getByTestId } = render(Conversation, {
-    props: { items: [permissionItem()], status: "waiting", onAnswer: vi.fn() },
+    props: { items: [permissionItem()], onAnswer: vi.fn() },
   });
 
   const region = getByTestId("chat-announcer");
@@ -136,7 +136,6 @@ test("an already-answered permission is not announced on mount", async () => {
   const { getByTestId } = render(Conversation, {
     props: {
       items: [permissionItem({ answer: { optionId: "allow-1" } })],
-      status: "idle",
       onAnswer: vi.fn(),
     },
   });
@@ -148,7 +147,7 @@ test("an already-answered permission is not announced on mount", async () => {
 
 test("a permission announces when unanswered, and answering does not re-announce", async () => {
   const { getByTestId, rerender } = render(Conversation, {
-    props: { items: [permissionItem()], status: "waiting", onAnswer: vi.fn() },
+    props: { items: [permissionItem()], onAnswer: vi.fn() },
   });
 
   const region = getByTestId("chat-announcer");
@@ -160,33 +159,16 @@ test("a permission announces when unanswered, and answering does not re-announce
   expect(region.textContent).toContain("Agent asks to run go test");
 });
 
-test("resolving the starting placeholder to idle is not announced", async () => {
-  const { getByTestId, rerender } = render(Conversation, {
-    props: { items: [], status: "starting", onAnswer: vi.fn() },
-  });
-
-  // ChatPanel shows the transcript's "starting" placeholder until the attached
-  // session's real status arrives — that flip is bookkeeping, not news.
-  await rerender({ status: "idle" });
-  await new Promise((r) => setTimeout(r, 0));
-  expect(getByTestId("chat-announcer").textContent ?? "").not.toContain("Agent is idle.");
-
-  // A genuine flip out of the placeholder still announces.
-  await rerender({ status: "working" });
-  await waitFor(() => expect(getByTestId("chat-announcer").textContent).toContain("working"));
-});
-
-test("aria-live region announces status flips", async () => {
-  const { getByTestId, rerender } = render(Conversation, {
-    props: { items: [], status: "working", onAnswer: vi.fn() },
+test("the announcer carries permissions only — status has a single owner in the header", async () => {
+  const { getByTestId } = render(Conversation, {
+    props: { items: [permissionItem()], onAnswer: vi.fn() },
   });
 
   const region = getByTestId("chat-announcer");
-  // First render is not a flip — nothing to announce yet.
-  expect(region.textContent ?? "").not.toContain("idle");
-
-  await rerender({ status: "idle" });
-  await waitFor(() => expect(region.textContent).toContain("Agent is idle."));
+  await waitFor(() => expect(region.textContent).toContain("Agent asks to run go test"));
+  // ChatHeader's role="status" region announces working/idle/ended; announcing
+  // here too meant every flip was read out twice.
+  expect(region.textContent ?? "").not.toContain("Agent is");
 });
 
 test("scroll-away pauses follow; new items show a pill; clicking jumps back", async () => {
@@ -195,7 +177,7 @@ test("scroll-away pauses follow; new items show a pill; clicking jumps back", as
     { kind: "assistant", seq: 2, text: "two", streaming: false },
   ];
   const { getByTestId, getByText, queryByText, rerender } = render(Conversation, {
-    props: { items, status: "working", onAnswer: vi.fn() },
+    props: { items, onAnswer: vi.fn() },
   });
 
   const container = getByTestId("chat-scroll-container");
@@ -222,7 +204,7 @@ test("scroll-away pauses follow; new items show a pill; clicking jumps back", as
 test("a pin requested while the panel is hidden is replayed when layout returns", async () => {
   const items: ChatItem[] = [{ kind: "user", seq: 1, text: "one" }];
   const { getByTestId, queryByText, rerender } = render(Conversation, {
-    props: { items, status: "working", onAnswer: vi.fn() },
+    props: { items, onAnswer: vi.fn() },
   });
 
   const container = getByTestId("chat-scroll-container");
@@ -261,7 +243,7 @@ test("a pin requested while the panel is hidden is replayed when layout returns"
 test("streaming growth of the trailing item scrolls to bottom while following", async () => {
   const items: ChatItem[] = [{ kind: "assistant", seq: 1, text: "a", streaming: true }];
   const { getByTestId, rerender } = render(Conversation, {
-    props: { items, status: "working", onAnswer: vi.fn() },
+    props: { items, onAnswer: vi.fn() },
   });
 
   const container = getByTestId("chat-scroll-container");

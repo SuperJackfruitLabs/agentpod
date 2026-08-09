@@ -287,7 +287,13 @@ test("busy mirrors every refusal window the composer must respect", async () => 
   resolveCreate(row());
   await inFlight;
 
-  // (2) optimistic prompt awaiting its echo.
+  // (2) replay in flight — the transcript, and so the status, isn't trustworthy.
+  expect(fresh.replaying).toBe(true);
+  expect(fresh.busy).toBe(true);
+  MockWebSocket.latest()!.fireMessage({ t: "replay-done", lastSeq: 0 });
+  expect(fresh.replaying).toBe(false);
+
+  // (3) optimistic prompt awaiting its echo.
   expect(fresh.busy).toBe(true);
   MockWebSocket.latest()!.fireMessage({
     t: "event",
@@ -295,11 +301,34 @@ test("busy mirrors every refusal window the composer must respect", async () => 
   });
   expect(fresh.busy).toBe(false);
 
-  // (3) agent working.
+  // (4) agent working.
   MockWebSocket.latest()!.fireMessage({ t: "event", event: ev(2, "state", { status: "working" }) });
   expect(fresh.busy).toBe(true);
   MockWebSocket.latest()!.fireMessage({ t: "event", event: ev(3, "state", { status: "idle" }) });
   expect(fresh.busy).toBe(false);
+});
+
+test("status and busy follow the session row until the stream speaks", async () => {
+  // Reattaching to a session the hub says is WORKING: the transcript has no
+  // state event yet, so only the row knows — and the composer must not offer to
+  // send into a turn the hub would reject.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ status: "working" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+
+  expect(chat.status).toBe("working");
+  expect(chat.working).toBe(true);
+  expect(chat.busy).toBe(true);
+
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  // Still working per the row; the stream hasn't contradicted it.
+  expect(chat.busy).toBe(true);
+
+  ws.fireMessage({ t: "event", event: ev(1, "state", { status: "idle" }) });
+  expect(chat.status).toBe("idle");
+  expect(chat.busy).toBe(false);
 });
 
 test("prompt after destroy dials nothing", async () => {
@@ -454,33 +483,67 @@ test("end() DELETEs via the api; the ended state arrives via events, not locally
 
 // ─── Synthetic seq-0 error events ────────────────────────────────────────────
 
-test("seq-0 error with a trailing pending prompt goes to error, not the transcript", async () => {
-  const { chat, ws } = await connectedChat();
+test("a rejected prompt releases the pending item and hands its text back", async () => {
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+
   await chat.prompt("do it");
   expect(chat.transcript.items.at(-1)).toMatchObject({ kind: "user", pending: true });
+  expect(chat.busy).toBe(true);
 
-  ws.fireMessage({ t: "event", event: ev(0, "error", { message: "Agent connection lost." }) });
+  // The hub refuses the turn ("Session is busy — wait for the current turn…").
+  ws.fireMessage({ t: "event", event: ev(0, "error", { message: "Session is busy." }) });
 
-  // Never fold a notice between an optimistic prompt and its echo.
-  expect(chat.transcript.items.at(-1)).toMatchObject({ kind: "user", pending: true });
-  expect(chat.transcript.items.filter((it) => it.kind === "notice")).toHaveLength(0);
-  expect(chat.error).toBe("Agent connection lost.");
+  // No ghost bubble, no notice folded between prompt and echo, composer usable.
+  expect(chat.transcript.items).toEqual([]);
+  expect(chat.busy).toBe(false);
+  expect(chat.error).toBe("Session is busy.");
+  expect(failed).toEqual(["do it"]);
 
-  // The echo still reconciles cleanly afterwards.
-  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "do it" }) });
-  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 1, text: "do it" }]);
+  // And the session is still usable: the next prompt goes out normally.
+  await chat.prompt("again");
+  expect(ws.frames()).toContainEqual({ t: "prompt", text: "again" });
 });
 
-test("seq-0 error with no live turn folds a notice and sets error; cursor unmoved", async () => {
+test("an exhausted reconnect budget releases a pending prompt instead of wedging", async () => {
+  vi.useFakeTimers();
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  MockWebSocket.latest()!.open();
+  MockWebSocket.latest()!.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("lost in transit");
+  expect(chat.busy).toBe(true);
+
+  MockWebSocket.latest()!.drop();
+  vi.advanceTimersByTime(1000);
+  MockWebSocket.latest()!.drop();
+  vi.advanceTimersByTime(2000);
+  MockWebSocket.latest()!.drop();
+  vi.advanceTimersByTime(4000);
+  MockWebSocket.latest()!.drop();
+
+  expect(chat.connection).toBe("disconnected");
+  expect(chat.transcript.items).toEqual([]); // the echo will never arrive
+  expect(chat.busy).toBe(false);
+  expect(failed).toEqual(["lost in transit"]);
+  expect(chat.error).toBe("Couldn't reach the hub — check your connection.");
+});
+
+test("seq-0 error with no live turn goes to error only — never both surfaces", async () => {
   const { chat, ws } = await connectedChat();
 
   ws.fireMessage({ t: "event", event: ev(0, "error", { message: "Prompt failed." }) });
 
-  expect(chat.transcript.items.at(-1)).toMatchObject({
-    kind: "notice",
-    level: "error",
-    text: "Prompt failed.",
-  });
+  // The strip owns it: duplicating the sentence as a transcript notice too made
+  // screen readers and eyes read the same failure twice.
+  expect(chat.transcript.items).toEqual([]);
   expect(chat.transcript.lastSeq).toBe(0);
   expect(chat.error).toBe("Prompt failed.");
 });

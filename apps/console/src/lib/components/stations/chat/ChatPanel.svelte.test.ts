@@ -231,13 +231,103 @@ test("the composer refuses sends while a create is in flight and until the echo 
   // Optimistic prompt still awaiting its echo → still refused.
   expect(box.readOnly).toBe(true);
 
+  // Replay still in flight is also a refusal window (the transcript, and so the
+  // status, isn't trustworthy yet).
   MockWebSocket.latest()!.fireMessage({
     t: "event",
     event: ev(1, "user-prompt", { text: "first" }),
   });
   await tick();
+  expect(box.readOnly).toBe(true);
+
+  MockWebSocket.latest()!.fireMessage({ t: "replay-done", lastSeq: 1 });
+  await tick();
   expect(box.readOnly).toBe(false);
   expect(box.getAttribute("aria-disabled")).toBeNull();
+});
+
+test("reattaching to a working session is not sendable, and says why", async () => {
+  // The header's status and the composer's must come from ONE machine: a header
+  // reading "Working…" over an enabled Send button is how a prompt gets fired
+  // into someone else's turn and rejected by the hub.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ status: "working" })]);
+  const u = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  await tick();
+
+  // Before replay-done: transport state is what the user is told.
+  expect(u.getByText("Connecting…")).toBeTruthy();
+  expect(u.queryByRole("button", { name: "Send" })).toBeNull();
+  expect(u.getByRole("button", { name: "Stop the current turn" })).toBeTruthy();
+
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "cut in line" } });
+  await fireEvent.keyDown(box, { key: "Enter" });
+  // Refused, and the draft is still there to send when the turn ends.
+  expect(box.value).toBe("cut in line");
+  expect(MockWebSocket.latest()!.frames()).not.toContainEqual({
+    t: "prompt",
+    text: "cut in line",
+  });
+
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await tick();
+  expect(u.getByText("Working…")).toBeTruthy(); // row status still says working
+
+  ws.fireMessage({ t: "event", event: ev(1, "state", { status: "idle" }) });
+  await tick();
+  expect(u.getByRole("button", { name: "Send" })).toBeTruthy();
+  expect(box.readOnly).toBe(false);
+});
+
+test("a prompt the hub rejects gives the text back and frees the composer", async () => {
+  const u = await renderConnected();
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "do it" } });
+  await fireEvent.keyDown(box, { key: "Enter" });
+  await tick();
+  expect(u.getByText("do it")).toBeTruthy(); // optimistic bubble
+  expect(box.readOnly).toBe(true);
+
+  u.ws.fireMessage({
+    t: "event",
+    event: ev(0, "error", { message: "Session is busy — wait for the current turn to finish." }),
+  });
+  await tick();
+
+  // No ghost bubble wedging the composer, the text is back, the error is shown.
+  expect(u.queryByText("do it")).toBeNull();
+  expect(box.readOnly).toBe(false);
+  expect(box.value).toBe("do it");
+  expect(
+    u.getByText("Session is busy — wait for the current turn to finish."),
+  ).toBeTruthy();
+});
+
+test("a prompt lost with the socket comes back when the reconnect budget runs out", async () => {
+  vi.useFakeTimers();
+  const u = await renderConnected();
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "lost in transit" } });
+  await fireEvent.keyDown(box, { key: "Enter" });
+  await tick();
+  expect(box.readOnly).toBe(true);
+
+  MockWebSocket.latest()!.drop();
+  await vi.advanceTimersByTimeAsync(1000);
+  MockWebSocket.latest()!.drop();
+  await vi.advanceTimersByTimeAsync(2000);
+  MockWebSocket.latest()!.drop();
+  await vi.advanceTimersByTimeAsync(4000);
+  MockWebSocket.latest()!.drop();
+  await tick();
+
+  expect(u.queryByText("lost in transit")).toBeNull(); // no ghost bubble
+  expect(box.readOnly).toBe(false);
+  expect(box.value).toBe("lost in transit");
+  expect(u.getByRole("button", { name: "Retry" })).toBeTruthy();
 });
 
 test("sending keeps focus in the composer, through the create and the echo", async () => {

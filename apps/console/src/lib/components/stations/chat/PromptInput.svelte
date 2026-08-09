@@ -23,15 +23,15 @@
   import { Textarea } from "$lib/components/ui/textarea";
 
   interface Props {
+    /** Bindable so the panel can hand back the text of a prompt that failed. */
+    value?: string;
     disabled?: boolean;
     working: boolean;
     onSend: (text: string) => void;
     onCancel: () => void;
   }
 
-  let { disabled = false, working, onSend, onCancel }: Props = $props();
-
-  let value = $state("");
+  let { value = $bindable(""), disabled = false, working, onSend, onCancel }: Props = $props();
   const canSend = $derived(value.trim().length > 0);
 
   function send() {

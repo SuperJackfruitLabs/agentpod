@@ -7,12 +7,18 @@
    * row (the transcript) is the only scroller — `flex-1 min-h-0` so a long
    * conversation never pushes the composer off screen.
    *
-   * The controller owns every refusal rule; the panel's job is to never let the
-   * user lose text to one. `chat.busy` is true exactly when `prompt()` would
-   * refuse (create in flight / optimistic prompt awaiting its echo / agent
-   * working), and PromptInput only preserves a draft it wasn't allowed to send —
+   * The controller owns every refusal rule and the ONE status both the header and
+   * the composer read (`chat.status`) — a header saying "Working…" over an
+   * enabled Send button is how a prompt gets sent into someone else's turn and
+   * rejected. `chat.busy` is true exactly when `prompt()` would refuse (create in
+   * flight / optimistic prompt awaiting its echo / agent working / replay in
+   * flight), and PromptInput only preserves a draft it wasn't allowed to send —
    * so `busy` must reach it as `working` (mid-turn, where Stop is the action) or
-   * `disabled` (the create + echo window).
+   * `disabled` (every other refusal window).
+   *
+   * A prompt the hub rejects, or one lost with the socket, hands its text back
+   * through `onPromptFailed` — the controller drops the ghost bubble (which would
+   * otherwise keep `busy` true forever) and the draft reappears in the composer.
    *
    * Failures surface twice on purpose: an inline strip above the composer (with
    * Retry when the transport is dead) plus a toast for a failed session create,
@@ -32,13 +38,21 @@
 
   let { stationId }: Props = $props();
 
+  /** The composer's draft, owned here so a failed prompt can be handed back. */
+  let draft = $state("");
+
   // Plain (non-reactive) ref: the controller holds its own $state internally,
   // so the template stays reactive while the instance itself is stable for the
   // lifetime of the panel. The station is fixed at construction on purpose —
   // the station page keys this panel on `stationId`, so a different station
   // gets a fresh panel (and a fresh socket) rather than a rebound controller.
   // svelte-ignore state_referenced_locally
-  let chat = new AcpChat(stationId);
+  let chat = new AcpChat(stationId, {
+    onPromptFailed: (text) => {
+      // Don't clobber something the user has already started typing instead.
+      if (draft.trim().length === 0) draft = text;
+    },
+  });
 
   onMount(() => {
     void chat.init();
@@ -47,25 +61,12 @@
     return () => chat.destroy();
   });
 
-  /**
-   * Session status shown to the user. The transcript's status is stream truth
-   * (working → idle → ended) but starts at the `"starting"` placeholder, which
-   * an attached session that hasn't emitted a state event yet would sit on
-   * forever — so until the stream says otherwise, the session row's own status
-   * wins.
-   */
-  const status = $derived(
-    chat.transcript.status === "starting" && chat.session
-      ? chat.session.status
-      : chat.transcript.status,
-  );
-
   async function handleSend(text: string) {
     // The composer is already disabled in every refusal window; this guard just
     // keeps a stale `error` from being re-toasted if one slips through.
     if (chat.busy) return;
     const beforeId = chat.session?.id ?? null;
-    const needsCreate = beforeId === null || chat.transcript.status === "ended";
+    const needsCreate = beforeId === null || chat.status === "ended";
 
     await chat.prompt(text);
 
@@ -82,7 +83,7 @@
   <div class="shrink-0 border-b px-3 py-2">
     <ChatHeader
       session={chat.session}
-      {status}
+      status={chat.status}
       connection={chat.connection}
       mode={chat.mode}
       onModeChange={(mode) => chat.setMode(mode)}
@@ -99,7 +100,6 @@
   <div class="min-h-0 flex-1">
     <Conversation
       items={chat.transcript.items}
-      {status}
       onAnswer={(requestSeq, optionId) => chat.answer(requestSeq, optionId)}
     />
   </div>
@@ -115,6 +115,7 @@
 
   <div class="shrink-0 border-t p-3">
     <PromptInput
+      bind:value={draft}
       working={chat.working}
       disabled={chat.busy && !chat.working}
       onSend={handleSend}

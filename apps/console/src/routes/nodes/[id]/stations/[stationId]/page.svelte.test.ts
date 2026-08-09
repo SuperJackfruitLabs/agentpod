@@ -193,26 +193,47 @@ test("a deep link to ?tab=health on an acp station shows health, not chat", asyn
   expect(acpApi.listAcpSessions).not.toHaveBeenCalled();
 });
 
-test("panels wait for the capability list, so no wrong-default panel is mounted", async () => {
+test("panels wait for the capability list, showing a skeleton instead of a bare header", async () => {
   let resolve: (rows: StationRow[]) => void = () => {};
   vi.spyOn(api, "listStations").mockReturnValue(
     new Promise<StationRow[]>((r) => {
       resolve = r;
     }),
   );
+  setUrl("?tab=chat"); // a deep link to a tab that doesn't exist yet
 
-  const { getAllByRole, queryByPlaceholderText } = render(StationPage);
+  const { getAllByRole, getByTestId, queryByPlaceholderText } = render(StationPage);
   await waitFor(() => expect(getAllByRole("tab").length).toBeGreaterThan(0));
 
-  // Which tab is the default depends on the capabilities, so nothing mounts yet.
+  // Which tab is the default depends on the capabilities, so nothing mounts yet —
+  // but the wait has a shape.
   expect(api.stationHealth).not.toHaveBeenCalled();
   expect(queryByPlaceholderText("Message the agent…")).toBeNull();
+  expect(getByTestId("station-panels-loading")).toBeTruthy();
+
+  // The tablist keeps exactly one tabbable tab: PageHeader's roving tabindex
+  // hangs off the active tab, so an active tab that isn't rendered would leave
+  // the whole tab bar unreachable by keyboard.
+  const tabbable = getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0");
+  expect(tabbable).toHaveLength(1);
 
   resolve([station(["health", "acp"])]);
 
   await waitFor(() => expect(queryByPlaceholderText("Message the agent…")).toBeTruthy());
-  // Chat was the default all along — health was never mounted or fetched.
+  // Chat exists now, so the deep link resolves to it — and health was never
+  // mounted or fetched on the way there.
+  expect(selected(getAllByRole("tab"))).toBe("Chat");
   expect(api.stationHealth).not.toHaveBeenCalled();
+});
+
+test("a tab the station doesn't have falls back to the default, keeping the tablist tabbable", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs"])]);
+  setUrl("?tab=terminal"); // no terminal capability → no such tab
+
+  const { getAllByRole } = render(StationPage);
+
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Health"));
+  expect(getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
 });
 
 // ─── non-acp station ────────────────────────────────────────────────────────

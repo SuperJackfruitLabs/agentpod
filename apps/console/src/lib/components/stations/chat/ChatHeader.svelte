@@ -4,8 +4,12 @@
    *
    * Status maps the ACP session vocab onto the console's shared status
    * tokens (working→starting+pulse, idle→running, waiting→degraded,
-   * ended→stopped). A degraded CONNECTION (reconnecting/disconnected)
-   * overrides the label — transport truth beats stale session state.
+   * ended→stopped). Transport state overrides the label — while connecting,
+   * replaying or reconnecting the session state is not yet trustworthy, and it
+   * is also why the composer refuses to send, so the user gets told.
+   *
+   * This is the ONE live region for session status in the panel: Conversation
+   * announces permissions only, so a flip is never read out twice.
    *
    * Mode chips are never disabled: pre-session the selection seeds creation,
    * live it round-trips set-mode, and after end it seeds the next session
@@ -55,26 +59,25 @@
     { value: "full-auto", label: "Full auto" },
   ];
 
+  /** Transport is still catching up: the transcript (and status) is incomplete. */
+  const syncing = $derived(connection === "connecting" || connection === "reconnecting");
+
   const dotStatus = $derived(
-    connection === "reconnecting"
-      ? "starting"
-      : connection === "disconnected"
-        ? "error"
-        : session
-          ? STATUS_DOT[status]
-          : "stopped",
+    syncing ? "starting" : connection === "disconnected" ? "error" : session ? STATUS_DOT[status] : "stopped",
   );
   const dotAnimate = $derived(
-    connection === "reconnecting" || (connection !== "disconnected" && status === "working"),
+    syncing || (connection !== "disconnected" && status === "working"),
   );
   const label = $derived(
-    connection === "reconnecting"
-      ? "Reconnecting…"
-      : connection === "disconnected"
-        ? "Disconnected"
-        : session
-          ? STATUS_LABEL[status]
-          : "No session",
+    connection === "connecting"
+      ? "Connecting…"
+      : connection === "reconnecting"
+        ? "Reconnecting…"
+        : connection === "disconnected"
+          ? "Disconnected"
+          : session
+            ? STATUS_LABEL[status]
+            : "No session",
   );
 
   let confirmEndOpen = $state(false);

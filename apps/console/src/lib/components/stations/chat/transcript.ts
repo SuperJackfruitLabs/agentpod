@@ -69,6 +69,22 @@ export function addPendingPrompt(t: Transcript, text: string): Transcript {
   return { ...t, items: [...t.items, { kind: "user", seq: -1, text, pending: true }] };
 }
 
+/**
+ * Remove a trailing optimistic prompt whose echo will never arrive — the hub
+ * rejected the turn, or the frame was lost with the socket. Returns the SAME
+ * reference when the tail isn't a pending prompt, and the dropped text so the
+ * caller can hand it back to the composer instead of losing it.
+ *
+ * Dropping is also what makes folding safe again: `foldUserPrompt` reconciles
+ * against the LAST item only, so nothing may be folded in while a pending prompt
+ * trails.
+ */
+export function dropPendingPrompt(t: Transcript): { transcript: Transcript; text: string | null } {
+  const last = t.items.at(-1);
+  if (last?.kind !== "user" || last.pending !== true) return { transcript: t, text: null };
+  return { transcript: { ...t, items: t.items.slice(0, -1) }, text: last.text };
+}
+
 // ─── Defensive narrowing helpers ─────────────────────────────────────────────
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -220,6 +236,13 @@ function foldAgentUpdate(t: Transcript, ev: AcpEvent): Transcript {
     case "tool_call": {
       const toolCallId = str(payload.toolCallId);
       if (toolCallId === undefined) return t;
+      // UPSERT, not push: a (buggy or hostile) agent repeating a toolCallId must
+      // not produce two items with the same identity — views key tool items by
+      // toolCallId, and duplicate keys throw at render time, taking the whole
+      // transcript with them. A repeat merges exactly like tool_call_update.
+      if (findToolIndex(t, toolCallId) !== -1) {
+        return mergeToolCall(t, toolCallId, payload);
+      }
       const item: ChatItem = {
         kind: "tool",
         seq: ev.seq,
@@ -235,25 +258,7 @@ function foldAgentUpdate(t: Transcript, ev: AcpEvent): Transcript {
     case "tool_call_update": {
       const toolCallId = str(payload.toolCallId);
       if (toolCallId === undefined) return t;
-      const idx = t.items.findLastIndex(
-        (it) => it.kind === "tool" && it.toolCallId === toolCallId,
-      );
-      if (idx === -1) return t; // unknown toolCallId → ignore
-      const prev = t.items[idx] as Extract<ChatItem, { kind: "tool" }>;
-      const merged: ChatItem = {
-        ...prev,
-        title: str(payload.title) ?? prev.title,
-        toolKind: str(payload.kind) ?? prev.toolKind,
-        status: toolStatus(payload.status) ?? prev.status,
-        // Content/locations REPLACE when present (SDK semantics); null/absent keeps prior.
-        content: Array.isArray(payload.content) ? mapToolContent(payload.content) : prev.content,
-        locations: Array.isArray(payload.locations)
-          ? mapLocations(payload.locations)
-          : prev.locations,
-      };
-      const items = t.items.slice();
-      items[idx] = merged;
-      return { ...t, items };
+      return mergeToolCall(t, toolCallId, payload);
     }
     case "usage_update": {
       const used = payload.used;
@@ -266,6 +271,36 @@ function foldAgentUpdate(t: Transcript, ev: AcpEvent): Transcript {
       // anything newer → ignored in v1 (forward compat).
       return t;
   }
+}
+
+function findToolIndex(t: Transcript, toolCallId: string): number {
+  return t.items.findLastIndex((it) => it.kind === "tool" && it.toolCallId === toolCallId);
+}
+
+/**
+ * Merge a tool_call/tool_call_update payload into the existing item for that
+ * toolCallId. Later fields win; content/locations REPLACE only when an array is
+ * present (SDK `null`/absent means "unchanged"). Unknown ids are ignored.
+ */
+function mergeToolCall(
+  t: Transcript,
+  toolCallId: string,
+  payload: Record<string, unknown>,
+): Transcript {
+  const idx = findToolIndex(t, toolCallId);
+  if (idx === -1) return t; // unknown toolCallId → ignore
+  const prev = t.items[idx] as Extract<ChatItem, { kind: "tool" }>;
+  const merged: ChatItem = {
+    ...prev,
+    title: str(payload.title) ?? prev.title,
+    toolKind: str(payload.kind) ?? prev.toolKind,
+    status: toolStatus(payload.status) ?? prev.status,
+    content: Array.isArray(payload.content) ? mapToolContent(payload.content) : prev.content,
+    locations: Array.isArray(payload.locations) ? mapLocations(payload.locations) : prev.locations,
+  };
+  const items = t.items.slice();
+  items[idx] = merged;
+  return { ...t, items };
 }
 
 function appendChunk(

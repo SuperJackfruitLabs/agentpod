@@ -21,12 +21,17 @@
  *   - `bye` arrives as a server MESSAGE; the socket close that follows it is
  *     expected and must not trigger a reconnect.
  *
+ * Error surfacing: a synthetic seq-0 error appears in ONE place, never two —
+ * as the fate of a trailing optimistic prompt (dropped, text handed back via
+ * `onPromptFailed`, message on `error`), else inline as a transcript notice
+ * while a turn is live, else on `error` for the panel's strip.
+ *
  * Permission dismissal: ACP has no per-request dismiss — agents supply reject
  * options in the request itself (answer with one of those), and `cancel()`
  * rejects ALL parked permissions (hub cancelTurn). Wire the UI accordingly.
  */
 
-import type { AcpEvent, AcpSessionMode } from "@agentpod/contract";
+import type { AcpEvent, AcpSessionMode, AcpSessionStatus } from "@agentpod/contract";
 import {
   createAcpSession,
   createAcpSocket,
@@ -36,7 +41,13 @@ import {
   type AcpSessionRow,
   type AcpSocket,
 } from "$lib/api/acp";
-import { addPendingPrompt, emptyTranscript, foldEvent, type Transcript } from "./transcript";
+import {
+  addPendingPrompt,
+  dropPendingPrompt,
+  emptyTranscript,
+  foldEvent,
+  type Transcript,
+} from "./transcript";
 
 export type ChatConnection = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected";
 
@@ -81,8 +92,16 @@ export class AcpChat {
    */
   #creating = $state(false);
 
-  constructor(stationId: string) {
+  /**
+   * Called with the text of a prompt whose echo will never arrive (the hub
+   * rejected the turn, or the socket died before it landed). The panel hands it
+   * back to the composer so the user's words aren't lost with the turn.
+   */
+  private readonly onPromptFailed?: (text: string) => void;
+
+  constructor(stationId: string, options: { onPromptFailed?: (text: string) => void } = {}) {
     this.stationId = stationId;
+    this.onPromptFailed = options.onPromptFailed;
   }
 
   get session(): AcpSessionRow | null {
@@ -102,18 +121,44 @@ export class AcpChat {
     return this.#error;
   }
 
+  /**
+   * The session status every view must render. Stream truth once it exists, but
+   * `"starting"` doubles as the transcript's pre-event placeholder, so until a
+   * state event lands the session row's own status wins — otherwise reattaching
+   * to a *working* session reads as "starting" and the composer would happily
+   * offer to send into a turn the hub will reject.
+   *
+   * The header, the composer and `working`/`busy` all read THIS. Two views on
+   * two different status machines is how a user gets an enabled Send button
+   * during someone else's turn.
+   */
+  get status(): AcpSessionStatus {
+    return this.#transcript.status === "starting" && this.#session
+      ? this.#session.status
+      : this.#transcript.status;
+  }
+
   get working(): boolean {
-    return this.#transcript.status === "working";
+    return this.status === "working";
+  }
+
+  /** True while a socket is (re)connecting and its replay hasn't finished. */
+  get replaying(): boolean {
+    return (
+      this.#session !== null && (this.#connection === "connecting" || this.#connection === "reconnecting")
+    );
   }
 
   /**
    * True exactly when `prompt()` would refuse: a create is in flight, an
-   * optimistic prompt is still awaiting its echo, or the agent is working.
-   * The composer MUST be disabled (or shown as working) whenever this is
-   * true — PromptInput only keeps a draft it wasn't allowed to send.
+   * optimistic prompt is still awaiting its echo, the agent is working, or a
+   * replay is still in flight (the transcript — and therefore the status — is
+   * not yet trustworthy). The composer MUST be disabled (or shown as working)
+   * whenever this is true — PromptInput only keeps a draft it wasn't allowed
+   * to send.
    */
   get busy(): boolean {
-    return this.#creating || this.working || this.hasPendingPrompt();
+    return this.#creating || this.working || this.hasPendingPrompt() || this.replaying;
   }
 
   get pendingPermissions(): number {
@@ -153,9 +198,10 @@ export class AcpChat {
   /**
    * Send a prompt, creating a session first if none is live.
    *
-   * Double-submission guard: refuses (silent no-op) while a create is in
-   * flight, while a pending optimistic prompt is still awaiting its echo, or
-   * while the agent is working — one turn at a time.
+   * Refuses (silent no-op) whenever `busy` is true: a create in flight, an
+   * optimistic prompt still awaiting its echo, the agent working (one turn at a
+   * time), or a replay still in flight. The composer reads the same `busy`, so a
+   * refused send always keeps its draft.
    */
   async prompt(text: string): Promise<void> {
     if (!text || this.destroyed) return;
@@ -303,29 +349,49 @@ export class AcpChat {
   }
 
   private applyEvent(ev: AcpEvent): void {
-    // Synthetic seq-0 errors (hub-side failures outside the persisted stream)
-    // never advance the cursor. Two extra caller rules apply here:
+    // Synthetic seq-0 errors are hub-side failures outside the persisted stream:
+    // they never advance the cursor, and they surface in exactly ONE place so the
+    // same sentence never appears as both a transcript notice and a strip.
     if (ev.type === "error" && ev.seq === 0) {
       const message = isRecord(ev.payload) && typeof ev.payload.message === "string"
         ? ev.payload.message
         : "Something went wrong.";
-      const last = this.#transcript.items.at(-1);
-      if (last?.kind === "user" && last.pending) {
-        // Never fold a notice between an optimistic pending prompt and its
-        // echoed user-prompt event — the reconcile only checks the LAST item.
+
+      // A trailing optimistic prompt means THIS error is the fate of that
+      // prompt — the hub refused the turn ("Session is busy…", "…still
+      // starting."), so its echo will never arrive. Drop it: the ghost bubble
+      // would otherwise sit there forever with `busy` stuck true (readonly
+      // composer, no recovery short of a page reload), and dropping it is also
+      // what makes folding safe again.
+      if (this.hasPendingPrompt()) {
+        this.releasePendingPrompt();
         this.#error = message;
         return;
       }
-      this.#transcript = foldEvent(this.#transcript, ev);
-      const status = this.#transcript.status;
-      if (status !== "working" && status !== "waiting") {
-        // No live turn: also surface via the strip so the input area shows it.
-        this.#error = message;
+
+      if (this.status === "working" || this.status === "waiting") {
+        // Mid-turn: the error belongs inline, in the turn it happened to.
+        this.#transcript = foldEvent(this.#transcript, ev);
+        return;
       }
+      // No live turn: the strip owns it — it's the actionable surface, next to
+      // the composer the user is about to retype into.
+      this.#error = message;
       return;
     }
 
     this.#transcript = foldEvent(this.#transcript, ev);
+  }
+
+  /**
+   * Drop a trailing optimistic prompt whose echo will never arrive and hand its
+   * text back to the composer. Clears `busy`, so the composer is usable again.
+   */
+  private releasePendingPrompt(): void {
+    const { transcript, text } = dropPendingPrompt(this.#transcript);
+    if (text === null) return;
+    this.#transcript = transcript;
+    this.onPromptFailed?.(text);
   }
 
   private handleBye(reason: string): void {
@@ -367,6 +433,10 @@ export class AcpChat {
   private scheduleReconnect(): void {
     if (this.attempt >= MAX_ATTEMPTS) {
       this.#connection = "disconnected";
+      // The budget is gone: a prompt still awaiting its echo was either never
+      // sent or will never be echoed, so release it rather than wedge the
+      // composer behind a ghost bubble.
+      this.releasePendingPrompt();
       this.#error = OFFLINE_COPY;
       return;
     }

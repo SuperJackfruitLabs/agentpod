@@ -66,6 +66,16 @@ test("reconnecting connection overrides the status label", () => {
   expect(region.textContent).not.toContain("Working…");
 });
 
+test("connecting (replay in flight) overrides the status label", () => {
+  // The composer refuses sends until the replay lands, so the header has to say
+  // why rather than showing a stale session status.
+  const { getByRole } = setup({ status: "working", connection: "connecting" });
+
+  const region = getByRole("status");
+  expect(region.textContent).toContain("Connecting…");
+  expect(region.textContent).not.toContain("Working…");
+});
+
 test("disconnected connection overrides the status label", () => {
   const { getByRole } = setup({ connection: "disconnected" });
   expect(getByRole("status").textContent).toContain("Disconnected");

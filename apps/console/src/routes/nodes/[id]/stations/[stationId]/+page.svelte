@@ -15,6 +15,7 @@
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { Skeleton } from "$lib/components/ui/skeleton";
   import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
   import * as Dialog from "$lib/components/ui/dialog";
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
@@ -47,7 +48,12 @@
   // health leads everywhere else.
   const activeTab = $derived.by<Tab>(() => {
     const t = $page.url.searchParams?.get("tab");
-    return VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
+    const wanted = VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
+    // The active tab must be one the tab bar actually renders. PageHeader gives
+    // the tablist a roving tabindex keyed on it, so a tab that isn't there (a
+    // ?tab=chat deep link while capabilities load, ?tab=terminal on a station
+    // without one) would leave the WHOLE tablist untabbable.
+    return tabs.some((tab) => tab.id === wanted) ? wanted : defaultTab;
   });
 
   /** Base id PageHeader builds its tab/panel ids from — kept in one place so
@@ -223,10 +229,16 @@
     </div>
   {:else if stationLoad === "loaded"}
     {@render stationPanels()}
+  {:else}
+    <!-- Panels wait for the capability list: which tab is the default depends on
+         it (chat for acp stations, health otherwise), so rendering one earlier
+         would mount — and fetch for — a panel the user never asked for. The
+         shape of the wait is still shown, so the page isn't a bare header. -->
+    <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-hidden="true">
+      <Skeleton class="h-8 w-48 rounded-lg" />
+      <Skeleton class="h-[320px] w-full rounded-lg" />
+    </div>
   {/if}
-  <!-- Panels wait for the capability list: which tab is the default depends on
-       it (chat for acp stations, health otherwise), so rendering earlier would
-       mount — and fetch for — a panel the user never asked for. -->
 </div>
 
 {#snippet stationPanels()}

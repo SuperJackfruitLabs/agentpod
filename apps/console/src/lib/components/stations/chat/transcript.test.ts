@@ -1,6 +1,12 @@
 import { test, expect } from "vitest";
 import type { AcpEvent, AcpEventType } from "@agentpod/contract";
-import { emptyTranscript, foldEvent, addPendingPrompt, type Transcript } from "./transcript";
+import {
+  emptyTranscript,
+  foldEvent,
+  addPendingPrompt,
+  dropPendingPrompt,
+  type Transcript,
+} from "./transcript";
 
 function ev(seq: number, type: AcpEventType, payload: unknown): AcpEvent {
   return { sessionId: "s1", seq, type, payload, createdAt: "2026-08-09T00:00:00.000Z" };
@@ -133,6 +139,54 @@ test("tool_call status defaults to pending; content entries map text and drop un
     content: [{ type: "text", text: "42 passing" }],
     locations: [],
   });
+});
+
+test("a repeated tool_call upserts instead of pushing a duplicate identity", () => {
+  // Views key tool items by toolCallId; two items with the same id throw at
+  // render time and take the whole transcript down, so untrusted agent output
+  // must not be able to create one.
+  const t = fold([
+    ev(1, "agent-update", {
+      sessionUpdate: "tool_call",
+      toolCallId: "t1",
+      title: "Read main.go",
+      status: "pending",
+    }),
+    ev(2, "agent-update", {
+      sessionUpdate: "tool_call",
+      toolCallId: "t1",
+      title: "Read main.go (again)",
+      status: "in_progress",
+      content: [{ type: "content", content: { type: "text", text: "hello" } }],
+    }),
+  ]);
+
+  expect(t.items).toHaveLength(1);
+  expect(t.items[0]).toEqual({
+    kind: "tool",
+    seq: 1, // identity (and key) stays with the first sighting
+    toolCallId: "t1",
+    title: "Read main.go (again)",
+    toolKind: undefined,
+    status: "in_progress",
+    content: [{ type: "text", text: "hello" }],
+    locations: [],
+  });
+  expect(t.lastSeq).toBe(2);
+});
+
+test("dropPendingPrompt removes a trailing pending prompt and returns its text", () => {
+  const withPending = addPendingPrompt(fold([ev(1, "state", { status: "idle" })]), "unsent words");
+
+  const dropped = dropPendingPrompt(withPending);
+  expect(dropped.text).toBe("unsent words");
+  expect(dropped.transcript.items).toEqual([]);
+  expect(dropped.transcript.lastSeq).toBe(1); // cursor untouched
+
+  // No pending tail → same reference, nothing claimed.
+  const noop = dropPendingPrompt(dropped.transcript);
+  expect(noop.transcript).toBe(dropped.transcript);
+  expect(noop.text).toBeNull();
 });
 
 test("tool_call_update for an unknown toolCallId is ignored", () => {
