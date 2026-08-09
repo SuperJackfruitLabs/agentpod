@@ -48,25 +48,35 @@ mkdir -p "${OPENCODE_DATA}/project/workspace"
 # already exited by then, so the two never race.
 mkdir -p /var/run
 rm -f /var/run/opencode-serve.stop
+# Double-fork: the OUTER subshell backgrounds the loop subshell and exits
+# immediately, so the loop re-parents to the container's init (docker-init,
+# HostConfig.Init) instead of staying a child of this shell — which `exec`s
+# into the Go node-agent below. A direct child would linger as a <defunct>
+# zombie after the loop halts (the Go process never reaps unrelated
+# children), and the zombie's comm still matches the descriptor's pgrep
+# health check, freezing Health at "running" (live-fleet finding 2026-08-09).
 (
-  # `set +e`: the top-level `set -e` (line 2) is inherited into this subshell.
-  # Without disabling it here, any non-zero exit from `opencode serve` (a
-  # crash, or exit 143 from the lifecycle Stop's SIGTERM) would terminate the
-  # subshell at that line — the echo/sleep/loop-back below would never run,
-  # making supervision single-shot instead of restart-on-crash. Scoped to this
-  # subshell only; the outer script keeps `set -e`.
-  set +e
-  cd /workspace
-  while :; do
-    if [ -f /var/run/opencode-serve.stop ]; then
-      echo "[entrypoint] opencode-serve.stop present, halting supervision loop" >>/var/log/opencode-serve.log
-      break
-    fi
-    opencode serve >>/var/log/opencode-serve.log 2>&1
-    echo "[entrypoint] opencode serve exited ($?), restarting in 2s" >>/var/log/opencode-serve.log
-    sleep 2
-  done
+  (
+    # `set +e`: the top-level `set -e` (line 2) is inherited into subshells.
+    # Without disabling it here, any non-zero exit from `opencode serve` (a
+    # crash, or exit 143 from the lifecycle Stop's SIGTERM) would terminate
+    # the subshell at that line — the echo/sleep/loop-back below would never
+    # run, making supervision single-shot instead of restart-on-crash.
+    set +e
+    cd /workspace
+    while :; do
+      if [ -f /var/run/opencode-serve.stop ]; then
+        echo "[entrypoint] opencode-serve.stop present, halting supervision loop" >>/var/log/opencode-serve.log
+        break
+      fi
+      opencode serve >>/var/log/opencode-serve.log 2>&1
+      echo "[entrypoint] opencode serve exited ($?), restarting in 2s" >>/var/log/opencode-serve.log
+      sleep 2
+    done
+  ) &
 ) &
+# Reap the short-lived outer subshell before exec'ing, so IT doesn't zombie.
+wait $!
 export AGENTPOD_OPENCODE_SUPERVISED=1
 
 # Hand off to the run loop. AGENTPOD_OPENCODE_SUPERVISED, exported above,
