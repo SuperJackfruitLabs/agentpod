@@ -297,10 +297,21 @@ func (o *openCodeDescriptor) Health(key string) (Health, error) {
 	return health, nil
 }
 
-// openCodeProcessRunning checks for any running opencode process via pgrep.
+// openCodeProcessRunning checks for a running opencode process via pgrep.
 // Returns false with a note when the check is unavailable.
+//
+// In supervised (provisioned-container) mode the pattern is the exact serve
+// command line: the broad "opencode" pattern permanently matches unrelated
+// argv substrings inside the container — docker-init's own cmdline carries
+// the entrypoint path "/node-opencode-entrypoint.sh" — so health could never
+// report stopped (live-fleet finding, 2026-08-09). On real hosts the broad
+// pattern is kept: any opencode process (TUI, serve, run) counts as running.
 func openCodeProcessRunning() (running bool, note string) {
-	cmd := exec.Command("pgrep", "-f", "opencode")
+	pattern := "opencode"
+	if openCodeSupervised() {
+		pattern = "opencode serve"
+	}
+	cmd := exec.Command("pgrep", "-f", pattern)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
