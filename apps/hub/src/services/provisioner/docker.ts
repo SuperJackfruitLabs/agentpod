@@ -23,7 +23,10 @@ const RUNTIME_RESOURCE_TIERS: Record<
   "small" | "medium" | "large",
   ResourceLimits
 > = {
-  small:  { cpus: "0.5", memory: "512m",  pidsLimit: 100 },
+  // small was 512m; a live opencode runtime OOM-killed its acp session at
+  // 513MB rss (memcg, 2026-08-09) — `opencode serve` + one `opencode acp`
+  // need ≥1g to coexist.
+  small:  { cpus: "0.5", memory: "1g",    pidsLimit: 100 },
   medium: { cpus: "1.0", memory: "2g",    pidsLimit: 256 },
   large:  { cpus: "2.0", memory: "4g",    pidsLimit: 512 },
 };
