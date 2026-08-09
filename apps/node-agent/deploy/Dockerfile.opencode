@@ -14,8 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # procps provides `pgrep`, used by the OpenCode descriptor's running-process
 # health check; without it the station Health panel shows "process check unavailable".
 
-# Install the opencode CLI (pinned to fleet version 0.5.5)
-RUN bun add -g opencode-ai@0.5.5
+# Install the opencode CLI (pinned to fleet version 1.18.15 — the newest
+# published version as of 2026-08-09, confirmed to ship the `acp` subcommand
+# the node-agent's ACPCommand uses to spawn `opencode acp` sessions).
+RUN bun add -g opencode-ai@1.18.15
 
 COPY --from=builder /agentpod-node /agentpod-node
 COPY deploy/node-opencode-entrypoint.sh /node-opencode-entrypoint.sh

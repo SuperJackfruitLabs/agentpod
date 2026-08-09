@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // buildOpenCodeFixture creates a temporary OpenCode data directory suitable for
@@ -444,5 +446,279 @@ func TestOpenCodeDetect_DBPrimary(t *testing.T) {
 	}
 	if s.Kind != "leaf" {
 		t.Errorf("kind: want leaf, got %q", s.Kind)
+	}
+}
+
+// --- Lifecycle capability gating ---
+
+// TestOpenCodeDetect_LifecycleCapability_UngatedByDefault asserts that a
+// bare-metal opencode host (no AGENTPOD_OPENCODE_SUPERVISED env var) never
+// advertises "lifecycle" — it has no supervised process for Stop/Start to
+// control.
+func TestOpenCodeDetect_LifecycleCapability_UngatedByDefault(t *testing.T) {
+	dataDir, projPath := buildOpenCodeFixture(t)
+	d := NewOpenCode(dataDir)
+
+	stations, err := d.Detect()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	key := expectedOpenCodeKey(projPath)
+	s := findOpenCodeStation(t, stations, key)
+	if hasCapability(s.Capabilities, "lifecycle") {
+		t.Errorf("capabilities should NOT include 'lifecycle' without AGENTPOD_OPENCODE_SUPERVISED, got %v", s.Capabilities)
+	}
+}
+
+// TestOpenCodeDetect_LifecycleCapability_WhenSupervised asserts that setting
+// AGENTPOD_OPENCODE_SUPERVISED=1 (as the provisioned-opencode entrypoint
+// does) adds "lifecycle" to the station's capabilities.
+func TestOpenCodeDetect_LifecycleCapability_WhenSupervised(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
+	dataDir, projPath := buildOpenCodeFixture(t)
+	d := NewOpenCode(dataDir)
+
+	stations, err := d.Detect()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	key := expectedOpenCodeKey(projPath)
+	s := findOpenCodeStation(t, stations, key)
+	if !hasCapability(s.Capabilities, "lifecycle") {
+		t.Errorf("capabilities should include 'lifecycle' when AGENTPOD_OPENCODE_SUPERVISED=1, got %v", s.Capabilities)
+	}
+}
+
+func findOpenCodeStation(t *testing.T, stations []Station, key string) Station {
+	t.Helper()
+	for _, s := range stations {
+		if s.Key == key {
+			return s
+		}
+	}
+	t.Fatalf("station %q not found in %+v", key, stations)
+	return Station{}
+}
+
+func hasCapability(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
+	}
+	return false
+}
+
+// --- Lifecycle Stop/Start ---
+
+// writeFakePgrepPID writes an executable "pgrep" stub in tmpDir. It logs its
+// invocation args (space-joined) to argsFile, then prints pid and exits 0 —
+// simulating a matching `opencode serve` process without depending on the
+// real opencode binary or a real pgrep -f substring match.
+func writeFakePgrepPID(t *testing.T, tmpDir string, pid int, argsFile string) {
+	t.Helper()
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %s
+echo %d
+exit 0
+`, argsFile, pid)
+	if err := os.WriteFile(filepath.Join(tmpDir, "pgrep"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writeFakePgrepPID: %v", err)
+	}
+}
+
+// TestOpenCodeLifecycle_Stop_NoProcess_ReturnsError asserts that Stop returns
+// an error when no `opencode serve` process can be found (pgrep exits 1, as
+// on a fresh runtime with nothing running yet).
+func TestOpenCodeLifecycle_Stop_NoProcess_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	writeFakePgrep(t, tmpDir) // from hermes_lifecycle_systemd_test.go: always exits 1
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+
+	o := &openCodeDescriptor{}
+	if err := o.Stop("opencode:abc"); err == nil {
+		t.Fatal("expected error when no opencode serve process is running")
+	}
+}
+
+// TestOpenCodeLifecycle_Stop_UsesExpectedPgrepPattern asserts that Stop
+// queries pgrep with the exact "-f opencode.*serve" pattern the entrypoint's
+// supervised process matches.
+func TestOpenCodeLifecycle_Stop_UsesExpectedPgrepPattern(t *testing.T) {
+	tmpDir := t.TempDir()
+	argsFile := filepath.Join(tmpDir, "pgrep.args")
+
+	// A real process for the fake pgrep to "find" and for stopProcess to kill.
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	defer func() { _ = cmd.Wait() }()
+
+	writeFakePgrepPID(t, tmpDir, cmd.Process.Pid, argsFile)
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+	withTempSentinel(t)
+
+	o := &openCodeDescriptor{}
+	if err := o.Stop("opencode:abc"); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("Stop: %v", err)
+	}
+
+	got := readLog(t, argsFile)
+	if !strings.Contains(got, "-f opencode.*serve") {
+		t.Errorf("expected pgrep invoked with '-f opencode.*serve', got %q", got)
+	}
+}
+
+// TestOpenCodeLifecycle_Stop_KillsProcessAndTouchesSentinel is the core
+// regression: Stop must both terminate the running `opencode serve` process
+// AND leave the stop sentinel behind so the entrypoint's supervision loop
+// halts instead of resurrecting it within 2s (which would make Stop a no-op).
+func TestOpenCodeLifecycle_Stop_KillsProcessAndTouchesSentinel(t *testing.T) {
+	tmpDir := t.TempDir()
+	argsFile := filepath.Join(tmpDir, "pgrep.args")
+
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start sleep: %v", err)
+	}
+	defer func() { _ = cmd.Wait() }()
+	pid := cmd.Process.Pid
+
+	writeFakePgrepPID(t, tmpDir, pid, argsFile)
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+	sentinel := withTempSentinel(t)
+
+	o := &openCodeDescriptor{}
+	if err := o.Stop("opencode:abc"); err != nil {
+		_ = cmd.Process.Kill()
+		t.Fatalf("Stop: %v", err)
+	}
+
+	if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
+		_ = cmd.Process.Kill()
+		t.Fatal("process still alive after Stop")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("expected stop sentinel %q to exist after Stop: %v", sentinel, err)
+	}
+}
+
+// withTempSentinel points openCodeServeSentinelPath at a path inside a fresh
+// t.TempDir() for the duration of the test and restores it afterward — Stop
+// and Start must never touch the real /var/run path in tests.
+func withTempSentinel(t *testing.T) string {
+	t.Helper()
+	sentinel := filepath.Join(t.TempDir(), "opencode-serve.stop")
+	orig := openCodeServeSentinelPath
+	openCodeServeSentinelPath = sentinel
+	t.Cleanup(func() { openCodeServeSentinelPath = orig })
+	return sentinel
+}
+
+// withTempServeLog points openCodeServeLogPath at a path inside a fresh
+// t.TempDir() for the duration of the test.
+func withTempServeLog(t *testing.T) string {
+	t.Helper()
+	logPath := filepath.Join(t.TempDir(), "opencode-serve.log")
+	orig := openCodeServeLogPath
+	openCodeServeLogPath = logPath
+	t.Cleanup(func() { openCodeServeLogPath = orig })
+	return logPath
+}
+
+// withTempWorkspaceDir points openCodeWorkspaceDir at dir for the duration of
+// the test.
+func withTempWorkspaceDir(t *testing.T, dir string) {
+	t.Helper()
+	orig := openCodeWorkspaceDir
+	openCodeWorkspaceDir = dir
+	t.Cleanup(func() { openCodeWorkspaceDir = orig })
+}
+
+// TestOpenCodeLifecycle_Start_RemovesSentinelAndSpawnsServeInWorkspace
+// asserts that Start clears the stop sentinel (so a subsequent lifecycle
+// action isn't confused by a stale one) and re-spawns `opencode serve` cd'd
+// into the workspace, appending output to the shared serve log.
+func TestOpenCodeLifecycle_Start_RemovesSentinelAndSpawnsServeInWorkspace(t *testing.T) {
+	stubDir := t.TempDir()
+	argsFile := filepath.Join(stubDir, "opencode.args")
+	cwdFile := filepath.Join(stubDir, "opencode.cwd")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s' "$*" > %s
+pwd > %s
+`, argsFile, cwdFile)
+	if err := os.WriteFile(filepath.Join(stubDir, "opencode"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write opencode stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+
+	workspace := t.TempDir()
+	withTempWorkspaceDir(t, workspace)
+	logPath := withTempServeLog(t)
+	sentinel := withTempSentinel(t)
+	if err := os.WriteFile(sentinel, []byte(""), 0o644); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+
+	o := &openCodeDescriptor{}
+	if err := o.Start("opencode:abc"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+		t.Errorf("expected sentinel removed after Start, stat err = %v", err)
+	}
+
+	var args string
+	for i := 0; i < 100; i++ {
+		if b, err := os.ReadFile(argsFile); err == nil && len(b) > 0 {
+			args = string(b)
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if args != "serve" {
+		t.Errorf("expected stub invoked with 'serve', got %q", args)
+	}
+
+	var cwdOut string
+	for i := 0; i < 100; i++ {
+		if b, err := os.ReadFile(cwdFile); err == nil && len(b) > 0 {
+			cwdOut = strings.TrimSpace(string(b))
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	wantWorkspace, _ := filepath.EvalSymlinks(workspace)
+	gotWorkspace, _ := filepath.EvalSymlinks(cwdOut)
+	if gotWorkspace != wantWorkspace {
+		t.Errorf("expected opencode serve to run in %q, ran in %q", wantWorkspace, cwdOut)
+	}
+
+	// The log file must exist (opened for append before the stub ran).
+	if _, err := os.Stat(logPath); err != nil {
+		t.Errorf("expected serve log %q to exist: %v", logPath, err)
+	}
+}
+
+// TestOpenCodeLifecycle_Start_NoSentinel_StillSucceeds asserts that Start
+// does not error when the sentinel file does not already exist (the common
+// case: Start after a normal boot, not after a prior Stop).
+func TestOpenCodeLifecycle_Start_NoSentinel_StillSucceeds(t *testing.T) {
+	stubDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(stubDir, "opencode"), []byte("#!/bin/sh\ntrue\n"), 0o755); err != nil {
+		t.Fatalf("write opencode stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+
+	withTempWorkspaceDir(t, t.TempDir())
+	withTempServeLog(t)
+	withTempSentinel(t) // path set but file not created
+
+	o := &openCodeDescriptor{}
+	if err := o.Start("opencode:abc"); err != nil {
+		t.Fatalf("Start with no pre-existing sentinel: unexpected error: %v", err)
 	}
 }

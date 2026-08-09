@@ -50,5 +50,34 @@ SQL
 # Enroll reads AGENTPOD_HUB_URL and AGENTPOD_ENROLL_TOKEN from the environment.
 /agentpod-node enroll
 
-# Hand off to the run loop.
+# Supervised opencode server: the station's long-running process. Restarts on
+# crash with 2s backoff; killed cleanly when the container stops.
+#
+# Lifecycle coordination: without the sentinel check below, this loop would
+# immediately resurrect `opencode serve` after the node-agent's opencode
+# descriptor (internal/descriptor/opencode.go) runs a lifecycle Stop on it,
+# making Stop a no-op. The descriptor's Stop kills the process THEN touches
+# /var/run/opencode-serve.stop; the loop checks that sentinel before every
+# (re)spawn and exits when it is present. The descriptor's Start removes the
+# sentinel and re-spawns `opencode serve` itself — this loop has already
+# exited by then, so the two never race.
+mkdir -p /var/run
+rm -f /var/run/opencode-serve.stop
+(
+  cd /workspace
+  while :; do
+    if [ -f /var/run/opencode-serve.stop ]; then
+      echo "[entrypoint] opencode-serve.stop present, halting supervision loop" >>/var/log/opencode-serve.log
+      break
+    fi
+    opencode serve >>/var/log/opencode-serve.log 2>&1
+    echo "[entrypoint] opencode serve exited ($?), restarting in 2s" >>/var/log/opencode-serve.log
+    sleep 2
+  done
+) &
+export AGENTPOD_OPENCODE_SUPERVISED=1
+
+# Hand off to the run loop. AGENTPOD_OPENCODE_SUPERVISED, exported above,
+# flows into this process so the opencode descriptor gates its "lifecycle"
+# capability and Stop/Start methods on it.
 exec /agentpod-node run
