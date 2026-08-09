@@ -20,3 +20,15 @@ it("StreamMsg accepts optional base64 enc", () => {
   expect(StreamMsg.parse({ type:"stream", id:"r1", seq:0, chunk:"AA==", eof:false, enc:"base64" })).toBeTruthy();
   expect(StreamMsg.parse({ type:"stream", id:"r1", seq:0, chunk:"hi", eof:false }).enc).toBeUndefined();
 });
+it("acp.open params/result schemas round-trip", () => {
+  expect(VERB_PARAMS["acp.open"].parse({ key: "opencode:c52ddf65" })).toEqual({ key: "opencode:c52ddf65" });
+  expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
+});
+it("acp.attach takes a sessionId; acp.close returns ok", () => {
+  expect(VERB_PARAMS["acp.attach"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
+  expect(VERB_PARAMS["acp.close"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
+  expect(VERB_RESULTS["acp.close"].parse({ ok: true })).toEqual({ ok: true });
+});
+it("station capabilities accept acp", () => {
+  expect(Capability.parse("acp")).toBe("acp");
+});

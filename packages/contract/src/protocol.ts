@@ -31,6 +31,9 @@ export const VERB_PARAMS = {
   "term.open":   z.object({ key: z.string(), cols: z.number().int(), rows: z.number().int() }),
   "term.attach": z.object({ sessionId: z.string() }),
   "term.close":  z.object({ sessionId: z.string() }),
+  "acp.open":   z.object({ key: z.string() }),
+  "acp.attach": z.object({ sessionId: z.string() }),
+  "acp.close":  z.object({ sessionId: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -51,4 +54,7 @@ export const VERB_RESULTS = {
   "term.open":  z.object({ sessionId: z.string() }),
   "term.close": z.object({ ok: z.boolean() }),
   // term.attach streams; no entry needed.
+  "acp.open":  z.object({ sessionId: z.string() }),
+  "acp.close": z.object({ ok: z.boolean() }),
+  // acp.attach streams; no entry needed (same as term.attach).
 } as const;
