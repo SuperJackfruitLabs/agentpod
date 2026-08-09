@@ -45,6 +45,8 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
+// ACP session boot reconciliation (hub-owned sessions do not survive restarts)
+import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
 validateConfig();
 
@@ -53,6 +55,10 @@ await initDatabase();
 
 const orphans = await resetOrphanedOnlineNodes();
 if (orphans > 0) console.log(`Reset ${orphans} orphaned online node(s) to offline`);
+
+// Mark ACP sessions from before the restart ended + best-effort close orphaned
+// agent processes on nodes that are already back online.
+await reconcileAcpSessions();
 
 const errorLogger = createLogger('error-handler');
 
