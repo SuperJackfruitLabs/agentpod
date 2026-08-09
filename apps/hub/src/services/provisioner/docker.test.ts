@@ -162,7 +162,7 @@ describe("DockerRuntimeProvisioner", () => {
       const fake = new FakeDockerOrchestrator();
       await makeProvisioner(fake).provision({ ...BASE_SPEC, resourceTier: "small" });
       expect(fake.capturedConfig!.resources.cpus).toBe("0.5");
-      expect(fake.capturedConfig!.resources.memory).toBe("512m");
+      expect(fake.capturedConfig!.resources.memory).toBe("1g");
     });
 
     it("maps resourceTier medium to 1 CPU / 2g memory", async () => {

@@ -8,12 +8,14 @@
   import FileBrowser from "$lib/components/stations/FileBrowser.svelte";
   import ConfigEditor from "$lib/components/stations/ConfigEditor.svelte";
   import Terminal from "$lib/components/stations/Terminal.svelte";
+  import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { listStations } from "$lib/api/client";
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import { Button } from "$lib/components/ui/button";
+  import { Skeleton } from "$lib/components/ui/skeleton";
   import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
   import * as Dialog from "$lib/components/ui/dialog";
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
@@ -23,19 +25,35 @@
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import ActivityIcon from "@lucide/svelte/icons/activity";
+  import MessageSquareIcon from "@lucide/svelte/icons/message-square";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
 
-  type Tab = "health" | "logs" | "files" | "terminal" | "cleanup" | "activity";
-  const VALID_TABS: readonly Tab[] = ["health", "logs", "files", "terminal", "cleanup", "activity"];
+  type Tab = "chat" | "health" | "logs" | "files" | "terminal" | "cleanup" | "activity";
+  const VALID_TABS: readonly Tab[] = [
+    "chat",
+    "health",
+    "logs",
+    "files",
+    "terminal",
+    "cleanup",
+    "activity",
+  ];
 
   // The active tab lives in the URL (?tab=logs) so station views are
   // deep-linkable, survive refresh, and participate in back/forward.
-  // An absent or unknown param falls back to "health".
+  // An absent or unknown param falls back to the station's default tab: talking
+  // to the agent is the point of an ACP-capable station, so chat leads there and
+  // health leads everywhere else.
   const activeTab = $derived.by<Tab>(() => {
     const t = $page.url.searchParams?.get("tab");
-    return VALID_TABS.includes(t as Tab) ? (t as Tab) : "health";
+    const wanted = VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
+    // The active tab must be one the tab bar actually renders. PageHeader gives
+    // the tablist a roving tabindex keyed on it, so a tab that isn't there (a
+    // ?tab=chat deep link while capabilities load, ?tab=terminal on a station
+    // without one) would leave the WHOLE tablist untabbable.
+    return tabs.some((tab) => tab.id === wanted) ? wanted : defaultTab;
   });
 
   /** Base id PageHeader builds its tab/panel ids from — kept in one place so
@@ -52,7 +70,10 @@
   let visitedHeavyTabs = $state(new Set<Tab>());
   $effect(() => {
     if (
-      (activeTab === "logs" || activeTab === "files" || activeTab === "terminal") &&
+      (activeTab === "chat" ||
+        activeTab === "logs" ||
+        activeTab === "files" ||
+        activeTab === "terminal") &&
       !visitedHeavyTabs.has(activeTab)
     ) {
       visitedHeavyTabs = new Set(visitedHeavyTabs).add(activeTab);
@@ -70,6 +91,13 @@
    *  content cache for the saved path (see FileBrowser.invalidate). */
   let fileBrowser: FileBrowser | undefined = $state();
   let configEditor: ConfigEditor | undefined = $state();
+
+  const hasAcp = $derived(
+    Array.isArray(station?.capabilities) && station!.capabilities.includes("acp")
+  );
+
+  /** Tab shown when ?tab= is absent — also the one whose selection DELETES the param. */
+  const defaultTab = $derived<Tab>(hasAcp ? "chat" : "health");
 
   const hasTerminal = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("terminal")
@@ -107,6 +135,7 @@
   });
 
   const tabs = $derived.by(() => [
+    ...(hasAcp ? [{ id: "chat", label: "Chat", icon: MessageSquareIcon }] : []),
     { id: "health", label: "Health", icon: HeartPulseIcon },
     { id: "logs", label: "Logs", icon: ScrollTextIcon },
     { id: "files", label: "Files", icon: FolderIcon },
@@ -117,7 +146,7 @@
 
   function handleTabChange(tabId: string) {
     const url = new URL($page.url);
-    if (tabId === "health") {
+    if (tabId === defaultTab) {
       url.searchParams.delete("tab");
     } else {
       url.searchParams.set("tab", tabId);
@@ -198,12 +227,36 @@
       <p class="text-sm text-destructive">{stationLoadError}</p>
       <Button variant="outline" size="sm" onclick={() => loadStation()}>Retry</Button>
     </div>
-  {:else}
+  {:else if stationLoad === "loaded"}
     {@render stationPanels()}
+  {:else}
+    <!-- Panels wait for the capability list: which tab is the default depends on
+         it (chat for acp stations, health otherwise), so rendering one earlier
+         would mount — and fetch for — a panel the user never asked for. The
+         shape of the wait is still shown, so the page isn't a bare header. -->
+    <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-busy="true">
+      <span class="sr-only">Loading this agent…</span>
+      <Skeleton class="h-8 w-48 rounded-lg" />
+      <Skeleton class="h-[320px] w-full rounded-lg" />
+    </div>
   {/if}
 </div>
 
 {#snippet stationPanels()}
+  {#if hasAcp}
+    {@render keepAlivePanel("chat", chatContent)}
+    {#snippet chatContent()}
+      <!-- Keyed on the station: the panel's controller binds its session (and
+           socket) at construction, so a different station gets a fresh panel
+           rather than a live socket pointed at the wrong agent. -->
+      {#key stationId}
+        <div class="flex-1 min-h-[320px]">
+          <ChatPanel {stationId} />
+        </div>
+      {/key}
+    {/snippet}
+  {/if}
+
   {@render mountedPanel("health", healthContent)}
   {#snippet healthContent()}
     <HealthPanel {stationId} {canLifecycle} matrixId={station?.matrixId ?? null} />

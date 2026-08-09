@@ -28,7 +28,8 @@
     "material-file-icons": "^2.4.0",
     "monaco-editor": "^0.55.1",
     "remark-gfm": "^4.0.1",
-    "shiki": "^3.19.0"
+    "shiki": "^3.19.0",
+    "svelte-streamdown": "3.1.2"
   },
   "devDependencies": {
     "@agentpod/tsconfig": "workspace:*",

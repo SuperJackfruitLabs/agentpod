@@ -23,6 +23,24 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// jsdom has no matchMedia. The theme store resolves the "system" colour scheme
+// with it at module-initialisation time (src/lib/themes/store.svelte.ts), so any
+// test that transitively imports a themed component (Terminal, the monaco
+// editor, the station page) crashes during module evaluation without it. Report
+// light mode and no listeners — tests never assert on the resolved scheme.
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
 // Unmount components, then let bits-ui's 24ms body-scroll-lock cleanup timer
 // fire while the DOM still exists. Without the flush, the last dialog-using
 // test in a file races vitest's environment teardown and crashes with
