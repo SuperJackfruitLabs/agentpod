@@ -100,6 +100,34 @@ test("aria-live region announces the latest permission request", async () => {
   await waitFor(() => expect(region.textContent).toContain("Agent asks to run go test"));
 });
 
+test("an already-answered permission is not announced on mount", async () => {
+  const { getByTestId } = render(Conversation, {
+    props: {
+      items: [permissionItem({ answer: { optionId: "allow-1" } })],
+      status: "idle",
+      onAnswer: vi.fn(),
+    },
+  });
+
+  // Let effects flush before asserting the region stayed silent.
+  await new Promise((r) => setTimeout(r, 0));
+  expect(getByTestId("chat-announcer").textContent ?? "").not.toContain("Agent asks");
+});
+
+test("a permission announces when unanswered, and answering does not re-announce", async () => {
+  const { getByTestId, rerender } = render(Conversation, {
+    props: { items: [permissionItem()], status: "waiting", onAnswer: vi.fn() },
+  });
+
+  const region = getByTestId("chat-announcer");
+  await waitFor(() => expect(region.textContent).toContain("Agent asks to run go test"));
+
+  // The answer folds in; the region content is unchanged (no dead re-announce).
+  await rerender({ items: [permissionItem({ answer: { optionId: "allow-1" } })] as ChatItem[] });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(region.textContent).toContain("Agent asks to run go test");
+});
+
 test("aria-live region announces status flips", async () => {
   const { getByTestId, rerender } = render(Conversation, {
     props: { items: [], status: "working", onAnswer: vi.fn() },

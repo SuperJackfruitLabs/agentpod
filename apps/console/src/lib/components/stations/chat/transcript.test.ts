@@ -244,16 +244,37 @@ test("duplicate seq delivery is a no-op returning the same object reference", ()
   expect(t3).toBe(t1);
 });
 
-test("seq-0 synthetic error adds a notice but does not move lastSeq", () => {
+test("seq-0 synthetic error adds a notice (unique negative seq) but does not move lastSeq", () => {
   const before = fold([chunk(1, "hi")]);
   const after = foldEvent(before, ev(0, "error", { message: "connection lost" }));
   expect(after.items.at(-1)).toEqual({
     kind: "notice",
-    seq: 0,
+    seq: -1,
     level: "error",
     text: "connection lost",
   });
   expect(after.lastSeq).toBe(1);
+});
+
+test("multiple synthetic events mint distinct seqs — item identity stays keyable", () => {
+  // Two hub-side seq-0 errors followed by the bye-without-ended fallback
+  // (synthetic seq-0 state ended) — the exact pileup an error path produces.
+  const t = fold([
+    chunk(1, "hi"),
+    ev(0, "error", { message: "boom one" }),
+    ev(0, "error", { message: "boom two" }),
+    ev(0, "state", { status: "ended", reason: "gone" }),
+  ]);
+
+  // Keys derivable from items alone must be collision-free (Conversation
+  // keys its {#each} by kind + identity — duplicate `notice:0` would throw).
+  const keys = t.items.map((it) => `${it.kind}:${it.seq}`);
+  expect(new Set(keys).size).toBe(keys.length);
+
+  const notices = t.items.filter((it) => it.kind === "notice");
+  expect(notices.map((n) => n.seq)).toEqual([-1, -2, -3]);
+  expect(notices.map((n) => n.text)).toEqual(["boom one", "boom two", "Session ended — gone"]);
+  expect(t.lastSeq).toBe(1); // synthetics never move the cursor
 });
 
 test("persisted error event adds an error notice and advances lastSeq", () => {

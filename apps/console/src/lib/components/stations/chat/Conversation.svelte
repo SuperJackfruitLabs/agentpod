@@ -126,11 +126,14 @@
   let announcedPermSeq: number | null = null;
   let prevStatus: AcpSessionStatus | null = null;
 
-  // A newly arrived permission request (including one already parked when the
-  // transcript mounts) is the most actionable thing in the stream — announce.
+  // A newly arrived UNANSWERED permission request (including one already
+  // parked when the transcript mounts) is the most actionable thing in the
+  // stream — announce. Answered ones are history: a replayed transcript must
+  // not announce a dead ask.
   $effect(() => {
     const perm = items.findLast(
-      (it): it is Extract<ChatItem, { kind: "permission" }> => it.kind === "permission",
+      (it): it is Extract<ChatItem, { kind: "permission" }> =>
+        it.kind === "permission" && !it.answer,
     );
     if (perm && perm.requestSeq !== announcedPermSeq) {
       announcedPermSeq = perm.requestSeq;

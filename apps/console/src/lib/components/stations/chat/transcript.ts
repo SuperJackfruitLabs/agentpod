@@ -139,6 +139,22 @@ function mapLocations(v: unknown): string[] {
   return out;
 }
 
+/**
+ * Unique seq for an item minted from a SYNTHETIC event (seq < 1). Real seqs
+ * are positive and hub-assigned; synthetics get monotonically decreasing
+ * negatives derived from the transcript alone, so `{#each}` keys built from
+ * `kind:seq` stay collision-free even when several seq-0 events fold into one
+ * transcript (e.g. a hub-side error notice followed by the bye-without-ended
+ * fallback — both would otherwise key `notice:0`). The optimistic pending
+ * prompt's -1 shares this number line, so synthetics never reuse it either.
+ * Pure: derived from items, no counter state.
+ */
+function syntheticSeq(items: ChatItem[]): number {
+  let min = 0;
+  for (const it of items) if (it.seq < min) min = it.seq;
+  return min - 1;
+}
+
 /** Set `streaming: false` on any open assistant/reasoning items; reuses refs when untouched. */
 function closeStreaming(items: ChatItem[]): ChatItem[] {
   if (!items.some((it) => (it.kind === "assistant" || it.kind === "reasoning") && it.streaming)) {
@@ -332,7 +348,7 @@ function foldState(t: Transcript, ev: AcpEvent): Transcript {
       ...items,
       {
         kind: "notice",
-        seq: ev.seq,
+        seq: ev.seq >= 1 ? ev.seq : syntheticSeq(items),
         level: "info",
         text: reason ? `Session ended — ${reason}` : "Session ended.",
       },
@@ -347,6 +363,14 @@ function foldError(t: Transcript, ev: AcpEvent): Transcript {
   if (message === undefined) return t;
   return {
     ...t,
-    items: [...t.items, { kind: "notice", seq: ev.seq, level: "error", text: message }],
+    items: [
+      ...t.items,
+      {
+        kind: "notice",
+        seq: ev.seq >= 1 ? ev.seq : syntheticSeq(t.items),
+        level: "error",
+        text: message,
+      },
+    ],
   };
 }
