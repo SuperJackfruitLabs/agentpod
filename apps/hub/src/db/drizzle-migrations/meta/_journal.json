@@ -176,6 +176,13 @@
       "when": 1782790802513,
       "tag": "0024_boring_the_hunter",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786267145481,
+      "tag": "0025_striped_demogoblin",
+      "breakpoints": true
     }
   ]
 }
