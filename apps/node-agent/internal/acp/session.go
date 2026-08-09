@@ -30,11 +30,14 @@ const stderrRingBytes = 4 * 1024
 const closeGrace = 3 * time.Second
 
 // subscriber is one registered stdout consumer: a buffered chunk queue fed by
-// the read loop and drained by a dedicated dispatcher goroutine.
+// the read loop and drained by a dedicated dispatcher goroutine. finished is
+// closed once the dispatcher has delivered every queued chunk and returned —
+// unsubscribe blocks on it so callers get a drain guarantee.
 type subscriber struct {
-	ch   chan []byte
-	quit chan struct{}
-	stop sync.Once
+	ch       chan []byte
+	quit     chan struct{}
+	stop     sync.Once
+	finished chan struct{}
 }
 
 // shutdown detaches the subscriber's dispatcher (idempotent).
@@ -55,7 +58,8 @@ type Session struct {
 	subs       map[int]*subscriber
 	subSeq     int
 	stderrRing []byte
-	exitFns    []func(reason string)
+	exitFns    map[int]func(reason string)
+	exitSeq    int
 	exited     bool
 	exitReason string
 	stdinDone  bool
@@ -153,9 +157,11 @@ func (s *Session) stdoutLoop(r io.Reader, wg *sync.WaitGroup) {
 }
 
 // dispatch delivers queued chunks to one subscriber's callback in order. On
-// shutdown it drains whatever is already buffered, then exits. A callback
-// that blocks forever pins only this goroutine — never the read loop.
+// shutdown it drains whatever is already buffered, then exits and closes
+// sub.finished. A callback that blocks forever pins only this goroutine (and
+// any unsubscribe waiting on the drain) — never the read loop.
 func (s *Session) dispatch(sub *subscriber, fn func(chunk []byte)) {
+	defer close(sub.finished)
 	for {
 		select {
 		case c := <-sub.ch:
@@ -249,10 +255,18 @@ func (s *Session) Write(p []byte) error {
 // session or lose stream position for other subscribers. A dropped or
 // unsubscribed consumer receives no further chunks after its buffered
 // backlog drains.
+//
+// Drain guarantee: unsub BLOCKS until every chunk already queued for this
+// subscriber has been delivered to fn and the dispatcher goroutine has
+// returned — a caller that unsubscribes after child exit is certain fn saw
+// the child's complete output first. Consequently unsub must NEVER be called
+// from within fn itself (self-deadlock); spawn a goroutine for that
+// (`go unsub()`). unsub is idempotent and safe for concurrent use.
 func (s *Session) Subscribe(fn func(chunk []byte)) (unsub func()) {
 	sub := &subscriber{
-		ch:   make(chan []byte, subChanBuffer),
-		quit: make(chan struct{}),
+		ch:       make(chan []byte, subChanBuffer),
+		quit:     make(chan struct{}),
+		finished: make(chan struct{}),
 	}
 
 	s.mu.Lock()
@@ -268,6 +282,7 @@ func (s *Session) Subscribe(fn func(chunk []byte)) (unsub func()) {
 		delete(s.subs, id)
 		s.mu.Unlock()
 		sub.shutdown()
+		<-sub.finished
 	}
 }
 
@@ -275,16 +290,40 @@ func (s *Session) Subscribe(fn func(chunk []byte)) (unsub func()) {
 // reason is "exit" for a clean exit, otherwise the error string (with the
 // stderr tail appended when present). If the child has already exited, fn is
 // invoked immediately with the recorded reason.
-func (s *Session) OnExit(fn func(reason string)) {
+//
+// The returned unregister func removes the callback so long-lived sessions do
+// not accumulate one closure per attach/detach cycle; it is idempotent, safe
+// after exit, and a no-op once fn has fired (or is firing).
+func (s *Session) OnExit(fn func(reason string)) (unregister func()) {
 	s.mu.Lock()
 	if s.exited {
 		reason := s.exitReason
 		s.mu.Unlock()
 		fn(reason)
-		return
+		return func() {}
 	}
-	s.exitFns = append(s.exitFns, fn)
+	if s.exitFns == nil {
+		s.exitFns = make(map[int]func(reason string))
+	}
+	id := s.exitSeq
+	s.exitSeq++
+	s.exitFns[id] = fn
 	s.mu.Unlock()
+	return func() {
+		s.mu.Lock()
+		delete(s.exitFns, id)
+		s.mu.Unlock()
+	}
+}
+
+// OnExitCount reports the number of currently registered exit callbacks
+// (diagnostic/test helper — pins that attach/detach cycles unregister their
+// hooks instead of leaking).
+func (s *Session) OnExitCount() int {
+	s.mu.Lock()
+	n := len(s.exitFns)
+	s.mu.Unlock()
+	return n
 }
 
 // StderrTail returns the last 4 KiB of the child's stderr output.

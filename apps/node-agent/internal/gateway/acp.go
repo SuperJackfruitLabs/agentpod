@@ -22,30 +22,38 @@ type ACPCommandFunc func(key string) (argv []string, dir string, env []string, e
 // event from the session's reaper — so mu serializes them, keeping stream seq
 // numbers monotonic and guaranteeing nothing is emitted after the exit event.
 type acpAttachState struct {
-	sessionID string
-	unsub     func()
+	unsub func()
 
-	mu   sync.Mutex
-	seq  int
-	done bool // set once the exit event has been emitted
-	emit func(seq int, chunk string, eof bool, enc string) error
+	mu     sync.Mutex
+	seq    int
+	done   bool // set once the exit event has been emitted
+	failed bool // set once emit errored; suppresses further chunk frames
+	emit   func(seq int, chunk string, eof bool, enc string) error
 
 	exited chan struct{} // closed after the exit event; unblocks the attach handler
 }
 
 // emitChunk sends one base64 stream frame unless the exit event has already
-// been emitted.
+// been emitted or a previous emit failed. On emit failure the subscriber is
+// detached (mirroring term.attach's unsub-on-emit-error); the unsubscribe must
+// run async because it blocks until the session dispatcher — the goroutine
+// calling this very function — has drained and returned.
 func (st *acpAttachState) emitChunk(chunk []byte) {
 	encoded := base64.StdEncoding.EncodeToString(chunk)
 	st.mu.Lock()
-	defer st.mu.Unlock()
-	if st.done {
+	if st.done || st.failed {
+		st.mu.Unlock()
 		return
 	}
 	if err := st.emit(st.seq, encoded, false, "base64"); err != nil {
-		return // hub disconnected or attach cancelled — frames stop here
+		// Hub disconnected or attach cancelled — detach this subscriber.
+		st.failed = true
+		st.mu.Unlock()
+		go st.unsub()
+		return
 	}
 	st.seq++
+	st.mu.Unlock()
 }
 
 // emitExit sends the final stream frame whose decoded payload is the JSON
@@ -53,8 +61,8 @@ func (st *acpAttachState) emitChunk(chunk []byte) {
 // handler. Idempotent.
 func (st *acpAttachState) emitExit(reason string) {
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	if st.done {
+		st.mu.Unlock()
 		return
 	}
 	st.done = true
@@ -62,6 +70,7 @@ func (st *acpAttachState) emitExit(reason string) {
 		_ = st.emit(st.seq, base64.StdEncoding.EncodeToString(payload), false, "base64")
 		st.seq++
 	}
+	st.mu.Unlock()
 	close(st.exited)
 }
 
@@ -69,13 +78,13 @@ func (st *acpAttachState) emitExit(reason string) {
 // (acp.open, acp.attach, acp.close) plus inbound input frame handling via the
 // FrameHandler interface. Input frames whose id is not a live ACP session ID
 // pass through to the inner handler (terminal), preserving the frame chain.
+// All per-attach state lives on the attach request's own stack — input frames
+// are correlated by session ID against the manager, so no attach registry is
+// needed.
 type acpHandler struct {
 	inner Handler
 	mgr   *acp.Manager
 	cmdFn ACPCommandFunc
-
-	attachMu sync.Mutex
-	attaches map[string]*acpAttachState // keyed by attach request ID
 }
 
 // NewACPHandler wraps inner with ACP verb and input frame support.
@@ -85,10 +94,9 @@ type acpHandler struct {
 // The returned handler implements both Handler and FrameHandler.
 func NewACPHandler(inner Handler, mgr *acp.Manager, cmdFn ACPCommandFunc) Handler {
 	return &acpHandler{
-		inner:    inner,
-		mgr:      mgr,
-		cmdFn:    cmdFn,
-		attaches: make(map[string]*acpAttachState),
+		inner: inner,
+		mgr:   mgr,
+		cmdFn: cmdFn,
 	}
 }
 
@@ -140,15 +148,18 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 
 // handleAttach subscribes to the session's stdout stream and forwards each
 // chunk as a base64-encoded stream frame. It blocks until the context is
-// cancelled (detach via cancel frame) or the child exits — on exit a final
-// frame carrying {"event":"exit","reason":...} is emitted before the handler
-// returns and cleans up. On context cancellation the subscriber is removed
-// WITHOUT closing the session.
+// cancelled (detach via cancel frame) or the child exits — on exit every
+// chunk already queued for this subscriber is delivered first (Session unsub
+// blocks until the backlog has drained), then a final frame carrying
+// {"event":"exit","reason":...} is emitted. On context cancellation the
+// subscriber is removed and its exit hook unregistered WITHOUT closing the
+// session.
 //
-// The exit hook is registered per attach (not at open time) because
-// Session.OnExit fires immediately when the child has already exited — a
-// subscriber attaching around exit time still receives its exit event instead
-// of blocking forever.
+// The exit hook is registered per attach (not at open time) for two reasons:
+// Session.OnExit fires immediately when the child has already exited, so an
+// attach racing the exit still gets its event instead of blocking forever;
+// and the returned unregister func lets a detach drop the hook so long-lived
+// sessions don't accumulate one closure per attach/detach cycle.
 func (h *acpHandler) handleAttach(
 	ctx context.Context,
 	params json.RawMessage,
@@ -166,41 +177,28 @@ func (h *acpHandler) handleAttach(
 		return nil, true, fmt.Errorf("acp.attach: session not found: %s", p.SessionID)
 	}
 
-	// Extract the attach request ID embedded in ctx by serve() so the attach
-	// map can be keyed per request (mirrors term.attach) and input frames can
-	// be correlated with active attaches.
-	reqID, _ := ctx.Value(reqIDKey{}).(string)
-
 	st := &acpAttachState{
-		sessionID: p.SessionID,
-		emit:      emit,
-		exited:    make(chan struct{}),
+		emit:   emit,
+		exited: make(chan struct{}),
 	}
 	st.unsub = sess.Subscribe(st.emitChunk)
 
-	h.attachMu.Lock()
-	h.attaches[reqID] = st
-	h.attachMu.Unlock()
-
-	// Fires exactly once when the child exits (immediately if already exited):
-	// deliver the exit event to this subscriber, then clean up.
-	sess.OnExit(func(reason string) {
+	// Fires exactly once when the child exits (immediately if already exited).
+	// unsub blocks until this subscriber's queued backlog has been delivered,
+	// so the exit frame always trails the child's final output.
+	unregExit := sess.OnExit(func(reason string) {
 		st.unsub()
 		st.emitExit(reason)
 	})
 
-	defer func() {
-		h.attachMu.Lock()
-		delete(h.attaches, reqID)
-		h.attachMu.Unlock()
-	}()
-
 	select {
 	case <-st.exited:
-		// Child exited; the exit event has been emitted.
+		// Child exited; the backlog and exit event have been emitted.
 	case <-ctx.Done():
-		// cancel frame received: detach this subscriber, do NOT close the
-		// session (the child keeps running; another client can re-attach).
+		// cancel frame received: detach this subscriber and drop its exit
+		// hook, do NOT close the session (the child keeps running; another
+		// client can re-attach).
+		unregExit()
 		st.unsub()
 	}
 

@@ -231,6 +231,132 @@ func TestACPCloseEmitsExitEvent(t *testing.T) {
 	}
 }
 
+// TestACPAttachDeliversBacklogBeforeExit is the regression test for buffered
+// stdout being silently dropped at exit: the child writes a paced burst and
+// exits while a slow consumer is still draining its per-subscriber queue.
+// Every line must reach the consumer BEFORE the exit event frame — the
+// backlog must never be discarded in favor of the exit event.
+func TestACPAttachDeliversBacklogBeforeExit(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+
+	dir := t.TempDir()
+	burstCmd := ACPCommandFunc(func(string) ([]string, string, []string, error) {
+		// ~20 distinct chunks (paced so the fast read loop sees separate
+		// writes), then immediate exit.
+		return []string{"/bin/sh", "-c",
+			"i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done",
+		}, dir, nil, nil
+	})
+	h := NewACPHandler(failInner(t), mgr, burstCmd)
+
+	res, _, err := h.Handle(context.Background(), "acp.open", json.RawMessage(`{"key":"k"}`), nil)
+	if err != nil {
+		t.Fatalf("acp.open: %v", err)
+	}
+	sessionID := res.(map[string]any)["sessionId"].(string)
+
+	var mu sync.Mutex
+	var frames []string // decoded frame payloads, in emit order
+	slowEmit := func(_ int, chunk string, _ bool, _ string) error {
+		time.Sleep(30 * time.Millisecond) // slow consumer: backlog builds
+		decoded, err := base64.StdEncoding.DecodeString(chunk)
+		if err != nil {
+			return err
+		}
+		mu.Lock()
+		frames = append(frames, string(decoded))
+		mu.Unlock()
+		return nil
+	}
+
+	attachDone := make(chan error, 1)
+	go func() {
+		_, _, err := h.Handle(context.Background(), "acp.attach",
+			json.RawMessage(fmt.Sprintf(`{"sessionId":%q}`, sessionID)), slowEmit)
+		attachDone <- err
+	}()
+
+	select {
+	case err := <-attachDone:
+		if err != nil {
+			t.Fatalf("acp.attach: %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("attach did not return after child exit")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(frames) < 2 {
+		t.Fatalf("got %d frames, want chunks plus an exit event", len(frames))
+	}
+	last := frames[len(frames)-1]
+	if !strings.Contains(last, `"event":"exit"`) {
+		t.Fatalf("last frame = %q, want the exit event", last)
+	}
+	beforeExit := strings.Join(frames[:len(frames)-1], "")
+	for i := 1; i <= 20; i++ {
+		want := fmt.Sprintf("line%d\n", i)
+		if !strings.Contains(beforeExit, want) {
+			t.Fatalf("line%d missing before the exit event (backlog dropped); %d frames", i, len(frames))
+		}
+	}
+}
+
+// TestACPAttachDetachUnregistersExitHook is the regression test for exit-hook
+// leakage: every attach/detach cycle on a long-lived session must remove its
+// OnExit closure, returning the session's registered-callback count to
+// baseline.
+func TestACPAttachDetachUnregistersExitHook(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+
+	h := NewACPHandler(failInner(t), mgr, catCommandFunc(t.TempDir()))
+
+	res, _, err := h.Handle(context.Background(), "acp.open", json.RawMessage(`{"key":"k"}`), nil)
+	if err != nil {
+		t.Fatalf("acp.open: %v", err)
+	}
+	sessionID := res.(map[string]any)["sessionId"].(string)
+	sess, ok := mgr.Get(sessionID)
+	if !ok {
+		t.Fatal("session not registered")
+	}
+	base := sess.OnExitCount() // the manager's own removal hook
+
+	noopEmit := func(int, string, bool, string) error { return nil }
+	params := json.RawMessage(fmt.Sprintf(`{"sessionId":%q}`, sessionID))
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		attachDone := make(chan struct{})
+		go func() {
+			defer close(attachDone)
+			_, _, _ = h.Handle(ctx, "acp.attach", params, noopEmit)
+		}()
+
+		// Wait until this attach has registered its exit hook, then detach.
+		deadline := time.Now().Add(3 * time.Second)
+		for sess.OnExitCount() == base && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if sess.OnExitCount() != base+1 {
+			cancel()
+			t.Fatalf("iteration %d: OnExitCount = %d, want %d after attach", i, sess.OnExitCount(), base+1)
+		}
+		cancel()
+		select {
+		case <-attachDone:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("iteration %d: attach did not return after cancel", i)
+		}
+		if got := sess.OnExitCount(); got != base {
+			t.Fatalf("iteration %d: OnExitCount = %d after detach, want baseline %d (exit hook leaked)", i, got, base)
+		}
+	}
+}
+
 // recordingFrameHandler is a stub inner handler that records HandleFrame calls.
 type recordingFrameHandler struct {
 	Handler

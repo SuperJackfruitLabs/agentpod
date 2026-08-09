@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -117,6 +118,101 @@ func TestManager_CloseWithBlockedSubscriber(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("process not reaped")
 	}
+}
+
+// TestSession_UnsubscribeWaitsForBacklog pins the drain guarantee consumers
+// (gateway acp.attach) rely on for exit ordering: unsub must not return until
+// every chunk already queued for this subscriber has been delivered to fn —
+// otherwise the child's final output (e.g. its last JSON-RPC response) is
+// silently truncated when an exit event is emitted right after unsub.
+func TestSession_UnsubscribeWaitsForBacklog(t *testing.T) {
+	m := NewManager()
+	defer m.Shutdown()
+
+	// Child paces its writes so the fast read loop queues ~20 distinct chunks,
+	// then exits immediately after the burst.
+	s, err := m.Open("k",
+		[]string{"/bin/sh", "-c", "i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done"},
+		t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var mu sync.Mutex
+	var got []byte
+	unsub := s.Subscribe(func(c []byte) {
+		time.Sleep(30 * time.Millisecond) // slow consumer: backlog builds
+		mu.Lock()
+		got = append(got, c...)
+		mu.Unlock()
+	})
+
+	exited := make(chan struct{})
+	s.OnExit(func(string) { close(exited) })
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("child did not exit")
+	}
+
+	// At child exit the slow subscriber is still draining its queue. unsub
+	// must block until that backlog has been delivered.
+	unsub()
+
+	mu.Lock()
+	defer mu.Unlock()
+	for i := 1; i <= 20; i++ {
+		if !strings.Contains(string(got), fmt.Sprintf("line%d", i)) {
+			t.Fatalf("line%d missing after unsub returned; got %d bytes: %q", i, len(got), got)
+		}
+	}
+}
+
+// TestSession_OnExitUnregister pins that OnExit returns an unregister func so
+// long-lived sessions don't accumulate one dead closure per attach/detach
+// cycle, and that unregistered callbacks never fire.
+func TestSession_OnExitUnregister(t *testing.T) {
+	m := NewManager()
+	defer m.Shutdown()
+	s, err := m.Open("k", []string{"/bin/cat"}, t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := s.OnExitCount() // manager registers its own removal hook
+
+	fired := make(chan int, 4)
+	unreg1 := s.OnExit(func(string) { fired <- 1 })
+	unreg2 := s.OnExit(func(string) { fired <- 2 })
+	if got := s.OnExitCount(); got != base+2 {
+		t.Fatalf("OnExitCount = %d, want %d", got, base+2)
+	}
+
+	unreg1()
+	unreg1() // idempotent
+	if got := s.OnExitCount(); got != base+1 {
+		t.Fatalf("OnExitCount after unregister = %d, want %d", got, base+1)
+	}
+
+	if err := m.Close(s.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case n := <-fired:
+		if n != 2 {
+			t.Fatalf("unregistered callback %d fired", n)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("remaining callback did not fire")
+	}
+	select {
+	case n := <-fired:
+		t.Fatalf("unexpected extra callback: %d", n)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	unreg2() // after exit: must be a harmless no-op
 }
 
 func TestManager_OpenEmptyArgv(t *testing.T) {
