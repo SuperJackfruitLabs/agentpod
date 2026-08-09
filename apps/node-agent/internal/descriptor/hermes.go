@@ -61,7 +61,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		return []Station{}, nil
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup"}
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 	homeCopy := h.home
 
 	stations := []Station{
@@ -120,6 +120,23 @@ func (h *hermesDescriptor) workspaceFor(key string) (string, error) {
 		return filepath.Join(h.home, "profiles", name), nil
 	}
 	return "", fmt.Errorf("hermes: unrecognized key %q", key)
+}
+
+// ACPCommand implements ACPCommander. Hermes serves an ACP session via
+// `hermes -p <profile> acp --accept-hooks`, run from the profile's workspace.
+// The profile is derived from the station key the same way workspaceFor and
+// hermesNativeStartArgs parse it; for the root "hermes" key the profile
+// selector is omitted (mirroring hermesNativeStartArgs) and dir is the home.
+func (h *hermesDescriptor) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	dir, err = h.workspaceFor(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if key == "hermes" {
+		return []string{"hermes", "acp", "--accept-hooks"}, dir, nil, nil
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	return []string{"hermes", "-p", name, "acp", "--accept-hooks"}, dir, nil, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a station.

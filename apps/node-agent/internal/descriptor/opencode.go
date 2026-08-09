@@ -109,7 +109,7 @@ func (o *openCodeDescriptor) Detect() ([]Station, error) {
 		return nil, err
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 	seen := make(map[string]bool)
 	var stations []Station
 
@@ -241,6 +241,17 @@ func (o *openCodeDescriptor) projectPathForKey(key string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("opencode: station not found: %q", key)
+}
+
+// ACPCommand implements ACPCommander. OpenCode serves an ACP session via
+// `opencode acp`, run from the station's project workspace (the same path
+// term.open resolves through the workspace resolver).
+func (o *openCodeDescriptor) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	projPath, err := o.projectPathForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return []string{"opencode", "acp"}, projPath, nil, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a leaf station.

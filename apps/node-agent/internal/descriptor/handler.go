@@ -56,6 +56,34 @@ func NewHandler(reg *Registry) gateway.Handler {
 	})
 }
 
+// Handler exposes typed per-station capability resolution over a Registry for
+// the gateway wiring in cmd/agentpod-node. The verb-routing gateway.Handler is
+// built separately by NewHandler; methods here are injected into the gateway
+// as plain funcs, mirroring how lifecycleFn resolves the Lifecycle interface.
+type Handler struct {
+	reg *Registry
+}
+
+// NewCapabilityHandler returns a Handler resolving capabilities against reg.
+func NewCapabilityHandler(reg *Registry) *Handler {
+	return &Handler{reg: reg}
+}
+
+// ACPCommand resolves the descriptor for key and, when it implements
+// ACPCommander, returns the ACP spawn command for the station. Descriptors
+// that do not implement the interface yield an "acp not supported" error.
+func (h *Handler) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	d, err := h.reg.For(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	c, ok := d.(ACPCommander)
+	if !ok {
+		return nil, "", nil, fmt.Errorf("acp not supported for harness %q", d.Harness())
+	}
+	return c.ACPCommand(key)
+}
+
 // --- verb handlers ---
 
 func handleDetect(reg *Registry) (any, bool, error) {
