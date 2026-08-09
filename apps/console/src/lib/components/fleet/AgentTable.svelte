@@ -7,6 +7,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import * as Table from "$lib/components/ui/table";
   import { Empty } from "$lib/components/ui/empty";
+  import { Button } from "$lib/components/ui/button";
   import { cn } from "$lib/utils";
   import { toast } from "svelte-sonner";
   import StatusRibbon from "./StatusRibbon.svelte";
@@ -242,12 +243,19 @@
         // and the next fleet refresh will clear updateAvailable.
       } else {
         delete updatingNodes[nodeId];
-        toast.error("Update failed", { description: result.error ?? "Unknown error" });
+        toast.error("Couldn’t update the node", {
+          description:
+            result.error ??
+            "The node didn’t respond — it may already be restarting. Check back in a minute.",
+        });
       }
     } catch (err) {
       delete updatingNodes[nodeId];
-      toast.error("Update failed", {
-        description: err instanceof Error ? err.message : "Unknown error",
+      toast.error("Couldn’t update the node", {
+        description:
+          err instanceof Error
+            ? err.message
+            : "The node didn’t respond — it may already be restarting. Check back in a minute.",
       });
     }
   }
@@ -377,7 +385,18 @@
         {#if filteredAgents.length === 0}
           <Table.Row>
             <Table.Cell colspan={9} class="p-0">
-              <Empty title="No agents match the current filter" icon={SearchIcon} class="border-none rounded-none" />
+              <Empty title="No agents match the current filter" icon={SearchIcon} class="border-none rounded-none">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onclick={() => {
+                    searchQuery = "";
+                    filterUpdateAvailable = false;
+                  }}
+                >
+                  Clear filters
+                </Button>
+              </Empty>
             </Table.Cell>
           </Table.Row>
         {:else if groupByNode}

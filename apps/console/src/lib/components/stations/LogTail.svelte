@@ -389,7 +389,7 @@
       <DownloadIcon class="size-3.5" aria-hidden="true" />
     </Button>
 
-    <span class="ml-auto shrink-0 text-muted-foreground">{lines.length} lines</span>
+    <span class="ml-auto shrink-0 text-muted-foreground">{lines.length} {lines.length === 1 ? "line" : "lines"}</span>
   </div>
 
   <!-- Log lines -->
@@ -401,11 +401,16 @@
       onscroll={handleScroll}
     >
       {#if lines.length === 0 && status === "connected"}
-        <Empty title="No log output yet" icon={TerminalIcon} class="border-none" />
+        <Empty
+          title="No log output yet"
+          description="The agent is connected but hasn’t logged anything."
+          icon={TerminalIcon}
+          class="border-none"
+        />
       {:else if lines.length === 0}
         <div class="px-3 py-1 italic text-muted-foreground">Waiting for log output…</div>
       {:else if visibleLines.length === 0}
-        <div class="px-3 py-1 italic text-muted-foreground">No lines match the current filter.</div>
+        <div class="px-3 py-1 italic text-muted-foreground">No lines match the current filter</div>
       {:else}
         {#each visibleLines as line, i (i)}
           <div
@@ -429,7 +434,7 @@
         class="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full border bg-background px-3 py-1 text-xs shadow-md hover:bg-muted"
         onclick={jumpToBottom}
       >
-        {newLinesCount} new lines
+        {newLinesCount} new {newLinesCount === 1 ? "line" : "lines"}
         <ArrowDownIcon class="size-3" aria-hidden="true" />
       </button>
     {/if}

@@ -90,7 +90,7 @@ export async function connect(apiUrl: string, _apiKey?: string): Promise<boolean
         connected: false,
         apiUrl,
         lastTested: new Date().toISOString(),
-        error: "Health check failed",
+        error: "Couldn’t reach the hub.",
       };
       return false;
     }

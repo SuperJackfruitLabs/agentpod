@@ -33,7 +33,7 @@
       }
     } catch (e) {
       const err = e as Error;
-      error = err.message || "Failed to verify admin status";
+      error = err.message || "Couldn’t verify admin access.";
     } finally {
       isChecking = false;
     }

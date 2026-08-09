@@ -56,12 +56,15 @@
         // new version; next refresh clears updateAvailable.
       } else {
         updating = false;
-        toast.error("Update failed", { description: result.error ?? "Unknown error" });
+        toast.error("Couldn’t update the node", { description: result.error ?? "The node didn’t respond — it may already be restarting. Check back in a minute." });
       }
     } catch (e) {
       updating = false;
-      toast.error("Update failed", {
-        description: e instanceof Error ? e.message : "Unknown error",
+      toast.error("Couldn’t update the node", {
+        description:
+          e instanceof Error
+            ? e.message
+            : "The node didn’t respond — it may already be restarting. Check back in a minute.",
       });
     }
   }
@@ -104,7 +107,7 @@
   {#snippet actions()}
     {#if node}
       <span class="text-xs font-mono text-muted-foreground">
-        {node.agentVersion ?? "unknown"}
+        {node.agentVersion ?? "—"}
       </span>
       {#if node.updateAvailable}
         <span class="text-xs text-status-degraded">
@@ -135,8 +138,8 @@
   <section class="space-y-3">
     <div class="flex items-center justify-between gap-4">
       <div>
-        <h2 class="t-section">Detected stations</h2>
-        <p class="text-sm text-muted-foreground">Ready to adopt</p>
+        <h2 class="t-section">Detected agents</h2>
+        <p class="text-sm text-muted-foreground">Found on this node, not yet added</p>
       </div>
       {#if stations.detected.filter((s) => !isAlreadyAdopted(s.key)).length > 0}
         <Button
@@ -146,7 +149,7 @@
           disabled={stations.isLoading}
           class="shrink-0"
         >
-          Adopt all
+          Add all agents
         </Button>
       {/if}
     </div>
@@ -158,7 +161,12 @@
         {/each}
       </div>
     {:else if stations.detected.length === 0}
-      <Empty title="No stations detected" />
+      <Empty
+        title="No agents found on this node"
+        description="AgentPod looks for hermes, openclaw, claude-code, codex, and opencode. Start one and rescan."
+      >
+        <Button variant="outline" size="sm" onclick={loadStations}>Rescan</Button>
+      </Empty>
     {:else}
       <div class="flex flex-col gap-2 md:grid md:grid-cols-2 lg:grid-cols-3">
         {#each stations.detected as s (s.key)}
@@ -181,10 +189,10 @@
                   disabled={stations.isLoading}
                   class="shrink-0"
                 >
-                  Adopt
+                  Add agent
                 </Button>
               {:else}
-                <Badge variant="secondary" class="shrink-0">Adopted</Badge>
+                <Badge variant="secondary" class="shrink-0">Added</Badge>
               {/if}
             </Card.Content>
           </Card.Root>
@@ -193,12 +201,9 @@
     {/if}
   </section>
 
-  <!-- Adopted Stations section -->
+  <!-- Your agents section -->
   <section class="space-y-3">
-    <div>
-      <h2 class="t-section">Adopted stations</h2>
-      <p class="text-sm text-muted-foreground">Active workspaces</p>
-    </div>
+    <h2 class="t-section">Your agents</h2>
 
     {#if stations.isLoading}
       <div class="flex flex-col gap-2">
@@ -207,7 +212,10 @@
         {/each}
       </div>
     {:else if stations.adopted.length === 0}
-      <Empty title="No stations adopted yet" />
+      <Empty
+        title="No agents added yet"
+        description="Add a detected agent above to start monitoring it."
+      />
     {:else}
       <StationTree stations={stations.adopted} nodeId={id} />
     {/if}

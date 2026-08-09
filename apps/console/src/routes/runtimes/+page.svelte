@@ -45,7 +45,7 @@
     try {
       runtimes = await listRuntimes();
     } catch (e) {
-      error = e instanceof Error ? e.message : "Failed to load runtimes";
+      error = e instanceof Error ? e.message : "Couldn’t load runtimes.";
     } finally {
       isLoading = false;
     }
@@ -80,7 +80,7 @@
       isLoading = true;
       await loadRuntimes();
     } catch (e) {
-      toast.error("Destroy failed", {
+      toast.error("Couldn’t destroy the runtime", {
         description: e instanceof Error ? e.message : "Unknown error",
       });
     } finally {
@@ -94,7 +94,7 @@
       await startRuntime(rt.id);
       await loadRuntimes();
     } catch (e) {
-      toast.error("Start failed", {
+      toast.error("Couldn’t start the runtime", {
         description: e instanceof Error ? e.message : "Unknown error",
       });
     } finally {
@@ -108,7 +108,7 @@
       await stopRuntime(rt.id);
       await loadRuntimes();
     } catch (e) {
-      toast.error("Stop failed", {
+      toast.error("Couldn’t stop the runtime", {
         description: e instanceof Error ? e.message : "Unknown error",
       });
     } finally {
@@ -271,7 +271,7 @@
       >
         <Button onclick={() => (showNewRuntimeDialog = true)} data-testid="empty-new-runtime-btn">
           <PlusIcon class="h-4 w-4 mr-2" />
-          Provision runtime
+          New runtime
         </Button>
       </Empty>
     </div>
@@ -294,7 +294,7 @@
 <TypeToConfirmDialog
   open={destroyTarget !== null}
   title="Destroy runtime"
-  message="This will permanently destroy the runtime. This action cannot be undone."
+  message="This will permanently destroy the runtime. This action can’t be undone."
   confirmPhrase={destroyTarget?.name ?? ""}
   confirmLabel="Destroy"
   onConfirm={handleDestroyConfirm}

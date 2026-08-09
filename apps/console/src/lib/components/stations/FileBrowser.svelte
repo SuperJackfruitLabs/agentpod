@@ -17,7 +17,7 @@
     /** Show write actions when the station advertises fs.write capability. */
     canWrite?: boolean;
     /**
-     * Called when the user clicks "Edit (diff)" on a file.
+     * Called when the user clicks "Edit" on a file.
      * The station page uses this to open the ConfigEditor modal.
      * Only invoked when canWrite is true.
      */
@@ -148,7 +148,7 @@
       next.set(path, result);
       contentCache = next;
     } catch (err) {
-      fileError = err instanceof Error ? err.message : "Failed to read file";
+      fileError = err instanceof Error ? err.message : "Couldn’t read this file.";
     } finally {
       isLoadingFile = false;
     }
@@ -293,7 +293,7 @@
                   class="h-7 px-2 text-xs font-sans"
                   onclick={() => onOpenConfigEditor!(activePath!)}
                 >
-                  Edit (diff)
+                  Edit
                 </Button>
               {/if}
             </div>

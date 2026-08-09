@@ -188,12 +188,15 @@
         // version and the next nodes refresh will clear updateAvailable.
       } else {
         delete updatingNodes[id];
-        toast.error("Update failed", { description: result.error ?? "Unknown error" });
+        toast.error("Couldn’t update the node", { description: result.error ?? "The node didn’t respond — it may already be restarting. Check back in a minute." });
       }
     } catch (e) {
       delete updatingNodes[id];
-      toast.error("Update failed", {
-        description: e instanceof Error ? e.message : "Unknown error",
+      toast.error("Couldn’t update the node", {
+        description:
+          e instanceof Error
+            ? e.message
+            : "The node didn’t respond — it may already be restarting. Check back in a minute.",
       });
     }
   }

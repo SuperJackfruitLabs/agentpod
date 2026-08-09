@@ -54,7 +54,7 @@
   <span data-status={token} class={cn("inline-flex shrink-0", className)}>
     <span
       class={cn(
-        "size-2 rounded-full",
+        "size-2 rounded-full transition-colors duration-200",
         statusBgClass(status),
         animate && "motion-safe:animate-pulse",
       )}
@@ -67,6 +67,6 @@
     data-status={token}
     role="img"
     aria-label={display}
-    class={cn("block rounded-[2px]", statusBgClass(status), className)}
+    class={cn("block rounded-[2px] transition-colors duration-200", statusBgClass(status), className)}
   ></span>
 {/if}

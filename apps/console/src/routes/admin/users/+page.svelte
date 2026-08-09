@@ -114,7 +114,7 @@
       stats = statsResponse;
       signupEnabled = signupResponse.enabled;
     } catch (e) {
-      error = (e as Error).message || "Failed to load users";
+      error = (e as Error).message || "Couldn’t load users.";
     } finally {
       isLoading = false;
     }
@@ -149,7 +149,7 @@
       toast.success(`${user.email} has been unbanned`);
       await loadData();
     } catch (e) {
-      toast.error("Failed to unban user", { description: (e as Error).message });
+      toast.error("Couldn’t unban user", { description: (e as Error).message });
     } finally {
       delete actionLoading[user.id];
     }
@@ -168,7 +168,7 @@
         toast.success("Public signup enabled");
       }
     } catch (e) {
-      toast.error("Failed to update signup settings", { description: (e as Error).message });
+      toast.error("Couldn’t update signup settings", { description: (e as Error).message });
     } finally {
       signupLoading = false;
     }

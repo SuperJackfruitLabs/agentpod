@@ -224,7 +224,7 @@ test("role badge opens the role dialog", async () => {
     totalPages: 1,
   });
 
-  const { getAllByTestId, getByText } = render(UsersPage);
+  const { getAllByTestId, getAllByText } = render(UsersPage);
 
   await waitFor(() => {
     expect(getAllByTestId("role-badge").length).toBe(1);
@@ -233,7 +233,7 @@ test("role badge opens the role dialog", async () => {
   await fireEvent.click(getAllByTestId("role-badge")[0]);
 
   await waitFor(() => {
-    expect(getByText("Change role")).toBeTruthy();
+    expect(getAllByText("Change role").length).toBeGreaterThanOrEqual(1);
   });
 });
 

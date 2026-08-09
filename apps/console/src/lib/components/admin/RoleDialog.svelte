@@ -95,7 +95,7 @@
         </Select.Root>
         {#if newRole === "admin"}
           <p class="text-xs text-destructive">
-            Warning: Admins have full access to manage all users and system settings.
+            Admins have full access to manage all users and system settings.
           </p>
         {/if}
       </div>
@@ -105,7 +105,7 @@
           Cancel
         </Button>
         <Button onclick={handleConfirm} disabled={isUpdating || newRole === user?.role}>
-          {isUpdating ? "Updating…" : "Update role"}
+          {isUpdating ? "Changing…" : "Change role"}
         </Button>
       </Dialog.Footer>
     </Dialog.Content>

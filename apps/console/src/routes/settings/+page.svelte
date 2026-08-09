@@ -42,7 +42,7 @@
       </p>
     </div>
     <Button variant="outline" onclick={handleDisconnect}>
-      Use different server
+      Use a different hub
     </Button>
   </div>
 

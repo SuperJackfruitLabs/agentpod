@@ -74,7 +74,7 @@
       // one is found, otherwise the login form is shown.
       await initAuth();
     } else {
-      connectionError = connection.error || "Connection failed";
+      connectionError = connection.error || "Couldn’t reach the hub. Check the URL and that the hub is running.";
     }
 
     isConnecting = false;
@@ -149,7 +149,7 @@
     {#if step === "setup"}
       <!-- Setup Step -->
       <form onsubmit={handleSetup} class="space-y-5">
-        <Field label="API Endpoint" for="api-url" description="Enter your AgentPod Management API URL">
+        <Field label="Hub URL" for="api-url" description="Where your AgentPod hub is running.">
           <Input
             id="api-url"
             name="hub-url"
@@ -275,7 +275,7 @@
 
         <!-- Change server -->
         <Button variant="ghost" class="w-full text-muted-foreground hover:text-foreground" onclick={disconnect}>
-          ← Use different server
+          Use a different hub
         </Button>
       </div>
     {/if}

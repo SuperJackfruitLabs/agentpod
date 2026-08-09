@@ -79,7 +79,7 @@
       rootEntries = await listFiles(stationId, "");
       onEntriesLoaded?.("", rootEntries);
     } catch (err) {
-      error = err instanceof Error ? err.message : "Failed to load directory";
+      error = err instanceof Error ? err.message : "Couldn’t load this folder.";
     } finally {
       isLoading = false;
     }
@@ -379,7 +379,7 @@
 <TypeToConfirmDialog
   open={deleteTarget !== null}
   title="Delete {deleteTarget?.name ?? ''}"
-  message="This will permanently delete {deleteTarget?.name ?? ''}. This action cannot be undone."
+  message="This will permanently delete {deleteTarget?.name ?? ''}. This action can’t be undone."
   confirmPhrase={deleteTarget?.name ?? ""}
   confirmLabel={deleteTarget?.type === "dir" ? "Delete folder" : "Delete file"}
   onConfirm={handleDelete}

@@ -137,8 +137,8 @@
   <!-- Tabs for Color Scheme and Font Pairing -->
   <Tabs.Root value="colors" class="w-full">
     <Tabs.List class="grid w-full grid-cols-2">
-      <Tabs.Trigger value="colors">Color Schemes</Tabs.Trigger>
-      <Tabs.Trigger value="fonts">Font Pairings</Tabs.Trigger>
+      <Tabs.Trigger value="colors">Color schemes</Tabs.Trigger>
+      <Tabs.Trigger value="fonts">Font pairings</Tabs.Trigger>
     </Tabs.List>
 
     <!-- Color Schemes Tab -->
@@ -153,10 +153,10 @@
           }}
         >
           <Select.Trigger class="w-48">
-            {selectedColorCategory === "all" ? "All Categories" : getColorCategoryLabel(selectedColorCategory)}
+            {selectedColorCategory === "all" ? "All categories" : getColorCategoryLabel(selectedColorCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
-            <Select.Item value="all" label="All Categories" />
+            <Select.Item value="all" label="All categories" />
             {#each colorSchemeCategories as category}
               <Select.Item value={category.id} label={category.label} />
             {/each}
@@ -225,7 +225,7 @@
             <div>
               <p class="text-sm font-mono font-medium text-primary">{themeStore.currentColorScheme.label}</p>
               <p class="text-xs text-muted-foreground font-mono capitalize">
-                {themeStore.currentColorScheme.category} · Shiki: {themeStore.shikiThemes.light}/{themeStore.shikiThemes.dark}
+                {themeStore.currentColorScheme.category}
               </p>
             </div>
             <div class="flex gap-1">
@@ -262,10 +262,10 @@
           }}
         >
           <Select.Trigger class="w-48">
-            {selectedFontCategory === "all" ? "All Categories" : getFontCategoryLabel(selectedFontCategory)}
+            {selectedFontCategory === "all" ? "All categories" : getFontCategoryLabel(selectedFontCategory)}
           </Select.Trigger>
           <Select.Content class="font-mono">
-            <Select.Item value="all" label="All Categories" />
+            <Select.Item value="all" label="All categories" />
             {#each fontPairingCategories as category}
               <Select.Item value={category.id} label={category.label} />
             {/each}

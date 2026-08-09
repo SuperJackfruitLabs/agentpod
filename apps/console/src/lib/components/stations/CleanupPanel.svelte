@@ -166,7 +166,7 @@
                   {item.path}
                 </span>
                 <span class="flex shrink-0 items-center gap-2">
-                  <span class="text-xs uppercase tracking-wide text-muted-foreground">
+                  <span class="text-xs text-muted-foreground">
                     {item.kind}
                   </span>
                   <span class="font-mono text-xs tabular-nums text-muted-foreground">
@@ -185,7 +185,7 @@
 <TypeToConfirmDialog
   open={dialogOpen}
   title="Apply cleanup"
-  message="This will permanently remove the selected {selectedPaths.length} item{selectedPaths.length === 1 ? '' : 's'}. Type the station ID below to confirm."
+  message="This will permanently remove the selected {selectedPaths.length} item{selectedPaths.length === 1 ? '' : 's'}. Type the agent ID below to confirm."
   confirmPhrase={stationId}
   confirmLabel="Delete items"
   onConfirm={handleDialogConfirm}

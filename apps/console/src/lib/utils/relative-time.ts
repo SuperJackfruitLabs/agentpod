@@ -12,7 +12,7 @@
  */
 
 export function relativeTime(dateStr: string | null): string {
-  if (dateStr === null) return "unknown";
+  if (dateStr === null) return "—";
   try {
     const diff = Date.now() - new Date(dateStr).getTime();
     if (Number.isNaN(diff)) return "?";

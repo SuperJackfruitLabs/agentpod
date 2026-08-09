@@ -24,7 +24,7 @@
     try {
       rows = await activity(stationId);
     } catch (err) {
-      error = err instanceof Error ? err.message : "Failed to load activity";
+      error = err instanceof Error ? err.message : "Couldn’t load activity.";
     } finally {
       isLoading = false;
     }

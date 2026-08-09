@@ -49,7 +49,7 @@
       original = result.content;
       buffer = result.content;
     } catch (err) {
-      loadError = err instanceof Error ? err.message : "Failed to load file";
+      loadError = err instanceof Error ? err.message : "Couldn’t load this file.";
     } finally {
       isLoading = false;
     }
@@ -92,7 +92,7 @@
       backupPath = result.backupPath ?? null;
       onSaved?.(path);
     } catch (err) {
-      saveError = err instanceof Error ? err.message : "Failed to save";
+      saveError = err instanceof Error ? err.message : "Couldn’t save the file.";
     } finally {
       isSaving = false;
       showConfirm = false;
@@ -158,7 +158,7 @@
       {#if hasChanges}
         <div class="flex flex-col flex-1 overflow-auto border-t border-border bg-muted/10">
           <div class="px-3 py-1 text-xs font-sans text-muted-foreground border-b border-border/60">
-            Diff (original → buffer)
+            Changes
           </div>
           <div
             data-testid="diff-view"
