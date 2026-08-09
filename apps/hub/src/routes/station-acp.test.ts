@@ -42,7 +42,11 @@ import {
 } from "../../tests/helpers/acp-fake-node";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { adoptStations } from "../services/station-registry";
-import { endSession, getSession } from "../services/acp-sessions";
+import {
+  endSession,
+  getSession,
+  _subscriberCountForTest,
+} from "../services/acp-sessions";
 import { gatewayRoutes } from "./gateway";
 import { stationAcpRoutes } from "./station-acp";
 import { websocket } from "../ws";
@@ -464,6 +468,127 @@ test(
       );
 
       second.ws.close();
+      await endSession(TEST_USER, row.id, "test done");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "disconnect during subscribe's awaits does not leak a live subscriber (regression: unsubscribe-null race)",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-leak-host",
+      { stationKey: "acproute-leak" }
+    );
+    try {
+      const created = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(created.status).toBe(201);
+      const row = (await created.json()) as AcpSessionRow;
+
+      // Race the close frame against handleSubscribe's DB awaits: send
+      // subscribe and close IMMEDIATELY, several times. Without the closed
+      // guard, onClose runs while unsubscribe is still null, then
+      // handleSubscribe resumes and registers a subscriber nothing removes.
+      for (let i = 0; i < 10; i++) {
+        const client = connectClientWs(server.port!, row.id, TEST_USER);
+        await client.opened;
+        // Let onOpen's ownership lookup settle so the message gate is open
+        // and the race lands inside handleSubscribe itself.
+        await new Promise((r) => setTimeout(r, 50));
+        client.ws.send(JSON.stringify({ t: "subscribe", sinceSeq: 0 }));
+        client.ws.close();
+      }
+
+      // Every subscriber must be gone once the sockets are down.
+      await pollUntil(() => _subscriberCountForTest(row.id) === 0, 5000);
+
+      await endSession(TEST_USER, row.id, "test done");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "a second valid subscribe replaces the first subscription — one live subscriber, no double delivery",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-resub-host",
+      { stationKey: "acproute-resub" }
+    );
+    try {
+      const created = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(created.status).toBe(201);
+      const row = (await created.json()) as AcpSessionRow;
+
+      const client = connectClientWs(server.port!, row.id, TEST_USER);
+      await client.opened;
+      client.ws.send(JSON.stringify({ t: "subscribe", sinceSeq: 0 }));
+      await pollUntil(() => client.msgs.find((m) => m.t === "replay-done"));
+
+      // Re-subscribe on the SAME socket: replaces, not stacks.
+      client.ws.send(JSON.stringify({ t: "subscribe", sinceSeq: 0 }));
+      await pollUntil(
+        () => client.msgs.filter((m) => m.t === "replay-done").length >= 2
+      );
+      expect(_subscriberCountForTest(row.id)).toBe(1);
+
+      // A subsequent live event is delivered exactly once.
+      client.ws.send(JSON.stringify({ t: "prompt", text: "once please" }));
+      await pollUntil(() =>
+        receivedEvents(client).find((e) => e.type === "user-prompt")
+      );
+      const promptEvents = receivedEvents(client).filter(
+        (e) => e.type === "user-prompt"
+      );
+      expect(promptEvents.length).toBe(1);
+
+      client.ws.close();
+      await endSession(TEST_USER, row.id, "test done");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "WS upgrade with a disallowed Origin is refused (CSWSH)",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-origin-host",
+      { stationKey: "acproute-origin" }
+    );
+    try {
+      const created = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(created.status).toBe(201);
+      const row = (await created.json()) as AcpSessionRow;
+
+      const { closeCode } = await new Promise<{ closeCode: number }>((resolve) => {
+        const ws = new WebSocket(
+          `ws://localhost:${server.port}/api/acp/sessions/${row.id}/ws`,
+          {
+            headers: {
+              "X-Test-User-Id": TEST_USER,
+              Origin: "https://evil.example",
+            },
+          } as RequestInit & { headers: Record<string, string> }
+        );
+        ws.onclose = (e) => resolve({ closeCode: e.code });
+        ws.onerror = () => resolve({ closeCode: 1006 });
+      });
+      expect([1008, 1006, 1000, 1011].includes(closeCode)).toBe(true);
+
       await endSession(TEST_USER, row.id, "test done");
       fake.close();
       await new Promise((r) => setTimeout(r, 100));

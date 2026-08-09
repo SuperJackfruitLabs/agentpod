@@ -209,6 +209,11 @@ export const stationAcpRoutes = new Hono()
 
       const handleSubscribe = async (ws: Ws, sinceSeq: number) => {
         const row = await acp.getSession(user!.id, sessionId);
+        // Leak guard (station-terminal "Fix 1" pattern): if the client
+        // disconnected while we were awaiting the DB lookup, onClose already
+        // ran — with unsubscribe still null, so it had nothing to remove.
+        // Registering a subscriber now would leak it forever.
+        if (closed) return;
         if (!row) {
           sendError(ws, "Couldn't find that session.");
           return;
@@ -235,6 +240,15 @@ export const stationAcpRoutes = new Hono()
           deliver(ws, e);
         });
 
+        // Leak guard, part two: onClose may have run in the microtask gap
+        // around the await above. It could not cancel (unsubscribe was null
+        // then), so self-unsubscribe now.
+        if (closed) {
+          unsubscribe();
+          unsubscribe = null;
+          return;
+        }
+
         const rows = await db
           .select()
           .from(acpEvents)
@@ -242,6 +256,10 @@ export const stationAcpRoutes = new Hono()
             and(eq(acpEvents.sessionId, sessionId), gt(acpEvents.seq, sinceSeq))
           )
           .orderBy(asc(acpEvents.seq));
+
+        // Disconnected during the replay read: onClose has already removed
+        // the subscription (unsubscribe was set) — just stop.
+        if (closed) return;
 
         // Replay. A state-ended event in the replay defers its bye until
         // after replay-done so the client always sees the full transcript
@@ -297,7 +315,16 @@ export const stationAcpRoutes = new Hono()
           }
 
           // ── 2. Ownership: the session must exist AND belong to the user ──
-          const row = await acp.getSession(user.id, sessionId);
+          // A lookup failure must not strand the socket with the gate pending
+          // (messages would queue unboundedly) — close it instead.
+          let row: Awaited<ReturnType<typeof acp.getSession>>;
+          try {
+            row = await acp.getSession(user.id, sessionId);
+          } catch {
+            allowMessages(false);
+            ws.close(1011, "Couldn't open the session.");
+            return;
+          }
           if (!row) {
             ws.close(1008, "session not found");
             allowMessages(false);

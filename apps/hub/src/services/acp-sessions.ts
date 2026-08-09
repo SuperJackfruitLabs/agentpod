@@ -659,6 +659,11 @@ async function appendEndedState(sessionId: string, reason: string): Promise<void
   });
 }
 
+/** Test hook: live subscriber count for a session (leak detection). */
+export function _subscriberCountForTest(sessionId: string): number {
+  return subscribers.get(sessionId)?.size ?? 0;
+}
+
 /** Subscribe to live events; replay is the caller's job (read acp_events). */
 export function subscribe(
   sessionId: string,
