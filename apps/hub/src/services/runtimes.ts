@@ -14,7 +14,7 @@
  *   - driver provision() throw   → status set to "error"; rethrow (→ 502)
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { mintEnrollmentToken } from "./enrollment";
@@ -174,13 +174,22 @@ export async function createRuntime(
 }
 
 /**
- * List all provisioned runtimes for a user.
+ * List a user's live provisioned runtimes.
+ *
+ * Destroyed rows stay in the DB for history but are excluded here: no action
+ * can be taken on a destroyed runtime, so surfacing it gives the console a
+ * permanent dead row.
  */
 export async function listRuntimes(userId: string): Promise<ProvisionedRuntime[]> {
   const rows = await db
     .select()
     .from(provisionedRuntimes)
-    .where(eq(provisionedRuntimes.userId, userId));
+    .where(
+      and(
+        eq(provisionedRuntimes.userId, userId),
+        ne(provisionedRuntimes.status, "destroyed")
+      )
+    );
 
   return rows.map(toContract);
 }

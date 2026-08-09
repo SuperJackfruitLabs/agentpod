@@ -220,6 +220,28 @@ test("GET /api/runtimes → only the caller's runtimes", async () => {
   expect(otherUserRts).toHaveLength(0);
 }, 30_000);
 
+test("GET /api/runtimes → destroyed runtimes are excluded (no immortal ghost rows)", async () => {
+  // Regression: destroyed rows are kept in the DB for history, but the list
+  // endpoint must not return them — the console can take no action on a
+  // destroyed runtime, so returning it produces a permanent dead row.
+  const createRes = await createRuntime(TEST_USER, "ghost-box");
+  expect(createRes.status).toBe(201);
+  const created = (await createRes.json()) as { id: string };
+
+  const delRes = await testApp.request(`/api/runtimes/${created.id}`, {
+    method: "DELETE",
+    headers: { "X-Test-User-Id": TEST_USER },
+  });
+  expect(delRes.status).toBe(204);
+
+  const res = await testApp.request("/api/runtimes", {
+    headers: { "X-Test-User-Id": TEST_USER },
+  });
+  expect(res.status).toBe(200);
+  const list = (await res.json()) as Array<{ id: string }>;
+  expect(list.find((r) => r.id === created.id)).toBeUndefined();
+}, 30_000);
+
 test("GET /api/runtimes/providers → lists enabled providers", async () => {
   const res = await testApp.request("/api/runtimes/providers", {
     headers: { "X-Test-User-Id": TEST_USER },
