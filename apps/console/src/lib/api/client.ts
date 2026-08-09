@@ -26,7 +26,7 @@ export function handleUnauthorized(): void {
   }
 }
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
+export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const requestLine = `${init?.method ?? "GET"} ${path}`;
   let res: Response;
   try {
