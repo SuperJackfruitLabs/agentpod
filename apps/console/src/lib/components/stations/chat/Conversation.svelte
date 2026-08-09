@@ -52,14 +52,41 @@
   let follow = $state(true);
   let newItemsCount = $state(0);
   let scrollTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * A pin was requested while the container had no layout. The station page
+   * keeps this panel mounted-but-`display:none` across tab switches, and a
+   * hidden element reports `scrollHeight === 0` — pinning then would park the
+   * transcript at the top, following, with nothing to re-trigger it. The pin is
+   * held here and replayed when layout comes back (resize) or items change.
+   */
+  let pinPending = false;
+
+  /** Pin to the newest message. Returns false when there's no layout to pin to. */
+  function pinToBottom(): boolean {
+    if (!containerEl || containerEl.scrollHeight === 0) return false;
+    containerEl.scrollTop = containerEl.scrollHeight;
+    return true;
+  }
 
   function queueScrollToBottom() {
     if (scrollTimer !== null) clearTimeout(scrollTimer);
     scrollTimer = setTimeout(() => {
       scrollTimer = null;
-      if (containerEl) containerEl.scrollTop = containerEl.scrollHeight;
+      pinPending = !pinToBottom();
     }, 0);
   }
+
+  // Becoming visible again resizes the container from 0 → its real height; that
+  // is the signal to replay a pin deferred while the panel was hidden.
+  $effect(() => {
+    const el = containerEl;
+    if (!el) return;
+    const observer = new ResizeObserver(() => {
+      if (pinPending && follow) queueScrollToBottom();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  });
 
   // A manual scroll away from the bottom (>~40px) pauses follow; scrolling
   // back to within the threshold re-enables it.
@@ -103,7 +130,9 @@
     } else if (added < 0) {
       // Transcript replaced (new session) — reset the pill.
       newItemsCount = 0;
-    } else if (tailGrew && follow) {
+    } else if ((tailGrew || pinPending) && follow) {
+      // pinPending: a pin deferred while hidden gets another chance on every
+      // items change, in case the resize signal never arrives.
       queueScrollToBottom();
     }
   });
@@ -145,7 +174,11 @@
   $effect(() => {
     const s = status;
     if (prevStatus !== null && s !== prevStatus) {
-      const msg = STATUS_ANNOUNCEMENTS[s];
+      // "starting" doubles as the transcript's placeholder before any state
+      // event lands, so its resolution to idle is bookkeeping, not news — the
+      // agent never did anything to become idle from.
+      const placeholderResolved = prevStatus === "starting" && s === "idle";
+      const msg = placeholderResolved ? undefined : STATUS_ANNOUNCEMENTS[s];
       if (msg) announcement = msg;
     }
     prevStatus = s;

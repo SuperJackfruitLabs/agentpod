@@ -81,7 +81,23 @@ test("working shows a stop button that calls onCancel; Send is absent", async ()
   expect(textarea.value).toBe("queued thought");
 });
 
-test("disabled disables the textarea", () => {
-  const { textarea } = setup({ disabled: true });
-  expect(textarea.disabled).toBe(true);
+test("disabled marks the textarea read-only WITHOUT blurring it, and refuses sends", async () => {
+  const { getByRole, textarea, onSend } = setup({ disabled: true });
+
+  // A real `disabled` attribute would be blurred to <body> by the browser,
+  // dumping keyboard users out of the composer after every send.
+  expect(textarea.disabled).toBe(false);
+  expect(textarea.readOnly).toBe(true);
+  expect(textarea.getAttribute("aria-disabled")).toBe("true");
+  textarea.focus();
+  expect(document.activeElement).toBe(textarea);
+
+  expect((getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+
+  // The guard in send() — not the attribute — is what refuses and keeps the draft.
+  await fireEvent.input(textarea, { target: { value: "typed anyway" } });
+  await fireEvent.keyDown(textarea, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  expect(textarea.value).toBe("typed anyway");
+  expect(document.activeElement).toBe(textarea);
 });

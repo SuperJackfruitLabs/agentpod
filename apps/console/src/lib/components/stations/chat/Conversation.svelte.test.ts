@@ -1,4 +1,4 @@
-import { test, expect, vi } from "vitest";
+import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent } from "@testing-library/svelte";
 import type { ChatItem } from "./transcript";
 
@@ -7,6 +7,38 @@ vi.mock("./Response.svelte", () => import("./response.stub.svelte"));
 
 // Static import: compiled during file collection, not inside a test's waitFor.
 import Conversation from "./Conversation.svelte";
+
+// A drivable ResizeObserver: the component observes its scroll container to
+// learn when a hidden (keep-alive) panel comes back and gets its layout, and the
+// global vitest stub never fires callbacks.
+class DrivableResizeObserver {
+  static callbacks: Array<() => void> = [];
+  constructor(private cb: () => void) {
+    DrivableResizeObserver.callbacks.push(cb);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {
+    DrivableResizeObserver.callbacks = DrivableResizeObserver.callbacks.filter(
+      (c) => c !== this.cb,
+    );
+  }
+  /** Test helper: every live observer reports a resize. */
+  static fire() {
+    for (const cb of [...DrivableResizeObserver.callbacks]) cb();
+  }
+}
+
+const realResizeObserver = globalThis.ResizeObserver;
+
+beforeEach(() => {
+  DrivableResizeObserver.callbacks = [];
+  globalThis.ResizeObserver = DrivableResizeObserver as unknown as typeof ResizeObserver;
+});
+
+afterEach(() => {
+  globalThis.ResizeObserver = realResizeObserver;
+});
 
 function toolItem(overrides: Partial<Extract<ChatItem, { kind: "tool" }>> = {}): ChatItem {
   return {
@@ -128,6 +160,22 @@ test("a permission announces when unanswered, and answering does not re-announce
   expect(region.textContent).toContain("Agent asks to run go test");
 });
 
+test("resolving the starting placeholder to idle is not announced", async () => {
+  const { getByTestId, rerender } = render(Conversation, {
+    props: { items: [], status: "starting", onAnswer: vi.fn() },
+  });
+
+  // ChatPanel shows the transcript's "starting" placeholder until the attached
+  // session's real status arrives — that flip is bookkeeping, not news.
+  await rerender({ status: "idle" });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(getByTestId("chat-announcer").textContent ?? "").not.toContain("Agent is idle.");
+
+  // A genuine flip out of the placeholder still announces.
+  await rerender({ status: "working" });
+  await waitFor(() => expect(getByTestId("chat-announcer").textContent).toContain("working"));
+});
+
 test("aria-live region announces status flips", async () => {
   const { getByTestId, rerender } = render(Conversation, {
     props: { items: [], status: "working", onAnswer: vi.fn() },
@@ -169,6 +217,45 @@ test("scroll-away pauses follow; new items show a pill; clicking jumps back", as
 
   await fireEvent.click(getByText(/2 new messages/));
   await waitFor(() => expect(queryByText(/new messages/)).toBeNull());
+});
+
+test("a pin requested while the panel is hidden is replayed when layout returns", async () => {
+  const items: ChatItem[] = [{ kind: "user", seq: 1, text: "one" }];
+  const { getByTestId, queryByText, rerender } = render(Conversation, {
+    props: { items, status: "working", onAnswer: vi.fn() },
+  });
+
+  const container = getByTestId("chat-scroll-container");
+  let scrollTop = 0;
+  // display:none (the station page keeps this panel alive across tab switches):
+  // no layout at all, so scrollHeight reads 0.
+  let scrollHeight = 0;
+  Object.defineProperty(container, "scrollTop", {
+    get: () => scrollTop,
+    set: (v: number) => {
+      scrollTop = v;
+    },
+    configurable: true,
+  });
+  Object.defineProperty(container, "scrollHeight", { get: () => scrollHeight, configurable: true });
+  Object.defineProperty(container, "clientHeight", {
+    get: () => (scrollHeight === 0 ? 0 : 200),
+    configurable: true,
+  });
+
+  // The agent replies while the panel is hidden.
+  await rerender({
+    items: [...items, { kind: "assistant", seq: 2, text: "two", streaming: false }] as ChatItem[],
+  });
+  await new Promise((r) => setTimeout(r, 0));
+  expect(scrollTop).toBe(0); // nothing to pin to yet
+  expect(queryByText(/new message/)).toBeNull(); // still following: no pill
+
+  // Back on the Chat tab: layout returns, which resizes the container.
+  scrollHeight = 800;
+  DrivableResizeObserver.fire();
+
+  await waitFor(() => expect(scrollTop).toBe(800));
 });
 
 test("streaming growth of the trailing item scrolls to bottom while following", async () => {

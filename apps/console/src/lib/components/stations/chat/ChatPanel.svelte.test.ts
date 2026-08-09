@@ -206,7 +206,7 @@ test("the chosen mode chip seeds session creation", async () => {
   await waitFor(() => expect(create).toHaveBeenCalledWith("st1", "accept-edits"));
 });
 
-test("the composer is disabled while a create is in flight and until the echo lands", async () => {
+test("the composer refuses sends while a create is in flight and until the echo lands", async () => {
   const u = await renderIdle();
   let resolveCreate: (r: AcpSessionRow) => void = () => {};
   vi.spyOn(api, "createAcpSession").mockReturnValue(
@@ -222,20 +222,47 @@ test("the composer is disabled while a create is in flight and until the echo la
 
   // Create in flight: a second message must not be typeable-and-lost — the
   // controller would refuse it and PromptInput would clear the draft.
-  expect(box.disabled).toBe(true);
+  expect(box.readOnly).toBe(true);
+  expect(box.getAttribute("aria-disabled")).toBe("true");
 
   resolveCreate(row());
   await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
   await tick();
   // Optimistic prompt still awaiting its echo → still refused.
-  expect(box.disabled).toBe(true);
+  expect(box.readOnly).toBe(true);
 
   MockWebSocket.latest()!.fireMessage({
     t: "event",
     event: ev(1, "user-prompt", { text: "first" }),
   });
   await tick();
-  expect(box.disabled).toBe(false);
+  expect(box.readOnly).toBe(false);
+  expect(box.getAttribute("aria-disabled")).toBeNull();
+});
+
+test("sending keeps focus in the composer, through the create and the echo", async () => {
+  const u = await renderIdle();
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row());
+
+  const box = composer(u);
+  box.focus();
+  await fireEvent.input(box, { target: { value: "hello agent" } });
+  await fireEvent.keyDown(box, { key: "Enter" });
+  await tick();
+
+  // The refusal window must never blur the composer: a keyboard user would
+  // otherwise land at <body> and have to Tab through the whole transcript
+  // (tool and permission cards are full of focusable controls) every turn.
+  expect(document.activeElement).toBe(box);
+
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  MockWebSocket.latest()!.fireMessage({
+    t: "event",
+    event: ev(1, "user-prompt", { text: "hello agent" }),
+  });
+  await tick();
+
+  expect(document.activeElement).toBe(box);
 });
 
 test("a failed create surfaces the strip and a toast, and stays sendable", async () => {
@@ -256,7 +283,7 @@ test("a failed create surfaces the strip and a toast, and stays sendable", async
   });
   // Nothing is live, so there's nothing to retry a connection to.
   expect(u.queryByRole("button", { name: "Retry" })).toBeNull();
-  expect(box.disabled).toBe(false);
+  expect(box.readOnly).toBe(false);
 });
 
 // ─── Turn controls ──────────────────────────────────────────────────────────

@@ -8,6 +8,14 @@
    * stop button (cancel the turn) and Enter is a no-op that KEEPS the draft —
    * the controller refuses mid-turn prompts, so silently clearing would lose
    * the user's text.
+   *
+   * `disabled` never reaches the textarea as the `disabled` attribute: the
+   * caller sets it in the window right after a send (session create + optimistic
+   * echo), and a focused element that becomes `disabled` is blurred to <body> by
+   * the browser — every turn would throw a keyboard user back to the top of the
+   * transcript. It's `aria-disabled` + `readonly` instead, so focus survives,
+   * and `send()`'s own guard (not the attribute) is what refuses the send and
+   * keeps the draft.
    */
   import ArrowUpIcon from "@lucide/svelte/icons/arrow-up";
   import SquareIcon from "@lucide/svelte/icons/square";
@@ -45,8 +53,9 @@
     bind:value
     placeholder="Message the agent…"
     aria-label="Message the agent"
-    class="max-h-40 min-h-9"
-    {disabled}
+    class="max-h-40 min-h-9 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+    aria-disabled={disabled ? "true" : undefined}
+    readonly={disabled}
     onkeydown={handleKeydown}
   />
   {#if working}
