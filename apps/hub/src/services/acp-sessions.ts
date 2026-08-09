@@ -60,6 +60,48 @@ export function _setOfflineGraceMsForTest(ms: number): void {
   offlineGraceMs = ms;
 }
 
+// Deadline for each ACP handshake request (initialize, session/new). An agent
+// process that spawns but never speaks ACP (interactive-prompt/TTY wedge —
+// the class Hermes hit in dogfooding) must not leave createSession pending
+// forever: the live-map entry is registered before the handshake, so a hung
+// await would 409-lock the station until hub restart.
+let handshakeTimeoutMs = 30_000;
+
+/** Test hook: shrink the handshake deadline. */
+export function _setHandshakeTimeoutMsForTest(ms: number): void {
+  handshakeTimeoutMs = ms;
+}
+
+const HANDSHAKE_TIMEOUT_MESSAGE =
+  "Couldn't start the agent process — the agent didn't respond (handshake timed out).";
+
+/**
+ * Reject with `message` if `promise` doesn't settle within `ms`.
+ *
+ * On timeout the underlying promise is left to settle later (the SDK rejects
+ * it when the connection closes) — its eventual rejection is swallowed so it
+ * never becomes an unhandled rejection.
+ */
+function withDeadline<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      promise.catch(() => {});
+      reject(new Error(message));
+    }, ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface CreateSessionInput {
@@ -430,17 +472,25 @@ export async function createSession(
       () => void handleWireClosed(live, "wire error")
     );
 
-    await connection.agent.request("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {},
-      clientInfo: { name: "agentpod-hub", version: "0.1.0" },
-    });
-    const created = await connection.agent.request("session/new", {
-      // The SDK requires an absolute cwd; the station workspace is the
-      // natural one, "/" the fallback for workspace-less stations.
-      cwd: station.workspacePath ?? "/",
-      mcpServers: [],
-    });
+    await withDeadline(
+      connection.agent.request("initialize", {
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: {},
+        clientInfo: { name: "agentpod-hub", version: "0.1.0" },
+      }),
+      handshakeTimeoutMs,
+      HANDSHAKE_TIMEOUT_MESSAGE
+    );
+    const created = await withDeadline(
+      connection.agent.request("session/new", {
+        // The SDK requires an absolute cwd; the station workspace is the
+        // natural one, "/" the fallback for workspace-less stations.
+        cwd: station.workspacePath ?? "/",
+        mcpServers: [],
+      }),
+      handshakeTimeoutMs,
+      HANDSHAKE_TIMEOUT_MESSAGE
+    );
     live.acpSessionId = created.sessionId;
 
     await db

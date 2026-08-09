@@ -62,6 +62,7 @@ import {
   subscribe,
   reconcileOnBoot,
   _setOfflineGraceMsForTest,
+  _setHandshakeTimeoutMsForTest,
 } from "./acp-sessions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -299,6 +300,62 @@ test(
         createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
       ).rejects.toThrow();
     } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "handshake timeout: an agent that spawns but never responds → createSession rejects, wire closed, station not wedged (maps drained)",
+  async () => {
+    _setHandshakeTimeoutMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-hshake-host", {
+      stationKey: "acp-hshake-station",
+      hangHandshake: "initialize",
+    });
+    try {
+      // Wedged on initialize → deadline fires with the standard copy.
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
+      // The spawned process is torn down: node saw the best-effort acp.close.
+      await pollUntil(() =>
+        parsedNodeMsgs(fake.nodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        )
+      );
+
+      // Row ended with the timeout copy + error event.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("handshake timed out");
+      const evts = await eventsFor(rows[0]!.id);
+      expect(evts.some((e) => e.type === "error")).toBe(true);
+
+      // Wedged on session/new times out the same way.
+      fake.opts.hangHandshake = "session/new";
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Couldn't start the agent process");
+
+      // Maps drained: with a healthy agent the station accepts a fresh
+      // session — no "active session already exists" 409-lock.
+      fake.opts.hangHandshake = undefined;
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(row.status).toBe("idle");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
       server.stop(true);
     }
   },

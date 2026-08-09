@@ -7,6 +7,8 @@
  *         404 unknown station, 409 active session exists,
  *         502 node offline / agent open failure)
  *   GET  /stations/:id/acp/sessions → AcpSessionRow[] (newest first)
+ *   DELETE /acp/sessions/:sessionId → 204 (ends the session; WS clients get
+ *        {t:"bye"}); 401 anonymous, 404 absent/foreign
  *
  * WS: GET /acp/sessions/:sessionId/ws (upgrade)
  *   Mirrors station-terminal.ts for the security preamble: CSWSH origin
@@ -122,6 +124,34 @@ export const stationAcpRoutes = new Hono()
       (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)
     );
     return c.json(rows);
+  })
+
+  /**
+   * DELETE /api/acp/sessions/:sessionId
+   *
+   * Ends a session (hub-owned). Live sessions tear down the agent process on
+   * the node; attached WS clients receive {t:"bye"} via the service fan-out
+   * (the state-ended event). Stale rows are just marked ended. With
+   * single-session-per-station this is also how a healthy idle session is
+   * released so a new one can start.
+   *
+   * 204 on success (matches the stations/runtimes DELETE precedent);
+   * 404 when the session is absent or belongs to another user.
+   */
+  .delete("/acp/sessions/:sessionId", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    const sessionId = c.req.param("sessionId");
+    const row = await acp.getSession(user.id, sessionId);
+    if (!row) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    await acp.endSession(user.id, sessionId, "Ended from the console.");
+    return c.body(null, 204);
   })
 
   /**

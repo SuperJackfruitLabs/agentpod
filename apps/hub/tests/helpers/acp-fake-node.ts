@@ -44,6 +44,11 @@ export interface FakeAcpNodeOpts {
   ignoreCancel?: boolean;
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
+  /**
+   * Never answer the named handshake request (wedged-agent simulation).
+   * Mutable — clear it between createSession attempts to let one succeed.
+   */
+  hangHandshake?: "initialize" | "session/new";
 }
 
 export interface FakeAcpNode {
@@ -238,12 +243,14 @@ export async function connectFakeAcpNode(
     const id = msg.id as string | number | undefined;
 
     if (method === "initialize") {
+      if (opts.hangHandshake === "initialize") return; // wedged agent
       sendAgent({
         jsonrpc: "2.0",
         id,
         result: { protocolVersion: 1, agentCapabilities: {} },
       });
     } else if (method === "session/new") {
+      if (opts.hangHandshake === "session/new") return; // wedged agent
       sendAgent({ jsonrpc: "2.0", id, result: { sessionId: agentSessionId } });
     } else if (method === "session/prompt") {
       void runPromptTurn(msg as { id: string | number; params: { sessionId: string } });

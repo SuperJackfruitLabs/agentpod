@@ -650,3 +650,105 @@ test(
   },
   20_000
 );
+
+test(
+  "DELETE /api/acp/sessions/:id ends the session: 204 + row ended; 401 anonymous; 404 foreign session",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-del-host",
+      { stationKey: "acproute-del" }
+    );
+    try {
+      const created = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(created.status).toBe(201);
+      const row = (await created.json()) as AcpSessionRow;
+
+      // 401 anonymous (no auth header).
+      const anon = await fetch(`${baseUrl}/api/acp/sessions/${row.id}`, {
+        method: "DELETE",
+      });
+      expect(anon.status).toBe(401);
+
+      // 404 foreign session — and it must NOT end the session.
+      const foreign = await fetch(`${baseUrl}/api/acp/sessions/${row.id}`, {
+        method: "DELETE",
+        headers: { "X-Test-User-Id": OTHER_USER },
+      });
+      expect(foreign.status).toBe(404);
+      expect((await getSession(TEST_USER, row.id))?.status).toBe("idle");
+
+      // 404 unknown session id.
+      const unknown = await fetch(`${baseUrl}/api/acp/sessions/acps_nope`, {
+        method: "DELETE",
+        headers: { "X-Test-User-Id": TEST_USER },
+      });
+      expect(unknown.status).toBe(404);
+
+      // Happy path: 204, row ended.
+      const ended = await fetch(`${baseUrl}/api/acp/sessions/${row.id}`, {
+        method: "DELETE",
+        headers: { "X-Test-User-Id": TEST_USER },
+      });
+      expect(ended.status).toBe(204);
+      const after = await getSession(TEST_USER, row.id);
+      expect(after?.status).toBe("ended");
+      expect(after?.endedReason).toBe("Ended from the console.");
+
+      // Station released: a fresh session starts (no 409 lock).
+      const again = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(again.status).toBe(201);
+      const row2 = (await again.json()) as AcpSessionRow;
+      await endSession(TEST_USER, row2.id, "test done");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  'attached WS client receives {t:"bye"} when the session is ended over REST',
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-delbye-host",
+      { stationKey: "acproute-delbye" }
+    );
+    try {
+      const created = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(created.status).toBe(201);
+      const row = (await created.json()) as AcpSessionRow;
+
+      const client = connectClientWs(server.port!, row.id, TEST_USER);
+      await client.opened;
+      client.ws.send(JSON.stringify({ t: "subscribe", sinceSeq: 0 }));
+      await pollUntil(() => client.msgs.find((m) => m.t === "replay-done"));
+
+      const res = await fetch(`${baseUrl}/api/acp/sessions/${row.id}`, {
+        method: "DELETE",
+        headers: { "X-Test-User-Id": TEST_USER },
+      });
+      expect(res.status).toBe(204);
+
+      // The service fan-out delivers the state-ended event, then the bye.
+      await pollUntil(() =>
+        receivedEvents(client).find(
+          (e) =>
+            e.type === "state" &&
+            (e.payload as { status?: string }).status === "ended"
+        )
+      );
+      const bye = await pollUntil(() => client.msgs.find((m) => m.t === "bye"));
+      expect(bye.reason).toBe("Ended from the console.");
+      await pollUntil(() => client.getCloseCode() !== null);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
