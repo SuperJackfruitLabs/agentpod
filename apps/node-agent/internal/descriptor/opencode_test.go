@@ -531,6 +531,7 @@ exit 0
 // an error when no `opencode serve` process can be found (pgrep exits 1, as
 // on a fresh runtime with nothing running yet).
 func TestOpenCodeLifecycle_Stop_NoProcess_ReturnsError(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
 	tmpDir := t.TempDir()
 	writeFakePgrep(t, tmpDir) // from hermes_lifecycle_systemd_test.go: always exits 1
 	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
@@ -545,6 +546,7 @@ func TestOpenCodeLifecycle_Stop_NoProcess_ReturnsError(t *testing.T) {
 // queries pgrep with the exact "-f opencode.*serve" pattern the entrypoint's
 // supervised process matches.
 func TestOpenCodeLifecycle_Stop_UsesExpectedPgrepPattern(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
 	tmpDir := t.TempDir()
 	argsFile := filepath.Join(tmpDir, "pgrep.args")
 
@@ -576,6 +578,7 @@ func TestOpenCodeLifecycle_Stop_UsesExpectedPgrepPattern(t *testing.T) {
 // AND leave the stop sentinel behind so the entrypoint's supervision loop
 // halts instead of resurrecting it within 2s (which would make Stop a no-op).
 func TestOpenCodeLifecycle_Stop_KillsProcessAndTouchesSentinel(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
 	tmpDir := t.TempDir()
 	argsFile := filepath.Join(tmpDir, "pgrep.args")
 
@@ -642,6 +645,7 @@ func withTempWorkspaceDir(t *testing.T, dir string) {
 // action isn't confused by a stale one) and re-spawns `opencode serve` cd'd
 // into the workspace, appending output to the shared serve log.
 func TestOpenCodeLifecycle_Start_RemovesSentinelAndSpawnsServeInWorkspace(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
 	stubDir := t.TempDir()
 	argsFile := filepath.Join(stubDir, "opencode.args")
 	cwdFile := filepath.Join(stubDir, "opencode.cwd")
@@ -707,6 +711,7 @@ pwd > %s
 // does not error when the sentinel file does not already exist (the common
 // case: Start after a normal boot, not after a prior Stop).
 func TestOpenCodeLifecycle_Start_NoSentinel_StillSucceeds(t *testing.T) {
+	t.Setenv("AGENTPOD_OPENCODE_SUPERVISED", "1")
 	stubDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(stubDir, "opencode"), []byte("#!/bin/sh\ntrue\n"), 0o755); err != nil {
 		t.Fatalf("write opencode stub: %v", err)
@@ -720,5 +725,66 @@ func TestOpenCodeLifecycle_Start_NoSentinel_StillSucceeds(t *testing.T) {
 	o := &openCodeDescriptor{}
 	if err := o.Start("opencode:abc"); err != nil {
 		t.Fatalf("Start with no pre-existing sentinel: unexpected error: %v", err)
+	}
+}
+
+// --- Lifecycle guard: Stop/Start must refuse to act on an unsupervised host ---
+//
+// Detect() only advertises "lifecycle" when AGENTPOD_OPENCODE_SUPERVISED=1,
+// but openCodeDescriptor structurally satisfies the Lifecycle interface
+// either way (Go can't gate a method set by an env var). These tests cover
+// the in-method guard that makes Stop/Start themselves refuse to run without
+// the env var — so a lifecycle verb reaching this descriptor by some other
+// path (a hub bug, a future direct WS caller) can't kill or spawn an
+// unsupervised `opencode serve` on a bare-metal host.
+
+// TestOpenCodeLifecycle_Stop_UnsupervisedHost_ReturnsError asserts that Stop
+// refuses to run (and never touches pgrep or the sentinel) when
+// AGENTPOD_OPENCODE_SUPERVISED is unset.
+func TestOpenCodeLifecycle_Stop_UnsupervisedHost_ReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	argsFile := filepath.Join(tmpDir, "pgrep.args")
+	writeFakePgrepPID(t, tmpDir, 99999, argsFile) // would "succeed" if ever invoked
+	t.Setenv("PATH", tmpDir+":"+os.Getenv("PATH"))
+	withTempSentinel(t)
+
+	o := &openCodeDescriptor{}
+	if err := o.Stop("opencode:abc"); err == nil {
+		t.Fatal("expected error from Stop when AGENTPOD_OPENCODE_SUPERVISED is unset")
+	}
+	if readLog(t, argsFile) != "" {
+		t.Error("Stop must not invoke pgrep when unsupervised")
+	}
+}
+
+// TestOpenCodeLifecycle_Start_UnsupervisedHost_ReturnsError asserts that
+// Start refuses to run (and never spawns opencode or removes the sentinel)
+// when AGENTPOD_OPENCODE_SUPERVISED is unset.
+func TestOpenCodeLifecycle_Start_UnsupervisedHost_ReturnsError(t *testing.T) {
+	stubDir := t.TempDir()
+	argsFile := filepath.Join(stubDir, "opencode.args")
+	script := fmt.Sprintf(`#!/bin/sh
+printf '%%s' "$*" > %s
+`, argsFile)
+	if err := os.WriteFile(filepath.Join(stubDir, "opencode"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write opencode stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+":"+os.Getenv("PATH"))
+	withTempWorkspaceDir(t, t.TempDir())
+	withTempServeLog(t)
+	sentinel := withTempSentinel(t)
+	if err := os.WriteFile(sentinel, []byte(""), 0o644); err != nil {
+		t.Fatalf("seed sentinel: %v", err)
+	}
+
+	o := &openCodeDescriptor{}
+	if err := o.Start("opencode:abc"); err == nil {
+		t.Fatal("expected error from Start when AGENTPOD_OPENCODE_SUPERVISED is unset")
+	}
+	if readLog(t, argsFile) != "" {
+		t.Error("Start must not invoke opencode when unsupervised")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Errorf("Start must not remove the sentinel when unsupervised, stat err = %v", err)
 	}
 }

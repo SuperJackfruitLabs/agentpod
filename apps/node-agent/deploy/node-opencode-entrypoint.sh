@@ -57,13 +57,22 @@ SQL
 # immediately resurrect `opencode serve` after the node-agent's opencode
 # descriptor (internal/descriptor/opencode.go) runs a lifecycle Stop on it,
 # making Stop a no-op. The descriptor's Stop kills the process THEN touches
-# /var/run/opencode-serve.stop; the loop checks that sentinel before every
-# (re)spawn and exits when it is present. The descriptor's Start removes the
-# sentinel and re-spawns `opencode serve` itself — this loop has already
-# exited by then, so the two never race.
+# /var/run/opencode-serve.stop (kill-before-touch is intentional and safe:
+# the loop's `sleep 2` after every exit means it can't re-check the sentinel
+# and respawn faster than Stop can touch it); the loop checks that sentinel
+# before every (re)spawn and exits when it is present. The descriptor's Start
+# removes the sentinel and re-spawns `opencode serve` itself — this loop has
+# already exited by then, so the two never race.
 mkdir -p /var/run
 rm -f /var/run/opencode-serve.stop
 (
+  # `set +e`: the top-level `set -e` (line 2) is inherited into this subshell.
+  # Without disabling it here, any non-zero exit from `opencode serve` (a
+  # crash, or exit 143 from the lifecycle Stop's SIGTERM) would terminate the
+  # subshell at that line — the echo/sleep/loop-back below would never run,
+  # making supervision single-shot instead of restart-on-crash. Scoped to this
+  # subshell only; the outer script keeps `set -e`.
+  set +e
   cd /workspace
   while :; do
     if [ -f /var/run/opencode-serve.stop ]; then

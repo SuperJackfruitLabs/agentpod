@@ -424,7 +424,17 @@ func startOpenCodeServeDetached() error {
 // process (TERM → grace → KILL via stopProcess) and then touches the stop
 // sentinel so the entrypoint's supervision loop does not immediately
 // resurrect it. See the package comment above for the coordination mechanism.
+//
+// Guarded by openCodeSupervised(): Detect() only advertises "lifecycle" when
+// AGENTPOD_OPENCODE_SUPERVISED=1, but Go's structural typing means Stop/Start
+// are still callable if a lifecycle verb ever reached this descriptor another
+// way (a hub bug, a future direct WS caller). Without this guard, Stop on a
+// real host would hunt for (and possibly kill) any process whose command line
+// happens to match "opencode.*serve".
 func (o *openCodeDescriptor) Stop(key string) error {
+	if !openCodeSupervised() {
+		return fmt.Errorf("opencode: stop %q: lifecycle requires supervised mode (%s=1)", key, openCodeSupervisedEnvVar)
+	}
 	pid, err := openCodeServePID()
 	if err != nil {
 		return fmt.Errorf("opencode: stop %q: %w", key, err)
@@ -440,7 +450,15 @@ func (o *openCodeDescriptor) Stop(key string) error {
 
 // Start implements Lifecycle. It removes the stop sentinel and re-spawns
 // `opencode serve` detached in /workspace, appending to the shared log.
+//
+// Guarded by openCodeSupervised() for the same reason as Stop: without it,
+// Start would spawn an unsupervised `opencode serve` on a bare-metal host
+// that has no supervision loop to restart it on crash and no sentinel
+// convention for a later Stop to coordinate with.
 func (o *openCodeDescriptor) Start(key string) error {
+	if !openCodeSupervised() {
+		return fmt.Errorf("opencode: start %q: lifecycle requires supervised mode (%s=1)", key, openCodeSupervisedEnvVar)
+	}
 	if err := os.Remove(openCodeServeSentinelPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("opencode: start %q: clear sentinel: %w", key, err)
 	}
