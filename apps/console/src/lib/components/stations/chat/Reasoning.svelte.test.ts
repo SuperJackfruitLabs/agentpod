@@ -57,6 +57,41 @@ test("collapses exactly once: manual re-expand survives later non-streaming upda
   expect(trigger(container).getAttribute("aria-expanded")).toBe("true");
 });
 
+test("re-opens on a new streaming segment: true → false (collapsed) → true", async () => {
+  const { container, rerender } = render(Reasoning, {
+    props: { text: "block 1", streaming: true },
+  });
+
+  // Block 1 finishes: auto-collapse. User leaves it collapsed.
+  await rerender({ text: "block 1", streaming: false });
+  await waitFor(() => expect(trigger(container).getAttribute("aria-expanded")).toBe("false"));
+
+  // The instance is reused for a fresh reasoning segment — false→true edge
+  // must re-open so new thinking content is not accumulating invisibly.
+  await rerender({ text: "block 2 begins", streaming: true });
+  await waitFor(() => expect(trigger(container).getAttribute("aria-expanded")).toBe("true"));
+});
+
+test("manual collapse mid-stream is not fought by same-state updates", async () => {
+  const { container, rerender } = render(Reasoning, {
+    props: { text: "quiet", streaming: false },
+  });
+  expect(trigger(container).getAttribute("aria-expanded")).toBe("false");
+
+  // false→true edge opens the block.
+  await rerender({ text: "thinking...", streaming: true });
+  await waitFor(() => expect(trigger(container).getAttribute("aria-expanded")).toBe("true"));
+
+  // User collapses it mid-stream…
+  await fireEvent.click(trigger(container));
+  await waitFor(() => expect(trigger(container).getAttribute("aria-expanded")).toBe("false"));
+
+  // …and streaming text keeps arriving (streaming stays true — no edge):
+  // the block must stay collapsed, not pop back open.
+  await rerender({ text: "thinking... more", streaming: true });
+  expect(trigger(container).getAttribute("aria-expanded")).toBe("false");
+});
+
 test("starts collapsed when not streaming; manual expand reveals plain text", async () => {
   const { container, getByText } = render(Reasoning, {
     props: { text: "already finished thought", streaming: false },

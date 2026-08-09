@@ -52,6 +52,31 @@ test("streaming: unterminated **bold is completed by incomplete-markdown parsing
   });
 });
 
+test("javascript: links render inert; https links keep their href", async () => {
+  const { container } = render(Response, {
+    props: {
+      text: "[evil](javascript:alert(1)) and [ok](https://example.com)",
+      streaming: false,
+    },
+  });
+
+  await waitFor(() => expect(container.textContent).toContain("evil"));
+
+  // No element anywhere may carry a javascript: href.
+  for (const el of container.querySelectorAll("[href]")) {
+    expect(el.getAttribute("href")).not.toMatch(/^\s*javascript:/i);
+  }
+  // The allowed https link renders as a real anchor (streamdown normalizes
+  // the URL with a trailing slash) hardened with noopener.
+  await waitFor(() => {
+    const anchor = [...container.querySelectorAll("a[href]")].find((a) =>
+      a.getAttribute("href")!.startsWith("https://example.com"),
+    );
+    expect(anchor).toBeTruthy();
+    expect(anchor!.getAttribute("rel")).toContain("noopener");
+  });
+});
+
 test("raw HTML in agent output is not rendered as elements", async () => {
   const { container } = render(Response, {
     props: { text: 'before <img src=x onerror="alert(1)"> after', streaming: false },
