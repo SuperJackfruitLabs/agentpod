@@ -61,7 +61,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		return []Station{}, nil
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup"}
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 	homeCopy := h.home
 
 	stations := []Station{
@@ -120,6 +120,23 @@ func (h *hermesDescriptor) workspaceFor(key string) (string, error) {
 		return filepath.Join(h.home, "profiles", name), nil
 	}
 	return "", fmt.Errorf("hermes: unrecognized key %q", key)
+}
+
+// ACPCommand implements ACPCommander. Hermes serves an ACP session via
+// `hermes -p <profile> acp --accept-hooks`, run from the profile's workspace.
+// The profile is derived from the station key the same way workspaceFor and
+// hermesNativeStartArgs parse it; for the root "hermes" key the profile
+// selector is omitted (mirroring hermesNativeStartArgs) and dir is the home.
+func (h *hermesDescriptor) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	dir, err = h.workspaceFor(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if key == "hermes" {
+		return []string{"hermes", "acp", "--accept-hooks"}, dir, nil, nil
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	return []string{"hermes", "-p", name, "acp", "--accept-hooks"}, dir, nil, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a station.
@@ -419,14 +436,18 @@ func (h *hermesDescriptor) TailLogs(ctx context.Context, key string, follow bool
 	}
 
 	// Collect all log file paths from the log directories.
-	logFiles := collectLogFiles(logDirs)
+	collect := func() []string { return collectLogFiles(logDirs) }
+	logFiles := collect()
 
 	if !follow {
 		// One-shot: emit the last N lines of existing content.
 		return emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit)
 	}
 
-	// Follow mode: emit the last N lines first, then poll for appends.
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = waitForLogFiles(ctx, collect)
 	if err := emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit); err != nil {
 		return err
 	}

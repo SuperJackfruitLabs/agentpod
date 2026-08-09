@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
@@ -26,6 +27,8 @@ func runCmd() {
 	reg := buildRegistry(cfg.HermesStartCmd, cfg.OpenClawStartCmd)
 	mgr := terminal.NewManager()
 	defer mgr.Shutdown()
+	acpMgr := acp.NewManager()
+	defer acpMgr.Shutdown()
 
 	resolver := gateway.WorkspaceFunc(func(key string) (string, error) {
 		d, err := reg.For(key)
@@ -100,6 +103,7 @@ func runCmd() {
 	}
 
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
+	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
 	h = gateway.NewUpdateHandler(h, version)
 	gateway.Run(ctx, cfg, h, version, gatherHealth)
 }

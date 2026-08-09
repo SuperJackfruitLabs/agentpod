@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup"]);
+export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup","acp"]);
 export type Capability = z.infer<typeof Capability>;
 export const StationKind = z.enum(["composite","leaf"]);
 export const Station = z.object({

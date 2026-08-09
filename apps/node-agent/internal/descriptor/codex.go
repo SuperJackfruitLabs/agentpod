@@ -108,12 +108,17 @@ func (c *codexDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, str
 // home directory is available. Falls back gracefully if absent.
 func (c *codexDescriptor) TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error {
 	sessDir := filepath.Join(c.home, "sessions")
-	logFiles := collectCodexLogFiles(sessDir)
+	collect := func() []string { return collectCodexLogFiles(sessDir) }
+	logFiles := collect()
 
 	if !follow {
 		return emitLogFiles(logFiles, emit)
 	}
 
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit its
+	// content and poll for appends.
+	logFiles = waitForLogFiles(ctx, collect)
 	if err := emitLogFiles(logFiles, emit); err != nil {
 		return err
 	}

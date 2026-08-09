@@ -10,7 +10,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -109,7 +111,15 @@ func (o *openCodeDescriptor) Detect() ([]Station, error) {
 		return nil, err
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	if openCodeSupervised() {
+		// Only a provisioned opencode container (deploy/node-opencode-entrypoint.sh)
+		// runs a supervised `opencode serve` process for Stop/Start to control.
+		// On a real host, opencode has no persistent process to manage — the
+		// capability, and therefore the descriptor's Lifecycle methods, must
+		// stay unadvertised there.
+		caps = append(caps, "lifecycle")
+	}
 	seen := make(map[string]bool)
 	var stations []Station
 
@@ -243,6 +253,17 @@ func (o *openCodeDescriptor) projectPathForKey(key string) (string, error) {
 	return "", fmt.Errorf("opencode: station not found: %q", key)
 }
 
+// ACPCommand implements ACPCommander. OpenCode serves an ACP session via
+// `opencode acp`, run from the station's project workspace (the same path
+// term.open resolves through the workspace resolver).
+func (o *openCodeDescriptor) ACPCommand(key string) (argv []string, dir string, env []string, err error) {
+	projPath, err := o.projectPathForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return []string{"opencode", "acp"}, projPath, nil, nil
+}
+
 // Health returns a best-effort liveness/resource snapshot for a leaf station.
 //
 // Running is determined via pgrep -f opencode (best-effort; false if
@@ -289,6 +310,162 @@ func openCodeProcessRunning() (running bool, note string) {
 		return false, "process check unavailable (pgrep not found or failed)"
 	}
 	return strings.TrimSpace(string(out)) != "", ""
+}
+
+// --- Lifecycle (gated: AGENTPOD_OPENCODE_SUPERVISED=1) ---
+//
+// A provisioned opencode container (deploy/node-opencode-entrypoint.sh) runs
+// `opencode serve` under a supervision loop: a shell while-loop that restarts
+// the process on crash with a 2s backoff. That loop is what makes the
+// container a living, dispatchable station — but it also means a bare SIGTERM
+// from Stop would be undone within 2s. The two sides coordinate via a
+// sentinel file, /var/run/opencode-serve.stop:
+//
+//   - Stop terminates the running `opencode serve` process, THEN touches the
+//     sentinel. The entrypoint loop checks the sentinel before every respawn
+//     and exits the loop when it is present, so the process actually stays
+//     down.
+//   - Start removes the sentinel and re-spawns `opencode serve` itself
+//     (the entrypoint loop already exited, so it will not race the respawn).
+//
+// On a real host (env var unset) these methods are unreachable in practice:
+// Detect() omits "lifecycle" from capabilities, so neither the console nor
+// the lifecycle dispatcher (cmd/agentpod-node/run.go) ever calls them for an
+// opencode key.
+
+const (
+	// openCodeSupervisedEnvVar gates the "lifecycle" capability and the
+	// interpretation of Stop/Start below. Set by
+	// deploy/node-opencode-entrypoint.sh in provisioned opencode containers.
+	openCodeSupervisedEnvVar = "AGENTPOD_OPENCODE_SUPERVISED"
+
+	// openCodeServePattern is the pgrep -f pattern matching the supervised
+	// `opencode serve` process, mirroring the entrypoint's invocation.
+	openCodeServePattern = "opencode.*serve"
+)
+
+// These are `var`, not `const`, purely so tests can point them at a temp
+// directory instead of the real container paths below. Production code never
+// reassigns them.
+var (
+	// openCodeServeLogPath is the log file the entrypoint's supervision loop
+	// appends to; Start appends to the same file so log output survives a
+	// lifecycle-triggered restart.
+	openCodeServeLogPath = "/var/log/opencode-serve.log"
+
+	// openCodeServeSentinelPath is the file Stop touches (and Start removes)
+	// to signal the entrypoint's supervision loop to halt/resume.
+	openCodeServeSentinelPath = "/var/run/opencode-serve.stop"
+
+	// openCodeWorkspaceDir is the fixed workspace root for a provisioned
+	// opencode container (see node-opencode-entrypoint.sh).
+	openCodeWorkspaceDir = "/workspace"
+)
+
+// openCodeSupervised reports whether this runtime is a provisioned opencode
+// container running the supervised `opencode serve` loop, as opposed to a
+// bare-metal fleet host where opencode has no persistent process.
+func openCodeSupervised() bool {
+	return os.Getenv(openCodeSupervisedEnvVar) == "1"
+}
+
+// openCodeServePID returns the PID of the running `opencode serve` process
+// (matched via openCodeServePattern), or an error if none is found.
+func openCodeServePID() (int, error) {
+	out, err := exec.Command("pgrep", "-f", openCodeServePattern).Output()
+	if err != nil {
+		return 0, fmt.Errorf("no running 'opencode serve' process found")
+	}
+	fields := strings.Fields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("no running 'opencode serve' process found")
+	}
+	return strconv.Atoi(fields[0])
+}
+
+// touchOpenCodeStopSentinel creates (or refreshes) the sentinel file that
+// tells the entrypoint's supervision loop to stop respawning `opencode serve`.
+func touchOpenCodeStopSentinel() error {
+	if err := os.MkdirAll(filepath.Dir(openCodeServeSentinelPath), 0o755); err != nil {
+		return fmt.Errorf("mkdir sentinel dir: %w", err)
+	}
+	f, err := os.OpenFile(openCodeServeSentinelPath, os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("touch sentinel %q: %w", openCodeServeSentinelPath, err)
+	}
+	return f.Close()
+}
+
+// startOpenCodeServeDetached spawns `opencode serve` rooted at the workspace,
+// detached from the node-agent process, appending stdout/stderr to the same
+// log file the entrypoint's supervision loop writes to.
+func startOpenCodeServeDetached() error {
+	logFile, err := os.OpenFile(openCodeServeLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return fmt.Errorf("open log %q: %w", openCodeServeLogPath, err)
+	}
+	defer logFile.Close()
+
+	cmd := exec.Command("opencode", "serve")
+	cmd.Dir = openCodeWorkspaceDir
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start opencode serve: %w", err)
+	}
+	// Reap in the background so an unexpectedly short-lived process does not
+	// linger as a zombie under the node-agent.
+	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// Stop implements Lifecycle. It terminates the supervised `opencode serve`
+// process (TERM → grace → KILL via stopProcess) and then touches the stop
+// sentinel so the entrypoint's supervision loop does not immediately
+// resurrect it. See the package comment above for the coordination mechanism.
+//
+// Guarded by openCodeSupervised(): Detect() only advertises "lifecycle" when
+// AGENTPOD_OPENCODE_SUPERVISED=1, but Go's structural typing means Stop/Start
+// are still callable if a lifecycle verb ever reached this descriptor another
+// way (a hub bug, a future direct WS caller). Without this guard, Stop on a
+// real host would hunt for (and possibly kill) any process whose command line
+// happens to match "opencode.*serve".
+func (o *openCodeDescriptor) Stop(key string) error {
+	if !openCodeSupervised() {
+		return fmt.Errorf("opencode: stop %q: lifecycle requires supervised mode (%s=1)", key, openCodeSupervisedEnvVar)
+	}
+	pid, err := openCodeServePID()
+	if err != nil {
+		return fmt.Errorf("opencode: stop %q: %w", key, err)
+	}
+	if err := stopProcess(pid, LifecycleGracePeriod); err != nil {
+		return fmt.Errorf("opencode: stop %q: %w", key, err)
+	}
+	if err := touchOpenCodeStopSentinel(); err != nil {
+		return fmt.Errorf("opencode: stop %q: %w", key, err)
+	}
+	return nil
+}
+
+// Start implements Lifecycle. It removes the stop sentinel and re-spawns
+// `opencode serve` detached in /workspace, appending to the shared log.
+//
+// Guarded by openCodeSupervised() for the same reason as Stop: without it,
+// Start would spawn an unsupervised `opencode serve` on a bare-metal host
+// that has no supervision loop to restart it on crash and no sentinel
+// convention for a later Stop to coordinate with.
+func (o *openCodeDescriptor) Start(key string) error {
+	if !openCodeSupervised() {
+		return fmt.Errorf("opencode: start %q: lifecycle requires supervised mode (%s=1)", key, openCodeSupervisedEnvVar)
+	}
+	if err := os.Remove(openCodeServeSentinelPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("opencode: start %q: clear sentinel: %w", key, err)
+	}
+	if err := startOpenCodeServeDetached(); err != nil {
+		return fmt.Errorf("opencode: start %q: %w", key, err)
+	}
+	return nil
 }
 
 // ListDir lists the directory at rel within the project workspace.
@@ -380,14 +557,18 @@ func (o *openCodeDescriptor) TailLogs(ctx context.Context, key string, follow bo
 	}
 
 	logDir := filepath.Join(o.dataDir, "log")
-	logFiles := collectOpenCodeLogFiles(logDir)
+	collect := func() []string { return collectOpenCodeLogFiles(logDir) }
+	logFiles := collect()
 
 	if !follow {
 		// One-shot: emit the last N lines of existing content.
 		return emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit)
 	}
 
-	// Follow mode: emit the last N lines first, then poll for appends.
+	// Follow mode: wait for a log file to exist (a harness that hasn't
+	// written logs yet must not close the stream immediately), then emit the
+	// last N lines and poll for appends.
+	logFiles = waitForLogFiles(ctx, collect)
 	if err := emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit); err != nil {
 		return err
 	}

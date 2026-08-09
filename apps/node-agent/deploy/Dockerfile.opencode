@@ -6,16 +6,27 @@ WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /agentpod-node ./cmd/agentpod-node
 
-# Stage 2: Runtime — bun base (Debian) for opencode + sqlite3 for DB seeding
+# Stage 2: Runtime — bun base (Debian) for opencode
 FROM oven/bun:1-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git sqlite3 procps \
+    ca-certificates git procps \
     && rm -rf /var/lib/apt/lists/*
 # procps provides `pgrep`, used by the OpenCode descriptor's running-process
-# health check; without it the station Health panel shows "process check unavailable".
+# health check and its supervised-serve Stop/Start; without it the station
+# Health panel shows "process check unavailable".
+#
+# `sqlite3` is deliberately NOT installed. The entrypoint used to hand-seed
+# opencode.db (the descriptor's PRIMARY project-discovery path) with a schema
+# snapshot that broke across opencode-ai version bumps (see
+# node-opencode-entrypoint.sh's comment). Omitting sqlite3 makes that PRIMARY
+# path unavailable to the descriptor in-container, so it always falls back to
+# the directory-enumeration path instead — opencode's self-managed
+# opencode.db (whatever its current schema) is then irrelevant to detection.
 
-# Install the opencode CLI (pinned to fleet version 0.5.5)
-RUN bun add -g opencode-ai@0.5.5
+# Install the opencode CLI (pinned to fleet version 1.18.15 — the newest
+# published version as of 2026-08-09, confirmed to ship the `acp` subcommand
+# the node-agent's ACPCommand uses to spawn `opencode acp` sessions).
+RUN bun add -g opencode-ai@1.18.15
 
 COPY --from=builder /agentpod-node /agentpod-node
 COPY deploy/node-opencode-entrypoint.sh /node-opencode-entrypoint.sh

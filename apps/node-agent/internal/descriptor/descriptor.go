@@ -166,3 +166,15 @@ type Descriptor interface {
 	// If follow is true the stream continues until ctx is cancelled.
 	TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error
 }
+
+// ACPCommander is an OPTIONAL interface implemented by descriptors whose
+// harness can serve an ACP (Agent Client Protocol) session over stdio. The
+// "acp" capability is advertised in Detect output ONLY when the descriptor
+// implements this interface.
+//
+// ACPCommand returns the command to spawn for a station key: argv is the full
+// command line (argv[0] is the binary); dir is the working directory; env is
+// extra environment appended to the inherited one (may be nil).
+type ACPCommander interface {
+	ACPCommand(key string) (argv []string, dir string, env []string, err error)
+}

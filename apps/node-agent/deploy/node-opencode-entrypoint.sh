@@ -16,39 +16,60 @@ mkdir -p /workspace
 #             name is a sanitised workspace path (leading '/' stripped, '/' → '-'),
 #             e.g. /workspace → "workspace".
 #
-# We seed BOTH so detection works regardless of whether sqlite3 is available.
-
+# We deliberately only seed the FALLBACK directory here. An earlier version of
+# this script also hand-seeded opencode.db (the PRIMARY path) with a sqlite3
+# heredoc matching a specific schema snapshot; that broke when opencode-ai was
+# bumped past the version that schema was captured from (`opencode serve`
+# refused to start against the pre-seeded db: "Database is not empty and has
+# no session table"). Chasing opencode's internal schema across every future
+# version bump is brittle, so instead: opencode creates and owns its own
+# opencode.db on first run, and this image does not install `sqlite3` (see
+# Dockerfile.opencode), which makes the PRIMARY path unavailable in-container
+# and forces Detect() onto this directory fallback unconditionally — the
+# schema of opencode's self-created db becomes irrelevant to detection.
 OPENCODE_DATA="${HOME:-/root}/.local/share/opencode"
-OPENCODE_DB="${OPENCODE_DATA}/opencode.db"
-
-# Create the data-dir structure opencode.go's Detect() requires.
 mkdir -p "${OPENCODE_DATA}/project/workspace"
-
-# PRIMARY: seed opencode.db with a project row for /workspace.
-# Schema matches the real opencode.db (id text PK, worktree text NOT NULL,
-# sandboxes text NOT NULL, time_created/time_updated integer NOT NULL).
-sqlite3 "${OPENCODE_DB}" <<'SQL'
-CREATE TABLE IF NOT EXISTS project (
-  id            text    PRIMARY KEY,
-  worktree      text    NOT NULL,
-  vcs           text,
-  name          text,
-  icon_url      text,
-  icon_color    text,
-  time_created  integer NOT NULL,
-  time_updated  integer NOT NULL,
-  time_initialized integer,
-  sandboxes     text    NOT NULL,
-  commands      text
-);
-INSERT OR IGNORE INTO project
-  (id, worktree, time_created, time_updated, sandboxes)
-VALUES
-  ('agentpod-workspace', '/workspace', unixepoch() * 1000, unixepoch() * 1000, '[]');
-SQL
 
 # Enroll reads AGENTPOD_HUB_URL and AGENTPOD_ENROLL_TOKEN from the environment.
 /agentpod-node enroll
 
-# Hand off to the run loop.
+# Supervised opencode server: the station's long-running process. Restarts on
+# crash with 2s backoff; killed cleanly when the container stops.
+#
+# Lifecycle coordination: without the sentinel check below, this loop would
+# immediately resurrect `opencode serve` after the node-agent's opencode
+# descriptor (internal/descriptor/opencode.go) runs a lifecycle Stop on it,
+# making Stop a no-op. The descriptor's Stop kills the process THEN touches
+# /var/run/opencode-serve.stop (kill-before-touch is intentional and safe:
+# the loop's `sleep 2` after every exit means it can't re-check the sentinel
+# and respawn faster than Stop can touch it); the loop checks that sentinel
+# before every (re)spawn and exits when it is present. The descriptor's Start
+# removes the sentinel and re-spawns `opencode serve` itself — this loop has
+# already exited by then, so the two never race.
+mkdir -p /var/run
+rm -f /var/run/opencode-serve.stop
+(
+  # `set +e`: the top-level `set -e` (line 2) is inherited into this subshell.
+  # Without disabling it here, any non-zero exit from `opencode serve` (a
+  # crash, or exit 143 from the lifecycle Stop's SIGTERM) would terminate the
+  # subshell at that line — the echo/sleep/loop-back below would never run,
+  # making supervision single-shot instead of restart-on-crash. Scoped to this
+  # subshell only; the outer script keeps `set -e`.
+  set +e
+  cd /workspace
+  while :; do
+    if [ -f /var/run/opencode-serve.stop ]; then
+      echo "[entrypoint] opencode-serve.stop present, halting supervision loop" >>/var/log/opencode-serve.log
+      break
+    fi
+    opencode serve >>/var/log/opencode-serve.log 2>&1
+    echo "[entrypoint] opencode serve exited ($?), restarting in 2s" >>/var/log/opencode-serve.log
+    sleep 2
+  done
+) &
+export AGENTPOD_OPENCODE_SUPERVISED=1
+
+# Hand off to the run loop. AGENTPOD_OPENCODE_SUPERVISED, exported above,
+# flows into this process so the opencode descriptor gates its "lifecycle"
+# capability and Stop/Start methods on it.
 exec /agentpod-node run
