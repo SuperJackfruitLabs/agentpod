@@ -536,6 +536,126 @@ test("an exhausted reconnect budget releases a pending prompt instead of wedging
   expect(chat.error).toBe("Couldn't reach the hub — check your connection.");
 });
 
+test("a reconnect that succeeds without the echo releases the prompt (blip mid-send)", async () => {
+  vi.useFakeTimers();
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws1 = MockWebSocket.latest()!;
+  ws1.open();
+  ws1.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("did the hub see this?");
+  expect(chat.busy).toBe(true);
+
+  // One drop; the FIRST reconnect succeeds and replays — and the replay carries
+  // no echo, which is the hub telling us it never saw the prompt.
+  ws1.drop();
+  vi.advanceTimersByTime(1000);
+  const ws2 = MockWebSocket.latest()!;
+  expect(ws2).not.toBe(ws1);
+  ws2.open();
+  ws2.fireMessage({ t: "replay-done", lastSeq: 0 });
+
+  expect(chat.connection).toBe("connected");
+  expect(chat.transcript.items).toEqual([]); // no ghost bubble
+  expect(chat.busy).toBe(false);
+  expect(failed).toEqual(["did the hub see this?"]);
+  expect(chat.error).toBe("Couldn't send that message — it's back in the box, try again.");
+});
+
+test("replay-done on the socket the prompt was sent on does NOT release it", async () => {
+  // A fresh session answers subscribe before it has finished handling the prompt
+  // flushed right behind it — releasing there would kill a prompt in flight.
+  const failed: string[] = [];
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row());
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.prompt("hello");
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "hello", pending: true },
+  ]);
+  expect(failed).toEqual([]);
+  expect(chat.error).toBeNull();
+
+  // …and the echo that follows reconciles it as usual.
+  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "hello" }) });
+  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 1, text: "hello" }]);
+  expect(chat.busy).toBe(false);
+});
+
+test("an error for a different client frame never steals the pending prompt", async () => {
+  // The hub's error frame is the catch-all for cancel/permission-answer/set-mode
+  // too, so position alone must not decide whose failure it is — restoring the
+  // draft here would invite a duplicate send while the real prompt is in flight.
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("real prompt");
+
+  chat.answer(7, "allow"); // whatever the error turns out to be, it's this frame's
+  ws.fireMessage({
+    t: "event",
+    event: ev(0, "error", { message: "No pending permission request." }),
+  });
+
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "real prompt", pending: true },
+  ]);
+  expect(failed).toEqual([]);
+  expect(chat.error).toBe("No pending permission request.");
+
+  // The prompt resolves the normal way when its echo lands.
+  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "real prompt" }) });
+  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 1, text: "real prompt" }]);
+});
+
+test("an ending session releases a pending prompt instead of keeping a phantom", async () => {
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("too late");
+
+  ws.fireMessage({ t: "event", event: ev(1, "state", { status: "ended", reason: "stopped" }) });
+
+  expect(chat.transcript.status).toBe("ended");
+  expect(chat.transcript.items).toEqual([
+    { kind: "notice", seq: 1, level: "info", text: "Session ended — stopped" },
+  ]);
+  expect(failed).toEqual(["too late"]);
+  expect(chat.busy).toBe(false);
+});
+
+test("bye with a pending prompt leaves no phantom message either", async () => {
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("never sent");
+
+  ws.fireMessage({ t: "bye", reason: "ended" });
+
+  expect(failed).toEqual(["never sent"]);
+  expect(chat.transcript.items.filter((it) => it.kind === "user")).toEqual([]);
+  expect(chat.transcript.status).toBe("ended");
+  expect(chat.busy).toBe(false);
+});
+
 test("seq-0 error with no live turn goes to error only — never both surfaces", async () => {
   const { chat, ws } = await connectedChat();
 

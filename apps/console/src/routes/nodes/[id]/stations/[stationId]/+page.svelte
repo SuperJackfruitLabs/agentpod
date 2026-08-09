@@ -234,7 +234,8 @@
          it (chat for acp stations, health otherwise), so rendering one earlier
          would mount — and fetch for — a panel the user never asked for. The
          shape of the wait is still shown, so the page isn't a bare header. -->
-    <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-hidden="true">
+    <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-busy="true">
+      <span class="sr-only">Loading this agent…</span>
       <Skeleton class="h-8 w-48 rounded-lg" />
       <Skeleton class="h-[320px] w-full rounded-lg" />
     </div>

@@ -22,9 +22,18 @@
  *     expected and must not trigger a reconnect.
  *
  * Error surfacing: a synthetic seq-0 error appears in ONE place, never two —
- * as the fate of a trailing optimistic prompt (dropped, text handed back via
+ * as the fate of an OUTSTANDING prompt (dropped, text handed back via
  * `onPromptFailed`, message on `error`), else inline as a transcript notice
- * while a turn is live, else on `error` for the panel's strip.
+ * while a turn is live, else on `error` for the panel's strip. "Outstanding" is
+ * tracked, not guessed from position: the hub's error frame is the catch-all for
+ * every client frame (cancel, permission-answer, set-mode), so a trailing
+ * pending prompt alone proves nothing.
+ *
+ * An optimistic prompt is never left pending forever — that would freeze `busy`
+ * and the composer with it. It is resolved by exactly one of: the echoed
+ * user-prompt event (reconciled), an error attributed to it, `replay-done` with
+ * the tail still pending (the hub never saw it), reconnect-budget exhaustion
+ * (replay will never happen), or the session ending.
  *
  * Permission dismissal: ACP has no per-request dismiss — agents supply reject
  * options in the request itself (answer with one of those), and `cancel()`
@@ -55,6 +64,7 @@ const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [1000, 2000, 4000];
 
 const OFFLINE_COPY = "Couldn't reach the hub — check your connection.";
+const LOST_PROMPT_COPY = "Couldn't send that message — it's back in the box, try again.";
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -82,6 +92,22 @@ export class AcpChat {
   private attempt = 0;
   /** Set on `bye`: the session is over — the following close is expected. */
   private sessionOver = false;
+  /**
+   * True while a prompt frame is outstanding and NOTHING else has been sent
+   * since. Only then may a hub error be read as that prompt's fate: the hub
+   * uses the same error frame for cancel/permission-answer/set-mode failures,
+   * and misattributing one would restore a draft the user might send twice
+   * while the real prompt is still on its way.
+   */
+  private awaitingEcho = false;
+  /**
+   * The socket a still-pending prompt frame was written to. A `replay-done` from
+   * a DIFFERENT socket proves the hub never saw it (the replay would have
+   * carried the echo); a replay-done from the same socket proves nothing — on a
+   * fresh session the hub answers subscribe before it has finished handling the
+   * prompt that was flushed right behind it.
+   */
+  private promptSocket: AcpSocket | null = null;
   private destroyed = false;
 
   /**
@@ -238,9 +264,12 @@ export class AcpChat {
 
     this.#transcript = addPendingPrompt(this.#transcript, text);
     this.socket?.send({ t: "prompt", text });
+    this.awaitingEcho = true;
+    this.promptSocket = this.socket;
   }
 
   cancel(): void {
+    this.awaitingEcho = false; // a later error could just as well be this frame's
     this.socket?.send({ t: "cancel" });
   }
 
@@ -250,12 +279,14 @@ export class AcpChat {
    * parked permissions — ACP has no per-request dismiss.
    */
   answer(requestSeq: number, optionId: string): void {
+    this.awaitingEcho = false; // e.g. "No pending permission request." is not the prompt's fault
     this.socket?.send({ t: "permission-answer", requestSeq, optionId });
   }
 
   setMode(mode: AcpSessionMode): void {
     this.mode = mode;
     if (this.#session && !this.sessionOver) {
+      this.awaitingEcho = false;
       this.socket?.send({ t: "set-mode", mode });
     }
   }
@@ -282,6 +313,8 @@ export class AcpChat {
     this.#connection = "idle";
     this.#error = null;
     this.sessionOver = false;
+    this.awaitingEcho = false;
+    this.promptSocket = null;
     this.attempt = 0;
   }
 
@@ -341,6 +374,16 @@ export class AcpChat {
         this.#connection = "connected";
         this.attempt = 0;
         this.#error = null;
+        // Replay is the authoritative answer to "did the hub see my prompt?" —
+        // if it did, the echo arrived during this replay and reconciled the
+        // pending item. Still pending after a replay on a DIFFERENT socket means
+        // it never landed (a blip between send and delivery, or a socket that
+        // died with the frame still queued), so release it rather than leave
+        // `busy` — and the composer — stuck forever.
+        if (this.hasPendingPrompt() && this.promptSocket !== s) {
+          this.releasePendingPrompt();
+          this.#error = LOST_PROMPT_COPY;
+        }
         break;
       case "bye":
         this.handleBye(msg.reason);
@@ -357,13 +400,15 @@ export class AcpChat {
         ? ev.payload.message
         : "Something went wrong.";
 
-      // A trailing optimistic prompt means THIS error is the fate of that
-      // prompt — the hub refused the turn ("Session is busy…", "…still
-      // starting."), so its echo will never arrive. Drop it: the ghost bubble
-      // would otherwise sit there forever with `busy` stuck true (readonly
-      // composer, no recovery short of a page reload), and dropping it is also
-      // what makes folding safe again.
-      if (this.hasPendingPrompt()) {
+      // An OUTSTANDING prompt (frame sent, nothing sent since, echo not yet
+      // arrived) makes this error that prompt's fate — the hub refused the turn
+      // ("Session is busy…", "…still starting."), so its echo will never come.
+      // Drop it: the ghost bubble would otherwise sit there forever with `busy`
+      // stuck true (read-only composer, no recovery short of a page reload), and
+      // dropping it is also what makes folding safe again. Without the
+      // attribution the pending item stays and waits for replay-done, budget
+      // exhaustion or the session ending to resolve it.
+      if (this.awaitingEcho && this.hasPendingPrompt()) {
         this.releasePendingPrompt();
         this.#error = message;
         return;
@@ -380,7 +425,18 @@ export class AcpChat {
       return;
     }
 
+    // An ending session appends a notice, which must never land between a
+    // pending prompt and an echo that is now never coming — and a phantom
+    // message in an ended transcript is a lie. Release first.
+    if (ev.type === "state" && isRecord(ev.payload) && ev.payload.status === "ended") {
+      this.releasePendingPrompt();
+    }
+
     this.#transcript = foldEvent(this.#transcript, ev);
+    if (ev.type === "user-prompt") {
+      this.awaitingEcho = false; // reconciled
+      this.promptSocket = null;
+    }
   }
 
   /**
@@ -388,6 +444,8 @@ export class AcpChat {
    * text back to the composer. Clears `busy`, so the composer is usable again.
    */
   private releasePendingPrompt(): void {
+    this.awaitingEcho = false;
+    this.promptSocket = null;
     const { transcript, text } = dropPendingPrompt(this.#transcript);
     if (text === null) return;
     this.#transcript = transcript;
@@ -396,6 +454,8 @@ export class AcpChat {
 
   private handleBye(reason: string): void {
     this.sessionOver = true;
+    // Same rule as a real ended event: no phantom message survives the session.
+    this.releasePendingPrompt();
     if (this.#transcript.status !== "ended") {
       // The hub's ended event didn't make it here — fold a final ended notice
       // locally (synthetic seq-0 state event: never advances the cursor).
