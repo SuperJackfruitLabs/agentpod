@@ -40,6 +40,8 @@ import { fleetActivityRoutes } from './routes/activity-fleet.ts';
 import { stationWriteRoutes } from './routes/station-writes.ts';
 import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
+// ACP session routes (REST session management + console session WebSocket)
+import { stationAcpRoutes } from './routes/station-acp.ts';
 // Middleware
 import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
@@ -119,7 +121,8 @@ const app = new Hono()
   // Station write routes (fs.write/mkdir/move/delete — capability-gated, audited)
   .route('/api', stationWriteRoutes)                       // POST /api/stations/:id/fs/{write,mkdir,move,delete}
   .route('/api', stationLifecycleRoutes)                   // POST /api/stations/:id/lifecycle
-  .route('/api', stationCleanupRoutes);                    // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationAcpRoutes);                        // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
 
 app.onError((err, c) => {
   const requestId = c.req.header('x-request-id') || crypto.randomUUID();
