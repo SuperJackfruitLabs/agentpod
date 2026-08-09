@@ -214,6 +214,13 @@ export class DockerOrchestrator {
         PortBindings: portBindings,
         NetworkMode: network,
         RestartPolicy: { Name: "unless-stopped" },
+        // Docker's built-in init (tini) as PID 1: reaps zombies. Without it,
+        // exited children of the entrypoint (e.g. the opencode supervision
+        // subshell after a lifecycle Stop) linger as <defunct> and their comm
+        // still matches the descriptor's pgrep health check — the station
+        // reports "running" forever after its process died (live-fleet
+        // finding, 2026-08-09).
+        Init: true,
         NanoCpus: resources.cpus
           ? Math.floor(parseFloat(resources.cpus) * 1e9)
           : undefined,
