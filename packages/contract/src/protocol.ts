@@ -10,6 +10,13 @@ export type RequestMsg = z.infer<typeof RequestMsg>;
 export type ResponseMsg = z.infer<typeof ResponseMsg>;
 export type StreamMsg = z.infer<typeof StreamMsg>;
 
+/**
+ * Keystroke/data frame sent hub → node over the gateway socket.
+ * `id` is dual-purpose depending on which handler owns it:
+ *  - terminal input frames key `id` by the attach-request id (term.attach's id).
+ *  - ACP input frames key `id` by the ACP session id — the node's acpHandler
+ *    routes incoming input by session id, not by attach-request id.
+ */
 export const InputMsg = z.object({ type: z.literal("input"), id: z.string(), data: z.string() });
 export const ResizeMsg = z.object({ type: z.literal("resize"), id: z.string(), cols: z.number().int(), rows: z.number().int() });
 export type InputMsg = z.infer<typeof InputMsg>;

@@ -1,11 +1,17 @@
 import { z } from "zod";
 export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup","acp"]);
 export type Capability = z.infer<typeof Capability>;
+// Station capability lists FILTER unknown capability strings instead of
+// rejecting the whole row (carry-in #2: an old hub must not break auto-adopt
+// when a newer node advertises capabilities this hub doesn't know about yet).
+export const CapabilityList = z
+  .array(z.string())
+  .transform((xs) => xs.filter((x): x is Capability => Capability.safeParse(x).success));
 export const StationKind = z.enum(["composite","leaf"]);
 export const Station = z.object({
   key: z.string().min(1), harness: z.string().min(1), kind: StationKind,
   displayName: z.string(), parentKey: z.string().nullable(),
-  workspacePath: z.string().nullable(), capabilities: z.array(Capability),
+  workspacePath: z.string().nullable(), capabilities: CapabilityList,
   matrixId: z.string().nullable().optional(),
 });
 export type Station = z.infer<typeof Station>;
