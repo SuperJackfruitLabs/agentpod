@@ -223,6 +223,67 @@ test("prompt surfaces the create failure message and keeps no session", async ()
   expect(chat.transcript.items).toEqual([]); // no optimistic item for a failed create
 });
 
+// ─── prompt: double-submission guard ─────────────────────────────────────────
+
+test("concurrent prompts with no session issue exactly one create", async () => {
+  const createSpy = vi.spyOn(api, "createAcpSession").mockResolvedValue(row());
+
+  const chat = new AcpChat("st1");
+  const first = chat.prompt("one");
+  const second = chat.prompt("two"); // refused: create in flight
+  await Promise.all([first, second]);
+
+  expect(createSpy).toHaveBeenCalledTimes(1);
+  expect(MockWebSocket.instances).toHaveLength(1);
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  expect(ws.frames()).toEqual([
+    { t: "subscribe", sinceSeq: 0 },
+    { t: "prompt", text: "one" },
+  ]);
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "one", pending: true },
+  ]);
+});
+
+test("prompt while an optimistic prompt is still pending is a no-op", async () => {
+  const { chat, ws } = await connectedChat();
+  await chat.prompt("first");
+  const framesBefore = ws.sent.length;
+
+  await chat.prompt("second"); // refused: pending echo outstanding
+
+  expect(ws.sent).toHaveLength(framesBefore);
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "first", pending: true },
+  ]);
+});
+
+test("prompt while the agent is working is a no-op", async () => {
+  const { chat, ws } = await connectedChat();
+  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "go" }) });
+  ws.fireMessage({ t: "event", event: ev(2, "state", { status: "working" }) });
+  const framesBefore = ws.sent.length;
+
+  await chat.prompt("more"); // refused: one turn at a time
+
+  expect(ws.sent).toHaveLength(framesBefore);
+  expect(chat.transcript.items.filter((it) => it.kind === "user")).toHaveLength(1);
+});
+
+test("prompt after destroy dials nothing", async () => {
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row());
+  const { chat, ws } = await connectedChat();
+  chat.destroy();
+  const count = MockWebSocket.instances.length;
+
+  await chat.prompt("late");
+
+  expect(MockWebSocket.instances).toHaveLength(count); // no redial
+  expect(api.createAcpSession).not.toHaveBeenCalled();
+  expect(ws.sent.filter((s) => (JSON.parse(s) as { t: string }).t === "prompt")).toHaveLength(0);
+});
+
 // ─── (d) reconnect budget ────────────────────────────────────────────────────
 
 test("unexpected close reconnects and re-subscribes with sinceSeq = lastSeq", async () => {
@@ -309,16 +370,16 @@ test("bye after an ended state event does not duplicate the ended notice", async
 
 // ─── (f) answer ──────────────────────────────────────────────────────────────
 
-test("answer sends optionId, and null sends cancelled:true", async () => {
+test("answer sends the permission-answer frame with the chosen optionId", async () => {
   const { ws, chat } = await connectedChat();
   const before = ws.sent.length;
 
   chat.answer(5, "allow");
-  chat.answer(6, null);
+  chat.answer(6, "reject");
 
   expect(ws.frames().slice(before)).toEqual([
     { t: "permission-answer", requestSeq: 5, optionId: "allow" },
-    { t: "permission-answer", requestSeq: 6, cancelled: true },
+    { t: "permission-answer", requestSeq: 6, optionId: "reject" },
   ]);
 });
 

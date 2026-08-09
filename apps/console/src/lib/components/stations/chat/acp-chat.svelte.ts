@@ -20,6 +20,10 @@
  *     gap ("working while away").
  *   - `bye` arrives as a server MESSAGE; the socket close that follows it is
  *     expected and must not trigger a reconnect.
+ *
+ * Permission dismissal: ACP has no per-request dismiss — agents supply reject
+ * options in the request itself (answer with one of those), and `cancel()`
+ * rejects ALL parked permissions (hub cancelTurn). Wire the UI accordingly.
  */
 
 import type { AcpEvent, AcpSessionMode } from "@agentpod/contract";
@@ -28,7 +32,6 @@ import {
   createAcpSocket,
   endAcpSession,
   listAcpSessions,
-  type AcpClientMsg,
   type AcpServerMsg,
   type AcpSessionRow,
   type AcpSocket,
@@ -68,6 +71,8 @@ export class AcpChat {
   private attempt = 0;
   /** Set on `bye`: the session is over — the following close is expected. */
   private sessionOver = false;
+  /** True while a createAcpSession POST is in flight (double-submit guard). */
+  private creating = false;
   private destroyed = false;
 
   constructor(stationId: string) {
@@ -129,19 +134,29 @@ export class AcpChat {
     this.startConnection();
   }
 
-  /** Send a prompt, creating a session first if none is live. */
+  /**
+   * Send a prompt, creating a session first if none is live.
+   *
+   * Double-submission guard: refuses (silent no-op) while a create is in
+   * flight, while a pending optimistic prompt is still awaiting its echo, or
+   * while the agent is working — one turn at a time.
+   */
   async prompt(text: string): Promise<void> {
-    if (!text) return;
+    if (!text || this.destroyed) return;
+    if (this.creating || this.working || this.hasPendingPrompt()) return;
     this.#error = null;
 
     if (!this.#session || this.sessionOver || this.#transcript.status === "ended") {
       let row: AcpSessionRow;
+      this.creating = true;
       try {
         row = await createAcpSession(this.stationId, this.mode);
       } catch (err) {
         // The ApiError message already carries the right "Couldn't …" grammar.
         this.#error = errMessage(err);
         return;
+      } finally {
+        this.creating = false;
       }
       if (this.destroyed) return;
       this.teardownSocket();
@@ -167,20 +182,13 @@ export class AcpChat {
     this.socket?.send({ t: "cancel" });
   }
 
-  /** Answer a permission request; `null` means the user dismissed/cancelled it. */
-  answer(requestSeq: number, optionId: string | null): void {
-    if (optionId === null) {
-      // Spec'd wire shape for a user cancel. NOTE: the contract's AcpClientMsg
-      // permission-answer variant doesn't carry `cancelled` yet — the cast
-      // keeps the spec'd frame until the contract/hub grow the variant.
-      this.socket?.send({
-        t: "permission-answer",
-        requestSeq,
-        cancelled: true,
-      } as unknown as AcpClientMsg);
-    } else {
-      this.socket?.send({ t: "permission-answer", requestSeq, optionId });
-    }
+  /**
+   * Answer a permission request with one of its offered options. To reject,
+   * answer with the agent-supplied reject option; `cancel()` rejects all
+   * parked permissions — ACP has no per-request dismiss.
+   */
+  answer(requestSeq: number, optionId: string): void {
+    this.socket?.send({ t: "permission-answer", requestSeq, optionId });
   }
 
   setMode(mode: AcpSessionMode): void {
@@ -230,6 +238,12 @@ export class AcpChat {
     this.destroyed = true;
     this.clearReconnectTimer();
     this.teardownSocket();
+  }
+
+  /** True while the last item is an optimistic prompt awaiting its echo. */
+  private hasPendingPrompt(): boolean {
+    const last = this.#transcript.items.at(-1);
+    return last?.kind === "user" && last.pending === true;
   }
 
   // ── Connection lifecycle ───────────────────────────────────────────────────
