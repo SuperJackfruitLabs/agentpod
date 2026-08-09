@@ -271,6 +271,37 @@ test("prompt while the agent is working is a no-op", async () => {
   expect(chat.transcript.items.filter((it) => it.kind === "user")).toHaveLength(1);
 });
 
+test("busy mirrors every refusal window the composer must respect", async () => {
+  // (1) create in flight — the POST is deliberately left unresolved.
+  let resolveCreate: (r: AcpSessionRow) => void = () => {};
+  vi.spyOn(api, "createAcpSession").mockReturnValue(
+    new Promise<AcpSessionRow>((res) => {
+      resolveCreate = res;
+    }),
+  );
+
+  const fresh = new AcpChat("st1");
+  expect(fresh.busy).toBe(false); // idle, no session
+  const inFlight = fresh.prompt("hello");
+  expect(fresh.busy).toBe(true);
+  resolveCreate(row());
+  await inFlight;
+
+  // (2) optimistic prompt awaiting its echo.
+  expect(fresh.busy).toBe(true);
+  MockWebSocket.latest()!.fireMessage({
+    t: "event",
+    event: ev(1, "user-prompt", { text: "hello" }),
+  });
+  expect(fresh.busy).toBe(false);
+
+  // (3) agent working.
+  MockWebSocket.latest()!.fireMessage({ t: "event", event: ev(2, "state", { status: "working" }) });
+  expect(fresh.busy).toBe(true);
+  MockWebSocket.latest()!.fireMessage({ t: "event", event: ev(3, "state", { status: "idle" }) });
+  expect(fresh.busy).toBe(false);
+});
+
 test("prompt after destroy dials nothing", async () => {
   vi.spyOn(api, "createAcpSession").mockResolvedValue(row());
   const { chat, ws } = await connectedChat();

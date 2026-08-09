@@ -71,9 +71,15 @@ export class AcpChat {
   private attempt = 0;
   /** Set on `bye`: the session is over — the following close is expected. */
   private sessionOver = false;
-  /** True while a createAcpSession POST is in flight (double-submit guard). */
-  private creating = false;
   private destroyed = false;
+
+  /**
+   * True while a createAcpSession POST is in flight (double-submit guard).
+   * $state-backed because `busy` is read by the view: the composer must be
+   * disabled for the whole create window, or PromptInput would clear a draft
+   * that `prompt()` then silently refuses.
+   */
+  #creating = $state(false);
 
   constructor(stationId: string) {
     this.stationId = stationId;
@@ -98,6 +104,16 @@ export class AcpChat {
 
   get working(): boolean {
     return this.#transcript.status === "working";
+  }
+
+  /**
+   * True exactly when `prompt()` would refuse: a create is in flight, an
+   * optimistic prompt is still awaiting its echo, or the agent is working.
+   * The composer MUST be disabled (or shown as working) whenever this is
+   * true — PromptInput only keeps a draft it wasn't allowed to send.
+   */
+  get busy(): boolean {
+    return this.#creating || this.working || this.hasPendingPrompt();
   }
 
   get pendingPermissions(): number {
@@ -143,12 +159,12 @@ export class AcpChat {
    */
   async prompt(text: string): Promise<void> {
     if (!text || this.destroyed) return;
-    if (this.creating || this.working || this.hasPendingPrompt()) return;
+    if (this.busy) return;
     this.#error = null;
 
     if (!this.#session || this.sessionOver || this.#transcript.status === "ended") {
       let row: AcpSessionRow;
-      this.creating = true;
+      this.#creating = true;
       try {
         row = await createAcpSession(this.stationId, this.mode);
       } catch (err) {
@@ -156,7 +172,7 @@ export class AcpChat {
         this.#error = errMessage(err);
         return;
       } finally {
-        this.creating = false;
+        this.#creating = false;
       }
       if (this.destroyed) return;
       this.teardownSocket();
