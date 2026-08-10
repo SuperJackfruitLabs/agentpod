@@ -32,22 +32,65 @@ import (
 type claudeCodeDescriptor struct {
 	home    string // absolute path to ~/.claude
 	jsonDir string // absolute path to ~/ (parent of home; .claude.json lives here)
+
+	// ACP adapter settings — see ClaudeCodeConfig. All optional.
+	acpBinary    string
+	claudeBinary string
+	nodeBinary   string
+
+	// Host seams. These are fields so no test needs node, npx or claude
+	// installed and none touches the host's PATH or filesystem; production
+	// wiring in NewClaudeCodeFrom uses the real host.
+	userHome     string                                // OS user home; "" omits home-relative candidates
+	lookPath     func(string) (string, error)          // exec.LookPath
+	isExecutable func(string) bool                     // isExecutableFile
+	nodeVersion  func(nodePath string) (string, error) // `node --version`
+}
+
+// ClaudeCodeConfig carries everything the descriptor needs. Zero values are
+// valid: an unconfigured host still detects stations, and an ACP session still
+// starts as long as the adapter (or npx) is reachable on PATH.
+type ClaudeCodeConfig struct {
+	Home         string // path to the ~/.claude directory; default <user home>/.claude
+	AcpBinary    string // a claude-agent-acp executable; empty = resolve it
+	ClaudeBinary string // the claude CLI, for CLAUDE_CODE_EXECUTABLE; empty = resolve it
+	NodeBinary   string // the node runtime, when it isn't on the service's PATH
 }
 
 // NewClaudeCode returns a Descriptor for the Claude Code harness.
 // home is the path to the ~/.claude directory. If empty it defaults to
 // $HOME/.claude. The .claude.json file is read from filepath.Dir(home).
 func NewClaudeCode(home string) Descriptor {
+	return NewClaudeCodeFrom(ClaudeCodeConfig{Home: home})
+}
+
+// NewClaudeCodeFrom returns a Descriptor for the Claude Code harness configured
+// by cfg.
+func NewClaudeCodeFrom(cfg ClaudeCodeConfig) Descriptor {
+	// userHome is "" when it can't be determined, which the binary locator
+	// reads as "skip the home-relative candidates".
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
+	}
+	home := cfg.Home
 	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			userHome = "."
+		base := userHome
+		if base == "" {
+			base = "."
 		}
-		home = filepath.Join(userHome, ".claude")
+		home = filepath.Join(base, ".claude")
 	}
 	return &claudeCodeDescriptor{
-		home:    home,
-		jsonDir: filepath.Dir(home),
+		home:         home,
+		jsonDir:      filepath.Dir(home),
+		acpBinary:    cfg.AcpBinary,
+		claudeBinary: cfg.ClaudeBinary,
+		nodeBinary:   cfg.NodeBinary,
+		userHome:     userHome,
+		lookPath:     exec.LookPath,
+		isExecutable: isExecutableFile,
+		nodeVersion:  nodeVersionOutput,
 	}
 }
 
@@ -83,7 +126,9 @@ func (c *claudeCodeDescriptor) Detect() ([]Station, error) {
 		return nil, err
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	// "acp" is advertised because *claudeCodeDescriptor implements ACPCommander
+	// (via the external claude-agent-acp adapter — see ACPCommand).
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 	var stations []Station
 
 	for _, projPath := range paths {
@@ -187,6 +232,128 @@ func (c *claudeCodeDescriptor) projectPathForKey(key string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("claude-code: station not found: %q", key)
+}
+
+// Claude Code has no ACP mode of its own: sessions run through the external
+// claude-agent-acp adapter, a Node program that speaks ACP on stdio and drives
+// Claude Code underneath.
+const (
+	// claudeACPBinaryName is the adapter's executable name once installed.
+	claudeACPBinaryName = "claude-agent-acp"
+	// claudeACPPackage is the npx fallback, VERSION-PINNED on purpose: an
+	// unpinned `npx -y <pkg>` would silently change every node's adapter the
+	// moment a new version is published, mid-flight, with no way to tell which
+	// version a session actually ran.
+	claudeACPPackage = "@agentclientprotocol/claude-agent-acp@0.66.0"
+	// claudeACPMinNodeMajor is the adapter's minimum Node major version.
+	claudeACPMinNodeMajor = 22
+)
+
+// locator returns the executable resolver for this node. A configured node
+// runtime contributes its own directory: the npx that ships with a hand-placed
+// node lives beside it, not on PATH.
+func (c *claudeCodeDescriptor) locator() binaryLocator {
+	var extraDirs []string
+	if c.nodeBinary != "" {
+		extraDirs = append(extraDirs, filepath.Dir(c.nodeBinary))
+	}
+	return binaryLocator{
+		userHome:     c.userHome,
+		extraDirs:    extraDirs,
+		lookPath:     c.lookPath,
+		isExecutable: c.isExecutable,
+	}
+}
+
+// nodeVersionOutput runs `node --version` and returns its raw output.
+func nodeVersionOutput(nodePath string) (string, error) {
+	out, err := exec.Command(nodePath, "--version").Output()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// parseNodeMajor extracts the major version from `node --version` output
+// ("v22.14.0\n" → 22). ok is false when the string isn't a version at all.
+func parseNodeMajor(out string) (int, bool) {
+	s := strings.TrimSpace(out)
+	s = strings.TrimPrefix(s, "v")
+	if i := strings.IndexByte(s, '.'); i != -1 {
+		s = s[:i]
+	}
+	major, err := strconv.Atoi(s)
+	if err != nil || major <= 0 {
+		return 0, false
+	}
+	return major, true
+}
+
+// checkNodeVersion fails when the node on this host is too old for the adapter.
+// A node that can't be found, or won't report a version, is NOT a failure: an
+// adapter may ship its own runtime, and the npx path fails on npx anyway.
+func (c *claudeCodeDescriptor) checkNodeVersion() error {
+	nodePath, ok := c.locator().locate("node", c.nodeBinary)
+	if !ok {
+		return nil
+	}
+	out, err := c.nodeVersion(nodePath)
+	if err != nil {
+		return nil
+	}
+	major, parsed := parseNodeMajor(out)
+	if !parsed {
+		return nil
+	}
+	if major < claudeACPMinNodeMajor {
+		return fmt.Errorf("claude-code: node %d+ is required by claude-agent-acp (found %s)",
+			claudeACPMinNodeMajor, strings.TrimSpace(out))
+	}
+	return nil
+}
+
+// ACPCommand implements ACPCommander. Unlike the other harnesses there is no
+// `claude acp`: the command spawned is the claude-agent-acp adapter, resolved
+// in order — the claudeCodeAcpBinary override, an installed adapter (PATH then
+// the well-known install dirs), then a version-pinned `npx -y`.
+//
+// No credential is ever put in argv (world-readable via ps) or env: the adapter
+// drives the host's own Claude Code install, which is already authenticated.
+// The one variable set is CLAUDE_CODE_EXECUTABLE — without it the adapter uses
+// the Claude Code build bundled with its SDK, so a chat session and the
+// station's Health tab would be reporting two different installs.
+func (c *claudeCodeDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	// The station must exist before anything is probed on the host: an unknown
+	// key has no project directory to run in.
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Node is checked up front for every path: a too-old runtime otherwise
+	// fails cryptically inside the adapter, after the hub opened a session.
+	if err := c.checkNodeVersion(); err != nil {
+		return nil, "", nil, err
+	}
+
+	locator := c.locator()
+
+	var env []string
+	if claudePath, ok := locator.locate("claude", c.claudeBinary); ok {
+		env = append(env, "CLAUDE_CODE_EXECUTABLE="+claudePath)
+	}
+
+	// An installed adapter beats npx: it starts immediately and can't change
+	// under us between two sessions.
+	if adapter, ok := locator.locate(claudeACPBinaryName, c.acpBinary); ok {
+		return []string{adapter}, projPath, env, nil
+	}
+
+	npx, ok := locator.locate("npx", "")
+	if !ok {
+		return nil, "", nil, fmt.Errorf("claude-code: couldn't find claude-agent-acp or npx on this node — set claudeCodeAcpBinary in the node config")
+	}
+	return []string{npx, "-y", claudeACPPackage}, projPath, env, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a leaf station.
