@@ -23,6 +23,12 @@
    * Failures surface twice on purpose: an inline strip above the composer (with
    * Retry when the transport is dead) plus a toast for a failed session create,
    * which is the one failure that leaves nothing on screen to explain itself.
+   *
+   * A station can host several sessions at once, so this panel is a view onto
+   * ONE of them: the header's switcher picks, `chat.attach` swaps the socket and
+   * the transcript. The panel is deliberately not remounted per session — the
+   * socket lifecycle belongs to the controller, and remounting would also throw
+   * away the draft and the scroll position on every switch.
    */
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
@@ -40,6 +46,31 @@
 
   /** The composer's draft, owned here so a failed prompt can be handed back. */
   let draft = $state("");
+
+  /**
+   * Drafts are PER SESSION: switching away from A parks A's text here, switching
+   * back restores it, and B always shows B's own (empty until B has one).
+   *
+   * The two single-buffer alternatives are both wrong. Carrying one draft across
+   * a switch leaves words written for one agent one Enter away from another —
+   * and the header above it now says a different session. Clearing on switch
+   * destroys text the user typed, which is the one thing this panel never does
+   * anywhere else (a refused send keeps its draft; a rejected prompt is handed
+   * back through `onPromptFailed`). Parking per session loses nothing and can
+   * misdirect nothing. Entries are dropped when a session ends — there is no
+   * composer to return to.
+   */
+  const drafts = new Map<string, string>();
+
+  /**
+   * Which session is on screen. The panel owns this pick; the controller owns
+   * the socket for it. Deliberately NOT an `$effect` reconciling `selectedId`
+   * against `chat.session`: an effect re-runs on every controller state change,
+   * so creating a session from the header (which moves `chat.session`, not the
+   * pick) would immediately be switched away from again. A switch happens once,
+   * in the handler for the thing the user actually clicked.
+   */
+  let selectedId = $state<string | null>(null);
 
   // Plain (non-reactive) ref: the controller holds its own $state internally,
   // so the template stays reactive while the instance itself is stable for the
@@ -59,6 +90,57 @@
     // Unmount (including a tab switch that drops this panel) closes the socket
     // only — the session keeps running on the hub and is re-attached on return.
     return () => chat.destroy();
+  });
+
+  /**
+   * Park the draft under the session we're leaving and load the one belonging to
+   * the session we landed on. Called only after the controller has actually
+   * moved: a refused switch (a session that's gone) must leave the composer
+   * exactly as the user left it.
+   */
+  function swapDraft(from: string | null, to: string | null) {
+    if (from === to) return;
+    if (from !== null) {
+      if (draft.length > 0) drafts.set(from, draft);
+      else drafts.delete(from);
+    }
+    draft = (to !== null ? drafts.get(to) : undefined) ?? "";
+  }
+
+  async function selectSession(id: string) {
+    const from = chat.session?.id ?? null;
+    if (id === from) return; // already on it — don't touch the socket or the draft
+    selectedId = id;
+    await chat.attach(id);
+    // A refused switch leaves the previous session attached, so the header must
+    // fall back to what is really on screen.
+    const landed = chat.session?.id ?? null;
+    selectedId = landed;
+    swapDraft(from, landed);
+  }
+
+  async function startSession() {
+    const from = chat.session?.id ?? null;
+    await chat.newSession();
+    const landed = chat.session?.id ?? null;
+    selectedId = landed;
+    swapDraft(from, landed);
+    // Same reasoning as a failed first prompt: the strip shows it, but a toast is
+    // what gets noticed when the transcript below hasn't changed.
+    if (chat.error !== null && landed === from) {
+      toast.error("Couldn't start the session", { description: chat.error });
+    }
+  }
+
+  // A parked draft for a session that has since ended is dead post — nothing can
+  // be sent into that session again, so drop it rather than hand it back on a
+  // switch into a read-only replay. Only the MAP is pruned: text the user can
+  // still see in the composer is never destroyed (with an ended session attached,
+  // sending it creates a new session — see `prompt()`'s lazy create).
+  $effect(() => {
+    for (const s of chat.sessions) {
+      if (s.status === "ended") drafts.delete(s.id);
+    }
   });
 
   async function handleSend(text: string) {
@@ -83,9 +165,12 @@
   <div class="shrink-0 border-b px-3 py-2">
     <ChatHeader
       session={chat.session}
+      sessions={chat.sessions}
+      selectedId={selectedId ?? chat.session?.id ?? null}
       status={chat.status}
       connection={chat.connection}
       mode={chat.mode}
+      creating={chat.creating}
       onModeChange={(mode) => chat.setMode(mode)}
       onEnd={() => {
         // While disconnected the DELETE still lands, but the ended state
@@ -93,7 +178,8 @@
         // until a retry reconnects and replays it. That's the honest reading.
         void chat.end();
       }}
-      onNew={() => chat.newSession()}
+      onNew={() => void startSession()}
+      onSelectSession={(id) => void selectSession(id)}
     />
   </div>
 

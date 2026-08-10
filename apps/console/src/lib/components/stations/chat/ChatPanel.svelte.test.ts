@@ -23,6 +23,26 @@ vi.mock("svelte-sonner", () => ({
 }));
 
 import { toast } from "svelte-sonner";
+
+// bits-ui's Select (the session switcher) opens on `pointerdown` and picks on
+// `pointerup`, touching pointer-capture methods jsdom doesn't implement.
+if (typeof window.PointerEvent === "undefined") {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error jsdom has no native PointerEvent
+  window.PointerEvent = PointerEventPolyfill;
+}
+if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false;
+if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = () => {};
+if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = () => {};
+
 // Static import: compiled during file collection, not inside a waitFor window.
 import ChatPanel from "./ChatPanel.svelte";
 
@@ -86,6 +106,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   MockWebSocket.instances = [];
   localStorage.clear();
 });
@@ -429,17 +450,170 @@ test("ending a session goes through the confirm dialog and DELETEs", async () =>
   await waitFor(() => expect(end).toHaveBeenCalledWith("s1"));
 });
 
-test("after the session ends, New session returns to the empty state", async () => {
+test("after the session ends, New session creates and attaches a fresh one", async () => {
   const u = await renderConnected();
   u.ws.fireMessage({ t: "event", event: ev(1, "state", { status: "ended", reason: "done" }) });
   await tick();
   expect(u.getByText("Ended")).toBeTruthy();
 
+  const created = row({ id: "s2", lastEventAt: minutesAgo(0) });
+  const create = vi.spyOn(api, "createAcpSession").mockResolvedValue(created);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([created, row()]);
+
   await fireEvent.click(u.getByRole("button", { name: "New session" }));
+  await waitFor(() => expect(create).toHaveBeenCalledWith("st1", "ask"));
   await tick();
 
+  // A fresh transcript on a new socket — not a local reset of the old session.
   expect(u.getByText("No conversation yet.")).toBeTruthy();
-  expect(u.getByText("No session")).toBeTruthy();
+  const ws2 = MockWebSocket.latest()!;
+  expect(ws2).not.toBe(u.ws);
+  expect(ws2.url).toContain("/api/acp/sessions/s2/ws");
+  expect(u.ws.readyState).toBe(3);
+  ws2.open();
+  expect(ws2.frames()).toEqual([{ t: "subscribe", sinceSeq: 0 }]);
+});
+
+// ─── Session switcher ───────────────────────────────────────────────────────
+
+/** ISO timestamp `minutes` ago — keeps relative labels deterministic. */
+const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+
+const sessionA = row({
+  id: "sa",
+  createdAt: "2026-08-09T10:00:00.000Z",
+  lastEventAt: minutesAgo(90),
+});
+const sessionB = row({
+  id: "sb",
+  mode: "full-auto",
+  createdAt: "2026-08-09T11:00:00.000Z",
+  lastEventAt: minutesAgo(5),
+});
+
+/** Two live sessions on the station, attached to the newest-activity one (B). */
+async function renderTwoSessions() {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([sessionB, sessionA]);
+  const utils = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "hello from B" }) });
+  ws.fireMessage({ t: "replay-done", lastSeq: 1 });
+  await tick();
+  return { ...utils, ws };
+}
+
+/** Opens the switcher and clicks the option whose accessible name matches. */
+async function switchTo(
+  u: Awaited<ReturnType<typeof renderTwoSessions>>,
+  name: RegExp,
+): Promise<void> {
+  const trigger = u.getByRole("button", { name: /^Session \d/ });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  const option = await waitFor(() => u.getByRole("option", { name }));
+  await fireEvent.pointerUp(option, { pointerId: 1, button: 0, pointerType: "mouse" });
+  await tick();
+}
+
+test("the switcher lists the station's sessions and switching re-attaches", async () => {
+  const endSpy = vi.spyOn(api, "endAcpSession");
+  const fetchSpy = vi.fn();
+  vi.stubGlobal("fetch", fetchSpy);
+  const u = await renderTwoSessions();
+  expect(u.getByText("hello from B")).toBeTruthy();
+  expect(u.getByRole("button", { name: /^Session 2 · idle · 5m ago$/ })).toBeTruthy();
+
+  await switchTo(u, /^Session 1 · idle · 1h ago$/);
+
+  // The old socket is closed and a new one subscribes to the chosen session.
+  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+  const wsA = MockWebSocket.latest()!;
+  expect(wsA).not.toBe(u.ws);
+  expect(wsA.url).toContain("/api/acp/sessions/sa/ws");
+  expect(u.ws.readyState).toBe(3);
+  wsA.open();
+  expect(wsA.frames()).toEqual([{ t: "subscribe", sinceSeq: 0 }]);
+
+  // B's transcript is gone and A's replay takes its place.
+  expect(u.queryByText("hello from B")).toBeNull();
+  wsA.fireMessage({ t: "event", event: ev(7, "user-prompt", { text: "hello from A" }) });
+  wsA.fireMessage({ t: "replay-done", lastSeq: 7 });
+  await tick();
+  expect(u.getByText("hello from A")).toBeTruthy();
+  expect(u.getByRole("button", { name: /^Session 1 · idle · 1h ago$/ })).toBeTruthy();
+
+  // Sessions are hub-owned: switching never ends one.
+  expect(endSpy).not.toHaveBeenCalled();
+  expect(fetchSpy.mock.calls).toEqual([]);
+});
+
+test("drafts are per session: parked on the way out, restored on the way back", async () => {
+  // One shared buffer would leave words written for one agent an Enter away from
+  // another; clearing on switch would destroy them. Parking does neither.
+  const u = await renderTwoSessions();
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "written for B" } });
+
+  await switchTo(u, /^Session 1/);
+  expect(box.value).toBe(""); // A has no draft of its own
+
+  await fireEvent.input(box, { target: { value: "written for A" } });
+  await switchTo(u, /^Session 2/);
+  expect(box.value).toBe("written for B"); // B's own draft came back
+
+  await switchTo(u, /^Session 1/);
+  expect(box.value).toBe("written for A");
+});
+
+test("a parked draft is dropped once its session has ended", async () => {
+  const u = await renderTwoSessions();
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "parked in B" } });
+  await switchTo(u, /^Session 1/); // B's draft is parked
+
+  // Ending A re-reads the list, which is where this panel learns B ended too.
+  vi.spyOn(api, "endAcpSession").mockResolvedValue(undefined);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([
+    { ...sessionB, status: "ended" },
+    sessionA,
+  ]);
+  await fireEvent.click(u.getByRole("button", { name: "End session" }));
+  const confirm = await waitFor(() => {
+    const inDialog = u
+      .getAllByRole("button", { name: "End session" })
+      .find((b) => b.closest('[role="dialog"]') !== null);
+    if (!inDialog) throw new Error("confirm button not rendered yet");
+    return inDialog;
+  });
+  await fireEvent.click(confirm);
+  await waitFor(() => expect(api.endAcpSession).toHaveBeenCalled());
+  await tick();
+
+  await switchTo(u, /^Session 2/);
+
+  // Nothing can be sent into an ended session, so its draft is not handed back.
+  expect(box.value).toBe("");
+});
+
+test("re-picking the attached session churns nothing", async () => {
+  // The list is also a status display, so it gets clicked idly. Re-attaching
+  // there would drop a live socket and replay the transcript for no reason.
+  const u = await renderTwoSessions();
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "still mine" } });
+
+  await switchTo(u, /^Session 2/);
+
+  expect(MockWebSocket.instances).toHaveLength(1);
+  expect(u.ws.readyState).toBe(1);
+  expect(box.value).toBe("still mine");
+  expect(u.getByText("hello from B")).toBeTruthy();
+});
+
+test("with one session the panel shows no switcher", async () => {
+  const u = await renderConnected();
+  expect(u.queryByRole("button", { name: /^Session \d/ })).toBeNull();
 });
 
 // ─── Connection failures ────────────────────────────────────────────────────
