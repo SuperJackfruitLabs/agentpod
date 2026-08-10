@@ -24,6 +24,20 @@ it("acp.open params/result schemas round-trip", () => {
   expect(VERB_PARAMS["acp.open"].parse({ key: "opencode:c52ddf65" })).toEqual({ key: "opencode:c52ddf65" });
   expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
 });
+it("acp.open params accept an optional instance discriminator", () => {
+  expect(VERB_PARAMS["acp.open"].parse({ key: "opencode:c52ddf65" })).toEqual({ key: "opencode:c52ddf65" });
+  expect(VERB_PARAMS["acp.open"].parse({ key: "opencode:c52ddf65", instance: "tab-2" })).toEqual({
+    key: "opencode:c52ddf65",
+    instance: "tab-2",
+  });
+});
+it("acp.open result echoes instance when the node understands it, and still parses when an old node omits it", () => {
+  expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1", instance: "tab-2" })).toEqual({
+    sessionId: "acp_1",
+    instance: "tab-2",
+  });
+  expect(VERB_RESULTS["acp.open"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
+});
 it("acp.attach takes a sessionId; acp.close returns ok", () => {
   expect(VERB_PARAMS["acp.attach"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });
   expect(VERB_PARAMS["acp.close"].parse({ sessionId: "acp_1" })).toEqual({ sessionId: "acp_1" });

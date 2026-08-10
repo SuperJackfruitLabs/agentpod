@@ -38,7 +38,10 @@ export const VERB_PARAMS = {
   "term.open":   z.object({ key: z.string(), cols: z.number().int(), rows: z.number().int() }),
   "term.attach": z.object({ sessionId: z.string() }),
   "term.close":  z.object({ sessionId: z.string() }),
-  "acp.open":   z.object({ key: z.string() }),
+  // instance is an opaque, caller-chosen discriminator for a distinct ACP process
+  // under the same station key. Omitted means "legacy: reuse any existing process
+  // for this key".
+  "acp.open":   z.object({ key: z.string(), instance: z.string().optional() }),
   "acp.attach": z.object({ sessionId: z.string() }),
   "acp.close":  z.object({ sessionId: z.string() }),
 } as const;
@@ -61,7 +64,10 @@ export const VERB_RESULTS = {
   "term.open":  z.object({ sessionId: z.string() }),
   "term.close": z.object({ ok: z.boolean() }),
   // term.attach streams; no entry needed.
-  "acp.open":  z.object({ sessionId: z.string() }),
+  // instance echoes the request's instance when the node understands it. A
+  // result missing instance is how the hub detects an older node and degrades
+  // safely (single-process-per-key behavior).
+  "acp.open":  z.object({ sessionId: z.string(), instance: z.string().optional() }),
   "acp.close": z.object({ ok: z.boolean() }),
   // acp.attach streams; no entry needed (same as term.attach).
 } as const;
