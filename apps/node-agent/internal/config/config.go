@@ -12,6 +12,13 @@ type Config struct {
   // OpenClawStartCmd is the shell command used to start the OpenClaw gateway.
   // Needed by the lifecycle "start" and "restart" actions. Optional.
   OpenClawStartCmd string `json:"openclawStartCmd,omitempty"`
+  // OpenClawGatewayURL / OpenClawTokenFile / OpenClawSessionLabel configure the
+  // `openclaw acp` bridge. All optional: with a local Gateway, openclaw resolves
+  // its own URL from config. The token is passed as a FILE PATH, never inline —
+  // argv is world-readable.
+  OpenClawGatewayURL   string `json:"openclawGatewayUrl,omitempty"`
+  OpenClawTokenFile    string `json:"openclawTokenFile,omitempty"`
+  OpenClawSessionLabel string `json:"openclawSessionLabel,omitempty"`
 }
 
 func DefaultPath() string {

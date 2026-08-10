@@ -110,6 +110,111 @@ func TestHermesACPCommand_BadKey(t *testing.T) {
 	}
 }
 
+// --- OpenClaw ---
+//
+// gatewayUp is overridden in every case so no test spawns or pgreps a process
+// (see the Go test hygiene note in CLAUDE.md).
+
+func TestOpenClawACPCommand_RootStation(t *testing.T) {
+	home := testdataOpenClawHome(t)
+	d := NewOpenClawFrom(OpenClawConfig{Home: home})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+
+	c, ok := d.(ACPCommander)
+	if !ok {
+		t.Fatal("openclaw descriptor must implement ACPCommander")
+	}
+	argv, dir, env, err := c.ACPCommand("openclaw")
+	if err != nil {
+		t.Fatalf("ACPCommand: %v", err)
+	}
+	want := []string{"openclaw", "acp", "--no-prefix-cwd", "--session", "agent:main:main"}
+	if !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %v, want %v", argv, want)
+	}
+	if dir == "" {
+		t.Error("dir must be the station workspace, got empty")
+	}
+	if env != nil {
+		t.Errorf("env = %v, want nil (inherit)", env)
+	}
+}
+
+func TestOpenClawACPCommand_AgentStation(t *testing.T) {
+	home := testdataOpenClawHome(t)
+	d := NewOpenClawFrom(OpenClawConfig{Home: home, SessionLabel: "console"})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+
+	argv, dir, _, err := d.(ACPCommander).ACPCommand("openclaw:analyst")
+	if err != nil {
+		t.Fatalf("ACPCommand: %v", err)
+	}
+	if got := argv[len(argv)-1]; got != "agent:analyst:console" {
+		t.Errorf("session key = %q, want agent:analyst:console", got)
+	}
+	if !strings.HasSuffix(dir, filepath.Join("agents", "analyst")) {
+		t.Errorf("dir = %q, want the analyst agent workspace", dir)
+	}
+}
+
+func TestOpenClawACPCommand_GatewayFlags(t *testing.T) {
+	home := testdataOpenClawHome(t)
+	d := NewOpenClawFrom(OpenClawConfig{
+		Home:       home,
+		GatewayURL: "wss://gw.example:18789",
+		TokenFile:  "/etc/agentpod/openclaw.token",
+	})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return false } // a URL makes the local probe irrelevant
+
+	argv, _, _, err := d.(ACPCommander).ACPCommand("openclaw")
+	if err != nil {
+		t.Fatalf("ACPCommand: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	for _, want := range []string{"--url wss://gw.example:18789", "--token-file /etc/agentpod/openclaw.token"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("argv %q missing %q", joined, want)
+		}
+	}
+	for _, arg := range argv {
+		if arg == "--token" {
+			t.Fatal("--token must never be used: argv is world-readable via ps")
+		}
+	}
+}
+
+func TestOpenClawACPCommand_NoGatewayNoURL(t *testing.T) {
+	home := testdataOpenClawHome(t)
+	d := NewOpenClawFrom(OpenClawConfig{Home: home})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return false }
+
+	if _, _, _, err := d.(ACPCommander).ACPCommand("openclaw"); err == nil {
+		t.Fatal("expected an error when no gateway is running and no URL is configured")
+	} else if !strings.Contains(err.Error(), "gateway") {
+		t.Errorf("error %q should name the gateway so the console message is actionable", err)
+	}
+}
+
+func TestOpenClawACPCommand_BadKey(t *testing.T) {
+	d := NewOpenClawFrom(OpenClawConfig{Home: testdataOpenClawHome(t)})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+
+	if _, _, _, err := d.(ACPCommander).ACPCommand("hermes:main"); err == nil {
+		t.Fatal("expected error for unrecognized key")
+	}
+}
+
+// A trailing colon carries no agent name. It must be rejected before the
+// session key is derived, or the bridge would be pointed at "agent::main".
+func TestOpenClawACPCommand_EmptyAgentKey(t *testing.T) {
+	d := NewOpenClawFrom(OpenClawConfig{Home: testdataOpenClawHome(t)})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+
+	if _, _, _, err := d.(ACPCommander).ACPCommand("openclaw:"); err == nil {
+		t.Fatal("expected error for a key with an empty agent name")
+	}
+}
+
 // --- capability advertising ---
 
 func TestCapabilitiesIncludeACP(t *testing.T) {
@@ -119,6 +224,9 @@ func TestCapabilitiesIncludeACP(t *testing.T) {
 	})
 	t.Run("hermes", func(t *testing.T) {
 		assertAllStationsHaveACP(t, NewHermes(testdataHermesHome(t)))
+	})
+	t.Run("openclaw", func(t *testing.T) {
+		assertAllStationsHaveACP(t, NewOpenClaw(testdataOpenClawHome(t)))
 	})
 }
 

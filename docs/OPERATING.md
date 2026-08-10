@@ -166,6 +166,35 @@ Start / stop / restart the station's runtime. Behaviour is harness-specific:
 | OpenClaw | User systemd unit (`openclaw-gateway.service`) |
 | Claude Code / Codex | Ephemeral CLI (no persistent process; lifecycle not applicable) |
 
+### OpenClaw agent sessions (ACP)
+
+Stations advertising the `acp` capability get a **Chat** tab — a real conversation with the agent, driven over the Agent Client Protocol. For OpenClaw the node-agent spawns `openclaw acp`, which is a **bridge to the OpenClaw Gateway**, not a standalone runtime.
+
+Prerequisites:
+
+- **OpenClaw ≥ 2026.1.20** on the node (that release added the `acp` subcommand).
+- **The OpenClaw Gateway must be running.** The bridge dials it over WebSocket. If no Gateway is running on the node and no remote URL is configured, opening a session fails immediately with `Couldn't start the agent process — openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session` rather than hanging until the handshake times out.
+
+A default local install needs **no configuration** — openclaw resolves the Gateway URL and credentials from its own config. Three optional node config keys override that (`~/.config/agentpod-node/config.json`, or `~/Library/Application Support/agentpod-node/config.json` on macOS):
+
+```json
+{
+  "openclawGatewayUrl": "wss://gateway.internal:18789",
+  "openclawTokenFile": "/etc/agentpod/openclaw.token",
+  "openclawSessionLabel": "console"
+}
+```
+
+| Key | Flag | Meaning |
+|-----|------|---------|
+| `openclawGatewayUrl` | `--url` | Point at a remote Gateway. When set, the local Gateway check is skipped. |
+| `openclawTokenFile` | `--token-file` | **Path to a file** containing the Gateway token. |
+| `openclawSessionLabel` | `--session` | Session component of the OpenClaw session key; default `main`. |
+
+The token is always passed as a **file path, never inline** — argv is world-readable via `ps`, so the node-agent never emits `--token`. Keep the token file `0600` and owned by the user running the node-agent.
+
+Work is addressed by OpenClaw session key `agent:<name>:<label>`: the root `openclaw` station maps to `agent:main:<label>`, and a subagent station `openclaw:<agent>` maps to `agent:<agent>:<label>`. Restart the node-agent (`apn restart`) after changing any of these keys.
+
 ### Cleanup
 
 Disk usage summary for the station's workspace. Actions: prune caches · rotate logs · reclaim space. Each cleanup action shows the bytes to be freed before applying.
