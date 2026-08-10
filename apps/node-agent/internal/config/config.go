@@ -44,8 +44,11 @@ type Config struct {
   // CodexAcpBinary is a codex-acp executable, used verbatim as argv[0]; when
   // empty the node-agent resolves it from PATH, then from well-known install
   // paths, then falls back to a version-pinned `npx -y`.
-  // CodexBinary is the codex CLI exported as CODEX_PATH, so the ACP session
-  // drives the same install the Health tab reports on.
+  // CodexBinary is an OPT-IN codex CLI exported as CODEX_PATH. Leave it empty
+  // unless the node's codex is new enough to expose `app-server` (the interface
+  // codex-acp drives): empty means the adapter uses its own bundled, known-
+  // compatible Codex, and an older CLI dies with "Device not configured
+  // (os error 6)". It is never auto-discovered for exactly that reason.
   //
   // There is deliberately NO key for CODEX_API_KEY/OPENAI_API_KEY: a key in this
   // file would end up in argv or in a child's environment, i.e. readable via

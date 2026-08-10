@@ -297,26 +297,86 @@ func TestCodexACPCommand_NeverOptsIntoFullAccess(t *testing.T) {
 	}
 }
 
-// Without CODEX_PATH the adapter drives the Codex build bundled with its own npm
-// dependency — so the Chat tab and the station's Health tab would be reporting
-// two different installs.
-func TestCodexACPCommand_SetsCodexPath(t *testing.T) {
-	d, key, _ := codexACP(t, CodexConfig{})
-	stubCodexHost(t, d, map[string]string{
-		"codex-acp": "/usr/local/bin/codex-acp",
-		"codex":     "/usr/local/bin/codex",
-		"node":      "/usr/bin/node",
-	}, "v22.14.0")
+// CODEX_PATH is OPT-IN ONLY. This is the regression test for a real live
+// failure: auto-discovery pointed the adapter at the node's own
+// /opt/homebrew/bin/codex (v0.36.0), which has no `app-server` subcommand at
+// all — codex-acp drives exactly that interface, so the old CLI fell into
+// interactive mode and died on a TTY it does not have:
+//
+//	Codex process has exited with code 1: Error: Device not configured (os error 6)
+//
+// With no CODEX_PATH the adapter uses its own bundled Codex (v0.147.0) and the
+// ACP handshake succeeds. So a discoverable codex must NEVER be volunteered: the
+// CLAUDE_CODE_EXECUTABLE analogy does not transfer, because Claude Code's adapter
+// tolerates the CLI it drives while codex-acp requires a specific interface from
+// it. Guessing is strictly worse than the known-good default.
+func TestCodexACPCommand_NeverAutoDiscoversCodexPath(t *testing.T) {
+	t.Run("codex on PATH", func(t *testing.T) {
+		d, key, _ := codexACP(t, CodexConfig{})
+		stubCodexHost(t, d, map[string]string{
+			"codex-acp": "/usr/local/bin/codex-acp",
+			"codex":     "/opt/homebrew/bin/codex", // the v0.36.0 that broke the live node
+			"node":      "/usr/bin/node",
+		}, "v22.14.0")
 
-	_, _, env, err := codexACPCommander(t, d).ACPCommand(key)
-	if err != nil {
-		t.Fatalf("ACPCommand: %v", err)
-	}
-	if got, ok := envValue(env, "CODEX_PATH"); !ok || got != "/usr/local/bin/codex" {
-		t.Errorf("env = %v, want CODEX_PATH=/usr/local/bin/codex", env)
-	}
+		_, _, env, err := codexACPCommander(t, d).ACPCommand(key)
+		if err != nil {
+			t.Fatalf("ACPCommand: %v", err)
+		}
+		if got, ok := envValue(env, "CODEX_PATH"); ok {
+			t.Errorf("env volunteered CODEX_PATH=%q from PATH discovery: an un-vetted codex may predate `app-server` and kill the session", got)
+		}
+	})
+
+	t.Run("codex in a well-known dir", func(t *testing.T) {
+		shim := filepath.Join(testStubHome, ".local", "bin", "codex")
+		d, key, _ := codexACP(t, CodexConfig{})
+		c := stubCodexHost(t, d, map[string]string{
+			"codex-acp": "/usr/local/bin/codex-acp",
+			"node":      "/usr/bin/node",
+		}, "v22.14.0")
+		c.isExecutable = func(path string) bool { return path == shim }
+
+		_, _, env, err := codexACPCommander(t, d).ACPCommand(key)
+		if err != nil {
+			t.Fatalf("ACPCommand: %v", err)
+		}
+		if got, ok := envValue(env, "CODEX_PATH"); ok {
+			t.Errorf("env volunteered CODEX_PATH=%q from the well-known-path probe", got)
+		}
+	})
+
+	// Belt and braces: the probe must not even be ATTEMPTED, so re-adding
+	// discovery can't sneak back in behind a resolver that happens to find
+	// nothing on this particular host.
+	t.Run("no codex lookup happens at all", func(t *testing.T) {
+		d, key, _ := codexACP(t, CodexConfig{})
+		c := stubCodexHost(t, d, map[string]string{
+			"codex-acp": "/usr/local/bin/codex-acp",
+			"node":      "/usr/bin/node",
+		}, "v22.14.0")
+		inner := c.lookPath
+		c.lookPath = func(name string) (string, error) {
+			if name == "codex" {
+				t.Error("looked up `codex` on PATH: CODEX_PATH is opt-in via codexBinary only")
+			}
+			return inner(name)
+		}
+		c.isExecutable = func(path string) bool {
+			if filepath.Base(path) == "codex" {
+				t.Errorf("probed %q for a codex: CODEX_PATH is opt-in via codexBinary only", path)
+			}
+			return false
+		}
+
+		if _, _, _, err := codexACPCommander(t, d).ACPCommand(key); err != nil {
+			t.Fatalf("ACPCommand: %v", err)
+		}
+	})
 }
 
+// The escape hatch: an operator whose codex is new enough to expose `app-server`
+// names it, and takes responsibility for that. Used verbatim.
 func TestCodexACPCommand_CodexBinaryOverride(t *testing.T) {
 	d, key, _ := codexACP(t, CodexConfig{CodexBinary: "/opt/codex/bin/codex"})
 	stubCodexHost(t, d, map[string]string{
@@ -334,9 +394,9 @@ func TestCodexACPCommand_CodexBinaryOverride(t *testing.T) {
 	}
 }
 
-// No codex on the node: the variable is left unset rather than set to a path
-// that doesn't exist, which would break a session the bundled Codex could have
-// carried.
+// The default configuration, and the one the live probe proved works: nothing
+// configured, nothing volunteered, the adapter's own bundled Codex carries the
+// session.
 func TestCodexACPCommand_NoCodexLeavesCodexPathUnset(t *testing.T) {
 	d, key, _ := codexACP(t, CodexConfig{})
 	stubCodexHost(t, d, map[string]string{

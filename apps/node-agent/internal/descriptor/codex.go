@@ -352,11 +352,12 @@ func (c *codexDescriptor) locator(preferDirs ...string) binaryLocator {
 //
 //   - NO_BROWSER=1 always: it hides the browser-based ChatGPT login, which is
 //     meaningless on a headless fleet node and would otherwise be offered (and
-//     attempted) with no one there to complete it. ChatGPT-login auth comes from
-//     a prior interactive `codex login` on the node instead.
-//   - CODEX_PATH when a codex resolves on the node: without it the adapter runs
-//     the Codex build bundled with its own npm dependency, so a chat session and
-//     the station's Health tab would be reporting two different installs.
+//     attempted) with no one there to complete it. With it set the adapter
+//     advertises only api-key auth, so a fleet node needs CODEX_API_KEY (or
+//     OPENAI_API_KEY) in the SERVICE environment, or a prior interactive
+//     `codex login` on the node.
+//   - INITIAL_AGENT_MODE=agent always: see the env literal below.
+//   - CODEX_PATH only when codexBinary is configured — never from discovery.
 //   - PATH when, and only when, a configured node runtime is in play.
 func (c *codexDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	// The station must exist before anything is probed on the host: an unknown
@@ -401,8 +402,20 @@ func (c *codexDescriptor) ACPCommand(key string) ([]string, string, []string, er
 	if nodeDir != "" {
 		env = append(env, "PATH="+pathWithDirFirst(nodeDir, c.getenv("PATH")))
 	}
-	if codexPath, ok := c.locator().locate("codex", c.codexBinary); ok {
-		env = append(env, "CODEX_PATH="+codexPath)
+	// OPT-IN ONLY, and never auto-discovered — the opposite of what
+	// CLAUDE_CODE_EXECUTABLE does, on purpose. The adapter ships a Codex it is
+	// known to work with; pointing it at the node's own CLI instead is only safe
+	// if that CLI exposes `app-server`, which is the single interface codex-acp
+	// drives. A Codex predating it (0.36.0, say) falls into interactive mode and
+	// dies immediately on a TTY a fleet node does not have:
+	//
+	//	Codex process has exited with code 1: Error: Device not configured (os error 6)
+	//
+	// Discovery cannot tell those apart — so it isn't attempted. An operator who
+	// names codexBinary is asserting their install is new enough, and that
+	// assertion is used verbatim.
+	if c.codexBinary != "" {
+		env = append(env, "CODEX_PATH="+c.codexBinary)
 	}
 
 	// An installed adapter beats npx: it starts immediately and can't change
