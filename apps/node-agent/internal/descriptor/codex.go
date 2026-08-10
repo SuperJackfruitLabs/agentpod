@@ -131,8 +131,18 @@ func (c *codexDescriptor) Detect() ([]Station, error) {
 
 	stations := []Station{}
 	for _, projPath := range parseCodexProjectPaths(data) {
-		if _, err := os.Stat(projPath); err != nil {
-			continue // project directory was deleted (or is unreadable)
+		// A relative key cannot be a workspace root: it would resolve against
+		// the SERVICE's cwd, and that resolution becomes the fs.read root and the
+		// CleanApply root. Codex writes absolute paths; anything else is a
+		// hand-edit we refuse rather than guess at.
+		if !filepath.IsAbs(projPath) {
+			continue
+		}
+		// Only "it is gone" drops a station. A transient stat failure (EACCES on
+		// a briefly-unavailable mount, say) must not make a station blink out of
+		// the fleet view — same rule as claude-code.
+		if _, err := os.Stat(projPath); os.IsNotExist(err) {
+			continue
 		}
 		wsCopy := projPath
 		stations = append(stations, Station{
@@ -358,9 +368,34 @@ func (c *codexDescriptor) ACPCommand(key string) ([]string, string, []string, er
 
 	// Selected, never refused — see codexACPMinNodeMajor. tooOld is always empty
 	// with a zero minimum, so it is discarded rather than checked.
-	nodeDir, _ := selectNodeRuntimeDir(c.nodeBinary, codexACPMinNodeMajor, c.locator(), c.nodeVersion)
+	//
+	// The probe is skipped entirely without a configured runtime, and that is a
+	// correctness-preserving shortcut rather than an optimisation: with no
+	// version to enforce, the selector can only return a non-empty dir when the
+	// winner IS the configured node, so unconfigured means the answer is
+	// structurally "". Running it anyway would fork `node --version` on every
+	// acp.open for a result that cannot change argv or env — and on a host whose
+	// node lives on a stalled network mount, pay the full timeout for it before
+	// argv is even resolved. (claude-code cannot take this shortcut: its probe
+	// also decides whether to REFUSE.)
+	var nodeDir string
+	if c.nodeBinary != "" {
+		nodeDir, _ = selectNodeRuntimeDir(c.nodeBinary, codexACPMinNodeMajor, c.locator(), c.nodeVersion)
+	}
 
-	env := []string{"NO_BROWSER=1"}
+	env := []string{
+		"NO_BROWSER=1",
+		// The agent's permission posture is OURS, set explicitly rather than
+		// inherited from whatever the adapter defaults to. "agent" is the
+		// approval-seeking mode: the console gates the Chat tab on the "acp"
+		// capability alone, so every detected Codex project gains a Chat tab the
+		// moment a node updates, and the hub's ask/accept-edits/full-auto modes
+		// are only a safety net if the agent actually requests permission. The
+		// third mode — the full access one — is deliberately never used here: an
+		// unattended fleet node is the worst possible place to hand an agent
+		// unprompted write-and-execute, and there is no config key to opt into it.
+		"INITIAL_AGENT_MODE=agent",
+	}
 	// A configured node only genuinely wins if the adapter's own child processes
 	// see it first — npx resolves `node` through PATH.
 	if nodeDir != "" {

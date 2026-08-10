@@ -220,19 +220,30 @@ func TestCodexACPCommand_BadKeySkipsResolution(t *testing.T) {
 
 // --- environment ---
 
+// codexResolutionCase is one of the three ways the adapter can be resolved. The
+// env invariants below must hold on ALL of them: they are properties of the
+// session, not of how the binary happened to be found.
+type codexResolutionCase struct {
+	name      string
+	cfg       CodexConfig
+	installed map[string]string
+}
+
+func codexResolutionCases() []codexResolutionCase {
+	return []codexResolutionCase{
+		// Every case has a node ON PATH but none configures nodeBinary — the
+		// ordinary fleet host, and what makes the "no wasted probe" case below
+		// bite in all three.
+		{"config override", CodexConfig{AcpBinary: "/opt/custom/bin/codex-acp"}, map[string]string{"node": "/usr/bin/node"}},
+		{"resolved adapter", CodexConfig{}, map[string]string{"codex-acp": "/usr/local/bin/codex-acp", "node": "/usr/bin/node"}},
+		{"npx fallback", CodexConfig{}, map[string]string{"npx": "/usr/bin/npx", "node": "/usr/bin/node"}},
+	}
+}
+
 // A fleet node is headless: the adapter must never offer (let alone attempt) the
 // browser ChatGPT login, whichever way the adapter itself was resolved.
 func TestCodexACPCommand_AlwaysDisablesBrowserAuth(t *testing.T) {
-	cases := []struct {
-		name      string
-		cfg       CodexConfig
-		installed map[string]string
-	}{
-		{"config override", CodexConfig{AcpBinary: "/opt/custom/bin/codex-acp"}, nil},
-		{"resolved adapter", CodexConfig{}, map[string]string{"codex-acp": "/usr/local/bin/codex-acp"}},
-		{"npx fallback", CodexConfig{}, map[string]string{"npx": "/usr/bin/npx", "node": "/usr/bin/node"}},
-	}
-	for _, tc := range cases {
+	for _, tc := range codexResolutionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			d, key, _ := codexACP(t, tc.cfg)
 			stubCodexHost(t, d, tc.installed, "v22.14.0")
@@ -245,6 +256,44 @@ func TestCodexACPCommand_AlwaysDisablesBrowserAuth(t *testing.T) {
 				t.Errorf("env = %v, want NO_BROWSER=1 — a fleet node must never try to open a browser", env)
 			}
 		})
+	}
+}
+
+// The agent's permission posture must be OURS and visible, never inherited from
+// whatever the adapter defaults to. The console gates the Chat tab purely on the
+// "acp" capability, so the moment a node updates, every detected Codex project
+// gets a Chat tab — and the hub's ask/accept-edits/full-auto modes are only a
+// safety net if the agent actually asks. "agent" is the approval-seeking mode.
+func TestCodexACPCommand_SetsApprovalSeekingAgentMode(t *testing.T) {
+	for _, tc := range codexResolutionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			d, key, _ := codexACP(t, tc.cfg)
+			stubCodexHost(t, d, tc.installed, "v22.14.0")
+
+			_, _, env, err := codexACPCommander(t, d).ACPCommand(key)
+			if err != nil {
+				t.Fatalf("ACPCommand: %v", err)
+			}
+			if got, ok := envValue(env, "INITIAL_AGENT_MODE"); !ok || got != "agent" {
+				t.Errorf("env = %v, want INITIAL_AGENT_MODE=agent — the posture must be set explicitly, not inherited", env)
+			}
+		})
+	}
+}
+
+// The other half of that decision, and the half a value assertion can't cover: a
+// fleet node is NEVER opted into Codex's full-access mode. That is a property of
+// the whole file, not of one code path — an unattended host is the worst place to
+// hand an agent unprompted write-and-execute — so the source is what gets
+// checked. (Deliberately: the prose in codex.go says "full access" with a space
+// for exactly this reason, so the ban can be spelled here and nowhere else.)
+func TestCodexACPCommand_NeverOptsIntoFullAccess(t *testing.T) {
+	src, err := os.ReadFile("codex.go")
+	if err != nil {
+		t.Fatalf("reading codex.go: %v", err)
+	}
+	if strings.Contains(string(src), "full-access") {
+		t.Error("codex.go mentions the full-access agent mode: a fleet node must never be opted into it")
 	}
 }
 
@@ -350,6 +399,33 @@ func TestCodexACPCommand_OldNodeIsNotRefused(t *testing.T) {
 			}
 			if want := []string{"/usr/local/bin/codex-acp"}; !reflect.DeepEqual(argv, want) {
 				t.Errorf("argv = %v, want %v", argv, want)
+			}
+		})
+	}
+}
+
+// With no version to enforce, a runtime probe is only ever worth a fork when
+// there is a CONFIGURED node to prefer — that is the single case whose outcome
+// can change argv or PATH. Without nodeBinary the answer is structurally always
+// "" (the selector returns a dir only when the winner IS the configured node),
+// so probing would be pure cost: `node --version` on a host whose node sits on a
+// stalled NFS/autofs mount burns the full 2s timeout on EVERY acp.open, before
+// argv is even resolved.
+func TestCodexACPCommand_NoNodeProbeWithoutConfiguredRuntime(t *testing.T) {
+	for _, tc := range codexResolutionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.cfg.NodeBinary != "" {
+				t.Fatal("this case is about the UNconfigured runtime")
+			}
+			d, key, _ := codexACP(t, tc.cfg)
+			c := stubCodexHost(t, d, tc.installed, "v22.14.0")
+			c.nodeVersion = func(nodePath string) (string, error) {
+				t.Errorf("forked `%s --version` with no nodeBinary configured: the result cannot affect argv or env", nodePath)
+				return "v22.14.0", nil
+			}
+
+			if _, _, _, err := codexACPCommander(t, d).ACPCommand(key); err != nil {
+				t.Fatalf("ACPCommand: %v", err)
 			}
 		})
 	}

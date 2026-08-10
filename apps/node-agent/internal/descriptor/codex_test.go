@@ -204,6 +204,81 @@ func TestCodexDetect_MissingHomeReturnsEmpty(t *testing.T) {
 	}
 }
 
+// A relative key can never be a workspace root. Left unchecked it would be
+// stat'd against the SERVICE's cwd — and that same resolution then becomes the
+// fs.read root and, worse, the CleanApply root. The fixture chdir's somewhere the
+// relative path really does resolve, so a station appearing would be the actual
+// bug and not a missing directory.
+func TestCodexDetect_RejectsRelativeProjectPaths(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, ".codex")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "relative", "workspace"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := "[projects.\"relative/workspace\"]\ntrust_level = \"trusted\"\n" +
+		"[projects.\"../escaped\"]\ntrust_level = \"trusted\"\n"
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	t.Chdir(root)
+
+	stations, err := NewCodex(home).Detect()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(stations) != 0 {
+		t.Fatalf("expected no stations from relative project keys, got %+v", stations)
+	}
+}
+
+// Only "it is gone" removes a station. A transient stat failure — EACCES on a
+// briefly-unavailable mount, say — must NOT make a station vanish from the fleet
+// view: the harness config still lists it, and a station blinking out of the
+// console is a worse lie than one that is temporarily unreachable. Matches
+// claude-code, which drops on os.IsNotExist only.
+func TestCodexDetect_KeepsStationWhenStatFailsWithoutNotExist(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a 0000 directory would still be traversable")
+	}
+	root := t.TempDir()
+	home := filepath.Join(root, ".codex")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	guarded := filepath.Join(root, "guarded")
+	proj := filepath.Join(guarded, "workspace")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := fmt.Sprintf("[projects.%q]\ntrust_level = \"trusted\"\n", proj)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(cfg), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	// Unreadable parent → stat(proj) fails with EACCES, not ENOENT. Restored so
+	// t.TempDir's cleanup can still remove the tree.
+	if err := os.Chmod(guarded, 0o000); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(guarded, 0o755) })
+	if _, err := os.Stat(proj); err == nil || os.IsNotExist(err) {
+		t.Skipf("could not provoke a non-ENOENT stat error on this platform (got %v)", err)
+	}
+
+	stations, err := NewCodex(home).Detect()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+	if len(stations) != 1 {
+		t.Fatalf("expected the station to survive a non-ENOENT stat error, got %+v", stations)
+	}
+	if stations[0].Key != codexKeyFor(proj) {
+		t.Errorf("station key = %q, want %q", stations[0].Key, codexKeyFor(proj))
+	}
+}
+
 func TestCodexHarness(t *testing.T) {
 	d := NewCodex("")
 	if d.Harness() != "codex" {
