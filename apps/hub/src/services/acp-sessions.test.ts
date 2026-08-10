@@ -1175,8 +1175,11 @@ test(
 test(
   "two concurrent sessions on one station: each acp.open carries its own instance, transcripts stream independently, ending one leaves the other live",
   async () => {
+    // exitOnClose: ending one session really kills its agent process, so
+    // "the sibling survives" is a claim about the code, not about the fake.
     const { server, fake, station } = await setupRig("acpsess-multi-host", {
       stationKey: "acp-multi-station",
+      exitOnClose: true,
     });
     try {
       const a = await createSession({
@@ -1323,8 +1326,11 @@ test(
 test(
   "a node that stops echoing the instance mid-life: the post-open layer tears the new wire down and refuses, leaving no live entry",
   async () => {
+    // exitOnClose: closing an agent process really kills it here, so the
+    // teardown's effect on the session sharing that process is not hidden.
     const { server, fake, station } = await setupRig("acpsess-noecho-host", {
       stationKey: "acp-noecho-station",
+      exitOnClose: true,
     });
     try {
       const a = await createSession({
@@ -1354,10 +1360,20 @@ test(
       const refusedEvents = await eventsFor(refused.id);
       expect(refusedEvents.some((e) => e.type === "error")).toBe(true);
 
-      // A's row is still live, and no live entry leaked: once A ends a fresh
-      // session starts (the node still can't echo, so one at a time).
-      expect((await getSession(TEST_USER, a.id))?.status).toBe("idle");
-      await endSession(TEST_USER, a.id, "cleanup");
+      // KNOWN RESIDUAL HAZARD, pinned rather than hidden: the node handed back
+      // A's process, so tearing the refused wire down closes it and takes A with
+      // it. This costs one session instead of bleeding two conversations into one
+      // process, and layer 1 keeps it unreachable for any node that never echoes
+      // (only a node that echoed and then stopped can get here).
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, a.id);
+        return s?.status === "ended";
+      });
+      // …and it ended from the process exit, not from anything the hub decided.
+      expect((await getSession(TEST_USER, a.id))?.endedReason).toBe("closed");
+
+      // No live entry leaked either: a fresh session starts (the node still
+      // can't echo, so one at a time).
       const next = await createSession({
         stationId: station.id,
         userId: TEST_USER,
@@ -1369,6 +1385,50 @@ test(
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a queued open re-reads the station: the node going offline while it waits is refused, not dialled",
+  async () => {
+    // The first open wedges on the handshake, so the second create sits in the
+    // station's open queue long enough for the fleet to change under it.
+    _setHandshakeTimeoutMsForTest(1500);
+    const { server, fake, station } = await setupRig("acpsess-requeue-host", {
+      stationKey: "acp-requeue-station",
+      hangHandshake: "initialize",
+    });
+    try {
+      // Settle both outcomes as values so neither can become an unhandled
+      // rejection while the other is being asserted.
+      const outcome = (p: Promise<unknown>) =>
+        p.then(
+          () => "resolved",
+          (err) => String(err)
+        );
+      const first = outcome(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      // Passes the fail-fast gates while the node is still online, then queues.
+      const queued = outcome(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      fake.close();
+
+      // The wedged open fails (dropped connection or handshake deadline)…
+      expect(await first).not.toBe("resolved");
+      // …and the queued one re-read the station instead of dialling a node that
+      // is no longer there.
+      expect(await queued).toContain("Node is offline.");
+
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
       server.stop(true);
     }
   },

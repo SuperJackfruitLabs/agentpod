@@ -22,6 +22,11 @@
  *   - `session/cancel`   → resolves the in-flight prompt with
  *                          {stopReason: "cancelled"}.
  *
+ * `acp.close` only DETACHES the process by default — it does not pretend to kill
+ * the agent. Pass `exitOnClose` for the real thing (exit frame + eof on every
+ * attached stream); a test that cares what closing a process does to whoever is
+ * attached to it MUST set that flag, or it is proving nothing.
+ *
  * `opts` is held by reference: tests may mutate `opts.permission` between
  * prompts (e.g. to flip the toolCall kind for accept-edits coverage).
  */
@@ -58,6 +63,14 @@ export interface FakeAcpNodeOpts {
    * station. Default (false) is a modern node, which echoes the instance.
    */
   legacyOpen?: boolean;
+  /**
+   * Model what a real node does on acp.close: the agent process is KILLED, so
+   * every stream attached to it gets the in-band exit frame and then eof —
+   * including a sibling session's stream when the process is shared. Off by
+   * default (close just detaches), because most tests close only their own
+   * process and would otherwise race their own teardown.
+   */
+  exitOnClose?: boolean;
   /**
    * Never answer the named handshake request (wedged-agent simulation).
    * Mutable — clear it between createSession attempts to let one succeed.
@@ -151,7 +164,14 @@ export async function connectFakeAcpNode(
   interface Proc extends FakeAgentProcess {
     /** Set by acp.close: a closed process is never reused by a later open. */
     closed: boolean;
+    /** Stream that carries this process's output (the latest acp.attach). */
     attachId: string | null;
+    /**
+     * EVERY stream ever attached to this process. Normally one — but a shared
+     * (legacy) process can have a sibling session attached too, and killing the
+     * process has to reach all of them.
+     */
+    attachIds: string[];
     streamSeq: number;
     inputBuffer: string;
     pendingPrompts: Array<string | number>;
@@ -175,6 +195,7 @@ export async function connectFakeAcpNode(
       permissionOutcomes: [],
       closed: false,
       attachId: null,
+      attachIds: [],
       streamSeq: 0,
       inputBuffer: "",
       pendingPrompts: [],
@@ -426,6 +447,7 @@ export async function connectFakeAcpNode(
           const proc = processes.find((p) => p.sessionId === String(wanted));
           if (!proc) break;
           proc.attachId = id;
+          proc.attachIds.push(id);
           // Flush agent messages queued before the attach stream existed.
           for (const line of proc.outQueue.splice(0)) {
             ws.send(
@@ -447,6 +469,34 @@ export async function connectFakeAcpNode(
             ?.sessionId;
           const proc = processes.find((p) => p.sessionId === String(wanted));
           if (proc) {
+            if (opts.exitOnClose && !proc.closed) {
+              // The process dies: exit frame then eof on every attached stream,
+              // a sibling's included. This is how closing a SHARED process takes
+              // the other session down with it on a real node.
+              for (const streamId of proc.attachIds) {
+                ws.send(
+                  JSON.stringify({
+                    type: "stream",
+                    id: streamId,
+                    seq: proc.streamSeq++,
+                    chunk: b64encode(
+                      JSON.stringify({ event: "exit", reason: "closed" })
+                    ),
+                    eof: false,
+                    enc: "base64",
+                  })
+                );
+                ws.send(
+                  JSON.stringify({
+                    type: "stream",
+                    id: streamId,
+                    seq: proc.streamSeq++,
+                    chunk: null,
+                    eof: true,
+                  })
+                );
+              }
+            }
             proc.closed = true;
             proc.attachId = null;
           }

@@ -451,15 +451,33 @@ function handlePermissionRequest(
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Serializes the open phase per station.
+ * Serializes the open phase per station — the other half of layer 1.
  *
- * Whether a node can host concurrent sessions is only knowable from a
- * COMPLETED acp.open (the echoed instance). Two opens in flight at once would
- * both pass the pre-open check and — on a node without instance support —
- * commit two hub sessions to ONE agent process before either could refuse.
- * One at a time keeps the refusal in the cheap pre-open layer.
+ * Layer 1 refuses on `instanceEchoed !== true`, and a session's verdict is null
+ * until ITS acp.open completes. So without this lock two simultaneous creates on
+ * a perfectly modern station would race: the second would see the first's null
+ * verdict and 409 a session that is entirely legal. Queueing the open phase
+ * means the second create reads a settled verdict and only refuses for real.
+ *
+ * The strict check and this lock are a PAIR, and dismantling either re-opens
+ * two-hub-sessions-on-one-agent-process for pre-instance nodes:
+ *   - relax layer 1 to `=== false` and two concurrent opens on an old node both
+ *     pass (neither has a verdict yet) and land on the same shared process,
+ *   - drop the lock and layer 1 has to stay strict, which spuriously 409s
+ *     legitimate concurrent creates.
+ * Layer 2 (post-open) is the last resort if both are somehow bypassed.
  */
 const openLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Ceiling on one queued open, so a stalled open fails instead of wedging the
+ * station: the ACP handshake carries its own deadline but the DB writes around
+ * it do not, and an unbounded open would park every later create behind it
+ * forever. Both handshake steps plus slack for the DB work.
+ */
+const OPEN_PHASE_SLACK_MS = 5_000;
+const OPEN_PHASE_TIMEOUT_MESSAGE =
+  "Couldn't start the agent process — it didn't finish starting in time.";
 
 function withStationOpenLock<T>(
   stationId: string,
@@ -468,7 +486,11 @@ function withStationOpenLock<T>(
   const prev = openLocks.get(stationId);
   const run = (async () => {
     if (prev) await prev.catch(() => {});
-    return fn();
+    return withDeadline(
+      fn(),
+      handshakeTimeoutMs * 2 + OPEN_PHASE_SLACK_MS,
+      OPEN_PHASE_TIMEOUT_MESSAGE
+    );
   })();
   openLocks.set(stationId, run);
   void run.then(
@@ -483,8 +505,10 @@ function withStationOpenLock<T>(
 export async function createSession(
   input: CreateSessionInput
 ): Promise<AcpSessionRow> {
-  const { stationId, userId, mode } = input;
+  const { stationId, userId } = input;
 
+  // Fail fast on the obvious gates before queueing (openSession re-checks them
+  // under the lock, where the answers are current).
   const station = await getStation(userId, stationId);
   if (!station) throw new Error("Station not found.");
   if (!gateCapability(station, "acp")) {
@@ -494,24 +518,33 @@ export async function createSession(
     throw new Error("Node is offline.");
   }
 
-  return withStationOpenLock(stationId, () =>
-    openSession(station.nodeId, station.stationKey, station.workspacePath, input)
-  );
+  return withStationOpenLock(stationId, () => openSession(input));
 }
 
-async function openSession(
-  nodeId: string,
-  stationKey: string,
-  workspacePath: string | null,
-  input: CreateSessionInput
-): Promise<AcpSessionRow> {
+async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   const { stationId, userId, mode } = input;
+
+  // Re-read the station and its node's presence: a queued open can start a
+  // minute after createSession was called, by which time the station may have
+  // been re-adopted onto another node, lost the capability, or gone offline.
+  // The open must target CURRENT routing, never the snapshot from the queue.
+  const station = await getStation(userId, stationId);
+  if (!station) throw new Error("Station not found.");
+  if (!gateCapability(station, "acp")) {
+    throw new Error("This station does not support agent sessions.");
+  }
+  if (!connectionManager.isOnline(station.nodeId)) {
+    throw new Error("Node is offline.");
+  }
+  const { nodeId, stationKey, workspacePath } = station;
 
   // ── Compatibility layer 1 (pre-open) ───────────────────────────────────────
   // A concurrent session is only safe when the node keys its agent processes on
   // (station key, instance). The one signal for that is a live sibling whose
   // acp.open echoed the instance back; anything else (an old node, or a sibling
-  // that never got that far) means one shared process — refuse.
+  // that never got that far) means one shared process — refuse. Runs with no
+  // await between it and addLive below, and under the station open lock, so no
+  // second open can slip past it (see withStationOpenLock).
   for (const sibling of liveByStation.get(stationId) ?? []) {
     if (sibling.instanceEchoed !== true) {
       throw new Error(ACTIVE_SESSION_MESSAGE);
