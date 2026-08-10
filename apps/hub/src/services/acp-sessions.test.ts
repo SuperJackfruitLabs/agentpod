@@ -67,6 +67,7 @@ import {
   reconcileOnBoot,
   closeOrphanedProcesses,
   _setOfflineGraceMsForTest,
+  _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
 } from "./acp-sessions";
 
@@ -1428,6 +1429,76 @@ test(
 
       await new Promise((r) => setTimeout(r, 100));
     } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a stalled DB write inside the open phase rejects with the database copy and still drains the live map (no 409 lock on the station)",
+  async () => {
+    // The station's transcript table is locked for the duration, so the open
+    // phase's idle state-event insert BLOCKS — a real stalled query, not a mock.
+    _setHandshakeTimeoutMsForTest(2000);
+    _setOpenDbTimeoutMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-dbstall-host", {
+      stationKey: "acp-dbstall-station",
+    });
+    let releaseLock!: () => void;
+    const lockHeld = new Promise<void>((r) => {
+      releaseLock = r;
+    });
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((r) => {
+      signalLocked = r;
+    });
+    // EXCLUSIVE conflicts with the INSERT's ROW EXCLUSIVE but not with reads.
+    const lockTx = rawSql.begin(async (tx) => {
+      await tx`LOCK TABLE acp_events IN EXCLUSIVE MODE`;
+      signalLocked();
+      await lockHeld;
+    });
+    try {
+      await locked;
+
+      const attempt = createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      }).then(
+        () => "resolved",
+        (err) => String(err)
+      );
+      // Long enough for the bounded DB step to trip while the table is locked.
+      await new Promise((r) => setTimeout(r, 900));
+      releaseLock();
+      await lockTx;
+
+      // The per-step DB deadline is what fired — not the open-phase backstop.
+      expect(await attempt).toContain("the database didn't respond");
+
+      // The failure exit still ran once the DB freed up: the row is ended and
+      // nothing is left in the live map, so the station is NOT 409-locked.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("the database didn't respond");
+
+      const next = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+
+      await endSession(TEST_USER, next.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      releaseLock();
+      _setOpenDbTimeoutMsForTest(10_000);
       _setHandshakeTimeoutMsForTest(30_000);
       server.stop(true);
     }

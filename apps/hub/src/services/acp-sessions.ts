@@ -81,6 +81,37 @@ export function _setHandshakeTimeoutMsForTest(ms: number): void {
 const HANDSHAKE_TIMEOUT_MESSAGE =
   "Couldn't start the agent process — the agent didn't respond (handshake timed out).";
 
+// Deadline for each DB step of the open phase. Postgres has no statement
+// timeout here (and must not get one — boot migrations share the client), so a
+// blocked query would otherwise hang openSession forever: its live-map entry is
+// already registered, its catch never runs, and layer 1 would refuse every
+// later create for that station until hub restart.
+let openDbTimeoutMs = 10_000;
+
+/** Test hook: shrink the per-step deadline for the open phase's DB writes. */
+export function _setOpenDbTimeoutMsForTest(ms: number): void {
+  openDbTimeoutMs = ms;
+}
+
+const OPEN_DB_TIMEOUT_MESSAGE =
+  "Couldn't start the agent process — the database didn't respond (write timed out).";
+
+/**
+ * Bound one DB step of the open phase so a stall REJECTS into openSession's
+ * catch (error event → finalizeEnd → live-map cleanup) instead of hanging.
+ * `step` names the culprit in the log; the thrown copy stays stable.
+ */
+function boundedDb<T>(promise: Promise<T>, step: string): Promise<T> {
+  return withDeadline(promise, openDbTimeoutMs, OPEN_DB_TIMEOUT_MESSAGE).catch(
+    (err: unknown) => {
+      if (err instanceof Error && err.message === OPEN_DB_TIMEOUT_MESSAGE) {
+        log.error("ACP open: database step timed out", { step });
+      }
+      throw err;
+    }
+  );
+}
+
 /**
  * Reject with `message` if `promise` doesn't settle within `ms`.
  *
@@ -470,14 +501,25 @@ function handlePermissionRequest(
 const openLocks = new Map<string, Promise<unknown>>();
 
 /**
- * Ceiling on one queued open, so a stalled open fails instead of wedging the
- * station: the ACP handshake carries its own deadline but the DB writes around
- * it do not, and an unbounded open would park every later create behind it
- * forever. Both handshake steps plus slack for the DB work.
+ * Backstop ceiling on one queued open, so a stalled open can never park every
+ * later create for that station behind it. Every step INSIDE the open phase has
+ * its own deadline (two handshake requests, four DB steps), and this ceiling is
+ * their sum plus slack — so a single stalled step always trips its own,
+ * attributable deadline first and this one only catches something unbounded
+ * that slipped in.
  */
 const OPEN_PHASE_SLACK_MS = 5_000;
+const OPEN_PHASE_DB_STEPS = 4;
 const OPEN_PHASE_TIMEOUT_MESSAGE =
   "Couldn't start the agent process — it didn't finish starting in time.";
+
+function openPhaseTimeoutMs(): number {
+  return (
+    handshakeTimeoutMs * 2 +
+    openDbTimeoutMs * OPEN_PHASE_DB_STEPS +
+    OPEN_PHASE_SLACK_MS
+  );
+}
 
 function withStationOpenLock<T>(
   stationId: string,
@@ -486,11 +528,7 @@ function withStationOpenLock<T>(
   const prev = openLocks.get(stationId);
   const run = (async () => {
     if (prev) await prev.catch(() => {});
-    return withDeadline(
-      fn(),
-      handshakeTimeoutMs * 2 + OPEN_PHASE_SLACK_MS,
-      OPEN_PHASE_TIMEOUT_MESSAGE
-    );
+    return withDeadline(fn(), openPhaseTimeoutMs(), OPEN_PHASE_TIMEOUT_MESSAGE);
   })();
   openLocks.set(stationId, run);
   void run.then(
@@ -581,17 +619,22 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   addLive(live);
 
   try {
-    await db.insert(acpSessions).values({
-      id,
-      stationId,
-      userId,
-      mode,
-      status: "starting",
-      endedReason: null,
-      nodeSessionId: null,
-      createdAt: now,
-      lastEventAt: now,
-    });
+    // Every DB step below is bounded (boundedDb): a stalled query must reject
+    // into the catch so the live-map entry is cleaned up, never hang holding it.
+    await boundedDb(
+      db.insert(acpSessions).values({
+        id,
+        stationId,
+        userId,
+        mode,
+        status: "starting",
+        endedReason: null,
+        nodeSessionId: null,
+        createdAt: now,
+        lastEventAt: now,
+      }),
+      "insert session row"
+    );
 
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
@@ -651,16 +694,19 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     );
     live.acpSessionId = created.sessionId;
 
-    await db
-      .update(acpSessions)
-      .set({ nodeSessionId: wire.nodeSessionId })
-      .where(eq(acpSessions.id, id));
-    await setStatus(live, "idle").done;
+    await boundedDb(
+      db
+        .update(acpSessions)
+        .set({ nodeSessionId: wire.nodeSessionId })
+        .where(eq(acpSessions.id, id)),
+      "record node session id"
+    );
+    await boundedDb(setStatus(live, "idle").done, "idle state event");
 
-    const rows = await db
-      .select()
-      .from(acpSessions)
-      .where(eq(acpSessions.id, id));
+    const rows = await boundedDb(
+      db.select().from(acpSessions).where(eq(acpSessions.id, id)),
+      "read back session row"
+    );
     return toContract(rows[0]!);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
