@@ -451,7 +451,10 @@ export async function createSession(
       lastEventAt: now,
     });
 
-    const wire = await openAcpWire(station.nodeId, station.stationKey);
+    // The hub session id doubles as the ACP instance: stable by construction
+    // across a re-open of this session, and it correlates node-side processes
+    // back to this row in logs.
+    const wire = await openAcpWire(station.nodeId, station.stationKey, id);
     live.wire = wire;
 
     const app = client({ name: "agentpod-hub" })

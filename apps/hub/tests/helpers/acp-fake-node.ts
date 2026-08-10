@@ -45,6 +45,13 @@ export interface FakeAcpNodeOpts {
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
+   * Behave like a node from before slice 4b: accept acp.open but answer with
+   * only {sessionId} — never echoing the requested instance. That missing echo
+   * is exactly how the hub detects an old node and degrades to one session per
+   * station. Default (false) is a modern node, which echoes the instance.
+   */
+  legacyOpen?: boolean;
+  /**
    * Never answer the named handshake request (wedged-agent simulation).
    * Mutable — clear it between createSession attempts to let one succeed.
    */
@@ -324,12 +331,17 @@ export async function connectFakeAcpNode(
               JSON.stringify({ type: "res", id, ok: false, error: opts.failOpen })
             );
           } else {
+            const params = msg.params as { instance?: string } | undefined;
+            const instance = params?.instance;
+            const echo = !opts.legacyOpen && instance !== undefined;
             ws.send(
               JSON.stringify({
                 type: "res",
                 id,
                 ok: true,
-                data: { sessionId: processSessionId },
+                data: echo
+                  ? { sessionId: processSessionId, instance }
+                  : { sessionId: processSessionId },
               })
             );
           }
