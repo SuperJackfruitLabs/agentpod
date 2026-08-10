@@ -474,7 +474,13 @@ test(
       expect(update.sessionUpdate).toBe("agent_message_chunk");
       expect(update.content.text).toBe("Working on it");
 
-      // Session row is idle again.
+      // Session row is idle again. Poll rather than read once: the idle state
+      // event is persisted before the row update settles, so a bare read races
+      // the transition on a loaded CI runner (observed failing "working").
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, row.id);
+        return s?.status === "idle";
+      });
       const after = await getSession(TEST_USER, row.id);
       expect(after?.status).toBe("idle");
 
@@ -806,7 +812,19 @@ test(
         );
         return working.length === 2; // turn #1's and turn #2's
       });
-      const before = (await eventsFor(row.id)).length;
+      // Count only STATE events. A stale completion's symptom is a spurious
+      // `state` transition, and turn #2 is legitimately live — it may emit its
+      // own agent-updates inside the window below, so counting every event
+      // makes this assertion a race (it flaked on CI twice: 7 vs 8).
+      const stateEvents = async () =>
+        (await eventsFor(row.id)).filter((e) => e.type === "state");
+      const idleCount = (evs: Awaited<ReturnType<typeof stateEvents>>) =>
+        evs.filter(
+          (e) => (e.payload as { status?: string } | null)?.status === "idle"
+        ).length;
+      const before = await stateEvents();
+      const statesBefore = before.length;
+      const idlesBefore = idleCount(before); // create's idle + turn #1's cancel
 
       // NOW turn #1's late response arrives (oldest pending prompt).
       fake.releasePrompt("end_turn");
@@ -815,8 +833,10 @@ test(
       // Status must stay working and no spurious state event may appear.
       const mid = await getSession(TEST_USER, row.id);
       expect(mid?.status).toBe("working");
-      const after = await eventsFor(row.id);
-      expect(after.length).toBe(before);
+      const statesAfter = await stateEvents();
+      expect(statesAfter.length).toBe(statesBefore);
+      // …and no NEW idle in particular: that is what clobbering looks like.
+      expect(idleCount(statesAfter)).toBe(idlesBefore);
 
       // Turn #2's own completion still lands normally.
       fake.releasePrompt("end_turn");
