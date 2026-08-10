@@ -139,6 +139,21 @@ test("send(msg) before open is buffered and flushed in order on open", () => {
   expect(JSON.parse(MockWebSocket.instance!.sent[1])).toEqual({ t: "prompt", text: "hi" });
 });
 
+test("isOpen tracks the underlying readyState without exposing internals", () => {
+  const socket = createAcpSocket("s1");
+  expect(socket.isOpen).toBe(false); // CONNECTING
+
+  MockWebSocket.instance!.open();
+  expect(socket.isOpen).toBe(true);
+
+  // A socket the browser has noticed is gone (CLOSING/CLOSED) is not open —
+  // callers use this to redial instead of writing into a dead socket.
+  MockWebSocket.instance!.readyState = 2; // CLOSING
+  expect(socket.isOpen).toBe(false);
+  MockWebSocket.instance!.readyState = 3; // CLOSED
+  expect(socket.isOpen).toBe(false);
+});
+
 // ─── WebSocket: onMessage ────────────────────────────────────────────────────
 
 test("onMessage delivers parsed AcpServerMsg frames", () => {
