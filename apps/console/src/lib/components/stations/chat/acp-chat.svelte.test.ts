@@ -79,6 +79,11 @@ beforeEach(() => {
   MockWebSocket.instances = [];
   localStorage.setItem("agentpod.apiUrl", "http://hub.test:3001");
   (globalThis as unknown as Record<string, unknown>).WebSocket = MockWebSocket;
+  // Default stub for the session-list refresh the controller fires after a
+  // create/end (`sessions` feeds the header's switcher). Tests that care
+  // re-spy with their own rows; without this default the background refresh in
+  // a create-only test would reach the real http client.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -128,7 +133,8 @@ async function connectedChat(): Promise<{ chat: AcpChat; ws: MockWebSocket }> {
 test("init attaches to the newest non-ended session and replays to connected", async () => {
   const ended = row({ id: "s0", status: "ended", createdAt: "2026-08-08T00:00:00.000Z" });
   const active = row({ id: "s1", mode: "accept-edits", createdAt: "2026-08-09T00:00:00.000Z" });
-  // Deliberately unsorted: the controller must pick the newest by createdAt.
+  // The hub returns newest-ACTIVITY-first from SQL; the controller keeps that
+  // order and attaches the first non-ended row.
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([active, ended]);
 
   const chat = new AcpChat("st1");
@@ -848,10 +854,11 @@ test("destroy() clears the echo deadline — no release after unmount", async ()
 test("newSession() clears the echo deadline", async () => {
   vi.useFakeTimers();
   _setEchoDeadlineMsForTest(500);
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row({ id: "s2" }));
   const { chat, failed } = await chatWithFailures();
   await chat.prompt("abandoned");
 
-  chat.newSession();
+  await chat.newSession();
 
   expect(vi.getTimerCount()).toBe(0);
   vi.advanceTimersByTime(60_000);
@@ -860,16 +867,263 @@ test("newSession() clears the echo deadline", async () => {
   expect(chat.error).toBeNull();
 });
 
-test("newSession resets to the empty state", async () => {
+test("newSession creates a session and attaches it (no local-reset-only)", async () => {
   const { chat, ws } = await connectedChat();
   ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "hi" }) });
   ws.fireMessage({ t: "bye", reason: "ended" });
+  const created = row({ id: "s2", lastEventAt: "2026-08-09T02:00:00.000Z" });
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(created);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([created, row()]);
 
-  chat.newSession();
+  await chat.newSession();
 
-  expect(chat.session).toBeNull();
+  expect(api.createAcpSession).toHaveBeenCalledWith("st1", "ask");
+  expect(chat.session?.id).toBe("s2");
+  expect(chat.sessions.map((s) => s.id)).toEqual(["s2", "s1"]);
   expect(chat.transcript.items).toEqual([]);
   expect(chat.transcript.lastSeq).toBe(0);
-  expect(chat.connection).toBe("idle");
+  expect(chat.connection).toBe("connecting");
   expect(chat.error).toBeNull();
+
+  const ws2 = MockWebSocket.latest()!;
+  expect(ws2).not.toBe(ws);
+  expect(ws2.url).toContain("/api/acp/sessions/s2/ws");
+  ws2.open();
+  expect(ws2.frames()).toEqual([{ t: "subscribe", sinceSeq: 0 }]);
+});
+
+test("newSession surfaces a failed create and keeps the current session attached", async () => {
+  const { chat, ws } = await connectedChat();
+  vi.spyOn(api, "createAcpSession").mockRejectedValue(new Error("That station's node is offline."));
+
+  await chat.newSession();
+
+  expect(chat.error).toBe("That station's node is offline.");
+  expect(chat.session?.id).toBe("s1");
+  expect(ws.readyState).toBe(1); // the live socket is untouched by a failed create
+  expect(MockWebSocket.instances).toHaveLength(1);
+  expect(chat.busy).toBe(false); // the create window closed
+});
+
+test("concurrent newSession calls issue exactly one create", async () => {
+  const { chat } = await connectedChat();
+  const createSpy = vi.spyOn(api, "createAcpSession").mockResolvedValue(row({ id: "s2" }));
+
+  await Promise.all([chat.newSession(), chat.newSession()]);
+
+  expect(createSpy).toHaveBeenCalledTimes(1);
+});
+
+// ─── Several sessions per station: list + attach (hub-owned, never DELETE) ────
+
+test("init keeps the hub's order and attaches the first live session", async () => {
+  // The hub orders newest-ACTIVITY-first in SQL (lastEventAt desc, id desc).
+  // Re-sorting by createdAt here would bury a session that just streamed under
+  // one that has been idle since the moment it was created.
+  const busyOld = row({
+    id: "old",
+    createdAt: "2026-08-01T00:00:00.000Z",
+    lastEventAt: "2026-08-09T12:00:00.000Z",
+  });
+  const quietNew = row({
+    id: "new",
+    createdAt: "2026-08-09T00:00:00.000Z",
+    lastEventAt: "2026-08-09T00:00:00.000Z",
+  });
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([busyOld, quietNew]);
+
+  const chat = new AcpChat("st1");
+  await chat.init();
+
+  expect(chat.sessions.map((s) => s.id)).toEqual(["old", "new"]);
+  expect(chat.session?.id).toBe("old");
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/old/ws");
+});
+
+test("init skips an ended session at the head but still lists it", async () => {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([
+    row({ id: "e1", status: "ended" }),
+    row({ id: "s2" }),
+  ]);
+
+  const chat = new AcpChat("st1");
+  await chat.init();
+
+  expect(chat.session?.id).toBe("s2");
+  // The ended one stays switchable — its transcript is still worth reading.
+  expect(chat.sessions.map((s) => s.id)).toEqual(["e1", "s2"]);
+});
+
+test("attach swaps the socket and the transcript to another session, DELETEing nothing", async () => {
+  const endSpy = vi.spyOn(api, "endAcpSession");
+  const fetchSpy = vi.fn();
+  vi.stubGlobal("fetch", fetchSpy);
+  const a = row({ id: "sa" });
+  const b = row({ id: "sb", mode: "full-auto" });
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([a, b]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  const wsA = MockWebSocket.latest()!;
+  wsA.open();
+  wsA.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "in A" }) });
+  wsA.fireMessage({ t: "replay-done", lastSeq: 1 });
+  expect(chat.transcript.items).toHaveLength(1);
+
+  await chat.attach("sb");
+
+  expect(wsA.readyState).toBe(3); // the old socket is closed…
+  const wsB = MockWebSocket.latest()!;
+  expect(wsB).not.toBe(wsA); // …and replaced
+  expect(wsB.url).toContain("/api/acp/sessions/sb/ws");
+  expect(chat.session?.id).toBe("sb");
+  expect(chat.mode).toBe("full-auto"); // B's mode, not A's
+  expect(chat.transcript.items).toEqual([]); // A's transcript is gone
+  expect(chat.transcript.lastSeq).toBe(0);
+  expect(chat.connection).toBe("connecting");
+
+  wsB.open();
+  expect(wsB.frames()).toEqual([{ t: "subscribe", sinceSeq: 0 }]); // B replays whole
+
+  wsB.fireMessage({ t: "event", event: ev(4, "user-prompt", { text: "in B" }) });
+  wsB.fireMessage({ t: "replay-done", lastSeq: 4 });
+  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 4, text: "in B" }]);
+  expect(chat.connection).toBe("connected");
+
+  // Switching is navigation, never destruction — the sessions are hub-owned.
+  expect(endSpy).not.toHaveBeenCalled();
+  expect(fetchSpy).not.toHaveBeenCalled();
+  vi.unstubAllGlobals();
+});
+
+test("attach never reconnects the session it left", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" }), row({ id: "sb" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  MockWebSocket.latest()!.open();
+
+  await chat.attach("sb");
+  const count = MockWebSocket.instances.length;
+  vi.advanceTimersByTime(60_000);
+
+  // A manual close is not a drop: the old socket must not schedule a redial.
+  expect(MockWebSocket.instances).toHaveLength(count);
+});
+
+test("attach mid-pending never leaks the optimistic prompt into the next session", async () => {
+  vi.useFakeTimers();
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" }), row({ id: "sb" })]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const wsA = MockWebSocket.latest()!;
+  wsA.open();
+  wsA.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await chat.prompt("meant for A");
+  expect(chat.busy).toBe(true);
+
+  await chat.attach("sb");
+
+  expect(chat.transcript.items).toEqual([]); // no ghost bubble in B
+  // NOT handed back: the composer now points at another agent's session.
+  expect(failed).toEqual([]);
+  const wsB = MockWebSocket.latest()!;
+  wsB.open();
+  wsB.fireMessage({ t: "replay-done", lastSeq: 0 });
+  expect(chat.busy).toBe(false); // and busy is not latched behind A's prompt
+  expect(vi.getTimerCount()).toBe(0); // A's echo deadline went with it
+
+  vi.advanceTimersByTime(ECHO_DEADLINE_MS * 3);
+  expect(chat.error).toBeNull();
+  expect(failed).toEqual([]);
+});
+
+test("attach to an id that is gone re-reads the list and keeps the live session", async () => {
+  const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  const wsA = MockWebSocket.latest()!;
+  wsA.open();
+  wsA.fireMessage({ t: "replay-done", lastSeq: 0 });
+
+  await chat.attach("gone");
+
+  expect(list).toHaveBeenCalledTimes(2); // re-read before giving up
+  expect(chat.session?.id).toBe("sa"); // still attached, socket untouched
+  expect(wsA.readyState).toBe(1);
+  expect(MockWebSocket.instances).toHaveLength(1);
+  expect(chat.error).toBe("Couldn't open that session — it's no longer there.");
+});
+
+test("attach after destroy dials nothing", async () => {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" }), row({ id: "sb" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  chat.destroy();
+  const count = MockWebSocket.instances.length;
+
+  await chat.attach("sb");
+
+  expect(MockWebSocket.instances).toHaveLength(count);
+});
+
+test("the session frame refreshes that row in the list without reordering it", async () => {
+  const a = row({ id: "sa" });
+  const b = row({ id: "sb" });
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([a, b]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+
+  ws.fireMessage({ t: "session", session: { ...a, status: "working" } });
+
+  // The switcher's <Status> must follow the stream, but a list that reshuffles
+  // itself under the pointer is how a user picks the wrong session.
+  expect(chat.sessions.map((s) => s.id)).toEqual(["sa", "sb"]);
+  expect(chat.sessions[0].status).toBe("working");
+});
+
+test("a prompt into an attached ENDED session creates a new one instead", async () => {
+  // Reading an ended session and typing a follow-up is an obvious move now that
+  // the switcher offers them. The row says ended, but a replay that carried no
+  // state event leaves the transcript's own status at the "starting" placeholder
+  // — deciding on that alone writes the frame into a session that can never
+  // answer it.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([
+    row({ id: "sa" }),
+    row({ id: "se", status: "ended" }),
+  ]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  await chat.attach("se");
+  const wsE = MockWebSocket.latest()!;
+  wsE.open();
+  wsE.fireMessage({ t: "replay-done", lastSeq: 0 });
+  expect(chat.status).toBe("ended");
+  expect(chat.busy).toBe(false);
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row({ id: "sn" }));
+
+  await chat.prompt("carry on");
+
+  expect(api.createAcpSession).toHaveBeenCalledWith("st1", "ask");
+  expect(chat.session?.id).toBe("sn");
+  expect(wsE.frames()).not.toContainEqual({ t: "prompt", text: "carry on" });
+  const wsN = MockWebSocket.latest()!;
+  wsN.open();
+  expect(wsN.frames()).toEqual([
+    { t: "subscribe", sinceSeq: 0 },
+    { t: "prompt", text: "carry on" },
+  ]);
+});
+
+test("end() refreshes the session list so the switcher shows it ended", async () => {
+  vi.spyOn(api, "endAcpSession").mockResolvedValue(undefined);
+  const { chat } = await connectedChat();
+  expect(chat.sessions.map((s) => s.status)).toEqual(["idle"]);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ status: "ended" })]);
+
+  await chat.end();
+
+  expect(chat.sessions.map((s) => s.status)).toEqual(["ended"]);
 });

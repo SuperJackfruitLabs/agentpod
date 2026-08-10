@@ -27,11 +27,24 @@
     value?: string;
     disabled?: boolean;
     working: boolean;
+    /**
+     * Id of a line explaining what sending will do (e.g. "this starts a new
+     * session"). Reaches the textarea as `aria-describedby`, so the caveat is
+     * announced when focus lands here — not only to people who can see it.
+     */
+    describedBy?: string;
     onSend: (text: string) => void;
     onCancel: () => void;
   }
 
-  let { value = $bindable(""), disabled = false, working, onSend, onCancel }: Props = $props();
+  let {
+    value = $bindable(""),
+    disabled = false,
+    working,
+    describedBy,
+    onSend,
+    onCancel,
+  }: Props = $props();
   const canSend = $derived(value.trim().length > 0);
 
   function send() {
@@ -55,6 +68,7 @@
     aria-label="Message the agent"
     class="max-h-40 min-h-9 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
     aria-disabled={disabled ? "true" : undefined}
+    aria-describedby={describedBy}
     readonly={disabled}
     onkeydown={handleKeydown}
   />

@@ -121,10 +121,14 @@ func (h *acpHandler) Handle(
 }
 
 // handleOpen resolves the ACP spawn command for key, spawns (or reuses) the
-// session, and returns {sessionId}.
+// session for the (key, instance) pair, and returns {sessionId} — plus the
+// echoed instance when the request carried one. The echo is how the hub tells a
+// node that understands per-instance processes from an older one; omitting the
+// field for an instance-less request keeps the legacy result shape byte-exact.
 func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 	var p struct {
-		Key string `json:"key"`
+		Key      string `json:"key"`
+		Instance string `json:"instance"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, false, fmt.Errorf("acp.open: bad params: %w", err)
@@ -138,12 +142,16 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 		return nil, false, fmt.Errorf("acp.open: %w", err)
 	}
 
-	sess, err := h.mgr.Open(p.Key, argv, dir, env)
+	sess, err := h.mgr.Open(p.Key, p.Instance, argv, dir, env)
 	if err != nil {
 		return nil, false, fmt.Errorf("acp.open: %w", err)
 	}
 
-	return map[string]any{"sessionId": sess.ID()}, false, nil
+	res := map[string]any{"sessionId": sess.ID()}
+	if p.Instance != "" {
+		res["instance"] = p.Instance
+	}
+	return res, false, nil
 }
 
 // handleAttach subscribes to the session's stdout stream and forwards each

@@ -11,6 +11,9 @@
  *   4. close() sends acp.close {sessionId} + a cancel for the attach stream;
  *      idempotent.
  *   5. acp.open failure → throws Error("Couldn't start the agent process — ...").
+ *   6. The caller's instance rides on acp.open, and `instanceEchoed` reports
+ *      whether the node understood it (an old node echoes nothing but must
+ *      still yield a fully working wire).
  *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
@@ -39,6 +42,8 @@ import { openAcpWire } from "./acp-transport";
 const TEST_USER = "test-user-acpwire-001";
 const STATION_KEY = "acpwire-station";
 const FAKE_SESSION_ID = "acp-session-xyz789";
+/** Stand-in for the hub session id the caller passes as the ACP instance. */
+const HUB_SESSION = "acps_wire-test-session";
 
 const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
 
@@ -73,7 +78,8 @@ afterAll(async () => {
 /**
  * Connect a fake node WS to the gateway and script the ACP verbs.
  *
- * - acp.open  → res {sessionId: FAKE_SESSION_ID} (or {ok:false} when failOpen)
+ * - acp.open  → res {sessionId: FAKE_SESSION_ID, instance: <echoed>} (or
+ *   {ok:false} when failOpen; no instance echo when legacyOpen — an old node)
  * - acp.attach → records the attach id, then emits opts.streamChunks (base64)
  *   followed by eof unless holdStream is set
  * - input frames → echoed back as stream chunks on the attach id
@@ -90,6 +96,7 @@ async function connectFakeNode(
     holdStream?: boolean;
     failOpen?: string; // respond to acp.open with ok:false and this error
     malformedOpen?: boolean; // respond to acp.open with ok:true but no sessionId
+    legacyOpen?: boolean; // old node: return only sessionId, never echo instance
   } = {}
 ): Promise<WebSocket> {
   const ws = new WebSocket(
@@ -172,12 +179,16 @@ async function connectFakeNode(
               })
             );
           } else {
+            const instance = msg.params?.instance as string | undefined;
             ws.send(
               JSON.stringify({
                 type: "res",
                 id: msg.id,
                 ok: true,
-                data: { sessionId: FAKE_SESSION_ID },
+                data:
+                  opts.legacyOpen || instance === undefined
+                    ? { sessionId: FAKE_SESSION_ID }
+                    : { sessionId: FAKE_SESSION_ID, instance },
               })
             );
           }
@@ -306,7 +317,7 @@ test(
         attachIdRef,
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
       expect(wire.nodeSessionId).toBe(FAKE_SESSION_ID);
 
       // acp.open carried the station key; acp.attach carried the session id.
@@ -357,7 +368,7 @@ test(
         attachIdRef,
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
       await pollUntil(() => attachIdRef[0]);
 
       const outbound = '{"jsonrpc":"2.0","id":7,"method":"initialize"}\n';
@@ -410,7 +421,7 @@ test(
         streamChunks: [b64(protocolLine), b64(exitFrame)],
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
 
       const text = await readAllText(wire.readable);
       // Protocol bytes surfaced; the exit frame did NOT leak into readable.
@@ -456,7 +467,7 @@ test(
         streamChunks: [b64(half1), b64(half2)],
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
 
       const text = await readAllText(wire.readable);
       expect(text).toBe(line);
@@ -488,7 +499,7 @@ test(
         attachIdRef,
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
       await pollUntil(() => attachIdRef[0]);
 
       // Consumer-side teardown (what the SDK does on connection close) — must
@@ -547,7 +558,7 @@ test(
         attachIdRef,
       });
 
-      const wire = await openAcpWire(nodeId, STATION_KEY);
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
       await pollUntil(() => attachIdRef[0]);
 
       await wire.close();
@@ -602,13 +613,13 @@ test(
         failOpen: "harness not found",
       });
 
-      await expect(openAcpWire(nodeId, STATION_KEY)).rejects.toThrow(
+      await expect(openAcpWire(nodeId, STATION_KEY, HUB_SESSION)).rejects.toThrow(
         "Couldn't start the agent process — harness not found."
       );
 
       // Offline node (never connected) → broker resolves {ok:false, error:"node offline"}.
       await expect(
-        openAcpWire("00000000-0000-0000-0000-000000000000", STATION_KEY)
+        openAcpWire("00000000-0000-0000-0000-000000000000", STATION_KEY, HUB_SESSION)
       ).rejects.toThrow("Couldn't start the agent process — node offline.");
 
       fakeNode.close();
@@ -623,12 +634,174 @@ test(
         { malformedOpen: true }
       );
       await expect(
-        openAcpWire(malformed.nodeId, STATION_KEY)
+        openAcpWire(malformed.nodeId, STATION_KEY, HUB_SESSION)
       ).rejects.toThrow(
         "Couldn't start the agent process — malformed open response."
       );
 
       malformedNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "acp.open carries a non-empty instance equal to the id passed in; instanceEchoed is true when the node echoes it",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-inst-host");
+
+      const capturedNodeMsgs: string[] = [];
+      const attachIdRef: [string | null] = [null];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        holdStream: true,
+        capturedNodeMsgs,
+        attachIdRef,
+      });
+
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
+
+      const openReq = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+        ) as { params: { key: string; instance?: string } } | undefined;
+      });
+      expect(openReq.params.key).toBe(STATION_KEY);
+      expect(openReq.params.instance).toBe(HUB_SESSION);
+      expect(openReq.params.instance!.length).toBeGreaterThan(0);
+
+      // A modern node echoes the instance → the hub knows it was understood.
+      expect(wire.instance).toBe(HUB_SESSION);
+      expect(wire.instanceEchoed).toBe(true);
+      // Existing field meanings are unchanged.
+      expect(wire.nodeSessionId).toBe(FAKE_SESSION_ID);
+
+      await wire.close();
+      fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "two openAcpWire calls for the same station with different ids send different instances",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-two-host");
+
+      const capturedNodeMsgs: string[] = [];
+      const attachIdRef: [string | null] = [null];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        holdStream: true,
+        capturedNodeMsgs,
+        attachIdRef,
+      });
+
+      const wireA = await openAcpWire(nodeId, STATION_KEY, "acps_one");
+      const wireB = await openAcpWire(nodeId, STATION_KEY, "acps_two");
+
+      const opens = await pollUntil(() => {
+        const found = parsedNodeMsgs(capturedNodeMsgs).filter(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+        ) as Array<{ params: { key: string; instance?: string } }>;
+        return found.length === 2 ? found : undefined;
+      });
+      expect(opens.map((o) => o.params.key)).toEqual([STATION_KEY, STATION_KEY]);
+      expect(opens[0]!.params.instance).toBe("acps_one");
+      expect(opens[1]!.params.instance).toBe("acps_two");
+      expect(opens[0]!.params.instance).not.toBe(opens[1]!.params.instance);
+      expect(wireA.instance).toBe("acps_one");
+      expect(wireB.instance).toBe("acps_two");
+
+      await wireA.close();
+      await wireB.close();
+      fakeNode.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "legacy node (no instance echo): instanceEchoed is false and readable/writable/closed still work",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-legacy-host");
+
+      const capturedNodeMsgs: string[] = [];
+      const attachIdRef: [string | null] = [null];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        holdStream: true,
+        capturedNodeMsgs,
+        attachIdRef,
+        legacyOpen: true,
+      });
+
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
+      await pollUntil(() => attachIdRef[0]);
+
+      // The hub still sent the instance; the old node just ignored it.
+      const openReq = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+        ) as { params: { instance?: string } } | undefined;
+      });
+      expect(openReq.params.instance).toBe(HUB_SESSION);
+      expect(wire.instanceEchoed).toBe(false);
+
+      // …and the wire is fully usable: attach keyed by the node session id,
+      // writable → input frames, echoes back through readable.
+      expect(wire.nodeSessionId).toBe(FAKE_SESSION_ID);
+      const attachReq = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) =>
+            m.type === "req" && (m as { verb?: string }).verb === "acp.attach"
+        ) as { params: { sessionId: string } } | undefined;
+      });
+      expect(attachReq.params.sessionId).toBe(FAKE_SESSION_ID);
+
+      const outbound = '{"jsonrpc":"2.0","id":9,"method":"initialize"}\n';
+      const writer = wire.writable.getWriter();
+      await writer.write(new TextEncoder().encode(outbound));
+      writer.releaseLock();
+
+      const inputFrame = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "input"
+        ) as { id: string; data: string } | undefined;
+      });
+      expect(inputFrame.id).toBe(FAKE_SESSION_ID);
+
+      const reader = wire.readable.getReader();
+      const { value } = await reader.read();
+      expect(new TextDecoder().decode(value)).toBe(outbound);
+      reader.releaseLock();
+
+      // close() still tears down: acp.close on the node, closed settles.
+      await wire.close();
+      const closeReq = await pollUntil(() => {
+        return parsedNodeMsgs(capturedNodeMsgs).find(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+        ) as { params: { sessionId: string } } | undefined;
+      });
+      expect(closeReq.params.sessionId).toBe(FAKE_SESSION_ID);
+      expect(await wire.closed).toBe("eof");
+
+      fakeNode.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
       server.stop(true);

@@ -11,11 +11,22 @@ import (
 var ErrEmptyArgv = errors.New("acp: empty argv")
 
 // Manager owns the set of live ACP sessions keyed both by session ID and by
-// station key. All public methods are safe for concurrent use.
+// the (station key, instance) pair. All public methods are safe for concurrent
+// use.
 type Manager struct {
 	mu    sync.Mutex
 	byID  map[string]*Session
-	byKey map[string]string // station key → session ID
+	byKey map[string]string // instanceKey(key, instance) → session ID
+}
+
+// instanceKey encodes the (station key, instance) pair as one map key. NUL
+// cannot appear in either half (station keys are "harness:id", instances are
+// hub-chosen identifiers), so the pairs can never flatten onto each other the
+// way plain concatenation would collapse ("a","bc") and ("ab","c"). An empty
+// instance is a distinct pair of its own — that is the legacy
+// one-process-per-key slot an older hub keeps re-opening.
+func instanceKey(key, instance string) string {
+	return key + "\x00" + instance
 }
 
 // NewManager allocates an empty Manager.
@@ -34,18 +45,25 @@ func newSessionID() string {
 	return "acp_" + hex.EncodeToString(b[:])
 }
 
-// Open returns the live session for key if one already exists (idempotent),
-// or spawns argv[0] with argv[1:] in dir with env appended to os.Environ().
-// stdout is streamed to subscribers in chunks; stderr is discarded to a
-// bounded ring (last 4 KiB) exposed via s.StderrTail() for exit reasons.
-func (m *Manager) Open(key string, argv []string, dir string, env []string) (*Session, error) {
+// Open returns the live session for the (key, instance) pair if one already
+// exists (idempotent), or spawns argv[0] with argv[1:] in dir with env appended
+// to os.Environ(). stdout is streamed to subscribers in chunks; stderr is
+// discarded to a bounded ring (last 4 KiB) exposed via s.StderrTail() for exit
+// reasons.
+//
+// instance discriminates concurrent sessions on one station: each distinct
+// instance gets its own child, so two hub sessions never read each other's
+// JSON-RPC traffic. An empty instance keeps the pre-instance behaviour
+// (idempotent by station key alone), which is what an older hub sends.
+func (m *Manager) Open(key, instance string, argv []string, dir string, env []string) (*Session, error) {
 	if len(argv) == 0 {
 		return nil, ErrEmptyArgv
 	}
+	ikey := instanceKey(key, instance)
 
 	m.mu.Lock()
-	// Fast path: session already alive for this key.
-	if id, ok := m.byKey[key]; ok {
+	// Fast path: session already alive for this pair.
+	if id, ok := m.byKey[ikey]; ok {
 		if s, ok := m.byID[id]; ok {
 			m.mu.Unlock()
 			return s, nil
@@ -69,8 +87,8 @@ func (m *Manager) Open(key string, argv []string, dir string, env []string) (*Se
 	}
 
 	m.mu.Lock()
-	// Double-check: another goroutine may have won the race for this key.
-	if existingID, ok := m.byKey[key]; ok {
+	// Double-check: another goroutine may have won the race for this pair.
+	if existingID, ok := m.byKey[ikey]; ok {
 		if existing, ok := m.byID[existingID]; ok {
 			m.mu.Unlock()
 			// We lost the race — discard our session.
@@ -79,12 +97,13 @@ func (m *Manager) Open(key string, argv []string, dir string, env []string) (*Se
 		}
 	}
 	m.byID[id] = s
-	m.byKey[key] = id
+	m.byKey[ikey] = id
 	m.mu.Unlock()
 
 	// Drop the session from the registry once the child exits so a later
-	// Open for the same key spawns a fresh process instead of returning a
-	// dead session.
+	// Open for the same pair spawns a fresh process instead of returning a
+	// dead session. Only this pair's entry goes — siblings on the same station
+	// key keep running.
 	s.OnExit(func(string) { m.remove(id) })
 	return s, nil
 }
@@ -97,13 +116,15 @@ func (m *Manager) Get(id string) (*Session, bool) {
 	return s, ok
 }
 
-// remove deletes id from both indexes (no-op if already gone).
+// remove deletes id from both indexes (no-op if already gone). A session ID is
+// mapped from at most one (key, instance) pair, so the reverse scan can stop at
+// the first hit and leaves every sibling pair on the same station key intact.
 func (m *Manager) remove(id string) {
 	m.mu.Lock()
 	delete(m.byID, id)
-	for k, v := range m.byKey {
+	for ikey, v := range m.byKey {
 		if v == id {
-			delete(m.byKey, k)
+			delete(m.byKey, ikey)
 			break
 		}
 	}

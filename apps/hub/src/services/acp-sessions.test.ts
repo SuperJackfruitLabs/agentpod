@@ -4,9 +4,9 @@
  * Verifies src/services/acp-sessions.ts against a fake node speaking scripted
  * ACP (tests/helpers/acp-fake-node.ts):
  *
- *   1. createSession → row idle + state event persisted; single live session
- *      per station; capability/ownership/online gates; open-failure marks the
- *      row ended with an error event.
+ *   1. createSession → row idle + state event persisted;
+ *      capability/ownership/online gates; open-failure marks the row ended
+ *      with an error event.
  *   2. promptSession → user-prompt / state working / agent-update / state idle
  *      ordering by seq; audit row (chars only, never text); subscribe fan-out.
  *   3. ask mode parks the permission (status waiting); answerPermission
@@ -18,7 +18,11 @@
  *   7. wrong-user access → null / empty / throws.
  *   8. endSession closes the wire (node sees acp.close) + row ended + event.
  *   9. node offline mid-session → waiting + grace end.
- *  10. reconcileOnBoot marks stale rows ended and best-effort closes orphans.
+ *  10. reconcileOnBoot marks stale rows ended and best-effort closes orphans,
+ *      each row's OWN node_session_id, never one a live session holds.
+ *  11. Slice 4b: several live sessions per station — distinct instances and
+ *      node processes, independent transcripts, independent teardown; a node
+ *      that doesn't echo the instance keeps the one-at-a-time behaviour.
  *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
@@ -61,7 +65,9 @@ import {
   endSession,
   subscribe,
   reconcileOnBoot,
+  closeOrphanedProcesses,
   _setOfflineGraceMsForTest,
+  _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
 } from "./acp-sessions";
 
@@ -147,9 +153,12 @@ async function eventsFor(sessionId: string) {
     .orderBy(asc(acpEvents.seq));
 }
 
+/** The shape both persisted rows and fanned-out events share. */
+type EventLike = { seq: number; type: string; payload?: unknown };
+
 async function pollForEvent(
   sessionId: string,
-  match: (e: { type: string; payload: unknown }) => boolean,
+  match: (e: EventLike) => boolean,
   timeoutMs = 8000
 ) {
   const deadline = Date.now() + timeoutMs;
@@ -166,13 +175,46 @@ async function pollForEvent(
   }
 }
 
-const stateWith = (status: string) => (e: { type: string; payload: unknown }) =>
-  e.type === "state" && (e.payload as { status?: string }).status === status;
+const stateWith =
+  (status: string) => (e: { type: string; payload?: unknown }) =>
+    e.type === "state" && (e.payload as { status?: string }).status === status;
+
+/** The node process id recorded on a session row. */
+async function nodeSessionIdOf(sessionId: string): Promise<string | null> {
+  const rows = await db
+    .select()
+    .from(acpSessions)
+    .where(eq(acpSessions.id, sessionId));
+  return rows[0]?.nodeSessionId ?? null;
+}
+
+/** acp.open requests the node received, in order. */
+function opensSeenBy(fake: { nodeMsgs: string[] }) {
+  return parsedNodeMsgs(fake.nodeMsgs).filter(
+    (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+  ) as Array<{ params?: { instance?: string; key?: string } }>;
+}
+
+/** acp.close requests the node received, in order of sessionId. */
+function closesSeenBy(fake: { nodeMsgs: string[] }): string[] {
+  return parsedNodeMsgs(fake.nodeMsgs)
+    .filter(
+      (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+    )
+    .map(
+      (m) => (m as { params?: { sessionId?: string } }).params?.sessionId ?? ""
+    );
+}
+
+const promptTexts = (evts: Array<{ type: string; payload: unknown }>) =>
+  evts
+    .filter((e) => e.type === "user-prompt")
+    .map((e) => (e.payload as { text: string }).text);
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test(
-  "createSession: row idle + state event; duplicate refused; endSession closes wire (node sees acp.close) + row ended + event",
+  "createSession: row idle + state event; endSession closes its own wire (node sees acp.close) + row ended + event",
   async () => {
     const { server, fake, station } = await setupRig("acpsess-create-host");
     try {
@@ -195,10 +237,16 @@ test(
       expect(evts[0]!.type).toBe("state");
       expect((evts[0]!.payload as { status: string }).status).toBe("idle");
 
-      // Single live session per station.
-      await expect(
-        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
-      ).rejects.toThrow("An active session already exists for this agent.");
+      // A second live session is allowed on a node that echoes the instance
+      // (independence is covered by the multi-session test below).
+      const sibling = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(sibling.id).not.toBe(row.id);
+      expect(sibling.status).toBe("idle");
+      await endSession(TEST_USER, sibling.id, "cleanup");
 
       // getSession / listSessions surface the row.
       const fetched = await getSession(TEST_USER, row.id);
@@ -206,16 +254,19 @@ test(
       const listed = await listSessions(TEST_USER, station.id);
       expect(listed.map((s) => s.id)).toContain(row.id);
 
-      // endSession → node sees acp.close, row ended, state ended event.
+      // endSession → node sees acp.close for THIS session's process id, row
+      // ended, state ended event.
       await endSession(TEST_USER, row.id, "user closed");
       const closeReq = await pollUntil(() =>
         parsedNodeMsgs(fake.nodeMsgs).find(
-          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.close"
+          (m) =>
+            m.type === "req" &&
+            (m as { verb?: string }).verb === "acp.close" &&
+            (m as { params?: { sessionId?: string } }).params?.sessionId ===
+              "acp-proc-1"
         )
       );
-      expect((closeReq as { params: { sessionId: string } }).params.sessionId).toBe(
-        "acp-proc-1"
-      );
+      expect(closeReq).toBeTruthy();
 
       const ended = await getSession(TEST_USER, row.id);
       expect(ended?.status).toBe("ended");
@@ -383,7 +434,7 @@ test(
       // Turn ends back at idle (skip seq 1 = the create-time idle event).
       const { all } = await pollForEvent(
         row.id,
-        (e) => stateWith("idle")(e) && (e as { seq: number }).seq > 1,
+        (e) => stateWith("idle")(e) && e.seq > 1,
         8000
       );
 
@@ -770,10 +821,43 @@ test(
 );
 
 test(
-  "concurrent createSession for the same station: exactly one wins, the other gets the active-session error",
+  "concurrent createSession for the same station: a node that echoes instances hosts both; a legacy node lets exactly one win",
   async () => {
     const { server, fake, station } = await setupRig("acpsess-race-host", {
       stationKey: "acp-race-station",
+    });
+    try {
+      const results = await Promise.allSettled([
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" }),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(2);
+      const both = results.map(
+        (r) => (r as PromiseFulfilledResult<{ id: string }>).value
+      );
+      expect(new Set(both.map((s) => s.id)).size).toBe(2);
+      // Distinct agent processes on the node — never one shared process.
+      const procIds = await Promise.all(
+        both.map(async (s) => (await nodeSessionIdOf(s.id))!)
+      );
+      expect(new Set(procIds).size).toBe(2);
+
+      for (const s of both) await endSession(TEST_USER, s.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "concurrent createSession against a legacy node: exactly one wins, the loser gets the active-session error",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-race-legacy-host", {
+      stationKey: "acp-race-legacy-station",
+      legacyOpen: true,
     });
     try {
       const results = await Promise.allSettled([
@@ -787,6 +871,13 @@ test(
       expect(String((lost[0] as PromiseRejectedResult).reason)).toContain(
         "An active session already exists for this agent."
       );
+
+      // Only ONE process was ever opened: the loser never reached the node.
+      expect(
+        parsedNodeMsgs(fake.nodeMsgs).filter(
+          (m) => m.type === "req" && (m as { verb?: string }).verb === "acp.open"
+        )
+      ).toHaveLength(1);
 
       const winner = (won[0] as PromiseFulfilledResult<{ id: string }>).value;
       await endSession(TEST_USER, winner.id, "cleanup");
@@ -1001,6 +1092,21 @@ test(
         createdAt: new Date(),
       });
 
+      // A SECOND stale row on the SAME station with its own process id (two
+      // concurrent sessions before the restart) — each must be closed by id.
+      const staleId2 = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+        id: staleId2,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "idle",
+        endedReason: null,
+        nodeSessionId: "acp-proc-stale-43",
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
       // A stale row whose station is gone (transcript survives; no close possible).
       const orphanId = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
@@ -1017,7 +1123,7 @@ test(
 
       await reconcileOnBoot();
 
-      for (const id of [staleId, orphanId]) {
+      for (const id of [staleId, staleId2, orphanId]) {
         const s = await getSession(TEST_USER, id);
         expect(s?.status).toBe("ended");
         expect(s?.endedReason).toBe("hub restarted");
@@ -1028,17 +1134,11 @@ test(
       expect((staleEvts.at(-1)!.payload as { status: string }).status).toBe("ended");
       expect(staleEvts.at(-1)!.seq).toBe(2);
 
-      // Online node got a best-effort acp.close for the orphaned process id.
-      const closeReq = await pollUntil(() =>
-        parsedNodeMsgs(fake.nodeMsgs).find(
-          (m) =>
-            m.type === "req" &&
-            (m as { verb?: string }).verb === "acp.close" &&
-            (m as { params?: { sessionId?: string } }).params?.sessionId ===
-              "acp-proc-stale-42"
-        )
+      // Online node got a best-effort acp.close for EACH row's own process id.
+      await pollUntil(() =>
+        closesSeenBy(fake).includes("acp-proc-stale-42") &&
+        closesSeenBy(fake).includes("acp-proc-stale-43")
       );
-      expect(closeReq).toBeTruthy();
 
       // Boot-time close clears the marker (once-only); the station-less
       // orphan keeps its marker (transcript row survives, nothing to close).
@@ -1047,6 +1147,13 @@ test(
           .select()
           .from(acpSessions)
           .where(eq(acpSessions.id, staleId));
+        return r[0]?.nodeSessionId === null;
+      });
+      await pollUntil(async () => {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, staleId2));
         return r[0]?.nodeSessionId === null;
       });
       const orphanRow = await db
@@ -1062,4 +1169,421 @@ test(
     }
   },
   20_000
+);
+
+// ─── Slice 4b: several live sessions per station ───────────────────────────────
+
+test(
+  "two concurrent sessions on one station: each acp.open carries its own instance, transcripts stream independently, ending one leaves the other live",
+  async () => {
+    // exitOnClose: ending one session really kills its agent process, so
+    // "the sibling survives" is a claim about the code, not about the fake.
+    const { server, fake, station } = await setupRig("acpsess-multi-host", {
+      stationKey: "acp-multi-station",
+      exitOnClose: true,
+    });
+    try {
+      const a = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      const b = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.id).not.toBe(b.id);
+      expect(a.status).toBe("idle");
+      expect(b.status).toBe("idle");
+
+      // Each open carried the hub session id as its instance — two distinct ones.
+      const opens = opensSeenBy(fake);
+      expect(opens).toHaveLength(2);
+      expect(opens.map((o) => o.params?.instance)).toEqual([a.id, b.id]);
+
+      // …and the node spawned a distinct process per session, recorded per row.
+      const procA = (await nodeSessionIdOf(a.id))!;
+      const procB = (await nodeSessionIdOf(b.id))!;
+      expect(procA).toBeTruthy();
+      expect(procB).toBeTruthy();
+      expect(procA).not.toBe(procB);
+      expect(fake.processFor(a.id)!.sessionId).toBe(procA);
+      expect(fake.processFor(b.id)!.sessionId).toBe(procB);
+
+      // A prompt in A never appears in B's transcript.
+      await promptSession(TEST_USER, a.id, "hello from A");
+      await pollForEvent(
+        a.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      const aEvents = await eventsFor(a.id);
+      expect(promptTexts(aEvents)).toEqual(["hello from A"]);
+      expect(aEvents.some((e) => e.type === "agent-update")).toBe(true);
+
+      const bEvents = await eventsFor(b.id);
+      expect(bEvents).toHaveLength(1); // only its own create-time idle state
+      expect(promptTexts(bEvents)).toEqual([]);
+      expect(bEvents.some((e) => e.type === "agent-update")).toBe(false);
+
+      // B's own prompt runs on B's process and stays out of A's transcript.
+      await promptSession(TEST_USER, b.id, "hello from B");
+      await pollForEvent(
+        b.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      const bAfter = await eventsFor(b.id);
+      expect(promptTexts(bAfter)).toEqual(["hello from B"]);
+      expect(bAfter.some((e) => e.type === "agent-update")).toBe(true);
+      expect(promptTexts(await eventsFor(a.id))).toEqual(["hello from A"]);
+      expect(
+        fake
+          .processFor(b.id)!
+          .agentReceived.some((m) => m.method === "session/prompt")
+      ).toBe(true);
+
+      // Ending A closes A's process only; B stays live and usable.
+      await endSession(TEST_USER, a.id, "done with A");
+      await pollUntil(() => closesSeenBy(fake).includes(procA));
+      expect(closesSeenBy(fake)).not.toContain(procB);
+      expect((await getSession(TEST_USER, a.id))?.status).toBe("ended");
+      expect((await getSession(TEST_USER, b.id))?.status).toBe("idle");
+
+      await promptSession(TEST_USER, b.id, "still alive");
+      await pollForEvent(
+        b.id,
+        (e) =>
+          e.type === "user-prompt" &&
+          (e.payload as { text: string }).text === "still alive"
+      );
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, b.id);
+        return s?.status === "idle";
+      });
+      expect(closesSeenBy(fake)).not.toContain(procB);
+
+      await endSession(TEST_USER, b.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "legacy node (no instance echo): the second createSession is refused with the pinned error before any second open, leaving no stray row, live entry or wire",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-legacy-host", {
+      stationKey: "acp-legacy-station",
+      legacyOpen: true,
+    });
+    try {
+      const a = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.status).toBe("idle");
+
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("An active session already exists for this agent.");
+
+      // Refused BEFORE touching the node: no second acp.open, no leaked wire.
+      expect(opensSeenBy(fake)).toHaveLength(1);
+      // …and no stray session row for the refused attempt.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows.map((r) => r.id)).toEqual([a.id]);
+
+      // The live session is untouched and still usable.
+      await promptSession(TEST_USER, a.id, "still mine");
+      await pollForEvent(
+        a.id,
+        (e) => stateWith("idle")(e) && e.seq > 1
+      );
+      expect(promptTexts(await eventsFor(a.id))).toEqual(["still mine"]);
+
+      // Ending it releases the station — no 409 lock.
+      await endSession(TEST_USER, a.id, "cleanup");
+      const next = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+      await endSession(TEST_USER, next.id, "cleanup");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a node that stops echoing the instance mid-life: the post-open layer tears the new wire down and refuses, leaving no live entry",
+  async () => {
+    // exitOnClose: closing an agent process really kills it here, so the
+    // teardown's effect on the session sharing that process is not hidden.
+    const { server, fake, station } = await setupRig("acpsess-noecho-host", {
+      stationKey: "acp-noecho-station",
+      exitOnClose: true,
+    });
+    try {
+      const a = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      expect(a.status).toBe("idle");
+
+      // The node degrades: it still accepts acp.open but stops echoing, so the
+      // process it hands back may be the one session A is already using. Only
+      // the post-open layer can catch that.
+      fake.opts.legacyOpen = true;
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("An active session already exists for this agent.");
+
+      // The refused attempt did reach the node, and its row is ended with the
+      // pinned reason + an error event (the standard failure exit).
+      expect(opensSeenBy(fake)).toHaveLength(2);
+      const rows = await listSessions(TEST_USER, station.id);
+      const refused = rows.find((r) => r.id !== a.id)!;
+      expect(refused.status).toBe("ended");
+      expect(refused.endedReason).toBe(
+        "An active session already exists for this agent."
+      );
+      const refusedEvents = await eventsFor(refused.id);
+      expect(refusedEvents.some((e) => e.type === "error")).toBe(true);
+
+      // KNOWN RESIDUAL HAZARD, pinned rather than hidden: the node handed back
+      // A's process, so tearing the refused wire down closes it and takes A with
+      // it. This costs one session instead of bleeding two conversations into one
+      // process, and layer 1 keeps it unreachable for any node that never echoes
+      // (only a node that echoed and then stopped can get here).
+      await pollUntil(async () => {
+        const s = await getSession(TEST_USER, a.id);
+        return s?.status === "ended";
+      });
+      // …and it ended from the process exit, not from anything the hub decided.
+      expect((await getSession(TEST_USER, a.id))?.endedReason).toBe("closed");
+
+      // No live entry leaked either: a fresh session starts (the node still
+      // can't echo, so one at a time).
+      const next = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+      await endSession(TEST_USER, next.id, "cleanup");
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a queued open re-reads the station: the node going offline while it waits is refused, not dialled",
+  async () => {
+    // The first open wedges on the handshake, so the second create sits in the
+    // station's open queue long enough for the fleet to change under it.
+    _setHandshakeTimeoutMsForTest(1500);
+    const { server, fake, station } = await setupRig("acpsess-requeue-host", {
+      stationKey: "acp-requeue-station",
+      hangHandshake: "initialize",
+    });
+    try {
+      // Settle both outcomes as values so neither can become an unhandled
+      // rejection while the other is being asserted.
+      const outcome = (p: Promise<unknown>) =>
+        p.then(
+          () => "resolved",
+          (err) => String(err)
+        );
+      const first = outcome(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      // Passes the fail-fast gates while the node is still online, then queues.
+      const queued = outcome(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      fake.close();
+
+      // The wedged open fails (dropped connection or handshake deadline)…
+      expect(await first).not.toBe("resolved");
+      // …and the queued one re-read the station instead of dialling a node that
+      // is no longer there.
+      expect(await queued).toContain("Node is offline.");
+
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "a stalled DB write inside the open phase rejects with the database copy and still drains the live map (no 409 lock on the station)",
+  async () => {
+    // The station's transcript table is locked for the duration, so the open
+    // phase's idle state-event insert BLOCKS — a real stalled query, not a mock.
+    _setHandshakeTimeoutMsForTest(2000);
+    _setOpenDbTimeoutMsForTest(300);
+    const { server, fake, station } = await setupRig("acpsess-dbstall-host", {
+      stationKey: "acp-dbstall-station",
+    });
+    let releaseLock!: () => void;
+    const lockHeld = new Promise<void>((r) => {
+      releaseLock = r;
+    });
+    let signalLocked!: () => void;
+    const locked = new Promise<void>((r) => {
+      signalLocked = r;
+    });
+    // EXCLUSIVE conflicts with the INSERT's ROW EXCLUSIVE but not with reads.
+    const lockTx = rawSql.begin(async (tx) => {
+      await tx`LOCK TABLE acp_events IN EXCLUSIVE MODE`;
+      signalLocked();
+      await lockHeld;
+    });
+    try {
+      await locked;
+
+      const attempt = createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      }).then(
+        () => "resolved",
+        (err) => String(err)
+      );
+      // Long enough for the bounded DB step to trip while the table is locked.
+      await new Promise((r) => setTimeout(r, 900));
+      releaseLock();
+      await lockTx;
+
+      // The per-step DB deadline is what fired — not the open-phase backstop.
+      expect(await attempt).toContain("the database didn't respond");
+
+      // The failure exit still ran once the DB freed up: the row is ended and
+      // nothing is left in the live map, so the station is NOT 409-locked.
+      const rows = await listSessions(TEST_USER, station.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe("ended");
+      expect(rows[0]!.endedReason).toContain("the database didn't respond");
+
+      const next = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      expect(next.status).toBe("idle");
+
+      await endSession(TEST_USER, next.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      releaseLock();
+      _setOpenDbTimeoutMsForTest(10_000);
+      _setHandshakeTimeoutMsForTest(30_000);
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "closeOrphanedProcesses: closes each ended row's own node session id, never one a live session is holding",
+  async () => {
+    const { server, nodeId, fake, station } = await setupRig(
+      "acpsess-orphan-multi-host",
+      { stationKey: "acp-orphan-multi-station" }
+    );
+    try {
+      const live = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+      });
+      const liveProc = (await nodeSessionIdOf(live.id))!;
+      expect(liveProc).toBeTruthy();
+
+      // Two orphan markers with their own process ids (two sessions that ended
+      // while the node was away) …
+      const orphanProcs = ["acp-proc-multi-a", "acp-proc-multi-b"];
+      const orphanIds: string[] = [];
+      for (const proc of orphanProcs) {
+        const id = `acps_${crypto.randomUUID()}`;
+        orphanIds.push(id);
+        await db.insert(acpSessions).values({
+          id,
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "ask",
+          status: "ended",
+          endedReason: "node went away",
+          nodeSessionId: proc,
+          createdAt: new Date(),
+          lastEventAt: new Date(),
+        });
+      }
+      // … and a poisoned marker pointing at the process the LIVE session holds.
+      const poisonedId = `acps_${crypto.randomUUID()}`;
+      await db.insert(acpSessions).values({
+        id: poisonedId,
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "ask",
+        status: "ended",
+        endedReason: "node went away",
+        nodeSessionId: liveProc,
+        createdAt: new Date(),
+        lastEventAt: new Date(),
+      });
+
+      await closeOrphanedProcesses(nodeId);
+
+      // Each orphan closed by its own id, markers cleared.
+      await pollUntil(() =>
+        orphanProcs.every((proc) => closesSeenBy(fake).includes(proc))
+      );
+      for (const id of orphanIds) {
+        const r = await db
+          .select()
+          .from(acpSessions)
+          .where(eq(acpSessions.id, id));
+        expect(r[0]!.nodeSessionId).toBeNull();
+      }
+
+      // The live session's process was never closed and keeps its marker.
+      expect(closesSeenBy(fake)).not.toContain(liveProc);
+      const poisoned = await db
+        .select()
+        .from(acpSessions)
+        .where(eq(acpSessions.id, poisonedId));
+      expect(poisoned[0]!.nodeSessionId).toBe(liveProc);
+      expect((await getSession(TEST_USER, live.id))?.status).toBe("idle");
+
+      await endSession(TEST_USER, live.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
 );

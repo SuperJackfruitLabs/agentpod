@@ -6,11 +6,14 @@
  * messages; `ndJsonStream(output, input)` builds one from exactly the pair of
  * Uint8Array streams exposed here:
  *
- *   const wire = await openAcpWire(nodeId, stationKey);
+ *   const wire = await openAcpWire(nodeId, stationKey, hubSessionId);
  *   const stream = ndJsonStream(wire.writable, wire.readable);
  *
  * Wire protocol (node-agent acpHandler):
- *   - `acp.open {key}` starts (or reuses) the agent process → `{sessionId}`.
+ *   - `acp.open {key, instance}` starts (or reuses) the agent process for that
+ *     (key, instance) pair → `{sessionId, instance?}`. A result without the
+ *     echoed instance is an OLDER node that keys processes on the key alone —
+ *     reported as `instanceEchoed: false`, never an error.
  *   - `acp.attach {sessionId}` streams the agent's stdout as base64 chunks.
  *   - Input frames to the node are keyed by the ACP SESSION id — NOT the
  *     attach stream id (that is the terminal PTY convention).
@@ -20,9 +23,14 @@
  */
 
 import { z } from "zod";
+import { VERB_RESULTS } from "@agentpod/contract";
 import * as broker from "./broker";
 
-const OpenResponseSchema = z.object({ sessionId: z.string().min(1) });
+// The contract shape (sessionId + optional echoed instance), tightened so an
+// empty sessionId is still treated as a malformed open response.
+const OpenResponseSchema = VERB_RESULTS["acp.open"].extend({
+  sessionId: z.string().min(1),
+});
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +45,12 @@ export interface AcpWire {
   /** Detach + best-effort acp.close on the node. Idempotent. */
   close(): Promise<void>;
   nodeSessionId: string;
+  /** The instance discriminator sent on acp.open (the hub session id). */
+  instance: string;
+  /** True only when the node echoed the instance back — i.e. it keys its ACP
+   *  processes on (key, instance) and can host concurrent sessions. False means
+   *  an older node: one process per station key, whatever instance we asked for. */
+  instanceEchoed: boolean;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -71,14 +85,23 @@ function parseExitReason(bytes: Uint8Array): string | null {
 /**
  * Open an ACP wire to the station's agent process on a node.
  *
+ * `instance` is the caller's discriminator for which process it wants under the
+ * station key; the caller passes its own hub session id, which makes the value
+ * stable across a re-open of the same session and lets node-side logs be
+ * correlated back to a hub session. The transport never invents one.
+ *
  * Throws Error("Couldn't start the agent process — <broker error>.") when
  * acp.open fails or the node is offline.
  */
 export async function openAcpWire(
   nodeId: string,
-  stationKey: string
+  stationKey: string,
+  instance: string
 ): Promise<AcpWire> {
-  const opened = await broker.request(nodeId, "acp.open", { key: stationKey });
+  const opened = await broker.request(nodeId, "acp.open", {
+    key: stationKey,
+    instance,
+  });
   if (!opened.ok) {
     throw new Error(
       `Couldn't start the agent process — ${opened.error ?? "unknown error"}.`
@@ -91,6 +114,9 @@ export async function openAcpWire(
     );
   }
   const { sessionId } = parsedOpen.data;
+  // A missing (or, defensively, mismatched) echo means the node did not honour
+  // the instance — valid, and the caller degrades to one session per station.
+  const instanceEchoed = parsedOpen.data.instance === instance;
 
   let resolveClosed!: (reason: string) => void;
   const closed = new Promise<string>((resolve) => {
@@ -179,5 +205,13 @@ export async function openAcpWire(
     void broker.request(nodeId, "acp.close", { sessionId });
   };
 
-  return { readable, writable, closed, close, nodeSessionId: sessionId };
+  return {
+    readable,
+    writable,
+    closed,
+    close,
+    nodeSessionId: sessionId,
+    instance,
+    instanceEchoed,
+  };
 }

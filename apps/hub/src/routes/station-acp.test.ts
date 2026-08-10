@@ -5,9 +5,10 @@
  *   REST:
  *     1. POST /api/stations/:id/acp/sessions {mode} → 201 AcpSessionRow;
  *        error statuses: 400 invalid mode, 401 anonymous, 403 no acp
- *        capability, 404 unknown station, 409 active session exists,
- *        502 node offline / acp.open failure.
- *     2. GET /api/stations/:id/acp/sessions → rows newest first.
+ *        capability, 404 unknown station, 409 the node can't host a second
+ *        session, 502 node offline / acp.open failure.
+ *     2. GET /api/stations/:id/acp/sessions → rows newest ACTIVITY first,
+ *        straight from the service's SQL ordering (the route never re-sorts).
  *   WS (GET /api/acp/sessions/:sessionId/ws):
  *     3. subscribe → session row, replay of persisted events (seq order),
  *        replay-done, then live events stream; prompt over the WS produces
@@ -45,6 +46,7 @@ import { adoptStations } from "../services/station-registry";
 import {
   endSession,
   getSession,
+  promptSession,
   _subscriberCountForTest,
 } from "../services/acp-sessions";
 import { gatewayRoutes } from "./gateway";
@@ -212,7 +214,7 @@ function receivedEvents(client: WsClient): AcpEvent[] {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test(
-  "POST create → 201 idle row; 400 invalid mode; 401 anonymous; 403 no capability; 404 unknown station; 409 duplicate; GET lists newest first",
+  "POST create → 201 idle row; 400 invalid mode; 401 anonymous; 403 no capability; 404 unknown station; a second concurrent session is allowed; GET lists newest first",
   async () => {
     const { server, nodeId, fake, station, baseUrl } = await setupRig(
       "acproute-rest-host"
@@ -258,9 +260,14 @@ test(
       expect(row.mode).toBe("ask");
       expect(row.status).toBe("idle");
 
-      // 409 — an active session already exists.
-      const dup = await createSessionReq(baseUrl, station.id, { mode: "ask" });
-      expect(dup.status).toBe(409);
+      // A second concurrent session is allowed — the node echoes the instance,
+      // so each session gets its own agent process.
+      const second = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(second.status).toBe(201);
+      const rowB = (await second.json()) as AcpSessionRow;
+      expect(rowB.id).not.toBe(row.id);
+      await endSession(TEST_USER, rowB.id, "test done");
+      await rawSql`DELETE FROM acp_sessions WHERE id = ${rowB.id}`;
 
       // End it, create a second one; GET must list newest first.
       await endSession(TEST_USER, row.id, "test done");
@@ -289,6 +296,82 @@ test(
       expect(listMissing.status).toBe(404);
 
       await endSession(TEST_USER, row2.id, "test done");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "POST → 409 when the node cannot host a second session (it never echoes the instance)",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-legacy-host",
+      { stationKey: "acproute-legacy", legacyOpen: true }
+    );
+    try {
+      const first = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(first.status).toBe(201);
+      const row = (await first.json()) as AcpSessionRow;
+
+      const dup = await createSessionReq(baseUrl, station.id, { mode: "ask" });
+      expect(dup.status).toBe(409);
+      expect(((await dup.json()) as { error: string }).error).toBe(
+        "An active session already exists for this agent."
+      );
+
+      await endSession(TEST_USER, row.id, "test done");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "GET lists sessions newest-ACTIVITY first (from SQL): a prompt floats the older session above a newer idle one",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-order-host",
+      { stationKey: "acproute-order" }
+    );
+    const listIds = async () => {
+      const res = await fetch(
+        `${baseUrl}/api/stations/${station.id}/acp/sessions`,
+        { headers: { "X-Test-User-Id": TEST_USER } }
+      );
+      return ((await res.json()) as AcpSessionRow[]).map((r) => r.id);
+    };
+    try {
+      const aRes = await createSessionReq(baseUrl, station.id, {
+        mode: "full-auto",
+      });
+      expect(aRes.status).toBe(201);
+      const a = (await aRes.json()) as AcpSessionRow;
+      await new Promise((r) => setTimeout(r, 30)); // distinct timestamps
+      const bRes = await createSessionReq(baseUrl, station.id, {
+        mode: "full-auto",
+      });
+      expect(bRes.status).toBe(201);
+      const b = (await bRes.json()) as AcpSessionRow;
+
+      // Both live: the newer one leads.
+      expect(await listIds()).toEqual([b.id, a.id]);
+
+      // Activity on the OLDER session floats it to the top — a createdAt sort
+      // would still report the newer one first.
+      await new Promise((r) => setTimeout(r, 30));
+      await promptSession(TEST_USER, a.id, "wake up");
+      await pollUntil(async () => (await listIds())[0] === a.id);
+      expect(await listIds()).toEqual([a.id, b.id]);
+
+      await endSession(TEST_USER, a.id, "test done");
+      await endSession(TEST_USER, b.id, "test done");
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
