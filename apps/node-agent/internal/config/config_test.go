@@ -4,7 +4,13 @@ import ("path/filepath"; "testing")
 
 func TestSaveLoadRoundTrip(t *testing.T) {
   p := filepath.Join(t.TempDir(), "config.json")
-  want := Config{Hub: "http://h", NodeID: "node_1", NodeSecret: "s"}
+  want := Config{
+    Hub: "http://h", NodeID: "node_1", NodeSecret: "s",
+    HermesStartCmd: "hermes gateway", OpenClawStartCmd: "openclaw gateway",
+    OpenClawGatewayURL: "wss://gw.example:18789",
+    OpenClawTokenFile: "/etc/agentpod/openclaw.token",
+    OpenClawSessionLabel: "console",
+  }
   if err := Save(p, want); err != nil { t.Fatal(err) }
   got, err := Load(p)
   if err != nil { t.Fatal(err) }

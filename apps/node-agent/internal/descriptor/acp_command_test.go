@@ -204,6 +204,17 @@ func TestOpenClawACPCommand_BadKey(t *testing.T) {
 	}
 }
 
+// A trailing colon carries no agent name. It must be rejected before the
+// session key is derived, or the bridge would be pointed at "agent::main".
+func TestOpenClawACPCommand_EmptyAgentKey(t *testing.T) {
+	d := NewOpenClawFrom(OpenClawConfig{Home: testdataOpenClawHome(t)})
+	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+
+	if _, _, _, err := d.(ACPCommander).ACPCommand("openclaw:"); err == nil {
+		t.Fatal("expected error for a key with an empty agent name")
+	}
+}
+
 // --- capability advertising ---
 
 func TestCapabilitiesIncludeACP(t *testing.T) {
