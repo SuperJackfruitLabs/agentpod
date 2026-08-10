@@ -4,9 +4,9 @@
  * Thin client for the hub's ACP session API.
  *
  * REST (via client.ts `http`):
- *   POST   /api/stations/:id/acp/sessions {mode} → 201 AcpSessionRow
- *   GET    /api/stations/:id/acp/sessions        → AcpSessionRow[]
- *   DELETE /api/acp/sessions/:sessionId          → 204
+ *   POST   /api/stations/:id/acp/sessions {mode}          → 201 AcpSessionRow
+ *   GET    /api/stations/:id/acp/sessions[?limit&before]  → AcpSessionRow[]
+ *   DELETE /api/acp/sessions/:sessionId                   → 204
  *
  * WS (mirrors terminal.ts):
  *   /api/acp/sessions/:sessionId/ws speaking AcpClientMsg / AcpServerMsg
@@ -39,8 +39,40 @@ export const createAcpSession = (stationId: string, mode: AcpSessionMode) =>
     body: JSON.stringify({ mode }),
   });
 
-export const listAcpSessions = (stationId: string) =>
-  http<AcpSessionRow[]>(`/api/stations/${stationId}/acp/sessions`);
+/**
+ * The station's sessions, newest ACTIVITY first (hub SQL order — never
+ * re-sorted by callers).
+ *
+ * Paging options exist for the history surface, which lists sessions a station
+ * accumulated over weeks: `limit` (hub default 20, clamped to 100) and a
+ * COMPOUND cursor, `before` (a `lastEventAt` ISO string) plus `beforeId` — the
+ * hub reads them as `lastEventAt < before OR (lastEventAt = before AND id <
+ * beforeId)`. Both come from the LAST row of the page just received, and both
+ * must be sent: `lastEventAt` is only millisecond-resolution, so a page boundary
+ * landing inside a group of tied timestamps drops the tied rows that missed the
+ * earlier page out of every later page too — they vanish from history rather
+ * than merely repeating. `before` alone still works (the hub falls back to a
+ * strict `<`); it is just lossy.
+ *
+ * Omitting all three leaves the page size to the hub, which is what the
+ * switcher wants.
+ */
+export const listAcpSessions = (
+  stationId: string,
+  opts: { limit?: number; before?: string; beforeId?: string } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+  // The cursor is an ISO timestamp — colons and '+' MUST be encoded, which is
+  // exactly what URLSearchParams does (hand-built query strings have shipped
+  // half-parsed cursors before).
+  if (opts.before !== undefined) params.set("before", opts.before);
+  if (opts.beforeId !== undefined) params.set("beforeId", opts.beforeId);
+  const query = params.toString();
+  return http<AcpSessionRow[]>(
+    `/api/stations/${stationId}/acp/sessions${query ? `?${query}` : ""}`,
+  );
+};
 
 export const endAcpSession = (sessionId: string) =>
   http<void>(`/api/acp/sessions/${sessionId}`, { method: "DELETE" });

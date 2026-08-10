@@ -1055,6 +1055,26 @@ test("attach to an id that is gone re-reads the list and keeps the live session"
   expect(chat.error).toBe("Couldn't open that session — it's no longer there.");
 });
 
+test("attach resolves a session the first page never had, via a deep re-read", async () => {
+  // The history dialog pages far deeper than the switcher, so a legitimate pick
+  // can be a session this controller has never seen. The re-read asks for the
+  // hub's maximum page rather than its default, or that pick would be reported
+  // as "no longer there".
+  const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  MockWebSocket.latest()!.open();
+
+  const ancient = row({ id: "s99", createdAt: "2026-01-01T00:00:00.000Z" });
+  list.mockResolvedValue([row({ id: "sa" }), ancient]);
+  await chat.attach("s99");
+
+  expect(list).toHaveBeenLastCalledWith("st1", { limit: 100 });
+  expect(chat.session?.id).toBe("s99");
+  expect(chat.error).toBeNull();
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/s99/ws");
+});
+
 test("attach after destroy dials nothing", async () => {
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" }), row({ id: "sb" })]);
   const chat = new AcpChat("st1");

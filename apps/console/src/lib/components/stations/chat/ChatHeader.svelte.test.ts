@@ -44,6 +44,7 @@ function setup(props: Partial<ComponentProps<typeof ChatHeader>> = {}) {
   const onEnd = vi.fn();
   const onNew = vi.fn();
   const onSelectSession = vi.fn();
+  const onOpenHistory = vi.fn();
   const utils = render(ChatHeader, {
     props: {
       session: row,
@@ -56,10 +57,11 @@ function setup(props: Partial<ComponentProps<typeof ChatHeader>> = {}) {
       onEnd,
       onNew,
       onSelectSession,
+      onOpenHistory,
       ...props,
     },
   });
-  return { ...utils, onModeChange, onEnd, onNew, onSelectSession };
+  return { ...utils, onModeChange, onEnd, onNew, onSelectSession, onOpenHistory };
 }
 
 test("mode chips call onModeChange and mark the active mode pressed", async () => {
@@ -267,4 +269,154 @@ test("an ended session is still listed, and reads as ended", async () => {
 
   const option = await waitFor(() => getByRole("option", { name: /^Session 1 · ended · 2h ago$/ }));
   expect(option).toBeTruthy();
+});
+
+// ─── Titles ─────────────────────────────────────────────────────────────────
+
+/** Opens the switcher (bits-ui: pointerdown) and waits for the listbox. */
+async function openSwitcher(u: ReturnType<typeof setup>): Promise<void> {
+  const trigger = u.getByRole("button", { name: /^Switch session/ });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  await waitFor(() => u.getAllByRole("option"));
+}
+
+test("a titled session is named by its title, not by its number", async () => {
+  // "Session 3 · ended · 2h ago" tells the user nothing about which conversation
+  // it was; the first prompt does.
+  const titled: AcpSessionRow = { ...sessionA, title: "Fix the flaky terminal test" };
+  const u = setup({
+    sessions: [sessionB, titled],
+    session: sessionB,
+    selectedId: sessionB.id,
+    status: "working",
+  });
+
+  await openSwitcher(u);
+
+  expect(
+    u.getByRole("option", { name: /^Fix the flaky terminal test · idle · 1h ago$/ }),
+  ).toBeTruthy();
+});
+
+test("the trigger names the attached session by its title too", async () => {
+  const titled: AcpSessionRow = { ...sessionA, title: "Fix the flaky terminal test" };
+  const u = setup({
+    sessions: [titled, sessionB],
+    session: titled,
+    selectedId: titled.id,
+    status: "idle",
+  });
+
+  expect(
+    u.getByRole("button", {
+      name: /^Switch session — currently Fix the flaky terminal test · idle · 1h ago$/,
+    }),
+  ).toBeTruthy();
+});
+
+test("a session with no (or blank) title falls back to its number", async () => {
+  // A session has no title until its first prompt lands, and the hub trims — a
+  // whitespace-only title must not render as a nameless row.
+  const blank: AcpSessionRow = { ...sessionA, title: "   " };
+  const u = setup({
+    sessions: [sessionB, blank],
+    session: sessionB,
+    selectedId: sessionB.id,
+    status: "working",
+  });
+
+  await openSwitcher(u);
+
+  expect(u.getByRole("option", { name: /^Session 1 · idle · 1h ago$/ })).toBeTruthy();
+  expect(u.getByRole("option", { name: /^Session 2 · working · 5m ago$/ })).toBeTruthy();
+});
+
+test("a title is rendered as text, never as markup", async () => {
+  // Titles are the user's / the agent's own words — untrusted text.
+  const nasty: AcpSessionRow = {
+    ...sessionA,
+    title: "<img src=x onerror=alert(1)> & <b>bold</b>",
+  };
+  const u = setup({
+    sessions: [sessionB, nasty],
+    session: sessionB,
+    selectedId: sessionB.id,
+    status: "working",
+  });
+
+  await openSwitcher(u);
+
+  const option = u.getByRole("option", { name: /onerror=alert\(1\)/ });
+  expect(option.querySelector("img")).toBeNull();
+  expect(option.querySelector("b")).toBeNull();
+  expect(option.textContent).toContain("<img src=x onerror=alert(1)> & <b>bold</b>");
+});
+
+// ─── Cap + history escape hatch ─────────────────────────────────────────────
+
+/** `n` sessions, newest activity first, created oldest-first. */
+function manySessions(n: number): AcpSessionRow[] {
+  return Array.from({ length: n }, (_, i) => ({
+    ...row,
+    id: `ses_${i + 1}`,
+    createdAt: new Date(Date.UTC(2026, 7, 1, i)).toISOString(),
+    lastEventAt: minutesAgo(i),
+  }));
+}
+
+test("the switcher lists every session while there are 8 or fewer", async () => {
+  const sessions = manySessions(8);
+  const u = setup({ sessions, session: sessions[0], selectedId: sessions[0].id });
+
+  await openSwitcher(u);
+
+  expect(u.getAllByRole("option")).toHaveLength(8);
+  expect(u.queryByRole("option", { name: /All sessions/ })).toBeNull();
+});
+
+test("past 8 sessions the switcher caps at 8 and offers All sessions…", async () => {
+  // A switcher is a shortcut, not an archive: an uncapped dropdown of every
+  // session a station has ever hosted is unusable, and the history surface is
+  // what handles scale.
+  const sessions = manySessions(9);
+  const u = setup({ sessions, session: sessions[0], selectedId: sessions[0].id });
+
+  await openSwitcher(u);
+
+  const options = u.getAllByRole("option");
+  expect(options).toHaveLength(9); // 8 sessions + the escape hatch
+  expect(options.at(-1)!.textContent).toContain("All sessions");
+  // The 9th row (oldest ACTIVITY, so last in the hub's order) is not in the
+  // dropdown — the cap keeps the hub's own front of the list.
+  expect(u.queryByRole("option", { name: /^Session 9 ·/ })).toBeNull();
+  expect(u.getByRole("option", { name: /^Session 1 ·/ })).toBeTruthy();
+
+  // …and the escape hatch opens history rather than attaching anything.
+  const all = u.getByRole("option", { name: /All sessions/ });
+  await fireEvent.pointerUp(all, { pointerId: 1, button: 0, pointerType: "mouse" });
+  await waitFor(() => expect(u.onOpenHistory).toHaveBeenCalledTimes(1));
+  expect(u.onSelectSession).not.toHaveBeenCalled();
+});
+
+test("the session on screen is listed even when it has sunk past the cap", async () => {
+  // Opening an old session from history does exactly this: it is attached while
+  // its activity leaves it at the bottom of the hub's order.
+  const sessions = manySessions(12);
+  const oldest = sessions.at(-1)!;
+  const u = setup({ sessions, session: oldest, selectedId: oldest.id });
+
+  await openSwitcher(u);
+
+  const options = u.getAllByRole("option");
+  expect(options).toHaveLength(10); // 8 + the attached one + All sessions…
+  expect(u.getByRole("option", { name: new RegExp(`^Session 12 ·`) })).toBeTruthy();
+});
+
+test("the capped switcher still adds no second live region", async () => {
+  const sessions = manySessions(12);
+  const u = setup({ sessions, session: sessions[0], selectedId: sessions[0].id });
+
+  await openSwitcher(u);
+
+  expect(u.getAllByRole("status")).toHaveLength(1);
 });

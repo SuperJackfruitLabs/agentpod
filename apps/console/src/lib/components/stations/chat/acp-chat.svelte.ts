@@ -102,6 +102,15 @@ const GONE_SESSION_COPY = "Couldn't open that session — it's no longer there."
  */
 export const ECHO_DEADLINE_MS = 20_000;
 
+/**
+ * Page size for the session re-read behind create/end/attach. The hub clamps
+ * `limit` at 100; asking for the maximum keeps `attach` able to resolve a
+ * session the switcher never showed (the history dialog lists far deeper than
+ * the switcher's 8), which is the difference between opening an old session and
+ * being told it is "no longer there".
+ */
+const SESSION_LIST_LIMIT = 100;
+
 let echoDeadlineMs: number = ECHO_DEADLINE_MS;
 
 /** Test hook: shrink the echo deadline (mirrors the hub's `_set…ForTest` hooks). */
@@ -451,7 +460,11 @@ export class AcpChat {
    */
   private async refreshSessions(): Promise<void> {
     try {
-      const rows = await listAcpSessions(this.stationId);
+      // Deepest page the hub allows. This re-read is also `attach`'s last
+      // resort before it calls a session gone, and the history dialog can offer
+      // rows far older than the hub's default page — asking for the default
+      // here would make a legitimate pick from history unattachable.
+      const rows = await listAcpSessions(this.stationId, { limit: SESSION_LIST_LIMIT });
       if (this.destroyed) return;
       this.#sessions = rows;
     } catch {
