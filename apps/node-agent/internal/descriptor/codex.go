@@ -56,7 +56,12 @@ type codexDescriptor struct {
 type CodexConfig struct {
 	Home        string // path to the ~/.codex directory; default <user home>/.codex
 	AcpBinary   string // a codex-acp executable; empty = resolve it
-	CodexBinary string // the codex CLI, for CODEX_PATH; empty = resolve it
+	// CodexBinary is opt-in: naming a codex CLI here sets CODEX_PATH, which
+	// overrides the Codex the adapter bundles. Empty means "don't set it" —
+	// never "discover one". Discovery would find CLIs older than the
+	// `app-server` interface codex-acp drives, which fail with
+	// "Device not configured (os error 6)".
+	CodexBinary string
 	NodeBinary  string // the node runtime, when it isn't on the service's PATH
 }
 
