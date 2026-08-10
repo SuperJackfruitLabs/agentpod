@@ -785,11 +785,19 @@ test(
         return s?.status === "idle";
       });
 
-      // Turn #2 starts.
+      // Turn #2 starts. Wait for its "working" state EVENT, not just the row:
+      // the row update and the event insert land in separate statements, so a
+      // poll on the row can win the race and `before` would miss an event that
+      // shows up a beat later — the count below then reads 8 instead of 7. That
+      // flaked on CI (run 31370830538) before this poll watched the events.
       await promptSession(TEST_USER, row.id, "task two");
       await pollUntil(async () => {
-        const s = await getSession(TEST_USER, row.id);
-        return s?.status === "working";
+        const working = (await eventsFor(row.id)).filter(
+          (e) =>
+            e.type === "state" &&
+            (e.payload as { status?: string } | null)?.status === "working"
+        );
+        return working.length === 2; // turn #1's and turn #2's
       });
       const before = (await eventsFor(row.id)).length;
 
