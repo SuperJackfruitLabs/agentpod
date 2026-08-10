@@ -2,10 +2,12 @@ package descriptor
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Claude Code has no native ACP mode: sessions run through the external
@@ -14,12 +16,17 @@ import (
 // needs node, npx or claude installed and none spawns a process (see the Go
 // test hygiene note in CLAUDE.md).
 
-const testStubHome = "/home/pod"
+const (
+	testStubHome = "/home/pod"
+	testStubPath = "/usr/local/bin:/usr/bin:/bin"
+)
 
 // stubClaudeCodeHost replaces the descriptor's host seams. installed maps an
 // executable name to the absolute path PATH would report for it; anything
 // absent from the map is "not on PATH". No well-known path exists unless a
-// case overrides isExecutable. nodeVersion is what `node --version` prints.
+// case overrides isExecutable. nodeVersion is what `node --version` prints, for
+// every candidate — a case that needs one answer per node path replaces the
+// seam itself.
 func stubClaudeCodeHost(t *testing.T, d Descriptor, installed map[string]string, nodeVersion string) *claudeCodeDescriptor {
 	t.Helper()
 	c, ok := d.(*claudeCodeDescriptor)
@@ -35,7 +42,34 @@ func stubClaudeCodeHost(t *testing.T, d Descriptor, installed map[string]string,
 	}
 	c.isExecutable = func(string) bool { return false }
 	c.nodeVersion = func(string) (string, error) { return nodeVersion, nil }
+	c.getenv = func(name string) string {
+		if name == "PATH" {
+			return testStubPath
+		}
+		return ""
+	}
 	return c
+}
+
+// nodeVersions builds a nodeVersion seam that answers per node path; a path
+// absent from the map behaves like a binary that can't be run.
+func nodeVersions(versions map[string]string) func(string) (string, error) {
+	return func(nodePath string) (string, error) {
+		if v, ok := versions[nodePath]; ok {
+			return v, nil
+		}
+		return "", fmt.Errorf("fork/exec %s: no such file or directory", nodePath)
+	}
+}
+
+// pathEntry returns the PATH= entry from env, or "".
+func pathEntry(env []string) string {
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			return strings.TrimPrefix(e, "PATH=")
+		}
+	}
+	return ""
 }
 
 // claudeCodeACP builds a descriptor over the standard fixture and returns it
@@ -177,6 +211,174 @@ func TestClaudeCodeACPCommand_NpxBesideConfiguredNode(t *testing.T) {
 	}
 	if argv[0] != npx {
 		t.Errorf("argv[0] = %q, want the npx beside the configured node %q", argv[0], npx)
+	}
+}
+
+// The gate must judge the runtime the adapter will ACTUALLY run under. On the
+// host nodeBinary exists for — an old node first on the service's PATH, a good
+// one installed out of the way — a PATH-first npx lookup would green-light v22
+// and then start the adapter under v18: the exact crash the gate prevents, now
+// with a passing pre-check.
+func TestClaudeCodeACPCommand_ConfiguredNodeBeatsOlderPathNode(t *testing.T) {
+	const (
+		configuredDir = "/opt/node-22/bin"
+		configured    = configuredDir + "/node"
+	)
+	d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{NodeBinary: configured})
+	c := stubClaudeCodeHost(t, d, map[string]string{
+		"node": "/usr/bin/node",
+		"npx":  "/usr/bin/npx", // node 18's npx
+	}, "")
+	c.nodeVersion = nodeVersions(map[string]string{
+		configured:      "v22.14.0",
+		"/usr/bin/node": "v18.19.0",
+	})
+	c.isExecutable = func(path string) bool { return path == configuredDir+"/npx" }
+
+	argv, _, env, err := acpCommander(t, d).ACPCommand(key)
+	if err != nil {
+		t.Fatalf("ACPCommand: %v", err)
+	}
+	if want := configuredDir + "/npx"; argv[0] != want {
+		t.Errorf("argv[0] = %q, want the configured runtime's npx %q — PATH's npx belongs to node 18", argv[0], want)
+	}
+	// Belt and braces: npx execs `node` through PATH, so the configured runtime
+	// must also come first there.
+	if got := pathEntry(env); !strings.HasPrefix(got, configuredDir+string(os.PathListSeparator)) {
+		t.Errorf("PATH = %q, want the configured runtime's dir %q first", got, configuredDir)
+	}
+	if got := pathEntry(env); !strings.HasSuffix(got, testStubPath) {
+		t.Errorf("PATH = %q must PREPEND to the inherited PATH %q, not replace it", got, testStubPath)
+	}
+}
+
+// The mirror case must not refuse: nodeBinary exists to supply a good runtime,
+// never to downgrade a working one. A stale override with node 22 on PATH is an
+// operator's leftover config, not a reason to refuse a session that works.
+func TestClaudeCodeACPCommand_StaleConfiguredNodeDoesNotRefuse(t *testing.T) {
+	const configured = "/opt/node-18/bin/node"
+	d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{NodeBinary: configured})
+	c := stubClaudeCodeHost(t, d, map[string]string{
+		"node":             "/usr/bin/node",
+		"npx":              "/usr/bin/npx",
+		"claude-agent-acp": "/usr/local/bin/claude-agent-acp",
+	}, "")
+	c.nodeVersion = nodeVersions(map[string]string{
+		configured:      "v18.19.0",
+		"/usr/bin/node": "v22.14.0",
+	})
+
+	argv, _, env, err := acpCommander(t, d).ACPCommand(key)
+	if err != nil {
+		t.Fatalf("a node 22 on PATH must carry the session: %v", err)
+	}
+	if want := []string{"/usr/local/bin/claude-agent-acp"}; !reflect.DeepEqual(argv, want) {
+		t.Errorf("argv = %v, want %v", argv, want)
+	}
+	if got := pathEntry(env); strings.Contains(got, "/opt/node-18/bin") {
+		t.Errorf("PATH = %q must not put the stale configured runtime ahead of the node 22 being used", got)
+	}
+}
+
+// A mistyped nodeBinary must degrade to a check, not to no check: `locate`
+// returns an override unexamined, so without a fallback the version probe fails
+// and the gate silently passes whatever is really on the host.
+func TestClaudeCodeACPCommand_UnusableNodeBinaryFallsBackToPath(t *testing.T) {
+	d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{NodeBinary: "/opt/node-22/bni/node"})
+	c := stubClaudeCodeHost(t, d, map[string]string{
+		"node":             "/usr/bin/node",
+		"claude-agent-acp": "/usr/local/bin/claude-agent-acp",
+	}, "")
+	c.nodeVersion = nodeVersions(map[string]string{"/usr/bin/node": "v20.11.1"})
+
+	_, _, _, err := acpCommander(t, d).ACPCommand(key)
+	if err == nil {
+		t.Fatal("a typo'd nodeBinary must not disable the version gate")
+	}
+	if !strings.Contains(err.Error(), "v20.11.1") {
+		t.Errorf("error %q should report the node actually found on PATH", err)
+	}
+}
+
+// An explicitly configured adapter takes responsibility for its own runtime: it
+// may be a wrapper that execs a bundled node, in which case the host's node is
+// irrelevant. Refusing there would contradict the same rule that lets a host
+// with NO node through.
+func TestClaudeCodeACPCommand_NodeGateAppliesPerAdapterSource(t *testing.T) {
+	t.Run("explicit adapter override is exempt", func(t *testing.T) {
+		d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{AcpBinary: "/opt/wrapper/claude-agent-acp"})
+		stubClaudeCodeHost(t, d, map[string]string{"node": "/usr/bin/node"}, "v18.19.0")
+
+		argv, _, _, err := acpCommander(t, d).ACPCommand(key)
+		if err != nil {
+			t.Fatalf("a configured adapter must not be gated on the host's node: %v", err)
+		}
+		if want := []string{"/opt/wrapper/claude-agent-acp"}; !reflect.DeepEqual(argv, want) {
+			t.Errorf("argv = %v, want %v", argv, want)
+		}
+	})
+
+	t.Run("resolved adapter is gated", func(t *testing.T) {
+		d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{})
+		stubClaudeCodeHost(t, d, map[string]string{
+			"claude-agent-acp": "/usr/local/bin/claude-agent-acp",
+			"node":             "/usr/bin/node",
+		}, "v18.19.0")
+
+		if _, _, _, err := acpCommander(t, d).ACPCommand(key); err == nil {
+			t.Fatal("an adapter we chose ourselves runs under the host's node, so it must be gated")
+		}
+	})
+
+	t.Run("npx fallback is gated", func(t *testing.T) {
+		d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{})
+		stubClaudeCodeHost(t, d, map[string]string{
+			"npx":  "/usr/bin/npx",
+			"node": "/usr/bin/node",
+		}, "v18.19.0")
+
+		if _, _, _, err := acpCommander(t, d).ACPCommand(key); err == nil {
+			t.Fatal("the npx fallback runs under the host's node, so it must be gated")
+		}
+	})
+}
+
+// Both problems at once: the runtime is reported, because it is the more
+// fundamental one — installing an adapter wouldn't make node 20 work.
+func TestClaudeCodeACPCommand_OldNodeReportedBeforeMissingAdapter(t *testing.T) {
+	d, key, _ := claudeCodeACP(t, ClaudeCodeConfig{})
+	stubClaudeCodeHost(t, d, map[string]string{"node": "/usr/bin/node"}, "v20.11.1")
+
+	_, _, _, err := acpCommander(t, d).ACPCommand(key)
+	if err == nil {
+		t.Fatal("expected an error when the node is too old and no adapter resolves")
+	}
+	if !strings.Contains(err.Error(), "node 22+") {
+		t.Errorf("error %q should report the runtime, not the missing adapter", err)
+	}
+	if strings.Contains(err.Error(), "claudeCodeAcpBinary") {
+		t.Errorf("error %q points at the adapter key, but the runtime is the blocking problem", err)
+	}
+}
+
+// A node on a stalled network mount must not wedge acp.open with no error.
+func TestNodeVersionOutputWithin_Timeout(t *testing.T) {
+	stub := filepath.Join(t.TempDir(), "node")
+	// exec, so the process that hangs IS the child the deadline kills — a
+	// wrapping shell would leave `sleep` behind unreaped.
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	out, err := nodeVersionOutputWithin(50*time.Millisecond, stub)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("expected an error from a node that never answers, got %q", out)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("took %s: `node --version` must be bounded, it runs on the acp.open path", elapsed)
 	}
 }
 

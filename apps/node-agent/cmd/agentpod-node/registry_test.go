@@ -41,15 +41,24 @@ func TestBuildRegistry_ThreadsOpenClawBinary(t *testing.T) {
 }
 
 // The claude-code ACP keys are the same kind of escape hatch: claude-agent-acp
-// is a Node program that a fleet host may have anywhere. A HOME fixture keeps
-// station detection off the real machine, and nodeBinary points at a path that
-// can't report a version — which both neutralises the Node gate for this test
-// and proves the key is threaded.
+// is a Node program that a fleet host may have anywhere. This goes through the
+// production seams (real LookPath, real `node --version`, real os.Getenv), so it
+// is kept off the host's own installs: a HOME fixture supplies the station, and
+// nodeBinary points at a stub that reports v22 — which is also what proves the
+// key is threaded, since only a configured runtime is prepended to PATH.
 func TestBuildRegistry_ThreadsClaudeCodeACPKeys(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	proj := filepath.Join(home, "work", "repo")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nodeDir := filepath.Join(home, "runtime", "bin")
+	if err := os.MkdirAll(nodeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nodeStub := filepath.Join(nodeDir, "node")
+	if err := os.WriteFile(nodeStub, []byte("#!/bin/sh\necho v22.14.0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := json.Marshal(map[string]any{"projects": map[string]any{proj: map[string]any{}}})
@@ -63,7 +72,7 @@ func TestBuildRegistry_ThreadsClaudeCodeACPKeys(t *testing.T) {
 	reg := buildRegistry(config.Config{
 		ClaudeCodeAcpBinary: "/opt/custom/bin/claude-agent-acp",
 		ClaudeCodeBinary:    "/opt/custom/bin/claude",
-		NodeBinary:          "/nonexistent/node",
+		NodeBinary:          nodeStub,
 	})
 
 	var key string
@@ -97,5 +106,14 @@ func TestBuildRegistry_ThreadsClaudeCodeACPKeys(t *testing.T) {
 	}
 	if want := "CLAUDE_CODE_EXECUTABLE=/opt/custom/bin/claude"; !strings.Contains(strings.Join(env, " "), want) {
 		t.Errorf("env = %v, want the configured claudeCodeBinary as %q", env, want)
+	}
+	var pathEntry string
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			pathEntry = strings.TrimPrefix(e, "PATH=")
+		}
+	}
+	if !strings.HasPrefix(pathEntry, nodeDir+string(os.PathListSeparator)) {
+		t.Errorf("PATH = %q, want the configured nodeBinary's dir %q first", pathEntry, nodeDir)
 	}
 }

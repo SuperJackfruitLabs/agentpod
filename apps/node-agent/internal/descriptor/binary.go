@@ -2,7 +2,6 @@ package descriptor
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 )
 
@@ -39,41 +38,35 @@ func wellKnownBinaryDirs(userHome string) []string {
 type binaryLocator struct {
 	// userHome is the OS user's home directory, or "" when undeterminable.
 	userHome string
-	// extraDirs are probed before the well-known directories. Used for dirs
-	// derived from configuration, e.g. the bin dir of a configured runtime.
-	extraDirs []string
+	// preferDirs are probed BEFORE PATH. They exist for the case where a
+	// configured runtime must beat whatever PATH offers — e.g. the npx beside a
+	// configured node, when PATH's npx belongs to an older one.
+	preferDirs []string
 	// lookPath is exec.LookPath in production.
 	lookPath func(string) (string, error)
 	// isExecutable is isExecutableFile in production.
 	isExecutable func(string) bool
 }
 
-// newBinaryLocator returns a locator wired to the real host.
-func newBinaryLocator(userHome string, extraDirs ...string) binaryLocator {
-	return binaryLocator{
-		userHome:     userHome,
-		extraDirs:    extraDirs,
-		lookPath:     exec.LookPath,
-		isExecutable: isExecutableFile,
-	}
-}
-
 // locate resolves the executable named name, in order: the configured override
 // (used verbatim — the operator knows their layout, and second-guessing it with
-// a PATH lookup would defeat the escape hatch), then PATH, then extraDirs, then
+// a PATH lookup would defeat the escape hatch), then preferDirs, then PATH, then
 // the well-known install directories. The second return value reports whether
 // anything was found; callers own the (harness-specific, actionable) error.
 func (l binaryLocator) locate(name, override string) (string, bool) {
 	if override != "" {
 		return override, true
 	}
+	for _, dir := range l.preferDirs {
+		if candidate := filepath.Join(dir, name); l.isExecutable(candidate) {
+			return candidate, true
+		}
+	}
 	if abs, err := l.lookPath(name); err == nil {
 		return abs, true
 	}
-	dirs := append(append([]string{}, l.extraDirs...), wellKnownBinaryDirs(l.userHome)...)
-	for _, dir := range dirs {
-		candidate := filepath.Join(dir, name)
-		if l.isExecutable(candidate) {
+	for _, dir := range wellKnownBinaryDirs(l.userHome) {
+		if candidate := filepath.Join(dir, name); l.isExecutable(candidate) {
 			return candidate, true
 		}
 	}

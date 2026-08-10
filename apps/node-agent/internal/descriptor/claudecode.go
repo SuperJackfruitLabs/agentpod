@@ -45,6 +45,7 @@ type claudeCodeDescriptor struct {
 	lookPath     func(string) (string, error)          // exec.LookPath
 	isExecutable func(string) bool                     // isExecutableFile
 	nodeVersion  func(nodePath string) (string, error) // `node --version`
+	getenv       func(string) string                   // os.Getenv
 }
 
 // ClaudeCodeConfig carries everything the descriptor needs. Zero values are
@@ -91,6 +92,7 @@ func NewClaudeCodeFrom(cfg ClaudeCodeConfig) Descriptor {
 		lookPath:     exec.LookPath,
 		isExecutable: isExecutableFile,
 		nodeVersion:  nodeVersionOutput,
+		getenv:       os.Getenv,
 	}
 }
 
@@ -249,17 +251,17 @@ const (
 	claudeACPMinNodeMajor = 22
 )
 
-// locator returns the executable resolver for this node. A configured node
-// runtime contributes its own directory: the npx that ships with a hand-placed
-// node lives beside it, not on PATH.
-func (c *claudeCodeDescriptor) locator() binaryLocator {
-	var extraDirs []string
-	if c.nodeBinary != "" {
-		extraDirs = append(extraDirs, filepath.Dir(c.nodeBinary))
-	}
+// nodeVersionTimeout bounds `node --version`. It runs on the gateway's
+// acp.open path, so a node binary on a stalled network mount would otherwise
+// wedge session opening with no error at all.
+const nodeVersionTimeout = 2 * time.Second
+
+// locator returns the executable resolver for this node. preferDirs (when any)
+// are probed ahead of PATH — see nodeRuntimeDir.
+func (c *claudeCodeDescriptor) locator(preferDirs ...string) binaryLocator {
 	return binaryLocator{
 		userHome:     c.userHome,
-		extraDirs:    extraDirs,
+		preferDirs:   preferDirs,
 		lookPath:     c.lookPath,
 		isExecutable: c.isExecutable,
 	}
@@ -267,7 +269,15 @@ func (c *claudeCodeDescriptor) locator() binaryLocator {
 
 // nodeVersionOutput runs `node --version` and returns its raw output.
 func nodeVersionOutput(nodePath string) (string, error) {
-	out, err := exec.Command(nodePath, "--version").Output()
+	return nodeVersionOutputWithin(nodeVersionTimeout, nodePath)
+}
+
+// nodeVersionOutputWithin is nodeVersionOutput with an explicit deadline. A
+// timeout surfaces as an error, which callers treat as "version unknown".
+func nodeVersionOutputWithin(timeout time.Duration, nodePath string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
 	if err != nil {
 		return "", err
 	}
@@ -289,27 +299,67 @@ func parseNodeMajor(out string) (int, bool) {
 	return major, true
 }
 
-// checkNodeVersion fails when the node on this host is too old for the adapter.
-// A node that can't be found, or won't report a version, is NOT a failure: an
-// adapter may ship its own runtime, and the npx path fails on npx anyway.
-func (c *claudeCodeDescriptor) checkNodeVersion() error {
-	nodePath, ok := c.locator().locate("node", c.nodeBinary)
-	if !ok {
-		return nil
+// nodeRuntimeDir decides which node the adapter will run under, and refuses the
+// session when that node is too old for it.
+//
+// Candidates are the configured nodeBinary (when set) and then whatever PATH or
+// the well-known dirs offer. The FIRST candidate new enough for the adapter
+// wins; a configured node that is too old is stepped over rather than enforced,
+// because nodeBinary exists to supply a good runtime, never to downgrade a
+// working one. A configured override that can't report a version at all (a typo,
+// say) also falls through to PATH, so a mistyped key degrades to a check rather
+// than to no check.
+//
+// The returned dir is non-empty only when the winner is the CONFIGURED node:
+// that one needs help to actually be used (see ACPCommand), whereas a node found
+// on PATH is what the adapter and npx would pick by themselves.
+//
+// No node at all, and no readable version from any candidate, is NOT a failure:
+// an adapter may ship its own runtime, and the npx path fails on npx anyway.
+func (c *claudeCodeDescriptor) nodeRuntimeDir() (string, error) {
+	var candidates []string
+	if c.nodeBinary != "" {
+		candidates = append(candidates, c.nodeBinary)
 	}
-	out, err := c.nodeVersion(nodePath)
-	if err != nil {
-		return nil
+	if resolved, ok := c.locator().locate("node", ""); ok {
+		candidates = append(candidates, resolved)
 	}
-	major, parsed := parseNodeMajor(out)
-	if !parsed {
-		return nil
+
+	tooOld := "" // first readable version that falls short
+	for _, nodePath := range candidates {
+		out, err := c.nodeVersion(nodePath)
+		if err != nil {
+			continue // unreachable, stalled, or not a node at all
+		}
+		major, parsed := parseNodeMajor(out)
+		if !parsed {
+			continue
+		}
+		if major < claudeACPMinNodeMajor {
+			if tooOld == "" {
+				tooOld = strings.TrimSpace(out)
+			}
+			continue
+		}
+		if nodePath == c.nodeBinary {
+			return filepath.Dir(nodePath), nil
+		}
+		return "", nil
 	}
-	if major < claudeACPMinNodeMajor {
-		return fmt.Errorf("claude-code: node %d+ is required by claude-agent-acp (found %s)",
-			claudeACPMinNodeMajor, strings.TrimSpace(out))
+
+	if tooOld != "" {
+		return "", fmt.Errorf("claude-code: node %d+ is required by claude-agent-acp (found %s)",
+			claudeACPMinNodeMajor, tooOld)
 	}
-	return nil
+	return "", nil
+}
+
+// pathWithDirFirst puts dir at the front of a PATH value.
+func pathWithDirFirst(dir, path string) string {
+	if path == "" {
+		return dir
+	}
+	return dir + string(os.PathListSeparator) + path
 }
 
 // ACPCommand implements ACPCommander. Unlike the other harnesses there is no
@@ -319,9 +369,10 @@ func (c *claudeCodeDescriptor) checkNodeVersion() error {
 //
 // No credential is ever put in argv (world-readable via ps) or env: the adapter
 // drives the host's own Claude Code install, which is already authenticated.
-// The one variable set is CLAUDE_CODE_EXECUTABLE — without it the adapter uses
-// the Claude Code build bundled with its SDK, so a chat session and the
-// station's Health tab would be reporting two different installs.
+// Only two variables are set: CLAUDE_CODE_EXECUTABLE — without it the adapter
+// uses the Claude Code build bundled with its SDK, so a chat session and the
+// station's Health tab would be reporting two different installs — and, when a
+// configured node runtime is in play, PATH.
 func (c *claudeCodeDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	// The station must exist before anything is probed on the host: an unknown
 	// key has no project directory to run in.
@@ -330,26 +381,44 @@ func (c *claudeCodeDescriptor) ACPCommand(key string) ([]string, string, []strin
 		return nil, "", nil, err
 	}
 
-	// Node is checked up front for every path: a too-old runtime otherwise
-	// fails cryptically inside the adapter, after the hub opened a session.
-	if err := c.checkNodeVersion(); err != nil {
-		return nil, "", nil, err
+	// Node is settled up front: a too-old runtime otherwise fails cryptically
+	// inside the adapter, after the hub opened a session. The refusal is skipped
+	// for an explicit claudeCodeAcpBinary — that adapter may be a wrapper that
+	// execs a runtime of its own, and naming it is the operator taking
+	// responsibility for it. Its outcome is still used for PATH below, and the
+	// check runs before adapter resolution, so on a host with neither a new
+	// enough node nor an adapter the runtime is what gets reported: it is the
+	// more fundamental problem, and installing an adapter wouldn't fix it.
+	nodeDir, nodeErr := c.nodeRuntimeDir()
+	if nodeErr != nil && c.acpBinary == "" {
+		return nil, "", nil, nodeErr
 	}
 
-	locator := c.locator()
-
 	var env []string
-	if claudePath, ok := locator.locate("claude", c.claudeBinary); ok {
+	// A configured node only genuinely wins if the adapter's own child processes
+	// see it first — npx resolves `node` through PATH, so gating on one runtime
+	// and spawning under another is exactly the crash the gate exists to
+	// prevent. Prepending makes the gate's verdict the truth at spawn time.
+	if nodeDir != "" {
+		env = append(env, "PATH="+pathWithDirFirst(nodeDir, c.getenv("PATH")))
+	}
+	if claudePath, ok := c.locator().locate("claude", c.claudeBinary); ok {
 		env = append(env, "CLAUDE_CODE_EXECUTABLE="+claudePath)
 	}
 
 	// An installed adapter beats npx: it starts immediately and can't change
 	// under us between two sessions.
-	if adapter, ok := locator.locate(claudeACPBinaryName, c.acpBinary); ok {
+	if adapter, ok := c.locator().locate(claudeACPBinaryName, c.acpBinary); ok {
 		return []string{adapter}, projPath, env, nil
 	}
 
-	npx, ok := locator.locate("npx", "")
+	// npx is resolved from the configured runtime's directory first: PATH's npx
+	// belongs to PATH's node, which is the one we just stepped over.
+	var preferDirs []string
+	if nodeDir != "" {
+		preferDirs = append(preferDirs, nodeDir)
+	}
+	npx, ok := c.locator(preferDirs...).locate("npx", "")
 	if !ok {
 		return nil, "", nil, fmt.Errorf("claude-code: couldn't find claude-agent-acp or npx on this node — set claudeCodeAcpBinary in the node config")
 	}
