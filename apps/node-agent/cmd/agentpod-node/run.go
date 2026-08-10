@@ -24,7 +24,7 @@ func runCmd() {
 	defer stop()
 	fmt.Println("connecting to", cfg.Hub, "as", cfg.NodeID)
 
-	reg := buildRegistry(cfg.HermesStartCmd, cfg.OpenClawStartCmd)
+	reg := buildRegistry(cfg)
 	mgr := terminal.NewManager()
 	defer mgr.Shutdown()
 	acpMgr := acp.NewManager()

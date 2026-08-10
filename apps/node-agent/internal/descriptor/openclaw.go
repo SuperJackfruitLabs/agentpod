@@ -31,12 +31,32 @@ import (
 type openclawDescriptor struct {
 	home     string // absolute path to the .openclaw home directory
 	startCmd string
+
+	// ACP bridge settings — see OpenClawConfig. All optional.
+	gatewayURL   string
+	tokenFile    string
+	sessionLabel string
+
+	// gatewayUp probes whether a local OpenClaw Gateway is running. It is a
+	// field so tests can declare the answer without spawning or pgrep-ing a
+	// process; production wiring in NewOpenClawFrom uses openclawGatewayPID.
+	gatewayUp func() bool
 }
 
-// NewOpenClaw returns a Descriptor for the OpenClaw harness.
-// home is the path to the OpenClaw home directory (e.g. "~/.openclaw").
-// If home is empty it defaults to $HOME/.openclaw.
-func NewOpenClaw(home string, startCmd ...string) Descriptor {
+// OpenClawConfig carries everything the descriptor needs. Zero values are valid:
+// an empty GatewayURL/TokenFile means "let openclaw resolve it from its own
+// config", which is what a default local install wants.
+type OpenClawConfig struct {
+	Home         string // default: <user home>/.openclaw
+	StartCmd     string // lifecycle Start (existing behaviour)
+	GatewayURL   string // → --url
+	TokenFile    string // → --token-file  (never --token)
+	SessionLabel string // session component of agent:<name>:<label>; default "main"
+}
+
+// NewOpenClawFrom returns a Descriptor for the OpenClaw harness configured by cfg.
+func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
+	home := cfg.Home
 	if home == "" {
 		userHome, err := os.UserHomeDir()
 		if err != nil {
@@ -44,11 +64,29 @@ func NewOpenClaw(home string, startCmd ...string) Descriptor {
 		}
 		home = filepath.Join(userHome, ".openclaw")
 	}
+	label := cfg.SessionLabel
+	if label == "" {
+		label = "main"
+	}
+	return &openclawDescriptor{
+		home:         home,
+		startCmd:     cfg.StartCmd,
+		gatewayURL:   cfg.GatewayURL,
+		tokenFile:    cfg.TokenFile,
+		sessionLabel: label,
+		gatewayUp:    func() bool { _, err := openclawGatewayPID(); return err == nil },
+	}
+}
+
+// NewOpenClaw returns a Descriptor for the OpenClaw harness.
+// home is the path to the OpenClaw home directory (e.g. "~/.openclaw").
+// If home is empty it defaults to $HOME/.openclaw.
+func NewOpenClaw(home string, startCmd ...string) Descriptor {
 	var cmd string
 	if len(startCmd) > 0 {
 		cmd = startCmd[0]
 	}
-	return &openclawDescriptor{home: home, startCmd: cmd}
+	return NewOpenClawFrom(OpenClawConfig{Home: home, StartCmd: cmd})
 }
 
 // Harness returns the harness identifier.
@@ -61,7 +99,8 @@ func (o *openclawDescriptor) Detect() ([]Station, error) {
 		return []Station{}, nil
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup"}
+	// "acp" is advertised because *openclawDescriptor implements ACPCommander.
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 
 	// Root workspace: prefer <home>/workspace if it exists, else fall back to <home>.
 	rootWs := o.resolveRootWorkspace()
@@ -143,6 +182,51 @@ func (o *openclawDescriptor) workspaceFor(key string) (string, error) {
 		return o.resolveAgentWorkspace(name), nil
 	}
 	return "", fmt.Errorf("openclaw: unrecognized key %q", key)
+}
+
+// ACPCommand implements ACPCommander. OpenClaw speaks ACP natively via
+// `openclaw acp` (OpenClaw ≥ 2026.1.20), which is a bridge to the OpenClaw
+// Gateway rather than a self-contained runtime: it dials the Gateway over
+// WebSocket and addresses work by session key agent:<name>:<session>.
+// Everything except --session is optional so a default local install (Gateway
+// running, openclaw's own config) needs no node configuration at all.
+func (o *openclawDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	workspace, err := o.workspaceFor(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// A configured URL points at a remote Gateway, so the local probe says
+	// nothing; without one, a dead local Gateway means the bridge would start,
+	// fail to dial, and leave the user waiting on the hub's handshake deadline.
+	// Failing here turns that into an immediate, actionable message.
+	if o.gatewayURL == "" && !o.gatewayUp() {
+		return nil, "", nil, fmt.Errorf("openclaw: the OpenClaw gateway isn't running on this node — start it before opening a session")
+	}
+
+	agent := "main"
+	if name := strings.TrimPrefix(key, "openclaw:"); name != key && name != "" {
+		agent = name
+	}
+	label := o.sessionLabel
+	if label == "" {
+		label = "main"
+	}
+
+	// --no-prefix-cwd: the bridge otherwise prefixes every prompt with the
+	// working directory, which is redundant here — the station IS its workspace
+	// and we already set cmd.Dir — and it pollutes the transcript.
+	argv := []string{"openclaw", "acp", "--no-prefix-cwd"}
+	if o.gatewayURL != "" {
+		argv = append(argv, "--url", o.gatewayURL)
+	}
+	if o.tokenFile != "" {
+		// --token-file only, never --token: argv is world-readable via ps.
+		argv = append(argv, "--token-file", o.tokenFile)
+	}
+	argv = append(argv, "--session", fmt.Sprintf("agent:%s:%s", agent, label))
+
+	return argv, workspace, nil, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a station.
