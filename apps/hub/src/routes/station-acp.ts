@@ -4,9 +4,9 @@
  * REST (mounted at /api in index.ts):
  *   POST /stations/:id/acp/sessions {mode} → 201 AcpSessionRow
  *        (400 invalid mode, 401 anonymous, 403 no acp capability,
- *         404 unknown station, 409 active session exists,
+ *         404 unknown station, 409 the node can't host a second session,
  *         502 node offline / agent open failure)
- *   GET  /stations/:id/acp/sessions → AcpSessionRow[] (newest first)
+ *   GET  /stations/:id/acp/sessions → AcpSessionRow[] (newest activity first)
  *   DELETE /acp/sessions/:sessionId → 204 (ends the session; WS clients get
  *        {t:"bye"}); 401 anonymous, 404 absent/foreign
  *
@@ -60,6 +60,8 @@ import type { AuthUser } from "../auth/middleware";
 function createErrorStatus(message: string): 403 | 404 | 409 | 502 {
   if (message === "Station not found.") return 404;
   if (message === "This station does not support agent sessions.") return 403;
+  // Raised only when the node can't key processes per session (no instance
+  // echo) and one is already live — the exact string the service throws.
   if (message === "An active session already exists for this agent.") return 409;
   return 502;
 }
@@ -104,7 +106,8 @@ export const stationAcpRoutes = new Hono()
   /**
    * GET /api/stations/:id/acp/sessions
    *
-   * Lists the caller's sessions for the station, newest first.
+   * Lists the caller's sessions for the station, newest ACTIVITY first (the
+   * service orders in SQL by last_event_at desc, id desc).
    */
   .get("/stations/:id/acp/sessions", async (c) => {
     const user = c.get("user") as AuthUser | undefined;
@@ -118,22 +121,18 @@ export const stationAcpRoutes = new Hono()
       return c.json({ error: "Not Found" }, 404);
     }
 
+    // Already ordered newest-activity-first in SQL — never re-sort here.
     const rows = await acp.listSessions(user.id, stationId);
-    // Newest first (createdAt is an ISO string — lexicographic order works).
-    rows.sort(
-      (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id)
-    );
     return c.json(rows);
   })
 
   /**
    * DELETE /api/acp/sessions/:sessionId
    *
-   * Ends a session (hub-owned). Live sessions tear down the agent process on
-   * the node; attached WS clients receive {t:"bye"} via the service fan-out
-   * (the state-ended event). Stale rows are just marked ended. With
-   * single-session-per-station this is also how a healthy idle session is
-   * released so a new one can start.
+   * Ends a session (hub-owned). Live sessions tear down their OWN agent process
+   * on the node — siblings on the same station keep running; attached WS clients
+   * receive {t:"bye"} via the service fan-out (the state-ended event). Stale
+   * rows are just marked ended.
    *
    * 204 on success (matches the stations/runtimes DELETE precedent);
    * 404 when the session is absent or belongs to another user.

@@ -15,12 +15,18 @@
  *   - live fan-out to subscribers (replay is the caller's job — read
  *     acp_events).
  *
- * Slice 2 scope: single live session per station, no reattach after node
- * offline (recorded as a slice-3 improvement — on wire eof the session parks
- * at `waiting` and a grace timer ends it).
+ * A station can host SEVERAL live sessions at once (slice 4b): each one opens
+ * its own ACP wire with the hub session id as the `instance`, so the node keys
+ * a separate agent process per session. Nodes that predate the instance
+ * discriminator hand the same process back for every instance — detectable
+ * only from `AcpWire.instanceEchoed` — and those stations stay
+ * one-session-at-a-time (see createSession).
+ *
+ * No reattach after the node goes offline: on wire eof the session parks at
+ * `waiting` and a grace timer ends it.
  */
 
-import { and, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
 import {
   client,
   ndJsonStream,
@@ -136,12 +142,66 @@ interface LiveSession {
   agent: ClientContext | null;
   /** ACP protocol session id from session/new (NOT the node process id). */
   acpSessionId: string;
+  /** Node process id from acp.open; null until the wire is open. */
+  nodeSessionId: string | null;
+  /**
+   * Did the node echo our instance on acp.open? null until the wire is open.
+   * `true` is the ONLY evidence that this node keys agent processes on
+   * (station key, instance) and can therefore host a concurrent session.
+   */
+  instanceEchoed: boolean | null;
   graceTimer: ReturnType<typeof setTimeout> | null;
 }
 
-const liveByStation = new Map<string, LiveSession>();
+/** Live sessions per station — one-to-many since slice 4b. */
+const liveByStation = new Map<string, Set<LiveSession>>();
 const liveById = new Map<string, LiveSession>();
 const subscribers = new Map<string, Set<(e: AcpEvent) => void>>();
+
+/** Verbatim copy the routes map to 409 — do not reword (tests pin it). */
+const ACTIVE_SESSION_MESSAGE = "An active session already exists for this agent.";
+
+function addLive(live: LiveSession): void {
+  let set = liveByStation.get(live.stationId);
+  if (!set) {
+    set = new Set();
+    liveByStation.set(live.stationId, set);
+  }
+  set.add(live);
+  liveById.set(live.id, live);
+}
+
+/** Identity-guarded removal; the station key drops when its last one goes. */
+function removeLive(live: LiveSession): void {
+  const set = liveByStation.get(live.stationId);
+  if (set) {
+    set.delete(live);
+    if (set.size === 0) liveByStation.delete(live.stationId);
+  }
+  if (liveById.get(live.id) === live) liveById.delete(live.id);
+}
+
+/** Live sessions on the station other than `self`. */
+function otherLive(stationId: string, self: LiveSession): LiveSession[] {
+  const set = liveByStation.get(stationId);
+  if (!set) return [];
+  return [...set].filter((s) => s !== self);
+}
+
+/**
+ * Is this node process id currently held by a LIVE session? Guards the
+ * orphan-cleanup paths: an ended row may carry the same node_session_id as a
+ * live session (a pre-instance node reuses one process per station key), and
+ * closing it would kill the live session's agent.
+ */
+function isNodeSessionIdLive(nodeId: string, nodeSessionId: string): boolean {
+  for (const live of liveById.values()) {
+    if (live.nodeId === nodeId && live.nodeSessionId === nodeSessionId) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ─── Row mapping ─────────────────────────────────────────────────────────────
 
@@ -282,10 +342,7 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
     endedReason: reason,
     force: true,
   });
-  if (liveByStation.get(live.stationId) === live) {
-    liveByStation.delete(live.stationId);
-  }
-  liveById.delete(live.id);
+  removeLive(live);
   try {
     live.connection?.close();
   } catch {
@@ -393,6 +450,36 @@ function handlePermissionRequest(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * Serializes the open phase per station.
+ *
+ * Whether a node can host concurrent sessions is only knowable from a
+ * COMPLETED acp.open (the echoed instance). Two opens in flight at once would
+ * both pass the pre-open check and — on a node without instance support —
+ * commit two hub sessions to ONE agent process before either could refuse.
+ * One at a time keeps the refusal in the cheap pre-open layer.
+ */
+const openLocks = new Map<string, Promise<unknown>>();
+
+function withStationOpenLock<T>(
+  stationId: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  const prev = openLocks.get(stationId);
+  const run = (async () => {
+    if (prev) await prev.catch(() => {});
+    return fn();
+  })();
+  openLocks.set(stationId, run);
+  void run.then(
+    () => {},
+    () => {}
+  ).then(() => {
+    if (openLocks.get(stationId) === run) openLocks.delete(stationId);
+  });
+  return run;
+}
+
 export async function createSession(
   input: CreateSessionInput
 ): Promise<AcpSessionRow> {
@@ -406,8 +493,29 @@ export async function createSession(
   if (!connectionManager.isOnline(station.nodeId)) {
     throw new Error("Node is offline.");
   }
-  if (liveByStation.has(stationId)) {
-    throw new Error("An active session already exists for this agent.");
+
+  return withStationOpenLock(stationId, () =>
+    openSession(station.nodeId, station.stationKey, station.workspacePath, input)
+  );
+}
+
+async function openSession(
+  nodeId: string,
+  stationKey: string,
+  workspacePath: string | null,
+  input: CreateSessionInput
+): Promise<AcpSessionRow> {
+  const { stationId, userId, mode } = input;
+
+  // ── Compatibility layer 1 (pre-open) ───────────────────────────────────────
+  // A concurrent session is only safe when the node keys its agent processes on
+  // (station key, instance). The one signal for that is a live sibling whose
+  // acp.open echoed the instance back; anything else (an old node, or a sibling
+  // that never got that far) means one shared process — refuse.
+  for (const sibling of liveByStation.get(stationId) ?? []) {
+    if (sibling.instanceEchoed !== true) {
+      throw new Error(ACTIVE_SESSION_MESSAGE);
+    }
   }
 
   const id = `acps_${crypto.randomUUID()}`;
@@ -416,8 +524,8 @@ export async function createSession(
     id,
     stationId,
     userId,
-    nodeId: station.nodeId,
-    stationKey: station.stationKey,
+    nodeId,
+    stationKey,
     mode,
     status: "starting",
     seq: 0,
@@ -429,14 +537,15 @@ export async function createSession(
     connection: null,
     agent: null,
     acpSessionId: "",
+    nodeSessionId: null,
+    instanceEchoed: null,
     graceTimer: null,
   };
-  // Register before any await so a concurrent createSession is refused
-  // (fresh-process semantics: single session per station in slice 2). Every
-  // failure exit below MUST run finalizeEnd, which removes these entries —
-  // a leaked entry would wedge the station with 409s until restart.
-  liveByStation.set(stationId, live);
-  liveById.set(id, live);
+  // Register before any await so siblings (and the layers above) can see this
+  // session while it is starting. Every failure exit below MUST run
+  // finalizeEnd, which removes these entries — a leaked entry would wedge the
+  // station with 409s until restart.
+  addLive(live);
 
   try {
     await db.insert(acpSessions).values({
@@ -454,8 +563,21 @@ export async function createSession(
     // The hub session id doubles as the ACP instance: stable by construction
     // across a re-open of this session, and it correlates node-side processes
     // back to this row in logs.
-    const wire = await openAcpWire(station.nodeId, station.stationKey, id);
+    const wire = await openAcpWire(nodeId, stationKey, id);
     live.wire = wire;
+    live.nodeSessionId = wire.nodeSessionId;
+    live.instanceEchoed = wire.instanceEchoed;
+
+    // ── Compatibility layer 2 (post-open) ────────────────────────────────────
+    // The node did not echo the instance, so this wire may well be the SAME
+    // agent process a sibling is already talking to — two conversations on one
+    // process and one input-frame key. Refuse rather than risk the bleed; the
+    // catch below tears this wire down (error event + finalizeEnd + node close).
+    // Layer 1 normally catches this first; this is the belt to its braces for
+    // the case where no live sibling had recorded an echo verdict yet.
+    if (!wire.instanceEchoed && otherLive(stationId, live).length > 0) {
+      throw new Error(ACTIVE_SESSION_MESSAGE);
+    }
 
     const app = client({ name: "agentpod-hub" })
       .onNotification("session/update", ({ params }) => {
@@ -488,7 +610,7 @@ export async function createSession(
       connection.agent.request("session/new", {
         // The SDK requires an absolute cwd; the station workspace is the
         // natural one, "/" the fallback for workspace-less stations.
-        cwd: station.workspacePath ?? "/",
+        cwd: workspacePath ?? "/",
         mcpServers: [],
       }),
       handshakeTimeoutMs,
@@ -515,6 +637,11 @@ export async function createSession(
   }
 }
 
+/**
+ * The caller's sessions for a station, newest ACTIVITY first (id desc breaks
+ * same-millisecond ties). Ordered in SQL so the console's session switcher and
+ * the history view share one read — callers must not re-sort.
+ */
 export async function listSessions(
   userId: string,
   stationId: string
@@ -524,7 +651,8 @@ export async function listSessions(
     .from(acpSessions)
     .where(
       and(eq(acpSessions.userId, userId), eq(acpSessions.stationId, stationId))
-    );
+    )
+    .orderBy(desc(acpSessions.lastEventAt), desc(acpSessions.id));
   return rows.map(toContract);
 }
 
@@ -739,7 +867,9 @@ export function subscribe(
 /**
  * Boot reconciliation: mark all non-ended sessions ended("hub restarted");
  * best-effort acp.close each orphaned nodeSessionId whose node is online at
- * boot (log the rest). Call from index.ts boot after initDatabase.
+ * boot (log the rest). Each row's OWN node_session_id is closed — several rows
+ * on one station now mean several distinct agent processes. Call from index.ts
+ * boot after initDatabase.
  */
 export async function reconcileOnBoot(): Promise<void> {
   const stale = await db
@@ -757,6 +887,15 @@ export async function reconcileOnBoot(): Promise<void> {
       .from(stations)
       .where(eq(stations.id, row.stationId));
     const nodeId = stationRows[0]?.nodeId;
+    if (nodeId && isNodeSessionIdLive(nodeId, row.nodeSessionId)) {
+      // A live session holds this process (only possible when a node shares one
+      // process across sessions). Never close it out from under that session.
+      log.info("ACP reconcile: node process held by a live session — not closed", {
+        sessionId: row.id,
+        nodeSessionId: row.nodeSessionId,
+      });
+      continue;
+    }
     if (nodeId && connectionManager.isOnline(nodeId)) {
       // Best-effort: broker.request never rejects; result is ignored.
       void broker.request(nodeId, "acp.close", {
@@ -789,10 +928,13 @@ export async function reconcileOnBoot(): Promise<void> {
  *
  * Orphan marker: an ENDED session row that still carries node_session_id
  * (live/normal ends clear it when the close was deliverable). Fires one
- * best-effort acp.close per orphan and clears the marker so it's once-only.
- * Never touches non-ended rows, so live sessions are safe.
+ * best-effort acp.close per orphan, for that row's OWN node_session_id, and
+ * clears the marker so it's once-only. Never touches non-ended rows, and skips
+ * any process a live session is still holding, so live sessions are safe.
+ *
+ * Exported for tests; production calls it from the node-online hook below.
  */
-async function closeOrphanedProcesses(nodeId: string): Promise<void> {
+export async function closeOrphanedProcesses(nodeId: string): Promise<void> {
   const orphans = await db
     .select({
       id: acpSessions.id,
@@ -808,6 +950,16 @@ async function closeOrphanedProcesses(nodeId: string): Promise<void> {
       )
     );
   for (const orphan of orphans) {
+    if (isNodeSessionIdLive(nodeId, orphan.nodeSessionId!)) {
+      // A live session is talking to this very process (possible when a node
+      // shares one process per station key): leave it — and its marker — alone.
+      log.info("ACP orphan cleanup: process held by a live session — skipped", {
+        sessionId: orphan.id,
+        nodeId,
+        nodeSessionId: orphan.nodeSessionId,
+      });
+      continue;
+    }
     // Best-effort: broker.request never rejects; result is ignored.
     void broker.request(nodeId, "acp.close", {
       sessionId: orphan.nodeSessionId!,
