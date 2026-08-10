@@ -12,6 +12,8 @@ func TestSaveLoadRoundTrip(t *testing.T) {
     OpenClawSessionLabel: "console",
     ClaudeCodeAcpBinary: "/opt/bin/claude-agent-acp",
     ClaudeCodeBinary: "/usr/local/bin/claude",
+    CodexAcpBinary: "/opt/bin/codex-acp",
+    CodexBinary: "/usr/local/bin/codex",
     NodeBinary: "/opt/node-22/bin/node",
   }
   if err := Save(p, want); err != nil { t.Fatal(err) }

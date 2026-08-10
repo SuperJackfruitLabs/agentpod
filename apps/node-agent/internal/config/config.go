@@ -38,6 +38,21 @@ type Config struct {
   // where node isn't on the service's PATH.
   ClaudeCodeAcpBinary string `json:"claudeCodeAcpBinary,omitempty"`
   ClaudeCodeBinary    string `json:"claudeCodeBinary,omitempty"`
+  // Codex has no native ACP mode either: sessions run through the external
+  // codex-acp adapter (also a Node program, so it shares NodeBinary above).
+  //
+  // CodexAcpBinary is a codex-acp executable, used verbatim as argv[0]; when
+  // empty the node-agent resolves it from PATH, then from well-known install
+  // paths, then falls back to a version-pinned `npx -y`.
+  // CodexBinary is the codex CLI exported as CODEX_PATH, so the ACP session
+  // drives the same install the Health tab reports on.
+  //
+  // There is deliberately NO key for CODEX_API_KEY/OPENAI_API_KEY: a key in this
+  // file would end up in argv or in a child's environment, i.e. readable via
+  // `ps`. Codex key auth belongs in the node-agent SERVICE's environment, which
+  // the adapter inherits.
+  CodexAcpBinary      string `json:"codexAcpBinary,omitempty"`
+  CodexBinary         string `json:"codexBinary,omitempty"`
   NodeBinary          string `json:"nodeBinary,omitempty"`
 }
 
