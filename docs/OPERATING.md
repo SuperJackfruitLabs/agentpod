@@ -112,7 +112,7 @@ Stations are discovered per harness:
 | **Hermes** | Reads `~/.hermes/profiles/` + `hermes profile` output |
 | **OpenClaw** | Reads `~/.openclaw/agents/` |
 | **Claude Code** | Project paths read from `~/.claude.json` (fallback: `~/.claude/projects/` enumeration) |
-| **Codex** | Declared manually (Codex records no stable per-project history) |
+| **Codex** | Project paths read from the `[projects."<path>"]` tables in `~/.codex/config.toml` |
 | **OpenCode** | Worktree paths read from `opencode.db` (fallback: project dir enumeration) |
 
 ---
@@ -236,6 +236,49 @@ A host with node and `claude` on the service's `PATH` needs **no configuration**
 - `PATH` → node 22, `nodeBinary` → something older or mistyped: the session runs on `PATH`'s node 22 and is **not** refused. A stale key in a config file shouldn't cost you a session that works. (A `nodeBinary` that can't report a version at all falls through to `PATH` for the same reason — a typo degrades to a check against the real runtime, not to no check.)
 
 The same **PATH gotcha as OpenClaw** applies, and bites harder here: under a `systemctl --user` unit, an nvm- or fnm-managed node is invisible (those live under `~/.nvm/versions/...`, which is not probed) — set `nodeBinary` to the absolute path from `which node` in a login shell. Restart the node-agent (`apn restart`) after changing any of these keys.
+
+### Codex agent sessions (ACP)
+
+Codex has **no ACP mode of its own** either. Its stations get a **Chat** tab via [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp) — a Node program that speaks ACP on stdio and drives `codex app-server` underneath. The node-agent runs it in the station's **project directory**, the same path the Files, Health and Cleanup tabs use.
+
+- **The adapter must be reachable.** Resolution order: the `codexAcpBinary` config key (used verbatim) → a `codex-acp` on `PATH` → the well-known install paths `~/.local/share/pnpm/`, `~/.local/bin/`, `/usr/local/bin/`, `/usr/bin/`, `/opt/homebrew/bin/` → a version-pinned `npx -y @agentclientprotocol/codex-acp@1.1.14`. If not even `npx` resolves, opening a session fails immediately with `Couldn't start the agent process — codex: couldn't find codex-acp or npx on this node — set codexAcpBinary in the node config`. The pin exists for the same reason as claude-code's, and bumping it is a node-agent release.
+- **No Node version gate.** Unlike `claude-agent-acp` (which declares `node >= 22`), `codex-acp` declares **no `engines` field at all** — so the node-agent selects a runtime but never refuses a session over its version: inventing a floor the package never asked for would cost sessions on hosts it actually supports. `nodeBinary` still works exactly as it does for claude-code, with one difference that follows from the missing requirement: since there is no minimum to judge an "old" runtime against, a configured `nodeBinary` always wins the spawn (its directory is prepended to the session's `PATH` and its `npx` is preferred over `PATH`'s) rather than being stepped over in favour of a newer `PATH` node. A `nodeBinary` that can't report a version at all — a typo — still falls through to `PATH` untouched.
+- **`NO_BROWSER=1` is always set.** It hides the browser-based ChatGPT login, which is meaningless on a headless fleet node: nobody is sitting at that host to complete an OAuth round trip, and offering the method only produces a session that hangs on auth.
+
+**Authentication is the node's, not AgentPod's.** Pick one, per node:
+
+1. **ChatGPT login (recommended).** A **one-time interactive** `codex login` on the node itself — over SSH, or via the station's own Terminal tab. It writes credentials under `~/.codex/`, and every later ACP session reuses them silently. Do this once and Chat just works.
+2. **API key in the SERVICE environment.** `codex-acp` reads `CODEX_API_KEY` (preferred) or `OPENAI_API_KEY` from the environment it **inherits** from the node-agent — so put the key in the service unit, not anywhere AgentPod reads:
+
+   ```ini
+   # systemd: ~/.config/systemd/user/agentpod-node.service.d/codex.conf
+   [Service]
+   EnvironmentFile=/home/pod/.config/agentpod-node/codex.env   # chmod 0600, contains CODEX_API_KEY=sk-...
+   ```
+
+   On macOS, the equivalent is an `EnvironmentVariables` entry in the LaunchAgent plist — or, better, keep the key in a `0600` file referenced from a wrapper, never inline in a world-readable plist.
+
+> **There is deliberately no `codexApiKey` config key, and there never will be.** The node config feeds argv and child environments, and argv is world-readable via `ps` — a key there would be visible to every process on the host. The node-agent passes **no** key, token or secret in argv or in the environment it adds; it only ever lets the service's own environment through.
+
+> **Install skew.** The node-agent sets `CODEX_PATH` to the `codex` it resolves on the node (order: `codexBinary` → `PATH` → well-known paths). Without it the adapter runs the Codex build bundled with its own npm dependency, so the Chat tab and the Health tab would be reporting two different installs — different version, different config, different auth. When no `codex` resolves at all, the variable is left unset so the adapter's bundled Codex can still carry the session.
+
+A host with node and `codex` on the service's `PATH` needs **no configuration**. The optional keys:
+
+```json
+{
+  "codexAcpBinary": "/home/pod/.local/share/pnpm/codex-acp",
+  "codexBinary": "/home/pod/.local/bin/codex",
+  "nodeBinary": "/opt/node-22/bin/node"
+}
+```
+
+| Key | Effect |
+|-----|--------|
+| `codexAcpBinary` | `argv[0]`: absolute path to a `codex-acp` executable. Used verbatim, skipping `PATH`, the well-known-path probe and the npx fallback. |
+| `codexBinary` | Absolute path to the `codex` CLI, exported as `CODEX_PATH`. |
+| `nodeBinary` | Shared with claude-code: the `node` runtime to use instead of the service `PATH`'s. |
+
+Restart the node-agent (`apn restart`) after changing any of these keys.
 
 ### Cleanup
 

@@ -12,10 +12,11 @@ import (
 	"testing"
 )
 
-// codexExpectedCaps is exactly what a codex station advertises in this slice.
-// "acp" is deliberately ABSENT: the contract (descriptor.go) ties "acp" to
-// implementing ACPCommander, which codex does not do yet.
-var codexExpectedCaps = []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+// codexExpectedCaps is exactly what a codex station advertises. "acp" is
+// present because *codexDescriptor implements ACPCommander (via the external
+// codex-acp adapter — see ACPCommand), which is what the contract in
+// descriptor.go ties the capability to.
+var codexExpectedCaps = []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 
 // buildCodexFixture writes a realistic ~/.codex/config.toml containing three
 // [projects."<path>"] tables — one path with a space in it, one that does not
@@ -123,10 +124,14 @@ func TestCodexDetect_ProjectTables(t *testing.T) {
 		if !reflect.DeepEqual(s.Capabilities, codexExpectedCaps) {
 			t.Errorf("station %s: capabilities = %v, want exactly %v", s.Key, s.Capabilities, codexExpectedCaps)
 		}
+		var hasACP bool
 		for _, c := range s.Capabilities {
 			if c == "acp" {
-				t.Errorf("station %s advertises acp before ACPCommander is implemented", s.Key)
+				hasACP = true
 			}
+		}
+		if !hasACP {
+			t.Errorf("station %s must advertise acp: the descriptor implements ACPCommander", s.Key)
 		}
 		byPath[*s.WorkspacePath] = s
 	}

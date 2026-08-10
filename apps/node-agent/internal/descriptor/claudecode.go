@@ -251,11 +251,6 @@ const (
 	claudeACPMinNodeMajor = 22
 )
 
-// nodeVersionTimeout bounds `node --version`. It runs on the gateway's
-// acp.open path, so a node binary on a stalled network mount would otherwise
-// wedge session opening with no error at all.
-const nodeVersionTimeout = 2 * time.Second
-
 // locator returns the executable resolver for this node. preferDirs (when any)
 // are probed ahead of PATH — see nodeRuntimeDir.
 func (c *claudeCodeDescriptor) locator(preferDirs ...string) binaryLocator {
@@ -267,99 +262,16 @@ func (c *claudeCodeDescriptor) locator(preferDirs ...string) binaryLocator {
 	}
 }
 
-// nodeVersionOutput runs `node --version` and returns its raw output.
-func nodeVersionOutput(nodePath string) (string, error) {
-	return nodeVersionOutputWithin(nodeVersionTimeout, nodePath)
-}
-
-// nodeVersionOutputWithin is nodeVersionOutput with an explicit deadline. A
-// timeout surfaces as an error, which callers treat as "version unknown".
-func nodeVersionOutputWithin(timeout time.Duration, nodePath string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
-}
-
-// parseNodeMajor extracts the major version from `node --version` output
-// ("v22.14.0\n" → 22). ok is false when the string isn't a version at all.
-func parseNodeMajor(out string) (int, bool) {
-	s := strings.TrimSpace(out)
-	s = strings.TrimPrefix(s, "v")
-	if i := strings.IndexByte(s, '.'); i != -1 {
-		s = s[:i]
-	}
-	major, err := strconv.Atoi(s)
-	if err != nil || major <= 0 {
-		return 0, false
-	}
-	return major, true
-}
-
-// nodeRuntimeDir decides which node the adapter will run under, and refuses the
-// session when that node is too old for it.
-//
-// Candidates are the configured nodeBinary (when set) and then whatever PATH or
-// the well-known dirs offer. The FIRST candidate new enough for the adapter
-// wins; a configured node that is too old is stepped over rather than enforced,
-// because nodeBinary exists to supply a good runtime, never to downgrade a
-// working one. A configured override that can't report a version at all (a typo,
-// say) also falls through to PATH, so a mistyped key degrades to a check rather
-// than to no check.
-//
-// The returned dir is non-empty only when the winner is the CONFIGURED node:
-// that one needs help to actually be used (see ACPCommand), whereas a node found
-// on PATH is what the adapter and npx would pick by themselves.
-//
-// No node at all, and no readable version from any candidate, is NOT a failure:
-// an adapter may ship its own runtime, and the npx path fails on npx anyway.
+// nodeRuntimeDir decides which node the adapter will run under (see
+// selectNodeRuntimeDir) and refuses the session when the only node available is
+// too old for claude-agent-acp, which documents Node 22 as its minimum.
 func (c *claudeCodeDescriptor) nodeRuntimeDir() (string, error) {
-	var candidates []string
-	if c.nodeBinary != "" {
-		candidates = append(candidates, c.nodeBinary)
-	}
-	if resolved, ok := c.locator().locate("node", ""); ok {
-		candidates = append(candidates, resolved)
-	}
-
-	tooOld := "" // first readable version that falls short
-	for _, nodePath := range candidates {
-		out, err := c.nodeVersion(nodePath)
-		if err != nil {
-			continue // unreachable, stalled, or not a node at all
-		}
-		major, parsed := parseNodeMajor(out)
-		if !parsed {
-			continue
-		}
-		if major < claudeACPMinNodeMajor {
-			if tooOld == "" {
-				tooOld = strings.TrimSpace(out)
-			}
-			continue
-		}
-		if nodePath == c.nodeBinary {
-			return filepath.Dir(nodePath), nil
-		}
-		return "", nil
-	}
-
+	dir, tooOld := selectNodeRuntimeDir(c.nodeBinary, claudeACPMinNodeMajor, c.locator(), c.nodeVersion)
 	if tooOld != "" {
 		return "", fmt.Errorf("claude-code: node %d+ is required by claude-agent-acp (found %s)",
 			claudeACPMinNodeMajor, tooOld)
 	}
-	return "", nil
-}
-
-// pathWithDirFirst puts dir at the front of a PATH value.
-func pathWithDirFirst(dir, path string) string {
-	if path == "" {
-		return dir
-	}
-	return dir + string(os.PathListSeparator) + path
+	return dir, nil
 }
 
 // ACPCommand implements ACPCommander. Unlike the other harnesses there is no

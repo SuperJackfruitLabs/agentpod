@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -33,24 +34,67 @@ import (
 type codexDescriptor struct {
 	home string // absolute path to ~/.codex
 
-	// Host seam: the "is a codex session running here" probe. It is a field so
-	// no test needs codex installed and none spawns a pgrep-visible child;
-	// production wiring in NewCodex uses the real host.
+	// ACP adapter settings — see CodexConfig. All optional.
+	acpBinary   string
+	codexBinary string
+	nodeBinary  string
+
+	// Host seams. These are fields so no test needs codex, node or npx
+	// installed, none touches the host's PATH or filesystem and none spawns a
+	// pgrep-visible child; production wiring in NewCodexFrom uses the real host.
 	processRunning func(projPath string) (running bool, note string)
+	userHome       string                                // OS user home; "" omits home-relative candidates
+	lookPath       func(string) (string, error)          // exec.LookPath
+	isExecutable   func(string) bool                     // isExecutableFile
+	nodeVersion    func(nodePath string) (string, error) // `node --version`
+	getenv         func(string) string                   // os.Getenv
+}
+
+// CodexConfig carries everything the descriptor needs. Zero values are valid: an
+// unconfigured host still detects stations, and an ACP session still starts as
+// long as the adapter (or npx) is reachable on PATH.
+type CodexConfig struct {
+	Home        string // path to the ~/.codex directory; default <user home>/.codex
+	AcpBinary   string // a codex-acp executable; empty = resolve it
+	CodexBinary string // the codex CLI, for CODEX_PATH; empty = resolve it
+	NodeBinary  string // the node runtime, when it isn't on the service's PATH
 }
 
 // NewCodex returns a Descriptor for the Codex harness.
 // home is the path to the ~/.codex directory. If empty it defaults to
 // $HOME/.codex.
 func NewCodex(home string) Descriptor {
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			userHome = "."
-		}
-		home = filepath.Join(userHome, ".codex")
+	return NewCodexFrom(CodexConfig{Home: home})
+}
+
+// NewCodexFrom returns a Descriptor for the Codex harness configured by cfg.
+func NewCodexFrom(cfg CodexConfig) Descriptor {
+	// userHome is "" when it can't be determined, which the binary locator
+	// reads as "skip the home-relative candidates".
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
 	}
-	return &codexDescriptor{home: home, processRunning: codexProcessRunning}
+	home := cfg.Home
+	if home == "" {
+		base := userHome
+		if base == "" {
+			base = "."
+		}
+		home = filepath.Join(base, ".codex")
+	}
+	return &codexDescriptor{
+		home:           home,
+		acpBinary:      cfg.AcpBinary,
+		codexBinary:    cfg.CodexBinary,
+		nodeBinary:     cfg.NodeBinary,
+		processRunning: codexProcessRunning,
+		userHome:       userHome,
+		lookPath:       exec.LookPath,
+		isExecutable:   isExecutableFile,
+		nodeVersion:    nodeVersionOutput,
+		getenv:         os.Getenv,
+	}
 }
 
 // Harness returns the harness identifier.
@@ -81,9 +125,9 @@ func (c *codexDescriptor) Detect() ([]Station, error) {
 		return nil, fmt.Errorf("codex: reading %s: %w", c.configPath(), err)
 	}
 
-	// "acp" is NOT advertised: the contract ties it to implementing
-	// ACPCommander, and codex has no ACP bridge here yet.
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	// "acp" is advertised because *codexDescriptor implements ACPCommander (via
+	// the external codex-acp adapter — see ACPCommand).
+	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 
 	stations := []Station{}
 	for _, projPath := range parseCodexProjectPaths(data) {
@@ -250,6 +294,99 @@ func (c *codexDescriptor) projectPathForKey(key string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("codex: station not found: %q", key)
+}
+
+// Codex has no ACP mode of its own: sessions run through the external codex-acp
+// adapter, a Node program that speaks ACP on stdio and drives `codex
+// app-server` underneath.
+const (
+	// codexACPBinaryName is the adapter's executable name once installed.
+	codexACPBinaryName = "codex-acp"
+	// codexACPPackage is the npx fallback, VERSION-PINNED on purpose: an
+	// unpinned `npx -y <pkg>` would silently change every node's adapter the
+	// moment a new version is published, mid-flight, with no way to tell which
+	// version a session actually ran.
+	codexACPPackage = "@agentclientprotocol/codex-acp@1.1.14"
+	// codexACPMinNodeMajor is 0 — "no minimum" — NOT an oversight: unlike
+	// claude-agent-acp (node >= 22), codex-acp declares no `engines` field at
+	// all, so there is no documented requirement to enforce. The runtime is
+	// still SELECTED the same way, so a configured nodeBinary wins the spawn;
+	// what is deliberately skipped is the REFUSAL. Inventing a floor here would
+	// cost sessions on hosts the package supports, and the adapter's own error
+	// is the honest one if its node really is too old.
+	codexACPMinNodeMajor = 0
+)
+
+// locator returns the executable resolver for this node. preferDirs (when any)
+// are probed ahead of PATH — see selectNodeRuntimeDir.
+func (c *codexDescriptor) locator(preferDirs ...string) binaryLocator {
+	return binaryLocator{
+		userHome:     c.userHome,
+		preferDirs:   preferDirs,
+		lookPath:     c.lookPath,
+		isExecutable: c.isExecutable,
+	}
+}
+
+// ACPCommand implements ACPCommander. There is no `codex acp`: the command
+// spawned is the codex-acp adapter, resolved in order — the codexAcpBinary
+// override, an installed adapter (PATH then the well-known install dirs), then a
+// version-pinned `npx -y`. The working directory is the station's project path,
+// the same one the Files, Health and Cleanup tabs use.
+//
+// No credential is ever put in argv (world-readable via ps) or env. Codex key
+// auth (CODEX_API_KEY / OPENAI_API_KEY) is read by the adapter from the
+// environment it INHERITS — i.e. the node-agent service's own environment, where
+// an operator can protect it — and is never lifted out of the node config, which
+// would publish it to every `ps` on the host. Otherwise:
+//
+//   - NO_BROWSER=1 always: it hides the browser-based ChatGPT login, which is
+//     meaningless on a headless fleet node and would otherwise be offered (and
+//     attempted) with no one there to complete it. ChatGPT-login auth comes from
+//     a prior interactive `codex login` on the node instead.
+//   - CODEX_PATH when a codex resolves on the node: without it the adapter runs
+//     the Codex build bundled with its own npm dependency, so a chat session and
+//     the station's Health tab would be reporting two different installs.
+//   - PATH when, and only when, a configured node runtime is in play.
+func (c *codexDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	// The station must exist before anything is probed on the host: an unknown
+	// key has no project directory to run in.
+	projPath, err := c.projectPathForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	// Selected, never refused — see codexACPMinNodeMajor. tooOld is always empty
+	// with a zero minimum, so it is discarded rather than checked.
+	nodeDir, _ := selectNodeRuntimeDir(c.nodeBinary, codexACPMinNodeMajor, c.locator(), c.nodeVersion)
+
+	env := []string{"NO_BROWSER=1"}
+	// A configured node only genuinely wins if the adapter's own child processes
+	// see it first — npx resolves `node` through PATH.
+	if nodeDir != "" {
+		env = append(env, "PATH="+pathWithDirFirst(nodeDir, c.getenv("PATH")))
+	}
+	if codexPath, ok := c.locator().locate("codex", c.codexBinary); ok {
+		env = append(env, "CODEX_PATH="+codexPath)
+	}
+
+	// An installed adapter beats npx: it starts immediately and can't change
+	// under us between two sessions.
+	if adapter, ok := c.locator().locate(codexACPBinaryName, c.acpBinary); ok {
+		return []string{adapter}, projPath, env, nil
+	}
+
+	// npx is resolved from the configured runtime's directory first: PATH's npx
+	// belongs to PATH's node, which is the one we just stepped over.
+	var preferDirs []string
+	if nodeDir != "" {
+		preferDirs = append(preferDirs, nodeDir)
+	}
+	npx, ok := c.locator(preferDirs...).locate("npx", "")
+	if !ok {
+		return nil, "", nil, fmt.Errorf("codex: couldn't find codex-acp or npx on this node — set codexAcpBinary in the node config")
+	}
+	return []string{npx, "-y", codexACPPackage}, projPath, env, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a leaf station.

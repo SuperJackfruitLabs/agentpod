@@ -117,3 +117,65 @@ func TestBuildRegistry_ThreadsClaudeCodeACPKeys(t *testing.T) {
 		t.Errorf("PATH = %q, want the configured nodeBinary's dir %q first", pathEntry, nodeDir)
 	}
 }
+
+// The codex ACP keys are the same escape hatch for the codex-acp adapter. This
+// goes through the production seams (real LookPath, real os.Getenv), so a HOME
+// fixture supplies the ~/.codex/config.toml the station comes from and the
+// configured adapter path is what proves the key is threaded.
+func TestBuildRegistry_ThreadsCodexACPKeys(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	proj := filepath.Join(home, "work", "codex-repo")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	codexHome := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgToml := "model = \"gpt-5-codex\"\n\n[projects.\"" + proj + "\"]\ntrust_level = \"trusted\"\n"
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte(cfgToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := buildRegistry(config.Config{
+		CodexAcpBinary: "/opt/custom/bin/codex-acp",
+		CodexBinary:    "/opt/custom/bin/codex",
+	})
+
+	var key string
+	for _, s := range reg.DetectAll() {
+		if s.Harness == "codex" {
+			key = s.Key
+		}
+	}
+	if key == "" {
+		t.Fatal("no codex station detected from the HOME fixture")
+	}
+
+	d, err := reg.For(key)
+	if err != nil {
+		t.Fatalf("registry has no codex descriptor: %v", err)
+	}
+	c, ok := d.(descriptor.ACPCommander)
+	if !ok {
+		t.Fatalf("codex descriptor must implement ACPCommander, got %T", d)
+	}
+
+	argv, dir, env, err := c.ACPCommand(key)
+	if err != nil {
+		t.Fatalf("ACPCommand: %v", err)
+	}
+	if argv[0] != "/opt/custom/bin/codex-acp" {
+		t.Errorf("argv[0] = %q, want the configured codexAcpBinary", argv[0])
+	}
+	if dir != proj {
+		t.Errorf("dir = %q, want the station's project path %q", dir, proj)
+	}
+	joined := strings.Join(env, " ")
+	for _, want := range []string{"NO_BROWSER=1", "CODEX_PATH=/opt/custom/bin/codex"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("env = %v, want %q", env, want)
+		}
+	}
+}
