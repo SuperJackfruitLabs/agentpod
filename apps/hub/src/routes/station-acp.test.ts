@@ -8,7 +8,9 @@
  *        capability, 404 unknown station, 409 the node can't host a second
  *        session, 502 node offline / acp.open failure.
  *     2. GET /api/stations/:id/acp/sessions → rows newest ACTIVITY first,
- *        straight from the service's SQL ordering (the route never re-sorts).
+ *        straight from the service's SQL ordering (the route never re-sorts),
+ *        with ?limit= / ?before= paging (slice 4c) — out-of-range numbers are
+ *        clamped, nonsense is 400.
  *   WS (GET /api/acp/sessions/:sessionId/ws):
  *     3. subscribe → session row, replay of persisted events (seq order),
  *        replay-done, then live events stream; prompt over the WS produces
@@ -379,6 +381,86 @@ test(
     }
   },
   20_000
+);
+
+test(
+  "GET paging: ?limit= caps the page (out-of-range numbers clamp), ?before= returns strictly older rows, nonsense limit/cursor → 400; rows carry title + lastSeq",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-page-host",
+      { stationKey: "acproute-page" }
+    );
+    const list = async (query = "") => {
+      const res = await fetch(
+        `${baseUrl}/api/stations/${station.id}/acp/sessions${query}`,
+        { headers: { "X-Test-User-Id": TEST_USER } }
+      );
+      return {
+        status: res.status,
+        rows: res.status === 200 ? ((await res.json()) as AcpSessionRow[]) : [],
+      };
+    };
+    try {
+      // Three sessions, ended as we go so each lastEventAt is settled and
+      // strictly increasing in creation order. The first one gets a prompt so
+      // the listing has a titled row to prove title/lastSeq reach the client.
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const res = await createSessionReq(baseUrl, station.id, { mode: "full-auto" });
+        expect(res.status).toBe(201);
+        const row = (await res.json()) as AcpSessionRow;
+        if (i === 0) {
+          await promptSession(TEST_USER, row.id, "  name this conversation  ");
+          await pollUntil(async () => {
+            const s = await getSession(TEST_USER, row.id);
+            return s?.status === "idle" && s.title !== null;
+          });
+        }
+        await endSession(TEST_USER, row.id, "test done");
+        ids.push(row.id);
+        await new Promise((r) => setTimeout(r, 15));
+      }
+      const newestFirst = [...ids].reverse();
+
+      // No query → the whole (short) history, newest activity first.
+      const all = await list();
+      expect(all.status).toBe(200);
+      expect(all.rows.map((r) => r.id)).toEqual(newestFirst);
+
+      // toContract exposes the slice-4c fields over the wire.
+      const titled = all.rows.find((r) => r.id === ids[0]);
+      expect(titled?.title).toBe("name this conversation");
+      expect(titled?.lastSeq).toBeGreaterThan(1);
+
+      // ?limit= caps the page.
+      const page1 = await list("?limit=2");
+      expect(page1.status).toBe(200);
+      expect(page1.rows.map((r) => r.id)).toEqual(newestFirst.slice(0, 2));
+
+      // ?before= pages strictly older, with no duplicates and no gaps.
+      const cursor = page1.rows[1]!.lastEventAt;
+      const page2 = await list(`?limit=2&before=${encodeURIComponent(cursor)}`);
+      expect(page2.status).toBe(200);
+      expect(page2.rows.map((r) => r.id)).toEqual(newestFirst.slice(2));
+      expect([...page1.rows, ...page2.rows].map((r) => r.id)).toEqual(newestFirst);
+
+      // An out-of-range NUMBER is clamped, not rejected.
+      expect((await list("?limit=1000")).status).toBe(200);
+      expect((await list("?limit=0")).rows.map((r) => r.id)).toEqual([
+        newestFirst[0]!,
+      ]);
+
+      // Nonsense is a client bug: 400 rather than a silent default page.
+      expect((await list("?limit=abc")).status).toBe(400);
+      expect((await list("?before=yesterday")).status).toBe(400);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
 );
 
 test(

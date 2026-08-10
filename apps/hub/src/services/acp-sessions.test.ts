@@ -23,6 +23,9 @@
  *  11. Slice 4b: several live sessions per station — distinct instances and
  *      node processes, independent transcripts, independent teardown; a node
  *      that doesn't echo the instance keeps the one-at-a-time behaviour.
+ *  12. Slice 4c (history): the first prompt titles the session (and nothing
+ *      later renames it), last_seq tracks the transcript's highest seq, and
+ *      listSessions pages with limit + a lastEventAt cursor.
  *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
@@ -66,6 +69,7 @@ import {
   subscribe,
   reconcileOnBoot,
   closeOrphanedProcesses,
+  clampSessionLimit,
   _setOfflineGraceMsForTest,
   _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
@@ -1587,6 +1591,165 @@ test(
       expect((await getSession(TEST_USER, live.id))?.status).toBe("idle");
 
       await endSession(TEST_USER, live.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Slice 4c: titles, lastSeq, paginated history ─────────────────────────────
+
+test("clampSessionLimit: defaults to 20, floors, and clamps into [1, 100]", () => {
+  expect(clampSessionLimit(undefined)).toBe(20);
+  expect(clampSessionLimit(7)).toBe(7);
+  expect(clampSessionLimit(100)).toBe(100);
+  // Out-of-range values are CLAMPED, never rejected — the route 400s only on
+  // input that isn't a number at all.
+  expect(clampSessionLimit(0)).toBe(1);
+  expect(clampSessionLimit(-5)).toBe(1);
+  expect(clampSessionLimit(500)).toBe(100);
+  expect(clampSessionLimit(2.9)).toBe(2);
+  expect(clampSessionLimit(Number.NaN)).toBe(20);
+});
+
+test(
+  "title + lastSeq: the first real prompt names the session (trimmed, 80 chars, no ellipsis), later prompts never rename it, whitespace leaves it null; lastSeq tracks the highest seq and still does after the end",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-title-host", {
+      stationKey: "acp-title-station",
+    });
+    try {
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      // Fresh session: unnamed, and lastSeq is the create-time idle event.
+      expect(row.title).toBeNull();
+      expect(row.lastSeq).toBe(1);
+
+      /** Prompt, then wait for that turn to land back at idle. */
+      const promptAndSettle = async (text: string) => {
+        const before = (await eventsFor(row.id)).length;
+        await promptSession(TEST_USER, row.id, text);
+        // before+1 is the user-prompt and before+2 the `working` state, so any
+        // idle beyond before+1 is this turn's completion.
+        await pollForEvent(
+          row.id,
+          (e) => stateWith("idle")(e) && e.seq > before + 1
+        );
+      };
+
+      // A whitespace-only prompt is no title at all.
+      await promptAndSettle("   \n\t ");
+      expect((await getSession(TEST_USER, row.id))?.title).toBeNull();
+
+      // The first real prompt names it: trimmed, truncated to 80 chars, stored
+      // truncated with NO ellipsis (presentation is the console's job).
+      const long = `  ${"a".repeat(60)} ${"b".repeat(60)}  `;
+      await promptAndSettle(long);
+      const titled = await getSession(TEST_USER, row.id);
+      expect(titled?.title).toBe(long.trim().slice(0, 80));
+      expect(titled?.title).toHaveLength(80);
+      expect(titled!.title!.includes("…")).toBe(false);
+
+      // A long conversation keeps the label the user recognises.
+      await promptAndSettle("a completely different question");
+      expect((await getSession(TEST_USER, row.id))?.title).toBe(titled!.title);
+
+      // lastSeq === the highest persisted seq across prompts, agent updates and
+      // state events.
+      const evts = await eventsFor(row.id);
+      const maxSeq = Math.max(...evts.map((e) => e.seq));
+      expect(maxSeq).toBeGreaterThan(1);
+      expect((await getSession(TEST_USER, row.id))?.lastSeq).toBe(maxSeq);
+
+      // … and it still reflects the FINAL event once the session has ended.
+      await endSession(TEST_USER, row.id, "cleanup");
+      const ended = await getSession(TEST_USER, row.id);
+      const finalMax = Math.max(
+        ...(await eventsFor(row.id)).map((e) => e.seq)
+      );
+      expect(finalMax).toBe(maxSeq + 1); // the state-ended event
+      expect(ended?.lastSeq).toBe(finalMax);
+      expect(ended?.title).toBe(titled!.title);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "listSessions pagination: limit caps the page and clamps out-of-range values; before returns strictly older rows; two pages tile the history with no duplicates and no gaps",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-page-host", {
+      stationKey: "acp-page-station",
+    });
+    try {
+      // Five sessions, ended as we go so each row's lastEventAt is settled and
+      // strictly increasing in creation order.
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const s = await createSession({
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "ask",
+        });
+        await endSession(TEST_USER, s.id, "cleanup");
+        ids.push(s.id);
+        await new Promise((r) => setTimeout(r, 15)); // distinct lastEventAt
+      }
+      const newestFirst = [...ids].reverse();
+
+      // Default limit (20) covers all five, newest activity first.
+      expect((await listSessions(TEST_USER, station.id)).map((s) => s.id)).toEqual(
+        newestFirst
+      );
+
+      // limit caps the page.
+      const page1 = await listSessions(TEST_USER, station.id, { limit: 2 });
+      expect(page1.map((s) => s.id)).toEqual(newestFirst.slice(0, 2));
+
+      // Out-of-range limits clamp instead of throwing.
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 500 })).map((s) => s.id)
+      ).toEqual(newestFirst);
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 0 })).map((s) => s.id)
+      ).toEqual([newestFirst[0]!]);
+
+      // before = the last row of page 1 → strictly older rows only.
+      const cursor = page1[page1.length - 1]!.lastEventAt;
+      const page2 = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: cursor,
+      });
+      expect(page2.map((s) => s.id)).toEqual(newestFirst.slice(2, 4));
+      for (const s of page2) {
+        expect(new Date(s.lastEventAt).getTime()).toBeLessThan(
+          new Date(cursor).getTime()
+        );
+      }
+
+      // The two pages tile the history: no duplicates, no gaps.
+      expect([...page1, ...page2].map((s) => s.id)).toEqual(
+        newestFirst.slice(0, 4)
+      );
+
+      // The tail page runs out cleanly.
+      const page3 = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: page2[page2.length - 1]!.lastEventAt,
+      });
+      expect(page3.map((s) => s.id)).toEqual([newestFirst[4]!]);
+
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {

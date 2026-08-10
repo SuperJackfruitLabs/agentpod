@@ -26,7 +26,8 @@
  * `waiting` and a grace timer ends it.
  */
 
-import { and, desc, eq, isNotNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, ne, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
   ndJsonStream,
@@ -238,6 +239,9 @@ function isNodeSessionIdLive(nodeId: string, nodeSessionId: string): boolean {
 
 type DbRow = typeof acpSessions.$inferSelect;
 
+/** Columns a row write may set alongside the ones persistEvent owns. */
+type SessionRowPatch = PgUpdateSetSource<typeof acpSessions>;
+
 function toContract(r: DbRow): AcpSessionRow {
   return {
     id: r.id,
@@ -248,7 +252,32 @@ function toContract(r: DbRow): AcpSessionRow {
     endedReason: r.endedReason,
     createdAt: r.createdAt.toISOString(),
     lastEventAt: r.lastEventAt.toISOString(),
+    // Slice 4c (history): the console's session list renders the title and
+    // sizes the transcript from lastSeq — a row that omitted them would leave
+    // every session labelled "Session" no matter what was persisted.
+    title: r.title,
+    lastSeq: r.lastSeq,
   };
+}
+
+// ─── Session titles ───────────────────────────────────────────────────────────
+
+/**
+ * Stored title length. Truncation is stored as-is with NO ellipsis: how a
+ * clipped title is presented (…, fade, tooltip) is the console's choice, and
+ * baking a glyph in here would corrupt the data for every other reader.
+ */
+const TITLE_MAX_CHARS = 80;
+
+/**
+ * The title a prompt would give a session: trimmed, clipped to 80 chars.
+ * Whitespace-only prompts name nothing (null) — the next real prompt titles
+ * the session instead.
+ */
+export function deriveSessionTitle(text: string): string | null {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.slice(0, TITLE_MAX_CHARS);
 }
 
 // ─── Event persistence ────────────────────────────────────────────────────────
@@ -279,13 +308,20 @@ function enqueue(live: LiveSession, fn: () => Promise<void>): Promise<void> {
 
 /**
  * Persist the next event: assign seq synchronously, then (serialized) insert
- * into acp_events, bump last_event_at (+ any extra row columns), and fan out.
+ * into acp_events, bump last_event_at + last_seq (+ any extra row columns), and
+ * fan out.
+ *
+ * last_seq rides along in the SAME update as last_event_at — a second round
+ * trip would double every event's write cost and could be observed half-applied
+ * (a row whose activity moved but whose transcript size didn't). Plain
+ * assignment is safe because the writes are serialized per session (enqueue)
+ * in seq order, so the last write always carries the highest seq.
  */
 function persistEvent(
   live: LiveSession,
   type: AcpEventType,
   payload: unknown,
-  rowSet: Partial<typeof acpSessions.$inferInsert> = {}
+  rowSet: SessionRowPatch = {}
 ): { seq: number; done: Promise<void> } {
   const seq = ++live.seq;
   const createdAt = new Date();
@@ -299,7 +335,7 @@ function persistEvent(
     });
     await db
       .update(acpSessions)
-      .set({ lastEventAt: createdAt, ...rowSet })
+      .set({ lastEventAt: createdAt, lastSeq: seq, ...rowSet })
       .where(eq(acpSessions.id, live.id));
     fanOut(live.id, {
       sessionId: live.id,
@@ -716,22 +752,72 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   }
 }
 
+// ─── Session listing ─────────────────────────────────────────────────────────
+
+/** Page size when the caller doesn't say. */
+const SESSION_PAGE_DEFAULT_LIMIT = 20;
+/** Hard ceiling on one page — a station can accumulate thousands of sessions. */
+const SESSION_PAGE_MAX_LIMIT = 100;
+
+export interface ListSessionsOptions {
+  /** Page size; defaults to 20 and is clamped into [1, 100]. */
+  limit?: number;
+  /**
+   * `lastEventAt` cursor (ISO): return only rows STRICTLY older than this.
+   * Pass the last row of the previous page.
+   */
+  before?: string;
+}
+
 /**
- * The caller's sessions for a station, newest ACTIVITY first (id desc breaks
- * same-millisecond ties). Ordered in SQL so the console's session switcher and
- * the history view share one read — callers must not re-sort.
+ * The page size to use for `limit`: default when absent or not a number,
+ * otherwise floored into [1, 100].
+ *
+ * Out-of-range numbers are clamped rather than refused — a client asking for
+ * 1000 rows gets 100, not an error. Deciding that a *non-numeric* limit is a
+ * client bug worth a 400 is the route's job (it can't be told apart from a
+ * default down here).
+ */
+export function clampSessionLimit(limit?: number): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return SESSION_PAGE_DEFAULT_LIMIT;
+  }
+  return Math.min(SESSION_PAGE_MAX_LIMIT, Math.max(1, Math.floor(limit)));
+}
+
+/**
+ * One page of the caller's sessions for a station, newest ACTIVITY first (id
+ * desc breaks same-millisecond ties). Ordered and limited in SQL — backed by
+ * acp_sessions_station_activity_idx — so the console's session switcher and the
+ * history view share one read; callers must not re-sort.
+ *
+ * Paging is keyset, not offset: pass the last row's `lastEventAt` as `before`
+ * and rows inserted meanwhile can't shift the page under the caller. The cursor
+ * is the timestamp alone, so two rows sharing one millisecond exactly at a page
+ * boundary can straddle it; the tie-break inside a page is id desc.
  */
 export async function listSessions(
   userId: string,
-  stationId: string
+  stationId: string,
+  opts: ListSessionsOptions = {}
 ): Promise<AcpSessionRow[]> {
+  const filters = [
+    eq(acpSessions.userId, userId),
+    eq(acpSessions.stationId, stationId),
+  ];
+  if (opts.before !== undefined) {
+    const cursor = new Date(opts.before);
+    if (Number.isNaN(cursor.getTime())) {
+      throw new Error("Invalid page cursor.");
+    }
+    filters.push(lt(acpSessions.lastEventAt, cursor));
+  }
   const rows = await db
     .select()
     .from(acpSessions)
-    .where(
-      and(eq(acpSessions.userId, userId), eq(acpSessions.stationId, stationId))
-    )
-    .orderBy(desc(acpSessions.lastEventAt), desc(acpSessions.id));
+    .where(and(...filters))
+    .orderBy(desc(acpSessions.lastEventAt), desc(acpSessions.id))
+    .limit(clampSessionLimit(opts.limit));
   return rows.map(toContract);
 }
 
@@ -758,7 +844,17 @@ export async function promptSession(
   const agent = live.agent;
   if (!agent) throw new Error("Session is still starting.");
 
-  const { done: promptWritten } = persistEvent(live, "user-prompt", { text });
+  // The first real prompt names the session, in the user-prompt's own write.
+  // COALESCE is what makes "first" mean first: an existing title always wins,
+  // so a long conversation keeps the label the user recognises no matter how
+  // many prompts follow (and a whitespace-only prompt sets nothing at all).
+  const title = deriveSessionTitle(text);
+  const { done: promptWritten } = persistEvent(
+    live,
+    "user-prompt",
+    { text },
+    title === null ? {} : { title: sql`COALESCE(${acpSessions.title}, ${title})` }
+  );
   const { done: statusWritten } = setStatus(live, "working");
   await Promise.all([promptWritten, statusWritten]);
 
@@ -908,7 +1004,14 @@ async function appendEndedState(sessionId: string, reason: string): Promise<void
   });
   await db
     .update(acpSessions)
-    .set({ status: "ended", endedReason: reason, lastEventAt: createdAt })
+    .set({
+      status: "ended",
+      endedReason: reason,
+      lastEventAt: createdAt,
+      // This row is not live, so seq came from MAX(seq)+1 — the same
+      // last_seq invariant persistEvent maintains for live sessions.
+      lastSeq: seq,
+    })
     .where(eq(acpSessions.id, sessionId));
   fanOut(sessionId, {
     sessionId,
