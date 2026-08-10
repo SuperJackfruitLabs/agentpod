@@ -331,7 +331,12 @@ export class AcpChat {
     if (this.busy) return;
     this.#error = null;
 
-    if (!this.#session || this.sessionOver || this.#transcript.status === "ended") {
+    // `status`, not the transcript's own: attaching an ENDED session from the
+    // switcher leaves the transcript at its "starting" placeholder until a state
+    // event turns up in the replay, and a session that has ended can never answer
+    // a prompt frame — the text would vanish into a socket the hub is about to
+    // close. The row's verdict is enough to create instead.
+    if (!this.#session || this.sessionOver || this.status === "ended") {
       const row = await this.createSession();
       if (row === null) return;
       this.attachRow(row);

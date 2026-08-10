@@ -1084,6 +1084,39 @@ test("the session frame refreshes that row in the list without reordering it", a
   expect(chat.sessions[0].status).toBe("working");
 });
 
+test("a prompt into an attached ENDED session creates a new one instead", async () => {
+  // Reading an ended session and typing a follow-up is an obvious move now that
+  // the switcher offers them. The row says ended, but a replay that carried no
+  // state event leaves the transcript's own status at the "starting" placeholder
+  // — deciding on that alone writes the frame into a session that can never
+  // answer it.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([
+    row({ id: "sa" }),
+    row({ id: "se", status: "ended" }),
+  ]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  await chat.attach("se");
+  const wsE = MockWebSocket.latest()!;
+  wsE.open();
+  wsE.fireMessage({ t: "replay-done", lastSeq: 0 });
+  expect(chat.status).toBe("ended");
+  expect(chat.busy).toBe(false);
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(row({ id: "sn" }));
+
+  await chat.prompt("carry on");
+
+  expect(api.createAcpSession).toHaveBeenCalledWith("st1", "ask");
+  expect(chat.session?.id).toBe("sn");
+  expect(wsE.frames()).not.toContainEqual({ t: "prompt", text: "carry on" });
+  const wsN = MockWebSocket.latest()!;
+  wsN.open();
+  expect(wsN.frames()).toEqual([
+    { t: "subscribe", sinceSeq: 0 },
+    { t: "prompt", text: "carry on" },
+  ]);
+});
+
 test("end() refreshes the session list so the switcher shows it ended", async () => {
   vi.spyOn(api, "endAcpSession").mockResolvedValue(undefined);
   const { chat } = await connectedChat();

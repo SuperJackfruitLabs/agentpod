@@ -29,7 +29,8 @@
    * (AcpChat.setMode handles all three).
    *
    * Ending a session is destructive (the agent process stops) — gated behind
-   * ConfirmDialog. An ended session flips the action to "New session".
+   * ConfirmDialog. "New session" sits beside it and is offered whatever the
+   * status; only "End session" disappears once there is nothing left to end.
    */
   import type { AcpSessionMode, AcpSessionStatus } from "@agentpod/contract";
   import type { AcpSessionRow } from "$lib/api/acp";
@@ -158,7 +159,13 @@
         if (v && v !== selectedId) onSelectSession(v);
       }}
     >
-      <Select.Trigger size="sm" class="min-w-0 max-w-56">
+      <Select.Trigger
+        size="sm"
+        class="min-w-0 max-w-56"
+        aria-label={selectedRow
+          ? `Switch session — currently ${sessionLabel(selectedRow)}`
+          : "Switch session"}
+      >
         <!-- aria-hidden: the label carries the status word, so the dot's own
              sr-only text would read as a duplicate. -->
         {#if selectedRow}

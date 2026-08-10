@@ -506,10 +506,10 @@ async function renderTwoSessions() {
 
 /** Opens the switcher and clicks the option whose accessible name matches. */
 async function switchTo(
-  u: Awaited<ReturnType<typeof renderTwoSessions>>,
+  u: { getByRole: (role: string, options: { name: RegExp }) => HTMLElement },
   name: RegExp,
 ): Promise<void> {
-  const trigger = u.getByRole("button", { name: /^Session \d/ });
+  const trigger = u.getByRole("button", { name: /^Switch session/ });
   await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
   const option = await waitFor(() => u.getByRole("option", { name }));
   await fireEvent.pointerUp(option, { pointerId: 1, button: 0, pointerType: "mouse" });
@@ -522,7 +522,9 @@ test("the switcher lists the station's sessions and switching re-attaches", asyn
   vi.stubGlobal("fetch", fetchSpy);
   const u = await renderTwoSessions();
   expect(u.getByText("hello from B")).toBeTruthy();
-  expect(u.getByRole("button", { name: /^Session 2 · idle · 5m ago$/ })).toBeTruthy();
+  expect(
+    u.getByRole("button", { name: /^Switch session — currently Session 2 · idle · 5m ago$/ }),
+  ).toBeTruthy();
 
   await switchTo(u, /^Session 1 · idle · 1h ago$/);
 
@@ -541,7 +543,9 @@ test("the switcher lists the station's sessions and switching re-attaches", asyn
   wsA.fireMessage({ t: "replay-done", lastSeq: 7 });
   await tick();
   expect(u.getByText("hello from A")).toBeTruthy();
-  expect(u.getByRole("button", { name: /^Session 1 · idle · 1h ago$/ })).toBeTruthy();
+  expect(
+    u.getByRole("button", { name: /^Switch session — currently Session 1 · idle · 1h ago$/ }),
+  ).toBeTruthy();
 
   // Sessions are hub-owned: switching never ends one.
   expect(endSpy).not.toHaveBeenCalled();
@@ -613,7 +617,120 @@ test("re-picking the attached session churns nothing", async () => {
 
 test("with one session the panel shows no switcher", async () => {
   const u = await renderConnected();
-  expect(u.queryByRole("button", { name: /^Session \d/ })).toBeNull();
+  expect(u.queryByRole("button", { name: /^Switch session/ })).toBeNull();
+});
+
+// ─── Reading an ended session, and sending from one ─────────────────────────
+
+const endedA = row({
+  id: "sa",
+  status: "ended",
+  createdAt: "2026-08-09T10:00:00.000Z",
+  lastEventAt: minutesAgo(120),
+});
+
+/** Two sessions where the older one has ended; attached to the live one (B). */
+async function renderWithEnded() {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([sessionB, endedA]);
+  const utils = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await tick();
+  return { ...utils, ws };
+}
+
+/** Switches to the ended session A and replays its ended state event. */
+async function readEndedSession(u: Awaited<ReturnType<typeof renderWithEnded>>) {
+  await switchTo(u, /^Session 1 · ended/);
+  const wsA = MockWebSocket.latest()!;
+  wsA.open();
+  wsA.fireMessage({ t: "event", event: ev(3, "state", { status: "ended", reason: "done" }) });
+  wsA.fireMessage({ t: "replay-done", lastSeq: 3 });
+  await tick();
+  return wsA;
+}
+
+test("sending from an ended session re-points the header at the new session", async () => {
+  // Regression: only the switcher and "New session" resynced the pick, so
+  // prompt()'s lazy create left the header naming the ENDED session the user had
+  // been reading while the socket and transcript were the new one's — and the
+  // stale pick then swallowed the next click on either of them.
+  const u = await renderWithEnded();
+  await readEndedSession(u);
+  expect(u.getByRole("button", { name: /currently Session 1 · ended/ })).toBeTruthy();
+
+  const created = row({
+    id: "sc",
+    createdAt: "2026-08-09T12:00:00.000Z",
+    lastEventAt: minutesAgo(0),
+  });
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(created);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([created, sessionB, endedA]);
+
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "follow-up" } });
+  await fireEvent.keyDown(box, { key: "Enter" });
+  await waitFor(() => expect(api.createAcpSession).toHaveBeenCalledWith("st1", "ask"));
+  await tick();
+
+  // The header names what is actually attached, not what was being read.
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/sc/ws");
+  expect(
+    u.getByRole("button", { name: /^Switch session — currently Session 3 · idle · just now$/ }),
+  ).toBeTruthy();
+
+  // …and the session just read is selectable again straight away (no sticky pick).
+  await switchTo(u, /^Session 1 · ended/);
+  await waitFor(() => expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/sa/ws"));
+});
+
+test("an attached ended session says plainly that sending starts a new one", async () => {
+  const notice = "This session has ended — sending starts a new one.";
+  const u = await renderWithEnded();
+  expect(u.queryByText(notice)).toBeNull(); // live session: nothing to explain
+
+  await readEndedSession(u);
+
+  const line = u.getByText(notice);
+  const box = composer(u);
+  // Visible AND announced on focus — a composer that quietly spawns a second
+  // agent process on the host is the one thing that must not be a surprise.
+  expect(box.getAttribute("aria-describedby")).toBe(line.id);
+  expect(line.id.length).toBeGreaterThan(0);
+  // Not a dead end: sending is still allowed, it just starts a session.
+  expect(box.readOnly).toBe(false);
+});
+
+test("a draft typed with no session survives switching away to read one", async () => {
+  // Every session ended, so the switcher is up while nothing is attached. This
+  // draft has no session to be parked under — the bug dropped it on the floor.
+  const endedB = { ...sessionB, status: "ended" as const };
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([endedB, endedA]);
+  const u = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1"));
+  await tick();
+  expect(MockWebSocket.instances).toHaveLength(0); // nothing live to attach
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "typed before any session" } });
+
+  await switchTo(u, /^Session 1 · ended/);
+  expect(box.value).toBe(""); // the session being read has no draft of its own
+
+  // The pre-session text was written for whatever session came next — so it is
+  // waiting in the one this creates, not gone.
+  const created = row({
+    id: "sc",
+    createdAt: "2026-08-09T12:00:00.000Z",
+    lastEventAt: minutesAgo(0),
+  });
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(created);
+  await fireEvent.click(u.getByRole("button", { name: "New session" }));
+  await waitFor(() => expect(api.createAcpSession).toHaveBeenCalled());
+  await tick();
+
+  expect(box.value).toBe("typed before any session");
 });
 
 // ─── Connection failures ────────────────────────────────────────────────────

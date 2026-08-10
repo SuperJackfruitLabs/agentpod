@@ -59,8 +59,18 @@
    * back through `onPromptFailed`). Parking per session loses nothing and can
    * misdirect nothing. Entries are dropped when a session ends — there is no
    * composer to return to.
+   *
+   * "No session attached" is a slot of its own (`NEW_SESSION_SLOT`): with every
+   * session ended the switcher is up while nothing is attached, so a draft typed
+   * there has no session id to be filed under. It is parked all the same, and the
+   * next session CREATED inherits it — that text was written for whichever
+   * session came next, and creating one is what makes it exist.
    */
   const drafts = new Map<string, string>();
+
+  /** Draft slot for "nothing attached". Not a valid session id, so it can't collide. */
+  const NEW_SESSION_SLOT = "__new-session__";
+  const draftSlot = (sessionId: string | null) => sessionId ?? NEW_SESSION_SLOT;
 
   /**
    * Which session is on screen. The panel owns this pick; the controller owns
@@ -93,18 +103,37 @@
   });
 
   /**
-   * Park the draft under the session we're leaving and load the one belonging to
-   * the session we landed on. Called only after the controller has actually
-   * moved: a refused switch (a session that's gone) must leave the composer
-   * exactly as the user left it.
+   * Park the on-screen draft under the slot being left and load the slot being
+   * landed on. A no-op when nothing moved, so a refused switch (a session that is
+   * gone) leaves the composer exactly as the user left it.
+   *
+   * `created` marks the landing session as brand new, which is the one case that
+   * inherits the pre-session draft — see NEW_SESSION_SLOT.
    */
-  function swapDraft(from: string | null, to: string | null) {
-    if (from === to) return;
-    if (from !== null) {
-      if (draft.length > 0) drafts.set(from, draft);
-      else drafts.delete(from);
+  function swapDraft(from: string | null, to: string | null, created = false) {
+    const fromSlot = draftSlot(from);
+    const toSlot = draftSlot(to);
+    if (fromSlot === toSlot) return;
+
+    if (draft.length > 0) drafts.set(fromSlot, draft);
+    else drafts.delete(fromSlot);
+
+    if (created && !drafts.has(toSlot)) {
+      const preSession = drafts.get(NEW_SESSION_SLOT);
+      if (preSession !== undefined) {
+        drafts.set(toSlot, preSession);
+        drafts.delete(NEW_SESSION_SLOT);
+      }
     }
-    draft = (to !== null ? drafts.get(to) : undefined) ?? "";
+    draft = drafts.get(toSlot) ?? "";
+  }
+
+  /** Point the header and the drafts at whatever the controller actually attached. */
+  function settleOn(from: string | null, created: boolean) {
+    const landed = chat.session?.id ?? null;
+    selectedId = landed;
+    swapDraft(from, landed, created);
+    return landed;
   }
 
   async function selectSession(id: string) {
@@ -114,23 +143,29 @@
     await chat.attach(id);
     // A refused switch leaves the previous session attached, so the header must
     // fall back to what is really on screen.
-    const landed = chat.session?.id ?? null;
-    selectedId = landed;
-    swapDraft(from, landed);
+    settleOn(from, false);
   }
 
   async function startSession() {
     const from = chat.session?.id ?? null;
     await chat.newSession();
-    const landed = chat.session?.id ?? null;
-    selectedId = landed;
-    swapDraft(from, landed);
+    const landed = settleOn(from, true);
     // Same reasoning as a failed first prompt: the strip shows it, but a toast is
     // what gets noticed when the transcript below hasn't changed.
     if (chat.error !== null && landed === from) {
       toast.error("Couldn't start the session", { description: chat.error });
     }
   }
+
+  /**
+   * An ended session is attachable (its transcript is worth reading), and the
+   * composer stays usable there rather than stranding the user in a read-only
+   * dead end — `prompt()` creates a fresh session for the text. But that also
+   * starts a new agent process on the host, so it is said out loud instead of
+   * happening silently under a header that reads "ended".
+   */
+  const endedNotice = $derived(chat.session !== null && chat.status === "ended");
+  const endedNoticeId = $props.id();
 
   // A parked draft for a session that has since ended is dead post — nothing can
   // be sent into that session again, so drop it rather than hand it back on a
@@ -152,10 +187,17 @@
 
     await chat.prompt(text);
 
+    // Sending is a THIRD way the attached session changes: with nothing attached,
+    // or while reading an ended one, `prompt()` creates a session first. The pick
+    // has to follow, or the header names the session the user was reading while
+    // the transcript below it belongs to a different one — and the stale pick then
+    // swallows the next click on either of them.
+    const landed = settleOn(beforeId, needsCreate);
+
     // A create that failed leaves the session unchanged and the message in
     // `chat.error` — the strip shows it, but a toast is what gets noticed when
     // the panel is otherwise empty.
-    if (needsCreate && chat.error !== null && (chat.session?.id ?? null) === beforeId) {
+    if (needsCreate && chat.error !== null && landed === beforeId) {
       toast.error("Couldn't start the session", { description: chat.error });
     }
   }
@@ -200,10 +242,18 @@
   {/if}
 
   <div class="shrink-0 border-t p-3">
+    {#if endedNotice}
+      <!-- Not a live region: the header owns the ONE status announcement. This is
+           the composer's description, read when focus lands on it. -->
+      <p id={endedNoticeId} class="t-label mb-2 text-muted-foreground">
+        This session has ended — sending starts a new one.
+      </p>
+    {/if}
     <PromptInput
       bind:value={draft}
       working={chat.working}
       disabled={chat.busy && !chat.working}
+      describedBy={endedNotice ? endedNoticeId : undefined}
       onSend={handleSend}
       onCancel={() => chat.cancel()}
     />

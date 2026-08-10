@@ -186,7 +186,7 @@ test("with a single session no switcher is rendered", () => {
   // get a second one, and the switcher appears the moment there is one.
   const { queryByRole, getByRole } = setup({ sessions: [row] });
 
-  expect(queryByRole("button", { name: /^Session \d/ })).toBeNull();
+  expect(queryByRole("button", { name: /^Switch session/ })).toBeNull();
   // …and the rest of the header is unchanged.
   expect(getByRole("status").textContent).toContain("Idle");
 });
@@ -200,7 +200,10 @@ test("the switcher lists every session with its status and last activity", async
     status: "working",
   });
 
-  const trigger = getByRole("button", { name: /^Session 2 · working · 5m ago$/ });
+  // The trigger says what it switches, then which session is on screen.
+  const trigger = getByRole("button", {
+    name: /^Switch session — currently Session 2 · working · 5m ago$/,
+  });
   await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
 
   const options = await waitFor(() => {
@@ -226,14 +229,14 @@ test("picking the session already attached is not re-selected", async () => {
     status: "working",
   });
 
-  const trigger = getByRole("button", { name: /^Session 2/ });
+  const trigger = getByRole("button", { name: /currently Session 2/ });
   await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
   const current = await waitFor(() => getByRole("option", { name: /^Session 2/ }));
   await fireEvent.pointerUp(current, { pointerId: 1, button: 0, pointerType: "mouse" });
 
   // bits-ui re-fires onValueChange for the same value; a switch back to the
   // session we are already on must not tear its socket down.
-  await waitFor(() => expect(getByRole("button", { name: /^Session 2/ })).toBeTruthy());
+  await waitFor(() => expect(getByRole("button", { name: /currently Session 2/ })).toBeTruthy());
   expect(onSelectSession).not.toHaveBeenCalled();
 });
 
@@ -259,7 +262,7 @@ test("an ended session is still listed, and reads as ended", async () => {
     status: "working",
   });
 
-  const trigger = getByRole("button", { name: /^Session 2/ });
+  const trigger = getByRole("button", { name: /currently Session 2/ });
   await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
 
   const option = await waitFor(() => getByRole("option", { name: /^Session 1 · ended · 2h ago$/ }));
