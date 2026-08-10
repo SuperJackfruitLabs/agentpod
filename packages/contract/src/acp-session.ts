@@ -13,6 +13,11 @@ export const AcpSessionRow = z.object({
   mode: AcpSessionMode, status: AcpSessionStatus,
   endedReason: z.string().nullable(),
   createdAt: z.string(), lastEventAt: z.string(),
+  // Slice 4c (history). Both optional so hub and console can deploy
+  // independently: a console built before this slice still parses new rows,
+  // and a new console tolerates rows from an older hub.
+  title: z.string().nullable().optional(),   // first prompt, truncated; null until the first prompt
+  lastSeq: z.number().int().optional(),      // highest event seq persisted for the session
 });
 export type AcpSessionRow = z.infer<typeof AcpSessionRow>;
 

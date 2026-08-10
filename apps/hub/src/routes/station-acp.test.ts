@@ -8,7 +8,9 @@
  *        capability, 404 unknown station, 409 the node can't host a second
  *        session, 502 node offline / acp.open failure.
  *     2. GET /api/stations/:id/acp/sessions → rows newest ACTIVITY first,
- *        straight from the service's SQL ordering (the route never re-sorts).
+ *        straight from the service's SQL ordering (the route never re-sorts),
+ *        with ?limit= / ?before= paging (slice 4c) — out-of-range numbers are
+ *        clamped, nonsense is 400.
  *   WS (GET /api/acp/sessions/:sessionId/ws):
  *     3. subscribe → session row, replay of persisted events (seq order),
  *        replay-done, then live events stream; prompt over the WS produces
@@ -379,6 +381,141 @@ test(
     }
   },
   20_000
+);
+
+test(
+  "GET paging: ?limit= caps the page (out-of-range numbers clamp), ?before=&beforeId= page strictly older rows and tile a same-millisecond tie group, nonsense/half a cursor → 400; rows carry title + lastSeq",
+  async () => {
+    const { server, fake, station, baseUrl } = await setupRig(
+      "acproute-page-host",
+      { stationKey: "acproute-page" }
+    );
+    const list = async (query = "") => {
+      const res = await fetch(
+        `${baseUrl}/api/stations/${station.id}/acp/sessions${query}`,
+        { headers: { "X-Test-User-Id": TEST_USER } }
+      );
+      return {
+        status: res.status,
+        rows: res.status === 200 ? ((await res.json()) as AcpSessionRow[]) : [],
+      };
+    };
+    /** Follow the cursor to the end, `limit` rows at a time. */
+    const walk = async (limit: number, total: number) => {
+      const seen: string[] = [];
+      let cursor: AcpSessionRow | null = null;
+      for (let guard = 0; guard <= total; guard++) {
+        const q = cursor
+          ? `?limit=${limit}&before=${encodeURIComponent(cursor.lastEventAt)}&beforeId=${encodeURIComponent(cursor.id)}`
+          : `?limit=${limit}`;
+        const { status, rows } = await list(q);
+        expect(status).toBe(200);
+        if (rows.length === 0) break;
+        seen.push(...rows.map((r) => r.id));
+        cursor = rows[rows.length - 1]!;
+      }
+      return seen;
+    };
+    try {
+      // Three ended sessions; the first gets a prompt so the listing has a
+      // titled row to prove title/lastSeq reach the client. lastEventAt is
+      // stamped explicitly below so ordering never rides on wall-clock gaps —
+      // and so the same-millisecond tie case can be tested rather than dodged.
+      const ids: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        const res = await createSessionReq(baseUrl, station.id, { mode: "full-auto" });
+        expect(res.status).toBe(201);
+        const row = (await res.json()) as AcpSessionRow;
+        if (i === 0) {
+          await promptSession(TEST_USER, row.id, "  name this conversation  ");
+          await pollUntil(async () => {
+            const s = await getSession(TEST_USER, row.id);
+            return s?.status === "idle" && s.title !== null;
+          });
+        }
+        await endSession(TEST_USER, row.id, "test done");
+        ids.push(row.id);
+      }
+      const stampAll = async (at: (i: number) => Date) => {
+        for (const [i, id] of ids.entries()) {
+          // Written as a literal wall-clock timestamp (the column has no time
+          // zone), so what goes in is exactly what comes back out.
+          const stamp = at(i).toISOString().replace("Z", "");
+          await rawSql`
+            UPDATE acp_sessions SET last_event_at = ${stamp}::timestamp
+            WHERE id = ${id}`;
+        }
+      };
+
+      // ── Distinct timestamps ────────────────────────────────────────────────
+      const base = new Date("2026-08-10T00:00:00.000Z");
+      await stampAll((i) => new Date(base.getTime() + i * 1000));
+      const newestFirst = [...ids].reverse();
+
+      // No query → the whole (short) history, newest activity first.
+      const all = await list();
+      expect(all.status).toBe(200);
+      expect(all.rows.map((r) => r.id)).toEqual(newestFirst);
+
+      // toContract exposes the slice-4c fields over the wire.
+      const titled = all.rows.find((r) => r.id === ids[0]);
+      expect(titled?.title).toBe("name this conversation");
+      expect(titled?.lastSeq).toBeGreaterThan(1);
+
+      // ?limit= caps the page.
+      const page1 = await list("?limit=2");
+      expect(page1.status).toBe(200);
+      expect(page1.rows.map((r) => r.id)).toEqual(newestFirst.slice(0, 2));
+
+      // ?before=&beforeId= page strictly older, with no duplicates and no gaps.
+      const cursor = page1.rows[1]!;
+      const page2 = await list(
+        `?limit=2&before=${encodeURIComponent(cursor.lastEventAt)}&beforeId=${encodeURIComponent(cursor.id)}`
+      );
+      expect(page2.status).toBe(200);
+      expect(page2.rows.map((r) => r.id)).toEqual(newestFirst.slice(2));
+      expect([...page1.rows, ...page2.rows].map((r) => r.id)).toEqual(newestFirst);
+      expect(await walk(2, ids.length)).toEqual(newestFirst);
+
+      // ?before= alone still works while timestamps differ (old-console path).
+      expect(
+        (await list(`?limit=2&before=${encodeURIComponent(cursor.lastEventAt)}`)).rows.map(
+          (r) => r.id
+        )
+      ).toEqual(newestFirst.slice(2));
+
+      // ── All three tied on ONE millisecond ─────────────────────────────────
+      await stampAll(() => base);
+      const tiedOrder = (await list()).rows.map((r) => r.id);
+      expect([...tiedOrder].sort()).toEqual([...ids].sort());
+      // The full keyset tiles the tie group: every session once, in order.
+      expect(await walk(2, ids.length)).toEqual(tiedOrder);
+      expect(await walk(1, ids.length)).toEqual(tiedOrder);
+      // Without beforeId the tie group is excluded wholesale — the silent
+      // history loss beforeId exists to prevent.
+      const tiedFirst = (await list("?limit=2")).rows;
+      const lossy = await list(
+        `?limit=2&before=${encodeURIComponent(tiedFirst[1]!.lastEventAt)}`
+      );
+      expect(lossy.rows).toHaveLength(0);
+
+      // An out-of-range NUMBER is clamped, not rejected.
+      expect((await list("?limit=1000")).status).toBe(200);
+      expect((await list("?limit=0")).rows).toHaveLength(1);
+
+      // Nonsense is a client bug: 400 rather than a silent default page.
+      expect((await list("?limit=abc")).status).toBe(400);
+      expect((await list("?before=yesterday")).status).toBe(400);
+      // Half a cursor is a broken paging loop, not a fresh page.
+      expect((await list(`?beforeId=${ids[0]}`)).status).toBe(400);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
 );
 
 test(

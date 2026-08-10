@@ -140,7 +140,7 @@ test("init attaches to the newest non-ended session and replays to connected", a
   const chat = new AcpChat("st1");
   await chat.init();
 
-  expect(api.listAcpSessions).toHaveBeenCalledWith("st1");
+  expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 });
   const ws = MockWebSocket.latest();
   expect(ws).toBeTruthy();
   expect(ws!.url).toContain("/api/acp/sessions/s1/ws");
@@ -160,6 +160,29 @@ test("init attaches to the newest non-ended session and replays to connected", a
   expect(chat.mode).toBe("accept-edits"); // synced from the session row
   expect(chat.transcript.lastSeq).toBe(2);
   expect(chat.transcript.items.map((it) => it.kind)).toEqual(["user", "assistant"]);
+});
+
+test("init attaches a live session that sits past the hub's default page", async () => {
+  // Regression: the hub's session list is paginated (default 20). A station where
+  // an idle live session was left running while a dozen short-lived ones were
+  // created and ended has it far down the ACTIVITY order — on the default page it
+  // isn't in the response at all, so `init` found no live row and the panel
+  // opened on "No session" with an empty transcript while the agent was running.
+  const rows = [
+    ...Array.from({ length: 21 }, (_, i) =>
+      row({ id: `dead${i}`, status: "ended", lastEventAt: `2026-08-09T10:${String(i).padStart(2, "0")}:00.000Z` }),
+    ),
+    row({ id: "alive", status: "idle", lastEventAt: "2026-08-01T00:00:00.000Z" }),
+  ];
+  const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue(rows);
+
+  const chat = new AcpChat("st1");
+  await chat.init();
+
+  // Asking for the deepest page is what makes the 22nd row visible at all.
+  expect(list).toHaveBeenCalledWith("st1", { limit: 100 });
+  expect(chat.session?.id).toBe("alive");
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/alive/ws");
 });
 
 // ─── (b) init: only ended sessions → idle, no socket ─────────────────────────
@@ -1053,6 +1076,26 @@ test("attach to an id that is gone re-reads the list and keeps the live session"
   expect(wsA.readyState).toBe(1);
   expect(MockWebSocket.instances).toHaveLength(1);
   expect(chat.error).toBe("Couldn't open that session — it's no longer there.");
+});
+
+test("attach resolves a session the first page never had, via a deep re-read", async () => {
+  // The history dialog pages far deeper than the switcher, so a legitimate pick
+  // can be a session this controller has never seen. The re-read asks for the
+  // hub's maximum page rather than its default, or that pick would be reported
+  // as "no longer there".
+  const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue([row({ id: "sa" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  MockWebSocket.latest()!.open();
+
+  const ancient = row({ id: "s99", createdAt: "2026-01-01T00:00:00.000Z" });
+  list.mockResolvedValue([row({ id: "sa" }), ancient]);
+  await chat.attach("s99");
+
+  expect(list).toHaveBeenLastCalledWith("st1", { limit: 100 });
+  expect(chat.session?.id).toBe("s99");
+  expect(chat.error).toBeNull();
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/s99/ws");
 });
 
 test("attach after destroy dials nothing", async () => {

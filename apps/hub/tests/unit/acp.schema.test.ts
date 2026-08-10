@@ -63,6 +63,29 @@ test("acpSessions has an index on station_id", () => {
   expect(idx).toBeDefined();
 });
 
+test("acpSessions.title is a nullable text column", () => {
+  const config = getTableConfig(acpSessions);
+  const col = config.columns.find((c) => c.name === "title");
+  expect(col).toBeDefined();
+  expect(col?.notNull).toBe(false);
+});
+
+test("acpSessions.last_seq is NOT NULL with a default of 0", () => {
+  const config = getTableConfig(acpSessions);
+  const col = config.columns.find((c) => c.name === "last_seq");
+  expect(col).toBeDefined();
+  expect(col?.notNull).toBe(true);
+  expect(col?.default).toBe(0);
+});
+
+test("acpSessions has a (station_id, last_event_at desc) activity index", () => {
+  const config = getTableConfig(acpSessions);
+  const idx = config.indexes.find((i) => i.config.name === "acp_sessions_station_activity_idx");
+  expect(idx).toBeDefined();
+  const cols = idx!.config.columns.map((c: any) => c.name ?? c.column?.name);
+  expect(cols).toEqual(["station_id", "last_event_at"]);
+});
+
 test("acpEvents.sessionId still has a foreign key to acpSessions.id ON DELETE CASCADE", () => {
   const config = getTableConfig(acpEvents);
   expect(config.foreignKeys.length).toBe(1);

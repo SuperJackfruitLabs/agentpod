@@ -70,6 +70,33 @@ function createErrorStatus(message: string): 403 | 404 | 409 | 502 {
 
 const CreateBody = z.object({ mode: AcpSessionMode });
 
+/** Treat `?limit=` / `?before=` with an empty value as absent, not as junk. */
+const blankToUndefined = (v: unknown) => (v === "" ? undefined : v);
+
+/**
+ * Paging for the session list. The cursor is the previous page's last row:
+ * `before` its lastEventAt, `beforeId` its id — both halves, or rows tied on
+ * the timestamp fall out of history entirely (see listSessions).
+ *
+ * An out-of-RANGE limit is clamped by the service (1000 → 100): asking for too
+ * much is not a bug. A limit that isn't a number, a cursor no Date can parse, or
+ * half a cursor IS a client bug — 400 it, because silently serving the default
+ * page would hide a broken paging loop and look like "history stops here".
+ */
+const ListQuery = z
+  .object({
+    limit: z.preprocess(blankToUndefined, z.coerce.number().finite().optional()),
+    before: z.preprocess(
+      blankToUndefined,
+      z.string().datetime({ offset: true }).optional()
+    ),
+    beforeId: z.preprocess(blankToUndefined, z.string().min(1).optional()),
+  })
+  .refine((q) => q.beforeId === undefined || q.before !== undefined, {
+    message: "beforeId requires before",
+    path: ["beforeId"],
+  });
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 export const stationAcpRoutes = new Hono()
@@ -104,12 +131,14 @@ export const stationAcpRoutes = new Hono()
   )
 
   /**
-   * GET /api/stations/:id/acp/sessions
+   * GET /api/stations/:id/acp/sessions?limit=&before=&beforeId=
    *
-   * Lists the caller's sessions for the station, newest ACTIVITY first (the
-   * service orders in SQL by last_event_at desc, id desc).
+   * One page of the caller's sessions for the station, newest ACTIVITY first
+   * (the service orders in SQL by last_event_at desc, id desc). `before` +
+   * `beforeId` are the previous page's last row — keyset paging, so rows
+   * arriving meanwhile can't shift the page.
    */
-  .get("/stations/:id/acp/sessions", async (c) => {
+  .get("/stations/:id/acp/sessions", zValidator("query", ListQuery), async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") {
       return c.json({ error: "Unauthorized" }, 401);
@@ -121,8 +150,14 @@ export const stationAcpRoutes = new Hono()
       return c.json({ error: "Not Found" }, 404);
     }
 
-    // Already ordered newest-activity-first in SQL — never re-sort here.
-    const rows = await acp.listSessions(user.id, stationId);
+    const { limit, before, beforeId } = c.req.valid("query");
+    // Already ordered newest-activity-first and limited in SQL — never re-sort
+    // or re-slice here.
+    const rows = await acp.listSessions(user.id, stationId, {
+      limit,
+      before,
+      beforeId,
+    });
     return c.json(rows);
   })
 

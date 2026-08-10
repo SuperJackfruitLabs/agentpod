@@ -135,7 +135,7 @@ function ev(seq: number, type: AcpEvent["type"], payload: unknown): AcpEvent {
 async function renderIdle() {
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([]);
   const utils = render(ChatPanel, { props: { stationId: "st1" } });
-  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1"));
+  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 }));
   await tick();
   return utils;
 }
@@ -709,7 +709,7 @@ test("a draft typed with no session survives switching away to read one", async 
   const endedB = { ...sessionB, status: "ended" as const };
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([endedB, endedA]);
   const u = render(ChatPanel, { props: { stationId: "st1" } });
-  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1"));
+  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 }));
   await tick();
   expect(MockWebSocket.instances).toHaveLength(0); // nothing live to attach
   const box = composer(u);
@@ -731,6 +731,149 @@ test("a draft typed with no session survives switching away to read one", async 
   await tick();
 
   expect(box.value).toBe("typed before any session");
+});
+
+test("a draft typed into an ENDED session survives New session", async () => {
+  // Regression (4b review): the draft was parked under the ended session's own
+  // slot, which the pruning effect then garbage-collected — the text the user
+  // had just typed vanished on the click that was supposed to carry it forward.
+  const u = await renderWithEnded();
+  await readEndedSession(u);
+  expect(u.getByText("This session has ended — sending starts a new one.")).toBeTruthy();
+
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "carry me into the next one" } });
+
+  const created = row({
+    id: "sc",
+    createdAt: "2026-08-09T12:00:00.000Z",
+    lastEventAt: minutesAgo(0),
+  });
+  vi.spyOn(api, "createAcpSession").mockResolvedValue(created);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([created, sessionB, endedA]);
+
+  await fireEvent.click(u.getByRole("button", { name: "New session" }));
+  await waitFor(() => expect(api.createAcpSession).toHaveBeenCalledWith("st1", "ask"));
+  await tick();
+
+  // The new session is attached AND the words are still in the composer.
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/sc/ws");
+  expect(box.value).toBe("carry me into the next one");
+});
+
+test("a failed create from an ended session keeps the draft on screen", async () => {
+  // The draft is only ever MOVED when the pick actually moves: a create that
+  // failed leaves the same (ended) session attached, so the text stays put.
+  const u = await renderWithEnded();
+  await readEndedSession(u);
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "still here" } });
+
+  vi.spyOn(api, "createAcpSession").mockRejectedValue(new Error("Couldn't start a session."));
+  await fireEvent.click(u.getByRole("button", { name: "New session" }));
+  await waitFor(() => expect(api.createAcpSession).toHaveBeenCalled());
+  await tick();
+
+  expect(box.value).toBe("still here");
+});
+
+// ─── Session history ────────────────────────────────────────────────────────
+
+/** `n` sessions, newest activity first (created oldest-first), each titled. */
+function manySessions(n: number): AcpSessionRow[] {
+  return Array.from({ length: n }, (_, i) => {
+    const age = n - 1 - i; // index 0 = newest activity
+    return row({
+      id: `sh${age}`,
+      title: `Task ${age}`,
+      createdAt: new Date(Date.UTC(2026, 7, 1, age)).toISOString(),
+      lastEventAt: minutesAgo(age),
+      lastSeq: age + 1,
+    });
+  });
+}
+
+test("past 8 sessions the switcher hands off to the history dialog", async () => {
+  const endSpy = vi.spyOn(api, "endAcpSession");
+  const sessions = manySessions(9);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue(sessions);
+  const u = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await tick();
+
+  // The oldest session is past the switcher's cap — history is the way to it.
+  const trigger = u.getByRole("button", { name: /^Switch session/ });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  const all = await waitFor(() => u.getByRole("option", { name: /All sessions/ }));
+  await fireEvent.pointerUp(all, { pointerId: 1, button: 0, pointerType: "mouse" });
+
+  const dialog = await waitFor(() => {
+    const found = u.getAllByRole("dialog").find((d) => d.textContent?.includes("All sessions"));
+    if (!found) throw new Error("history dialog not open yet");
+    return found;
+  });
+  const oldest = await waitFor(() => {
+    const found = u.getAllByRole("button").find((b) => b.textContent?.includes("Task 0"));
+    if (!found) throw new Error("history rows not rendered yet");
+    return found;
+  });
+  expect(dialog.textContent).toContain("Task 0");
+
+  // Selecting there goes through the SAME attach path the switcher uses: the old
+  // socket is dropped, a new one subscribes, and the header names what it landed on.
+  await fireEvent.click(oldest);
+  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+  const ws2 = MockWebSocket.latest()!;
+  expect(ws2.url).toContain("/api/acp/sessions/sh0/ws");
+  expect(ws.readyState).toBe(3);
+  ws2.open();
+  expect(ws2.frames()).toEqual([{ t: "subscribe", sinceSeq: 0 }]);
+  await waitFor(() =>
+    expect(u.getByRole("button", { name: /^Switch session — currently Task 0 ·/ })).toBeTruthy(),
+  );
+
+  // The dialog got out of the way, and history ended nothing.
+  await waitFor(() =>
+    expect(u.queryAllByRole("dialog").some((d) => d.textContent?.includes("All sessions"))).toBe(
+      false,
+    ),
+  );
+  expect(endSpy).not.toHaveBeenCalled();
+});
+
+test("switching from history parks the draft exactly like the switcher does", async () => {
+  const sessions = manySessions(9);
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue(sessions);
+  const u = render(ChatPanel, { props: { stationId: "st1" } });
+  await waitFor(() => expect(MockWebSocket.latest()).toBeTruthy());
+  MockWebSocket.latest()!.open();
+  MockWebSocket.latest()!.fireMessage({ t: "replay-done", lastSeq: 0 });
+  await tick();
+
+  const box = composer(u);
+  await fireEvent.input(box, { target: { value: "written for Task 8" } });
+
+  const trigger = u.getByRole("button", { name: /^Switch session/ });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  const all = await waitFor(() => u.getByRole("option", { name: /All sessions/ }));
+  await fireEvent.pointerUp(all, { pointerId: 1, button: 0, pointerType: "mouse" });
+  const oldest = await waitFor(() => {
+    const found = u.getAllByRole("button").find((b) => b.textContent?.includes("Task 0"));
+    if (!found) throw new Error("history rows not rendered yet");
+    return found;
+  });
+  await fireEvent.click(oldest);
+  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+  await tick();
+
+  expect(box.value).toBe(""); // Task 0 has no draft of its own
+
+  // …and the parked one comes back on the way home.
+  await switchTo(u, /^Task 8 ·/);
+  await waitFor(() => expect(box.value).toBe("written for Task 8"));
 });
 
 // ─── Connection failures ────────────────────────────────────────────────────

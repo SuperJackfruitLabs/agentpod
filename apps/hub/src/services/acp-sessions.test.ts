@@ -23,6 +23,11 @@
  *  11. Slice 4b: several live sessions per station — distinct instances and
  *      node processes, independent transcripts, independent teardown; a node
  *      that doesn't echo the instance keeps the one-at-a-time behaviour.
+ *  12. Slice 4c (history): the first prompt titles the session (and nothing
+ *      later renames it), the 80-char cut is code-point safe through Postgres,
+ *      last_seq tracks the transcript's highest seq, and listSessions pages on
+ *      the (lastEventAt, id) keyset — including inside a same-millisecond tie
+ *      group, where a timestamp-only cursor would lose rows for good.
  *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
@@ -66,6 +71,8 @@ import {
   subscribe,
   reconcileOnBoot,
   closeOrphanedProcesses,
+  clampSessionLimit,
+  deriveSessionTitle,
   _setOfflineGraceMsForTest,
   _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
@@ -1587,6 +1594,312 @@ test(
       expect((await getSession(TEST_USER, live.id))?.status).toBe("idle");
 
       await endSession(TEST_USER, live.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Slice 4c: titles, lastSeq, paginated history ─────────────────────────────
+
+test("clampSessionLimit: defaults to 20, floors, and clamps into [1, 100]", () => {
+  expect(clampSessionLimit(undefined)).toBe(20);
+  expect(clampSessionLimit(7)).toBe(7);
+  expect(clampSessionLimit(100)).toBe(100);
+  // Out-of-range values are CLAMPED, never rejected — the route 400s only on
+  // input that isn't a number at all.
+  expect(clampSessionLimit(0)).toBe(1);
+  expect(clampSessionLimit(-5)).toBe(1);
+  expect(clampSessionLimit(500)).toBe(100);
+  expect(clampSessionLimit(2.9)).toBe(2);
+  expect(clampSessionLimit(Number.NaN)).toBe(20);
+});
+
+test(
+  "title + lastSeq: the first real prompt names the session (trimmed, 80 chars, no ellipsis), later prompts never rename it, whitespace leaves it null; lastSeq tracks the highest seq and still does after the end",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-title-host", {
+      stationKey: "acp-title-station",
+    });
+    try {
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+      });
+      // Fresh session: unnamed, and lastSeq is the create-time idle event.
+      expect(row.title).toBeNull();
+      expect(row.lastSeq).toBe(1);
+
+      /** Prompt, then wait for that turn to land back at idle. */
+      const promptAndSettle = async (text: string) => {
+        const before = (await eventsFor(row.id)).length;
+        await promptSession(TEST_USER, row.id, text);
+        // before+1 is the user-prompt and before+2 the `working` state, so any
+        // idle beyond before+1 is this turn's completion.
+        await pollForEvent(
+          row.id,
+          (e) => stateWith("idle")(e) && e.seq > before + 1
+        );
+      };
+
+      // A whitespace-only prompt is no title at all.
+      await promptAndSettle("   \n\t ");
+      expect((await getSession(TEST_USER, row.id))?.title).toBeNull();
+
+      // The first real prompt names it: trimmed, truncated to 80 chars, stored
+      // truncated with NO ellipsis (presentation is the console's job).
+      const long = `  ${"a".repeat(60)} ${"b".repeat(60)}  `;
+      await promptAndSettle(long);
+      const titled = await getSession(TEST_USER, row.id);
+      expect(titled?.title).toBe(long.trim().slice(0, 80));
+      expect(titled?.title).toHaveLength(80);
+      expect(titled!.title!.includes("…")).toBe(false);
+
+      // A long conversation keeps the label the user recognises.
+      await promptAndSettle("a completely different question");
+      expect((await getSession(TEST_USER, row.id))?.title).toBe(titled!.title);
+
+      // lastSeq === the highest persisted seq across prompts, agent updates and
+      // state events.
+      const evts = await eventsFor(row.id);
+      const maxSeq = Math.max(...evts.map((e) => e.seq));
+      expect(maxSeq).toBeGreaterThan(1);
+      expect((await getSession(TEST_USER, row.id))?.lastSeq).toBe(maxSeq);
+
+      // … and it still reflects the FINAL event once the session has ended.
+      await endSession(TEST_USER, row.id, "cleanup");
+      const ended = await getSession(TEST_USER, row.id);
+      const finalMax = Math.max(
+        ...(await eventsFor(row.id)).map((e) => e.seq)
+      );
+      expect(finalMax).toBe(maxSeq + 1); // the state-ended event
+      expect(ended?.lastSeq).toBe(finalMax);
+      expect(ended?.title).toBe(titled!.title);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "deriveSessionTitle: the 80-char cut is code-point safe — an emoji on the boundary is kept whole or dropped whole, never left as a lone surrogate",
+  () => {
+    // A string survives a UTF-8 round trip iff it holds no lone surrogate —
+    // exactly the check postgres.js applies on the way into the DB.
+    const wellFormed = (s: string) =>
+      new TextDecoder().decode(new TextEncoder().encode(s)) === s;
+
+    expect(deriveSessionTitle("  hello  ")).toBe("hello");
+    expect(deriveSessionTitle("   \n\t ")).toBeNull();
+
+    // 80 code points whose last is astral: 81 UTF-16 code units, so a
+    // slice(0, 80) would keep the high surrogate alone and postgres would then
+    // silently swallow the emoji. Kept whole instead.
+    const exactly80 = `${"a".repeat(79)}😀`;
+    expect(Array.from(exactly80)).toHaveLength(80);
+    const kept = deriveSessionTitle(exactly80)!;
+    expect(kept).toBe(exactly80);
+    expect(Array.from(kept)).toHaveLength(80);
+    expect(wellFormed(kept)).toBe(true);
+
+    // 81 code points: the emoji is past the budget and is dropped WHOLE.
+    const past = `${"a".repeat(80)}😀`;
+    const cut = deriveSessionTitle(past)!;
+    expect(cut).toBe("a".repeat(80));
+    expect(cut.includes("\uD83D")).toBe(false); // no orphaned high surrogate
+    expect(wellFormed(cut)).toBe(true);
+
+    // An emoji sitting on the boundary of a longer prompt is kept intact and
+    // the code-point budget still holds.
+    const straddling = `${"a".repeat(79)}😀${"b".repeat(20)}`;
+    const clipped = deriveSessionTitle(straddling)!;
+    expect(clipped).toBe(exactly80);
+    expect(Array.from(clipped)).toHaveLength(80);
+    expect(wellFormed(clipped)).toBe(true);
+  }
+);
+
+test(
+  "session titles round-trip through Postgres unchanged: an emoji on the 80-char boundary is stored whole (never a lone surrogate), and one past it is dropped whole",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-title-utf8-host", {
+      stationKey: "acp-title-utf8-station",
+    });
+    const wellFormed = (s: string) =>
+      new TextDecoder().decode(new TextEncoder().encode(s)) === s;
+    try {
+      /** Title a fresh session with `text` and read back what Postgres stored. */
+      const titleFromPrompt = async (text: string) => {
+        const row = await createSession({
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "full-auto",
+        });
+        await promptSession(TEST_USER, row.id, text);
+        const stored = await pollUntil(async () => {
+          const s = await getSession(TEST_USER, row.id);
+          return s?.title ?? false;
+        });
+        await endSession(TEST_USER, row.id, "cleanup");
+        return stored;
+      };
+
+      // Exactly 80 code points ending in an emoji (81 UTF-16 code units): the
+      // emoji is intact, not swallowed by a broken surrogate pair.
+      const onBoundary = `${"a".repeat(79)}😀`;
+      const stored = await titleFromPrompt(onBoundary);
+      expect(stored).toBe(onBoundary);
+      expect(stored.endsWith("😀")).toBe(true);
+      expect(Array.from(stored)).toHaveLength(80);
+      expect(wellFormed(stored)).toBe(true);
+
+      // One code point past the budget: dropped whole, nothing corrupt stored.
+      const pastBoundary = `${"a".repeat(80)}😀`;
+      const clipped = await titleFromPrompt(pastBoundary);
+      expect(clipped).toBe("a".repeat(80));
+      expect(wellFormed(clipped)).toBe(true);
+
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "listSessions pagination: limit caps and clamps; the (before, beforeId) keyset pages strictly older rows and resumes INSIDE a same-millisecond tie group without losing or repeating a session",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-page-host", {
+      stationKey: "acp-page-station",
+    });
+    try {
+      // Five ended sessions. Their lastEventAt is stamped explicitly below, so
+      // ordering is deterministic — and so the same-millisecond tie case (which
+      // wall-clock gaps would only hide) can be tested head-on.
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const s = await createSession({
+          stationId: station.id,
+          userId: TEST_USER,
+          mode: "ask",
+        });
+        await endSession(TEST_USER, s.id, "cleanup");
+        ids.push(s.id);
+      }
+
+      const stamp = async (at: (i: number) => Date) => {
+        for (const [i, id] of ids.entries()) {
+          await db
+            .update(acpSessions)
+            .set({ lastEventAt: at(i) })
+            .where(eq(acpSessions.id, id));
+        }
+      };
+      /** Walk the whole history `limit` rows at a time with the full keyset. */
+      const walk = async (limit: number) => {
+        const seen: string[] = [];
+        let cursor: { lastEventAt: string; id: string } | null = null;
+        for (let guard = 0; guard <= ids.length; guard++) {
+          const p = await listSessions(TEST_USER, station.id, {
+            limit,
+            ...(cursor
+              ? { before: cursor.lastEventAt, beforeId: cursor.id }
+              : {}),
+          });
+          if (p.length === 0) break;
+          seen.push(...p.map((s) => s.id));
+          const last = p[p.length - 1]!;
+          cursor = { lastEventAt: last.lastEventAt, id: last.id };
+        }
+        return seen;
+      };
+
+      // ── Distinct timestamps ────────────────────────────────────────────────
+      const base = new Date("2026-08-10T00:00:00.000Z");
+      await stamp((i) => new Date(base.getTime() + i * 1000));
+      const newestFirst = [...ids].reverse();
+
+      // Default limit (20) covers all five, newest activity first.
+      expect((await listSessions(TEST_USER, station.id)).map((s) => s.id)).toEqual(
+        newestFirst
+      );
+
+      // limit caps the page.
+      const page1 = await listSessions(TEST_USER, station.id, { limit: 2 });
+      expect(page1.map((s) => s.id)).toEqual(newestFirst.slice(0, 2));
+
+      // Out-of-range limits clamp instead of throwing.
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 500 })).map((s) => s.id)
+      ).toEqual(newestFirst);
+      expect(
+        (await listSessions(TEST_USER, station.id, { limit: 0 })).map((s) => s.id)
+      ).toEqual([newestFirst[0]!]);
+
+      // before + beforeId = the last row of page 1 → strictly older rows.
+      const cursorRow = page1[page1.length - 1]!;
+      const page2 = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: cursorRow.lastEventAt,
+        beforeId: cursorRow.id,
+      });
+      expect(page2.map((s) => s.id)).toEqual(newestFirst.slice(2, 4));
+      for (const s of page2) {
+        expect(new Date(s.lastEventAt).getTime()).toBeLessThan(
+          new Date(cursorRow.lastEventAt).getTime()
+        );
+      }
+      // The two pages tile the history: no duplicates, no gaps.
+      expect([...page1, ...page2].map((s) => s.id)).toEqual(
+        newestFirst.slice(0, 4)
+      );
+      // Paging the whole history two at a time reproduces it exactly.
+      expect(await walk(2)).toEqual(newestFirst);
+
+      // A console still sending `before` alone (no beforeId) keeps working while
+      // timestamps differ — the compatibility path.
+      expect(
+        (
+          await listSessions(TEST_USER, station.id, {
+            limit: 2,
+            before: cursorRow.lastEventAt,
+          })
+        ).map((s) => s.id)
+      ).toEqual(newestFirst.slice(2, 4));
+
+      // ── All five tied on ONE millisecond ──────────────────────────────────
+      await stamp(() => base);
+      // The unpaged read is the reference ordering (lastEventAt equal → id desc).
+      const tiedOrder = (await listSessions(TEST_USER, station.id)).map(
+        (s) => s.id
+      );
+      expect([...tiedOrder].sort()).toEqual([...ids].sort());
+
+      // Every session exactly once, in order: the keyset resumes inside the tie
+      // group instead of skipping past it.
+      expect(await walk(2)).toEqual(tiedOrder);
+      expect(await walk(1)).toEqual(tiedOrder);
+
+      // Why beforeId exists: the timestamp-only cursor excludes the ENTIRE tie
+      // group — those three sessions would be missing from every later page,
+      // gone from history with no error at all.
+      const tiedPage1 = await listSessions(TEST_USER, station.id, { limit: 2 });
+      const lossy = await listSessions(TEST_USER, station.id, {
+        limit: 2,
+        before: tiedPage1[tiedPage1.length - 1]!.lastEventAt,
+      });
+      expect(lossy).toHaveLength(0);
+
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {

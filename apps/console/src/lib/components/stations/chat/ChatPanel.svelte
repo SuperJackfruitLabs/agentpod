@@ -37,6 +37,7 @@
   import ChatHeader from "./ChatHeader.svelte";
   import Conversation from "./Conversation.svelte";
   import PromptInput from "./PromptInput.svelte";
+  import SessionHistory from "./SessionHistory.svelte";
 
   interface Props {
     stationId: string;
@@ -65,6 +66,12 @@
    * there has no session id to be filed under. It is parked all the same, and the
    * next session CREATED inherits it — that text was written for whichever
    * session came next, and creating one is what makes it exist.
+   *
+   * Text typed while an ENDED session is attached lands in that same slot: the
+   * composer there is ALREADY a new-session composer (the notice below says so,
+   * and `prompt()` creates), so its words belong to the next session, not to the
+   * dead one. Filing them under the ended session's own id is how "New session"
+   * used to lose them — the pruning effect below garbage-collects that slot.
    */
   const drafts = new Map<string, string>();
 
@@ -81,6 +88,13 @@
    * in the handler for the thing the user actually clicked.
    */
   let selectedId = $state<string | null>(null);
+
+  /**
+   * The full session history (a dialog, so this panel stays mounted behind it —
+   * the socket, the transcript and the draft all survive browsing). Owned here
+   * because the pick it produces belongs to `selectSession`, not to the header.
+   */
+  let historyOpen = $state(false);
 
   // Plain (non-reactive) ref: the controller holds its own $state internally,
   // so the template stays reactive while the instance itself is stable for the
@@ -105,18 +119,27 @@
   /**
    * Park the on-screen draft under the slot being left and load the slot being
    * landed on. A no-op when nothing moved, so a refused switch (a session that is
-   * gone) leaves the composer exactly as the user left it.
+   * gone) or a failed create leaves the composer exactly as the user left it.
    *
    * `created` marks the landing session as brand new, which is the one case that
    * inherits the pre-session draft — see NEW_SESSION_SLOT.
+   *
+   * `fromEnded` says the session being left had ENDED, which redirects the park
+   * to NEW_SESSION_SLOT: nothing can be sent into that session again, so text
+   * written there is destined for the next one (and the pruning effect below
+   * would otherwise collect it).
    */
-  function swapDraft(from: string | null, to: string | null, created = false) {
-    const fromSlot = draftSlot(from);
+  function swapDraft(from: string | null, to: string | null, created = false, fromEnded = false) {
+    if (from === to) return; // nothing moved — don't touch the composer
+    const fromSlot = fromEnded ? NEW_SESSION_SLOT : draftSlot(from);
     const toSlot = draftSlot(to);
     if (fromSlot === toSlot) return;
 
     if (draft.length > 0) drafts.set(fromSlot, draft);
-    else drafts.delete(fromSlot);
+    // Never leave a stale entry under the slot we actually left: an empty
+    // composer parks nothing, and a redirected park must not also keep a copy
+    // filed under the ended session's own id.
+    if (draft.length === 0 || fromSlot !== draftSlot(from)) drafts.delete(draftSlot(from));
 
     if (created && !drafts.has(toSlot)) {
       const preSession = drafts.get(NEW_SESSION_SLOT);
@@ -128,28 +151,34 @@
     draft = drafts.get(toSlot) ?? "";
   }
 
-  /** Point the header and the drafts at whatever the controller actually attached. */
-  function settleOn(from: string | null, created: boolean) {
+  /**
+   * Point the header and the drafts at whatever the controller actually attached.
+   * `fromEnded` must be read BEFORE the attach/create — by the time this runs,
+   * `chat.status` describes the session just landed on.
+   */
+  function settleOn(from: string | null, created: boolean, fromEnded = false) {
     const landed = chat.session?.id ?? null;
     selectedId = landed;
-    swapDraft(from, landed, created);
+    swapDraft(from, landed, created, fromEnded);
     return landed;
   }
 
   async function selectSession(id: string) {
     const from = chat.session?.id ?? null;
     if (id === from) return; // already on it — don't touch the socket or the draft
+    const fromEnded = chat.status === "ended";
     selectedId = id;
     await chat.attach(id);
     // A refused switch leaves the previous session attached, so the header must
     // fall back to what is really on screen.
-    settleOn(from, false);
+    settleOn(from, false, fromEnded);
   }
 
   async function startSession() {
     const from = chat.session?.id ?? null;
+    const fromEnded = chat.status === "ended";
     await chat.newSession();
-    const landed = settleOn(from, true);
+    const landed = settleOn(from, true, fromEnded);
     // Same reasoning as a failed first prompt: the strip shows it, but a toast is
     // what gets noticed when the transcript below hasn't changed.
     if (chat.error !== null && landed === from) {
@@ -192,7 +221,7 @@
     // has to follow, or the header names the session the user was reading while
     // the transcript below it belongs to a different one — and the stale pick then
     // swallows the next click on either of them.
-    const landed = settleOn(beforeId, needsCreate);
+    const landed = settleOn(beforeId, needsCreate, beforeId !== null && needsCreate);
 
     // A create that failed leaves the session unchanged and the message in
     // `chat.error` — the strip shows it, but a toast is what gets noticed when
@@ -222,6 +251,7 @@
       }}
       onNew={() => void startSession()}
       onSelectSession={(id) => void selectSession(id)}
+      onOpenHistory={() => (historyOpen = true)}
     />
   </div>
 
@@ -259,3 +289,17 @@
     />
   </div>
 </div>
+
+<!-- Mounted only while open, so its list is re-read (and starts at page 1) each
+     time — a station's sessions move while the dialog is shut. Selecting there
+     goes through the SAME selectSession/settleOn path as the switcher: a second
+     attach path is exactly what left the header naming a session the user
+     wasn't in. -->
+{#if historyOpen}
+  <SessionHistory
+    {stationId}
+    currentSessionId={chat.session?.id ?? null}
+    onSelect={(id) => void selectSession(id)}
+    onClose={() => (historyOpen = false)}
+  />
+{/if}

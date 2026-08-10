@@ -24,9 +24,15 @@ export const acpSessions = pgTable("acp_sessions", {
   status: text("status").notNull(),                                   // starting|idle|working|waiting|ended
   endedReason: text("ended_reason"),
   nodeSessionId: text("node_session_id"),                             // the node-side acp_* id, for reconciliation acp.close
+  title: text("title"),                                               // first prompt, truncated; null until the first prompt
+  lastSeq: integer("last_seq").notNull().default(0),                  // highest event seq persisted for this session
   createdAt: timestamp("created_at").notNull(),
   lastEventAt: timestamp("last_event_at").notNull(),
-}, (t) => [index("acp_sessions_station_id_idx").on(t.stationId)]);
+}, (t) => [
+  index("acp_sessions_station_id_idx").on(t.stationId),
+  // Ordering index for the paginated per-station history list (newest first).
+  index("acp_sessions_station_activity_idx").on(t.stationId, t.lastEventAt.desc()),
+]);
 
 export const acpEvents = pgTable("acp_events", {
   sessionId: text("session_id").notNull().references(() => acpSessions.id, { onDelete: "cascade" }),

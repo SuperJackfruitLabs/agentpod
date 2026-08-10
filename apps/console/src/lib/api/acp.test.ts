@@ -260,6 +260,35 @@ test("listAcpSessions GETs /api/stations/:id/acp/sessions", async () => {
   expect(rows).toEqual([sessionRow]);
 });
 
+test("listAcpSessions passes limit + the compound cursor through as query params", async () => {
+  // The history surface pages with a compound cursor (lastEventAt + id), so the
+  // timestamp MUST be url-encoded — a raw ISO string carries colons the hub
+  // would have to guess at — and `beforeId` must go with it, or a group of tied
+  // timestamps straddling a page boundary drops rows from history for good.
+  const fetchSpy = vi.fn().mockResolvedValue(jsonResponse([sessionRow]));
+  vi.stubGlobal("fetch", fetchSpy);
+
+  await listAcpSessions("st1", {
+    limit: 20,
+    before: "2026-08-09T00:00:00.000Z",
+    beforeId: "s1",
+  });
+
+  const [url] = fetchSpy.mock.calls[0];
+  expect(url).toBe(
+    "http://hub.test:3001/api/stations/st1/acp/sessions?limit=20&before=2026-08-09T00%3A00%3A00.000Z&beforeId=s1",
+  );
+});
+
+test("listAcpSessions with no cursor GETs the bare path (hub's own default page)", async () => {
+  const fetchSpy = vi.fn().mockResolvedValue(jsonResponse([sessionRow]));
+  vi.stubGlobal("fetch", fetchSpy);
+
+  await listAcpSessions("st1", {});
+
+  expect(fetchSpy.mock.calls[0][0]).toBe("http://hub.test:3001/api/stations/st1/acp/sessions");
+});
+
 test("endAcpSession DELETEs /api/acp/sessions/:sessionId and resolves on 204", async () => {
   const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
   vi.stubGlobal("fetch", fetchSpy);
