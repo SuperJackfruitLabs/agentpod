@@ -13,7 +13,7 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import type { AcpEvent, AcpSessionRow } from "@agentpod/contract";
 import * as api from "$lib/api/acp";
-import { AcpChat } from "./acp-chat.svelte";
+import { AcpChat, ECHO_DEADLINE_MS, _setEchoDeadlineMsForTest } from "./acp-chat.svelte";
 
 // ─── Minimal WebSocket stub ───────────────────────────────────────────────────
 
@@ -83,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  _setEchoDeadlineMsForTest(ECHO_DEADLINE_MS); // module-level hook: never leak an override
   MockWebSocket.instances = [];
   localStorage.clear();
 });
@@ -713,6 +714,150 @@ test("pendingPermissions counts unanswered permission items", async () => {
     event: ev(2, "permission-answer", { requestSeq: 1, optionId: "allow" }),
   });
   expect(chat.pendingPermissions).toBe(0);
+});
+
+// ─── The dead socket: a send into a connection nothing has noticed is gone ───
+//
+// Live-dogfooding defect: after a laptop sleep the browser still held a socket
+// it believed was OPEN (no close event ever fired). The prompt frame went into
+// it, the hub never saw it, and because no close/error/reconnect/replay-done/bye
+// followed, NO existing release path fired — the pending item stayed trailing,
+// `busy` latched true, and the composer was read-only until a page reload.
+
+/** Boots a connected chat that records every prompt handed back. */
+async function chatWithFailures(): Promise<{
+  chat: AcpChat;
+  ws: MockWebSocket;
+  failed: string[];
+}> {
+  const failed: string[] = [];
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row()]);
+  const chat = new AcpChat("st1", { onPromptFailed: (text) => failed.push(text) });
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "replay-done", lastSeq: 0 });
+  return { chat, ws, failed };
+}
+
+test("a prompt whose echo never arrives is released at the echo deadline", async () => {
+  vi.useFakeTimers();
+  const { chat, ws, failed } = await chatWithFailures();
+
+  await chat.prompt("sent after the laptop woke");
+
+  // The frame was written into a socket the browser still calls OPEN, so no
+  // close, error, reconnect, replay-done or bye is ever coming.
+  expect(ws.frames()).toContainEqual({ t: "prompt", text: "sent after the laptop woke" });
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "sent after the laptop woke", pending: true },
+  ]);
+  expect(chat.busy).toBe(true);
+
+  vi.advanceTimersByTime(ECHO_DEADLINE_MS - 1);
+  expect(chat.busy).toBe(true); // not a hair early — a slow link still wins
+
+  vi.advanceTimersByTime(1);
+
+  expect(chat.transcript.items).toEqual([]); // no ghost bubble
+  expect(chat.busy).toBe(false); // composer usable again
+  expect(failed).toEqual(["sent after the laptop woke"]); // text handed back
+  expect(chat.error).toBe("Couldn't send that message — it's back in the box, try again.");
+
+  // And the panel really is usable: the next prompt is accepted, not refused.
+  await chat.prompt("again");
+  expect(chat.transcript.items).toEqual([
+    { kind: "user", seq: -1, text: "again", pending: true },
+  ]);
+});
+
+test("an echoed prompt clears the echo deadline — nothing fires late", async () => {
+  vi.useFakeTimers();
+  const { chat, ws, failed } = await chatWithFailures();
+
+  await chat.prompt("healthy");
+  ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "healthy" }) });
+
+  expect(vi.getTimerCount()).toBe(0); // no leaked deadline
+  vi.advanceTimersByTime(ECHO_DEADLINE_MS * 3);
+
+  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 1, text: "healthy" }]);
+  expect(failed).toEqual([]);
+  expect(chat.error).toBeNull();
+  expect(chat.busy).toBe(false);
+});
+
+test("an attributed error clears the echo deadline too", async () => {
+  vi.useFakeTimers();
+  const { chat, ws, failed } = await chatWithFailures();
+
+  await chat.prompt("rejected");
+  ws.fireMessage({ t: "event", event: ev(0, "error", { message: "Session is busy." }) });
+
+  expect(failed).toEqual(["rejected"]);
+  expect(chat.error).toBe("Session is busy.");
+  expect(vi.getTimerCount()).toBe(0);
+
+  // The deadline must not fire a second release and overwrite the real reason.
+  vi.advanceTimersByTime(ECHO_DEADLINE_MS * 3);
+  expect(failed).toEqual(["rejected"]);
+  expect(chat.error).toBe("Session is busy.");
+});
+
+test("a prompt while the socket is not OPEN redials instead of writing into it", async () => {
+  const { chat, ws, failed } = await chatWithFailures();
+  // The cheap half of the bug: the browser HAS noticed (CLOSED) but no close
+  // event was delivered to this tab, so `socket` is still non-null here.
+  ws.readyState = 3;
+
+  await chat.prompt("redial me");
+
+  expect(MockWebSocket.instances).toHaveLength(2); // redialed, not written into
+  const ws2 = MockWebSocket.latest()!;
+  expect(ws2).not.toBe(ws);
+  expect(ws.frames()).not.toContainEqual({ t: "prompt", text: "redial me" });
+
+  ws2.open(); // buffered frames flush in order: subscribe still precedes the prompt
+  expect(ws2.frames()).toEqual([
+    { t: "subscribe", sinceSeq: 0 },
+    { t: "prompt", text: "redial me" },
+  ]);
+
+  // Replay on the socket the prompt went out on proves nothing — the echo does.
+  ws2.fireMessage({ t: "replay-done", lastSeq: 0 });
+  expect(failed).toEqual([]);
+  ws2.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "redial me" }) });
+  expect(chat.transcript.items).toEqual([{ kind: "user", seq: 1, text: "redial me" }]);
+  expect(chat.busy).toBe(false);
+});
+
+test("destroy() clears the echo deadline — no release after unmount", async () => {
+  vi.useFakeTimers();
+  _setEchoDeadlineMsForTest(500);
+  const { chat, failed } = await chatWithFailures();
+  await chat.prompt("in flight at unmount");
+
+  chat.destroy();
+
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersByTime(60_000);
+  expect(failed).toEqual([]);
+  expect(chat.error).toBeNull();
+});
+
+test("newSession() clears the echo deadline", async () => {
+  vi.useFakeTimers();
+  _setEchoDeadlineMsForTest(500);
+  const { chat, failed } = await chatWithFailures();
+  await chat.prompt("abandoned");
+
+  chat.newSession();
+
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersByTime(60_000);
+  expect(chat.transcript.items).toEqual([]);
+  expect(failed).toEqual([]);
+  expect(chat.error).toBeNull();
 });
 
 test("newSession resets to the empty state", async () => {

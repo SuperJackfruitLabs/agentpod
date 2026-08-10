@@ -33,7 +33,9 @@
  * and the composer with it. It is resolved by exactly one of: the echoed
  * user-prompt event (reconciled), an error attributed to it, `replay-done` with
  * the tail still pending (the hub never saw it), reconnect-budget exhaustion
- * (replay will never happen), or the session ending.
+ * (replay will never happen), the session ending, or — the backstop for a
+ * socket NOTHING has noticed is dead — the echo deadline (ECHO_DEADLINE_MS).
+ * Every event-driven path needs an event; a slept laptop's socket produces none.
  *
  * Permission dismissal: ACP has no per-request dismiss — agents supply reject
  * options in the request itself (answer with one of those), and `cancel()`
@@ -66,6 +68,28 @@ const BACKOFF_MS = [1000, 2000, 4000];
 const OFFLINE_COPY = "Couldn't reach the hub — check your connection.";
 const LOST_PROMPT_COPY = "Couldn't send that message — it's back in the box, try again.";
 
+/**
+ * How long an optimistic prompt may wait for its echo before we call it lost.
+ *
+ * The hub PERSISTS `user-prompt` before dispatching to the agent, so a healthy
+ * echo comes back sub-second — 20s is generous headroom for a slow link, not a
+ * guess at agent latency (the agent's own thinking happens after the echo).
+ * This is the only release path that needs no inbound event, which is exactly
+ * the case it exists for: a socket the browser still calls OPEN after a sleep,
+ * where no close/error/reconnect/replay-done/bye is ever coming. The cost of a
+ * false positive is small and reversible — the text returns to the composer and
+ * the user re-sends — while the cost of not having it is a wedged composer with
+ * no recovery short of a page reload.
+ */
+export const ECHO_DEADLINE_MS = 20_000;
+
+let echoDeadlineMs: number = ECHO_DEADLINE_MS;
+
+/** Test hook: shrink the echo deadline (mirrors the hub's `_set…ForTest` hooks). */
+export function _setEchoDeadlineMsForTest(ms: number): void {
+  echoDeadlineMs = ms;
+}
+
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -88,6 +112,13 @@ export class AcpChat {
   private readonly stationId: string;
   private socket: AcpSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Armed when a prompt frame is written, disarmed by whatever resolves it. The
+   * ONE release path that doesn't wait on an inbound event — see
+   * ECHO_DEADLINE_MS. Must never outlive the pending prompt (a stray timer would
+   * release a LATER prompt, or fire after destroy()).
+   */
+  private echoTimer: ReturnType<typeof setTimeout> | null = null;
   /** Reconnect attempts used since the last successful connect. */
   private attempt = 0;
   /** Set on `bye`: the session is over — the following close is expected. */
@@ -254,10 +285,17 @@ export class AcpChat {
       this.mode = row.mode;
       this.#transcript = emptyTranscript();
       this.startConnection();
-    } else if (!this.socket) {
-      // e.g. after budget exhaustion: reopen before prompting. The socket
-      // buffers pre-open sends, so subscribe still precedes the prompt.
+    } else if (!this.socket || !this.socket.isOpen) {
+      // No socket (e.g. after budget exhaustion), or one that is CONNECTING /
+      // CLOSING / CLOSED: either way there is nothing here that can carry a
+      // frame and answer it, so redial rather than write into it. A socket the
+      // browser has already noticed is gone still looks live to us until a close
+      // event arrives — and after a laptop sleep that event may never come.
+      // Tear the stale one down first: its close is ours, not a drop to
+      // reconnect from. The new socket buffers pre-open sends, so subscribe
+      // still precedes the prompt.
       this.clearReconnectTimer();
+      this.teardownSocket();
       this.attempt = 0;
       this.startConnection();
     }
@@ -266,6 +304,9 @@ export class AcpChat {
     this.socket?.send({ t: "prompt", text });
     this.awaitingEcho = true;
     this.promptSocket = this.socket;
+    // Nothing above proves the frame LANDED — only the echo does. Arm the
+    // backstop even if `send` went nowhere.
+    this.armEchoDeadline();
   }
 
   cancel(): void {
@@ -307,6 +348,7 @@ export class AcpChat {
   /** After ended: reset to the empty state (keep nothing but the mode selector). */
   newSession(): void {
     this.clearReconnectTimer();
+    this.clearEchoDeadline(); // the prompt it belonged to is gone with the transcript
     this.teardownSocket();
     this.#session = null;
     this.#transcript = emptyTranscript();
@@ -332,6 +374,7 @@ export class AcpChat {
   destroy(): void {
     this.destroyed = true;
     this.clearReconnectTimer();
+    this.clearEchoDeadline(); // an unmounted panel has no composer to hand text to
     this.teardownSocket();
   }
 
@@ -436,6 +479,7 @@ export class AcpChat {
     if (ev.type === "user-prompt") {
       this.awaitingEcho = false; // reconciled
       this.promptSocket = null;
+      this.clearEchoDeadline(); // the echo is here; nothing left to time out
     }
   }
 
@@ -444,6 +488,9 @@ export class AcpChat {
    * text back to the composer. Clears `busy`, so the composer is usable again.
    */
   private releasePendingPrompt(): void {
+    // Unconditionally: every other release path lands here, so this is the one
+    // place that guarantees the deadline can't fire behind them.
+    this.clearEchoDeadline();
     this.awaitingEcho = false;
     this.promptSocket = null;
     const { transcript, text } = dropPendingPrompt(this.#transcript);
@@ -513,6 +560,31 @@ export class AcpChat {
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  /**
+   * Start the echo deadline for the prompt just written. The frame may have gone
+   * into a socket that will never answer (see ECHO_DEADLINE_MS); when the clock
+   * runs out, release the pending item so `busy` — and the composer with it —
+   * comes back, and hand the text to the user rather than keep it hostage.
+   */
+  private armEchoDeadline(): void {
+    this.clearEchoDeadline();
+    this.echoTimer = setTimeout(() => {
+      this.echoTimer = null;
+      if (this.destroyed || !this.hasPendingPrompt()) return;
+      this.releasePendingPrompt();
+      // Same fate, same sentence as a replay that came back without the echo:
+      // the hub never saw it, and the words are back in the composer.
+      this.#error = LOST_PROMPT_COPY;
+    }, echoDeadlineMs);
+  }
+
+  private clearEchoDeadline(): void {
+    if (this.echoTimer !== null) {
+      clearTimeout(this.echoTimer);
+      this.echoTimer = null;
     }
   }
 
