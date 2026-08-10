@@ -26,7 +26,7 @@
  * `waiting` and a grace timer ends it.
  */
 
-import { and, desc, eq, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -263,21 +263,34 @@ function toContract(r: DbRow): AcpSessionRow {
 // ─── Session titles ───────────────────────────────────────────────────────────
 
 /**
- * Stored title length. Truncation is stored as-is with NO ellipsis: how a
- * clipped title is presented (…, fade, tooltip) is the console's choice, and
- * baking a glyph in here would corrupt the data for every other reader.
+ * Stored title length, counted in CODE POINTS. Truncation is stored as-is with
+ * NO ellipsis: how a clipped title is presented (…, fade, tooltip) is the
+ * console's choice, and baking a glyph in here would corrupt the data for every
+ * other reader.
  */
 const TITLE_MAX_CHARS = 80;
 
 /**
- * The title a prompt would give a session: trimmed, clipped to 80 chars.
+ * The title a prompt would give a session: trimmed, clipped to 80 code points.
  * Whitespace-only prompts name nothing (null) — the next real prompt titles
  * the session instead.
+ *
+ * The cut is code-point-safe (Array.from, not slice): `"a".repeat(79) + "😀"`
+ * has 81 UTF-16 code units, and a plain `slice(0, 80)` would keep the emoji's
+ * HIGH SURROGATE only. That lone surrogate is not valid UTF-8, so postgres.js
+ * drops it on the way in — the emoji vanishes and the stored title is 79 chars,
+ * silently, with no error anywhere. Code points, not grapheme clusters
+ * (Intl.Segmenter): the contract is a character budget, and a grapheme-limited
+ * cut could store far more than 80 characters. A multi-code-point emoji
+ * sequence (ZWJ family, flag) can still be split at the boundary, but every
+ * piece stays well-formed text — which is the invariant that matters here.
  */
 export function deriveSessionTitle(text: string): string | null {
   const trimmed = text.trim();
   if (trimmed.length === 0) return null;
-  return trimmed.slice(0, TITLE_MAX_CHARS);
+  const points = Array.from(trimmed);
+  if (points.length <= TITLE_MAX_CHARS) return trimmed;
+  return points.slice(0, TITLE_MAX_CHARS).join("");
 }
 
 // ─── Event persistence ────────────────────────────────────────────────────────
@@ -763,10 +776,17 @@ export interface ListSessionsOptions {
   /** Page size; defaults to 20 and is clamped into [1, 100]. */
   limit?: number;
   /**
-   * `lastEventAt` cursor (ISO): return only rows STRICTLY older than this.
-   * Pass the last row of the previous page.
+   * `lastEventAt` cursor (ISO) from the last row of the previous page: return
+   * only rows older than this. Pair it with `beforeId` — on its own it can only
+   * express "strictly older", which LOSES rows tied on the timestamp.
    */
   before?: string;
+  /**
+   * `id` of the same cursor row, completing the keyset. With it the predicate
+   * becomes (lastEventAt, id) < (before, beforeId) in the list's own ordering,
+   * so rows sharing `before` resume exactly where the page stopped.
+   */
+  beforeId?: string;
 }
 
 /**
@@ -791,10 +811,18 @@ export function clampSessionLimit(limit?: number): number {
  * acp_sessions_station_activity_idx — so the console's session switcher and the
  * history view share one read; callers must not re-sort.
  *
- * Paging is keyset, not offset: pass the last row's `lastEventAt` as `before`
- * and rows inserted meanwhile can't shift the page under the caller. The cursor
- * is the timestamp alone, so two rows sharing one millisecond exactly at a page
- * boundary can straddle it; the tie-break inside a page is id desc.
+ * Paging is keyset, not offset: pass the last row of the previous page back as
+ * `before` (its lastEventAt) AND `beforeId` (its id), and rows arriving
+ * meanwhile can't shift the page under the caller.
+ *
+ * Both halves matter. lastEventAt comes from `new Date()`, so several rows
+ * sharing one millisecond is ordinary — and a timestamp-only cursor with
+ * `lastEventAt < before` excludes every tied row from EVERY later page, not
+ * just this one. A session tied with the page boundary would disappear from
+ * history for good, silently. `beforeId` closes that hole by resuming inside
+ * the tie group. It stays optional only for cross-version tolerance: a console
+ * that sends `before` alone gets the old strict-older behaviour rather than an
+ * error.
  */
 export async function listSessions(
   userId: string,
@@ -810,7 +838,18 @@ export async function listSessions(
     if (Number.isNaN(cursor.getTime())) {
       throw new Error("Invalid page cursor.");
     }
-    filters.push(lt(acpSessions.lastEventAt, cursor));
+    filters.push(
+      opts.beforeId === undefined
+        ? lt(acpSessions.lastEventAt, cursor)
+        : // (lastEventAt, id) < (before, beforeId) — the list's own ordering.
+          or(
+            lt(acpSessions.lastEventAt, cursor),
+            and(
+              eq(acpSessions.lastEventAt, cursor),
+              lt(acpSessions.id, opts.beforeId)
+            )
+          )!
+    );
   }
   const rows = await db
     .select()
