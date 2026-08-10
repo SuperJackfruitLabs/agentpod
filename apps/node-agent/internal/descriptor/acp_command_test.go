@@ -244,6 +244,10 @@ func TestCapabilitiesIncludeACP(t *testing.T) {
 	t.Run("openclaw", func(t *testing.T) {
 		assertAllStationsHaveACP(t, NewOpenClaw(testdataOpenClawHome(t)))
 	})
+	t.Run("claude-code", func(t *testing.T) {
+		home, _, _, _ := buildClaudeCodeFixture(t)
+		assertAllStationsHaveACP(t, NewClaudeCode(home))
+	})
 }
 
 func assertAllStationsHaveACP(t *testing.T, d Descriptor) {
@@ -291,12 +295,15 @@ func TestHandlerACPCommand_ResolvesOpenCode(t *testing.T) {
 	}
 }
 
+// Codex is the last harness without an ACP mode; every other registered
+// descriptor implements ACPCommander, so it is what "unsupported" looks like
+// until Codex gains a bridge of its own.
 func TestHandlerACPCommand_UnsupportedHarness(t *testing.T) {
 	reg := NewRegistry()
-	reg.Register(NewClaudeCode("/nonexistent/claude/home"))
+	reg.Register(NewCodex("/nonexistent/codex/home"))
 	h := NewCapabilityHandler(reg)
 
-	_, _, _, err := h.ACPCommand("claude-code:abcd1234")
+	_, _, _, err := h.ACPCommand("codex:abcd1234")
 	if err == nil {
 		t.Fatal("expected error for harness without ACP support")
 	}

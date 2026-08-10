@@ -93,60 +93,19 @@ func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
 // openclawBinaryName is the executable that hosts the ACP bridge.
 const openclawBinaryName = "openclaw"
 
-// openclawWellKnownBinaries returns the absolute paths probed when openclaw is
-// not on PATH, in priority order. userHome is the OS user's home directory; ""
-// omits the home-relative candidates.
-//
-// This list exists because the node-agent commonly runs as a systemd *user*
-// service, which inherits systemd's minimal default PATH — that excludes
-// ~/.local/share/pnpm and ~/.local/bin, so a pnpm/npm-global install of openclaw
-// is invisible to exec.LookPath even though the shim works in the operator's
-// interactive shell.
-func openclawWellKnownBinaries(userHome string) []string {
-	var paths []string
-	if userHome != "" {
-		paths = append(paths,
-			filepath.Join(userHome, ".local", "share", "pnpm", openclawBinaryName), // pnpm global
-			filepath.Join(userHome, ".local", "bin", openclawBinaryName),           // npm --prefix ~/.local
-		)
-	}
-	return append(paths,
-		"/usr/local/bin/"+openclawBinaryName,
-		"/usr/bin/"+openclawBinaryName,
-		"/opt/homebrew/bin/"+openclawBinaryName, // macOS (Apple silicon Homebrew)
-	)
-}
-
-// resolveOpenClawBinary picks the openclaw executable to spawn, in order:
-// the configured override (used verbatim — the operator knows their layout),
-// then PATH, then the well-known absolute install paths. lookPath and
-// isExecutable are parameters so tests never touch the host's PATH or files.
+// resolveOpenClawBinary picks the openclaw executable to spawn via the shared
+// resolution order (config override → PATH → well-known install dirs; see
+// binaryLocator). lookPath and isExecutable are parameters so tests never touch
+// the host's PATH or files.
 //
 // The failure is an actionable lowercase fragment: it composes into the console's
 // "Couldn't start the agent process — <err>".
 func resolveOpenClawBinary(override, userHome string, lookPath func(string) (string, error), isExecutable func(string) bool) (string, error) {
-	if override != "" {
-		return override, nil
-	}
-	if abs, err := lookPath(openclawBinaryName); err == nil {
-		return abs, nil
-	}
-	for _, candidate := range openclawWellKnownBinaries(userHome) {
-		if isExecutable(candidate) {
-			return candidate, nil
-		}
+	locator := binaryLocator{userHome: userHome, lookPath: lookPath, isExecutable: isExecutable}
+	if binary, ok := locator.locate(openclawBinaryName, override); ok {
+		return binary, nil
 	}
 	return "", fmt.Errorf("openclaw: couldn't find the openclaw binary on this node — set openclawBinary in the node config")
-}
-
-// isExecutableFile reports whether path is an existing file with an executable
-// bit set. os.Stat follows symlinks, so a pnpm shim (a symlink) resolves.
-func isExecutableFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	return info.Mode()&0o111 != 0
 }
 
 // NewOpenClaw returns a Descriptor for the OpenClaw harness.

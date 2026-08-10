@@ -25,6 +25,20 @@ type Config struct {
   OpenClawGatewayURL   string `json:"openclawGatewayUrl,omitempty"`
   OpenClawTokenFile    string `json:"openclawTokenFile,omitempty"`
   OpenClawSessionLabel string `json:"openclawSessionLabel,omitempty"`
+  // Claude Code has no native ACP mode: sessions run through the external
+  // claude-agent-acp adapter (a Node program). All three keys are optional —
+  // with the adapter or npx on PATH, a node needs no configuration.
+  //
+  // ClaudeCodeAcpBinary is a claude-agent-acp executable, used verbatim as
+  // argv[0]; when empty the node-agent resolves it from PATH, then from
+  // well-known install paths, then falls back to a version-pinned `npx -y`.
+  // ClaudeCodeBinary is the claude CLI exported as CLAUDE_CODE_EXECUTABLE, so
+  // the ACP session drives the same install the Health tab reports on.
+  // NodeBinary is the node runtime (its directory also supplies npx) for hosts
+  // where node isn't on the service's PATH.
+  ClaudeCodeAcpBinary string `json:"claudeCodeAcpBinary,omitempty"`
+  ClaudeCodeBinary    string `json:"claudeCodeBinary,omitempty"`
+  NodeBinary          string `json:"nodeBinary,omitempty"`
 }
 
 func DefaultPath() string {

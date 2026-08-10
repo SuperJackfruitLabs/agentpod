@@ -39,7 +39,7 @@
   import { Empty } from "$lib/components/ui/empty";
   import { Status } from "$lib/components/ui/status";
   import { relativeTime } from "$lib/utils/relative-time";
-  import { ACP_STATUS_TOKEN, sessionName } from "./session-status";
+  import { ACP_STATUS_TOKEN, sessionName, untitledSessionLabel } from "./session-status";
 
   interface Props {
     stationId: string;
@@ -99,10 +99,15 @@
   });
 
   /**
-   * Untitled rows can't borrow the header's "Session N": that number comes from
-   * the whole list's creation order, which a paginated view doesn't have.
+   * A session's title, or "Session N" — the same shared fallback the chat
+   * header's switcher uses (session-status.ts), so an untitled row never
+   * wears two different words on the two surfaces a user is most likely to
+   * compare side by side. The number is scoped to whatever page(s) of `rows`
+   * this dialog has loaded so far — a paginated view doesn't have the whole
+   * station's session list to number against, only the header's switcher
+   * does — but the FORMAT is unified.
    */
-  const nameOf = (s: AcpSessionRow) => sessionName(s, "Untitled session");
+  const nameOf = (s: AcpSessionRow) => sessionName(s, untitledSessionLabel(rows, s.id));
 
   /**
    * "12 events" — `lastSeq` is the session's highest event seq, so it doubles as

@@ -10,6 +10,9 @@ func TestSaveLoadRoundTrip(t *testing.T) {
     OpenClawGatewayURL: "wss://gw.example:18789",
     OpenClawTokenFile: "/etc/agentpod/openclaw.token",
     OpenClawSessionLabel: "console",
+    ClaudeCodeAcpBinary: "/opt/bin/claude-agent-acp",
+    ClaudeCodeBinary: "/usr/local/bin/claude",
+    NodeBinary: "/opt/node-22/bin/node",
   }
   if err := Save(p, want); err != nil { t.Fatal(err) }
   got, err := Load(p)

@@ -7,8 +7,9 @@ import (
 
 // buildRegistry constructs the descriptor registry from the node config.
 // Every field it reads is optional: the zero Config yields the same registry as
-// an unconfigured host (detection works, lifecycle start and the openclaw ACP
-// gateway overrides simply stay unset).
+// an unconfigured host (detection works; lifecycle start, the openclaw ACP
+// gateway overrides and the claude-code adapter/runtime overrides simply stay
+// unset, and each descriptor resolves what it can from the host).
 func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg := descriptor.NewRegistry()
 	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
@@ -19,7 +20,11 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 		TokenFile:    cfg.OpenClawTokenFile,
 		SessionLabel: cfg.OpenClawSessionLabel,
 	}))
-	reg.Register(descriptor.NewClaudeCode(""))
+	reg.Register(descriptor.NewClaudeCodeFrom(descriptor.ClaudeCodeConfig{
+		AcpBinary:    cfg.ClaudeCodeAcpBinary,
+		ClaudeBinary: cfg.ClaudeCodeBinary,
+		NodeBinary:   cfg.NodeBinary,
+	}))
 	reg.Register(descriptor.NewOpenCode(""))
 	reg.Register(descriptor.NewCodex(""))
 	return reg
