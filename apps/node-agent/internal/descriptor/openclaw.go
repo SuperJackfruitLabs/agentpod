@@ -41,6 +41,11 @@ type openclawDescriptor struct {
 	// field so tests can declare the answer without spawning or pgrep-ing a
 	// process; production wiring in NewOpenClawFrom uses openclawGatewayPID.
 	gatewayUp func() bool
+
+	// resolveBinary returns the openclaw executable to spawn. Like gatewayUp it
+	// is a field so tests never depend on the host's PATH or filesystem;
+	// production wiring in NewOpenClawFrom uses resolveOpenClawBinary.
+	resolveBinary func() (string, error)
 }
 
 // OpenClawConfig carries everything the descriptor needs. Zero values are valid:
@@ -49,6 +54,7 @@ type openclawDescriptor struct {
 type OpenClawConfig struct {
 	Home         string // default: <user home>/.openclaw
 	StartCmd     string // lifecycle Start (existing behaviour)
+	Binary       string // openclaw executable; empty = resolve (see resolveOpenClawBinary)
 	GatewayURL   string // → --url
 	TokenFile    string // → --token-file  (never --token)
 	SessionLabel string // session component of agent:<name>:<label>; default "main"
@@ -56,18 +62,21 @@ type OpenClawConfig struct {
 
 // NewOpenClawFrom returns a Descriptor for the OpenClaw harness configured by cfg.
 func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
+	// userHome is "" when it can't be determined, which resolveOpenClawBinary
+	// reads as "skip the home-relative candidates".
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
+	}
 	home := cfg.Home
 	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			userHome = "."
-		}
 		home = filepath.Join(userHome, ".openclaw")
 	}
 	label := cfg.SessionLabel
 	if label == "" {
 		label = "main"
 	}
+	binary := cfg.Binary
 	return &openclawDescriptor{
 		home:         home,
 		startCmd:     cfg.StartCmd,
@@ -75,7 +84,69 @@ func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
 		tokenFile:    cfg.TokenFile,
 		sessionLabel: label,
 		gatewayUp:    func() bool { _, err := openclawGatewayPID(); return err == nil },
+		resolveBinary: func() (string, error) {
+			return resolveOpenClawBinary(binary, userHome, exec.LookPath, isExecutableFile)
+		},
 	}
+}
+
+// openclawBinaryName is the executable that hosts the ACP bridge.
+const openclawBinaryName = "openclaw"
+
+// openclawWellKnownBinaries returns the absolute paths probed when openclaw is
+// not on PATH, in priority order. userHome is the OS user's home directory; ""
+// omits the home-relative candidates.
+//
+// This list exists because the node-agent commonly runs as a systemd *user*
+// service, which inherits systemd's minimal default PATH — that excludes
+// ~/.local/share/pnpm and ~/.local/bin, so a pnpm/npm-global install of openclaw
+// is invisible to exec.LookPath even though the shim works in the operator's
+// interactive shell.
+func openclawWellKnownBinaries(userHome string) []string {
+	var paths []string
+	if userHome != "" {
+		paths = append(paths,
+			filepath.Join(userHome, ".local", "share", "pnpm", openclawBinaryName), // pnpm global
+			filepath.Join(userHome, ".local", "bin", openclawBinaryName),           // npm --prefix ~/.local
+		)
+	}
+	return append(paths,
+		"/usr/local/bin/"+openclawBinaryName,
+		"/usr/bin/"+openclawBinaryName,
+		"/opt/homebrew/bin/"+openclawBinaryName, // macOS (Apple silicon Homebrew)
+	)
+}
+
+// resolveOpenClawBinary picks the openclaw executable to spawn, in order:
+// the configured override (used verbatim — the operator knows their layout),
+// then PATH, then the well-known absolute install paths. lookPath and
+// isExecutable are parameters so tests never touch the host's PATH or files.
+//
+// The failure is an actionable lowercase fragment: it composes into the console's
+// "Couldn't start the agent process — <err>".
+func resolveOpenClawBinary(override, userHome string, lookPath func(string) (string, error), isExecutable func(string) bool) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	if abs, err := lookPath(openclawBinaryName); err == nil {
+		return abs, nil
+	}
+	for _, candidate := range openclawWellKnownBinaries(userHome) {
+		if isExecutable(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("openclaw: couldn't find the openclaw binary on this node — set openclawBinary in the node config")
+}
+
+// isExecutableFile reports whether path is an existing file with an executable
+// bit set. os.Stat follows symlinks, so a pnpm shim (a symlink) resolves.
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
 }
 
 // NewOpenClaw returns a Descriptor for the OpenClaw harness.
@@ -196,6 +267,15 @@ func (o *openclawDescriptor) ACPCommand(key string) ([]string, string, []string,
 		return nil, "", nil, err
 	}
 
+	// Resolve the binary before the gateway probe: a bare "openclaw" argv[0] dies
+	// later inside exec with "executable file not found in $PATH", and a node
+	// missing the CLI can't open a session however healthy its gateway is — so
+	// when both are wrong this is the failure worth reporting.
+	binary, err := o.resolveBinary()
+	if err != nil {
+		return nil, "", nil, err
+	}
+
 	// A configured URL points at a remote Gateway, so the local probe says
 	// nothing; without one, a dead local Gateway means the bridge would start,
 	// fail to dial, and leave the user waiting on the hub's handshake deadline.
@@ -216,7 +296,7 @@ func (o *openclawDescriptor) ACPCommand(key string) ([]string, string, []string,
 	// --no-prefix-cwd: the bridge otherwise prefixes every prompt with the
 	// working directory, which is redundant here — the station IS its workspace
 	// and we already set cmd.Dir — and it pollutes the transcript.
-	argv := []string{"openclaw", "acp", "--no-prefix-cwd"}
+	argv := []string{binary, "acp", "--no-prefix-cwd"}
 	if o.gatewayURL != "" {
 		argv = append(argv, "--url", o.gatewayURL)
 	}

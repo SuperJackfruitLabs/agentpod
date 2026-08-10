@@ -14,6 +14,7 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 	reg.Register(descriptor.NewHermes("", cfg.HermesStartCmd))
 	reg.Register(descriptor.NewOpenClawFrom(descriptor.OpenClawConfig{
 		StartCmd:     cfg.OpenClawStartCmd,
+		Binary:       cfg.OpenClawBinary,
 		GatewayURL:   cfg.OpenClawGatewayURL,
 		TokenFile:    cfg.OpenClawTokenFile,
 		SessionLabel: cfg.OpenClawSessionLabel,
