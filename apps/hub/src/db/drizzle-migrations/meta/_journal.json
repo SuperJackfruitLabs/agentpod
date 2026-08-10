@@ -183,6 +183,13 @@
       "when": 1786267145481,
       "tag": "0025_striped_demogoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1786354141066,
+      "tag": "0026_modern_colleen_wing",
+      "breakpoints": true
     }
   ]
 }

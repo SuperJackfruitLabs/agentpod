@@ -18,6 +18,33 @@ it("AcpSessionRow round-trips a full row", () => {
   expect(AcpSessionRow.parse(row)).toEqual(row);
 });
 
+describe("AcpSessionRow title + lastSeq (slice 4c) are cross-version tolerant", () => {
+  const base = {
+    id: "acp_1", stationId: "station_1", userId: "user_1",
+    mode: "ask", status: "idle", endedReason: null,
+    createdAt: "2026-08-09T00:00:00.000Z", lastEventAt: "2026-08-09T00:00:01.000Z",
+  };
+
+  it("parses a row WITH title and lastSeq", () => {
+    const row = { ...base, title: "Fix the flaky gateway test", lastSeq: 42 };
+    expect(AcpSessionRow.parse(row)).toEqual(row);
+  });
+
+  it("parses a row WITHOUT title or lastSeq (rows from an older hub)", () => {
+    expect(AcpSessionRow.parse(base)).toEqual(base);
+  });
+
+  it("parses title: null (no prompt sent yet)", () => {
+    const row = { ...base, title: null, lastSeq: 0 };
+    expect(AcpSessionRow.parse(row)).toEqual(row);
+  });
+
+  it("rejects a non-integer lastSeq", () => {
+    expect(() => AcpSessionRow.parse({ ...base, lastSeq: 1.5 })).toThrow();
+    expect(() => AcpSessionRow.parse({ ...base, lastSeq: "7" })).toThrow();
+  });
+});
+
 it("AcpSessionMode and AcpSessionStatus reject unknown values", () => {
   expect(() => AcpSessionMode.parse("yolo")).toThrow();
   expect(() => AcpSessionStatus.parse("bogus")).toThrow();
