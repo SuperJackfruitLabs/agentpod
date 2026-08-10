@@ -198,6 +198,70 @@ func TestACPVerbs(t *testing.T) {
 	}
 }
 
+// TestACPOpenEchoesInstance pins the wire contract from the contract package:
+// acp.open echoes the instance it was given (that echo is how the hub detects a
+// node that understands per-instance processes) and omits the field entirely
+// when the request carried none, so an older hub sees exactly today's result.
+func TestACPOpenEchoesInstance(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+
+	h := NewACPHandler(failInner(t), mgr, catCommandFunc(t.TempDir()))
+
+	res, _, err := h.Handle(context.Background(), "acp.open",
+		json.RawMessage(`{"key":"opencode:test","instance":"tab-2"}`), nil)
+	if err != nil {
+		t.Fatalf("acp.open: %v", err)
+	}
+	data := res.(map[string]any)
+	if got := data["instance"]; got != "tab-2" {
+		t.Fatalf(`result["instance"] = %v, want "tab-2"`, got)
+	}
+	if data["sessionId"] == "" || data["sessionId"] == nil {
+		t.Fatal("missing sessionId")
+	}
+
+	legacy, _, err := h.Handle(context.Background(), "acp.open",
+		json.RawMessage(`{"key":"opencode:test"}`), nil)
+	if err != nil {
+		t.Fatalf("legacy acp.open: %v", err)
+	}
+	legacyData := legacy.(map[string]any)
+	if _, present := legacyData["instance"]; present {
+		t.Fatalf(`legacy result carries instance=%v, want the field omitted`, legacyData["instance"])
+	}
+	if legacyData["sessionId"] == data["sessionId"] {
+		t.Fatal("the legacy (instance-less) open reused the named instance's session")
+	}
+}
+
+// TestACPOpenDistinctInstancesGetDistinctSessions pins that two hub sessions on
+// one station key each get their own ACP child through the gateway verb, and
+// that re-opening the same instance is still idempotent.
+func TestACPOpenDistinctInstancesGetDistinctSessions(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+
+	h := NewACPHandler(failInner(t), mgr, catCommandFunc(t.TempDir()))
+	open := func(instance string) string {
+		t.Helper()
+		res, _, err := h.Handle(context.Background(), "acp.open",
+			json.RawMessage(fmt.Sprintf(`{"key":"opencode:test","instance":%q}`, instance)), nil)
+		if err != nil {
+			t.Fatalf("acp.open %q: %v", instance, err)
+		}
+		return res.(map[string]any)["sessionId"].(string)
+	}
+
+	one, two := open("tab-1"), open("tab-2")
+	if one == two {
+		t.Fatalf("both instances got sessionId %q", one)
+	}
+	if again := open("tab-1"); again != one {
+		t.Fatalf("re-open of tab-1 = %q, want the existing %q", again, one)
+	}
+}
+
 // TestACPCloseEmitsExitEvent verifies that closing an ACP session delivers a
 // final stream frame whose decoded payload is the {"event":"exit",...} JSON
 // to an attached subscriber.
@@ -404,7 +468,7 @@ func TestACPInputFrameChainPassthrough(t *testing.T) {
 	}
 
 	// A frame for a live ACP session must NOT reach the inner handler.
-	sess, err := mgr.Open("opencode:test", []string{"/bin/cat"}, t.TempDir(), nil)
+	sess, err := mgr.Open("opencode:test", "", []string{"/bin/cat"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

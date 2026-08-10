@@ -11,7 +11,7 @@ import (
 func TestSession_EchoRoundTrip(t *testing.T) {
 	m := NewManager()
 	defer m.Shutdown()
-	s, err := m.Open("k", []string{"/bin/cat"}, t.TempDir(), nil)
+	s, err := m.Open("k", "", []string{"/bin/cat"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestSession_EchoRoundTrip(t *testing.T) {
 func TestSession_ExitFiresOnceWithReason(t *testing.T) {
 	m := NewManager()
 	defer m.Shutdown()
-	s, _ := m.Open("k", []string{"/bin/sh", "-c", "echo err >&2; exit 3"}, t.TempDir(), nil)
+	s, _ := m.Open("k", "", []string{"/bin/sh", "-c", "echo err >&2; exit 3"}, t.TempDir(), nil)
 	reasons := make(chan string, 2)
 	s.OnExit(func(r string) { reasons <- r })
 	select {
@@ -55,7 +55,7 @@ func TestSession_ExitFiresOnceWithReason(t *testing.T) {
 func TestSession_CloseFromOnExitDoesNotDeadlock(t *testing.T) {
 	m := NewManager()
 	defer m.Shutdown()
-	s, err := m.Open("k", []string{"/bin/sh", "-c", "exit 0"}, t.TempDir(), nil)
+	s, err := m.Open("k", "", []string{"/bin/sh", "-c", "exit 0"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestSession_CloseFromOnExitDoesNotDeadlock(t *testing.T) {
 
 func TestManager_CloseWithBlockedSubscriber(t *testing.T) {
 	m := NewManager()
-	s, err := m.Open("k", []string{"/bin/cat"}, t.TempDir(), nil)
+	s, err := m.Open("k", "", []string{"/bin/cat"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +131,7 @@ func TestSession_UnsubscribeWaitsForBacklog(t *testing.T) {
 
 	// Child paces its writes so the fast read loop queues ~20 distinct chunks,
 	// then exits immediately after the burst.
-	s, err := m.Open("k",
-		[]string{"/bin/sh", "-c", "i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done"},
+	s, err := m.Open("k", "", []string{"/bin/sh", "-c", "i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done"},
 		t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +173,7 @@ func TestSession_UnsubscribeWaitsForBacklog(t *testing.T) {
 func TestSession_OnExitUnregister(t *testing.T) {
 	m := NewManager()
 	defer m.Shutdown()
-	s, err := m.Open("k", []string{"/bin/cat"}, t.TempDir(), nil)
+	s, err := m.Open("k", "", []string{"/bin/cat"}, t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,14 +217,14 @@ func TestSession_OnExitUnregister(t *testing.T) {
 func TestManager_OpenEmptyArgv(t *testing.T) {
 	m := NewManager()
 	defer m.Shutdown()
-	if _, err := m.Open("k", nil, t.TempDir(), nil); err == nil {
+	if _, err := m.Open("k", "", nil, t.TempDir(), nil); err == nil {
 		t.Fatal("Open with empty argv should error, not panic")
 	}
 }
 
 func TestManager_CloseKillsProcess(t *testing.T) {
 	m := NewManager()
-	s, _ := m.Open("k", []string{"/bin/cat"}, t.TempDir(), nil)
+	s, _ := m.Open("k", "", []string{"/bin/cat"}, t.TempDir(), nil)
 	done := make(chan string, 1)
 	s.OnExit(func(r string) { done <- r })
 	if err := m.Close(s.ID()); err != nil {
