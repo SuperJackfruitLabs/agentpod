@@ -16,6 +16,12 @@ type Config struct {
   // `openclaw acp` bridge. All optional: with a local Gateway, openclaw resolves
   // its own URL from config. The token is passed as a FILE PATH, never inline —
   // argv is world-readable.
+  // OpenClawBinary is the openclaw executable to spawn (absolute path). Optional:
+  // when empty the node-agent resolves it from PATH, then from well-known install
+  // paths. Set it when openclaw lives somewhere the service's PATH can't see —
+  // e.g. a pnpm global install under ~/.local/share/pnpm, invisible to a systemd
+  // user service.
+  OpenClawBinary       string `json:"openclawBinary,omitempty"`
   OpenClawGatewayURL   string `json:"openclawGatewayUrl,omitempty"`
   OpenClawTokenFile    string `json:"openclawTokenFile,omitempty"`
   OpenClawSessionLabel string `json:"openclawSessionLabel,omitempty"`

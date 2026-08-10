@@ -112,13 +112,29 @@ func TestHermesACPCommand_BadKey(t *testing.T) {
 
 // --- OpenClaw ---
 //
-// gatewayUp is overridden in every case so no test spawns or pgreps a process
-// (see the Go test hygiene note in CLAUDE.md).
+// Both host-touching seams are overridden in every case so no test spawns or
+// pgreps a process (see the Go test hygiene note in CLAUDE.md) and none depends
+// on openclaw being installed on the machine running the tests.
+
+// stubOpenClawHost replaces the two seams that would otherwise touch the host:
+// the gateway liveness probe (pgrep/systemctl) and the binary resolver
+// (PATH + well-known install paths). It returns the concrete descriptor so a
+// case can refine either seam.
+func stubOpenClawHost(t *testing.T, d Descriptor, gatewayUp bool) *openclawDescriptor {
+	t.Helper()
+	o, ok := d.(*openclawDescriptor)
+	if !ok {
+		t.Fatalf("expected *openclawDescriptor, got %T", d)
+	}
+	o.gatewayUp = func() bool { return gatewayUp }
+	o.resolveBinary = func() (string, error) { return "openclaw", nil }
+	return o
+}
 
 func TestOpenClawACPCommand_RootStation(t *testing.T) {
 	home := testdataOpenClawHome(t)
 	d := NewOpenClawFrom(OpenClawConfig{Home: home})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+	stubOpenClawHost(t, d, true)
 
 	c, ok := d.(ACPCommander)
 	if !ok {
@@ -143,7 +159,7 @@ func TestOpenClawACPCommand_RootStation(t *testing.T) {
 func TestOpenClawACPCommand_AgentStation(t *testing.T) {
 	home := testdataOpenClawHome(t)
 	d := NewOpenClawFrom(OpenClawConfig{Home: home, SessionLabel: "console"})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+	stubOpenClawHost(t, d, true)
 
 	argv, dir, _, err := d.(ACPCommander).ACPCommand("openclaw:analyst")
 	if err != nil {
@@ -164,7 +180,7 @@ func TestOpenClawACPCommand_GatewayFlags(t *testing.T) {
 		GatewayURL: "wss://gw.example:18789",
 		TokenFile:  "/etc/agentpod/openclaw.token",
 	})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return false } // a URL makes the local probe irrelevant
+	stubOpenClawHost(t, d, false) // a URL makes the local probe irrelevant
 
 	argv, _, _, err := d.(ACPCommander).ACPCommand("openclaw")
 	if err != nil {
@@ -186,7 +202,7 @@ func TestOpenClawACPCommand_GatewayFlags(t *testing.T) {
 func TestOpenClawACPCommand_NoGatewayNoURL(t *testing.T) {
 	home := testdataOpenClawHome(t)
 	d := NewOpenClawFrom(OpenClawConfig{Home: home})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return false }
+	stubOpenClawHost(t, d, false)
 
 	if _, _, _, err := d.(ACPCommander).ACPCommand("openclaw"); err == nil {
 		t.Fatal("expected an error when no gateway is running and no URL is configured")
@@ -197,7 +213,7 @@ func TestOpenClawACPCommand_NoGatewayNoURL(t *testing.T) {
 
 func TestOpenClawACPCommand_BadKey(t *testing.T) {
 	d := NewOpenClawFrom(OpenClawConfig{Home: testdataOpenClawHome(t)})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+	stubOpenClawHost(t, d, true)
 
 	if _, _, _, err := d.(ACPCommander).ACPCommand("hermes:main"); err == nil {
 		t.Fatal("expected error for unrecognized key")
@@ -208,7 +224,7 @@ func TestOpenClawACPCommand_BadKey(t *testing.T) {
 // session key is derived, or the bridge would be pointed at "agent::main".
 func TestOpenClawACPCommand_EmptyAgentKey(t *testing.T) {
 	d := NewOpenClawFrom(OpenClawConfig{Home: testdataOpenClawHome(t)})
-	d.(*openclawDescriptor).gatewayUp = func() bool { return true }
+	stubOpenClawHost(t, d, true)
 
 	if _, _, _, err := d.(ACPCommander).ACPCommand("openclaw:"); err == nil {
 		t.Fatal("expected error for a key with an empty agent name")
