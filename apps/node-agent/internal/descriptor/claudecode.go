@@ -503,20 +503,27 @@ func cwdWithinWorkspace(cwd, workspace string) bool {
 
 // claudeProcessRunning reports whether a claude CLI session is running with
 // its working directory inside projPath.
-//
-// Detection is cwd-based: `pgrep '^claude'` finds candidate pids by process
-// name (ps/pgrep see "claude"), then one lsof call resolves their cwds.
-// Selecting by name inside lsof (-c claude) does NOT work — the claude CLI
-// rewrites its process title to its version string (e.g. "2.1.222"), and
-// lsof's `+d dir` does not match a process whose cwd is the directory anyway.
-// lsof's exit code is ignored when it produced output: it exits 1 on benign
-// per-file warnings even with valid matches (the old code read that as
-// "stopped" while sessions were running).
 func claudeProcessRunning(projPath string) (running bool, note string) {
-	out, err := exec.Command("pgrep", "^claude").Output()
+	return processRunningInWorkspace("^claude", projPath)
+}
+
+// processRunningInWorkspace reports whether a process whose name matches the
+// pgrep pattern is running with its working directory inside projPath. Used by
+// the workspace harnesses (claude-code, codex), which have no persistent
+// process of their own to look up.
+//
+// Detection is cwd-based: `pgrep <pattern>` finds candidate pids by process
+// name, then one lsof call resolves their cwds. Selecting by name inside lsof
+// (-c claude) does NOT work — the claude CLI rewrites its process title to its
+// version string (e.g. "2.1.222"), and lsof's `+d dir` does not match a process
+// whose cwd is the directory anyway. lsof's exit code is ignored when it
+// produced output: it exits 1 on benign per-file warnings even with valid
+// matches (the old code read that as "stopped" while sessions were running).
+func processRunningInWorkspace(pgrepPattern, projPath string) (running bool, note string) {
+	out, err := exec.Command("pgrep", pgrepPattern).Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return false, "" // no claude processes at all
+			return false, "" // no matching processes at all
 		}
 		return false, "process check unavailable (pgrep not found or failed)"
 	}
