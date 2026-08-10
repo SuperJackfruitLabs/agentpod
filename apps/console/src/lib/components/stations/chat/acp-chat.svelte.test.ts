@@ -140,7 +140,7 @@ test("init attaches to the newest non-ended session and replays to connected", a
   const chat = new AcpChat("st1");
   await chat.init();
 
-  expect(api.listAcpSessions).toHaveBeenCalledWith("st1");
+  expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 });
   const ws = MockWebSocket.latest();
   expect(ws).toBeTruthy();
   expect(ws!.url).toContain("/api/acp/sessions/s1/ws");
@@ -160,6 +160,29 @@ test("init attaches to the newest non-ended session and replays to connected", a
   expect(chat.mode).toBe("accept-edits"); // synced from the session row
   expect(chat.transcript.lastSeq).toBe(2);
   expect(chat.transcript.items.map((it) => it.kind)).toEqual(["user", "assistant"]);
+});
+
+test("init attaches a live session that sits past the hub's default page", async () => {
+  // Regression: the hub's session list is paginated (default 20). A station where
+  // an idle live session was left running while a dozen short-lived ones were
+  // created and ended has it far down the ACTIVITY order — on the default page it
+  // isn't in the response at all, so `init` found no live row and the panel
+  // opened on "No session" with an empty transcript while the agent was running.
+  const rows = [
+    ...Array.from({ length: 21 }, (_, i) =>
+      row({ id: `dead${i}`, status: "ended", lastEventAt: `2026-08-09T10:${String(i).padStart(2, "0")}:00.000Z` }),
+    ),
+    row({ id: "alive", status: "idle", lastEventAt: "2026-08-01T00:00:00.000Z" }),
+  ];
+  const list = vi.spyOn(api, "listAcpSessions").mockResolvedValue(rows);
+
+  const chat = new AcpChat("st1");
+  await chat.init();
+
+  // Asking for the deepest page is what makes the 22nd row visible at all.
+  expect(list).toHaveBeenCalledWith("st1", { limit: 100 });
+  expect(chat.session?.id).toBe("alive");
+  expect(MockWebSocket.latest()!.url).toContain("/api/acp/sessions/alive/ws");
 });
 
 // ─── (b) init: only ended sessions → idle, no socket ─────────────────────────

@@ -142,7 +142,14 @@
     {#if rows.length === 0}
       {#if loading}
         <p class="t-label text-muted-foreground">Loading sessions…</p>
-      {:else if error === null}
+      {:else if error !== null}
+        <!-- A failed FIRST page leaves nothing to page from, so "Load older"
+             below is out of reach: without this the only way out of a blank
+             dialog is closing and reopening it. -->
+        <div>
+          <Button variant="outline" size="sm" onclick={() => void loadPage()}>Try again</Button>
+        </div>
+      {:else}
         <Empty
           title="No sessions yet"
           description="Send a message in the composer and the session will show up here."

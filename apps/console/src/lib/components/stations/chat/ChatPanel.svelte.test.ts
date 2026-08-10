@@ -135,7 +135,7 @@ function ev(seq: number, type: AcpEvent["type"], payload: unknown): AcpEvent {
 async function renderIdle() {
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([]);
   const utils = render(ChatPanel, { props: { stationId: "st1" } });
-  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1"));
+  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 }));
   await tick();
   return utils;
 }
@@ -709,7 +709,7 @@ test("a draft typed with no session survives switching away to read one", async 
   const endedB = { ...sessionB, status: "ended" as const };
   vi.spyOn(api, "listAcpSessions").mockResolvedValue([endedB, endedA]);
   const u = render(ChatPanel, { props: { stationId: "st1" } });
-  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1"));
+  await waitFor(() => expect(api.listAcpSessions).toHaveBeenCalledWith("st1", { limit: 100 }));
   await tick();
   expect(MockWebSocket.instances).toHaveLength(0); // nothing live to attach
   const box = composer(u);

@@ -103,11 +103,13 @@ const GONE_SESSION_COPY = "Couldn't open that session — it's no longer there."
 export const ECHO_DEADLINE_MS = 20_000;
 
 /**
- * Page size for the session re-read behind create/end/attach. The hub clamps
- * `limit` at 100; asking for the maximum keeps `attach` able to resolve a
- * session the switcher never showed (the history dialog lists far deeper than
- * the switcher's 8), which is the difference between opening an old session and
- * being told it is "no longer there".
+ * Page size for every session list this controller reads (`init` and the re-read
+ * behind create/end/attach). The hub clamps `limit` at 100; asking for the
+ * maximum is what keeps `init` able to FIND a live session that has drifted down
+ * the activity order, and `attach` able to resolve a session the switcher never
+ * showed (the history dialog lists far deeper than the switcher's 8) — the
+ * difference between opening an old session and being told it is "no longer
+ * there". The hub's own default page is 20.
  */
 const SESSION_LIST_LIMIT = 100;
 
@@ -282,11 +284,18 @@ export class AcpChat {
    * List the station's sessions and attach the first live one. Only ended
    * sessions (or none at all) → stay idle with the empty state, but the list is
    * still published so the switcher can offer their transcripts.
+   *
+   * Asks for the DEEPEST page, like `refreshSessions` — the live session is not
+   * necessarily near the top. A station where an idle live session was left
+   * running while a dozen short-lived ones were created and ended has it far
+   * down the activity order, and on the hub's default page it wouldn't be in the
+   * response at all: the panel would open on "No session" with an empty
+   * transcript while the agent is actually running.
    */
   async init(): Promise<void> {
     let rows: AcpSessionRow[];
     try {
-      rows = await listAcpSessions(this.stationId);
+      rows = await listAcpSessions(this.stationId, { limit: SESSION_LIST_LIMIT });
     } catch (err) {
       this.#error = errMessage(err);
       return;

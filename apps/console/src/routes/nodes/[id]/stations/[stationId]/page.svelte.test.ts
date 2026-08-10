@@ -143,7 +143,7 @@ test("an acp station gets Chat first and selected by default, with the panel mou
   });
   // The panel is really there (not just the tab), and it booted the controller.
   expect(getByPlaceholderText("Message the agent…")).toBeTruthy();
-  expect(acpApi.listAcpSessions).toHaveBeenCalledWith("station_1");
+  expect(acpApi.listAcpSessions).toHaveBeenCalledWith("station_1", { limit: 100 });
 });
 
 test("switching away from Chat keeps the panel mounted so its socket survives", async () => {

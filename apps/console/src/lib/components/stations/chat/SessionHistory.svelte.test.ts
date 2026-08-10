@@ -137,8 +137,13 @@ test("a station with no sessions shows the empty state, not an empty list", asyn
   expect(within(dialog).queryByRole("button", { name: "Load older" })).toBeNull();
 });
 
-test("a failed load says so instead of looking empty", async () => {
-  vi.spyOn(api, "listAcpSessions").mockRejectedValue(new Error("Couldn't reach the hub."));
+test("a failed load says so instead of looking empty, and can be retried", async () => {
+  // A failed FIRST page has nothing to page from, so the "Load older" control
+  // isn't rendered — without a retry here the only way out is closing and
+  // reopening the dialog.
+  const list = vi
+    .spyOn(api, "listAcpSessions")
+    .mockRejectedValue(new Error("Couldn't reach the hub."));
   const u = render(SessionHistory, {
     props: { stationId: "st1", currentSessionId: null, onSelect: vi.fn(), onClose: vi.fn() },
   });
@@ -146,6 +151,14 @@ test("a failed load says so instead of looking empty", async () => {
   const dialog = await dialogOf(u);
   await waitFor(() => expect(within(dialog).getByText("Couldn't reach the hub.")).toBeTruthy());
   expect(within(dialog).queryByText("No sessions yet")).toBeNull();
+
+  list.mockResolvedValue([row({ id: "sa", title: "back from the dead" })]);
+  await fireEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+
+  await waitFor(() => expect(within(dialog).getByText("back from the dead")).toBeTruthy());
+  // The stale error goes with the successful retry.
+  expect(within(dialog).queryByText("Couldn't reach the hub.")).toBeNull();
+  expect(list).toHaveBeenLastCalledWith("st1", { limit: PAGE_SIZE });
 });
 
 // ─── Pagination ─────────────────────────────────────────────────────────────
