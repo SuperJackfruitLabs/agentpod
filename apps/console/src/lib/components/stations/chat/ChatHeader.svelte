@@ -47,7 +47,7 @@
   import { Status } from "$lib/components/ui/status";
   import { chipClass } from "$lib/utils/toggle-chip";
   import { relativeTime } from "$lib/utils/relative-time";
-  import { ACP_STATUS_TOKEN, sessionName } from "./session-status";
+  import { ACP_STATUS_TOKEN, sessionName, untitledSessionLabel } from "./session-status";
 
   interface Props {
     session: AcpSessionRow | null;
@@ -121,22 +121,13 @@
   );
 
   /**
-   * id → "Session N", numbered by creation order. Computed from a SORTED COPY:
-   * the rendered list keeps the hub's activity order, only the numbers come from
-   * createdAt, so a session's name never changes as it streams.
+   * A session's title, or "Session N" (numbered by creation order across
+   * `sessions`) until its first prompt gives it one — the shared fallback
+   * from session-status.ts, so the history dialog names the same row the
+   * same way.
    */
-  const sessionNumber = $derived.by(() => {
-    const byAge = [...sessions].sort((a, b) =>
-      a.createdAt === b.createdAt
-        ? a.id.localeCompare(b.id)
-        : a.createdAt.localeCompare(b.createdAt),
-    );
-    return new Map(byAge.map((s, i) => [s.id, i + 1]));
-  });
-
-  /** A session's title, or "Session N" until its first prompt gives it one. */
   function nameOf(s: AcpSessionRow): string {
-    return sessionName(s, `Session ${sessionNumber.get(s.id) ?? "?"}`);
+    return sessionName(s, untitledSessionLabel(sessions, s.id));
   }
 
   /** The row's meta half: "· working · 5m ago" (status is agent data → lowercase). */

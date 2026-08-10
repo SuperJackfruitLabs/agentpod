@@ -190,6 +190,13 @@
       "when": 1786354141066,
       "tag": "0026_modern_colleen_wing",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786358074831,
+      "tag": "0027_backfill_last_seq",
+      "breakpoints": true
     }
   ]
 }

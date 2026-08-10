@@ -111,7 +111,9 @@ test("lists the station's sessions with title, status, activity and event count"
   expect(second.textContent).not.toContain("1 events");
 });
 
-test("an untitled session falls back to a plain name, and titles are text only", async () => {
+test("an untitled session falls back to 'Session N' — the same word the switcher uses — and titles are text only", async () => {
+  // Same createdAt on sa/sb: the ordinal ties break on id, so sa=1, sb=2
+  // regardless of sc (titled, and sorted between them by id) being present.
   const rows = [
     row({ id: "sa", title: null }),
     row({ id: "sb", title: "   " }),
@@ -120,8 +122,11 @@ test("an untitled session falls back to a plain name, and titles are text only",
   const u = setup(rows);
   const dialog = await dialogOf(u);
 
-  const untitled = await waitFor(() => within(dialog).getAllByText("Untitled session"));
-  expect(untitled).toHaveLength(2); // null and whitespace-only both fall back
+  // Not "Untitled session" — the history dialog and the chat header's
+  // switcher must agree on the fallback word for the same kind of row.
+  expect(await waitFor(() => within(dialog).getByText("Session 1"))).toBeTruthy();
+  expect(within(dialog).getByText("Session 2")).toBeTruthy(); // null and whitespace-only both fall back
+  expect(within(dialog).queryByText("Untitled session")).toBeNull();
 
   // Untrusted text: the agent's / the user's own words never become markup.
   const nasty = within(dialog).getByText("<img src=x onerror=alert(1)> & <b>bold</b>");
