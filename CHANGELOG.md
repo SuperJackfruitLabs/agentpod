@@ -6,6 +6,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.19 - 2026-08-11
+
+`apn scan` — a security check for the agent runtimes on a machine, needing no hub, no account and no network.
+
+### Added
+
+- **`apn scan`** checks the two ways an agent runtime gets taken over:
+  - **Credential files other users can read.** Known credential paths per harness (openclaw, hermes, claude-code, codex, opencode) are checked for group- or world-readable modes. File *contents* are never inspected — telling someone their keys are exposed should not require reading their keys.
+  - **Agents listening on every network interface.** A runtime bound to `0.0.0.0` or `[::]` rather than loopback is reachable by anything that can route to the box. Only agent processes are considered; this is not a general port audit.
+- Graded report (`A`–`F`) with a specific remedy per finding, `--json` for scripting, and an exit code usable in cron: `0` clean, `1` warnings, `2` critical.
+- A check that cannot determine an answer reports `unknown` and says why. It is never counted as a pass, and never worsens the grade either.
+
+### Notes
+
+- **Scope of the listener check:** harnesses driven over stdio — Codex, Claude Code and OpenCode under ACP — never bind a port, so on a machine running only those this check has nothing to report. It covers agents run in server mode, such as an OpenClaw gateway.
+- **No CVE database.** Every check is a property of the machine as it is now, so the binary stays honest without needing updates.
+- macOS binaries remain unsigned ([#228](https://github.com/rakeshgangwar/agentpod/issues/228), blocked on an Apple Developer account), so a macOS node will re-prompt for permissions after self-updating.
+
+> Releases v0.1.14 – v0.1.18 were not written up here. They cover the ACP sessions program (multi-session, history, Claude Code and Codex adapters) and the UI revamp; see `git log v0.1.13..v0.1.18` for the detail.
+
+---
+
 ## v0.1.13 - 2026-08-08
 
 `apn` service CLI: status/stop/start/restart/logs, `service install`/`uninstall`, a grouped help system, and a thinner installer.
