@@ -266,3 +266,71 @@ export const cleanupApply = (stationId: string, paths: string[]) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paths }),
   });
+
+// ─── Changeset endpoints ──────────────────────────────────────────────────────
+
+export type ChangesetFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "type-changed"
+  | "untracked";
+
+export type ChangesetFile = {
+  path: string;
+  /** Set for renames and copies only. */
+  oldPath: string | null;
+  status: ChangesetFileStatus;
+  /** Null for binary files and for untracked files, which git will not count
+   *  without `git add -N` — and that would mutate a live workspace's index. */
+  insertions: number | null;
+  deletions: number | null;
+  binary: boolean;
+};
+
+export type ChangesetCommit = {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  author: string;
+  committedAt: string;
+};
+
+export type ChangesetStatusResult = {
+  repo: { branch: string | null; head: string | null; detached: boolean };
+  base: {
+    ref: string;
+    sha: string;
+    reason: "explicit" | "upstream" | "default-branch" | "head";
+  };
+  uncommitted: { files: ChangesetFile[]; insertions: number; deletions: number };
+  committed: {
+    files: ChangesetFile[];
+    insertions: number;
+    deletions: number;
+    commits: ChangesetCommit[];
+  };
+  truncatedFiles: boolean;
+};
+
+export type ChangesetDiffResult = { content: string; truncated: boolean; binary: boolean };
+
+export const changesetStatus = (stationId: string, base?: string) =>
+  http<ChangesetStatusResult>(`/api/stations/${stationId}/changeset/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(base ? { base } : {}),
+  });
+
+export const changesetDiff = (
+  stationId: string,
+  side: "uncommitted" | "committed",
+  path?: string
+) =>
+  http<ChangesetDiffResult>(`/api/stations/${stationId}/changeset/diff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ side, ...(path ? { path } : {}) }),
+  });
