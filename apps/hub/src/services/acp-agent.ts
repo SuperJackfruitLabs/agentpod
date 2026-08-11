@@ -14,7 +14,13 @@
  * Design: docs/superpowers/specs/2026-08-11-doors-acp-proxy-design.md
  */
 
-import { agent, AGENT_METHODS, RequestError, type AgentApp } from "@agentclientprotocol/sdk";
+import {
+  agent,
+  AGENT_METHODS,
+  CLIENT_METHODS,
+  RequestError,
+  type AgentApp,
+} from "@agentclientprotocol/sdk";
 import type { AcpSessionMode } from "@agentpod/contract";
 import * as sessions from "./acp-sessions";
 
@@ -31,6 +37,11 @@ export interface AcpSessionService {
     userId: string;
     mode: AcpSessionMode;
   }): Promise<{ id: string }>;
+
+  promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+
+  /** Returns an unsubscribe function. The hub fans out to N subscribers. */
+  subscribe(sessionId: string, fn: (e: { type: string; payload: unknown }) => void): () => void;
 }
 
 export interface AcpAgentOptions {
@@ -77,7 +88,49 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
         }),
       );
       return { sessionId: row.id };
+    })
+    // Handlers take ONE context object — `{ params, client }` — not
+    // (params, ctx). That is what the SDK's deprecation note means by "registers
+    // typed handlers with a single context object".
+    .onRequest(AGENT_METHODS.session_prompt, async ({ params, client }) => {
+      // Subscribe BEFORE prompting. The agent can emit its first update before
+      // promptSession resolves, and a late subscriber drops it silently — a bug
+      // that shows up as an occasional missing first line rather than a crash.
+      const unsubscribe = service.subscribe(params.sessionId, (event) => {
+        // Only agent-update carries a raw ACP sessionUpdate payload; the hub's
+        // other event types (permission-request, state, error) are its own
+        // vocabulary and are handled in slice 2. Forwarding them here would
+        // hand the editor frames it cannot parse.
+        if (event.type !== "agent-update") return;
+        void client.notify(CLIENT_METHODS.session_update, {
+          sessionId: params.sessionId,
+          update: event.payload,
+        } as never);
+      });
+
+      try {
+        await asAcpError(() =>
+          service.promptSession(opts.userId, params.sessionId, textOf(params.prompt)),
+        );
+        return { stopReason: "end_turn" };
+      } finally {
+        // The turn is over; stop writing to a client that is no longer waiting.
+        unsubscribe();
+      }
     });
+}
+
+/**
+ * ACP prompts are an array of content blocks; the session service takes text.
+ *
+ * Non-text blocks (images, resources) are dropped rather than stringified —
+ * pushing `[object Object]` at a harness is worse than sending less.
+ */
+function textOf(blocks: ReadonlyArray<{ type: string; text?: string }>): string {
+  return blocks
+    .filter((b) => b.type === "text")
+    .map((b) => b.text ?? "")
+    .join("");
 }
 
 /** JSON-RPC internal error. */
