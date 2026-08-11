@@ -1,6 +1,6 @@
 # kaambaan Bridge Spike — Findings
 
-**Date:** 2026-08-11 · **Status:** partial — RQ1, RQ3, RQ5 answered against live stations; RQ2 and RQ4 not yet run
+**Date:** 2026-08-11 · **Status:** RQ1, RQ3, RQ4, RQ5 answered against live stations; RQ2 outstanding
 
 Answers the research questions in [the spike design](./2026-08-11-kaambaan-bridge-spike-design.md). Evidence is in `apps/bridge/spike/findings/`.
 
@@ -66,9 +66,38 @@ Ordinary thinking comes nowhere near the reclaim timeout. A 60s heartbeat is com
 
 ---
 
-## RQ4 — Double execution on reclaim · **NOT RUN**
+## RQ4 — Double execution on reclaim · **SPLIT VERDICT: kaambaan PASSES, the workspace does not**
 
-Needs a 15-minute wall-clock wait. The reasoning that motivated it is unchanged and still evidenced in kaambaan's code (`board-do.ts:1500–1512`: reclaim ends the run, re-queues the card, notifies `work.available`). `scripts/observe-reclaim.ts` is written and ready.
+Run against Codex on `~/Projects/research` (backed up first). The bridge was killed mid-run so heartbeats stopped while the hub-owned ACP session kept the harness working.
+
+### Timeline
+
+| t | Event |
+|---|---|
+| 0s | Bridge killed. Card `working`, `delegate=agt_59945e…`, session `status=working` |
+| ~180s | **Codex finished on its own** — `summaries/` written, session `idle` |
+| **900s** | **Card reclaimed** — `state=submitted`, `delegate=None`. Exactly `HEARTBEAT_TIMEOUT_MS`, to the second |
+| ~1400s | Second agent claimed it: `run_ac35286e…`, **`leaseEpoch=2`**, `attempts` 1→2 |
+
+### What this proves
+
+**kaambaan fences correctly.** The new claim came back with `leaseEpoch=2`. Every run call carries its epoch, so the original run — still holding epoch 1 — can no longer write activities, complete, or otherwise corrupt board state. The design's fear that reclaim lets two agents *drive the same card* is unfounded: kaambaan's state machine is safe.
+
+**But the fence is around kaambaan's data, not around the machine.** The original harness kept executing with no idea its lease had been revoked. In this run it happened to finish first, so nothing collided. Had it still been working — which is the whole point of a task that outlives 15 minutes — two harnesses would have been writing the same directory. kaambaan would have correctly ignored the first one's *activities* while its *file writes* landed anyway.
+
+**Nothing tells the harness to stop.** That gap is entirely on our side, and it is the concrete deliverable this spike was run to find:
+
+> **When a run's lease is superseded, the bridge must end the ACP session.** The hub owns session lifecycle and already exposes `DELETE /api/acp/sessions/:id`. The bridge learns its epoch is stale on the next `heartbeat` or `activities` call — the natural place to hook it.
+
+### Two secondary findings
+
+- **`attemptCount` increments on *claim*, not on reclaim.** The plan assumed the reverse and would have watched the wrong signal. Reclaim moves `working → submitted` and clears `delegateAgentId`; those are what to watch.
+- **A completed-but-unreported run is re-dispatched.** The work was finished and on disk at t+180s, yet at t+900s the board offered it again — the bridge died before calling `complete`, so the board never learned. This is likely the *common* failure in production, more so than concurrent writes: not a race, just silently repeated work. It also means an at-least-once delivery model, so **card work must be idempotent or the bridge must check for prior output before starting.**
+- Releasing the second run with `fail` pushed the card to `input-required` — kaambaan's consecutive-failure circuit breaker, working as documented.
+
+### Workspace outcome
+
+Clean. Three summaries created, the three originals byte-identical to the backup. The backup was the right call and was not needed.
 
 ---
 
@@ -125,12 +154,15 @@ Recorded in full in `apps/bridge/spike/findings/verified-surface.md`: no `reques
 
 ---
 
-## Recommendation so far: **harden, with changes to §7 and §8**
+## Recommendation: **harden, with changes to §7 and §8**
 
-Nothing found so far kills the seam. The contract carries the work, the states line up, and the lease is comfortable. But three amendments are already earned:
+The seam holds. The contract carries the work, the states line up, the lease is comfortable, and kaambaan's fencing is sound — RQ4, the question with the power to kill this, came back with kaambaan behaving correctly. Four amendments are earned:
 
-1. **§7 gains a coalescing requirement.** A bridge that posts 1:1 is not viable at 1,051 events per prompt. This belongs in the strategy, not just the implementation, because it is a property of the seam rather than of our code.
-2. **§8's cost claim must be qualified.** Cost per run is not available over ACP today. Either the claim goes, or the roadmap gains a per-harness cost adapter with N-harness maintenance attached.
-3. **Horizon 2's bridge item gains a service-identity task** — the shared static `API_TOKEN` is not an identity for a fleet-scale bridge.
+1. **§7 gains a coalescing requirement.** A bridge that posts 1:1 is not viable at 1,051 events per prompt, and the 18× spread between harnesses means no fixed rate limit fits. This is a property of the seam, not of our code.
+2. **§8's cost claim must be qualified.** Cost per run is not available over ACP on any harness tested. Either the claim goes, or the roadmap gains per-harness cost adapters with the N-harness maintenance §10 warns about. The context window is worth keeping in its place.
+3. **The bridge must end the ACP session when its lease is superseded.** kaambaan fences its own state; nothing fences the machine. This is the concrete engineering deliverable of the spike and it belongs in Horizon 2's bridge item.
+4. **Card work must be idempotent, or the bridge must check for prior output.** Reclaim is at-least-once: a finished-but-unreported run gets re-dispatched.
 
-**This recommendation is provisional.** RQ2 and RQ4 are unrun, and RQ4 is the one with the power to force a redesign — if reclaim can produce two agents on one workspace, the fix lands in AgentPod's run identity and changes Horizon 0's shape.
+Plus the service-identity task — the shared static `API_TOKEN` is not an identity for a fleet-scale bridge (now Horizon 3).
+
+**Outstanding:** RQ2 (permission round-trip). It is the last unanswered question and the lowest-risk one — the state mapping is already confirmed on both sides, and what remains is verifying that ACP's option list survives `signalMetadata` and that an answer routes back into the blocked call.
