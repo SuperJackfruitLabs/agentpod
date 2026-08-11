@@ -466,6 +466,25 @@ explicitly). Add a usage event type and, keyed by run, we get cost per task, per
 per machine, per person. **Nobody else can compute that for self-hosted agents, because
 nobody else is on the box.**
 
+> **Correction, 2026-08-11 — the paragraph above is wrong about ACP, and the claim needs
+> qualifying.** The bridge spike drove real sessions on Codex and Hermes and searched both
+> transcripts: **zero occurrences of `inputTokens`, `outputTokens` or `costUsd` across 1,108
+> events.** No harness emits tokens or price over ACP. The one promising field,
+> `usage_update {used, size}`, is *context-window occupancy* — not tokens, not money. Nobody
+> else can compute cost for self-hosted agents, and on this evidence neither can we: being on
+> the box does not help when the harness never reports the number.
+>
+> **Cost accounting is therefore deferred**, and when it returns it costs more than a usage
+> event type — it needs per-harness log parsing (kaambaan's own `claude-code.ts` reads
+> `total_cost_usd` from `stream-json`, so the data exists off-protocol), which is the
+> N-harness maintenance §10 warns about. Pushing usage into ACP upstream is the cheaper fix
+> if it lands.
+>
+> **What we do get for free is the context window**, and it is worth having on its own terms:
+> occupancy predicts a run about to truncate or compact, which is a failure mode the board
+> can act on. The bridge tracks the peak, warns once above a threshold rather than streaming
+> noise, and carries the peak in the completion handoff.
+
 > **When the board and the runtime disagree, the runtime wins.** A card can dispatch work that
 > fleet policy forbids — `full-auto` on a production-tagged node, exec on a credential-holding
 > station. The runtime refuses, because it is on the box and it is the last line, and it
@@ -603,6 +622,12 @@ item here that is distribution rather than capability.*
       Docker and Cloudflare drivers we already have. Kubernetes `agent-sandbox` moves to the
       second wave (§6). Each must land as an ordinary enrolled station with zero downstream
       special-casing.
+- [ ] **Coalesce before projecting.** Measured on real stations: the same trivial prompt yields
+      57 ACP events from Codex and **1,051 from Hermes**, which at one-activity-per-event would
+      be over a thousand POSTs at a board for one instruction — and an 18× spread across
+      harnesses means no fixed rate limit fits both. Ephemeral chunks must be buffered and
+      flushed on a boundary before anything leaves the bridge. This is a property of the seam,
+      not of our code, which is why it sits in the roadmap rather than in a ticket.
 - [ ] **Fleet-as-MCP-server — a curated subset, not a mechanical wrap.** The original framing
       ("the zod schemas convert nearly mechanically") is precisely the mistake §7 flags in
       kaambaan's own MCP surface, and it bites harder here: our verbs include lifecycle,
@@ -674,6 +699,13 @@ tags, a fleet-level concurrency cap (§7).
       enrollment credential and its `kbn_` kaambaan token. Bind both to one non-human identity
       on a single rotation schedule, or they rotate on different clocks under different owners,
       which is how this breaks at 3am.
+- [ ] **Harden the hub's service credential.** It exists but is weak: `auth/middleware.ts`
+      accepts a single static `API_TOKEN` that maps *every* caller to one `DEFAULT_USER_ID` —
+      no per-service identity, no rotation, no scoping, and it is also accepted as a `?token=`
+      query parameter, so it lands in logs and proxy traces. Fine while one operator runs one
+      bridge; wrong the moment a fleet-scale bridge, a scheduler and a scanner all authenticate
+      as the same "user". Needs per-service credentials, scoped to capabilities, rotatable, and
+      header-only.
 
 ---
 
