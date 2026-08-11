@@ -306,3 +306,74 @@ describe("hub ACP agent — permissions", () => {
     expect(true).toBe(true);
   });
 });
+
+describe("hub ACP agent — cancel and mode", () => {
+  function verbFake() {
+    const calls: Array<Record<string, unknown>> = [];
+    const service = {
+      async createSession() {
+        return { id: "acps_test" };
+      },
+      subscribe() {
+        return () => {};
+      },
+      async promptSession() {},
+      async answerPermission() {},
+      async cancelTurn(userId: string, sessionId: string) {
+        calls.push({ fn: "cancelTurn", userId, sessionId });
+      },
+      async setMode(userId: string, sessionId: string, mode: string) {
+        calls.push({ fn: "setMode", userId, sessionId, mode });
+      },
+    } as unknown as AcpSessionService;
+    return { service, calls };
+  }
+
+  test("session/cancel is a NOTIFICATION and stops the turn", async () => {
+    // Not a request — ACP models cancellation as fire-and-forget, so the editor
+    // never waits for an ack. Registering it as a request would mean an editor's
+    // stop button hangs.
+    const { service, calls } = verbFake();
+    const conn = connect(service);
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    await conn.agent.notify(AGENT_METHODS.session_cancel, { sessionId: "acps_test" });
+    await Bun.sleep(20);
+
+    expect(calls).toContainEqual({ fn: "cancelTurn", userId: "usr_1", sessionId: "acps_test" });
+  });
+
+  test("session/set_mode maps modeId onto our permission mode", async () => {
+    const { service, calls } = verbFake();
+    const conn = connect(service);
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    await conn.agent.request(AGENT_METHODS.session_set_mode, {
+      sessionId: "acps_test",
+      modeId: "accept-edits",
+    });
+
+    expect(calls).toContainEqual({
+      fn: "setMode",
+      userId: "usr_1",
+      sessionId: "acps_test",
+      mode: "accept-edits",
+    });
+  });
+
+  test("an unknown modeId is refused rather than silently ignored", async () => {
+    // ACP's modeId is a free-form string; our modes are a fixed enum. Accepting
+    // an unrecognised one would leave the editor believing it had loosened
+    // permissions when nothing changed — the most dangerous possible direction
+    // for that mistake.
+    const { service, calls } = verbFake();
+    const conn = connect(service);
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    await expect(
+      conn.agent.request(AGENT_METHODS.session_set_mode, { sessionId: "acps_test", modeId: "yolo" }),
+    ).rejects.toThrow();
+
+    expect(calls).toHaveLength(0);
+  });
+});

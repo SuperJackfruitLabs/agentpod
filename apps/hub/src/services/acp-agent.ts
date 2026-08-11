@@ -56,6 +56,29 @@ export interface AcpSessionService {
     requestSeq: number,
     optionId: string,
   ): Promise<void>;
+
+  cancelTurn(userId: string, sessionId: string): Promise<void>;
+
+  setMode(userId: string, sessionId: string, mode: AcpSessionMode): Promise<void>;
+}
+
+/**
+ * ACP's `modeId` is a free-form string; ours is a fixed enum.
+ *
+ * An unrecognised mode is refused rather than ignored. Silently accepting one
+ * would leave the editor believing it had loosened permissions when nothing
+ * changed — the most dangerous direction for that mistake to point.
+ */
+const MODES: readonly AcpSessionMode[] = ["ask", "accept-edits", "full-auto"];
+
+function toSessionMode(modeId: unknown): AcpSessionMode {
+  if (typeof modeId === "string" && (MODES as readonly string[]).includes(modeId)) {
+    return modeId as AcpSessionMode;
+  }
+  throw new RequestError(
+    INVALID_PARAMS,
+    `Unknown mode ${JSON.stringify(modeId)}. Supported: ${MODES.join(", ")}.`,
+  );
 }
 
 export interface AcpAgentOptions {
@@ -219,6 +242,29 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
         // The turn is over; stop writing to a client that is no longer waiting.
         unsubscribe();
       }
+    })
+    // A NOTIFICATION, not a request. ACP models cancellation as fire-and-forget,
+    // so an editor's stop button never waits for an ack — registering this as a
+    // request would make it hang.
+    .onNotification(AGENT_METHODS.session_cancel, async ({ params }) => {
+      try {
+        await service.cancelTurn(opts.userId, params.sessionId);
+      } catch (err) {
+        // Nothing to reply to; a cancel that arrives after the turn already
+        // ended is normal, not an error worth surfacing.
+        log.debug("cancel failed", {
+          sessionId: params.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    })
+    // NOTE: session/set_mode is REMOVED in ACP v2, replaced by config options.
+    // Implemented here for v1; when the version router lands, this handler stays
+    // on the v1 surface rather than being carried forward.
+    .onRequest(AGENT_METHODS.session_set_mode, async ({ params }) => {
+      const mode = toSessionMode((params as { modeId?: unknown }).modeId);
+      await asAcpError(() => service.setMode(opts.userId, params.sessionId, mode));
+      return {};
     });
 }
 
@@ -237,6 +283,8 @@ function textOf(blocks: ReadonlyArray<{ type: string; text?: string }>): string 
 
 /** JSON-RPC internal error. */
 const INTERNAL_ERROR = -32603;
+/** JSON-RPC invalid params. */
+const INVALID_PARAMS = -32602;
 
 /**
  * Preserves the session service's message on the way to the editor.
