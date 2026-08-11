@@ -31,8 +31,13 @@ var StationCredentialLayouts = []StationCredentialLayout{
 	{
 		Harness:     "hermes",
 		ProfilesDir: ".hermes/profiles",
-		Files:       []string{"auth.json", ".env"},
-		KeyPrefix:   "hermes", // hermes.go: key = "hermes:" + name
+		// config.yaml is included for the same reason the host-level list
+		// includes it: it can hold provider settings and keys. On molt-bot the
+		// per-profile copies are mode 644 while the host-level one is 600 —
+		// which is exactly the case the reachability walk exists for, since
+		// /root is 700 and no other user can reach any of them.
+		Files:     []string{"auth.json", ".env", "config.yaml"},
+		KeyPrefix: "hermes", // hermes.go: key = "hermes:" + name
 	},
 	{
 		Harness:     "openclaw",

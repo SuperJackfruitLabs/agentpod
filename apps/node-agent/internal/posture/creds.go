@@ -163,11 +163,19 @@ func checkOneCredentialFile(harness, station, label, full string) []Finding {
 		}}
 	}
 
+	// A mode that grants read but an ancestor that blocks traversal is a pass —
+	// and worth saying out loud, because "not readable by others" next to
+	// "mode 0644" otherwise reads like a bug in the scanner.
+	detail := fmt.Sprintf("%s is mode %04o", label, info.Mode().Perm())
+	if info.Mode().Perm()&0o044 != 0 {
+		detail += " but a parent directory blocks other users from reaching it"
+	}
+
 	return []Finding{{
 		Check: CheckCredentialsID, Status: StatusPass, Severity: SeverityInfo,
 		Harness: harness, Station: station,
 		Title:  "Credential file is not readable by others",
-		Detail: fmt.Sprintf("%s is mode %04o", label, info.Mode().Perm()),
+		Detail: detail,
 		Path:   full,
 	}}
 }
