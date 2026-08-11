@@ -1,6 +1,6 @@
 # kaambaan Bridge Spike — Findings
 
-**Date:** 2026-08-11 · **Status:** RQ1, RQ3, RQ4, RQ5 answered against live stations; RQ2 outstanding
+**Date:** 2026-08-11 · **Status:** complete — all five research questions answered against live stations
 
 Answers the research questions in [the spike design](./2026-08-11-kaambaan-bridge-spike-design.md). Evidence is in `apps/bridge/spike/findings/`.
 
@@ -49,9 +49,33 @@ None is a blocker, but all three were invisible until a real harness ran: the de
 
 ---
 
-## RQ2 — Permission round-trip · **NOT RUN**
+## RQ2 — Permission round-trip · **BLOCKED — the return path does not exist in kaambaan**
 
-Requires a card whose work triggers a permission prompt under `ask` mode. The code path exists (`bridge.ts:handlePermission`) and the projection emits `elicitation` with ACP's options in `signalMetadata`, but the gate-resolution shape on the board is still unverified — the design flagged this and it remains open.
+The outbound half works. The inbound half is unimplemented.
+
+### What works
+
+An agent posts `postActivity {type: 'elicitation', signal: 'select', signalMetadata: {...}}` and the card moves to `input-required` (`board-do.ts:1350`; `signal: 'auth'` routes to `auth-required` instead). Verified live against a running board.
+
+### What does not
+
+**There is no way for a human to answer.** Three independent confirmations:
+
+1. **`human_reply` is never fired.** The transition `input-required → working` is defined in `packages/contract/src/state-machine.ts:54` and **nothing in `apps/api/src` invokes it.** Same for `gate_request_changes` and `account_linked` — transitions that exist on paper with no code path.
+2. **No gate is created.** After the elicitation, the board snapshot's `gates` array is empty, so `POST /v1/boards/{board}/gates/{gate}/resolve` — the working stage-review flow — has nothing to act on. Gates come from `submitForReview`, not from elicitations.
+3. **Nothing constructs a `prompt` activity.** The contract's `ActivityType` includes `prompt` ("human-authored"), but `AgentActivityType` in `board-do.ts:267` is only the five agent types, and no code anywhere creates one.
+
+So an elicitation is a **dead end**: the card sits at `input-required` until the 15-minute heartbeat reclaim frees it, and the agent blocked on the ACP permission request is never answered.
+
+### Consequence for the strategy
+
+§7 currently says *"Gates are already built — on both sides. A stage gate needing human approval is exactly an ACP permission request, and kaambaan's `input-required` is exactly where an ACP permission lands."*
+
+The **state** mapping is right. The **return path** is not built. Stage-review gates work end to end (`gates-rest.test.ts` proves approve, reject and separation-of-duties); mid-run elicitations do not. And ACP permission requests map to elicitations, not to stage gates — so the ACP permission round-trip cannot complete through kaambaan today.
+
+**This is a kaambaan-side task, and it is small**: an authenticated endpoint that posts a `prompt` activity against a run, firing `human_reply` to return the card to `working`, with the answer payload carried back to the waiting agent. The state machine already models it; only the wire and the handler are missing.
+
+Until it exists, the bridge should run sessions in a mode that does not block — `accept-edits` or `full-auto` — or hold permission answering on the AgentPod side, where the console's existing permission UI already works.
 
 ---
 
@@ -163,6 +187,12 @@ The seam holds. The contract carries the work, the states line up, the lease is 
 3. **The bridge must end the ACP session when its lease is superseded.** kaambaan fences its own state; nothing fences the machine. This is the concrete engineering deliverable of the spike and it belongs in Horizon 2's bridge item.
 4. **Card work must be idempotent, or the bridge must check for prior output.** Reclaim is at-least-once: a finished-but-unreported run gets re-dispatched.
 
+5. **§7's "gates are already built on both sides" needs qualifying.** Stage-review gates are. Mid-run elicitations — which is what ACP permissions actually are — have no return path in kaambaan. **This is the one thing that blocks a `ask`-mode bridge**, and it is a small kaambaan-side task.
+
 Plus the service-identity task — the shared static `API_TOKEN` is not an identity for a fleet-scale bridge (now Horizon 3).
 
-**Outstanding:** RQ2 (permission round-trip). It is the last unanswered question and the lowest-risk one — the state mapping is already confirmed on both sides, and what remains is verifying that ACP's option list survives `signalMetadata` and that an answer routes back into the blocked call.
+## Verdict
+
+**The seam holds. Harden it.** Four of five questions came back positive or neutral; the fifth (RQ2) is blocked by a gap in kaambaan that the state machine already anticipates and that nobody had noticed because no real agent had ever raised an elicitation against it.
+
+Nothing found argues for abandoning the §7 boundary. Everything found argues that the *strategy document was written from docs rather than code* on both sides — five of the corrections here contradict a written claim, and every one of them was cheap to find once something real was running.

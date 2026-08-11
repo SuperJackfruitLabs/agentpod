@@ -410,10 +410,15 @@ Two things this buys beyond avoiding a vendor:
 
 ### Three things we get almost free
 
-- **Gates are already built — on both sides.** A stage gate needing human approval is exactly
-  an ACP permission request, and kaambaan's `input-required` is exactly where an ACP
-  permission lands. Same queue, same audit, same modes, and now the same state name. The
-  approval UI is a re-skin of the permission UI, not a new subsystem.
+- **Gates are half built — the state mapping is right, the return path is missing.** A stage
+  gate needing human approval is exactly an ACP permission request, and kaambaan's
+  `input-required` is exactly where an ACP permission lands. Same queue, same audit, same
+  modes, same state name. **But** the spike found that mid-run elicitations — which is what
+  ACP permissions *are* — have no answer path in kaambaan: `human_reply` is defined in its
+  state machine and fired by nothing, no gate row is created, and no code constructs the
+  human-authored `prompt` activity. Stage-review gates work end to end; elicitations dead-end
+  at `input-required` until the heartbeat reclaim. Small kaambaan-side task, and it blocks any
+  bridge running sessions in `ask` mode.
 - **The shape is already in the schema.** The vestigial `agent_tasks` table from the
   OpenCode era is literally *task → sandbox → session → response → error*. Don't
   resurrect the table — it's Cloudflare-specific and pre-fleet — but it's evidence we
