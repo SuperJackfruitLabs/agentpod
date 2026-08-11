@@ -542,7 +542,11 @@ suite or a pile.*
       roadmap that *acquires users* rather than serving ones we don't have yet, it depends on
       nothing else here, and it lands into a market with 42,000 exposed instances looking for
       it. Runs in parallel with everything below.
-- [ ] Promote issue #228 (macOS signing and notarization) to blocking. Unsigned binaries
+- [ ] **#228 (macOS signing and notarization) — BACKLOGGED 2026-08-11, externally blocked.**
+      Signing and notarizing needs an Apple Developer account, which we do not have. Until
+      then every macOS node re-prompts for TCC permissions on each self-update, so a fleet
+      that updates itself is a fleet that nags. The unblock is an account, not engineering:
+      the CI change is small once an identity exists. Superseded detail:
       that re-prompt on every update are survivable for a console and disqualifying for a
       control plane. *Not* on the critical path for the spike — see below.
 - [x] ~~**The kaambaan bridge spike**~~ — done 2026-08-11, all five research questions answered
