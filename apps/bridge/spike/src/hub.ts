@@ -34,14 +34,39 @@ export type ServerMsg =
   | { t: "bye"; reason: string };
 
 /**
- * Returns a Cookie header value for the hub.
+ * Auth for the hub, in preference order.
  *
- * Prefers HUB_COOKIE — a session lifted from the browser — so no password is
- * ever written to disk. Falls back to email/password sign-in.
+ * `authMiddleware` (apps/hub/src/auth/middleware.ts) accepts, in this order:
+ *   1. `Authorization: Bearer <API_TOKEN>` — the static service key, mapping to
+ *      `DEFAULT_USER_ID`. The closest thing to a service identity today.
+ *   2. `Authorization: Bearer <better-auth session token>` — the value of the
+ *      `__Secure-better-auth.session_token` cookie, used directly as a bearer.
+ *   3. A session cookie, via `sessionMiddleware`.
+ *
+ * It also reads `?token=` as an alternative to the header, which is how the
+ * WebSocket authenticates — browsers cannot set headers on a WS handshake.
+ *
+ * We prefer the bearer forms: one value, no cookie-name pitfalls, and the same
+ * value works for both REST and WS.
  */
+export function authHeaders(c: SpikeConfig): Record<string, string> {
+  if (c.hubToken) return { Authorization: `Bearer ${c.hubToken}` };
+  if (c.hubCookie) return { Cookie: c.hubCookie };
+  return {};
+}
+
+/** Query suffix for the WS handshake, which cannot carry headers. */
+export function authQuery(c: SpikeConfig): string {
+  return c.hubToken ? `?token=${encodeURIComponent(c.hubToken)}` : "";
+}
+
 export async function signIn(c: SpikeConfig): Promise<string> {
+  if (c.hubToken) {
+    console.log("using HUB_TOKEN (bearer)");
+    return "";
+  }
   if (c.hubCookie) {
-    console.log("using HUB_COOKIE (no sign-in)");
+    console.log("using HUB_COOKIE");
     return c.hubCookie;
   }
 
@@ -66,7 +91,7 @@ export async function openSession(
 ): Promise<{ id: string }> {
   const res = await fetch(`${c.hubUrl}/api/stations/${c.stationId}/acp/sessions`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Cookie: cookie },
+    headers: { "Content-Type": "application/json", ...authHeaders(c), ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify({ mode }),
   });
   if (!res.ok) throw new Error(`openSession → ${res.status} ${await res.text()}`);
@@ -79,9 +104,12 @@ export function connect(
   sessionId: string,
   onMsg: (msg: ServerMsg) => void,
 ): Promise<WebSocket> {
-  const url = `${c.hubUrl.replace(/^http/, "ws")}/api/acp/sessions/${sessionId}/ws`;
+  const url =
+    `${c.hubUrl.replace(/^http/, "ws")}/api/acp/sessions/${sessionId}/ws` + authQuery(c);
   // Bun's WebSocket accepts headers; the browser one does not. Spike runs on Bun.
-  const ws = new WebSocket(url, { headers: { Cookie: cookie } } as any);
+  // The `?token=` query is the fallback authMiddleware reads for handshakes.
+  const headers = { ...authHeaders(c), ...(cookie ? { Cookie: cookie } : {}) };
+  const ws = new WebSocket(url, { headers } as any);
 
   ws.addEventListener("message", (e) => {
     try {

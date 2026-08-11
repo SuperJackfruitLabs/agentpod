@@ -8,14 +8,14 @@
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
-import { loadConfig } from "../src/config";
+import { loadHubConfig } from "../src/config";
 import { signIn, openSession, connect, kindOf } from "../src/hub";
 
 const PROMPT = process.env.PROMPT ?? "List the files in this directory, then stop.";
 const IDLE_EXIT_MS = Number(process.env.IDLE_EXIT_MS ?? 60_000);
 
 mkdirSync("findings", { recursive: true });
-const c = loadConfig();
+const c = loadHubConfig();
 const out = `findings/acp-raw-${c.stationId}.jsonl`;
 
 const cookie = await signIn(c);
