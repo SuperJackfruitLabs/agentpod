@@ -9,7 +9,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Build
 # -----------------------------------------------------------------------------
-FROM oven/bun:1.2-alpine AS builder
+FROM oven/bun:1.3-alpine AS builder
 
 WORKDIR /app
 
@@ -38,7 +38,7 @@ COPY apps/api/tsconfig.json ./apps/api/
 # -----------------------------------------------------------------------------
 # Stage 2: Production
 # -----------------------------------------------------------------------------
-FROM oven/bun:1.2-alpine AS production
+FROM oven/bun:1.3-alpine AS production
 
 WORKDIR /app
 
