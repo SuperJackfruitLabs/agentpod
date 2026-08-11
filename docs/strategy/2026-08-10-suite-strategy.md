@@ -535,6 +535,12 @@ suite or a pile.*
       no npm publishing.** The existing files already map almost 1:1, so this is packaging,
       not refactoring. Publishing waits until a consumer outside this monorepo needs it, and
       kaambaan is not that consumer — we speak its wire surface, not its package (§5).
+- [ ] **Migrate to zod 4 in the same pass**, since that pass already touches every contract
+      file. Cheaper than it looks: only fifteen files import zod across the workspace, and
+      `zod/v4` already ships inside the installed `3.25.76`, so it moves incrementally via
+      `import { z } from "zod/v4"` with no package bump. The reason is *not* kaambaan interop —
+      the seam is wire-level and there is no shared package — it is that zod 3 stops getting
+      attention and this only gets more expensive.
 - [ ] A **golden-fixture round-trip test** for the Go mirrors: emit JSON fixtures from the zod
       schemas, assert the Go structs unmarshal them losslessly. Ten percent of the codegen
       pipeline for most of its value, and unlike codegen it is justified today — see the note
@@ -583,6 +589,12 @@ item here that is distribution rather than capability.*
       organization plugin. Orgs are premature for demand and tenancy is a worse retrofit than
       the run key, so start neither: the resolver costs one small abstraction and buys the
       ordering freedom.
+- [ ] **Windows stations.** The intent is that stations run on Linux, macOS *or* Windows, but
+      today the release matrix is `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`, and service
+      management is systemd plus LaunchAgent. Windows needs a `windows/amd64` target, a service
+      integration (SCM or scheduled task), and path/process handling that currently assumes
+      POSIX — a piece of work, not a matrix row. Sizing it belongs here, before any plane
+      assumes the fleet is already cross-platform.
 - [ ] A **`posture` capability** alongside health and logs, so `apn scan`'s findings become
       fleet-visible instead of a local report. This is the missing middle of the posture
       story — Horizon 0 ships a one-shot hubless scanner, Horizon 3 ships continuous posture
