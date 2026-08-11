@@ -106,7 +106,10 @@ describe("hub ACP agent — session/prompt", () => {
         order.push("prompt");
         // The agent's first update can land before promptSession resolves —
         // that is the whole reason ordering matters here.
-        emit?.({ type: "agent-update", payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } });
+        emit?.({ type: "agent-update", seq: 1, payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } });
+        // The turn ends on an idle state event, exactly as the real service
+        // signals it. Without this the agent waits forever, correctly.
+        emit?.({ type: "state", seq: 2, payload: { status: "idle" } });
       },
     };
     return { service, order, emitNow: (e: { type: string; payload: unknown }) => emit?.(e) };
@@ -161,15 +164,18 @@ describe("hub ACP agent — session/prompt", () => {
 
   test("joins multi-block prompts into the text the session service takes", async () => {
     let seen = "";
+    let idle: (() => void) | undefined;
     const service: AcpSessionService = {
       async createSession() {
         return { id: "acps_test" };
       },
-      subscribe() {
+      subscribe(_s: string, fn: (e: { type: string; seq: number; payload: unknown }) => void) {
+        idle = () => fn({ type: "state", seq: 1, payload: { status: "idle" } });
         return () => {};
       },
       async promptSession(_u, _s, text) {
         seen = text;
+        idle?.();
       },
     };
     const conn = connect(service);
@@ -206,6 +212,7 @@ describe("hub ACP agent — permissions", () => {
         // from here is what a harness actually does.
         pending?.forEach((e) => emit?.(e));
         await Bun.sleep(40); // hold the turn open while the editor answers
+        emit?.({ type: "state", seq: 99, payload: { status: "idle" } });
       },
       async answerPermission(_u: string, _s: string, requestSeq: number, optionId: string) {
         calls.push({ fn: "answerPermission", requestSeq, optionId });
@@ -496,6 +503,7 @@ describe("hub ACP agent — concurrent attach", () => {
           fn({ type: "agent-update", seq: 1, payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "shared" } } }),
         );
         await Bun.sleep(20);
+        subscribers.forEach((fn) => fn({ type: "state", seq: 2, payload: { status: "idle" } }));
       },
       async answerPermission() {}, async cancelTurn() {}, async setMode() {},
       async readEvents() { return []; },
@@ -521,5 +529,108 @@ describe("hub ACP agent — concurrent attach", () => {
 
     expect(seenA.length).toBeGreaterThan(0);
     expect(seenB.length).toBeGreaterThan(0);
+  });
+});
+
+describe("hub ACP agent — the turn outlives promptSession", () => {
+  /**
+   * Regression for the bug a real editor found: Zed showed its own prompts and
+   * no replies at all, while the console watching the SAME session saw
+   * everything.
+   *
+   * promptSession resolves when the prompt is DISPATCHED, not when the turn
+   * ends — acp-sessions says so: "the turn runs in the background; callers
+   * observe progress via subscribe()/acp_events, not this promise". Unsubscribing
+   * when it resolves means the agent stops listening before the harness has said
+   * a word.
+   *
+   * The earlier fake hid this by emitting synchronously and then sleeping. A
+   * fake that resolves differently from the real thing tests nothing, so this
+   * one resolves immediately and emits afterwards, exactly like production.
+   */
+  function realisticFake() {
+    let emit: ((e: { type: string; seq: number; payload: unknown }) => void) | undefined;
+    let unsubscribed = false;
+    const service = {
+      async createSession() { return { id: "acps_test" }; },
+      subscribe(_s: string, fn: (e: { type: string; seq: number; payload: unknown }) => void) {
+        emit = fn;
+        return () => { unsubscribed = true; };
+      },
+      async promptSession() {
+        // Returns immediately. The turn has NOT started producing output yet.
+      },
+      async answerPermission() {}, async cancelTurn() {}, async setMode() {},
+      async readEvents() { return []; },
+    } as unknown as AcpSessionService;
+
+    const chunk = (text: string, seq: number) =>
+      emit?.({ type: "agent-update", seq, payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } });
+    const finish = (seq: number) => emit?.({ type: "state", seq, payload: { status: "idle" } });
+
+    return { service, chunk, finish, wasUnsubscribed: () => unsubscribed };
+  }
+
+  test("output produced after promptSession resolves still reaches the editor", async () => {
+    const { service, chunk, finish } = realisticFake();
+    const updates: unknown[] = [];
+    const conn = client()
+      .onNotification(CLIENT_METHODS.session_update, async ({ params }) => { updates.push(params); })
+      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    const turn = conn.agent.request(AGENT_METHODS.session_prompt, {
+      sessionId: "acps_test",
+      prompt: [{ type: "text", text: "hello" }],
+    });
+
+    // The harness replies well after the dispatch call returned.
+    await Bun.sleep(30);
+    chunk("Hello! What would you", 1);
+    chunk(" like to work on?", 2);
+    finish(3);
+
+    await turn;
+    expect(updates).toHaveLength(2);
+  });
+
+  test("session/prompt does not return until the turn actually ends", async () => {
+    // Returning end_turn immediately tells the editor the agent is done while
+    // it is still thinking, which is how a reply arrives into a closed turn.
+    const { service, chunk, finish } = realisticFake();
+    const conn = client()
+      .onNotification(CLIENT_METHODS.session_update, async () => {})
+      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    let settled = false;
+    const turn = conn.agent
+      .request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "hi" }] })
+      .then((r) => { settled = true; return r; });
+
+    await Bun.sleep(40);
+    expect(settled).toBe(false); // still working
+
+    chunk("done", 1);
+    finish(2);
+    await turn;
+    expect(settled).toBe(true);
+  });
+
+  test("it unsubscribes once the turn ends, not before", async () => {
+    const { service, chunk, finish, wasUnsubscribed } = realisticFake();
+    const conn = client()
+      .onNotification(CLIENT_METHODS.session_update, async () => {})
+      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    const turn = conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "hi" }] });
+    await Bun.sleep(20);
+    expect(wasUnsubscribed()).toBe(false);
+
+    chunk("x", 1);
+    finish(2);
+    await turn;
+    expect(wasUnsubscribed()).toBe(true);
   });
 });

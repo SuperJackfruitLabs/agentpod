@@ -143,6 +143,21 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
       // Keyed by the request's event seq, which is what answerPermission takes.
       const outstanding = new Map<number, AbortController>();
 
+      // promptSession resolves when the prompt is DISPATCHED, not when the turn
+      // ends — acp-sessions is explicit: "the turn runs in the background;
+      // callers observe progress via subscribe()/acp_events, not this promise".
+      // So the turn's real end is a `state` event carrying idle, and this
+      // promise is what session/prompt waits on.
+      //
+      // Getting this wrong is not subtle in effect: unsubscribing when
+      // promptSession resolved meant an editor saw its own prompts and no
+      // replies at all, while the console watching the same session saw
+      // everything.
+      let endTurn!: (reason: string) => void;
+      const turnEnded = new Promise<string>((resolve) => {
+        endTurn = resolve;
+      });
+
       const unsubscribe = service.subscribe(params.sessionId, (event) => {
         switch (event.type) {
           case "agent-update":
@@ -168,8 +183,21 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
             return;
           }
 
+          case "state": {
+            // The turn is over when the session returns to idle. Not forwarded
+            // to the editor — it is the hub's vocabulary, not an ACP frame.
+            const status = (event.payload as { status?: string })?.status;
+            if (status === "idle") endTurn("end_turn");
+            return;
+          }
+
+          case "error":
+            // A failed turn still ends it; leaving the editor waiting forever
+            // is worse than telling it something went wrong.
+            endTurn("refusal");
+            return;
+
           default:
-            // state and error are the hub's own vocabulary, not ACP frames.
             return;
         }
       });
@@ -243,9 +271,12 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
         await asAcpError(() =>
           service.promptSession(opts.userId, params.sessionId, textOf(params.prompt)),
         );
-        return { stopReason: "end_turn" };
+        // Dispatched. Now wait for the turn to actually finish, so the editor
+        // receives the reply rather than an immediate end_turn.
+        const stopReason = await turnEnded;
+        return { stopReason };
       } finally {
-        // The turn is over; stop writing to a client that is no longer waiting.
+        // Only now is nobody waiting on this subscription.
         unsubscribe();
       }
     })
