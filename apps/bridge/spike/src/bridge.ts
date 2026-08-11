@@ -12,7 +12,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config";
 import { Kaambaan, type Work } from "./kaambaan";
 import { signIn, openSession, connect, kindOf, type AcpEvent } from "./hub";
-import { project, unmapped, losses } from "./project";
+import { project, unmapped, losses, contextPeak, resetContext } from "./project";
 
 const POLL_MS = Number(process.env.POLL_MS ?? 5_000);
 const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS ?? 60_000);
@@ -26,6 +26,7 @@ const cookie = await signIn(c);
 console.log("signed in; polling for work every", POLL_MS, "ms");
 
 async function workOne(work: Work): Promise<void> {
+  resetContext();
   const session = await openSession(c, cookie, "ask");
   console.log(`run ${work.runId} → session ${session.id} ("${work.card.title}")`);
 
@@ -69,13 +70,27 @@ async function workOne(work: Work): Promise<void> {
   }
 
   clearInterval(beat);
+
+  const ctx = contextPeak();
+  const ctxLine = ctx.size
+    ? ` Peak context ${ctx.pct}% (${ctx.used.toLocaleString()}/${ctx.size.toLocaleString()}).`
+    : "";
+
   await k.activity(work, {
     type: "response",
-    body: `Ran on station \`${c.stationId}\` (ACP session \`${session.id}\`).`,
+    body: `Ran on station \`${c.stationId}\` (ACP session \`${session.id}\`).${ctxLine}`,
   });
   // Verified in Task 2: a `response` activity does NOT advance the card, even
   // though doc 04 §4 says it drives state to completed. `complete` is required.
-  await k.complete(work, { station: c.stationId, session: session.id });
+  //
+  // Context peak rides in the handoff so the next stage — and any attempts
+  // comparison — can see how close this run came to its ceiling. It is not cost;
+  // cost is deferred (RQ5 found no token or price data on any harness).
+  await k.complete(work, {
+    station: c.stationId,
+    session: session.id,
+    contextPeak: ctx.size ? ctx : undefined,
+  });
   ws.close();
 
   console.log(`completed ${work.runId}; kinds seen: ${[...kinds].sort().join(", ")}`);

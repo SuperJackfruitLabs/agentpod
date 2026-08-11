@@ -24,6 +24,41 @@ export const unmapped = (): string[] => [...UNMAPPED].sort();
 /** Kinds that project, but lose structure on the way. */
 export const losses = (): string[] => [...LOSSES].sort();
 
+// ─── context window ─────────────────────────────────────────────────────────
+//
+// `usage_update` is {used, size} — how full the context is, NOT tokens and NOT
+// cost (verified: zero token/cost fields across 1,108 events on both Codex and
+// Hermes). Cost accounting is deferred, but this is real telemetry arriving for
+// free, so we use it for the thing it is actually good for: noticing that a run
+// is about to hit its ceiling and degrade.
+//
+// Emitting every update would be noise — two per run, saying nothing. Instead we
+// track the peak and emit ONE non-ephemeral warning if it crosses the threshold.
+
+const CONTEXT_WARN_PCT = Number(process.env.CONTEXT_WARN_PCT ?? 80);
+
+let peakPct = 0;
+let peakUsed = 0;
+let peakSize = 0;
+let warned = false;
+
+export interface ContextPeak {
+  pct: number;
+  used: number;
+  size: number;
+}
+
+/** Highest context occupancy seen, for the completion handoff. */
+export const contextPeak = (): ContextPeak => ({ pct: peakPct, used: peakUsed, size: peakSize });
+
+/** Call between runs — the tracker is module-level, like UNMAPPED/LOSSES. */
+export function resetContext(): void {
+  peakPct = 0;
+  peakUsed = 0;
+  peakSize = 0;
+  warned = false;
+}
+
 export function project(event: AcpEvent): Activity[] {
   const p = event.payload as any;
 
@@ -95,23 +130,35 @@ function projectUpdate(p: any): Activity[] {
       LOSSES.add("plan → thought (agent plan has no board representation)");
       return [{ type: "thought", body: JSON.stringify(p.entries ?? p), ephemeral: true }];
 
-    // RQ5. Not all harnesses emit usage; Codex's adapter advertises it, Hermes
-    // may not. Recorded per harness in the findings.
-    case "usage":
-    case "token_usage":
-      return [
-        {
-          type: "thought",
-          body: "usage",
-          ephemeral: true,
-          usage: {
-            model: p.model,
-            inputTokens: p.inputTokens ?? p.usage?.input_tokens,
-            outputTokens: p.outputTokens ?? p.usage?.output_tokens,
-            costUsd: p.costUsd ?? p.total_cost_usd,
+    // Context-window occupancy. Deliberately NOT mapped onto kaambaan's `usage`
+    // field: that one means tokens and money, and this is neither. Silent below
+    // the threshold; one durable warning above it.
+    case "usage_update": {
+      const used = Number(p.used ?? 0);
+      const size = Number(p.size ?? 0);
+      if (!size) return [];
+
+      const pct = Math.round((used / size) * 100);
+      if (pct > peakPct) {
+        peakPct = pct;
+        peakUsed = used;
+        peakSize = size;
+      }
+
+      if (pct >= CONTEXT_WARN_PCT && !warned) {
+        warned = true;
+        return [
+          {
+            type: "thought",
+            ephemeral: false,
+            body:
+              `⚠️ Context window ${pct}% full (${used.toLocaleString()} of ` +
+              `${size.toLocaleString()}). The agent may start truncating or compacting.`,
           },
-        },
-      ];
+        ];
+      }
+      return [];
+    }
 
     default:
       UNMAPPED.add(`agent-update:${p?.sessionUpdate ?? "?"}`);
