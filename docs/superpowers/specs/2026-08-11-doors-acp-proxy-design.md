@@ -145,7 +145,28 @@ The hub's `ClientSideConnection` call site should move to `client()` in the same
 
 Multi-user shared sessions. An `apn` that serves ACP over a socket rather than stdio. Editor-specific packaging or plugins — we ship a binary that speaks the protocol; distribution through Zed's agent registry is a later decision. Rewriting the console to use the same path.
 
+### Attaching mid-conversation — answered by the protocol
+
+**Yes, and the mechanism is `session/load`.** The SDK is explicit: on load the agent should *"restore the session context and conversation history"* and *"stream the entire conversation history back to the client via notifications"*. It is capability-gated — the agent must advertise `loadSession`.
+
+The important part is **who replays**: the *agent* does. And `apn acp` is the agent as far as the editor is concerned. So the proxy's `session/load` handler is a near-direct pass-through of what the hub already provides — `subscribe {sinceSeq: 0}` returns a replay of `acp_events` followed by live updates, which is precisely "stream the history, then continue".
+
+There is a second path, `session/resume`, which *"resumes the session context… without replaying the message history"*, gated on `session.resume`.
+
+That gives the proxy two honest behaviours rather than one guess:
+
+| Editor asks | Proxy does | Result |
+|---|---|---|
+| `session/new` | opens a fresh session on the station | empty transcript |
+| `session/load` | `subscribe {sinceSeq: 0}` → replays history as notifications, then follows live | joins mid-conversation, sees everything |
+| `session/resume` | `subscribe {sinceSeq: <latest>}` → live only | joins mid-conversation, sees only what happens next |
+
+**Slice 1 must advertise `loadSession`**, because attaching to a station's existing session is the whole point of Doors — an editor that joins and sees a blank pane has not reached the agent, it has reached a fresh one.
+
+> **v1/v2 divergence, recorded now:** v2 removes `session/load` entirely, and `session/resume` explicitly does *not* replay history. So "join and see what happened" is a v1 affordance whose v2 equivalent is unclear. This is the second structural difference between the versions that a relay cannot smooth over, alongside the prompt lifecycle — and another reason to keep per-version protocol surfaces over shared business logic rather than a field map.
+>
+> Also noted: `session/fork` is marked **UNSTABLE** in the SDK — *"not part of the spec yet, and may be removed or changed at any point"*. Attractive for run comparison later; not to be built on now.
+
 ## Open questions
 
-1. **Does an editor tolerate an agent it did not spawn the state of?** Attaching to a session with existing history means the editor joins mid-conversation. ACP has session replay, but whether Zed renders a pre-existing transcript on attach is unverified and shapes slice 1.
-2. **Which token, in practice.** The static `API_TOKEN` maps every caller to one user, which is wrong for a laptop client. A Better Auth session token is per-user but expires. Neither is right; the choice affects what slice 1 documents, and the real fix is the Horizon 3 credential work.
+1. **Which token, in practice.** The static `API_TOKEN` maps every caller to one user, which is wrong for a laptop client. A Better Auth session token is per-user but expires. Neither is right; the choice affects what slice 1 documents, and the real fix is the Horizon 3 credential work.
