@@ -263,3 +263,56 @@ test("on a non-acp station Health still deletes ?tab=", async () => {
 
   expect(String(goto.mock.calls[0][0])).not.toContain("tab=");
 });
+
+// ─── changeset station ──────────────────────────────────────────────────────
+
+test("a station with the changeset capability gets a Changes tab", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "logs", "changeset"]),
+  ]);
+  vi.spyOn(api, "changesetStatus").mockResolvedValue({
+    repo: { branch: "main", head: "abc1234", detached: false },
+    base: { ref: "origin/main", sha: "def5678", reason: "upstream" },
+    uncommitted: { files: [], insertions: 0, deletions: 0 },
+    committed: { files: [], insertions: 0, deletions: 0, commits: [] },
+    truncatedFiles: false,
+  });
+
+  const { getAllByRole } = render(StationPage);
+
+  await waitFor(() => {
+    expect(tabNames(getAllByRole("tab"))).toContain("Changes");
+  });
+});
+
+test("a station without it gets no Changes tab", async () => {
+  // A tab that always errors is worse than no tab — which is exactly why the
+  // capability is advertised conditionally in the first place.
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs"])]);
+
+  const { getAllByRole } = render(StationPage);
+
+  await waitFor(() => {
+    expect(tabNames(getAllByRole("tab"))).toContain("Health");
+  });
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Changes");
+});
+
+test("the Changes panel mounts and asks the station what changed", async () => {
+  // The tab existing is not the feature; the panel fetching is.
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "logs", "changeset"]),
+  ]);
+  const status = vi.spyOn(api, "changesetStatus").mockResolvedValue({
+    repo: { branch: "feat/x", head: "abc1234", detached: false },
+    base: { ref: "origin/main", sha: "def5678", reason: "upstream" },
+    uncommitted: { files: [], insertions: 0, deletions: 0 },
+    committed: { files: [], insertions: 0, deletions: 0, commits: [] },
+    truncatedFiles: false,
+  });
+
+  setUrl("?tab=changes");
+  render(StationPage);
+
+  await waitFor(() => expect(status).toHaveBeenCalledWith("station_1"));
+});
