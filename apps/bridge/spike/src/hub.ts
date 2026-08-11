@@ -33,7 +33,18 @@ export type ServerMsg =
   | { t: "session"; session: { id: string; status: string } }
   | { t: "bye"; reason: string };
 
+/**
+ * Returns a Cookie header value for the hub.
+ *
+ * Prefers HUB_COOKIE — a session lifted from the browser — so no password is
+ * ever written to disk. Falls back to email/password sign-in.
+ */
 export async function signIn(c: SpikeConfig): Promise<string> {
+  if (c.hubCookie) {
+    console.log("using HUB_COOKIE (no sign-in)");
+    return c.hubCookie;
+  }
+
   const res = await fetch(`${c.hubUrl}/api/auth/sign-in/email`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

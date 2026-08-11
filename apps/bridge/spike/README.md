@@ -28,24 +28,31 @@ bun run bridge
 
 ## `.env`
 
-```sh
-KAAMBAAN_URL=http://localhost:8787
-TENANT_ID=tnt_spike
-BOARD_ID=          # from `bun run seed`
-AGENT_TOKEN=       # from `bun run seed`, starts kbn_
+`cp .env.example .env` and fill the blanks. `.env` is gitignored.
 
-HUB_URL=https://hub.agentpod.dev
-HUB_EMAIL=
-HUB_PASSWORD=
-STATION_ID=        # a station advertising `acp`, with a DISPOSABLE workspace
+**Hub auth — prefer the cookie.** Set `HUB_COOKIE` to a session lifted from the browser
+(console devtools → Application → Cookies → `hub.agentpod.dev`, copy the Better Auth session
+`name=value`). It expires, and no password is written to disk.
+
+`HUB_EMAIL`/`HUB_PASSWORD` — the same credentials you use for the console — are a fallback,
+read only when `HUB_COOKIE` is empty.
+
+> Neither is a real answer. **The hub has no service identity**: auth is cookie-based, routes
+> read `c.get("user")`, and there is no bearer or API-key path. A headless bridge borrowing a
+> human's session is fine for throwaway code and is a Horizon 2 blocker. It is recorded as a
+> finding.
+
+Check it before touching a station:
+
+```bash
+bun run scripts/check-auth.ts
 ```
-
-`.env` is gitignored. Do not commit credentials.
 
 ## Scripts
 
 | Command | What it does |
 |---|---|
+| `bun run scripts/check-auth.ts` | Verifies the hub credential, the station, and that it advertises `acp` |
 | `bun run seed` | Creates board + stages + agent + card in local kaambaan |
 | `bun run scripts/stub-run.ts` | Claims and completes one card with no ACP at all — proves the kaambaan half |
 | `bun run scripts/probe-acp.ts` | Opens a live ACP session and records the distinct event kinds — RQ1's input |
