@@ -64,7 +64,7 @@ Checked against the code, and they make this much smaller than it looks:
 - **`acp.attach` already exists** in the contract (`protocol.ts:45`) and streams like `term.attach`.
 - `apn` already ships for linux and darwin on amd64 and arm64, self-updates, and verifies against `SHA256SUMS`.
 
-**Consequence:** the hub needs little or no change. Doors is mostly a new `apn` subcommand plus explicit tests for the multi-subscriber behaviour that has always been possible and never been exercised.
+**Consequence, corrected once the ACP agent moved to the hub:** the *session machinery* needs little or no change — fan-out, permission arbitration and prompt serialisation are already there and simply untested with more than one client. What is genuinely new is a hub-side ACP **agent** surface bound to a WebSocket, and a small Go byte pipe. The weight sits in the hub, in TypeScript, next to the SDK — which is the point.
 
 ## Architecture
 
