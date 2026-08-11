@@ -14,6 +14,13 @@ hub → console).
 | [../TESTING.md](../TESTING.md) | Running/writing tests per tier, the test-postgres requirements, conventions |
 | [../CHANGELOG.md](../CHANGELOG.md) | Release history (`v0.1.x`) |
 
+## Strategy
+
+[`strategy/`](./strategy/) — product direction. Dated, point-in-time arguments about
+where the product goes next; proposals, not commitments.
+
+- [2026-08-10 — The Suite: five planes, one join key](./strategy/2026-08-10-suite-strategy.md)
+
 ## Design history
 
 The fleet console was designed and built through written specs and plans, kept
