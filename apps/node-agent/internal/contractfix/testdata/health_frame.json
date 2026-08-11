@@ -1,0 +1,23 @@
+{
+  "type": "health",
+  "stations": [
+    {
+      "key": "codex:4a1482de",
+      "ok": true,
+      "running": true,
+      "pid": 73226,
+      "cpuPct": 12.5,
+      "memBytes": 524288000,
+      "uptimeSec": 3600
+    },
+    {
+      "key": "hermes:idle",
+      "ok": false,
+      "running": false,
+      "pid": null,
+      "cpuPct": null,
+      "memBytes": null,
+      "uptimeSec": null
+    }
+  ]
+}

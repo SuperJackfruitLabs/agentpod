@@ -543,7 +543,11 @@ suite or a pile.*
 - [ ] Promote issue #228 (macOS signing and notarization) to blocking. Unsigned binaries
       that re-prompt on every update are survivable for a console and disqualifying for a
       control plane. *Not* on the critical path for the spike — see below.
-- [ ] **The kaambaan bridge spike — do this before committing to anything below it.**
+- [x] ~~**The kaambaan bridge spike**~~ — done 2026-08-11, all five research questions answered
+      against live Codex and Hermes stations. Verdict: the seam holds, harden it. Findings in
+      `docs/superpowers/specs/2026-08-11-kaambaan-bridge-spike-findings.md`; five corrections
+      to written claims on both sides, and RQ2 blocked on a missing return path in kaambaan.
+      Superseded detail:
       Register the hub as a kaambaan agent, claim a card, dispatch to a real station running
       a real harness, stream ACP events as activities, block once on a permission gate, and
       complete. Measured against `conformance.test.ts` semantics. **Target a Linux box, not
@@ -559,7 +563,8 @@ suite or a pile.*
       no npm publishing.** The existing files already map almost 1:1, so this is packaging,
       not refactoring. Publishing waits until a consumer outside this monorepo needs it, and
       kaambaan is not that consumer — we speak its wire surface, not its package (§5).
-- [ ] **Migrate to zod 4 in the same pass**, since that pass already touches every contract
+- [x] ~~**Migrate to zod 4**~~ — done 2026-08-11, `3.25.76` → `4.4.3`, zero source changes.
+      Superseded detail:
       file. Cheaper than it looks: only fifteen files import zod across the workspace, and
       `zod/v4` already ships inside the installed `3.25.76`, so it moves incrementally via
       `import { z } from "zod/v4"` with no package bump. The reason is *not* kaambaan interop —

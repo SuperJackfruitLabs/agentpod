@@ -1,0 +1,9 @@
+{
+  "key": "hermes:idle",
+  "ok": false,
+  "running": false,
+  "pid": null,
+  "cpuPct": null,
+  "memBytes": null,
+  "uptimeSec": null
+}

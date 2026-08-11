@@ -1,0 +1,6 @@
+{
+  "hostname": "fleet-box-1",
+  "os": "linux",
+  "arch": "arm64",
+  "cpuCount": 8
+}

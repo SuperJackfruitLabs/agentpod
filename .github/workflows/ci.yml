@@ -34,6 +34,13 @@ jobs:
         working-directory: packages/contract
         run: bun test
 
+      # A contract change whose Go fixtures were never regenerated fails here,
+      # rather than as a silently-dropped field on the wire. The node-agent job
+      # then proves the Go structs still round-trip them.
+      - name: Check Go fixtures are current
+        working-directory: packages/contract
+        run: bun run scripts/emit-go-fixtures.ts --check
+
   hub:
     name: hub
     runs-on: ubuntu-latest
