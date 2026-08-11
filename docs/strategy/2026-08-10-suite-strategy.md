@@ -1,8 +1,15 @@
 # AgentPod — The Suite: Five Planes, One Join Key
 
-> **Date:** 2026-08-10 · **Status:** Strategy — for discussion
+> **Date:** 2026-08-10 · **Amended:** 2026-08-11 · **Status:** Strategy — for discussion
 > **Scope:** product direction for AgentPod and the surrounding agentic suite
 > **Supersedes:** nothing. Complements the founding [fleet-console design](../superpowers/specs/2026-06-21-agentpod-fleet-console-design.md) (2026-06-21) and revisits its work/runtime split.
+>
+> **2026-08-11 amendment.** Two changes, both from checking claims against code rather than
+> memory. (1) Delivery is forge-neutral and `change` is a first-class entity — §7. (2) The
+> work plane is **kaambaan**, a separate repo, and it is far more built than the original
+> draft assumed — the board, the A2A state machine, gates, attempts comparison and metering
+> already ship there. §7 is rewritten around that boundary, §4/§5/§8/§9/§10 follow it, and
+> Horizon 2 shrinks accordingly.
 
 The suite is the right ambition, and the architecture already supports it better than
 it gets credit for — the provisioner drivers *already* make every sandbox self-enroll
@@ -117,7 +124,7 @@ eventually. Architecturally there are five planes and one spine.
 | 1 | **Runtime** — where agents live | Built | node-agent, hub gateway, station registry, descriptors, capabilities. Attach-first for machines we own. Everything else resolves down to "a station with capabilities." |
 | 2 | **Substrate** — where runtimes come from | 2 of ~8 drivers | Provisioning across Docker, Kubernetes, and hosted sandbox providers. The differentiator is not creating sandboxes — it's that a sandbox we created and a laptop we attached are indistinguishable downstream. (§5) |
 | 3 | **Conversation** — how you talk to them | Built + Doors | Hub-terminated ACP, persisted transcripts, permission modes. Remaining move is inversion: also be an ACP *server*. (§6) |
-| 4 | **Work** — what they should do | New (kaambaan) | Initiatives, tasks, runs, stages, gates, review. Linear-shaped, but an assignee can be an agent bound to a runtime and a budget. (§7) |
+| 4 | **Work** — what they should do | **Built — in kaambaan, a separate repo** | Boards, cards, tasks, runs, stages, gates, review. *Not ours to build.* kaambaan already ships the A2A state machine, the agent contract over REST and MCP, gates, attempts comparison and per-attempt metering. Our job is to be its fleet. (§7) |
 | 5 | **Governance** — trust, policy, spend | Ledger exists | Not a product — a layer every plane reports into. Posture and patching, fleet policy, cost accounting, audit. (§8) |
 
 > **Design rule to hold across all five.** A plane may only talk to another plane through
@@ -145,8 +152,15 @@ along plane boundaries, version independently, publish to npm:
 | `contract-runtime` | gateway frames, station, capabilities, the 15 verbs | node-agent, hub, console |
 | `contract-substrate` | provision spec, driver capability manifest, lifecycle | hub, drivers |
 | `contract-session` | ACP session, events, permission protocol | hub, console, external clients |
-| `contract-work` | initiative, task, run, change, stage, gate, verdict, delivery adapter | work plane, hub, console |
+| `contract-change` | change, changeset, delivery adapter | hub, console — projected into kaambaan as a `reference` |
 | `contract-identity` | org, actor, agent identity, policy, budget | everything |
+
+> **There is no `contract-work` package, and there should not be.** kaambaan owns
+> initiative/card/task/run/stage/gate/verdict and has already shipped them. We consume that
+> contract **over the wire, not by import** — its package is `private: true`, designed to be
+> projected onto REST and MCP surfaces, and it is on zod 4 while we are on zod 3.25. Importing
+> it would drag a zod major into the hub, contract and console for no benefit. Speak the
+> surface; validate against our own schemas. (§7)
 
 ### Generate the Go side
 
@@ -214,7 +228,7 @@ never manage your laptop. We already manage both.
 
 ---
 
-## 7. Work: mission control, without fighting Agent HQ head-on
+## 7. Work: kaambaan is the work plane; we are its fleet
 
 GitHub gives away task assignment with Copilot, across web, VS Code, mobile and CLI. We
 do not win that by building a better kanban. We win by dispatching where they
@@ -227,27 +241,127 @@ The corollary is that we must not hand the last mile back. A dispatch layer whos
 output has to become a GitHub pull request has routed around Agent HQ and then delivered
 its work to GitHub anyway.
 
-### The model — four objects, not a board
+### This plane already exists, and it is not in this repo
 
-Kanban is a view. The model underneath is a run graph:
+kaambaan is the work plane — a separate product and repo, `rakeshgangwar/kaambaan`. An
+earlier draft of this document treated it as greenfield ("New"). It is not. Verified against
+the code on 2026-08-11:
 
-- **Initiative** — the unit of intent, syncable with a GitHub issue or a Linear ticket.
-  Never ask anyone to migrate their backlog; import it.
-- **Task** — a decomposed, assignable unit with an acceptance condition.
-- **Run** — one attempt: binds *task + harness + station + session + budget + policy* and
-  produces *transcript + diff + cost + verdict*. This is the join key from §3. Runs are
-  cheap, comparable, and re-runnable on a different substrate.
-- **Change** — the thing that lands. One change accumulates many runs — a first attempt, a
-  revision after review, a CI fix — and resolves to a commit against a base. Runs are
-  immutable attempts; a change is the mutable object a human tracks across them. "Compare
-  three runs and promote one" produces a change; without it, the question of what the
-  promoted run *becomes* has no answer.
+| What kaambaan already has | Where |
+|---|---|
+| A2A-exact task state machine — `submitted · working · input-required · auth-required · completed · rejected · failed · canceled`, spelled to match A2A | `packages/contract/src/{primitives,state-machine}.ts`, with a transition-table test suite |
+| Agent contract over REST at `/v1/*`, plus programmatic agent registration minting `kbn_` bearer tokens | `apps/api`, `agents-rest.test.ts` |
+| MCP server — Streamable HTTP, OAuth 2.1, eleven tools | `apps/api/src/mcp/` |
+| An executable **conformance kit** driving a reference agent through a two-stage pipeline over the public REST contract only | `apps/api/test/conformance.test.ts` |
+| Gates, attempts comparison, per-attempt cost metering, GitHub references/webhooks, push, triggers | `board-{gates,attempts,metering,references,push,triggers}.test.ts` |
+| A Claude Code adapter normalizing `claude -p --output-format stream-json` into the activity envelope | `apps/api/src/adapters/claude-code.ts` |
+
+Two consequences the earlier draft got wrong. **Attempts comparison and cost metering are
+already built** — §7's "compare three runs" and §8's "cost per task, per agent, per machine"
+are not ours to invent, they are ours to feed. And kaambaan's adapter carries the comment
+*"a bridge (reference worker / harness adapter) calls this per line and POSTs each result as
+an activity"* — **that bridge is what AgentPod is.** The architecture already has a hole
+shaped like us.
+
+> **Note on kaambaan's own docs.** Its README and roadmap claim "P0 — Foundations." The code
+> is through roughly P5/P6. Read the tests, not the phase labels.
+
+### The model — where each object lives
+
+Kanban is a view. The model underneath is a run graph, and it now spans two repos:
+
+- **Initiative / Card / Task / Stage / Gate** — *kaambaan.* The unit of intent down to the
+  assignable unit with an acceptance condition. Syncable with a GitHub issue or Linear
+  ticket; never ask anyone to migrate a backlog.
+- **Run** — *kaambaan mints it, we execute it.* One attempt, binding *task + harness +
+  station + session + budget + policy*, producing *transcript + diff + cost + verdict*.
+  This is the join key from §3, and it already exists as `runId` in kaambaan's activity
+  envelope. We do **not** mint a competing id: a station attempt carries kaambaan's `runId`
+  when it came from a claim, and a local id when it did not — because the console must keep
+  working with no board attached at all.
+- **Change** — *ours.* The thing that lands. One change accumulates many runs — a first
+  attempt, a revision after review, a CI fix — and resolves to a commit against a base. Runs
+  are immutable attempts; a change is the mutable object a human tracks across them. It is
+  produced on a station, so it is produced here, and projected into kaambaan as a
+  `reference`.
 
 > **Why `change` is not a sixth plane.** The diff is already in the §3 sentence and already
 > a run output — this is an under-specified part of the existing thesis, not a plane the
 > strategy forgot. It earns a second entity because its lifecycle outlives the run that
 > produced it, and it earns nothing more. §10's rule holds: a new plane ships thin or not
 > at all.
+
+### The seam: REST for machines, MCP for models
+
+MCP and REST are not two syntaxes for one contract. They have **different callers.** REST is
+for when *software* decides — deterministic control flow, lease epochs, idempotency keys,
+retries. MCP is for when *the model* decides — tool annotations, elicitation, `isError` so it
+can self-correct.
+
+Our hub is software. It claims a card because a scheduler decided to, not because a model
+reasoned about it. So:
+
+- **AgentPod ↔ kaambaan is REST.** It is also what the conformance kit exercises, so the
+  validation instrument works out of the box, and `POST /v1/agents` already mints a bearer
+  that authorizes a claim with no OAuth dance.
+- **MCP stays, for the other caller** — a harness working a board directly with no fleet
+  involved. That is kaambaan's demo milestone and its distribution channel to people who
+  never install us. Two surfaces, two audiences, no redundancy.
+
+> **One refinement to kaambaan's "MCP ≡ REST parity" goal.** Chase *semantic* parity on shared
+> verbs, not identical verb sets. `kaambaan_heartbeat` is currently exposed as an MCP tool,
+> which hands a model a `leaseEpoch` — machinery it should never touch, and an invitation to
+> corrupt lease state. One contract, two projections, MCP a deliberate subset.
+
+### A2A: one agent per station
+
+The topology question is whether the hub registers as *one* agent or *many*. One agent is
+simpler and wrong: kaambaan then sees a single opaque blob called "AgentPod," capability
+routing degrades to "it can do everything," and attempts-comparison across machines is
+invisible to the board. So: **one kaambaan agent per station**, minted by the hub as stations
+enroll and retired on cleanup. Registration is already programmatic, so this needs nothing
+new from kaambaan.
+
+That gives the sentence the whole integration hangs off:
+
+> **An A2A AgentCard is the projection of a station descriptor.**
+
+The descriptor layer already computes harness type, detected tooling, health and
+capabilities. That is most of an AgentCard, and §1's structural insight — everything resolves
+to "a station with capabilities" — is exactly what A2A wants to consume. *(kaambaan's doc 04
+promises an AgentCard at `/.well-known/agent-card.json`; only the OAuth protected-resource
+document is implemented today. The endpoint is unbuilt on both sides.)*
+
+Three mappings then come for free, and each replaces something we would otherwise design:
+
+| Fleet condition | A2A / kaambaan state | What we avoid building |
+|---|---|---|
+| ACP permission request | `request_input` → `input-required` | A second approval queue — it is the same queue as the gate |
+| Station drops, CGNAT disconnect | `heartbeat_timeout` → `submitted` | Fleet failure handling; the card simply becomes reclaimable |
+| Harness credential expired on a remote box | `auth_required` → `auth-required`, then `account_linked` | A re-auth model we have no concept of today |
+
+Two rules follow, and both are the §6 invariant in a new costume:
+
+> **Coordination stays board-mediated.** No direct station-to-station A2A messaging. Every
+> handoff goes through a card, so every handoff lands in the ledger. Direct agent-to-agent
+> chatter is work that never touches the flight recorder — which is the §11 bet and the §8
+> monetization. Refuse any path where work escapes the record.
+
+> **Orchestrator-neutrality, exactly as §7 refuses forge lock-in.** Serve an AgentCard per
+> station so *any* A2A orchestrator can consume the fleet. kaambaan is the best-supported
+> consumer, never the required one. The day a station is only reachable through one board is
+> the day we have rebuilt the thing we refused in delivery.
+
+### What this asks of kaambaan
+
+Three fleet-scale problems it has not had to face, all small:
+
+1. **Lifecycle at churn** — stations come and go; needs deregistration/expiry and probably
+   agent *groups*, so a board routes to "the fleet" without enumerating fifty agents.
+2. **Refreshable capabilities** — tags are fixed at registration, but a station gains Rust
+   the day someone installs a toolchain.
+3. **A fleet-level concurrency cap** — limits are per-agent today, so fifty station-agents
+   can saturate a board.
 
 ### Delivery: the terminal state is a git ref
 
@@ -281,7 +395,7 @@ Two things this buys beyond avoiding a vendor:
 
 > **Same invariant as §6, opposite end of the pipe.** A delivery adapter's responsibility
 > *begins* at a finished change; nothing upstream knows which forge it is headed to. The
-> day `contract-work` grows a required `pull_request_id` is the day we have swapped one
+> day `contract-change` grows a required `pull_request_id` is the day we have swapped one
 > vendor's lock-in for another's and lost the reason we routed around Agent HQ at all.
 
 > **The wedge.** The forge owns everything after the merge request. Nobody owns what comes
@@ -291,9 +405,10 @@ Two things this buys beyond avoiding a vendor:
 
 ### Three things we get almost free
 
-- **Gates are already built.** A stage gate that needs human approval is exactly an ACP
-  permission request — same queue, same audit, same modes. The work plane's approval UI is
-  a re-skin of the permission UI, not a new subsystem.
+- **Gates are already built — on both sides.** A stage gate needing human approval is exactly
+  an ACP permission request, and kaambaan's `input-required` is exactly where an ACP
+  permission lands. Same queue, same audit, same modes, and now the same state name. The
+  approval UI is a re-skin of the permission UI, not a new subsystem.
 - **The shape is already in the schema.** The vestigial `agent_tasks` table from the
   OpenCode era is literally *task → sandbox → session → response → error*. Don't
   resurrect the table — it's Cloudflare-specific and pre-fleet — but it's evidence we
@@ -303,11 +418,19 @@ Two things this buys beyond avoiding a vendor:
   architecture. It also removes an ugly requirement: no station needs push credentials of
   its own for work done on it to become reviewable.
 
-> **The honest risk on this plane.** This is where we have the least differentiation and
-> the most competition, and it's the most UI-expensive thing in the suite. Ship it thin:
-> runs, changes, comparison, gates, and initiative sync. Resist swimlanes, sprints,
-> estimates and roadmaps — every hour spent on project-management features is an hour not
-> spent on the four planes nobody else can build.
+> **The honest risk on this plane has moved.** It is no longer "we might build a bad kanban" —
+> we are not building one. It is **drift between two repos owned by the same person.** The
+> conformance kit is the mitigation and it already exists: our bridge either passes it or it
+> does not, and that check belongs in CI on both sides. The second risk is duplication by
+> accident — the day AgentPod grows its own board, or kaambaan grows its own fleet
+> management, one of them is wasted work.
+
+> **What is still unproven, precisely.** Every kaambaan test drives a synthetic in-process
+> agent through `cloudflare:test`. Nothing has driven a *real* harness, on a *real* machine,
+> through that loop. The conformance kit proves the contract is self-consistent; it does not
+> prove the contract survives a persistent ACP session that blocks mid-flight on a permission
+> request, or a station behind CGNAT that drops halfway through a claim. That is exactly the
+> gap the Horizon 0 spike closes.
 
 ---
 
@@ -338,6 +461,13 @@ explicitly). Add a usage event type and, keyed by run, we get cost per task, per
 per machine, per person. **Nobody else can compute that for self-hosted agents, because
 nobody else is on the box.**
 
+> **Division of labour with kaambaan, so this is not metered twice.** kaambaan already meters
+> per tenant·board·card·attempt·agent·model — but only for work it dispatched. `acp_events`
+> stays **authoritative**: it is on the box, it is sequenced, it holds permission decisions
+> kaambaan never sees, and it covers sessions that never came from a board at all. kaambaan's
+> activity envelope and any A2A message stream are **projections** of it. One writer, many
+> readers — otherwise the two ledgers drift and neither can be trusted for §11.
+
 ### Approvals that reach a human
 
 The permission queue exists; the missing hop is the notification. A PWA plus push turns
@@ -358,17 +488,30 @@ suite or a pile.*
 - [ ] Promote issue #228 (macOS signing and notarization) to blocking. Unsigned binaries
       that re-prompt on every update are survivable for a console and disqualifying for a
       control plane.
-- [ ] Split the contract into the five packages, version them, publish to npm.
-- [ ] Add zod → JSON Schema → Go codegen, enforced in CI. The hand-written Go mirrors are
-      the crack that widens fastest once other people contribute.
-- [ ] Introduce the `run` entity and backfill it across sessions and provisioned runtimes.
-      Everything after this depends on it existing.
-- [ ] Reserve `change` alongside `run` in `contract-work`. Same argument as the run key — a
-      peer entity everything downstream keys off costs a schema decision now and a
-      reconciliation later. The delivery adapters can wait for Horizon 2; what cannot wait
-      is that the schema never grows a required `pull_request_id`.
-- [ ] Clear the dependabot backlog and fix the branch-flow drift — docs say `develop`, the
-      last three months went `ui-revamp` → `main`.
+- [ ] **The kaambaan bridge spike — do this first, before committing to anything below it.**
+      Register the hub as a kaambaan agent, claim a card, dispatch to a real station running
+      a real harness, stream ACP events as activities, block once on a permission gate, and
+      complete. Measured against `conformance.test.ts` semantics. This either validates the
+      seam in §7 or kills it, and everything else in this horizon is cheaper to do after it.
+- [ ] Split the contract along plane boundaries — `contract-runtime`, `contract-substrate`,
+      `contract-session`, `contract-change`, `contract-identity`. **Workspace-internal only;
+      no npm publishing.** The existing files already map almost 1:1, so this is packaging,
+      not refactoring. Publishing waits until a consumer outside this monorepo needs it, and
+      kaambaan is not that consumer — we speak its wire surface, not its package (§5).
+- [ ] Add zod → JSON Schema → Go codegen, enforced in CI. Fourteen Go files carry hand-written
+      `json:"` mirrors today; that is the crack that widens fastest once other people
+      contribute.
+- [ ] Give a station attempt a durable identity, carrying kaambaan's `runId` when it came from
+      a claim and a local id when it did not. Adopt A2A's state vocabulary verbatim — do not
+      invent a parallel outcome enum. The console must keep working with no board attached.
+- [ ] Reserve `change` in `contract-change`. A peer entity everything downstream keys off
+      costs a schema decision now and a reconciliation later. Delivery adapters can wait for
+      Horizon 2; what cannot wait is that the schema never grows a required
+      `pull_request_id`.
+- [x] ~~Clear the dependabot backlog~~ — done 2026-08-11. Eleven orphaned PRs closed against
+      directories and actions purged in P2a/P2c; `gomod` coverage added for the node-agent,
+      which had none. Still open: the branch-flow drift — docs say `develop`, the last three
+      months went `ui-revamp` → `main`.
 
 ### Horizon 1 — Substrate and doors (Q4 2026)
 
@@ -388,19 +531,29 @@ suite or a pile.*
 
 ### Horizon 2 — Work (Q1–Q2 2027)
 
-*The plane that makes it a suite rather than infrastructure.*
+*Most of what this horizon used to contain is already built, in kaambaan. What is left is
+the bridge and the change artifact — a much smaller horizon than the first draft assumed.*
 
-- [ ] Initiative / Task / Run / Change, over the sessions and stations we already have.
-- [ ] A `changeset` capability on the node-agent — package a station's workspace diff
-      against a base and ship it to the hub. Reuses filesystem and terminal.
-- [ ] Gates wired to the existing permission queue — same audit trail, same approval surface.
-- [ ] Board and run-comparison views. Same task, three harnesses, three substrates, compare
-      diffs and cost, promote one into a change.
+**Ours:**
+
+- [ ] Harden the bridge from spike to production: fleet-wide agent lifecycle (mint on enroll,
+      retire on cleanup), one kaambaan agent per station, conformance run in CI on both sides.
+- [ ] Serve an A2A AgentCard per station from the hub, derived from the descriptor. Any
+      orchestrator, not only kaambaan (§7).
+- [ ] A `changeset` capability on the node-agent — package a station's workspace diff against
+      a base and ship it to the hub. Reuses filesystem and terminal; no station needs push
+      credentials of its own.
 - [ ] Delivery adapters — `git-remote` first, then `github` / `gitlab` / `forgejo`, and
       `patch`. Ship nothing that makes the `git-remote` path insufficient.
-- [ ] Initiative sync adapters — GitHub Issues, Linear, and standalone with no upstream at
-      all. Import backlogs; never demand migration; never require an upstream.
-- [ ] Mobile PWA with push, covering both permission answers and stage gates.
+- [ ] Mobile PWA with push, covering permission answers — which are the same surface as
+      kaambaan's gates.
+
+**kaambaan's, and already shipped — feed them, don't rebuild them:** boards and cards, the
+task state machine, gates and approvals, attempts comparison, per-attempt metering, GitHub
+issue/PR references and sync.
+
+**kaambaan's, and needed for fleet scale:** agent lifecycle at churn, refreshable capability
+tags, a fleet-level concurrency cap (§7).
 
 ### Horizon 3 — Governance across the suite (2027)
 
@@ -423,9 +576,15 @@ suite or a pile.*
   heroic: the conformance suite so drivers can't rot silently, the descriptor SDK so
   harnesses are community-carried, codegen so contract drift can't compile, and a hard
   rule that a new plane ships thin or not at all.
-- **The join key retrofitted.** If `run` arrives after the work plane, we reconcile four
-  id spaces under load. This is the single highest-leverage ordering decision in the
-  document.
+- **The join key retrofitted.** If the run identity arrives after the planes that write to
+  it, we reconcile four id spaces under load. Now that the work plane is a *separate repo*,
+  this is worse than the original framing: reconciling id spaces across two products is
+  harder than across two tables. Adopt kaambaan's `runId` rather than minting a rival (§7).
+- **Two repos, one owner, silent drift.** kaambaan and AgentPod can diverge with nobody to
+  notice, and the failure is quiet — a contract change on one side that the other only
+  discovers in production. The mitigation exists already: kaambaan's conformance kit, run in
+  CI on *both* sides. The second form of this is duplication by accident — the day AgentPod
+  grows a board, or kaambaan grows fleet management, one of them is wasted work.
 - **Provider API churn.** Eight substrates means eight vendors shipping breaking changes
   on their own schedule — and one of them, Daytona, already closed its source mid-2026.
   Nightly conformance runs against real accounts, and treat a driver we cannot test as a
@@ -467,10 +626,17 @@ from what's already built.
 
 Build the suite. The architecture already wants it — the provisioner drivers hand every
 sandbox to the same node-agent, which means one management contract can span a Kubernetes
-CRD, a Firecracker microVM, and the laptop on the desk. What's missing isn't a plane,
-it's the spine: **ship the `run` entity and the split contracts before anything else, and
-every plane added afterwards makes the previous four more valuable instead of merely more
-numerous.**
+CRD, a Firecracker microVM, and the laptop on the desk. What's missing isn't a plane; it's
+the spine.
+
+But the spine is cheaper than the first draft of this document claimed, because one of the
+five planes is already built and living in another repo. The work is not to invent a run
+identity — kaambaan has one — it is to **join to it without minting a rival, and to prove
+that join against a real harness on a real machine before building anything on top of it.**
+So: **run the bridge spike first, adopt kaambaan's `runId` and A2A's states rather than
+inventing our own, keep `acp_events` authoritative and everything else a projection of it,
+and let every plane added afterwards make the previous four more valuable instead of merely
+more numerous.**
 
 ---
 
@@ -479,6 +645,11 @@ numerous.**
 Market and ecosystem claims in §2 and §6 are as of 2026-08-10 and should be re-checked
 before they're used to justify a decision.
 
+Claims in §7 about kaambaan are from its code and tests at `573a9ba` (2026-06-22), read
+2026-08-11 — **not** from its README or roadmap, which still say "P0 — Foundations" while the
+code is through roughly P5/P6.
+
+- [rakeshgangwar/kaambaan](https://github.com/rakeshgangwar/kaambaan) — the work plane. Key artifacts: `packages/contract/src/{primitives,state-machine,verbs}.ts`, `apps/api/src/mcp/`, `apps/api/src/adapters/claude-code.ts`, `apps/api/test/conformance.test.ts`
 - [ACP brings JetBrains on board — Zed](https://zed.dev/blog/jetbrains-on-acp) · [Zed — Agent Client Protocol](https://zed.dev/acp)
 - [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) · [Agent Sandbox docs](https://agent-sandbox.sigs.k8s.io/docs/) · [Agent Sandbox on Kubernetes — Northflank](https://northflank.com/blog/agent-sandbox-on-kubernetes)
 - [Daytona vs E2B — Northflank](https://northflank.com/blog/daytona-vs-e2b-ai-code-execution-sandboxes) · [E2B alternatives — Blaxel](https://blaxel.ai/blog/e2b-alternatives-sandbox-environments) · [Agent sandboxing in 2026](https://manveerc.substack.com/p/ai-agent-sandboxing-guide)
