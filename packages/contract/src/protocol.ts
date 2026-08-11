@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Station, StationHealth, FsEntry } from "./station";
 import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
+import { PostureReport } from "./posture";
 
 export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
@@ -55,6 +56,8 @@ export const VERB_PARAMS = {
     side: ChangesetDiffSide,
     maxBytes: z.number().int().positive().optional(),
   }),
+  // Node-level: no station key. One scan describes one machine.
+  "posture.scan": z.object({}),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -83,4 +86,5 @@ export const VERB_RESULTS = {
   // acp.attach streams; no entry needed (same as term.attach).
   "changeset.status": ChangesetStatus,
   "changeset.diff": ChangesetDiff,
+  "posture.scan": PostureReport,
 } as const;

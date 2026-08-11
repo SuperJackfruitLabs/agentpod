@@ -22,6 +22,8 @@ export const NodeSummary = z.object({
   agentVersion: z.string().nullable(),
   latestVersion: z.string().nullable(),
   updateAvailable: z.boolean(),
+  /** Node-level capabilities from the hello frame. Null on older nodes. */
+  capabilities: z.array(z.string()).nullable().optional(),
   provisioned: z.object({ runtimeId: z.string(), provider: z.string() }).nullable().optional(),
 });
 export type NodeSummary = z.infer<typeof NodeSummary>;
