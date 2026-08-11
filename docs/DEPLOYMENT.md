@@ -170,6 +170,49 @@ curl -s http://127.0.0.1:3001/health
 
 > If you need to run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`
 
+### Optional: gVisor isolation for provisioned runtimes
+
+Provisioned runtimes run on the hub box and execute agent-generated code. Under
+Docker's default `runc` they share the host kernel, so a container escape is a
+hub compromise. gVisor (`runsc`) gives each container its own userspace kernel.
+
+It needs **no nested virtualisation and no bare metal** — Linux 4.14.77+ is the
+only requirement, so it works on an ordinary cloud VM.
+
+```bash
+ARCH=$(uname -m)
+URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}"
+curl -fsSL -o runsc "${URL}/runsc" -o runsc.sha512 "${URL}/runsc.sha512" \
+     -o containerd-shim-runsc-v1 "${URL}/containerd-shim-runsc-v1" \
+     -o containerd-shim-runsc-v1.sha512 "${URL}/containerd-shim-runsc-v1.sha512"
+sha512sum -c runsc.sha512 -c containerd-shim-runsc-v1.sha512
+chmod a+rx runsc containerd-shim-runsc-v1
+sudo mv runsc containerd-shim-runsc-v1 /usr/local/bin/
+sudo /usr/local/bin/runsc install
+sudo systemctl reload docker      # reload, NOT restart — running containers keep running
+```
+
+Verify Docker sees it, then enable it for newly provisioned runtimes:
+
+```bash
+docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'   # expect runsc listed
+echo 'DOCKER_RUNTIME=runsc' >> /etc/agentpod/hub.env
+systemctl restart agentpod-hub
+```
+
+Existing runtimes keep whatever they were created with; this affects new ones.
+The console's **Isolation** column shows each runtime's actual runtime, read back
+from Docker rather than from config, so you can confirm rather than assume.
+
+**If `runsc` is not installed and `DOCKER_RUNTIME=runsc` is set, provisioning
+fails loudly.** It never falls back to `runc` — a silent fallback would leave you
+believing you had kernel isolation when you had none.
+
+Verified on the reference box (Ubuntu 24.04, kernel 6.8, Docker 29.6.1): the
+node-agent enrols, heartbeats, allocates PTYs for the terminal capability, and
+runs ACP stdio children under `runsc` identically to `runc`. Expect 5–20% CPU
+overhead depending on syscall frequency.
+
 ---
 
 ## 6. Console — build + deploy to Cloudflare Pages

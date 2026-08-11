@@ -277,3 +277,30 @@ test("calls listRuntimes on mount", async () => {
     expect(spy).toHaveBeenCalledOnce();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Container runtime column
+// ---------------------------------------------------------------------------
+
+test("a runtime running under gVisor says so", async () => {
+  // The operator needs to see which isolation a runtime actually got. Showing
+  // nothing would make a hardened and an unhardened runtime look identical.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-gvisor", name: "hardened", runtime: "runsc" },
+  ]);
+
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/runsc/));
+});
+
+test("a runtime with no reported runtime shows none", async () => {
+  // Null means "not recorded", not "runc". Printing a default here would be a
+  // guess presented as a fact.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-plain", name: "plain", runtime: null },
+  ]);
+
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/plain/));
+  expect(container.textContent).not.toMatch(/runsc|runc/);
+});

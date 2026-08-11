@@ -132,6 +132,16 @@
       header: "Provider",
     },
     {
+      id: "runtime",
+      header: "Isolation",
+      enableSorting: false,
+      // The runtime the provider REPORTED, not the one requested — blank when
+      // not recorded rather than defaulting to "runc", which would be a guess
+      // presented as a fact.
+      accessorFn: (row) => row.runtime ?? "",
+      cell: (ctx) => renderSnippet(runtimeCell, { value: ctx.getValue<string>() }),
+    },
+    {
       id: "node",
       header: "Node",
       enableSorting: false,
@@ -164,6 +174,12 @@
 
 {#snippet nameCell({ value }: { value: string })}
   <span class="font-mono text-sm font-medium">{value}</span>
+{/snippet}
+
+{#snippet runtimeCell({ value }: { value: string })}
+  {#if value}
+    <Badge variant="outline" class="font-mono text-xs">{value}</Badge>
+  {/if}
 {/snippet}
 
 {#snippet nodeCell({ value }: { value: string })}
