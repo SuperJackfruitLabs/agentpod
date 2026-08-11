@@ -649,10 +649,31 @@ item here that is distribution rather than capability.*
       integration (SCM or scheduled task), and path/process handling that currently assumes
       POSIX — a piece of work, not a matrix row. Sizing it belongs here, before any plane
       assumes the fleet is already cross-platform.
-- [ ] A **`posture` capability** alongside health and logs, so `apn scan`'s findings become
-      fleet-visible instead of a local report. This is the missing middle of the posture
-      story — Horizon 0 ships a one-shot hubless scanner, Horizon 3 ships continuous posture
-      with staged remediation, and nothing joined them.
+- [x] ~~A **`posture` capability**~~ — shipped 2026-08-12 in v0.1.22, hub deployed, verified on
+      molt-bot and superchotu. **The framing here was wrong in two ways worth recording.**
+      *(1) "Alongside health and logs" was a category error*: those are per-station verbs, but
+      credential files live in a user's home and a listening socket belongs to a process, so
+      posture is per-machine. It is a node-level verb gated on node capabilities carried in the
+      `hello` frame — which, riding the handshake, refresh on every connect and so cannot go
+      stale the way station capabilities did. *(2) This was not a presentation problem at all.*
+      Checking the scanner against real machines found it **grading them A without opening the
+      files it claimed to check**: the hermes and openclaw path lists matched zero real files.
+      Fixing that alone would have been worse — a file's mode is not its exposure, and a 644
+      file under a 700 ancestor is unreachable, so the corrected paths would have turned a
+      properly secured molt-bot into 15 criticals and an F. Findings now require effective
+      reachability. Per-station credentials (`profiles/*/auth.json`, `agents/*/agent/auth*.json`)
+      were never checked at all and now are, which is what `Finding.Station` was always for.
+      superchotu went 5 → 48 checks, molt-bot 5 → 60; both still grade A, and 27 would-be
+      criticals are suppressed by the reachability rule rather than by luck. Superseded detail:
+      so `apn scan`'s findings become fleet-visible instead of a local report. This is the
+      missing middle of the posture story — Horizon 0 ships a one-shot hubless scanner,
+      Horizon 3 ships continuous posture with staged remediation, and nothing joined them.
+
+      > **The lesson generalises beyond posture.** A checked-in list of external paths is a
+      > claim about the world that rots silently, and nothing in CI can catch it — the tests
+      > all passed. Verify such lists against real machines, and date the entries.
+      > [#237](https://github.com/rakeshgangwar/agentpod/issues/237) makes this same list serve
+      > a second consumer, so the next drift gets noticed sooner.
 - [ ] Ship the first driver wave — **generic SSH, then E2B and Fly Machines** — alongside the
       Docker and Cloudflare drivers we already have. Kubernetes `agent-sandbox` moves to the
       second wave (§6). Each must land as an ordinary enrolled station with zero downstream
