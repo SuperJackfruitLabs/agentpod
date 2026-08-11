@@ -14,21 +14,38 @@ The strategy says "be an ACP *server*". That does not map onto how ACP works, an
 
 **ACP clients spawn an agent as a subprocess and speak JSON-RPC over its stdio.** They do not dial URLs. A hub that "is an ACP server" has no socket an editor would ever open.
 
-So Doors is a **local stdio proxy**:
+So Doors is a **local stdio proxy** — but the protocol work does not live in it.
+
+### Where the ACP implementation goes, and why not in `apn`
+
+`apn` is Go, with two dependencies, and the node-agent has never parsed an ACP frame in its life — it pipes stdio bytes, exactly like the terminal. The ACP SDK is TypeScript. So `agent().connect(stream)` cannot live in `apn` without hand-writing a second implementation of a protocol that is *actively moving to v2*, in a language with no SDK, and maintaining it against a spec we do not control. That is the hand-written-mirror problem the golden-fixture test exists to contain, an order of magnitude larger.
+
+**So the hub runs the ACP agent, and `apn acp` is a byte pipe.**
 
 ```
 Zed / JetBrains  (on a laptop)
   ⇅ stdio, ACP JSON-RPC — the editor spawns this like any other agent
-apn acp --station <id>                      ← the new piece
-  ⇅ WSS
-hub.agentpod.dev — existing acp.open / acp.attach / acp.close
+apn acp --station <id>                    ← Go: shuttles bytes, parses nothing
+  ⇅ WSS  (raw ACP frames)
+hub.agentpod.dev
+  • the ACP AGENT, via the TypeScript SDK's agent() over the WebSocket stream
+  • handlers call the existing session service: open / attach / prompt / permission
   ⇅ broker (existing gateway rails)
-node-agent  ⇅ stdio  harness            (on a machine somewhere else)
+node-agent  ⇅ stdio  harness          (on a machine somewhere else)
 ```
+
+This is strictly better than putting ACP in Go:
+
+- **The protocol lives where its SDK lives.** One implementation, schema-validated by the SDK, in the language the SDK ships for.
+- **v1/v2 negotiation comes free.** `agentProtocolRouter()` runs in the hub. A Go implementation would have to hand-follow both versions.
+- **`apn acp` is small and boring** — connect, pipe stdin→ws, pipe ws→stdout. That is the terminal pattern this codebase already ships and tests.
+- **The decision to keep the proxy in `apn` holds**, and gets cheaper: one Go subcommand with no protocol knowledge, no second binary, no second release pipeline.
+
+The strategy's phrase "be an ACP server" turns out to be right after all — the hub really does serve ACP. It just does not serve it to editors *directly*, because editors spawn processes rather than dialling URLs. `apn acp` is the shim that turns a spawned process into a connection.
 
 ## Decisions (from brainstorm)
 
-1. **The proxy lives in `apn`**, not a second binary. `apn` becomes both a node that serves stations *and* a client that reaches them. Someone running Zed installs `apn` purely as a client — it never enrolls. This avoids a second release pipeline, a second self-update story, and a second thing to sign.
+1. **The proxy lives in `apn`**, not a second binary. `apn` becomes both a node that serves stations *and* a client that reaches them. Someone running Zed installs `apn` purely as a client — it never enrolls. This avoids a second release pipeline, a second self-update story, and a second thing to sign. **The ACP implementation itself lives in the hub**, not in `apn` — see below; `apn acp` parses nothing.
 2. **Concurrent attach from the start.** A session may have several clients at once — your console and your Zed on the same live transcript.
 3. **One user, many clients.** Not multi-user collaboration: sessions are already scoped by `userId` and shared sessions were explicitly out of scope for the ACP program. Doors does not change that.
 4. **Attach to the existing session machinery.** The proxy is another subscriber, not a parallel path. An editor and the console must be able to watch the same session.
@@ -59,14 +76,13 @@ A stdio ACP agent that proxies to a hub station.
 apn acp --station <station-id> [--hub <url>] [--token <t>] [--mode ask|accept-edits|full-auto]
 ```
 
-- Speaks ACP to the editor over stdin/stdout via the fluent API — `agent({ name: "agentpod" }).onRequest(...).connect(stream)` — never the deprecated `AgentSideConnection`.
-- Authenticates to the hub as a client (bearer; see Auth below).
-- Opens or attaches a session on the station, then relays:
-  - editor → hub: `prompt`, `cancel`, permission answers, mode changes
-  - hub → editor: session updates, permission requests, errors
-- Exits when the editor closes stdin or the session ends.
+- Dials the hub over WSS and **pipes bytes both ways**: stdin → socket, socket → stdout. It does not parse ACP, does not know what a session is, and has no protocol version.
+- Authenticates to the hub as a client (bearer; see Auth below), passing `--station` / `--session` as query parameters so the hub knows what to attach the ACP agent to.
+- Exits when the editor closes stdin or the socket closes.
 
-**It is a relay, not a translator.** The hub already terminates ACP and stores its events verbatim; the proxy's job is to move frames, not to reinterpret them. Anything that needs interpreting is a sign the boundary is wrong.
+**It is a pipe, not a relay and certainly not a translator.** Every ACP decision — initialize, capabilities, session/load replay, permission round-trips, version negotiation — happens in the hub, where the SDK is. If `apn acp` ever needs to understand a frame, the boundary is in the wrong place.
+
+The hub side is the ACP agent proper: `agent({ name: "agentpod" }).onRequest(...)` bound to the WebSocket as its stream, with handlers calling the existing session service.
 
 ### Session selection
 
