@@ -37,7 +37,10 @@ node-agent  ⇅ stdio  harness            (on a machine somewhere else)
 
 Checked against the code, and they make this much smaller than it looks:
 
-- **The SDK ships the agent half.** `@agentclientprotocol/sdk` exports `AgentSideConnection` and `ndJsonStream`. We implement an interface; nothing hand-rolls JSON-RPC. (The hub already uses `ClientSideConnection` from the same package.)
+- **The SDK ships the agent half, via a fluent API.** `@agentclientprotocol/sdk@1.3.0` exports `agent()` returning an `AgentApp`, built by chaining `.onRequest(...)` / `.onNotification(...)` / `.onConnect(...)` and finished with `.connect(stream)`. Nothing hand-rolls JSON-RPC, and handler params are parsed against the generated ACP schemas before a handler runs.
+- **`AgentSideConnection` and `ClientSideConnection` are deprecated.** The SDK says so in-tree: *"@deprecated Prefer `agent`, which registers typed handlers with a single context object"*, and *"@deprecated Prefer `agent({ name }).connect(stream)`"*. They remain for backwards compatibility. **New code uses the fluent API.**
+- **The hub is on the deprecated class today** (`ClientSideConnection` in `acp-sessions.ts:40`). That is pre-existing debt, not something Doors introduces — but Doors is the moment it becomes worth paying, because otherwise we add a second deprecated call site.
+- **The SDK already ships v1/v2 version negotiation.** `agentProtocolRouter()` returns an `AgentProtocolRouter` with `.withV1(agent)` and `.withV2(agent)`: it consumes the client's `initialize` request and selects the highest configured version that does not exceed what the client asked for, forwarding every later wire item unchanged. Marked `@experimental`.
 - **Concurrent attach is already supported by the hub.** `subscribers` is `Map<sessionId, Set<callback>>` and `fanOut` iterates the set (`acp-sessions.ts:191,298`). The console is simply the only client that exists today.
 - **Permission answering is already first-answer-wins.** `answerPermission` resolves from `live.pending` and deletes it; a second client answering the same request gets `"No pending permission request."` — a clean error, not a race (`acp-sessions.ts:969–984`).
 - **Prompts are already serialised.** A per-session `enqueue()` write queue chains work, so two clients prompting at once queue rather than interleave (`acp-sessions.ts:310`).
@@ -56,7 +59,7 @@ A stdio ACP agent that proxies to a hub station.
 apn acp --station <station-id> [--hub <url>] [--token <t>] [--mode ask|accept-edits|full-auto]
 ```
 
-- Speaks ACP to the editor over stdin/stdout via `AgentSideConnection`.
+- Speaks ACP to the editor over stdin/stdout via the fluent API — `agent({ name: "agentpod" }).onRequest(...).connect(stream)` — never the deprecated `AgentSideConnection`.
 - Authenticates to the hub as a client (bearer; see Auth below).
 - Opens or attaches a session on the station, then relays:
   - editor → hub: `prompt`, `cancel`, permission answers, mode changes
@@ -92,6 +95,38 @@ Already possible; this makes it real and tested.
 | Editor attaches to a console session | Same transcript, both live | Needs a test |
 
 The editor-side surface must reflect that it is *sharing*: when another client answers a permission the proxy did not answer, the editor should see the resolution rather than a request that silently vanishes.
+
+### Protocol versions: build for v2 without waiting for it
+
+ACP v2 is coming, and the SDK has already made room for it. `AgentProtocolRouter` negotiates per connection: register a v1 agent and a v2 agent, and each client gets the highest version both sides support.
+
+That removes the bet. We do **not** have to choose between shipping on v1 now and waiting for v2, and we do not need a flag day.
+
+Two rules follow:
+
+- **`apn acp`'s agent implementation is a pluggable `AgentConnector`, not a hard-wired connection.** Adding v2 then becomes `agentProtocolRouter().withV1(v1).withV2(v2)` — a registration, not a rewrite.
+- **We do not adopt the router yet.** It is `@experimental` in the SDK, and v2 is a draft. Shipping Doors on experimental negotiation would make our distribution story depend on someone else's unreleased draft.
+
+> **The docs and the SDK disagree about v2's maturity, and the SDK wins.** The website's v2 overview presents it as an active specification with no stability caveat; the shipping SDK marks v2 support `@experimental`. Where a protocol's own tooling hedges and its marketing does not, believe the tooling.
+
+v2 keeps the outer shape — initialize, session setup, prompt lifecycle — but the [migration guide](https://agentclientprotocol.com/protocol/v2/migration) lists changes that reach further into AgentPod than a proxy alone, and they are worth knowing before we add call sites:
+
+| v2 change | What it touches here |
+|---|---|
+| **`session/prompt` returns immediately** with an empty result; completion arrives via a `state_update` notification carrying the stop reason | The one change a relay cannot paper over. v1 keeps the response pending until the turn ends; our session service and the proxy both key off that. Different control flow, not a different field name. |
+| **`session/set_mode` removed**, replaced by config options | Our permission modes — `ask` / `accept-edits` / `full-auto` — ride on `set-mode`, including `AcpClientMsg` in the contract and the console's mode selector. **15 non-test call sites across hub, console and contract** — measured, and the change that costs us most. |
+| **Client `fs/*` and `terminal/*` methods removed** | **No impact, verified.** Our filesystem and terminal are *station capabilities* on the node-agent, not ACP client methods, and the hub answers no `fs/*` or `terminal/*` ACP method on a harness's behalf — grepped, zero call sites. |
+| **`tool_call` merged into `tool_call_update`**; upsert semantics with three-state patching, and an agent-generated `messageId` per chunk | `acp_events` stores payloads verbatim so the ledger is insulated, but the console's `transcript.ts` destructures these shapes, and so does the bridge's projection. |
+| **`authenticate` → `auth/login`**, `session/load` removed | Renames; cheap. |
+| **Permission requests restructured** — prompt copy in a required `title`, `subject.toolCall` carrying only genuine tool-call state | Touches the permission card and the bridge's `elicitation` projection. |
+
+**The guide's own advice is the strategy we had already arrived at:** *"Migrating does not mean dropping v1. v1-only Agents and Clients will remain common for some time, so implementers should support both versions side by side."* Negotiate per connection, keep separate protocol surfaces, share the business logic beneath them.
+
+This sharpens the design rule rather than changing it. **Relay frames, do not reinterpret them** — and note precisely where relaying is not enough: the prompt lifecycle differs structurally, so the proxy needs a per-version notion of "the turn is over", not a per-version field map.
+
+### Deprecation cleanup
+
+The hub's `ClientSideConnection` call site should move to `client()` in the same slice that introduces `agent()` in `apn`. Not scope creep — the alternative is two deprecated call sites across two binaries, and the SDK will eventually drop them.
 
 ## Testing
 
