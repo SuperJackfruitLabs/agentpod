@@ -806,4 +806,18 @@ The PR body must state plainly that `apps/bridge/spike/` is throwaway, that it i
 
 **Known unverified paths, flagged in-place rather than hidden:** the card-read endpoint used in Tasks 6 and 8 (`GET /v1/boards/{id}/cards/{cardId}`) and its resolution field path are inferred, not confirmed against the running service — Task 6 Step 2 instructs fixing them against the live response and recording the real shape.
 
+> **Corrections applied during execution (2026-08-11).** Tasks 1 and 2 ran against a live local
+> kaambaan and disproved four assumptions above. Full detail in
+> `apps/bridge/spike/findings/verified-surface.md`; the short version:
+>
+> - `pnpm dev:setup` (D1 migrations + seed) is a prerequisite for `pnpm dev`, and the seeded
+>   tenant is `tnt_dev` / `usr_dev`. The plan's `tnt_spike` fails the catalog foreign key with
+>   an opaque `500 D1_ERROR` naming nothing.
+> - **There is no card-read endpoint.** Both `/cards` and `/cards/:card` reject GET with 405.
+>   `GET /v1/boards/{board}` returns the whole snapshot and is the only read surface — better
+>   than planned, since each card carries `attemptCount` (the RQ4 reclaim signal) and `costUsd`.
+> - `POST /cards` returns `{card:{id}}`, not `{cardId}`.
+> - **A `response` activity does not advance the card**, contradicting doc 04 §4. Only
+>   `complete` did. The bridge must call it explicitly.
+
 **Type consistency:** `Work` and `Activity` are defined once in Task 2 and used unchanged in Tasks 4–8. `project()` returns `Activity[]` throughout. `signIn`/`openSession`/`connect` keep the Task 3 signatures in Task 5.
