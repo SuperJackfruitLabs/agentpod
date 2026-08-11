@@ -95,6 +95,7 @@ export function loadConfig(): SpikeConfig {
     boardId: req("BOARD_ID"),
     agentToken: req("AGENT_TOKEN"),
     hubUrl: process.env.HUB_URL ?? "https://hub.agentpod.dev",
+    hubToken,
     hubCookie,
     hubEmail,
     hubPassword,
