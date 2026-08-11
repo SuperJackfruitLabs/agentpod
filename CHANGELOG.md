@@ -6,6 +6,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.22 - 2026-08-12
+
+**Posture** — `apn scan`'s findings become fleet-visible, and, more urgently, become correct. Checking the scanner against real machines found it grading them **A** without opening the files it claimed to check.
+
+### Fixed
+
+- **`apn scan` reported false passes for Hermes and OpenClaw.** Its credential path list named files that exist on no machine we own — `config.json`, `credentials.json`, `gateway.json` — while the real files are `config.yaml`, `auth.json`, `.env`, `openclaw.json` and `gateway.systemd.env`. Not one path matched for either harness, so both graded clean having read nothing. The list is now rebuilt from running machines, and every entry carries the host and date it was verified on.
+- **Per-station credentials were never checked at all.** Hermes keeps `auth.json`, `.env` and `config.yaml` in every profile; OpenClaw keeps `agent/auth.json`, `auth-profiles.json` and `auth-state.json` in every agent. A profile with world-readable credentials passed. Findings for these now carry the station they belong to.
+- **A file's mode is not the same as its exposure.** A 644 file inside a 700 directory cannot be read by anyone else, and reporting it would be a false alarm. Every finding now requires *effective reachability* — the file grants read to a class **and** every ancestor directory grants traverse to it. Without this, correcting the paths above would have turned a correctly secured machine with 15 Hermes profiles into 15 criticals and a grade of F.
+
+### Added
+
+- **Station config directories are checked for being writable by others.** Files inside can all be owner-only while the directory holding them is group-writable, which lets another user *replace* an agent's credentials — invisible to any file-mode check.
+- **`posture.scan`**, a node-level verb, surfaced as a Posture panel on the node page in the console. A station whose own credentials are exposed also shows a banner on its own page; host-wide findings stay on the node page rather than being repeated across every station sharing a harness.
+- **Node-level capabilities**, carried in the `hello` frame. Because they ride the handshake they refresh on every connect, so they cannot go stale.
+
+### Notes
+
+- **Observe-only.** Nothing is stored and nothing is remediated from the console; findings carry the exact command to run. Continuous posture with staged remediation is a later horizon.
+- **The fix only reaches a machine once that machine runs this release.** Until then `apn scan` there keeps reporting on the old path list.
+- Verified on the fleet: superchotu went from ~5 checks to **48**, molt-bot from ~5 to **60** (55 of them per-station). Both still grade A — correctly, and now provably: superchotu's twelve `775` agent directories and molt-bot's fifteen `644` `config.yaml` files all sit under `700` ancestors, so all 27 would-be criticals are suppressed by the reachability rule rather than by luck.
+- **No Windows support** — the reachability walk assumes POSIX mode bits.
+- macOS binaries remain unsigned ([#228](https://github.com/rakeshgangwar/agentpod/issues/228), blocked on an Apple Developer account), so a macOS node re-prompts for permissions after self-updating.
+
+---
+
 ## v0.1.21 - 2026-08-11
 
 **Changesets** — see what an agent changed in a station's workspace without SSHing to the machine. Uncommitted edits, untracked files, and commits not yet on a base, in the console's new Changes tab.
