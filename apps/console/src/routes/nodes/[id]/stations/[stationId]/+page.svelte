@@ -11,6 +11,7 @@
   import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
+  import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { listStations } from "$lib/api/client";
   import type { StationRow } from "$lib/api/client";
@@ -236,6 +237,9 @@
       <Button variant="outline" size="sm" onclick={() => loadStation()}>Retry</Button>
     </div>
   {:else if stationLoad === "loaded"}
+    {#if station}
+      <PostureBanner {nodeId} stationKey={station.stationKey} />
+    {/if}
     {@render stationPanels()}
   {:else}
     <!-- Panels wait for the capability list: which tab is the default depends on

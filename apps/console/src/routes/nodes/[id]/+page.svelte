@@ -7,6 +7,7 @@
   import type { NodeSummary } from "@agentpod/contract";
   import StationTree from "$lib/components/stations/StationTree.svelte";
   import ProvisionedNodeControls from "$lib/components/fleet/ProvisionedNodeControls.svelte";
+  import PosturePanel from "$lib/components/fleet/PosturePanel.svelte";
   import * as Card from "$lib/components/ui/card";
   import { Badge } from "$lib/components/ui/badge";
   import Empty from "$lib/components/ui/empty/empty.svelte";
@@ -20,6 +21,12 @@
   const id = $derived(page.params.id as string);
 
   let node = $state<NodeSummary | null>(null);
+
+  /** Node-level capability, carried in the hello frame. Absent on nodes that
+   *  predate it, which is how they degrade to showing no panel at all. */
+  const hasPosture = $derived(
+    Array.isArray(node?.capabilities) && node!.capabilities.includes("posture")
+  );
 
   async function loadNode() {
     try {
@@ -125,6 +132,10 @@
   <!-- Provisioned runtime controls (destroy / stop / start) -->
   {#if node?.provisioned}
     <ProvisionedNodeControls {node} onRefresh={loadNode} />
+  {/if}
+
+  {#if hasPosture}
+    <PosturePanel nodeId={id} />
   {/if}
 
   {#if stations.error}
