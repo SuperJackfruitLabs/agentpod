@@ -62,6 +62,14 @@ export interface Sandbox {
   startedAt?: Date;
   image: string;
   labels?: Record<string, string>;
+  /**
+   * The runtime Docker reports for this container, read back from inspect.
+   *
+   * Deliberately the observed value rather than the requested one: "we asked
+   * for runsc" is a hope, "Docker says this is running under runsc" is a fact,
+   * and the gap between them is exactly what this field exists to expose.
+   */
+  runtime?: string;
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────
@@ -70,6 +78,11 @@ export interface DockerOrchestratorConfig {
   socketPath?: string;
   host?: string;
   port?: number;
+  /**
+   * Container runtime name, e.g. "runsc" for gVisor. Omitted means Docker's
+   * default (runc) and a create request byte-identical to before this existed.
+   */
+  runtime?: string;
   containerPrefix?: string;
   hostPathPrefix?: string;
   defaultNetwork?: string;
@@ -80,6 +93,7 @@ const DEFAULT_CONFIG: Required<DockerOrchestratorConfig> = {
   socketPath: "/var/run/docker.sock",
   host: "",
   port: 2375,
+  runtime: "",
   containerPrefix: "agentpod",
   defaultNetwork: "agentpod-net",
   hostPathPrefix: "",
@@ -221,6 +235,9 @@ export class DockerOrchestrator {
         // reports "running" forever after its process died (live-fleet
         // finding, 2026-08-09).
         Init: true,
+        // Only present when configured: an unset runtime must produce the same
+        // request Docker received before this option existed.
+        ...(this.config.runtime ? { Runtime: this.config.runtime } : {}),
         NanoCpus: resources.cpus
           ? Math.floor(parseFloat(resources.cpus) * 1e9)
           : undefined,
@@ -268,6 +285,7 @@ export class DockerOrchestrator {
       startedAt: state?.StartedAt ? new Date(state.StartedAt) : undefined,
       image: info.Config?.Image ?? "",
       labels,
+      runtime: info.HostConfig?.Runtime || undefined,
     };
   }
 }
