@@ -80,6 +80,9 @@ func main() {
   case "detect":
     if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) { os.Exit(0) }
     detectCmd() // debug/ops: print detected stations as JSON
+  case "scan":
+    if maybeShowHelp(os.Stdout, "scan", os.Args[2:]) { os.Exit(0) }
+    scanCmd(os.Args[2:]) // hubless posture check; exits non-zero on findings
   case "update":
     fs := flag.NewFlagSet("update", flag.ExitOnError)
     fs.Usage = func() {

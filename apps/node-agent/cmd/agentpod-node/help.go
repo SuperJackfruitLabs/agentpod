@@ -97,6 +97,17 @@ var commands = []struct {
 			"required.",
 	},
 	{
+		name: "scan", group: "Node",
+		oneline: "Check this machine's agents for exposure (--json)",
+		detail: "apn scan [--json] [--no-color] — check the agent runtimes on this\n" +
+			"host for the two ways they get taken over: a listener bound to every\n" +
+			"network interface, and credential files other users can read.\n\n" +
+			"Needs no hub, no account and no network. Prints a graded report and\n" +
+			"exits 0 (clean), 1 (warnings) or 2 (critical), so it works in cron.\n\n" +
+			"A check that cannot determine an answer says so — it is never\n" +
+			"reported as a pass.",
+	},
+	{
 		name: "update", group: "Maintenance",
 		oneline: "Self-update from the latest release (--check, --force)",
 		detail: "apn update [--check] [--force] — self-update from the latest GitHub\n" +

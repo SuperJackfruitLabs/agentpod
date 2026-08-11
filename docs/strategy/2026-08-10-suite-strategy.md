@@ -536,7 +536,9 @@ suite or a pile.*
       self-update is sound. Codex live-verified on the Mac: five codex stations detected, each
       advertising `acp`, prompt and reply confirmed through the console. Harness matrix on that
       node — claude-code 25, opencode 8, codex 5, openclaw 1; hermes absent there.
-- [ ] **`apn scan`, free and hubless.** Promoted from Horizon 1: it is the only item on this
+- [x] ~~**`apn scan`, free and hubless**~~ — shipped 2026-08-11. Two checks: credential files
+      readable by other users, and agents listening on every interface. Graded report, exit
+      code for cron, no hub/account/network. Superseded detail:
       roadmap that *acquires users* rather than serving ones we don't have yet, it depends on
       nothing else here, and it lands into a market with 42,000 exposed instances looking for
       it. Runs in parallel with everything below.
