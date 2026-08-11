@@ -108,6 +108,20 @@ var commands = []struct {
 			"reported as a pass.",
 	},
 	{
+		name: "acp", group: "Node",
+		oneline: "Attach an ACP editor to a station (--station, --session)",
+		detail: "apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —\n" +
+			"make a station on another machine look like a local agent to any ACP\n" +
+			"client (Zed, JetBrains, anything that speaks the protocol).\n\n" +
+			"The editor spawns this and talks ACP over its stdio; the frames are\n" +
+			"piped to the hub, which does the protocol work. Reaches stations\n" +
+			"behind NAT or CGNAT, because the node dials out.\n\n" +
+			"Prefer the AGENTPOD_TOKEN environment variable over --token: a token\n" +
+			"on the command line lands in shell history.\n\n" +
+			"This is the one command that needs no enrolled node — a laptop can\n" +
+			"install apn purely as a client.",
+	},
+	{
 		name: "update", group: "Maintenance",
 		oneline: "Self-update from the latest release (--check, --force)",
 		detail: "apn update [--check] [--force] — self-update from the latest GitHub\n" +
