@@ -145,7 +145,7 @@ along plane boundaries, version independently, publish to npm:
 | `contract-runtime` | gateway frames, station, capabilities, the 15 verbs | node-agent, hub, console |
 | `contract-substrate` | provision spec, driver capability manifest, lifecycle | hub, drivers |
 | `contract-session` | ACP session, events, permission protocol | hub, console, external clients |
-| `contract-work` | initiative, task, run, stage, gate, verdict | work plane, hub, console |
+| `contract-work` | initiative, task, run, change, stage, gate, verdict, delivery adapter | work plane, hub, console |
 | `contract-identity` | org, actor, agent identity, policy, budget | everything |
 
 ### Generate the Go side
@@ -207,6 +207,10 @@ never manage your laptop. We already manage both.
 > driver-specific paths downstream, no capability that only works on Docker. The day one
 > plane needs to know which substrate it's on is the day the suite starts costing N×
 > instead of N.
+>
+> The mirror of this rule on the outbound side — no forge in the work plane's model — is
+> in §7. Same failure at the opposite end of the pipe: inbound we refuse to let one
+> sandbox provider become the model; outbound we refuse to let one forge become it.
 
 ---
 
@@ -219,7 +223,11 @@ hosts.** Agent HQ assigns cloud agents into GitHub's own sandboxes. We can assig
 to Claude Code on a colleague's workstation, Hermes on a Hetzner box, and Codex in an E2B
 microVM — and compare the three.
 
-### The model — three objects, not a board
+The corollary is that we must not hand the last mile back. A dispatch layer whose every
+output has to become a GitHub pull request has routed around Agent HQ and then delivered
+its work to GitHub anyway.
+
+### The model — four objects, not a board
 
 Kanban is a view. The model underneath is a run graph:
 
@@ -229,8 +237,59 @@ Kanban is a view. The model underneath is a run graph:
 - **Run** — one attempt: binds *task + harness + station + session + budget + policy* and
   produces *transcript + diff + cost + verdict*. This is the join key from §3. Runs are
   cheap, comparable, and re-runnable on a different substrate.
+- **Change** — the thing that lands. One change accumulates many runs — a first attempt, a
+  revision after review, a CI fix — and resolves to a commit against a base. Runs are
+  immutable attempts; a change is the mutable object a human tracks across them. "Compare
+  three runs and promote one" produces a change; without it, the question of what the
+  promoted run *becomes* has no answer.
 
-### Two things we get almost free
+> **Why `change` is not a sixth plane.** The diff is already in the §3 sentence and already
+> a run output — this is an under-specified part of the existing thesis, not a plane the
+> strategy forgot. It earns a second entity because its lifecycle outlives the run that
+> produced it, and it earns nothing more. §10's rule holds: a new plane ships thin or not
+> at all.
+
+### Delivery: the terminal state is a git ref
+
+A change resolves to a commit against a base, content-addressed in our own store. Where it
+goes next is a **delivery adapter**, and none of them are privileged:
+
+| Adapter | Lands as | Notes |
+|---|---|---|
+| `git-remote` | A branch pushed to any remote | Zero vendor — Forgejo, Gitea, self-hosted GitLab, or a bare ssh remote. **The default, and it must remain sufficient on its own.** |
+| `github` · `gitlab` · `forgejo` | Pull or merge request | For teams that already live there. A convenience, never a dependency. |
+| `patch` | `format-patch` series | Mailing-list and air-gapped workflows; also the honest fallback for any forge whose API we don't want to carry. |
+
+Git is not the lock-in — GitHub is. Git is a format with no vendor, and depending on it
+buys interoperability with every forge and every developer's existing hands. What we refuse
+in the model is the *platform*.
+
+**And don't write a VCS.** If we want better ergonomics for many concurrent working states
+on a station, adopt `jj` — git-backed, anonymous branches, op-log undo, automatic
+working-copy snapshots — rather than build one. Every serious attempt in this space that
+got traction won by being git-compatible, and §10 already names surface area as the top
+risk.
+
+Two things this buys beyond avoiding a vendor:
+
+- **The §3 join stays whole.** If you have to call a forge's API to learn which diff a run
+  produced, a third party is sitting in the middle of the join key. Content-address the
+  change ourselves and the answer is local.
+- **It is what makes the §11 flight recorder credible.** "Produce March's agent activity"
+  cannot mean "assuming GitHub still has those pull requests and you still have that org."
+  A legal record built on another company's retention policy is not a record.
+
+> **Same invariant as §6, opposite end of the pipe.** A delivery adapter's responsibility
+> *begins* at a finished change; nothing upstream knows which forge it is headed to. The
+> day `contract-work` grows a required `pull_request_id` is the day we have swapped one
+> vendor's lock-in for another's and lost the reason we routed around Agent HQ at all.
+
+> **The wedge.** The forge owns everything after the merge request. Nobody owns what comes
+> before it — twelve candidate diffs from four harnesses on three substrates, and no way to
+> compare them. That gap is the visible payoff of the dispatch argument above, and it is a
+> comparison view over an artifact store, not a version control system.
+
+### Three things we get almost free
 
 - **Gates are already built.** A stage gate that needs human approval is exactly an ACP
   permission request — same queue, same audit, same modes. The work plane's approval UI is
@@ -239,12 +298,16 @@ Kanban is a view. The model underneath is a run graph:
   OpenCode era is literally *task → sandbox → session → response → error*. Don't
   resurrect the table — it's Cloudflare-specific and pre-fleet — but it's evidence we
   found this model once already.
+- **The diff already has a path off the box.** Stations expose filesystem and terminal
+  today, so packaging a workspace change against a base is a capability, not an
+  architecture. It also removes an ugly requirement: no station needs push credentials of
+  its own for work done on it to become reviewable.
 
 > **The honest risk on this plane.** This is where we have the least differentiation and
 > the most competition, and it's the most UI-expensive thing in the suite. Ship it thin:
-> runs, comparison, gates, and GitHub/Linear sync. Resist swimlanes, sprints, estimates
-> and roadmaps — every hour spent on project-management features is an hour not spent on
-> the four planes nobody else can build.
+> runs, changes, comparison, gates, and initiative sync. Resist swimlanes, sprints,
+> estimates and roadmaps — every hour spent on project-management features is an hour not
+> spent on the four planes nobody else can build.
 
 ---
 
@@ -300,6 +363,10 @@ suite or a pile.*
       the crack that widens fastest once other people contribute.
 - [ ] Introduce the `run` entity and backfill it across sessions and provisioned runtimes.
       Everything after this depends on it existing.
+- [ ] Reserve `change` alongside `run` in `contract-work`. Same argument as the run key — a
+      peer entity everything downstream keys off costs a schema decision now and a
+      reconciliation later. The delivery adapters can wait for Horizon 2; what cannot wait
+      is that the schema never grows a required `pull_request_id`.
 - [ ] Clear the dependabot backlog and fix the branch-flow drift — docs say `develop`, the
       last three months went `ui-revamp` → `main`.
 
@@ -323,11 +390,16 @@ suite or a pile.*
 
 *The plane that makes it a suite rather than infrastructure.*
 
-- [ ] Initiative / Task / Run, over the sessions and stations we already have.
+- [ ] Initiative / Task / Run / Change, over the sessions and stations we already have.
+- [ ] A `changeset` capability on the node-agent — package a station's workspace diff
+      against a base and ship it to the hub. Reuses filesystem and terminal.
 - [ ] Gates wired to the existing permission queue — same audit trail, same approval surface.
 - [ ] Board and run-comparison views. Same task, three harnesses, three substrates, compare
-      diffs and cost.
-- [ ] GitHub Issues and Linear sync, both directions. Import backlogs; never demand migration.
+      diffs and cost, promote one into a change.
+- [ ] Delivery adapters — `git-remote` first, then `github` / `gitlab` / `forgejo`, and
+      `patch`. Ship nothing that makes the `git-remote` path insufficient.
+- [ ] Initiative sync adapters — GitHub Issues, Linear, and standalone with no upstream at
+      all. Import backlogs; never demand migration; never require an upstream.
 - [ ] Mobile PWA with push, covering both permission answers and stage gates.
 
 ### Horizon 3 — Governance across the suite (2027)
