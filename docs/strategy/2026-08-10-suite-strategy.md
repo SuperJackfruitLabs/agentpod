@@ -210,12 +210,17 @@ never manage your laptop. We already manage both.
 |---|---|---|---|
 | `docker` | Local containers | Reference driver, self-host, demos | Have |
 | `cloudflare` | Edge sandboxes | Already wired, incl. webhook | Have |
-| `k8s agent-sandbox` | Sandbox CRD | The emerging standard, SIG-backed, pause-resume and warm pools built in — and it ships Hermes and OpenClaw examples. Also our entry into every company already running Kubernetes. | **First** |
+| `generic ssh` | BYO host | Nearly free — cloud-init plus the `install.sh` and `SHA256SUMS` we already publish and already verify. Covers every provider we never write a driver for, and it is the shape the fleet already takes. | **First** |
 | `e2b` | Firecracker microVM | Strongest isolation story and the most mindshare; the provider people name when they say "sandbox" | **First** |
-| `generic ssh` | BYO host | Nearly free — cloud-init plus the `install.sh` we already publish. Covers every provider we never write a driver for. | **First** |
-| `fly machines` | Per-machine VMs | Cheap always-on; the natural home for a personal Hermes or OpenClaw | Second |
-| `modal` · `runloop` · `blaxel` | Hosted sandboxes | Parity with the OpenAI SDK's bundled set; Blaxel resumes paused environments in tens of milliseconds | Second |
+| `fly machines` | Per-machine VMs | Cheap always-on; the natural home for a personal Hermes or OpenClaw | **First** |
+| `k8s agent-sandbox` | Sandbox CRD | The emerging standard, SIG-backed, pause-resume and warm pools built in, ships Hermes and OpenClaw examples, and it is our entry into every company already running Kubernetes — but it needs a cluster to test against, and §6's own rule says a driver we cannot test is a driver we do not ship. Enterprise-signalling ahead of demand. | Second |
+| `modal` · `runloop` · `blaxel` | Hosted sandboxes | Parity with the OpenAI SDK's bundled set; Blaxel resumes paused environments in tens of milliseconds | Third |
 | `daytona` | Persistent workspaces | Closest model to always-on agents, sub-90ms create — but its production codebase went closed-source in June 2026, so hosted-only, no self-host story | Third |
+
+> **Why SSH leads.** The first wave is chosen for testability and for the fleet we actually
+> have, not for the logo on the slide. `generic ssh` is verifiable against any VPS — or a
+> local container — on day one, which is the only wave-one property that matters given the
+> invariant below.
 
 > **Hold this invariant.** Every driver's responsibility ends at enrollment. No
 > driver-specific paths downstream, no capability that only works on Docker. The day one
@@ -483,24 +488,38 @@ and it's the same surface for work-plane gates.
 *Nothing new ships. This is the horizon that decides whether the next two years are a
 suite or a pile.*
 
-- [ ] Close ACP slice 4e Task 3 — cut the `v0.1.x` tag, verify release completeness,
-      live-verify Codex on the Mac. Record the harness matrix and stop.
+- [x] ~~Close ACP slice 4e Task 3~~ — done 2026-08-11. `v0.1.18` carries all seven assets
+      (four binaries + `.service` + `install.sh` + `SHA256SUMS`), matching the build matrix, so
+      self-update is sound. Codex live-verified on the Mac: five codex stations detected, each
+      advertising `acp`, prompt and reply confirmed through the console. Harness matrix on that
+      node — claude-code 25, opencode 8, codex 5, openclaw 1; hermes absent there.
+- [ ] **`apn scan`, free and hubless.** Promoted from Horizon 1: it is the only item on this
+      roadmap that *acquires users* rather than serving ones we don't have yet, it depends on
+      nothing else here, and it lands into a market with 42,000 exposed instances looking for
+      it. Runs in parallel with everything below.
 - [ ] Promote issue #228 (macOS signing and notarization) to blocking. Unsigned binaries
       that re-prompt on every update are survivable for a console and disqualifying for a
-      control plane.
-- [ ] **The kaambaan bridge spike — do this first, before committing to anything below it.**
+      control plane. *Not* on the critical path for the spike — see below.
+- [ ] **The kaambaan bridge spike — do this before committing to anything below it.**
       Register the hub as a kaambaan agent, claim a card, dispatch to a real station running
       a real harness, stream ACP events as activities, block once on a permission gate, and
-      complete. Measured against `conformance.test.ts` semantics. This either validates the
-      seam in §7 or kills it, and everything else in this horizon is cheaper to do after it.
+      complete. Measured against `conformance.test.ts` semantics. **Target a Linux box, not
+      the Mac** — #228 means every macOS update re-prompts for TCC permissions, and the one
+      experiment whose job is a clean signal about the seam should not be run on the surface
+      with a known permissions-friction bug. This either validates §7 or kills it.
+- [ ] Land the bridge as **`apps/bridge`** in this monorepo — its own process and deploy,
+      sharing the contract packages directly, without paying the cross-repo tax. Extract it
+      later if it ever earns its own release cadence; the same "split the repos later" logic
+      §5 applies to contracts.
 - [ ] Split the contract along plane boundaries — `contract-runtime`, `contract-substrate`,
       `contract-session`, `contract-change`, `contract-identity`. **Workspace-internal only;
       no npm publishing.** The existing files already map almost 1:1, so this is packaging,
       not refactoring. Publishing waits until a consumer outside this monorepo needs it, and
       kaambaan is not that consumer — we speak its wire surface, not its package (§5).
-- [ ] Add zod → JSON Schema → Go codegen, enforced in CI. Fourteen Go files carry hand-written
-      `json:"` mirrors today; that is the crack that widens fastest once other people
-      contribute.
+- [ ] A **golden-fixture round-trip test** for the Go mirrors: emit JSON fixtures from the zod
+      schemas, assert the Go structs unmarshal them losslessly. Ten percent of the codegen
+      pipeline for most of its value, and unlike codegen it is justified today — see the note
+      under Horizon 2 for why full codegen is not.
 - [ ] Give a station attempt a durable identity, carrying kaambaan's `runId` when it came from
       a claim and a local id when it did not. Adopt A2A's state vocabulary verbatim — do not
       invent a parallel outcome enum. The console must keep working with no board attached.
@@ -510,24 +529,36 @@ suite or a pile.*
       `pull_request_id`.
 - [x] ~~Clear the dependabot backlog~~ — done 2026-08-11. Eleven orphaned PRs closed against
       directories and actions purged in P2a/P2c; `gomod` coverage added for the node-agent,
-      which had none. Still open: the branch-flow drift — docs say `develop`, the last three
-      months went `ui-revamp` → `main`.
+      which had none.
+- [x] ~~Fix the branch-flow drift~~ — done 2026-08-11. `CONTRIBUTING.md` now describes
+      trunk-based work on `main` gated by the four required checks, which is what has actually
+      been happening for three months, with a note on reverting to `develop` → PR → `main` if a
+      second contributor appears.
 
-### Horizon 1 — Substrate and doors (Q4 2026)
+### Horizon 1 — Doors, then substrate (Q4 2026)
 
-*Widen what we can run on, and stop being the only way in.*
+*Stop being the only way in, then widen what we can run on. Doors leads because it is the one
+item here that is distribution rather than capability.*
 
+- [ ] **Doors — be an ACP *server*.** Any ACP client — Zed, JetBrains, a phone — attaches to
+      any station on any machine through the hub, including behind CGNAT. This is the only
+      item in the horizon that puts stations in front of people who have installed nothing of
+      ours, and it is smaller than it sounds: the hub already terminates ACP sessions, so
+      serving is proxying plumbing it already owns.
 - [ ] Open the provisioner registry: dynamic names, capability manifests, per-org
       credentials, optional pause and resume, and a driver conformance suite in CI.
-- [ ] Ship three drivers — Kubernetes `agent-sandbox`, E2B, and generic SSH. Each must land
-      as an ordinary enrolled station with zero downstream special-casing.
-- [ ] **Doors:** be an ACP *server*. Any ACP client — Zed, JetBrains, a phone — attaches to
-      any station on any machine through the hub, including behind CGNAT.
-- [ ] **Fleet-as-MCP-server.** Wrap the contract verbs as MCP tools; the zod schemas convert
-      nearly mechanically. Agents can then operate the fleet.
-- [ ] `apn scan`, free and hubless. Independent of everything else here — ship it whenever
-      there's a gap.
-- [ ] A descriptor SDK, so new harnesses stop being bottlenecked on us writing Go.
+- [ ] Ship the first driver wave — **generic SSH, then E2B and Fly Machines** — alongside the
+      Docker and Cloudflare drivers we already have. Kubernetes `agent-sandbox` moves to the
+      second wave (§6). Each must land as an ordinary enrolled station with zero downstream
+      special-casing.
+- [ ] **Fleet-as-MCP-server — a curated subset, not a mechanical wrap.** The original framing
+      ("the zod schemas convert nearly mechanically") is precisely the mistake §7 flags in
+      kaambaan's own MCP surface, and it bites harder here: our verbs include lifecycle,
+      cleanup and provisioning, and a model holding `cleanup.apply` across 39 stations is a bad
+      afternoon. **Enforce it in the contract, not in a hand-maintained allowlist:** every verb
+      declares an exposure (`model-safe` / `operator-only`), the MCP surface is generated from
+      that declaration, and CI fails on a verb that declares neither. An allowlist rots; a
+      required field cannot be forgotten.
 
 ### Horizon 2 — Work (Q1–Q2 2027)
 
@@ -554,6 +585,22 @@ issue/PR references and sync.
 
 **kaambaan's, and needed for fleet scale:** agent lifecycle at churn, refreshable capability
 tags, a fleet-level concurrency cap (§7).
+
+**Opening up to contributors — one bundle, and it has a trigger, not a date:**
+
+- [ ] A descriptor SDK, so new harnesses stop being bottlenecked on us writing Go.
+- [ ] Full zod → JSON Schema → Go codegen, enforced in CI.
+
+> **Why these two moved here, together.** They are the same bet — making outside contribution
+> safe — and the original roadmap split them across horizons on the strength of a premise that
+> isn't true yet. There is no drift bug anywhere in this repo's history: the ACP program
+> expanded the contract across five harnesses, with hand-written Go mirrors, and none drifted.
+> Nobody is asking to add a sixth harness. Building for contributors before courting them is
+> the surface-area risk in §10 wearing a helpful face.
+>
+> **The trigger, so they don't drift forever:** the first outside request to add a harness, or
+> the second person committing. Until then Horizon 0's golden-fixture round-trip test carries
+> the drift risk for a fraction of the cost.
 
 ### Horizon 3 — Governance across the suite (2027)
 
