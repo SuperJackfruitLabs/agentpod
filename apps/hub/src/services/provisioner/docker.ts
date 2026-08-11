@@ -41,7 +41,11 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
    *   (no-arg constructor uses socket defaults from DockerOrchestratorConfig).
    */
   constructor(
-    private readonly orchestrator: DockerOrchestrator = new DockerOrchestrator()
+    private readonly orchestrator: DockerOrchestrator = new DockerOrchestrator({
+      // Set by the operator to harden the host, e.g. DOCKER_RUNTIME=runsc for
+      // gVisor. Unset keeps Docker's default and today's exact behaviour.
+      runtime: process.env.DOCKER_RUNTIME || "",
+    })
   ) {}
 
   /**
@@ -55,8 +59,13 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
    * methods (startSandbox / stopSandbox / deleteSandbox) resolve containers by
    * the sandbox config.id (name: "agentpod-<id>" or label agentpod.sandbox.id),
    * NOT by the raw hex Docker container id.
+   *
+   * Also returns the runtime the daemon reports for the container — observed
+   * via inspect, not the one requested via DOCKER_RUNTIME.
    */
-  async provision(spec: ProvisionSpec): Promise<{ externalId: string }> {
+  async provision(
+    spec: ProvisionSpec
+  ): Promise<{ externalId: string; runtime?: string }> {
     const image = spec.image;
     const resources = RUNTIME_RESOURCE_TIERS[spec.resourceTier];
 
@@ -82,8 +91,10 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
     // Use runtimeId (= config.id) so that destroy/start/stop can pass it
     // directly to deleteSandbox/startSandbox/stopSandbox, which look up the
     // container by name "agentpod-<id>" or label agentpod.sandbox.id=<id>.
-    void sandbox; // containerId is intentionally not used as the lifecycle key
-    return { externalId: spec.runtimeId };
+    // containerId is intentionally not used as the lifecycle key, but the
+    // runtime the daemon reports for the container is worth carrying back:
+    // it is the observed value, not the one we asked for.
+    return { externalId: spec.runtimeId, runtime: sandbox.runtime };
   }
 
   /**

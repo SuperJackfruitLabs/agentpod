@@ -38,9 +38,13 @@ export interface RuntimeProvisioner {
 
   /**
    * Create and start a new runtime for the given spec.
-   * Returns the provider-specific external identifier (container id, sandbox id, …).
+   *
+   * Returns the provider-specific external identifier (container id, sandbox
+   * id, …), and — where the provider can report it — the container runtime
+   * actually used. `runtime` is optional so providers with no such concept
+   * (Cloudflare) are unaffected.
    */
-  provision(spec: ProvisionSpec): Promise<{ externalId: string }>;
+  provision(spec: ProvisionSpec): Promise<{ externalId: string; runtime?: string }>;
 
   /**
    * Permanently destroy the runtime identified by externalId.
