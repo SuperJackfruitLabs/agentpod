@@ -9,3 +9,4 @@ export * from "./fleet";
 export * from "./acp-session";
 export * from "./run";
 export * from "./changeset";
+export * from "./posture";

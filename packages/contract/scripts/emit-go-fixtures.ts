@@ -26,10 +26,13 @@ const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contrac
 const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["host_info", HostInfo, { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 }],
 
+  // capabilities gate whole console features; one silently dropped in the Go
+  // mirror is a feature that never appears and errors nowhere.
   ["hello", HelloMsg, {
     type: "hello",
     hostInfo: { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 },
-    version: "v0.1.18",
+    version: "v0.1.22",
+    capabilities: ["posture"],
   }],
 
   ["heartbeat", HeartbeatMsg, { type: "heartbeat", ts: 1786445000000 }],

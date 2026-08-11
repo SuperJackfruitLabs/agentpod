@@ -42,6 +42,7 @@ export async function listNodes(userId: string): Promise<NodeWithProvisioning[]>
       arch: nodes.arch,
       cpuCount: nodes.cpuCount,
       agentVersion: nodes.agentVersion,
+      capabilities: nodes.capabilities,
       status: nodes.status,
       lastSeenAt: nodes.lastSeenAt,
       createdAt: nodes.createdAt,
@@ -63,6 +64,7 @@ export async function listNodes(userId: string): Promise<NodeWithProvisioning[]>
     arch: n.arch,
     cpuCount: n.cpuCount,
     agentVersion: n.agentVersion ?? null,
+    capabilities: n.capabilities ?? null,
     status: n.status,
     lastSeenAt: n.lastSeenAt ? n.lastSeenAt.toISOString() : null,
     createdAt: n.createdAt.toISOString(),
@@ -107,4 +109,18 @@ export async function setNodeAgentVersion(
     .update(nodes)
     .set({ agentVersion })
     .where(eq(nodes.id, nodeId));
+}
+
+/**
+ * Store the node-level capabilities a node advertised in its hello frame.
+ *
+ * Called on every connect, so these cannot go stale — unlike station
+ * capabilities, which were only ever written at adoption and needed an explicit
+ * refresh to fix.
+ */
+export async function setNodeCapabilities(
+  nodeId: string,
+  capabilities: string[] | null
+) {
+  await db.update(nodes).set({ capabilities }).where(eq(nodes.id, nodeId));
 }

@@ -113,3 +113,14 @@ func TestHealthFrameStationsRoundTrip(t *testing.T) {
 		t.Errorf("health frame drifted.\n  contract: %s\n  go:       %s", src, out)
 	}
 }
+
+// The hello frame carries node capabilities, which gate whole features in the
+// console — a capability silently dropped here is a feature that never appears
+// and produces no error anywhere.
+//
+// Until this test existed the frame was an inline map[string]any in client.go
+// and nothing checked it at all, exactly the gap TestHealthFrameStationsRoundTrip
+// warns about one function above.
+func TestHelloRoundTrips(t *testing.T) {
+	roundTrip(t, "hello.json", &gateway.HelloMsg{})
+}

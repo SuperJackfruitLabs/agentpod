@@ -17,6 +17,8 @@ func Scan(ctx context.Context, home string, harnesses []string, stations int) Re
 	hostname, _ := os.Hostname()
 
 	findings := CheckCredentialFiles(home, harnesses)
+	findings = append(findings, CheckStationCredentials(home)...)
+	findings = append(findings, CheckConfigDirs(home)...)
 	findings = append(findings, CheckListeners(ctx)...)
 	Sort(findings)
 

@@ -6,5 +6,8 @@
     "arch": "arm64",
     "cpuCount": 8
   },
-  "version": "v0.1.18"
+  "version": "v0.1.22",
+  "capabilities": [
+    "posture"
+  ]
 }

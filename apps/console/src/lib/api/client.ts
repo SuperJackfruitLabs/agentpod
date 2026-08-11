@@ -334,3 +334,33 @@ export const changesetDiff = (
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ side, ...(path ? { path } : {}) }),
   });
+
+// ─── Posture endpoints ────────────────────────────────────────────────────────
+
+export type PostureFindingRow = {
+  check: string;
+  status: "pass" | "fail" | "unknown";
+  severity: "critical" | "warning" | "info";
+  harness?: string;
+  /** Station key (e.g. `hermes:analyst-echo`) for per-station findings. */
+  station?: string;
+  title: string;
+  detail: string;
+  path?: string;
+  remedy?: string;
+};
+
+export type PostureReportResult = {
+  hostname: string;
+  stations: number;
+  findings: PostureFindingRow[];
+  /** A — nothing · B — info only · C — a warning · F — a critical. */
+  grade: string;
+};
+
+export const nodePosture = (nodeId: string) =>
+  http<PostureReportResult>(`/api/nodes/${nodeId}/posture/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
