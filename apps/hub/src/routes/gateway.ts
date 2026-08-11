@@ -19,6 +19,7 @@ import type { Send } from "../services/connection-manager";
 import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
 import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
+import { refreshAdoptedCapabilities } from "../services/station-registry";
 import { recordHealth, clearNode } from "../services/health-cache";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
@@ -69,6 +70,20 @@ export const gatewayRoutes = new Hono().get(
             } catch {
               // autoAdoptProvisionedHarness never throws, but guard anyway.
             }
+          }
+        })();
+
+        // Re-read capabilities into already-adopted stations. A node that has
+        // just updated may advertise capabilities its stored rows predate, and
+        // nothing else in the hub ever refreshes that column — so without this
+        // a new capability appears only on stations adopted after the update.
+        // Fire-and-forget: it must never block or throw into the gateway.
+        void (async () => {
+          await new Promise((res) => setTimeout(res, 2000));
+          try {
+            await refreshAdoptedCapabilities(nodeId);
+          } catch {
+            // refreshAdoptedCapabilities never throws, but guard anyway.
           }
         })();
       },
