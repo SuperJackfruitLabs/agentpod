@@ -1,4 +1,4 @@
-import { pgTable, text, integer, timestamp, index, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, index, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 
 export const nodeStatusEnum = pgEnum("node_status", ["online", "offline"]);
@@ -13,6 +13,9 @@ export const nodes = pgTable("nodes", {
   cpuCount: integer("cpu_count").notNull().default(0),
   secretHash: text("secret_hash").notNull(),
   agentVersion: text("agent_version"),
+  // Node-level capabilities from the hello frame. Null on nodes that predate
+  // them — "did not say" stays distinguishable from "said nothing".
+  capabilities: jsonb("capabilities").$type<string[]>(),
   status: nodeStatusEnum("status").notNull().default("offline"),
   lastSeenAt: timestamp("last_seen_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

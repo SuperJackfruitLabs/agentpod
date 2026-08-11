@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { GatewayClientMessage } from "@agentpod/contract";
 import { verifyNodeCredential } from "../services/enrollment";
-import { setNodeStatus, setNodeAgentVersion } from "../services/node-registry";
+import { setNodeStatus, setNodeAgentVersion, setNodeCapabilities } from "../services/node-registry";
 import { connectionManager } from "../services/connection-manager";
 import type { Send } from "../services/connection-manager";
 import { handleNodeMessage, dropNode } from "../services/broker";
@@ -105,6 +105,9 @@ export const gatewayRoutes = new Hono().get(
         if (parsed.data.type === "hello") {
           const version = parsed.data.version ?? null;
           await setNodeAgentVersion(authed, version);
+          // Absent means an older node: store null rather than an empty array,
+          // so "did not say" stays distinguishable from "said nothing".
+          await setNodeCapabilities(authed, parsed.data.capabilities ?? null);
         } else if (parsed.data.type === "heartbeat") {
           // A heartbeating socket with no registry entry (swept, or lost to a
           // close race) re-registers itself — server→node send must work for
