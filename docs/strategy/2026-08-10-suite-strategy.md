@@ -619,11 +619,22 @@ item here that is distribution rather than capability.*
       item in the horizon that puts stations in front of people who have installed nothing of
       ours, and it is smaller than it sounds: the hub already terminates ACP sessions, so
       serving is proxying plumbing it already owns.
-- [ ] A **`changeset` capability** on the node-agent — package a station's workspace diff
-      against a base, ship it to the hub, render it in the console. *Pulled forward from
-      Horizon 2:* it waits on nothing here, needs no board and no bridge, and today a change
-      made on one of thirty-nine stations can only be seen by walking to that machine. Same
-      theme as Doors — make the fleet useful to someone who is not sitting at it.
+- [x] ~~A **`changeset` capability** on the node-agent~~ — shipped 2026-08-11 in v0.1.21, hub
+      deployed, gating verified across the real fleet. **Observe-only**: the diff is read live
+      and nothing is stored, because the artifact store's shape should be decided by the
+      volume it exists to manage, and nothing produces that volume until dispatch lands.
+      Two verbs (`changeset.status`, `changeset.diff`), untracked files included, and the base
+      reports *why* it was chosen. Three invariants carry tests: the repo is never mutated (no
+      `git add -N`), `GIT_OPTIONAL_LOCKS=0` so reads never contend with a working agent, and
+      every git call is an argv exec with a timeout. **It also exposed a latent bug worth
+      recording: `stations.capabilities` was written only at adoption, so no already-adopted
+      station could ever gain a new capability.** `posture` below would have hit it
+      identically; capabilities now refresh on node connect. Superseded detail: package a
+      station's workspace diff against a base, ship it to the hub, render it in the console.
+      *Pulled forward from Horizon 2:* it waits on nothing here, needs no board and no bridge,
+      and today a change made on one of thirty-nine stations can only be seen by walking to
+      that machine. Same theme as Doors — make the fleet useful to someone who is not sitting
+      at it.
 - [ ] Open the provisioner registry — **single-tenant for now.** Dynamic names, capability
       manifests, optional pause and resume, and a driver conformance suite in CI. Credentials
       stay env-based *behind a resolver interface*; the per-org encrypted store lands with the
