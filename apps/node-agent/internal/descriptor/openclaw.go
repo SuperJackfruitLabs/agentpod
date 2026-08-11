@@ -144,7 +144,7 @@ func (o *openclawDescriptor) Detect() ([]Station, error) {
 			DisplayName:   "OpenClaw",
 			ParentKey:     nil,
 			WorkspacePath: &rootWsCopy,
-			Capabilities:  caps,
+			Capabilities:  AppendChangesetCap(caps, &rootWsCopy),
 		},
 	}
 
@@ -171,7 +171,7 @@ func (o *openclawDescriptor) Detect() ([]Station, error) {
 			DisplayName:   name,
 			ParentKey:     &parentKey,
 			WorkspacePath: &wsCopy,
-			Capabilities:  caps,
+			Capabilities:  AppendChangesetCap(caps, &wsCopy),
 			MatrixId:      MatrixIDFromProfile(agentConfigDir, "id.agentpod.dev"),
 		})
 	}
