@@ -23,6 +23,9 @@ import {
 } from "@agentclientprotocol/sdk";
 import type { AcpSessionMode } from "@agentpod/contract";
 import * as sessions from "./acp-sessions";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger("acp-agent");
 
 /**
  * The slice of the session service this agent needs.
@@ -41,7 +44,18 @@ export interface AcpSessionService {
   promptSession(userId: string, sessionId: string, text: string): Promise<void>;
 
   /** Returns an unsubscribe function. The hub fans out to N subscribers. */
-  subscribe(sessionId: string, fn: (e: { type: string; payload: unknown }) => void): () => void;
+  subscribe(
+    sessionId: string,
+    fn: (e: { type: string; seq: number; payload: unknown }) => void,
+  ): () => void;
+
+  /** Throws "No pending permission request." when another client answered first. */
+  answerPermission(
+    userId: string,
+    sessionId: string,
+    requestSeq: number,
+    optionId: string,
+  ): Promise<void>;
 }
 
 export interface AcpAgentOptions {
@@ -96,17 +110,105 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
       // Subscribe BEFORE prompting. The agent can emit its first update before
       // promptSession resolves, and a late subscriber drops it silently — a bug
       // that shows up as an occasional missing first line rather than a crash.
+      // Permission prompts we have put to the editor and are still awaiting.
+      // Keyed by the request's event seq, which is what answerPermission takes.
+      const outstanding = new Map<number, AbortController>();
+
       const unsubscribe = service.subscribe(params.sessionId, (event) => {
-        // Only agent-update carries a raw ACP sessionUpdate payload; the hub's
-        // other event types (permission-request, state, error) are its own
-        // vocabulary and are handled in slice 2. Forwarding them here would
-        // hand the editor frames it cannot parse.
-        if (event.type !== "agent-update") return;
-        void client.notify(CLIENT_METHODS.session_update, {
-          sessionId: params.sessionId,
-          update: event.payload,
-        } as never);
+        switch (event.type) {
+          case "agent-update":
+            // The only type carrying a raw ACP sessionUpdate payload.
+            void client.notify(CLIENT_METHODS.session_update, {
+              sessionId: params.sessionId,
+              update: event.payload,
+            } as never);
+            return;
+
+          case "permission-request":
+            void askEditor(event);
+            return;
+
+          case "permission-answer": {
+            // Someone answered — possibly the console, possibly us. Either way
+            // this prompt is settled, so stop asking the editor about it.
+            const seq = (event.payload as { requestSeq?: number })?.requestSeq;
+            if (typeof seq === "number") {
+              outstanding.get(seq)?.abort();
+              outstanding.delete(seq);
+            }
+            return;
+          }
+
+          default:
+            // state and error are the hub's own vocabulary, not ACP frames.
+            return;
+        }
       });
+
+      /**
+       * Put a permission to the editor and apply whatever it says.
+       *
+       * Both clients are asked and the first answer wins — the honest
+       * expression of two live clients on one session. The loser's call finds
+       * nothing pending, which is the expected path rather than an error.
+       */
+      async function askEditor(event: { seq: number; payload: unknown }): Promise<void> {
+        const payload = event.payload as {
+          toolCall?: unknown;
+          options?: unknown[];
+          auto?: boolean;
+        };
+
+        // accept-edits and full-auto resolve server-side and persist the
+        // request with auto:true. Prompting for something already decided is a
+        // phantom dialog the editor can never usefully answer.
+        if (payload?.auto) return;
+
+        const ac = new AbortController();
+        outstanding.set(event.seq, ac);
+
+        try {
+          const res = (await client.request(
+            CLIENT_METHODS.session_request_permission,
+            {
+              sessionId: params.sessionId,
+              toolCall: payload?.toolCall,
+              options: payload?.options,
+            } as never,
+            // Cooperative: aborting sends $/cancel_request, but whether the
+            // editor dismisses its dialog is the editor's call.
+            { cancellationSignal: ac.signal },
+          )) as { outcome?: { outcome?: string; optionId?: string } };
+
+          const optionId = res?.outcome?.optionId;
+          if (!optionId) return; // cancelled, or the editor declined to choose
+
+          await service.answerPermission(opts.userId, params.sessionId, event.seq, optionId);
+        } catch (err) {
+          // Exactly two losses are expected, and neither is worth crashing a
+          // turn over: another client answered first ("No pending permission
+          // request."), or our own outstanding request was cancelled because it
+          // did. ANYTHING else is a real failure and must be visible.
+          //
+          // This was a blanket `catch {}` first, and it silently ate an
+          // "Invalid params" from the SDK — the editor was never asked and
+          // nothing said so. A permission that vanishes is precisely the bug
+          // you cannot afford to hide.
+          const msg = err instanceof Error ? err.message : String(err);
+          const expected =
+            msg.includes("No pending permission request") ||
+            msg.toLowerCase().includes("cancel");
+          if (!expected) {
+            log.error("failed to put a permission to the editor", {
+              sessionId: params.sessionId,
+              requestSeq: event.seq,
+              error: msg,
+            });
+          }
+        } finally {
+          outstanding.delete(event.seq);
+        }
+      }
 
       try {
         await asAcpError(() =>

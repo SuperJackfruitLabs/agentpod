@@ -185,3 +185,124 @@ describe("hub ACP agent — session/prompt", () => {
     expect(seen).toBe("one two");
   });
 });
+
+describe("hub ACP agent — permissions", () => {
+  /** Drives a session and lets a test push events at the agent. */
+  function permFake(over: Partial<AcpSessionService> = {}) {
+    const calls: Array<Record<string, unknown>> = [];
+    let emit: ((e: { type: string; seq: number; payload: unknown }) => void) | undefined;
+    let pending: Array<{ type: string; seq: number; payload: unknown }> | undefined;
+    const service = {
+      async createSession() {
+        return { id: "acps_test" };
+      },
+      subscribe(_s: string, fn: unknown) {
+        emit = fn as typeof emit;
+        return () => {};
+      },
+      async promptSession() {
+        // Permissions arrive DURING a turn — the agent subscribes for the
+        // duration of session/prompt and unsubscribes when it ends. Raising it
+        // from here is what a harness actually does.
+        pending?.forEach((e) => emit?.(e));
+        await Bun.sleep(40); // hold the turn open while the editor answers
+      },
+      async answerPermission(_u: string, _s: string, requestSeq: number, optionId: string) {
+        calls.push({ fn: "answerPermission", requestSeq, optionId });
+      },
+      ...over,
+    } as unknown as AcpSessionService;
+    return {
+      service,
+      calls,
+      // Queue an event to be raised from inside the next turn.
+      raiseDuringTurn: (e: { type: string; seq: number; payload: unknown }) => {
+        pending = [...(pending ?? []), e];
+      },
+    };
+  }
+
+  // Must satisfy the ACP schema — the SDK validates OUTGOING params too.
+  // PermissionOption requires {optionId, name, kind}; ToolCallUpdate requires
+  // toolCallId. Real payloads come from the harness's own request and do.
+  const OPTIONS = [
+    { optionId: "allow", name: "Allow", kind: "allow_once" },
+    { optionId: "reject", name: "Reject", kind: "reject_once" },
+  ];
+  const TOOL_CALL = { toolCallId: "tc_1", title: "Write hello.txt" };
+
+  async function connectAsking(
+    service: AcpSessionService,
+    onAsk: (params: Record<string, unknown>) => Promise<{ outcome: unknown }>,
+  ) {
+    const conn = client()
+      .onRequest(CLIENT_METHODS.session_request_permission, async ({ params }) => {
+        return onAsk(params as Record<string, unknown>);
+      })
+      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+    return conn;
+  }
+
+  test("a permission request reaches the editor", async () => {
+    // With an editor attached, the hub is the ACP agent — so a permission the
+    // harness raises must travel OUT to the editor, the reverse of the console
+    // flow where the hub parks it and waits.
+    const { service, raiseDuringTurn } = permFake();
+    let asked: Record<string, unknown> | undefined;
+    const conn = await connectAsking(service, async (params) => {
+      asked = params;
+      return { outcome: { outcome: "selected", optionId: "allow" } };
+    });
+
+    raiseDuringTurn({ type: "permission-request", seq: 7, payload: { toolCall: TOOL_CALL, options: OPTIONS } });
+    await conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "go" }] });
+
+    expect(asked).toBeDefined();
+    expect((asked!.options as unknown[])).toHaveLength(2);
+  });
+
+  test("the editor's answer is applied to the session", async () => {
+    const { service, calls, raiseDuringTurn } = permFake();
+    const conn = await connectAsking(service, async () => ({ outcome: { outcome: "selected", optionId: "reject" } }));
+
+    raiseDuringTurn({ type: "permission-request", seq: 7, payload: { toolCall: TOOL_CALL, options: OPTIONS } });
+    await conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "go" }] });
+
+    expect(calls).toContainEqual({ fn: "answerPermission", requestSeq: 7, optionId: "reject" });
+  });
+
+  test("an auto-answered permission is never forwarded", async () => {
+    // accept-edits and full-auto resolve server-side and persist the request
+    // with auto:true. Prompting the editor for something already decided would
+    // be a phantom dialog it can never usefully answer.
+    const { service, raiseDuringTurn } = permFake();
+    let asked = false;
+    const conn = await connectAsking(service, async () => {
+      asked = true;
+      return { outcome: { outcome: "selected", optionId: "allow" } };
+    });
+
+    raiseDuringTurn({ type: "permission-request", seq: 7, payload: { toolCall: TOOL_CALL, options: OPTIONS, auto: true } });
+    await conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "go" }] });
+
+    expect(asked).toBe(false);
+  });
+
+  test("losing the race to the console is swallowed, not thrown", async () => {
+    // Both clients are asked and the first answer wins. The loser's call finds
+    // nothing pending — that is the expected path, not an error worth crashing
+    // a turn over.
+    const { service, raiseDuringTurn } = permFake({
+      async answerPermission() {
+        throw new Error("No pending permission request.");
+      },
+    });
+    const conn = await connectAsking(service, async () => ({ outcome: { outcome: "selected", optionId: "allow" } }));
+
+    raiseDuringTurn({ type: "permission-request", seq: 7, payload: { toolCall: TOOL_CALL, options: OPTIONS } });
+    await conn.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "go" }] });
+    // Surviving without an unhandled rejection is the assertion.
+    expect(true).toBe(true);
+  });
+});
