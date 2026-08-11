@@ -308,8 +308,18 @@ func TestACPAttachDeliversBacklogBeforeExit(t *testing.T) {
 	burstCmd := ACPCommandFunc(func(string) ([]string, string, []string, error) {
 		// ~20 distinct chunks (paced so the fast read loop sees separate
 		// writes), then immediate exit.
+		//
+		// The leading sleep closes a race, and it is not padding. Subscribe
+		// delivers chunks produced AFTER it is called — there is no replay of
+		// earlier output — but acp.open starts the child immediately and
+		// acp.attach subscribes some time later. Without a head start for the
+		// attach, anything the child writes in that window is gone, and this
+		// test asserts every line arrives. Locally attach always won the race;
+		// on CI's slower, more contended runner the child got there first and
+		// line1 vanished, which is what made this test flaky on main rather
+		// than in isolation.
 		return []string{"/bin/sh", "-c",
-			"i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done",
+			"sleep 0.5; i=1; while [ $i -le 20 ]; do echo line$i; sleep 0.01; i=$((i+1)); done",
 		}, dir, nil, nil
 	})
 	h := NewACPHandler(failInner(t), mgr, burstCmd)
@@ -363,7 +373,7 @@ func TestACPAttachDeliversBacklogBeforeExit(t *testing.T) {
 	for i := 1; i <= 20; i++ {
 		want := fmt.Sprintf("line%d\n", i)
 		if !strings.Contains(beforeExit, want) {
-			t.Fatalf("line%d missing before the exit event (backlog dropped); %d frames", i, len(frames))
+			t.Fatalf("line%d missing before the exit event; %d frames. Either a queued chunk was lost on drain, or the child wrote before acp.attach subscribed", i, len(frames))
 		}
 	}
 }
