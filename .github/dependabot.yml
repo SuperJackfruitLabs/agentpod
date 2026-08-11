@@ -24,6 +24,30 @@ updates:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
+  # The node-agent runs on other people's machines and self-updates, so its
+  # dependencies are the fleet's exposure. Majors are NOT ignored here (unlike
+  # npm above): there are only two direct deps, and a major bump of the
+  # websocket transport is something we want to see rather than suppress.
+  - package-ecosystem: gomod
+    directory: /apps/node-agent
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    commit-message:
+      prefix: "deps(go)"
+    labels:
+      - dependencies
+      - go
+
   - package-ecosystem: docker
     directory: /apps/hub
     schedule:
