@@ -610,7 +610,11 @@ suite or a pile.*
 *Stop being the only way in, then widen what we can run on. Doors leads because it is the one
 item here that is distribution rather than capability.*
 
-- [ ] **Doors — be an ACP *server*.** Any ACP client — Zed, JetBrains, a phone — attaches to
+- [x] ~~**Doors**~~ — shipped 2026-08-11 in v0.1.20, deployed, and verified from a real Zed
+      against a live Codex station. The strategy's phrasing was half wrong: editors spawn a
+      process rather than dialling a URL, so the hub serves ACP through `apn acp`, a Go byte
+      pipe that parses nothing. Concurrent attach confirmed in production — console and editor
+      on one session. Superseded detail: Any ACP client — Zed, JetBrains, a phone — attaches to
       any station on any machine through the hub, including behind CGNAT. This is the only
       item in the horizon that puts stations in front of people who have installed nothing of
       ours, and it is smaller than it sounds: the hub already terminates ACP sessions, so
