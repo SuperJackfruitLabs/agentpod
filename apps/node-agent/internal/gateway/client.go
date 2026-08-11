@@ -147,6 +147,19 @@ func Run(ctx context.Context, cfg config.Config, h Handler, version string, gath
 	})
 }
 
+// HelloMsg is the frame sent immediately on every connection.
+//
+// A struct rather than an inline map so contractfix can prove it still
+// round-trips the contract's shape. It was a map[string]any until 2026-08-11,
+// which is exactly the gap TestHealthFrameStationsRoundTrip warns about: an
+// untyped map drifts from the contract and no test notices.
+type HelloMsg struct {
+	Type         string        `json:"type"`
+	HostInfo     host.HostInfo `json:"hostInfo"`
+	Version      string        `json:"version,omitempty"`
+	Capabilities []string      `json:"capabilities,omitempty"`
+}
+
 // connectOnce dials the hub, sends the hello frame, starts the heartbeat
 // ticker, and serves the inbound read loop until the connection is lost or ctx
 // is cancelled. onConnected is called immediately after the hello is sent so
@@ -164,7 +177,12 @@ func connectOnce(ctx context.Context, cfg config.Config, h Handler, onConnected 
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	hello, _ := json.Marshal(map[string]any{"type": "hello", "hostInfo": host.Info(), "version": version})
+	hello, _ := json.Marshal(HelloMsg{
+		Type:         "hello",
+		HostInfo:     host.Info(),
+		Version:      version,
+		Capabilities: NodeCapabilities,
+	})
 	if err := c.Write(ctx, websocket.MessageText, hello); err != nil {
 		return err
 	}
