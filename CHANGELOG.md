@@ -6,6 +6,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.20 - 2026-08-11
+
+**Doors** — reach a station from any ACP editor. `apn acp` makes a station on another machine look like a local agent to Zed, JetBrains, or anything else that speaks the Agent Client Protocol, including machines behind NAT or CGNAT, because the node dials out.
+
+### Added
+
+- **`apn acp --station <id>`** — spawned by an editor, it pipes the editor's stdio to the hub over WSS. It parses nothing: every protocol decision happens hub-side, where the ACP SDK lives, so `apn` carries no ACP library and no protocol version.
+- **`apn acp --list`** — the stations you can attach an editor to, grouped by machine. Lists only stations that can actually host a session; an empty fleet and a fleet with no `acp`-capable stations get different messages, because they need different fixes.
+- Attaching to an **existing** session replays its transcript, so joining a conversation mid-flight shows what has already happened rather than a blank pane.
+- Permission prompts reach the editor. If the console is attached to the same session, **both are asked and the first answer wins**.
+
+### Notes
+
+- **This is the first release carrying `apn acp`.** On v0.1.19 and earlier the subcommand does not exist and an editor gets `unknown command` (exit 2).
+- Requires a hub running **this release or later** — the `/api/acp/proxy` endpoint is new.
+- Editor config uses the ACP custom-agent form, e.g. Zed's `agent_servers` entry with `"command": "apn"`, `"args": ["acp", "--station", "<id>"]`, and `AGENTPOD_TOKEN` in `env`. Prefer the environment variable over `--token`: a token on the command line lands in shell history and process listings.
+- macOS binaries remain unsigned ([#228](https://github.com/rakeshgangwar/agentpod/issues/228), blocked on an Apple Developer account), so a macOS node re-prompts for permissions after self-updating.
+
+---
+
 ## v0.1.19 - 2026-08-11
 
 `apn scan` — a security check for the agent runtimes on a machine, needing no hub, no account and no network.
