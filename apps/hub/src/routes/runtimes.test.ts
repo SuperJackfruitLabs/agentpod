@@ -478,3 +478,42 @@ test("DELETE /api/runtimes/:id with unregistered provisioner → row still marke
     registerProvisioner(fakeDockerProvisioner);
   }
 }, 30_000);
+
+// ─── container runtime round-trip ─────────────────────────────────────────────
+
+test("the runtime a driver reports is stored and returned", async () => {
+  // Proves the value survives the whole path: driver → column → DTO. Without
+  // this the field can be plumbed everywhere and still arrive null.
+  registerProvisioner({
+    provider: "docker",
+    async provision() {
+      return { externalId: "rt_gvisor_ext", runtime: "runsc" };
+    },
+    async destroy() {},
+  } as never);
+
+  try {
+    const res = await testApp.request("/api/runtimes", {
+      method: "POST",
+      headers: { "X-Test-User-Id": TEST_USER, "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: "docker", name: "gvisor-rt", resourceTier: "small" }),
+    });
+
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as Record<string, unknown>).runtime).toBe("runsc");
+  } finally {
+    registerProvisioner(fakeDockerProvisioner); // restore for later tests
+  }
+});
+
+test("a driver that reports no runtime stores null", async () => {
+  // Null means "not recorded", never a guessed default.
+  const res = await testApp.request("/api/runtimes", {
+    method: "POST",
+    headers: { "X-Test-User-Id": TEST_USER, "Content-Type": "application/json" },
+    body: JSON.stringify({ provider: "docker", name: "plain-rt", resourceTier: "small" }),
+  });
+
+  expect(res.status).toBe(201);
+  expect(((await res.json()) as Record<string, unknown>).runtime).toBeNull();
+});

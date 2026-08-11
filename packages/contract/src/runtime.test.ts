@@ -63,3 +63,25 @@ describe("ProvisionedRuntime", () => {
     expect(result.nodeId).toBeNull();
   });
 });
+
+// ─── container runtime ───────────────────────────────────────────────────────
+
+describe("ProvisionedRuntime.runtime", () => {
+  const BASE = {
+    id: "rt_1", ownerId: "u_1", provider: "docker" as const, externalId: "abc",
+    status: "online" as const, nodeId: null, name: "n",
+    resourceTier: "small" as const, harness: "opencode" as const,
+    createdAt: "2026-08-12T00:00:00Z", updatedAt: "2026-08-12T00:00:00Z",
+  };
+
+  it("can report the container runtime it runs under", () => {
+    expect(ProvisionedRuntime.parse({ ...BASE, runtime: "runsc" }).runtime).toBe("runsc");
+  });
+
+  it("is absent on rows that predate it and providers without the concept", () => {
+    // Null rather than a guess: a Cloudflare sandbox has no container runtime,
+    // and a row created before this field existed never had one recorded.
+    expect(ProvisionedRuntime.parse(BASE).runtime).toBeUndefined();
+    expect(ProvisionedRuntime.parse({ ...BASE, runtime: null }).runtime).toBeNull();
+  });
+});

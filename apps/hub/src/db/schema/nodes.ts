@@ -33,6 +33,9 @@ export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   name: text("name").notNull(),
   resourceTier: text("resource_tier").notNull().default("small"),
   harness: text("harness").notNull().default("none"),
+  // Container runtime the provider reported, e.g. "runsc". Null when the
+  // provider has no such concept, or the row predates the field.
+  runtime: text("runtime"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [index("provisioned_runtimes_user_id_idx").on(t.userId)]);

@@ -1,0 +1,1 @@
+ALTER TABLE "provisioned_runtimes" ADD COLUMN "runtime" text;
