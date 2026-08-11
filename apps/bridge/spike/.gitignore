@@ -1,0 +1,6 @@
+.env
+node_modules/
+
+# Raw captures are evidence, not source. The written write-ups are tracked;
+# the JSONL dumps can be large and contain workspace paths.
+findings/*.jsonl
