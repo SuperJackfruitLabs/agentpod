@@ -26,14 +26,30 @@ import (
 // laptop running an editor installs `apn` purely as a client.
 func acpCmd(args []string) {
 	fs := flag.NewFlagSet("acp", flag.ExitOnError)
+	list := fs.Bool("list", false, "list the stations you can attach an editor to")
 	station := fs.String("station", "", "station to attach to")
 	session := fs.String("session", "", "specific session to resume")
 	hub := fs.String("hub", envOr("AGENTPOD_HUB", "https://hub.agentpod.dev"), "hub base URL")
 	token := fs.String("token", os.Getenv("AGENTPOD_TOKEN"), "hub token (prefer the AGENTPOD_TOKEN env var)")
 	_ = fs.Parse(args)
 
+	// Discovery first: someone who has never used this has no station id, and
+	// telling them to go and find one in a web console is a poor answer for a
+	// command line tool.
+	if *list {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		stations, err := acpproxy.ListStations(ctx, *hub, *token)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "apn acp: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Print(acpproxy.FormatStations(stations))
+		return
+	}
+
 	if err := acpproxy.ValidateTarget(*station, *session); err != nil {
-		fmt.Fprintf(os.Stderr, "apn acp: %v\n\nExample:\n  apn acp --station station_abc123\n", err)
+		fmt.Fprintf(os.Stderr, "apn acp: %v\n\nFind one with:\n  apn acp --list\n", err)
 		os.Exit(2)
 	}
 
