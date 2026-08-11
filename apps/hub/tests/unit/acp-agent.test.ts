@@ -377,3 +377,149 @@ describe("hub ACP agent — cancel and mode", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("hub ACP agent — session/load", () => {
+  const HISTORY = [
+    { seq: 1, type: "user-prompt", payload: { text: "hello" } },
+    { seq: 2, type: "agent-update", payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } },
+    { seq: 3, type: "permission-request", payload: { toolCall: { toolCallId: "t1" }, options: [] } },
+    { seq: 4, type: "agent-update", payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: " there" } } },
+    { seq: 5, type: "state", payload: { status: "idle" } },
+  ];
+
+  function loadFake(history = HISTORY) {
+    const calls: Array<Record<string, unknown>> = [];
+    const service = {
+      async createSession() { return { id: "acps_test" }; },
+      subscribe() { return () => {}; },
+      async promptSession() {},
+      async answerPermission() {},
+      async cancelTurn() {},
+      async setMode() {},
+      async readEvents(sessionId: string, sinceSeq: number) {
+        calls.push({ fn: "readEvents", sessionId, sinceSeq });
+        return history.filter((e) => e.seq > sinceSeq);
+      },
+    } as unknown as AcpSessionService;
+    return { service, calls };
+  }
+
+  async function connectCollecting(service: AcpSessionService) {
+    const updates: Array<Record<string, unknown>> = [];
+    const conn = client()
+      .onNotification(CLIENT_METHODS.session_update, async ({ params }) => {
+        updates.push(params as Record<string, unknown>);
+      })
+      .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+    await conn.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+    return { conn, updates };
+  }
+
+  test("streams the stored transcript back before returning", async () => {
+    // The protocol is explicit: on load the agent must "stream the entire
+    // conversation history back to the client via notifications". An editor
+    // that attaches and sees a blank pane has reached a fresh agent, not the
+    // one it asked for — which would defeat the point of Doors.
+    const { service } = loadFake();
+    const { conn, updates } = await connectCollecting(service);
+
+    await conn.agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+
+    expect(updates.length).toBeGreaterThan(0);
+  });
+
+  test("replays only the frames an editor can render, in order", async () => {
+    // Same filter as the live path: agent-update carries a raw ACP
+    // sessionUpdate, the hub's own types do not.
+    const { service } = loadFake();
+    const { conn, updates } = await connectCollecting(service);
+
+    await conn.agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+
+    expect(updates).toHaveLength(2);
+    const texts = updates.map((u) => ((u.update as Record<string, any>).content?.text));
+    expect(texts).toEqual(["hi", " there"]);
+  });
+
+  test("reads the whole transcript, not a tail", async () => {
+    const { service, calls } = loadFake();
+    const { conn } = await connectCollecting(service);
+
+    await conn.agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+
+    expect(calls).toContainEqual({ fn: "readEvents", sessionId: "acps_test", sinceSeq: 0 });
+  });
+
+  test("an empty transcript loads cleanly rather than erroring", async () => {
+    // A session opened but never prompted is legitimate.
+    const { service } = loadFake([]);
+    const { conn, updates } = await connectCollecting(service);
+
+    await conn.agent.request(AGENT_METHODS.session_load, {
+      sessionId: "acps_test",
+      cwd: "/tmp",
+      mcpServers: [],
+    });
+
+    expect(updates).toHaveLength(0);
+  });
+});
+
+describe("hub ACP agent — concurrent attach", () => {
+  test("two agents on one session both receive live events", async () => {
+    // The hub has always fanned out to N subscribers; the console was simply
+    // the only client. Doors makes that real, so it gets a test.
+    const subscribers: Array<(e: { type: string; seq: number; payload: unknown }) => void> = [];
+    const service = {
+      async createSession() { return { id: "acps_test" }; },
+      subscribe(_s: string, fn: (e: { type: string; seq: number; payload: unknown }) => void) {
+        subscribers.push(fn);
+        return () => {
+          const i = subscribers.indexOf(fn);
+          if (i >= 0) subscribers.splice(i, 1);
+        };
+      },
+      async promptSession() {
+        subscribers.forEach((fn) =>
+          fn({ type: "agent-update", seq: 1, payload: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "shared" } } }),
+        );
+        await Bun.sleep(20);
+      },
+      async answerPermission() {}, async cancelTurn() {}, async setMode() {},
+      async readEvents() { return []; },
+    } as unknown as AcpSessionService;
+
+    const seenA: unknown[] = [];
+    const seenB: unknown[] = [];
+    const mk = (sink: unknown[]) =>
+      client()
+        .onNotification(CLIENT_METHODS.session_update, async ({ params }) => { sink.push(params); })
+        .connect(buildAcpAgent({ userId: "usr_1", stationId: "station_1", sessions: service }));
+
+    const a = mk(seenA);
+    const b = mk(seenB);
+    await a.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+    await b.agent.request(AGENT_METHODS.initialize, { protocolVersion: 1, clientCapabilities: {} });
+
+    // B is mid-turn (subscribed) when A prompts, so both see A's event.
+    const bTurn = b.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "b" }] });
+    await Bun.sleep(5);
+    await a.agent.request(AGENT_METHODS.session_prompt, { sessionId: "acps_test", prompt: [{ type: "text", text: "a" }] });
+    await bTurn;
+
+    expect(seenA.length).toBeGreaterThan(0);
+    expect(seenB.length).toBeGreaterThan(0);
+  });
+});

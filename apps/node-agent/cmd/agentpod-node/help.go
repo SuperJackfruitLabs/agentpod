@@ -109,8 +109,9 @@ var commands = []struct {
 	},
 	{
 		name: "acp", group: "Node",
-		oneline: "Attach an ACP editor to a station (--station, --session)",
-		detail: "apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —\n" +
+		oneline: "Attach an ACP editor to a station (--list, --station)",
+		detail: "apn acp --list — show the stations you can attach an editor to.\n\n" +
+			"apn acp --station <id> [--session <id>] [--hub <url>] [--token <t>] —\n" +
 			"make a station on another machine look like a local agent to any ACP\n" +
 			"client (Zed, JetBrains, anything that speaks the protocol).\n\n" +
 			"The editor spawns this and talks ACP over its stdio; the frames are\n" +

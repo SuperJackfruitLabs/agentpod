@@ -60,6 +60,12 @@ export interface AcpSessionService {
   cancelTurn(userId: string, sessionId: string): Promise<void>;
 
   setMode(userId: string, sessionId: string, mode: AcpSessionMode): Promise<void>;
+
+  /** The stored transcript, ordered by seq. Replay is the caller's job. */
+  readEvents(
+    sessionId: string,
+    sinceSeq: number,
+  ): Promise<Array<{ seq: number; type: string; payload: unknown }>>;
 }
 
 /**
@@ -257,6 +263,41 @@ export function buildAcpAgent(opts: AcpAgentOptions): AgentApp {
           error: err instanceof Error ? err.message : String(err),
         });
       }
+    })
+    /**
+     * Attach to an existing session and stream its history back.
+     *
+     * The protocol is explicit that the AGENT replays, not the client: on load
+     * it must "restore the session context and conversation history" and
+     * "stream the entire conversation history back to the client via
+     * notifications". `apn acp` is the agent as far as the editor is concerned,
+     * so that work lands here.
+     *
+     * This is what makes Doors worth having. Without it an editor can only ever
+     * start a fresh conversation, and attaching to the station you have worked
+     * on all afternoon shows a blank pane.
+     *
+     * NOTE: session/load is REMOVED in ACP v2, where session/resume explicitly
+     * does NOT replay. "Join and see what happened" is a v1 affordance with no
+     * settled v2 equivalent — another reason the versions get separate surfaces
+     * rather than a field map.
+     */
+    .onRequest(AGENT_METHODS.session_load, async ({ params, client }) => {
+      const events = await asAcpError(() => service.readEvents(params.sessionId, 0));
+
+      for (const event of events) {
+        // Same filter as the live path: only agent-update carries a raw ACP
+        // sessionUpdate. Replaying the hub's own vocabulary would hand the
+        // editor frames it cannot parse, and replaying a permission-request
+        // would re-prompt for something already answered.
+        if (event.type !== "agent-update") continue;
+        await client.notify(CLIENT_METHODS.session_update, {
+          sessionId: params.sessionId,
+          update: event.payload,
+        } as never);
+      }
+
+      return {};
     })
     // NOTE: session/set_mode is REMOVED in ACP v2, replaced by config options.
     // Implemented here for v1; when the version router lands, this handler stays

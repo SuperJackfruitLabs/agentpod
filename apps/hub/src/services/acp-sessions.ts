@@ -26,7 +26,7 @@
  * `waiting` and a grace timer ends it.
  */
 
-import { and, desc, eq, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, lt, ne, or, sql } from "drizzle-orm";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -1064,6 +1064,26 @@ async function appendEndedState(sessionId: string, reason: string): Promise<void
 /** Test hook: live subscriber count for a session (leak detection). */
 export function _subscriberCountForTest(sessionId: string): number {
   return subscribers.get(sessionId)?.size ?? 0;
+}
+
+/**
+ * The stored transcript for a session, ordered by seq.
+ *
+ * Replay has always been the caller's job — the console's session socket does
+ * this query inline. Doors needs the same read for `session/load`, where the
+ * ACP protocol requires the AGENT to stream history back, so it lives here now
+ * rather than being copied a second time.
+ */
+export async function readEvents(
+  sessionId: string,
+  sinceSeq = 0,
+): Promise<Array<{ seq: number; type: string; payload: unknown }>> {
+  const rows = await db
+    .select({ seq: acpEvents.seq, type: acpEvents.type, payload: acpEvents.payload })
+    .from(acpEvents)
+    .where(and(eq(acpEvents.sessionId, sessionId), gt(acpEvents.seq, sinceSeq)))
+    .orderBy(asc(acpEvents.seq));
+  return rows as Array<{ seq: number; type: string; payload: unknown }>;
 }
 
 /** Subscribe to live events; replay is the caller's job (read acp_events). */
