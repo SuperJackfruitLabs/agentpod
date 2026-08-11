@@ -466,6 +466,13 @@ explicitly). Add a usage event type and, keyed by run, we get cost per task, per
 per machine, per person. **Nobody else can compute that for self-hosted agents, because
 nobody else is on the box.**
 
+> **When the board and the runtime disagree, the runtime wins.** A card can dispatch work that
+> fleet policy forbids — `full-auto` on a production-tagged node, exec on a credential-holding
+> station. The runtime refuses, because it is on the box and it is the last line, and it
+> **reports the refusal back as an activity** so it lands in both records rather than looking
+> like a silent failure. This is the policy analogue of `acp_events` being authoritative:
+> whoever holds the ground truth holds the veto.
+
 > **Division of labour with kaambaan, so this is not metered twice.** kaambaan already meters
 > per tenant·board·card·attempt·agent·model — but only for work it dispatched. `acp_events`
 > stays **authoritative**: it is on the box, it is sequenced, it holds permission decisions
@@ -568,8 +575,18 @@ item here that is distribution rather than capability.*
       Horizon 2:* it waits on nothing here, needs no board and no bridge, and today a change
       made on one of thirty-nine stations can only be seen by walking to that machine. Same
       theme as Doors — make the fleet useful to someone who is not sitting at it.
-- [ ] Open the provisioner registry: dynamic names, capability manifests, per-org
-      credentials, optional pause and resume, and a driver conformance suite in CI.
+- [ ] Open the provisioner registry — **single-tenant for now.** Dynamic names, capability
+      manifests, optional pause and resume, and a driver conformance suite in CI. Credentials
+      stay env-based *behind a resolver interface*; the per-org encrypted store lands with the
+      orgs work in Horizon 3. Per-org anything requires MT-1/MT-2, and there is no tenancy in
+      the hub at all today — eight schema files, zero `organizationId`, no Better Auth
+      organization plugin. Orgs are premature for demand and tenancy is a worse retrofit than
+      the run key, so start neither: the resolver costs one small abstraction and buys the
+      ordering freedom.
+- [ ] A **`posture` capability** alongside health and logs, so `apn scan`'s findings become
+      fleet-visible instead of a local report. This is the missing middle of the posture
+      story — Horizon 0 ships a one-shot hubless scanner, Horizon 3 ships continuous posture
+      with staged remediation, and nothing joined them.
 - [ ] Ship the first driver wave — **generic SSH, then E2B and Fly Machines** — alongside the
       Docker and Cloudflare drivers we already have. Kubernetes `agent-sandbox` moves to the
       second wave (§6). Each must land as an ordinary enrolled station with zero downstream
@@ -627,17 +644,24 @@ tags, a fleet-level concurrency cap (§7).
 
 *Where it stops being removable.*
 
-- [ ] Orgs — MT-1 through MT-4. Now, when the wedge is pulling teams in. The cross-tenant
-      isolation audit matters far more once we hold other people's security findings.
+- [ ] Orgs — MT-1 through MT-4, **plus the per-org credential store Horizon 1 deliberately
+      deferred.** Trigger this when the wedge actually starts pulling teams in — `apn scan` is
+      what produces that signal — rather than on a date. The cross-tenant isolation audit
+      matters far more once we hold other people's security findings.
 - [ ] Fleet permission policy, org-scoped, evaluated centrally, fully audited.
-- [ ] Spend accounting and budgets keyed by run, enforceable mid-run.
-- [ ] Continuous posture and staged fleet patching with health gates and rollback.
+- [ ] Spend accounting and budgets keyed by run. **kaambaan may decide a budget is exceeded;
+      only the runtime can enforce it** — terminating a live agent needs the session, and the
+      session is ours. The same authoritative/projection split as the ledger (§8).
+- [ ] Continuous posture and staged fleet patching with health gates and rollback, built on
+      the `posture` capability from Horizon 1.
 - [ ] **Ledger lifecycle in force** — retention windows, compaction of ephemeral activity, and
       a verifiable export. "Produce March's agent activity" has to be one command against a
       ledger, not a query someone writes by hand against a table nobody has pruned since 2026.
       The schema for this was settled in Horizon 0; this is the policy and the tooling.
-- [ ] Agent identity — each station bound to a non-human identity with short-lived
-      credentials.
+- [ ] Agent identity. **After the bridge, every station carries two credentials** — its
+      enrollment credential and its `kbn_` kaambaan token. Bind both to one non-human identity
+      on a single rotation schedule, or they rotate on different clocks under different owners,
+      which is how this breaks at 3am.
 
 ---
 
