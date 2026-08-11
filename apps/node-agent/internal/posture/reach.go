@@ -35,6 +35,14 @@ func EffectiveExposure(path string) (Exposure, error) {
 	return exposureWalk(path, "/")
 }
 
+// exposureOf is the indirection the checks call, so tests can force an answer.
+//
+// Needed because macOS gives each user a private TMPDIR at mode 0700: no file a
+// test creates there is ever reachable by another user, so the "this really is
+// exposed" branch of the checks cannot be reached with a real fixture on a Mac.
+// The walk itself is tested directly in reach_test.go.
+var exposureOf = EffectiveExposure
+
 // exposureWalk is EffectiveExposure with a controllable stopping point.
 //
 // stopAt is the highest directory inspected, inclusive. Production always walks

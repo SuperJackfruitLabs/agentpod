@@ -3,6 +3,7 @@ package posture
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -80,6 +81,12 @@ func writeMode(t *testing.T, path string, mode os.FileMode) {
 }
 
 func TestWorldReadableCredentialsAreCritical(t *testing.T) {
+	// Forces the exposure verdict rather than relying on the filesystem: macOS
+	// gives each user a private TMPDIR at 0700, so nothing a test writes there
+	// is reachable by another user and this branch would be unreachable on a
+	// Mac. The walk that produces the verdict is tested in reach_test.go.
+	defer forceExposure(t, Exposure{World: true, Group: true})()
+
 	home := t.TempDir()
 	writeMode(t, filepath.Join(home, ".codex/auth.json"), 0o644)
 
@@ -119,6 +126,8 @@ func TestOwnerOnlyCredentialsPass(t *testing.T) {
 
 func TestGroupReadableIsAlsoFlagged(t *testing.T) {
 	// 0640 leaks to the group, which on a shared box is still "other people".
+	defer forceExposure(t, Exposure{Group: true})()
+
 	home := t.TempDir()
 	writeMode(t, filepath.Join(home, ".codex/auth.json"), 0o640)
 
@@ -214,4 +223,100 @@ postgres  56789 rakesh   27u  IPv4 0x2222222222222222      0t0  TCP *:5432 (LIST
 	if Grade(findings) != "A" {
 		t.Errorf("grade = %q, want A — a non-agent listener is not our business", Grade(findings))
 	}
+}
+
+// ─── corrected paths ────────────────────────────────────────────────────────
+
+// The bug this pins: the shipped map named files that do not exist for hermes
+// and openclaw, so `apn scan` graded machines A having opened nothing. Verified
+// against molt-bot and superchotu on 2026-08-11.
+func TestCredentialPathsMatchRealHarnessLayouts(t *testing.T) {
+	want := map[string][]string{
+		"hermes":   {".hermes/config.yaml", ".hermes/auth.json", ".hermes/.env"},
+		"openclaw": {".openclaw/openclaw.json", ".openclaw/.env", ".openclaw/gateway.systemd.env", ".openclaw/credentials/*.json"},
+	}
+	for harness, paths := range want {
+		got := CredentialPaths[harness]
+		for _, p := range paths {
+			if !slices.Contains(got, p) {
+				t.Errorf("%s: missing %q from %v", harness, p, got)
+			}
+		}
+	}
+}
+
+func TestCredentialPathsDropTheFilesThatNeverExisted(t *testing.T) {
+	// Keeping a path that matches nothing is not harmless: it is what made the
+	// scan look thorough while checking nothing.
+	gone := map[string][]string{
+		"hermes":   {".hermes/config.json", ".hermes/credentials.json"},
+		"openclaw": {".openclaw/config.json", ".openclaw/credentials.json", ".openclaw/gateway.json"},
+	}
+	for harness, paths := range gone {
+		for _, p := range paths {
+			if slices.Contains(CredentialPaths[harness], p) {
+				t.Errorf("%s: %q does not exist on any real machine and must be removed", harness, p)
+			}
+		}
+	}
+}
+
+func TestCredentialGlobsExpand(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".openclaw", "credentials")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"telegram-pairing.json", "gateway-pairing.json", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := expandCredentialPaths(home, ".openclaw/credentials/*.json")
+	if len(got) != 2 {
+		t.Fatalf("expanded to %d paths, want 2 (json only): %v", len(got), got)
+	}
+}
+
+func TestCredentialGlobMatchingNothingIsSilent(t *testing.T) {
+	// Same rule as an absent literal: absence is not a finding.
+	got := expandCredentialPaths(t.TempDir(), ".openclaw/credentials/*.json")
+	if len(got) != 0 {
+		t.Errorf("want no paths, got %v", got)
+	}
+}
+
+func TestUnreachableFileIsNotReportedAsExposed(t *testing.T) {
+	// The molt-bot case end-to-end: a 644 credential file under a 700 ancestor
+	// is not exposed and must not be a finding. Without this, correcting the
+	// paths turns a secured box into 15 false criticals.
+	home := t.TempDir()
+	hermes := filepath.Join(home, ".hermes")
+	if err := os.MkdirAll(hermes, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(hermes, "auth.json")
+	if err := os.WriteFile(p, []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(hermes, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(hermes, 0o755) })
+
+	for _, f := range CheckCredentialFiles(home, []string{"hermes"}) {
+		if f.Status == StatusFail {
+			t.Errorf("unreachable file reported as exposed: %+v", f)
+		}
+	}
+}
+
+// forceExposure makes the credential checks see a fixed verdict, returning a
+// restore func. See the comment on exposureOf for why this is necessary.
+func forceExposure(t *testing.T, e Exposure) func() {
+	t.Helper()
+	prev := exposureOf
+	exposureOf = func(string) (Exposure, error) { return e, nil }
+	return func() { exposureOf = prev }
 }
