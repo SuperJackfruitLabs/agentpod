@@ -10,6 +10,7 @@
   import Terminal from "$lib/components/stations/Terminal.svelte";
   import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
+  import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { listStations } from "$lib/api/client";
   import type { StationRow } from "$lib/api/client";
@@ -23,6 +24,7 @@
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
+  import GitCompareIcon from "@lucide/svelte/icons/git-compare";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import ActivityIcon from "@lucide/svelte/icons/activity";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
@@ -30,13 +32,14 @@
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
 
-  type Tab = "chat" | "health" | "logs" | "files" | "terminal" | "cleanup" | "activity";
+  type Tab = "chat" | "health" | "logs" | "files" | "terminal" | "changes" | "cleanup" | "activity";
   const VALID_TABS: readonly Tab[] = [
     "chat",
     "health",
     "logs",
     "files",
     "terminal",
+    "changes",
     "cleanup",
     "activity",
   ];
@@ -111,6 +114,10 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
   );
 
+  const hasChangeset = $derived(
+    Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
+  );
+
   const hasCleanup = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("cleanup")
   );
@@ -140,6 +147,7 @@
     { id: "logs", label: "Logs", icon: ScrollTextIcon },
     { id: "files", label: "Files", icon: FolderIcon },
     ...(hasTerminal ? [{ id: "terminal", label: "Terminal", icon: TerminalIcon }] : []),
+    ...(hasChangeset ? [{ id: "changes", label: "Changes", icon: GitCompareIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup", label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity", label: "Activity", icon: ActivityIcon },
   ]);
@@ -286,6 +294,15 @@
     {#snippet terminalContent()}
       <div class="flex-1 min-h-[320px]">
         <Terminal {stationId} />
+      </div>
+    {/snippet}
+  {/if}
+
+  {#if hasChangeset}
+    {@render mountedPanel("changes", changesContent)}
+    {#snippet changesContent()}
+      <div class="min-h-[200px]">
+        <ChangesetPanel {stationId} />
       </div>
     {/snippet}
   {/if}

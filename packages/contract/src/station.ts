@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup","acp"]);
+export const Capability = z.enum(["inventory","health","logs","fs.read","fs.write","terminal","lifecycle","cleanup","acp","changeset"]);
 export type Capability = z.infer<typeof Capability>;
 // Station capability lists FILTER unknown capability strings instead of
 // rejecting the whole row (carry-in #2: an old hub must not break auto-adopt

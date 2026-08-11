@@ -18,7 +18,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg } from "../src/index";
+import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus } from "../src/index";
 
 const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contractfix/testdata");
 
@@ -53,6 +53,33 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
       { key: "codex:4a1482de", ok: true, running: true, pid: 73226, cpuPct: 12.5, memBytes: 524288000, uptimeSec: 3600 },
       { key: "hermes:idle", ok: false, running: false, pid: null, cpuPct: null, memBytes: null, uptimeSec: null },
     ],
+  }],
+
+  // Exercises every nullable and both sides — catches a Go struct that cannot
+  // represent a detached head, a rename, or an uncounted untracked file.
+  ["changeset_status", ChangesetStatus, {
+    repo: { branch: "feat/agent-work", head: "9f1c2ab", detached: false },
+    base: { ref: "origin/main", sha: "3d4e5f6", reason: "upstream" },
+    uncommitted: {
+      files: [
+        { path: "src/a.ts", oldPath: null, status: "modified", insertions: 12, deletions: 3, binary: false },
+        { path: "notes.md", oldPath: null, status: "untracked", insertions: null, deletions: null, binary: false },
+        { path: "logo.png", oldPath: null, status: "modified", insertions: null, deletions: null, binary: true },
+      ],
+      insertions: 12,
+      deletions: 3,
+    },
+    committed: {
+      files: [
+        { path: "src/new.ts", oldPath: "src/old.ts", status: "renamed", insertions: 1, deletions: 1, binary: false },
+      ],
+      insertions: 1,
+      deletions: 1,
+      commits: [
+        { sha: "9f1c2ab0000000000000000000000000000000aa", shortSha: "9f1c2ab", subject: "wire the thing up", author: "codex", committedAt: "2026-08-11T09:15:00Z" },
+      ],
+    },
+    truncatedFiles: false,
   }],
 ];
 

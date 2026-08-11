@@ -103,6 +103,7 @@ func runCmd() {
 	}
 
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
+	h = gateway.NewChangesetHandler(h, resolver)
 	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
 	h = gateway.NewUpdateHandler(h, version)
 	gateway.Run(ctx, cfg, h, version, gatherHealth)

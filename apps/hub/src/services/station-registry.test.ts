@@ -23,7 +23,7 @@ import { rawSql } from "../db/drizzle";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
-import { adoptStations, listAdopted, getStation } from "./station-registry";
+import { adoptStations, listAdopted, getStation, refreshAdoptedCapabilities } from "./station-registry";
 import type { DetectedStation } from "@agentpod/contract";
 
 // ─── Test Constants ────────────────────────────────────────────────────────────
@@ -256,4 +256,79 @@ test("re-adopting a station updates its matrixId", async () => {
     detectedV2
   );
   expect(rows2[0]!.matrixId).toBe(UPDATED_MATRIX_ID);
+});
+
+// ─── refreshAdoptedCapabilities ───────────────────────────────────────────────
+//
+// The bug these guard: `stations.capabilities` was written ONLY by
+// adoptStations, so a station adopted before a capability existed could never
+// gain it — the node reported it on every detect and the hub kept serving the
+// row it stored at adoption. Any new capability hits this.
+
+/** A detect fake in the shape brokerRequest returns. */
+const detectReturning = (stations: unknown[]) =>
+  async () => ({ ok: true as const, data: stations });
+
+test("refresh updates capabilities on an already-adopted station", async () => {
+  await adoptStations(TEST_USER, testNodeId, ["refresh-caps"], [
+    {
+      key: "refresh-caps", harness: "codex", kind: "leaf", displayName: "old name",
+      parentKey: null, workspacePath: "/old", capabilities: ["health"], adopted: false,
+    },
+  ]);
+
+  const updated = await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: detectReturning([
+      {
+        key: "refresh-caps", harness: "codex", kind: "leaf", displayName: "new name",
+        parentKey: null, workspacePath: "/new", capabilities: ["health", "changeset"],
+      },
+    ]),
+  });
+  expect(updated).toBeGreaterThanOrEqual(1);
+
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+    .find((r) => r.stationKey === "refresh-caps")!.id);
+  expect(row!.capabilities).toEqual(["health", "changeset"]);
+  expect(row!.displayName).toBe("new name");
+  expect(row!.workspacePath).toBe("/new");
+});
+
+test("refresh never adopts a station on its own", async () => {
+  // Adoption stays an explicit act. If this ever inserts, every station a node
+  // can see silently joins the fleet.
+  await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: detectReturning([
+      {
+        key: "never-adopted-by-refresh", harness: "hermes", kind: "leaf", displayName: "nope",
+        parentKey: null, workspacePath: null, capabilities: ["health", "changeset"],
+      },
+    ]),
+  });
+
+  const rows = await listAdopted(TEST_USER, testNodeId);
+  expect(rows.find((r) => r.stationKey === "never-adopted-by-refresh")).toBeUndefined();
+});
+
+test("refresh is quiet when the node cannot answer", async () => {
+  // Runs on every node connect. A node that fails detect must not throw into
+  // the gateway's connect path.
+  const updated = await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: async () => ({ ok: false as const, error: "node offline" }),
+  });
+  expect(updated).toBe(0);
+});
+
+test("refresh ignores a detect response that does not match the contract", async () => {
+  const updated = await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: async () => ({ ok: true as const, data: { not: "an array" } }),
+  });
+  expect(updated).toBe(0);
+});
+
+test("refresh survives a broker that throws", async () => {
+  const updated = await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: async () => { throw new Error("socket exploded"); },
+  });
+  expect(updated).toBe(0);
 });

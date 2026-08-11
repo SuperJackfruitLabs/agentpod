@@ -11,7 +11,9 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
+import { VERB_RESULTS } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
+import * as broker from "./broker";
 
 export type StationRow = typeof stations.$inferSelect;
 
@@ -141,4 +143,75 @@ export async function unadopt(
   await db
     .delete(stations)
     .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
+}
+
+// ─── refreshAdoptedCapabilities ───────────────────────────────────────────────
+
+/** Injectable deps — mirrors AutoAdoptDeps so tests avoid a live WebSocket. */
+export interface RefreshCapsDeps {
+  brokerRequest?: (
+    nodeId: string,
+    verb: string,
+    params: unknown,
+    opts?: { timeoutMs?: number }
+  ) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
+}
+
+/**
+ * Re-read a node's capabilities into the stations already adopted from it.
+ *
+ * adoptStations was the ONLY writer of `stations.capabilities`, so a station
+ * adopted before a capability existed could never gain it: the node reported it
+ * on every detect and the hub kept serving the row it stored at adoption. Any
+ * new capability hits this, which is why the fix lives here rather than in the
+ * feature that found it.
+ *
+ * Updates existing (nodeId, stationKey) rows ONLY. It must never insert:
+ * adoption is an explicit act, and an auto-inserting refresh would quietly
+ * adopt everything a node can see.
+ *
+ * Returns the number of rows updated. Never throws — it runs on node connect.
+ */
+export async function refreshAdoptedCapabilities(
+  nodeId: string,
+  deps: RefreshCapsDeps = {}
+): Promise<number> {
+  try {
+    const brokerRequest = deps.brokerRequest ?? broker.request;
+
+    const r = await brokerRequest(nodeId, "detect", {}, { timeoutMs: 10_000 });
+    if (!r.ok) return 0;
+
+    const parsed = VERB_RESULTS.detect.safeParse(r.data);
+    if (!parsed.success) return 0;
+
+    // Only rows that already exist for this node are eligible.
+    const existing = await db
+      .select({ stationKey: stations.stationKey })
+      .from(stations)
+      .where(eq(stations.nodeId, nodeId));
+    const adopted = new Set(existing.map((row) => row.stationKey));
+    if (adopted.size === 0) return 0;
+
+    let updated = 0;
+    for (const s of parsed.data) {
+      if (!adopted.has(s.key)) continue; // never insert
+      await db
+        .update(stations)
+        .set({
+          capabilities: s.capabilities as string[],
+          displayName: s.displayName,
+          workspacePath: s.workspacePath ?? null,
+        })
+        .where(and(eq(stations.nodeId, nodeId), eq(stations.stationKey, s.key)));
+      updated++;
+    }
+    return updated;
+  } catch (e) {
+    console.log(
+      `[refresh-caps] failed for node ${nodeId}:`,
+      e instanceof Error ? e.message : e
+    );
+    return 0;
+  }
 }

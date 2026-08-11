@@ -148,7 +148,7 @@ func (o *openCodeDescriptor) Detect() ([]Station, error) {
 			DisplayName:   filepath.Base(projPath),
 			ParentKey:     nil,
 			WorkspacePath: &wsCopy,
-			Capabilities:  caps,
+			Capabilities:  AppendChangesetCap(caps, &wsCopy),
 			MatrixId:      nil,
 		})
 	}

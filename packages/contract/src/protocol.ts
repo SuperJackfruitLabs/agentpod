@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Station, StationHealth, FsEntry } from "./station";
+import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
 
 export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
@@ -44,6 +45,16 @@ export const VERB_PARAMS = {
   "acp.open":   z.object({ key: z.string(), instance: z.string().optional() }),
   "acp.attach": z.object({ sessionId: z.string() }),
   "acp.close":  z.object({ sessionId: z.string() }),
+  // base affects the COMMITTED side only; uncommitted is always vs HEAD.
+  "changeset.status": z.object({ key: z.string(), base: z.string().optional() }),
+  "changeset.diff": z.object({
+    key: z.string(),
+    base: z.string().optional(),
+    /** Omitted means the whole side's patch, subject to maxBytes. */
+    path: z.string().optional(),
+    side: ChangesetDiffSide,
+    maxBytes: z.number().int().positive().optional(),
+  }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -70,4 +81,6 @@ export const VERB_RESULTS = {
   "acp.open":  z.object({ sessionId: z.string(), instance: z.string().optional() }),
   "acp.close": z.object({ ok: z.boolean() }),
   // acp.attach streams; no entry needed (same as term.attach).
+  "changeset.status": ChangesetStatus,
+  "changeset.diff": ChangesetDiff,
 } as const;

@@ -72,7 +72,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			DisplayName:   "Hermes",
 			ParentKey:     nil,
 			WorkspacePath: &homeCopy,
-			Capabilities:  caps,
+			Capabilities:  AppendChangesetCap(caps, &homeCopy),
 		},
 	}
 
@@ -99,7 +99,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			DisplayName:   name,
 			ParentKey:     &parentKey,
 			WorkspacePath: &wsCopy,
-			Capabilities:  caps,
+			Capabilities:  AppendChangesetCap(caps, &wsCopy),
 			MatrixId:      MatrixIDFromProfile(profileDir, "id.agentpod.dev"),
 		})
 	}
