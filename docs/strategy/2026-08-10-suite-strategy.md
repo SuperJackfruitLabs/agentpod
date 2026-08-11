@@ -674,10 +674,60 @@ item here that is distribution rather than capability.*
       > all passed. Verify such lists against real machines, and date the entries.
       > [#237](https://github.com/rakeshgangwar/agentpod/issues/237) makes this same list serve
       > a second consumer, so the next drift gets noticed sooner.
-- [ ] Ship the first driver wave — **generic SSH, then E2B and Fly Machines** — alongside the
-      Docker and Cloudflare drivers we already have. Kubernetes `agent-sandbox` moves to the
-      second wave (§6). Each must land as an ordinary enrolled station with zero downstream
-      special-casing.
+- [ ] Ship the first driver wave. **Re-planned 2026-08-12 after researching the substrate
+      market and reading our own code; three premises in the original line were wrong.**
+
+      **(a) "The Docker and Cloudflare drivers we already have" overstates both.** Docker
+      runtimes all land *on the hub box* — `DockerRuntimeProvisioner` defaults to
+      `/var/run/docker.sock`, so agent workloads share CPU, RAM and a kernel with the control
+      plane that manages them. The orchestrator already supports a remote daemon; nothing
+      reads it from env. And Cloudflare has **never run on this deployment**:
+      `ENABLE_CLOUDFLARE_SANDBOXES` is unset, so the live hub logs `Provisioners registered:
+      docker`. It worked once in the OpenCode era; it is not a verified reference driver today.
+
+      **(b) Generic SSH is not a provisioner.** Docker and Cloudflare *create* a sandbox; SSH
+      *enrols a machine you already own*, where `resourceTier` and `image` are meaningless and
+      `destroy` would mean uninstall — a console button one wiring mistake away from deleting
+      a customer's server. It moves to `apn enroll-remote`, a CLI feature using the operator's
+      **local** SSH agent, so the hub never holds keys to the fleet. That preserves the hub's
+      best security property: it holds no credentials and can reach nothing that is not
+      already dialling it.
+
+      **(c) E2B is a poor first rented driver, on billing.** E2B and Daytona charge for a
+      sandbox's *full alive duration*; Modal and Fly Sprites charge nothing while idle.
+      AgentPod stations are long-lived and mostly idle, so idle billing dominates cost. Also:
+      Daytona went closed-source in June 2026, and self-hosting E2B wants Firecracker plus a
+      Nomad/Consul control plane on AWS or GCP — **there is no substrate we can both rent and
+      self-host with one driver**, so "operate and rent" is two implementations, not one.
+
+      **Revised order** — cheap and concrete first, generalise only once a second driver has
+      actually run:
+      1. Wire a remote Docker host from env — gets runtimes off the control-plane box.
+      2. gVisor (`runsc`) as a runtime option. The isolation upgrade that needs **no nested
+         virtualisation and no bare metal**: `systrap` runs on ordinary cloud VMs, integration
+         is `docker run --runtime=runsc`, overhead 5–20%. Every other isolation step (Kata,
+         Firecracker, `agent-sandbox`) demands bare metal or a cluster.
+      3. Revive and *verify* Cloudflare. It is already in the provider union, so this needs
+         zero registry work and answers whether the existing driver interface holds against a
+         genuinely different substrate.
+      4. Open the registry — dynamic names, capability manifests, conformance suite — with
+         Fly or Modal as the forcing function, informed by (3).
+      5. Sleep/wake as a first-class station state (see below).
+      6. Operated substrate as a paid tier. Needs multi-tenancy the hub does not have, so it
+         follows the orgs work rather than leading it.
+
+      > **The conflict that shapes all of this.** Scale-to-zero is what makes rented substrates
+      > affordable, but AgentPod stations are *connection-oriented*: the node dials out over
+      > WSS and the sweeper reaps anything silent for 45s. **A slept sandbox is an offline
+      > station.** Keep it awake and you pay provisioned memory forever (~$28/month for a 4 GiB
+      > Cloudflare station, ~$1,090/month across 39); let it sleep and you need a wake path the
+      > hub does not have, because the hub cannot reach into a node. Self-operating is roughly
+      > 20× cheaper at this fleet size — a Hetzner AX41 is about €46/month — which is why
+      > operated leads and rented follows.
+
+      Kubernetes `agent-sandbox` stays in the second wave (§6); it is a SIG Apps subproject on
+      gVisor with Firecracker on its own 2026–27 roadmap, and it needs a cluster. Each driver
+      must still land as an ordinary enrolled station with zero downstream special-casing.
 - [ ] **Coalesce before projecting.** Measured on real stations: the same trivial prompt yields
       57 ACP events from Codex and **1,051 from Hermes**, which at one-activity-per-event would
       be over a thousand POSTs at a board for one instruction — and an 18× spread across
