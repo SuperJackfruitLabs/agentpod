@@ -574,14 +574,18 @@ suite or a pile.*
       schemas, assert the Go structs unmarshal them losslessly. Ten percent of the codegen
       pipeline for most of its value, and unlike codegen it is justified today — see the note
       under Horizon 2 for why full codegen is not.
-- [ ] Give a station attempt a durable identity, carrying kaambaan's `runId` when it came from
+- [x] ~~Give a station attempt a durable identity~~ — done 2026-08-11. `acp_runs` + `RunState`
+      (A2A verbatim). Superseded detail:
       a claim and a local id when it did not. Adopt A2A's state vocabulary verbatim — do not
       invent a parallel outcome enum. The console must keep working with no board attached.
-- [ ] Reserve `change` in `contract-change`. A peer entity everything downstream keys off
+- [x] ~~Reserve `change`~~ — done 2026-08-11, in `packages/contract/src/run.ts`; no
+      `pullRequestId`, delivery adapter optional. Superseded detail:
       costs a schema decision now and a reconciliation later. Delivery adapters can wait for
       Horizon 2; what cannot wait is that the schema never grows a required
       `pull_request_id`.
-- [ ] Settle the **shape** of `acp_events` retention and export, even though enforcement ships
+- [x] ~~Settle the `acp_events` retention shape~~ — done 2026-08-11: `created_at` indexed so
+      age-based pruning is not a full scan; archival boundary is the session, not the event.
+      Superseded detail:
       in Horizon 3. That table is now authoritative for transcripts, permission decisions and
       usage, *and* the projection source for kaambaan and A2A, *and* the §11 flight recorder —
       and today it only grows, on the hub's Postgres, with no compaction, archival or export
