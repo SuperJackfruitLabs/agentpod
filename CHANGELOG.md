@@ -6,6 +6,32 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Versioning: [S
 
 ---
 
+## v0.1.21 - 2026-08-11
+
+**Changesets** — see what an agent changed in a station's workspace without SSHing to the machine. Uncommitted edits, untracked files, and commits not yet on a base, in the console's new Changes tab.
+
+### Added
+
+- **`changeset.status`** — the summary for a station's workspace: the branch, the base, and the uncommitted and committed-not-on-base sides kept separate. They are different situations: one means the agent is mid-flight, the other means finished work is sitting on a machine.
+- **`changeset.diff`** — a patch, whole-side or per-file, truncated on a rune boundary with the same contract as `fs.read`.
+- **Untracked files are included.** Agents create files constantly and `git diff` shows none of them. Their content is fetched per-file rather than by staging them: `git add -N` would make them visible, but it writes to the index of a workspace an agent may be using.
+- **The base says why it was chosen** — `explicit`, `upstream`, `default-branch` or `head`. A surprising diff on a machine you are not sitting at is otherwise unexplainable, and "no upstream, so you are only seeing uncommitted work" is a different situation from "diffed against your upstream". The chosen ref always resolves to its merge base with HEAD, so commits made on the base after the branch diverged do not show up as work the station never did.
+- The capability is advertised **only** where the workspace is a git repository and `git` is usable, so stations without one show no tab rather than one that always errors.
+
+### Fixed
+
+- **A station's capabilities are now refreshed when its node connects.** `stations.capabilities` was previously written only at adoption, so a station adopted before a capability existed could never gain it — the node reported it on every detect and the hub kept serving the row it stored at adoption. Any new capability hit this. The refresh updates already-adopted rows only and never inserts; adoption stays an explicit act.
+
+### Notes
+
+- **Observe-only.** Nothing is stored: refresh and you get the workspace's current truth. Content-addressing a change and delivering it are a later horizon.
+- **Requires a hub running the matching release.** The `/api/stations/:id/changeset/*` endpoints are new, and **the hub should be deployed before the fleet updates** — otherwise nodes advertise `changeset` to a hub that cannot refresh their stored capabilities, and no tab appears.
+- Reads never mutate the repository, and run with `GIT_OPTIONAL_LOCKS=0` so they cannot contend with a working agent's own git operations.
+- **No Windows support yet** — path handling assumes POSIX. Submodules report as the pointer moving, which is what `git` itself reports.
+- macOS binaries remain unsigned ([#228](https://github.com/rakeshgangwar/agentpod/issues/228), blocked on an Apple Developer account), so a macOS node re-prompts for permissions after self-updating.
+
+---
+
 ## v0.1.20 - 2026-08-11
 
 **Doors** — reach a station from any ACP editor. `apn acp` makes a station on another machine look like a local agent to Zed, JetBrains, or anything else that speaks the Agent Client Protocol, including machines behind NAT or CGNAT, because the node dials out.
