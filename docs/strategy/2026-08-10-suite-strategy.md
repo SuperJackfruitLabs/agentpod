@@ -483,6 +483,18 @@ and it's the same surface for work-plane gates.
 
 ## 9. Roadmap
 
+> **Two rules that hold across every horizon below.**
+>
+> **The console ships with the capability — there is no separate console track.** A backend
+> capability is not done until the console surfaces it. A driver you cannot provision from the
+> UI, a change you cannot view, a run you cannot find: those are half-landed features. This is
+> why no horizon names console work — it is inside every item, not beside them.
+>
+> **Notifications are in-app on both sides.** kaambaan notifies for gates, we notify for
+> permissions, both in-app, and neither builds a push transport yet. Push, email and Slack are
+> a later channel decision for whichever side owns delivery — deferring it is what stops us
+> building the same transport twice before we know which side should own it.
+
 ### Horizon 0 — The spine (4–6 weeks)
 
 *Nothing new ships. This is the horizon that decides whether the next two years are a
@@ -527,6 +539,12 @@ suite or a pile.*
       costs a schema decision now and a reconciliation later. Delivery adapters can wait for
       Horizon 2; what cannot wait is that the schema never grows a required
       `pull_request_id`.
+- [ ] Settle the **shape** of `acp_events` retention and export, even though enforcement ships
+      in Horizon 3. That table is now authoritative for transcripts, permission decisions and
+      usage, *and* the projection source for kaambaan and A2A, *and* the §11 flight recorder —
+      and today it only grows, on the hub's Postgres, with no compaction, archival or export
+      path. Partitioning and an archival boundary are schema decisions, and §10's retrofit
+      argument applies to them exactly as it does to the run identity.
 - [x] ~~Clear the dependabot backlog~~ — done 2026-08-11. Eleven orphaned PRs closed against
       directories and actions purged in P2a/P2c; `gomod` coverage added for the node-agent,
       which had none.
@@ -545,6 +563,11 @@ item here that is distribution rather than capability.*
       item in the horizon that puts stations in front of people who have installed nothing of
       ours, and it is smaller than it sounds: the hub already terminates ACP sessions, so
       serving is proxying plumbing it already owns.
+- [ ] A **`changeset` capability** on the node-agent — package a station's workspace diff
+      against a base, ship it to the hub, render it in the console. *Pulled forward from
+      Horizon 2:* it waits on nothing here, needs no board and no bridge, and today a change
+      made on one of thirty-nine stations can only be seen by walking to that machine. Same
+      theme as Doors — make the fleet useful to someone who is not sitting at it.
 - [ ] Open the provisioner registry: dynamic names, capability manifests, per-org
       credentials, optional pause and resume, and a driver conformance suite in CI.
 - [ ] Ship the first driver wave — **generic SSH, then E2B and Fly Machines** — alongside the
@@ -560,10 +583,10 @@ item here that is distribution rather than capability.*
       that declaration, and CI fails on a verb that declares neither. An allowlist rots; a
       required field cannot be forgotten.
 
-### Horizon 2 — Work (Q1–Q2 2027)
+### Horizon 2 — The bridge and the change artifact (Q1–Q2 2027)
 
-*Most of what this horizon used to contain is already built, in kaambaan. What is left is
-the bridge and the change artifact — a much smaller horizon than the first draft assumed.*
+*Renamed. Most of what this horizon used to contain is already built, in kaambaan, and calling
+it "Work" is an invitation for someone to rebuild a board here in six months.*
 
 **Ours:**
 
@@ -571,13 +594,11 @@ the bridge and the change artifact — a much smaller horizon than the first dra
       retire on cleanup), one kaambaan agent per station, conformance run in CI on both sides.
 - [ ] Serve an A2A AgentCard per station from the hub, derived from the descriptor. Any
       orchestrator, not only kaambaan (§7).
-- [ ] A `changeset` capability on the node-agent — package a station's workspace diff against
-      a base and ship it to the hub. Reuses filesystem and terminal; no station needs push
-      credentials of its own.
 - [ ] Delivery adapters — `git-remote` first, then `github` / `gitlab` / `forgejo`, and
-      `patch`. Ship nothing that makes the `git-remote` path insufficient.
-- [ ] Mobile PWA with push, covering permission answers — which are the same surface as
-      kaambaan's gates.
+      `patch`. Ship nothing that makes the `git-remote` path insufficient. Built on the
+      `changeset` capability from Horizon 1.
+- [ ] In-app permission notifications, so "blocked, waiting for you" is not a forgotten tab.
+      No push transport yet — see the rules above §9.
 
 **kaambaan's, and already shipped — feed them, don't rebuild them:** boards and cards, the
 task state machine, gates and approvals, attempts comparison, per-attempt metering, GitHub
@@ -611,6 +632,10 @@ tags, a fleet-level concurrency cap (§7).
 - [ ] Fleet permission policy, org-scoped, evaluated centrally, fully audited.
 - [ ] Spend accounting and budgets keyed by run, enforceable mid-run.
 - [ ] Continuous posture and staged fleet patching with health gates and rollback.
+- [ ] **Ledger lifecycle in force** — retention windows, compaction of ephemeral activity, and
+      a verifiable export. "Produce March's agent activity" has to be one command against a
+      ledger, not a query someone writes by hand against a table nobody has pruned since 2026.
+      The schema for this was settled in Horizon 0; this is the policy and the tooling.
 - [ ] Agent identity — each station bound to a non-human identity with short-lived
       credentials.
 
