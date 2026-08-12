@@ -144,3 +144,36 @@ jobs:
       - name: Build
         working-directory: apps/console
         run: pnpm build
+
+  # The Cloudflare worker had no CI at all until now: its suite only ever ran in
+  # a developer's checkout, which is why the frozen-envVars bug (#253) reached
+  # the fleet and silently disabled workspace persistence for every existing
+  # sandbox. The tests existed; nothing ran them.
+  worker:
+    name: worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # cloudflare/worker-v2 sits outside the pnpm workspace (apps/*, packages/*)
+      # and pins its dependencies with package-lock.json, so this job is npm —
+      # copying the pnpm setup used by the hub/console jobs would find no lockfile.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: cloudflare/worker-v2/package-lock.json
+
+      # ci, not install: a package.json edited without regenerating the lockfile
+      # should fail here, the same guarantee pnpm --frozen-lockfile gives elsewhere.
+      - name: Install dependencies
+        working-directory: cloudflare/worker-v2
+        run: npm ci
+
+      # Includes the snapshot-wrapper round trip, which shells out to curl and
+      # tar against a temp directory — hence no container runtime is needed.
+      - name: Run tests
+        working-directory: cloudflare/worker-v2
+        run: npx vitest run
