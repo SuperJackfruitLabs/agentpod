@@ -73,6 +73,24 @@ code, and geography — not as the default substrate for standing stations. That
 argument for keeping the operated substrate primary, which is what the roadmap already
 says.
 
+## Correction, added 2026-08-12 after building the driver
+
+**Finding #4 named one cause where there were two.** The spike concluded that a
+woken container did not come back *because container disk is ephemeral and the
+node identity was lost*. That is true, and #245 was the right fix — but the spike
+worker's wake path also called `container.start()` with **no `envVars`**, and a
+container's environment does not survive a stop. So the woken container had no
+`AGENTPOD_HUB_URL` and no `AGENTPOD_ENROLL_TOKEN`, failed `agentpod-node enroll`,
+exited under `set -e`, and was restarted forever.
+
+Both faults produce the identical symptom — "the node never came back" — and the
+spike could not tell them apart because it only observed the outcome. The second
+was found only when the real driver reproduced it and `wrangler containers list`
+showed **7 live instances** in a silent restart loop.
+
+The lesson is narrower than "test more": when one observation is explained by a
+hypothesis you already hold, that is exactly when a second cause hides behind it.
+
 ## Corrections to earlier claims in this investigation
 
 - I reported that `onActivityExpired` "never fired" based on an empty tail. **Wrong** — the
