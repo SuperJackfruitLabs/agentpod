@@ -148,6 +148,16 @@ func (p *piDescriptor) Detect() ([]Station, error) {
 	// start, so this descriptor does not implement Lifecycle at all.
 	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
 
+	// "acp" is advertised ONLY when the pi-acp adapter actually resolves. The
+	// console gates the Chat tab on this capability alone, so advertising it
+	// unconditionally (as the harnesses with an npx fallback can afford to)
+	// would buy every Pi station a Chat tab that fails the moment it is
+	// clicked. No adapter, no tab. Resolved once here rather than per station:
+	// it is a property of the node, not of the workspace.
+	if _, ok := piACPAdapter(); ok {
+		caps = append(caps, "acp")
+	}
+
 	seen := make(map[string]bool)
 	stations := []Station{}
 
@@ -282,6 +292,103 @@ func (p *piDescriptor) resolveKey(key string) (wsPath string, sessionDirs []stri
 func (p *piDescriptor) workspaceForKey(key string) (string, error) {
 	wsPath, _, err := p.resolveKey(key)
 	return wsPath, err
+}
+
+// Pi has no ACP mode of its own — the maintainer declined one
+// (earendil-works/pi#175), and the source carries interactive/, json-event.ts,
+// print-mode.ts and rpc/ with nothing ACP-shaped between them. Sessions
+// therefore run through the community pi-acp adapter, a Node program that
+// speaks ACP on stdio outward and spawns `pi --mode rpc` inward. This is the
+// THIRD external Node adapter in this package (claude-agent-acp, codex-acp),
+// and it is resolved the same way they are.
+const (
+	// piACPBinaryName is the adapter's executable name once installed.
+	piACPBinaryName = "pi-acp"
+
+	// piACPPackage is the npm package, VERSION-PINNED for the same reason
+	// opencode-ai@1.18.15 is: it is a 0.0.x package with a single maintainer
+	// sitting on the Chat path, and an unpinned install would change every
+	// node's adapter the moment a new version is published. It appears here
+	// only in the install hint of an error message and in the container image
+	// layer — it is deliberately NOT an `npx -y` fallback (see ACPCommand).
+	piACPPackage = "pi-acp@0.0.33"
+
+	// piACPBinaryEnv names the adapter executable explicitly, the same escape
+	// hatch PI_PATH provides for Pi itself and for the same reason: pi-acp is
+	// an npm bin, and the npm prefix is routinely user-local (on the fleet host
+	// `superchotu`, observed 2026-08-12, Pi's own npm prefix is
+	// /home/openclaw/.npm-global/bin). A node-agent running as a systemd user
+	// service inherits a minimal PATH that misses such a prefix entirely.
+	piACPBinaryEnv = "PI_ACP_PATH"
+)
+
+// piACPAdapter resolves the pi-acp adapter: the PI_ACP_PATH override (used
+// verbatim), then PATH, then the well-known install directories — the shared
+// order in binary.go, which exists precisely because a service PATH is not the
+// operator's interactive PATH. NOTHING is hardcoded.
+//
+// There is deliberately no `npx -y` fallback, unlike claude-code and codex. npx
+// on the request path resolves the package over the network on first use, so a
+// node without the adapter installed would answer its user's first prompt with
+// a multi-second stall and no visible reason for it. Gating the capability is
+// the honest alternative: the Chat tab is simply absent until an operator
+// installs the adapter.
+//
+// The adapter's own Node floor (>= 20) is NOT probed here, and that is a
+// decision rather than an omission. Pi itself requires Node >= 22.19, so any
+// host with a Pi station to chat with already clears the adapter's floor by a
+// wide margin — a `node --version` fork on every acp.open could only ever
+// confirm what Pi's presence implies, at the cost of a 2s timeout on a host
+// whose node sits on a stalled network mount. It would also be checking the
+// WRONG node: with no configured-runtime key on this descriptor there is
+// nothing to prepend to PATH, so the version measured need not be the one the
+// adapter's shebang picks. Compare codexACPMinNodeMajor, which skips the
+// refusal for a related reason; claude-code enforces a floor because it has a
+// configured runtime to enforce it against.
+func piACPAdapter() (string, bool) {
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = "" // omits the home-relative candidates
+	}
+	loc := binaryLocator{
+		userHome:     userHome,
+		lookPath:     exec.LookPath,
+		isExecutable: isExecutableFile,
+	}
+	return loc.locate(piACPBinaryName, os.Getenv(piACPBinaryEnv))
+}
+
+// ACPCommand implements ACPCommander. argv is the resolved adapter alone: it
+// takes no arguments, reads its Pi settings from the Pi install it drives, and
+// the working directory is the station's workspace — the same path the Files,
+// Health and Cleanup tabs operate on, which is what makes a chat session and
+// the rest of the station agree about which directory they are in.
+//
+// env is nil. Pi's credentials live in ~/.pi/agent/auth.json, which the adapter
+// reaches through Pi itself, so there is nothing to inject — and nothing about
+// a credential belongs in argv (world-readable via ps) or in a child env when
+// the file it already reads will do.
+//
+// Detect gates the "acp" capability on the same resolution, so in practice this
+// error is only reachable if the adapter is removed between a Detect and a
+// session open. It still names the adapter, the install command and the
+// override, because that race lands in the console as a session-open failure
+// and a message with nothing actionable in it wastes the operator's time.
+func (p *piDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
+	// The station must exist before anything is probed on the host: an unknown
+	// key has no workspace to run in.
+	wsPath, err := p.workspaceForKey(key)
+	if err != nil {
+		return nil, "", nil, err
+	}
+
+	adapter, ok := piACPAdapter()
+	if !ok {
+		return nil, "", nil, fmt.Errorf(
+			"pi: couldn't find the %s adapter on this node — install it (npm i -g %s) or set %s",
+			piACPBinaryName, piACPPackage, piACPBinaryEnv)
+	}
+	return []string{adapter}, wsPath, nil, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a Pi station.

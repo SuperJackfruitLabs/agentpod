@@ -252,6 +252,16 @@ func TestCapabilitiesIncludeACP(t *testing.T) {
 		home, _, _ := buildCodexFixture(t)
 		assertAllStationsHaveACP(t, NewCodex(home))
 	})
+	// Pi is the one harness whose "acp" capability is CONDITIONAL: it rides on
+	// the external pi-acp adapter resolving, so the stub has to be on PATH
+	// before Detect runs or this subtest fails for a reason that has nothing to
+	// do with the conformance it is here to check. The gating itself is
+	// asserted by TestPiACPCapabilityGatedOnAdapter.
+	t.Run("pi", func(t *testing.T) {
+		dataDir, _ := buildPiFixture(t)
+		writePiACPStub(t)
+		assertAllStationsHaveACP(t, NewPi(dataDir))
+	})
 }
 
 func assertAllStationsHaveACP(t *testing.T, d Descriptor) {
