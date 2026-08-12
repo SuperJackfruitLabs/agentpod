@@ -464,8 +464,51 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
     }
   }
 
-  async stop(_externalId: string): Promise<void> {
-    throw new Error("fly: stop() is not implemented yet");
+  /**
+   * Stop a running machine, and wait for Fly to confirm it went down.
+   *
+   * `POST .../stop` is ASYNCHRONOUS: it answers `{"ok": true}` immediately and
+   * says nothing about state. Returning on that alone is exactly the shape of
+   * #260/#261 — a `stopped` written because a call returned, which an operator
+   * reads as "this has stopped costing me money". So the driver waits, and the
+   * hub still asks status() afterwards: stopRuntime writes `stopping` and only
+   * ever writes `stopped` on the evidence status() returns. This wait just means
+   * the ordinary case resolves before the operator can look away.
+   *
+   * The instance id is read FIRST because Fly requires it when waiting for
+   * `stopped` — a start assigns a new one (measured 2026-08-12), so "which run
+   * of this machine" is a real question the wait refuses to guess. Read after
+   * the stop it would be racing the very transition being waited on.
+   */
+  async stop(externalId: string): Promise<void> {
+    const { app, machineId } = parseFlyExternalId(externalId);
+    const instanceId = await this.instanceIdOf(app, machineId);
+    // No body: the defaults are SIGINT and Fly's own kill timeout, which is what
+    // a station's node-agent should be given a chance to shut down on.
+    await this.request("POST", `/v1/apps/${app}/machines/${machineId}/stop`);
+    await this.waitFor(app, machineId, "stopped", instanceId);
+  }
+
+  /**
+   * The current instance id, or undefined if Fly did not report one.
+   *
+   * Undefined rather than a throw: a wait without instance_id is a worse outcome
+   * than a stop that cannot be waited on, and a runtime that cannot be stopped
+   * is a runtime that keeps billing. The stop still goes out either way; only
+   * the confirmation is given up, and the sweeper's status() probe is what
+   * settles it in that case.
+   */
+  private async instanceIdOf(
+    app: string,
+    machineId: string
+  ): Promise<string | undefined> {
+    const { body } = await this.request(
+      "GET",
+      `/v1/apps/${app}/machines/${machineId}`
+    );
+    return typeof body.instance_id === "string" && body.instance_id
+      ? body.instance_id
+      : undefined;
   }
 
   async status(_externalId: string): Promise<RuntimeState> {

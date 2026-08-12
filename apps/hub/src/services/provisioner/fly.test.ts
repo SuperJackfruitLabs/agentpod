@@ -432,6 +432,140 @@ describe("FlyMachinesProvisioner — start", () => {
   });
 });
 
+describe("FlyMachinesProvisioner — stop", () => {
+  it("reads the instance id, stops, then waits for stopped", async () => {
+    // Fly REQUIRES instance_id when waiting for `stopped`. Omitting it makes
+    // the wait 400, which the driver would surface as a failed stop for a
+    // machine that stopped perfectly well.
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    fake.calls.length = 0;
+    await driver.stop(externalId);
+
+    expect(fake.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      `GET /v1/apps/${app}/machines/${machineId}`,
+      `POST /v1/apps/${app}/machines/${machineId}/stop`,
+      `GET /v1/apps/${app}/machines/${machineId}/wait`,
+    ]);
+    expect(fake.apps.get(app)!.machines.get(machineId)!.state).toBe("stopped");
+  });
+
+  it("passes instance_id on the wait, which Fly rejects the request without", async () => {
+    const urls: string[] = [];
+    const impl = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      urls.push(String(url));
+      if (path.endsWith("/machine-y")) {
+        return new Response(
+          JSON.stringify({ id: "machine-y", instance_id: "inst-42", state: "started" }),
+          { status: 200 }
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await driver.stop("app-x/machine-y");
+
+    const wait = urls.find((u) => u.includes("/wait"))!;
+    expect(wait).toBe(
+      "https://api.machines.dev/v1/apps/app-x/machines/machine-y/wait" +
+        "?state=stopped&timeout=60&instance_id=inst-42"
+    );
+  });
+
+  it("does not throw when the stop wait times out", async () => {
+    // The hub writes `stopping` and sweepStalledRuntimeStops confirms on a
+    // later tick via status(). A throw here would be a 500 on a stop that was
+    // in fact proceeding.
+    const impl = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/wait")) {
+        return new Response(JSON.stringify({ error: "timeout reached" }), { status: 408 });
+      }
+      return new Response(
+        JSON.stringify({ id: "machine-y", instance_id: "inst-42", state: "started" }),
+        { status: 200 }
+      );
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.stop("app-x/machine-y")).resolves.toBeUndefined();
+  });
+
+  it("PROPAGATES a stop wait that failed for any other reason", async () => {
+    // The 408 tolerance is one status wide on the stop path too, and here that
+    // narrowness is worth more than anywhere else: `stopped` is an evidence-only
+    // write (#260/#261), so a stop() that resolved on a wait which had in fact
+    // been REFUSED would hand stopRuntime a clean return for a machine nobody
+    // ever confirmed went down — an operator reads that as "it stopped costing
+    // me money". A bare `catch { return }` passes every other test in this
+    // describe; it does not pass this one.
+    //
+    // 400 is not hypothetical: it is precisely what Fly answers a stop-wait that
+    // is missing instance_id, so a regression in the line above lands here too.
+    for (const status of [400, 500]) {
+      const impl = (async (url: string | URL) => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith("/wait")) {
+          return new Response(JSON.stringify({ error: `wait refused (${status})` }), {
+            status,
+          });
+        }
+        return new Response(
+          JSON.stringify({ id: "machine-y", instance_id: "inst-42", state: "started" }),
+          { status: 200 }
+        );
+      }) as unknown as typeof globalThis.fetch;
+
+      const driver = new FlyMachinesProvisioner({
+        credentials: { get: () => "fly-token" },
+        fetchImpl: impl,
+        pacer: noPacer,
+      });
+      await expect(driver.stop("app-x/machine-y")).rejects.toThrow(
+        new RegExp(`wait refused \\(${status}\\)`)
+      );
+    }
+  });
+
+  it("still stops when the machine read gives no instance id", async () => {
+    // An older or unusual response shape must not make the stop unreachable —
+    // a runtime that cannot be stopped is a runtime that keeps billing.
+    const urls: string[] = [];
+    const impl = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      urls.push(String(url));
+      if (path.endsWith("/machine-y")) {
+        return new Response(JSON.stringify({ id: "machine-y", state: "started" }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await driver.stop("app-x/machine-y");
+
+    expect(urls.some((u) => u.includes("/stop"))).toBe(true);
+    expect(urls.find((u) => u.includes("/wait"))).not.toContain("instance_id");
+  });
+});
+
 describe("the Fly fake substrate is unfriendly where Fly is", () => {
   // The fake is what every later task's tests are checked against, so a
   // tolerant one would make all of them pass for free and prove nothing. These
