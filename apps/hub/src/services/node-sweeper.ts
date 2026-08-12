@@ -13,7 +13,7 @@ import { connectionManager } from "./connection-manager";
 import { dropNode } from "./broker";
 import { clearNode } from "./health-cache";
 import { setNodeStatus } from "./node-registry";
-import { sweepStalledRuntimeStarts } from "./runtimes";
+import { sweepStalledRuntimeStarts, sweepStalledRuntimeStops } from "./runtimes";
 
 export const SWEEP_INTERVAL_MS = 15_000;
 export const OFFLINE_THRESHOLD_MS = 45_000;
@@ -44,9 +44,10 @@ export async function sweepStaleNodes(now: number = Date.now()): Promise<string[
 /**
  * Start the periodic sweeper. Returns a stop function.
  *
- * Two expiries share the tick because they are the same idea at two levels: a
- * node that stopped talking, and a runtime that was asked to run and never
- * produced a node at all (see sweepStalledRuntimeStarts).
+ * Three expiries share the tick because they are the same idea at three levels:
+ * a node that stopped talking, a runtime that was asked to run and never
+ * produced a node at all (sweepStalledRuntimeStarts), and a runtime that was
+ * asked to stop and has not been seen to (sweepStalledRuntimeStops).
  */
 export function startNodeSweeper(): () => void {
   const timer = setInterval(() => {
@@ -55,6 +56,11 @@ export function startNodeSweeper(): () => void {
     );
     void sweepStalledRuntimeStarts().catch((err) =>
       console.error("[sweeper] runtime sweep failed:", err)
+    );
+    // Also the confirmation path, not only an expiry: this is what turns a
+    // `stopping` runtime into `stopped` once the substrate says it is down.
+    void sweepStalledRuntimeStops().catch((err) =>
+      console.error("[sweeper] runtime stop sweep failed:", err)
     );
   }, SWEEP_INTERVAL_MS);
   return () => clearInterval(timer);

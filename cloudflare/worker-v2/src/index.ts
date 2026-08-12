@@ -1,6 +1,13 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { isAuthorised } from "./auth";
 import { handleSnapshot, handleDestroy, type SnapshotDeps } from "./snapshot";
+import {
+  deriveState,
+  handleStatus,
+  STATE_KEY,
+  type ContainerState,
+  type LifecycleRecord,
+} from "./state";
 
 interface Env {
   // Typed with the container class so getContainer returns a stub carrying its
@@ -28,6 +35,47 @@ export class NodeAgentContainer extends Container {
 
   override async onStart() {
     console.log("[agentpod] container started", new Date().toISOString());
+    await this.record({ state: "running", at: new Date().toISOString() });
+  }
+
+  /**
+   * Persist a lifecycle transition.
+   *
+   * A fallback for containerState(), not its primary source — but a durable one, and
+   * the only thing left if a DO is asked about a container binding it no longer
+   * has. Never allowed to throw into a lifecycle hook: failing to write a note
+   * about a container stopping must not stop the container from stopping.
+   */
+  private async record(entry: LifecycleRecord): Promise<void> {
+    try {
+      await this.ctx.storage.put(STATE_KEY, entry);
+    } catch (e) {
+      console.log("[agentpod] could not record lifecycle state", String(e));
+    }
+  }
+
+  /**
+   * Is this sandbox's container actually running?
+   *
+   * The hub asks before it will write `stopped` for a runtime, because on this
+   * substrate a stop request returning means only that the container was
+   * signalled — the exit lands later, after the workspace has been archived on
+   * SIGTERM. Reported from `ctx.container.running`, the runtime's own view,
+   * with the recorded transition as a fallback and `unknown` when there is
+   * neither. Never a guess: see src/state.ts.
+   *
+   * Named `containerState` rather than `state` because the base Container class
+   * already has a private `state` — an override would compile as a clash and,
+   * worse, shadow something it does not understand.
+   */
+  async containerState(): Promise<ContainerState> {
+    let recorded: unknown;
+    try {
+      recorded = await this.ctx.storage.get(STATE_KEY);
+    } catch {
+      recorded = undefined;
+    }
+    return deriveState(this.ctx.container?.running, recorded);
   }
 
   /**
@@ -108,8 +156,16 @@ export class NodeAgentContainer extends Container {
     await this.start();
   }
 
-  override onStop({ exitCode, reason }: { exitCode: number; reason: string }) {
+  override async onStop({ exitCode, reason }: { exitCode: number; reason: string }) {
     console.log("[agentpod] container stopped", { exitCode, reason });
+    // The moment a stop becomes a fact. The hub will not write `stopped` for
+    // this runtime until it can read something like this back.
+    await this.record({
+      state: "stopped",
+      at: new Date().toISOString(),
+      exitCode,
+      reason,
+    });
   }
 
   /**
@@ -252,8 +308,12 @@ export default {
 
     const container = getContainer(env.NODE_AGENT, id);
 
+    // Whether this sandbox's container is actually running. The hub calls this
+    // to confirm a stop before it tells an operator the runtime is stopped —
+    // which they read as "it has stopped costing me money", so it may not be
+    // said on the strength of a stop request having been accepted.
     if (request.method === "GET" && !parts[2]) {
-      return json({ sandboxId: id });
+      return handleStatus(id, { state: () => container.containerState() });
     }
 
     if (request.method === "DELETE" && !parts[2]) {

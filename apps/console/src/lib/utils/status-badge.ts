@@ -40,6 +40,10 @@ export function tokenFor(status: string): StatusToken {
       return "error";
 
     case "starting":
+    // Both are "the ask went out, it is not true yet" — a runtime mid-start or
+    // mid-stop. `stopping` is a real RuntimeStatus, not only a station verb:
+    // the hub will not write `stopped` until the substrate confirms the
+    // container is down, so this is what the console shows in between.
     case "stopping":
     case "warning":
     case "pending":

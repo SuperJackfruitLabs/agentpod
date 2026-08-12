@@ -9,9 +9,9 @@
  * never logged by this module.
  */
 
-import type { RuntimeProvisioner, ProvisionSpec } from "./types";
+import type { RuntimeProvisioner, ProvisionSpec, RuntimeState } from "./types";
 import { DockerOrchestrator } from "./docker-orchestrator";
-import type { ResourceLimits } from "./docker-orchestrator";
+import type { ResourceLimits, Sandbox } from "./docker-orchestrator";
 
 // ─── Resource tier mapping ────────────────────────────────────────────────────
 
@@ -121,5 +121,46 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
    */
   async stop(externalId: string): Promise<void> {
     await this.orchestrator.stopSandbox(externalId);
+  }
+
+  /**
+   * Ask the daemon whether this container is actually running.
+   *
+   * The evidence behind a `stopped` runtime. Docker's stop is synchronous, so
+   * in practice this confirms immediately — but it confirms, rather than
+   * assuming, and that difference is the whole point (see stopRuntime).
+   *
+   * A container the daemon has no record of is reported `stopped`: that is a
+   * real answer — it is not running and cannot be billing. A daemon that cannot
+   * be reached at all throws, and the service layer degrades that to `unknown`
+   * rather than letting silence read as confirmation.
+   */
+  async status(externalId: string): Promise<RuntimeState> {
+    let sandbox: Sandbox;
+    try {
+      sandbox = await this.orchestrator.inspectSandbox(externalId);
+    } catch (err) {
+      if ((err as Error).message?.startsWith("Sandbox not found")) return "stopped";
+      throw err;
+    }
+
+    switch (sandbox.status) {
+      // Still holding its resources, whatever it is doing with them. A paused
+      // container is charged for exactly like a running one.
+      case "running":
+      case "paused":
+      case "restarting":
+        return "running";
+      case "exited":
+      case "dead":
+      case "stopped":
+      // "created" — never started, so never running.
+      case "creating":
+        return "stopped";
+      // "removing" / "error" / "unknown": mid-flight or unreadable. Not an
+      // answer, and must not be rounded to one.
+      default:
+        return "unknown";
+    }
   }
 }

@@ -63,6 +63,60 @@ describe("DockerOrchestrator container options", () => {
   });
 });
 
+describe("DockerOrchestrator.inspectSandbox", () => {
+  it("resolves the container by sandbox name and reports the daemon's state", async () => {
+    // Reuses the same lookup the lifecycle methods use, so "is it running?" is
+    // answered about the same container stop() was sent to — not a second,
+    // separately-resolved one.
+    const orch = new DockerOrchestrator();
+    const listed: Array<Record<string, any>> = [];
+    (orch as unknown as { docker: unknown }).docker = {
+      listContainers: async (opts: Record<string, any>) => {
+        listed.push(opts);
+        return [{ Id: "abc123" }];
+      },
+      getContainer: (id: string) => ({
+        inspect: async () => ({
+          Id: id,
+          Created: new Date().toISOString(),
+          State: { Running: false, Status: "exited" },
+          Config: { Labels: {}, Image: "agentpod-node:local" },
+        }),
+      }),
+    };
+
+    const sandbox = await orch.inspectSandbox("rt_test");
+    expect(sandbox.status).toBe("exited");
+    expect(sandbox.containerId).toBe("abc123");
+    expect(listed[0]!.filters.name).toEqual(["agentpod-rt_test"]);
+  });
+
+  it("reports a running container as running", async () => {
+    const orch = new DockerOrchestrator();
+    (orch as unknown as { docker: unknown }).docker = {
+      listContainers: async () => [{ Id: "abc123" }],
+      getContainer: () => ({
+        inspect: async () => ({
+          Id: "abc123",
+          Created: new Date().toISOString(),
+          State: { Running: true, Status: "running" },
+          Config: { Labels: {} },
+        }),
+      }),
+    };
+    expect((await orch.inspectSandbox("rt_test")).status).toBe("running");
+  });
+
+  it("throws 'Sandbox not found' when the daemon knows of no such container", async () => {
+    const orch = new DockerOrchestrator();
+    (orch as unknown as { docker: unknown }).docker = {
+      listContainers: async () => [],
+      getContainer: () => ({ inspect: async () => ({}) }),
+    };
+    await expect(orch.inspectSandbox("rt_gone")).rejects.toThrow(/Sandbox not found/);
+  });
+});
+
 describe("runtime and network compatibility", () => {
   // Root cause of #243: on a USER-DEFINED network Docker injects
   // `nameserver 127.0.0.11` and runs an embedded DNS proxy on that loopback

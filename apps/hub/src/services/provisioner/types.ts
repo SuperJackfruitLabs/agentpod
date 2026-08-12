@@ -34,6 +34,17 @@ export interface ProvisionSpec {
 }
 
 /**
+ * What a substrate says about a runtime's container, right now.
+ *
+ * `unknown` is a first-class answer, not a failure: a driver that cannot see
+ * the container (an old worker deployment, a transport error, a container the
+ * substrate has forgotten) must be able to say so. The one thing no driver may
+ * ever do is guess `stopped`, because the hub turns that into a claim an
+ * operator reads as "this has stopped costing me money".
+ */
+export type RuntimeState = "running" | "stopped" | "unknown";
+
+/**
  * Implemented by each driver (docker, cloudflare) to create/manage runtimes.
  */
 export interface RuntimeProvisioner {
@@ -73,4 +84,18 @@ export interface RuntimeProvisioner {
    * Stop a running runtime without destroying it (optional — Docker only).
    */
   stop?(externalId: string): Promise<void>;
+
+  /**
+   * Ask the substrate whether this runtime's container is actually running.
+   *
+   * Optional on purpose: a driver with no way to answer must not be forced to
+   * lie. The service layer treats its absence as "unverifiable" and says so in
+   * the runtime's statusReason rather than pretending it confirmed anything —
+   * see stopRuntime() in ../runtimes.ts.
+   *
+   * This is the ONLY evidence the hub has for writing `stopped`. The absence of
+   * a node is not evidence: nodes go offline for network reasons while their
+   * container runs, and bills, perfectly happily.
+   */
+  status?(externalId: string): Promise<RuntimeState>;
 }

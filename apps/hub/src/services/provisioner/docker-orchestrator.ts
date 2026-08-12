@@ -169,6 +169,24 @@ export class DockerOrchestrator {
     await container.stop({ t: timeout });
   }
 
+  /**
+   * What Docker says about a sandbox's container right now.
+   *
+   * Resolves the container exactly as the lifecycle methods do (name, then
+   * label) and reuses the same inspect → Sandbox mapping createSandbox uses, so
+   * "is it running?" is answered by the daemon rather than inferred from
+   * whether a previous call returned.
+   *
+   * Throws `Sandbox not found: <id>` when no container matches — a real answer
+   * from the daemon, and one the caller is expected to interpret rather than
+   * treat as an error (see DockerRuntimeProvisioner.status).
+   */
+  async inspectSandbox(id: string): Promise<Sandbox> {
+    const container = await this.getContainer(id);
+    const info = await container.inspect();
+    return this.containerInfoToSandbox(id, info);
+  }
+
   async deleteSandbox(id: string, removeVolumes = false): Promise<void> {
     const container = await this.getContainer(id);
     try { await container.stop({ t: 5 }); } catch { /* already stopped */ }

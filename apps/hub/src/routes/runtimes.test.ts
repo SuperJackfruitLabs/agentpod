@@ -36,7 +36,12 @@ import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { registerProvisioner, resetProvisioners } from "../services/provisioner/registry";
 import type { RuntimeProvisioner, ProvisionSpec } from "../services/provisioner/types";
 import { runtimeRoutes } from "./runtimes";
-import { sweepStalledRuntimeStarts, START_TIMEOUT_MS } from "../services/runtimes";
+import {
+  sweepStalledRuntimeStarts,
+  START_TIMEOUT_MS,
+  sweepStalledRuntimeStops,
+  STOP_TIMEOUT_MS,
+} from "../services/runtimes";
 import { enrollNode } from "../services/enrollment";
 import type { AuthUser } from "../auth/middleware";
 
@@ -641,6 +646,241 @@ test("a created runtime whose node never arrives times out too", async () => {
   const row = await rowOf(id);
   expect(row.status).toBe("error");
   expect(row.statusReason).toContain("no node enrolled");
+}, 30_000);
+
+// ─── "stopped without evidence" (sibling of #254) ─────────────────────────────
+//
+// `stopped` is a claim that a container is no longer running — which is what an
+// operator reads as "it has stopped costing me money". The stop path could not
+// know that: it only knew the substrate's stop call returned. A stop that did
+// not take left the console saying `stopped` while a 4 GiB station kept billing.
+//
+// The absence of a node is NOT evidence of a stop: nodes go offline for network
+// reasons while their container runs perfectly well. Only the substrate can say.
+
+/**
+ * A driver whose stop() always succeeds and whose status() answers whatever the
+ * test tells it to — the substrate's answer is the only thing under test here.
+ */
+function fakeStoppableProvisioner(
+  answers: () => "running" | "stopped" | "unknown",
+  opts: { withStatus?: boolean; statusThrows?: boolean } = {}
+) {
+  const calls = { stop: [] as string[], status: [] as string[] };
+  const driver: Record<string, unknown> = {
+    provider: "docker",
+    async provision(spec: ProvisionSpec) {
+      fakeCalls.provision.push(spec);
+      return { externalId: `fake-container-${spec.runtimeId}` };
+    },
+    async destroy() {},
+    async start() {},
+    async stop(externalId: string) {
+      calls.stop.push(externalId);
+    },
+  };
+  if (opts.withStatus !== false) {
+    driver.status = async (externalId: string) => {
+      calls.status.push(externalId);
+      if (opts.statusThrows) throw new Error("substrate unreachable");
+      return answers();
+    };
+  }
+  return { driver: driver as unknown as RuntimeProvisioner, calls };
+}
+
+async function stopVia(id: string, userId = TEST_USER) {
+  return testApp.request(`/api/runtimes/${id}/stop`, {
+    method: "POST",
+    headers: { "X-Test-User-Id": userId },
+  });
+}
+
+/** Run a body with a temporary provisioner registered, always restoring. */
+async function withProvisioner(
+  driver: RuntimeProvisioner,
+  body: () => Promise<void>
+) {
+  registerProvisioner(driver);
+  try {
+    await body();
+  } finally {
+    registerProvisioner(fakeDockerProvisioner);
+  }
+}
+
+test("a runtime the substrate still reports running is not written stopped", async () => {
+  // The bug: stopRuntime wrote `stopped` because the stop CALL returned, not
+  // because the container went away. The operator then believes billing ended.
+  const { driver, calls } = fakeStoppableProvisioner(() => "running");
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-no-evidence")).json()) as {
+      id: string;
+    };
+
+    const res = await stopVia(id);
+    expect(res.status).toBe(204);
+    expect(calls.stop).toHaveLength(1);
+
+    const row = await rowOf(id);
+    expect(row.status).not.toBe("stopped");
+    expect(row.status).toBe("stopping");
+  });
+}, 30_000);
+
+test("a stop the substrate confirms lands on stopped", async () => {
+  // The evidence path: the substrate says the container is down, so the hub may
+  // say so too — and nothing about the ordinary stop UX changes.
+  const { driver } = fakeStoppableProvisioner(() => "stopped");
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-confirmed")).json()) as {
+      id: string;
+    };
+
+    expect((await stopVia(id)).status).toBe(204);
+
+    const row = await rowOf(id);
+    expect(row.status).toBe("stopped");
+    expect(row.statusReason).toBeNull();
+  });
+}, 30_000);
+
+test("a stop confirmed only later is reconciled to stopped by the sweeper", async () => {
+  // Cloudflare's stop returns as soon as the container is signalled; the exit
+  // lands seconds later. `stopping` is the honest state in between.
+  let state: "running" | "stopped" = "running";
+  const { driver } = fakeStoppableProvisioner(() => state);
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-late-confirm")).json()) as {
+      id: string;
+    };
+    await stopVia(id);
+    expect((await rowOf(id)).status).toBe("stopping");
+
+    state = "stopped";
+    // No timeout needed: confirmation is welcome the moment it exists.
+    const swept = await sweepStalledRuntimeStops(Date.now());
+    expect(swept.stopped).toContain(id);
+
+    const row = await rowOf(id);
+    expect(row.status).toBe("stopped");
+    expect(row.statusReason).toBeNull();
+  });
+}, 30_000);
+
+test("a stop that never takes becomes an error saying so, not a silent stopped", async () => {
+  // The expensive case: the container is still up, still billing, and the
+  // console must not be the thing that tells the operator otherwise.
+  const { driver } = fakeStoppableProvisioner(() => "running");
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-never-takes")).json()) as {
+      id: string;
+    };
+    await stopVia(id);
+
+    // Before the deadline it is still legitimately "stopping".
+    expect((await sweepStalledRuntimeStops(Date.now())).failed).not.toContain(id);
+    expect((await rowOf(id)).status).toBe("stopping");
+
+    const swept = await sweepStalledRuntimeStops(Date.now() + STOP_TIMEOUT_MS + 1_000);
+    expect(swept.failed).toContain(id);
+
+    const row = await rowOf(id);
+    expect(row.status).toBe("error");
+    expect(row.statusReason).toContain("not confirmed");
+    // The operator's actual question is about money: say the quiet part.
+    expect(row.statusReason).toContain("still reports it running");
+    expect(row.statusReason).toContain("billing");
+  });
+}, 30_000);
+
+test("a substrate that will not answer ends in error, never in an unevidenced stopped", async () => {
+  // The undeployed-worker case: GET /sandbox/:id answers, but with no state in
+  // it. The hub has a channel and it is not giving an answer — that is an
+  // anomaly for a human, not something to paper over with a green "stopped".
+  const { driver } = fakeStoppableProvisioner(() => "unknown");
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-unknown")).json()) as {
+      id: string;
+    };
+    await stopVia(id);
+    expect((await rowOf(id)).status).toBe("stopping");
+
+    // A transient no-answer must not fail early — it may resolve next tick.
+    await sweepStalledRuntimeStops(Date.now());
+    expect((await rowOf(id)).status).toBe("stopping");
+
+    const swept = await sweepStalledRuntimeStops(Date.now() + STOP_TIMEOUT_MS + 1_000);
+    expect(swept.failed).toContain(id);
+
+    const row = await rowOf(id);
+    expect(row.status).toBe("error");
+    expect(row.statusReason).toContain("not confirmed");
+  });
+}, 30_000);
+
+test("a status() that throws does not fail the stop, it leaves it unconfirmed", async () => {
+  // A broken probe must never turn a working stop into a 502 — but it also must
+  // not be read as confirmation.
+  const { driver } = fakeStoppableProvisioner(() => "stopped", { statusThrows: true });
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-probe-throws")).json()) as {
+      id: string;
+    };
+
+    expect((await stopVia(id)).status).toBe(204);
+    expect((await rowOf(id)).status).toBe("stopping");
+  });
+}, 30_000);
+
+test("a driver that cannot report state says stopped is unverified rather than pretending", async () => {
+  // No status() at all: the hub structurally cannot confirm, and stranding
+  // every such runtime in `stopping` forever would be its own lie. So it writes
+  // `stopped` — with the caveat attached, in the console, next to the badge.
+  const { driver } = fakeStoppableProvisioner(() => "stopped", { withStatus: false });
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-unverifiable")).json()) as {
+      id: string;
+    };
+
+    expect((await stopVia(id)).status).toBe(204);
+
+    const row = await rowOf(id);
+    expect(row.status).toBe("stopped");
+    expect(row.statusReason).toContain("unverified");
+    expect(row.statusReason).toContain("docker");
+  });
+}, 30_000);
+
+test("an asleep runtime is never swept by the stop sweeper", async () => {
+  // A sleeping Cloudflare runtime is not a failed stop. Same rule as #254.
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes
+      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep-stop', 'asleep', 'sleeper2', 'small', 'none',
+            now() - interval '1 day', now() - interval '1 day')
+  `;
+
+  const swept = await sweepStalledRuntimeStops(Date.now() + STOP_TIMEOUT_MS + 1_000);
+  expect(swept.stopped).not.toContain(id);
+  expect(swept.failed).not.toContain(id);
+  expect((await rowOf(id)).status).toBe("asleep");
+}, 30_000);
+
+test("the start sweeper does not touch a stopping runtime", async () => {
+  // The two sweeps share a tick; they must not share a verdict.
+  const { driver } = fakeStoppableProvisioner(() => "running");
+  await withProvisioner(driver, async () => {
+    const { id } = (await (await createRuntime(TEST_USER, "stop-not-a-start")).json()) as {
+      id: string;
+    };
+    await stopVia(id);
+
+    const swept = await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+    expect(swept).not.toContain(id);
+    expect((await rowOf(id)).status).toBe("stopping");
+  });
 }, 30_000);
 
 test("a runtime still being provisioned (no external id yet) is not swept", async () => {
