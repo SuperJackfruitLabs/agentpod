@@ -44,6 +44,7 @@
     "gray-matter": "^4.0.3",
     "hono": "^4.13.1",
     "isomorphic-git": "^1.40.4",
+    "modal": "0.9.0",
     "nanoid": "^5.1.16",
     "postgres": "^3.4.9",
     "superjson": "^2.2.6",
