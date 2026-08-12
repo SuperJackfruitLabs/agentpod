@@ -40,11 +40,15 @@ const prefixedId = (prefix: string) =>
  *
  * Env overrides allow operators to pin specific image tags per harness:
  *   NODE_AGENT_OPENCODE_IMAGE — opencode harness (default: agentpod-node-opencode:local)
+ *   NODE_AGENT_PI_IMAGE       — pi harness      (default: agentpod-node-pi:local)
  *   NODE_AGENT_IMAGE          — generic / no harness (default: agentpod-node:local)
  */
 function imageForHarness(harness: string): string {
   if (harness === "opencode") {
     return process.env.NODE_AGENT_OPENCODE_IMAGE ?? "agentpod-node-opencode:local";
+  }
+  if (harness === "pi") {
+    return process.env.NODE_AGENT_PI_IMAGE ?? "agentpod-node-pi:local";
   }
   return process.env.NODE_AGENT_IMAGE ?? "agentpod-node:local";
 }

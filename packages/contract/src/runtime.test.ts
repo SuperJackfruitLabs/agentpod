@@ -28,6 +28,13 @@ describe("ProvisionRequest harness", () => {
     expect(result.harness).toBe("opencode");
   });
 
+  it("accepts pi as a provisionable harness", () => {
+    // The value must be exactly "pi": the Go descriptor's Harness() returns
+    // "pi" and auto-adoption matches it against a runtime's harness by string
+    // equality, so any other spelling silently breaks adoption.
+    expect(ProvisionRequest.parse({ provider: "docker", name: "x", resourceTier: "small", harness: "pi" }).harness).toBe("pi");
+  });
+
   it("throws for an invalid harness value", () => {
     expect(() => ProvisionRequest.parse({ provider: "docker", name: "x", harness: "bogus" })).toThrow();
   });

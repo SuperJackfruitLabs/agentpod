@@ -39,6 +39,7 @@
   const harnessOptions = [
     { value: "none", label: "Generic" },
     { value: "opencode", label: "OpenCode" },
+    { value: "pi", label: "Pi" },
   ];
 
   // provider/name/tier/harness are reset each time the dialog opens via $effect
