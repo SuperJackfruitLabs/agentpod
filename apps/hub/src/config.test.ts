@@ -84,6 +84,23 @@ describe("getEnvInt", () => {
     expect(() => getEnvInt(KEY, 3)).toThrow(new RegExp(KEY));
   });
 
+  it("refuses a FRACTIONAL value rather than silently truncating it", () => {
+    // parseInt("3.5") is 3, quietly. An operator who asked for 3.5 GB of
+    // workspace and got 3 was never told — and the Fly driver used to parse the
+    // same variable with Number(), sending Fly the untruncated 3.5: one
+    // variable with two meanings, and a boot check validating a number nothing
+    // used. There is one meaning now — whole units, or an error naming the
+    // variable.
+    process.env[KEY] = "3.5";
+    expect(() => getEnvInt(KEY, 3)).toThrow(new RegExp(KEY));
+  });
+
+  it("refuses a numeric prefix with trailing junk", () => {
+    // parseInt("12gb") is 12 — the same silent half-reading of a value the
+    // operator wrote deliberately.
+    process.env[KEY] = "12gb";
+    expect(() => getEnvInt(KEY, 3)).toThrow(new RegExp(KEY));
+  });
 });
 
 /**

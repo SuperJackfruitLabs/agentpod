@@ -27,18 +27,24 @@ function getEnv(key: string, defaultValue?: string): string {
  *
  * A non-empty value that is not an integer is still a refusal — that is an
  * operator saying something the hub cannot honour, not an operator saying
- * nothing.
+ * nothing — and the refusal is now WHOLE-STRING. `parseInt` read "3.5" as 3 and
+ * "12gb" as 12 without a word, which is how FLY_VOLUME_SIZE_GB came to mean two
+ * different numbers at once: 3 to the boot check that validated it and 3.5 to
+ * the driver that sent it to Fly. These settings are counts of whole things —
+ * ports, gigabytes — so a value that is not a whole number is a mistake worth
+ * hearing about, not a value worth guessing at.
  */
+const INTEGER_RE = /^[+-]?\d+$/;
+
 export function getEnvInt(key: string, defaultValue: number): number {
   const value = process.env[key]?.trim();
   if (value === undefined || value === '') {
     return defaultValue;
   }
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed)) {
+  if (!INTEGER_RE.test(value)) {
     throw new Error(`Invalid integer for environment variable: ${key}`);
   }
-  return parsed;
+  return Number(value);
 }
 
 function getEnvBool(key: string, defaultValue: boolean): boolean {
