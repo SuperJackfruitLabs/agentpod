@@ -1,0 +1,17 @@
+{
+  "name": "agentpod-sandbox-v2",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "tail": "wrangler tail --format pretty"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260812.1",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.121.0"
+  }
+}
