@@ -24,6 +24,12 @@
    * Retry when the transport is dead) plus a toast for a failed session create,
    * which is the one failure that leaves nothing on screen to explain itself.
    *
+   * What the agent says BEFORE the first prompt is not conversation: harnesses
+   * announce themselves (version, loaded skills) on stdout before their protocol
+   * stream begins, and that banner arrives as an agent message. It is split off
+   * by position in the controller and rendered as session metadata in the
+   * header — see AcpChat.preamble / splitPreamble.
+   *
    * A station can host several sessions at once, so this panel is a view onto
    * ONE of them: the header's switcher picks, `chat.attach` swaps the socket and
    * the transcript. The panel is deliberately not remounted per session — the
@@ -241,6 +247,7 @@
       status={chat.status}
       connection={chat.connection}
       mode={chat.mode}
+      preamble={chat.preamble}
       creating={chat.creating}
       onModeChange={(mode) => chat.setMode(mode)}
       onEnd={() => {
@@ -256,8 +263,11 @@
   </div>
 
   <div class="min-h-0 flex-1">
+    <!-- `chat.conversation`, not the raw transcript: whatever the agent said
+         before the first prompt is session metadata and belongs to the header
+         (see AcpChat.preamble), not to a conversation nobody had started. -->
     <Conversation
-      items={chat.transcript.items}
+      items={chat.conversation}
       onAnswer={(requestSeq, optionId) => chat.answer(requestSeq, optionId)}
     />
   </div>

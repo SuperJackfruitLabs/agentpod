@@ -5,6 +5,7 @@ import {
   foldEvent,
   addPendingPrompt,
   dropPendingPrompt,
+  splitPreamble,
   type Transcript,
 } from "./transcript";
 
@@ -383,6 +384,89 @@ test("user-prompt without a pending item pushes normally and closes streaming it
     { kind: "assistant", seq: 1, text: "old answer", streaming: false },
     { kind: "user", seq: 2, text: "next question" },
   ]);
+});
+
+// ─── (h) session preamble (agent output before the first prompt) ─────────────
+
+test("agent output before the first user prompt is preamble, not conversation", () => {
+  // The live shape: pi prints a human-readable banner on stdout before its
+  // NDJSON protocol stream begins, and the adapter forwards it as an agent
+  // message. Nobody has spoken yet, so it is not a conversational turn.
+  const banner = "pi v0.84.1\n\nSkills\n\n/home/u/.agents/skills/basecamp/SKILL.md";
+  const t = fold([
+    ev(1, "state", { status: "idle" }),
+    chunk(2, banner),
+    ev(3, "user-prompt", { text: "run the tests" }),
+    chunk(4, "on it"),
+  ]);
+
+  const split = splitPreamble(t.items);
+  expect(split.preamble).toEqual({
+    text: banner,
+    summary: "pi v0.84.1",
+    more: 2, // "Skills" and the skill path; blank spacer lines don't count
+  });
+  // The banner is gone from the conversation; the real turn is untouched.
+  expect(split.items).toEqual([
+    { kind: "user", seq: 3, text: "run the tests" },
+    { kind: "assistant", seq: 4, text: "on it", streaming: true },
+  ]);
+});
+
+test("an agent reply AFTER a user prompt is never preamble", () => {
+  const t = fold([ev(1, "user-prompt", { text: "hi" }), chunk(2, "hello there")]);
+
+  const split = splitPreamble(t.items);
+  expect(split.preamble).toBeNull();
+  // No preamble → the same array reference back, so views don't re-key.
+  expect(split.items).toBe(t.items);
+});
+
+test("agent output with no user prompt yet is still preamble", () => {
+  const t = fold([ev(1, "state", { status: "idle" }), chunk(2, "pi v0.84.1")]);
+
+  const split = splitPreamble(t.items);
+  expect(split.preamble?.summary).toBe("pi v0.84.1");
+  expect(split.preamble?.more).toBe(0);
+  expect(split.items).toEqual([]);
+});
+
+test("a pending optimistic prompt already closes the preamble window", () => {
+  // The echo hasn't landed, but the user HAS spoken — anything after it is a
+  // reply, not a banner.
+  const t = addPendingPrompt(fold([chunk(1, "pi v0.84.1")]), "hi");
+  const after = foldEvent(t, chunk(2, "hello"));
+
+  const split = splitPreamble(after.items);
+  expect(split.preamble?.summary).toBe("pi v0.84.1");
+  expect(split.items).toEqual([
+    { kind: "user", seq: -1, text: "hi", pending: true },
+    { kind: "assistant", seq: 2, text: "hello", streaming: true },
+  ]);
+});
+
+test("only agent MESSAGES are lifted out — notices and tool calls stay in the conversation", () => {
+  const t = fold([
+    ev(1, "error", { message: "harness restarted" }),
+    ev(2, "agent-update", { sessionUpdate: "tool_call", toolCallId: "t1", title: "Read file" }),
+    chunk(3, "pi v0.84.1"),
+  ]);
+
+  const split = splitPreamble(t.items);
+  expect(split.preamble?.summary).toBe("pi v0.84.1");
+  expect(split.items.map((it) => it.kind)).toEqual(["notice", "tool"]);
+});
+
+test("whitespace-only agent output before the first prompt is no preamble at all", () => {
+  const t = fold([chunk(1, "  \n\n "), ev(2, "user-prompt", { text: "hi" })]);
+
+  const split = splitPreamble(t.items);
+  expect(split.preamble).toBeNull();
+  expect(split.items).toEqual([{ kind: "user", seq: 2, text: "hi" }]);
+});
+
+test("an empty transcript has no preamble", () => {
+  expect(splitPreamble(emptyTranscript().items).preamble).toBeNull();
 });
 
 // ─── forward compat / malformed payloads ─────────────────────────────────────

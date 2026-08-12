@@ -37,11 +37,22 @@
    * Ending a session is destructive (the agent process stops) — gated behind
    * ConfirmDialog. "New session" sits beside it and is offered whatever the
    * status; only "End session" disappears once there is nothing left to end.
+   *
+   * The PREAMBLE row is session metadata, not conversation: harnesses that
+   * announce themselves before anyone has spoken (pi prints its version and
+   * loaded skills on stdout before the protocol stream starts) used to have
+   * that banner rendered as the first agent message. It belongs here, collapsed
+   * to its first line and expandable — and when there is none, nothing is
+   * rendered at all rather than an empty affordance. It is deliberately outside
+   * the status region: metadata is not an announcement.
    */
   import type { AcpSessionMode, AcpSessionStatus } from "@agentpod/contract";
   import type { AcpSessionRow } from "$lib/api/acp";
+  import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import type { ChatConnection } from "./acp-chat.svelte";
+  import type { SessionPreamble } from "./transcript";
   import { Button } from "$lib/components/ui/button";
+  import * as Collapsible from "$lib/components/ui/collapsible";
   import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
   import * as Select from "$lib/components/ui/select";
   import { Status } from "$lib/components/ui/status";
@@ -58,6 +69,11 @@
     status: AcpSessionStatus;
     connection: ChatConnection;
     mode: AcpSessionMode;
+    /**
+     * Whatever the agent said before the user's first prompt (the harness
+     * banner), or null when it said nothing — then no row is rendered.
+     */
+    preamble?: SessionPreamble | null;
     /** True while a create POST is in flight (disables "New session"). */
     creating?: boolean;
     onModeChange: (mode: AcpSessionMode) => void;
@@ -75,6 +91,7 @@
     status,
     connection,
     mode,
+    preamble = null,
     creating = false,
     onModeChange,
     onEnd,
@@ -188,87 +205,134 @@
   }
 
   let confirmEndOpen = $state(false);
+
+  /**
+   * The preamble disclosure. Collapsed by default — it is reference material,
+   * and the whole point of moving it out of the transcript was that it stopped
+   * being the first thing you read.
+   */
+  let preambleOpen = $state(false);
 </script>
 
-<div class="flex flex-wrap items-center gap-3">
-  <div role="status" aria-live="polite" class="flex min-w-0 items-center gap-2">
-    <!-- aria-hidden: the visible label is the ONE accessible text; the dot's
-         built-in sr-only label would read as a duplicate. -->
-    <span aria-hidden="true" class="flex">
-      <Status form="dot" status={dotStatus} animate={dotAnimate} {label} />
-    </span>
-    <span class="t-label truncate">{label}</span>
-  </div>
-
-  {#if sessions.length > 1}
-    <Select.Root type="single" bind:value={selectValue} onValueChange={handleValueChange}>
-      <Select.Trigger
-        size="sm"
-        class="min-w-0 max-w-56"
-        aria-label={selectedRow
-          ? `Switch session — currently ${sessionLabel(selectedRow)}`
-          : "Switch session"}
-      >
-        <!-- aria-hidden: the label carries the status word, so the dot's own
-             sr-only text would read as a duplicate. -->
-        {#if selectedRow}
-          <span aria-hidden="true" class="flex">
-            <Status form="dot" status={STATUS_DOT[selectedRow.status]} />
-          </span>
-          <span class="truncate">{sessionLabel(selectedRow)}</span>
-        {:else}
-          <span class="truncate">Sessions</span>
-        {/if}
-      </Select.Trigger>
-      <Select.Content class="max-w-[calc(100vw-2rem)]">
-        {#each visibleSessions as s (s.id)}
-          <!-- aria-label: the row is two spans (a truncating name + its meta), so
-               the accessible name is stated once, verbatim, instead of being
-               reassembled from them. -->
-          <Select.Item value={s.id} aria-label={sessionLabel(s)}>
-            <span aria-hidden="true" class="flex">
-              <Status form="dot" status={STATUS_DOT[s.status]} />
-            </span>
-            <!-- min-w-0 + truncate: a title is up to 80 chars of the user's own
-                 prose and must not stretch the dropdown across the viewport. -->
-            <span class="min-w-0 max-w-64 truncate">{nameOf(s)}</span>
-            <span class="shrink-0 text-muted-foreground">{metaOf(s)}</span>
-          </Select.Item>
-        {/each}
-        {#if hasMoreSessions}
-          <!-- Not a session: picking it opens history (handleValueChange reverts
-               the value straight away). It lives INSIDE the listbox so it is
-               reachable by keyboard like every other row. -->
-          <Select.Item value={ALL_SESSIONS} aria-label="All sessions…">
-            <span class="truncate">All sessions…</span>
-          </Select.Item>
-        {/if}
-      </Select.Content>
-    </Select.Root>
-  {/if}
-
-  <div role="group" aria-label="Permission mode" class="flex items-center gap-1 text-xs">
-    {#each MODES as m (m.value)}
-      <button
-        type="button"
-        class={chipClass(mode === m.value)}
-        aria-pressed={mode === m.value}
-        onclick={() => onModeChange(m.value)}
-      >
-        {m.label}
-      </button>
-    {/each}
-  </div>
-
-  {#if session}
-    <div class="ml-auto flex items-center gap-1">
-      {#if status !== "ended"}
-        <Button variant="ghost" size="sm" onclick={() => (confirmEndOpen = true)}>
-          End session
-        </Button>
-      {/if}
-      <Button variant="outline" size="sm" disabled={creating} onclick={onNew}>New session</Button>
+<div class="flex flex-col gap-1.5">
+  <div class="flex flex-wrap items-center gap-3">
+    <div role="status" aria-live="polite" class="flex min-w-0 items-center gap-2">
+      <!-- aria-hidden: the visible label is the ONE accessible text; the dot's
+           built-in sr-only label would read as a duplicate. -->
+      <span aria-hidden="true" class="flex">
+        <Status form="dot" status={dotStatus} animate={dotAnimate} {label} />
+      </span>
+      <span class="t-label truncate">{label}</span>
     </div>
+
+    {#if sessions.length > 1}
+      <Select.Root type="single" bind:value={selectValue} onValueChange={handleValueChange}>
+        <Select.Trigger
+          size="sm"
+          class="min-w-0 max-w-56"
+          aria-label={selectedRow
+            ? `Switch session — currently ${sessionLabel(selectedRow)}`
+            : "Switch session"}
+        >
+          <!-- aria-hidden: the label carries the status word, so the dot's own
+               sr-only text would read as a duplicate. -->
+          {#if selectedRow}
+            <span aria-hidden="true" class="flex">
+              <Status form="dot" status={STATUS_DOT[selectedRow.status]} />
+            </span>
+            <span class="truncate">{sessionLabel(selectedRow)}</span>
+          {:else}
+            <span class="truncate">Sessions</span>
+          {/if}
+        </Select.Trigger>
+        <Select.Content class="max-w-[calc(100vw-2rem)]">
+          {#each visibleSessions as s (s.id)}
+            <!-- aria-label: the row is two spans (a truncating name + its meta), so
+                 the accessible name is stated once, verbatim, instead of being
+                 reassembled from them. -->
+            <Select.Item value={s.id} aria-label={sessionLabel(s)}>
+              <span aria-hidden="true" class="flex">
+                <Status form="dot" status={STATUS_DOT[s.status]} />
+              </span>
+              <!-- min-w-0 + truncate: a title is up to 80 chars of the user's own
+                   prose and must not stretch the dropdown across the viewport. -->
+              <span class="min-w-0 max-w-64 truncate">{nameOf(s)}</span>
+              <span class="shrink-0 text-muted-foreground">{metaOf(s)}</span>
+            </Select.Item>
+          {/each}
+          {#if hasMoreSessions}
+            <!-- Not a session: picking it opens history (handleValueChange reverts
+                 the value straight away). It lives INSIDE the listbox so it is
+                 reachable by keyboard like every other row. -->
+            <Select.Item value={ALL_SESSIONS} aria-label="All sessions…">
+              <span class="truncate">All sessions…</span>
+            </Select.Item>
+          {/if}
+        </Select.Content>
+      </Select.Root>
+    {/if}
+
+    <div role="group" aria-label="Permission mode" class="flex items-center gap-1 text-xs">
+      {#each MODES as m (m.value)}
+        <button
+          type="button"
+          class={chipClass(mode === m.value)}
+          aria-pressed={mode === m.value}
+          onclick={() => onModeChange(m.value)}
+        >
+          {m.label}
+        </button>
+      {/each}
+    </div>
+
+    {#if session}
+      <div class="ml-auto flex items-center gap-1">
+        {#if status !== "ended"}
+          <Button variant="ghost" size="sm" onclick={() => (confirmEndOpen = true)}>
+            End session
+          </Button>
+        {/if}
+        <Button variant="outline" size="sm" disabled={creating} onclick={onNew}>New session</Button>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Session metadata, not conversation. Rendered ONLY when the agent actually
+       said something before the first prompt — an empty disclosure would be a
+       permanent affordance for nothing. The purpose lives in the trigger's
+       aria-label because the visible text is the banner's own first line, which
+       says nothing about what it is. -->
+  {#if preamble}
+    <Collapsible.Root bind:open={preambleOpen}>
+      <div data-testid="session-preamble" class="min-w-0">
+        <Collapsible.Trigger
+          class="group flex min-w-0 max-w-full items-center gap-1.5 rounded-sm py-0.5 text-left text-muted-foreground hover:text-foreground"
+          aria-label={preamble.more > 0
+            ? `Agent startup output — ${preamble.summary}, ${preamble.more} more ${preamble.more === 1 ? "line" : "lines"}`
+            : `Agent startup output — ${preamble.summary}`}
+        >
+          <ChevronDownIcon
+            class="size-3 shrink-0 transition-transform motion-reduce:transition-none group-data-[state=closed]:-rotate-90"
+            aria-hidden="true"
+          />
+          <span class="t-label truncate font-mono">{preamble.summary}</span>
+          {#if preamble.more > 0}
+            <span class="t-label shrink-0 opacity-70">
+              +{preamble.more}
+              {preamble.more === 1 ? "line" : "lines"}
+            </span>
+          {/if}
+        </Collapsible.Trigger>
+        <Collapsible.Content>
+          <!-- Verbatim, so a path or a version string is copyable as printed;
+               capped and scrollable so a chatty harness can't push the
+               transcript off the panel. -->
+          <pre
+            data-testid="session-preamble-text"
+            class="t-label mt-1 max-h-40 overflow-auto border-l-2 border-border pl-3 font-mono break-words whitespace-pre-wrap text-muted-foreground">{preamble.text}</pre>
+        </Collapsible.Content>
+      </div>
+    </Collapsible.Root>
   {/if}
 </div>
 
