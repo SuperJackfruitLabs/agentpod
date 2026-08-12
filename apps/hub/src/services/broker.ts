@@ -54,12 +54,30 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * Resolves with {ok:false, error:"timeout"} if no response arrives within timeoutMs.
  * Never rejects — callers can always `await` without try/catch.
  */
+/**
+ * Called with the node id on every outbound verb, so a substrate that idles its
+ * runtimes out can be told the station is in use.
+ *
+ * A hook rather than a direct call: the broker must not grow a dependency on
+ * the runtime tables or on any provisioner. Registered at boot in
+ * `provisioner/bootstrap.ts`.
+ *
+ * Every caller of request()/stream() is a user-initiated route — the hub does no
+ * periodic polling of nodes — so this fires on real activity, not on heartbeats.
+ */
+let activityHook: ((nodeId: string) => void) | null = null;
+
+export function setActivityHook(fn: ((nodeId: string) => void) | null): void {
+  activityHook = fn;
+}
+
 export function request(
   nodeId: string,
   verb: string,
   params: unknown,
   opts?: { timeoutMs?: number }
 ): Promise<RequestResult> {
+  activityHook?.(nodeId);
   return new Promise((resolve) => {
     const id = crypto.randomUUID();
     const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -99,6 +117,7 @@ export function stream(
   params: unknown,
   onChunk: StreamHandler
 ): { cancel(): void; id: string } {
+  activityHook?.(nodeId);
   const id = crypto.randomUUID();
   let active = true;
 
