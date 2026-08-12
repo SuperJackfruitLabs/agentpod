@@ -14,6 +14,12 @@ class_name = "NodeAgentContainer"
 tag = "v1"
 new_sqlite_classes = ["NodeAgentContainer"]
 
+# Workspace archives. Container disk is ephemeral on this substrate — without
+# this bucket a station destroys the user's work every time it idles out.
+[[r2_buckets]]
+binding = "SNAPSHOTS"
+bucket_name = "agentpod-snapshots"
+
 [[containers]]
 class_name = "NodeAgentContainer"
 image = "./Dockerfile"

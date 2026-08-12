@@ -1,5 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { isAuthorised } from "./auth";
+import { handleSnapshot, handleDestroy, type SnapshotDeps } from "./snapshot";
 
 interface Env {
   // Typed with the container class so getContainer returns a stub carrying its
@@ -7,6 +8,9 @@ interface Env {
   // site, and a cast is where a wrong method name survives to runtime.
   NODE_AGENT: DurableObjectNamespace<NodeAgentContainer>;
   AGENTPOD_WORKER_TOKEN?: string;
+  // Workspace archives. Cloudflare container disk is ephemeral, so this is the
+  // only thing standing between a sleep and the user losing their work.
+  SNAPSHOTS: R2Bucket;
 }
 
 /**
@@ -43,6 +47,52 @@ export class NodeAgentContainer extends Container {
   }
 
   /**
+   * The per-sandbox snapshot token, minted on first use and kept for the life
+   * of the sandbox so it survives sleep/wake alongside envVars.
+   *
+   * Deliberately NOT the worker admin token: a container holding that could
+   * create and destroy sandboxes across the whole fleet.
+   */
+  async snapshotToken(): Promise<string> {
+    const existing = await this.ctx.storage.get<string>("snapshotToken");
+    if (existing) return existing;
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const token = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    await this.ctx.storage.put("snapshotToken", token);
+    return token;
+  }
+
+  /** Read the stored token without minting one, for authenticating a request. */
+  async storedSnapshotToken(): Promise<string | null> {
+    return (await this.ctx.storage.get<string>("snapshotToken")) ?? null;
+  }
+
+  /**
+   * Revoke the snapshot token so no further upload is accepted.
+   *
+   * Called BEFORE destroy, and the ordering is the whole point. destroy() sends
+   * SIGTERM, which makes the container archive its workspace on the way out — so
+   * deleting the R2 object first and destroying second loses the race, and the
+   * dying container recreates the archive we just deleted. Observed live on
+   * 2026-08-12: a destroy returned 200 and left the archive behind.
+   */
+  async revokeSnapshotToken(): Promise<void> {
+    await this.ctx.storage.delete("snapshotToken");
+  }
+
+  /**
+   * Push the idle deadline out. Called when the hub routes a verb to this
+   * station, because Cloudflare's activity timer counts only INCOMING requests
+   * and a node-agent dials out — so without this a station sleeps 15 minutes
+   * after start however hard it is being used, which is precisely how a live
+   * station vanished mid-session on 2026-08-12.
+   */
+  async touch(): Promise<void> {
+    this.renewActivityTimeout();
+  }
+
+  /**
    * Wake: start again with the stored environment.
    *
    * Throws when there is none rather than starting a container that cannot
@@ -71,13 +121,20 @@ export class NodeAgentContainer extends Container {
    * is no connection — but the RUNTIME is `asleep`, not broken, and only this
    * worker knows the difference.
    *
-   * Safe because a woken container re-enrols and resumes the same nodeId
-   * (runtime identity persistence, #245). Before that, sleeping lost the station.
+   * Safe only because BOTH halves hold: a woken container resumes the same
+   * nodeId (#245) *and* restores its workspace from R2 (snapshot-wrapper.sh).
+   * Identity alone was not enough — with it, a woken station came back looking
+   * like itself with an empty workspace, which is worse than an obvious failure.
    */
   override async onActivityExpired() {
     console.log("[agentpod] idle — sleeping");
-    await this.notifyHub("asleep");
+    // stop() BEFORE notifyHub, and in that order deliberately: stop sends
+    // SIGTERM, which is what makes the container archive its workspace. Telling
+    // the hub "asleep" first would announce a safe state while the archive was
+    // still being written. Cloudflare allows 15 minutes between SIGTERM and
+    // SIGKILL, so the container has ample room to finish.
     await this.stop();
+    await this.notifyHub("asleep");
   }
 
   /**
@@ -132,6 +189,25 @@ export default {
       return json({ status: "ok" });
     }
 
+    // Snapshot routes authenticate with the PER-SANDBOX token, not the admin
+    // token, so they are matched before the admin gate. This is the only
+    // unauthenticated-by-admin path in the worker, and handleSnapshot fails
+    // closed: an absent, wrong, or other-sandbox token is a 401, and a sandbox
+    // with no stored token (unknown or destroyed) is refused outright.
+    if (parts[0] === "sandbox" && parts[1] && parts[2] === "snapshot") {
+      const id = parts[1];
+      const stub = getContainer(env.NODE_AGENT, id);
+      const deps: SnapshotDeps = {
+        tokenFor: () => stub.storedSnapshotToken(),
+        get: (key) => env.SNAPSHOTS.get(key),
+        put: async (key, body) => {
+          await env.SNAPSHOTS.put(key, body as ReadableStream);
+        },
+        delete: (key) => env.SNAPSHOTS.delete(key),
+      };
+      return handleSnapshot(id, request.method, request, deps);
+    }
+
     if (!isAuthorised(request, env.AGENTPOD_WORKER_TOKEN)) {
       return json({ error: "unauthorized" }, 401);
     }
@@ -156,12 +232,17 @@ export default {
       const c = getContainer(env.NODE_AGENT, body.id);
       // The token is passed through but never logged, here or anywhere in this
       // worker. Do not add log statements that reference body.enrollToken.
+      const snapshotToken = await c.snapshotToken();
       await c.createWithEnv({
         AGENTPOD_HUB_URL: body.hubUrl,
         AGENTPOD_ENROLL_TOKEN: body.enrollToken,
         // Read by the container class's notifyHub, not by agentpod-node.
         AGENTPOD_RUNTIME_ID: body.id,
         AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
+        // Where the entrypoint archives and restores /workspace. Derived from
+        // the request so the worker never has to be told its own URL.
+        AGENTPOD_SNAPSHOT_URL: `${url.origin}/sandbox/${body.id}/snapshot`,
+        AGENTPOD_SNAPSHOT_TOKEN: snapshotToken,
       });
       return json({ sandboxId: body.id }, 201);
     }
@@ -176,8 +257,27 @@ export default {
     }
 
     if (request.method === "DELETE" && !parts[2]) {
-      await container.destroy();
+      // Ordering lives in handleDestroy, which is where its regression test can
+      // reach it — see the 2026-08-12 live failure recorded there.
+      await handleDestroy(id, {
+        revokeToken: () => container.revokeSnapshotToken(),
+        destroy: () => container.destroy(),
+        tokenFor: () => container.storedSnapshotToken(),
+        get: (key) => env.SNAPSHOTS.get(key),
+        put: async (key, body) => {
+          await env.SNAPSHOTS.put(key, body as ReadableStream);
+        },
+        delete: (key) => env.SNAPSHOTS.delete(key),
+      });
       return json({ destroyed: id });
+    }
+
+    // Push the idle deadline out. The hub calls this when it routes a verb to
+    // a Cloudflare-backed node, which is the only way this substrate learns
+    // that a station is in use — see NodeAgentContainer.touch.
+    if (request.method === "POST" && parts[2] === "touch") {
+      await container.touch();
+      return json({ touched: id });
     }
 
     // The wake path. Uses the STORED environment — a bare start() would boot a

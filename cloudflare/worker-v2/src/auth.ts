@@ -6,11 +6,28 @@
  * misconfigured URL without holding a credential.
  */
 export function isAuthorised(request: Request, expected: string | undefined): boolean {
-  if (!expected) return false; // no secret configured → refuse everything
+  return tokenMatches(bearerToken(request), expected);
+}
+
+/** The bearer token presented on a request, or null when absent/malformed. */
+export function bearerToken(request: Request): string | null {
   const header = request.headers.get("Authorization") ?? "";
   const prefix = "Bearer ";
-  if (!header.startsWith(prefix)) return false;
-  return timingSafeEqual(header.slice(prefix.length), expected);
+  if (!header.startsWith(prefix)) return null;
+  return header.slice(prefix.length);
+}
+
+/**
+ * Compare a presented token against an expected one, failing closed.
+ *
+ * Shared by the admin gate and the per-sandbox snapshot gate so both inherit
+ * the same two properties: an unset expected value refuses everything, and the
+ * comparison does not leak length-independent timing.
+ */
+export function tokenMatches(presented: string | null, expected: string | undefined): boolean {
+  if (!expected) return false; // no secret configured → refuse everything
+  if (presented === null) return false;
+  return timingSafeEqual(presented, expected);
 }
 
 /** Constant-time compare, so a wrong token cannot be guessed byte by byte. */

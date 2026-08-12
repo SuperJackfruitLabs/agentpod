@@ -30,6 +30,12 @@ export interface CloudflareSandboxOptions {
    * it the hub cannot distinguish a routine sleep from a dead container.
    */
   callbackToken?: string;
+  /**
+   * The resource tier the deployed worker actually provides. Cloudflare fixes
+   * `instance_type` per container class, so one deployment offers exactly one
+   * tier; anything else cannot be honoured and is refused rather than ignored.
+   */
+  deployedTier?: string;
   /** Injectable fetch — used to inject a fake in unit tests. */
   fetchImpl?: typeof globalThis.fetch;
 }
@@ -41,6 +47,7 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
   private readonly apiToken: string;
   private readonly deployedImage: string;
   private readonly callbackToken: string;
+  private readonly deployedTier: string;
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor({
@@ -48,12 +55,15 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
     apiToken = process.env.CLOUDFLARE_WORKER_TOKEN ?? "",
     deployedImage = process.env.CLOUDFLARE_SANDBOX_IMAGE ?? "",
     callbackToken = process.env.RUNTIME_CALLBACK_TOKEN ?? "",
+    // standard-1 is 4 GiB, which is the Docker "large" tier's memory limit.
+    deployedTier = process.env.CLOUDFLARE_INSTANCE_TIER ?? "large",
     fetchImpl = globalThis.fetch,
   }: CloudflareSandboxOptions = {}) {
     this.workerUrl = workerUrl.replace(/\/$/, "");
     this.apiToken = apiToken;
     this.deployedImage = deployedImage;
     this.callbackToken = callbackToken;
+    this.deployedTier = deployedTier;
     this.fetchImpl = fetchImpl;
   }
 
@@ -101,6 +111,19 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
       );
     }
 
+    // Same rule as the image, for the same reason. Cloudflare fixes
+    // instance_type per container class, so a tier this worker was not deployed
+    // with cannot be satisfied. Until per-tier container classes exist, this
+    // driver refuses rather than quietly handing out a size nobody asked for.
+    if (this.deployedTier && spec.resourceTier !== this.deployedTier) {
+      throw new Error(
+        `cloudflare: this worker provides the "${this.deployedTier}" resource tier ` +
+          `and cannot provision "${spec.resourceTier}". Cloudflare fixes the ` +
+          `instance type at worker deploy time; choose "${this.deployedTier}" or ` +
+          `deploy a worker for the tier you want.`
+      );
+    }
+
     const body = await this.call("/sandbox", {
       method: "POST",
       body: JSON.stringify({
@@ -132,5 +155,15 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
 
   async stop(externalId: string): Promise<void> {
     await this.call(`/sandbox/${externalId}/stop`, { method: "POST" });
+  }
+
+  /**
+   * Push the substrate's idle deadline out because this station is in use.
+   *
+   * Cloudflare's timer counts only incoming requests and a node-agent dials out,
+   * so without this a station sleeps 15 minutes after start however busy it is.
+   */
+  async touch(externalId: string): Promise<void> {
+    await this.call(`/sandbox/${externalId}/touch`, { method: "POST" });
   }
 }

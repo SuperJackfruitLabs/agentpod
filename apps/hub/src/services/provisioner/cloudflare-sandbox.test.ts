@@ -15,7 +15,7 @@ const IMAGE = "agentpod-node-opencode:v0.1.22";
 const SPEC: ProvisionSpec = {
   runtimeId: "rt_abc",
   name: "test",
-  resourceTier: "small",
+  resourceTier: "large",
   hubUrl: "https://hub.example",
   enrollToken: "enr_secret",
   image: IMAGE,
@@ -115,6 +115,30 @@ describe("CloudflareSandboxProvisioner", () => {
     const stopped = fakeFetch({ stopped: "rt_abc" }, 200);
     await make(stopped.impl).stop!("rt_abc");
     expect(stopped.calls[0]!.url).toBe("https://w.example/sandbox/rt_abc/stop");
+  });
+
+  it("touches the activity route so an in-use station does not idle out", async () => {
+    const { impl, calls } = fakeFetch({ touched: "rt_abc" }, 200);
+    await make(impl).touch("rt_abc");
+    expect(calls[0]!.url).toBe("https://w.example/sandbox/rt_abc/touch");
+    expect(calls[0]!.init.method).toBe("POST");
+  });
+
+  it("REFUSES a resource tier the deployed worker cannot provide", async () => {
+    // Cloudflare fixes instance_type per container class, so a tier this worker
+    // was not deployed with cannot be honoured. Refusing is the same rule the
+    // image already follows — silently ignoring an input is how the dead driver
+    // failed, and today this driver drops resourceTier on the floor.
+    const { impl } = fakeFetch({ sandboxId: "rt_abc" });
+    await expect(
+      make(impl).provision({ ...SPEC, resourceTier: "small" })
+    ).rejects.toThrow(/resource tier/i);
+  });
+
+  it("accepts the tier the worker was deployed with", async () => {
+    const { impl } = fakeFetch({ sandboxId: "rt_abc" });
+    const res = await make(impl).provision({ ...SPEC, resourceTier: "large" });
+    expect(res.externalId).toBe("rt_abc");
   });
 
   it("fails clearly when the worker url is not configured", async () => {
