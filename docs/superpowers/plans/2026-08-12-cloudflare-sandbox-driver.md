@@ -4,7 +4,7 @@
 
 **Goal:** A second substrate — provision a station on Cloudflare from the console, and have it enrol, stay up, and survive a restart as the same node.
 
-**Architecture:** A new worker on `@cloudflare/containers` runs an image carrying a released `agentpod-node`, kept alive by overriding `onActivityExpired()` without stopping. A new hub driver talks to it over a small REST surface and validates every response. Identity across restarts is already solved by runtime-bound re-enrolment (merged in #245).
+**Architecture:** A new worker on `@cloudflare/containers` runs an image carrying a released `agentpod-node`. Stations **sleep when idle and wake explicitly**, which is ~12× cheaper than always-on and is only possible because runtime-bound re-enrolment (#245) lets a woken container resume the same `nodeId`. A new hub driver talks to the worker over a small REST surface and validates every response.
 
 **Tech Stack:** `@cloudflare/containers` + `wrangler` (worker), Bun + Hono + Drizzle (hub driver), Docker (image build via wrangler).
 
@@ -13,12 +13,16 @@
 
 ## Global Constraints
 
-- **Always-on, not scale-to-zero.** Containers keep themselves alive by overriding `onActivityExpired()` and declining to stop. Sleep/wake as a station state is explicitly out of scope.
+- **Stations sleep when idle.** `onActivityExpired()` stops the container; charges stop with it. Always-on would cost ~$28/month per station against ~$2 sleeping, and cost is the reason this substrate exists.
+- **Asleep is a distinct runtime status, and the worker tells the hub.** Cloudflare sleeps on its own timer, so without a callback the hub cannot tell "idled out" from "died" — and reporting a routine state as a fault is the failure shape this codebase keeps hitting.
+- **`asleep` must stay distinct from `stopped`.** `stopped` means an operator did it; conflating them loses the distinction an operator needs.
+- **The sweeper is not touched.** A sleeping node genuinely has no connection, so marking it `offline` is correct; teaching the sweeper about substrates would couple it to one.
+- **Explicit wake only.** Automatic wake on demand is deferred: it changes the broker's offline path and every caller's latency assumptions.
 - **Validate every worker response.** The dead driver's failure was an `ASSUMPTION` comment about the worker contract that nobody checked. Parse and reject, never trust.
 - **Reject a mismatched image, never ignore it.** Cloudflare bakes the image at deploy time, so `ProvisionSpec.image` cannot be honoured; silently ignoring an input is how the old driver would have failed.
 - **The image pulls a released binary and verifies it against `SHA256SUMS`** — the same artefacts `install.sh` and self-update use. Do not vendor a hand-built binary.
 - **Do not delete the dead worker or driver.** They stay marked until this replaces them in production.
-- Cost, for anyone reviewing the default: ~$28/month per always-on 4 GiB station, ~$1,090 across 39. This is a burst-and-geography substrate, not the default.
+- Cost: ~$2/month per sleeping station against ~$28 always-on. Even so this is a burst-and-geography substrate, not the default — a Hetzner box runs the whole fleet for about €46/month.
 - Branch: `cloudflare-sandbox-driver` off `main`. Single PR.
 - TDD: every task writes its failing test first.
 
@@ -217,7 +221,9 @@ interface Env {
  * which the spike confirmed keeps a station alive indefinitely.
  */
 export class NodeAgentContainer extends Container {
-  sleepAfter = "30m";
+  // Long enough that a pause in a conversation does not cost a wake, short
+  // enough that an abandoned station stops billing within the hour.
+  sleepAfter = "15m";
 
   override async onStart() {
     console.log("[agentpod] container started", new Date().toISOString());
@@ -228,14 +234,48 @@ export class NodeAgentContainer extends Container {
   }
 
   /**
-   * Deliberately does NOT call this.stop().
+   * Sleep when idle, and tell the hub so.
    *
-   * A station is long-lived and connection-oriented; sleeping would drop its
-   * WSS connection and take it offline. Scale-to-zero is a cost optimisation
-   * that needs "asleep" as a distinct station state, and is out of scope here.
+   * Cloudflare stops charging once an instance sleeps, which is ~12x cheaper
+   * than staying alive and is the reason this substrate is worth having. The
+   * station's WSS connection drops and its node goes offline — correctly, there
+   * is no connection — but the RUNTIME is `asleep`, not broken, and only this
+   * worker knows the difference.
+   *
+   * Safe because a woken container re-enrols and resumes the same nodeId
+   * (runtime identity persistence, #245). Before that, sleeping lost the station.
    */
   override async onActivityExpired() {
-    console.log("[agentpod] activity expired — staying alive (station is long-lived)");
+    console.log("[agentpod] idle — sleeping");
+    await this.notifyHub("asleep");
+    await this.stop();
+  }
+
+  /**
+   * Tell the hub this runtime's lifecycle state.
+   *
+   * Never throws into the lifecycle: a hub that is down must not stop a
+   * container from sleeping, or an unreachable hub would keep every station
+   * awake and billing.
+   */
+  private async notifyHub(state: "asleep"): Promise<void> {
+    const hubUrl = this.envVars.AGENTPOD_HUB_URL;
+    const token = this.envVars.AGENTPOD_RUNTIME_CALLBACK_TOKEN;
+    const runtimeId = this.envVars.AGENTPOD_RUNTIME_ID;
+    if (!hubUrl || !token || !runtimeId) return;
+
+    try {
+      await fetch(`${hubUrl}/public/runtimes/${runtimeId}/state`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ state }),
+      });
+    } catch (e) {
+      console.log("[agentpod] hub notify failed (continuing)", String(e));
+    }
   }
 }
 
@@ -243,6 +283,9 @@ interface CreateBody {
   id: string;
   hubUrl: string;
   enrollToken: string;
+  /** Lets the container tell the hub when it sleeps. Without it the hub cannot
+   *  tell "idled out" from "died". */
+  callbackToken: string;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -273,8 +316,11 @@ export default {
       } catch {
         return json({ error: "invalid json" }, 400);
       }
-      if (!body.id || !body.hubUrl || !body.enrollToken) {
-        return json({ error: "id, hubUrl and enrollToken are required" }, 400);
+      if (!body.id || !body.hubUrl || !body.enrollToken || !body.callbackToken) {
+        return json(
+          { error: "id, hubUrl, enrollToken and callbackToken are required" },
+          400
+        );
       }
 
       const c = getContainer(env.NODE_AGENT, body.id) as unknown as {
@@ -286,6 +332,9 @@ export default {
         envVars: {
           AGENTPOD_HUB_URL: body.hubUrl,
           AGENTPOD_ENROLL_TOKEN: body.enrollToken,
+          // Read by the container class's notifyHub, not by agentpod-node.
+          AGENTPOD_RUNTIME_ID: body.id,
+          AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
         },
       });
       return json({ sandboxId: body.id }, 201);
@@ -479,6 +528,7 @@ const make = (impl: typeof globalThis.fetch) =>
     workerUrl: "https://w.example",
     apiToken: "tok",
     deployedImage: IMAGE,
+    callbackToken: "cbtok",
     fetchImpl: impl,
   });
 
@@ -505,6 +555,9 @@ describe("CloudflareSandboxProvisioner", () => {
     expect(body.hubUrl).toBe(SPEC.hubUrl);
     expect(body.enrollToken).toBe(SPEC.enrollToken);
     expect(body.id).toBe(SPEC.runtimeId);
+    // Without this the container cannot tell the hub it slept, and every
+    // sleeping station would read as offline.
+    expect(body.callbackToken).toBe("cbtok");
   });
 
   it("authenticates with a bearer token", async () => {
@@ -601,6 +654,11 @@ export interface CloudflareSandboxOptions {
    * so a spec asking for anything else cannot be satisfied and is refused.
    */
   deployedImage?: string;
+  /**
+   * Shared secret the container presents when telling the hub it slept. Without
+   * it the hub cannot distinguish a routine sleep from a dead container.
+   */
+  callbackToken?: string;
   fetchImpl?: typeof globalThis.fetch;
 }
 
@@ -610,17 +668,20 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
   private readonly workerUrl: string;
   private readonly apiToken: string;
   private readonly deployedImage: string;
+  private readonly callbackToken: string;
   private readonly fetchImpl: typeof globalThis.fetch;
 
   constructor({
     workerUrl = process.env.CLOUDFLARE_WORKER_URL ?? "",
     apiToken = process.env.CLOUDFLARE_WORKER_TOKEN ?? "",
     deployedImage = process.env.CLOUDFLARE_SANDBOX_IMAGE ?? "",
+    callbackToken = process.env.RUNTIME_CALLBACK_TOKEN ?? "",
     fetchImpl = globalThis.fetch,
   }: CloudflareSandboxOptions = {}) {
     this.workerUrl = workerUrl.replace(/\/$/, "");
     this.apiToken = apiToken;
     this.deployedImage = deployedImage;
+    this.callbackToken = callbackToken;
     this.fetchImpl = fetchImpl;
   }
 
@@ -674,6 +735,7 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
         id: spec.runtimeId,
         hubUrl: spec.hubUrl,
         enrollToken: spec.enrollToken,
+        callbackToken: this.callbackToken,
       }),
     });
 
@@ -718,7 +780,369 @@ git commit -m "feat(hub): CloudflareSandboxProvisioner, validating every respons
 
 ---
 
-## Task 4: Register the new driver
+## Task 4: `asleep` runtime status and the sleep callback
+
+Without this the hub sees a slept container as an ordinary offline node, and the console reports a routine, expected state as a fault.
+
+**Files:**
+- Modify: `packages/contract/src/runtime.ts` (`RuntimeStatus`)
+- Modify: `apps/hub/src/db/schema/nodes.ts` (`runtimeStatusEnum`)
+- Create: `apps/hub/src/routes/runtime-callback.ts`
+- Create: `apps/hub/src/routes/runtime-callback.test.ts`
+- Modify: `apps/hub/src/index.ts` (mount)
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `RuntimeStatus` includes `"asleep"`; `runtimeCallbackRoutes` serving `POST /public/runtimes/:id/state`.
+
+- [ ] **Step 1: Write the failing contract test**
+
+Append to `packages/contract/src/runtime.test.ts`, inside the existing top-level structure (the file uses `describe`/`it`):
+
+```ts
+describe("RuntimeStatus asleep", () => {
+  it("accepts asleep", () => {
+    // A slept container is not stopped and not broken. Without its own value the
+    // console cannot tell an operator "this idled out" from "this failed".
+    expect(RuntimeStatus.parse("asleep")).toBe("asleep");
+  });
+
+  it("keeps stopped distinct", () => {
+    // `stopped` means an operator did it. Collapsing the two would lose the
+    // difference between "I did that" and "it happened on its own".
+    expect(RuntimeStatus.parse("stopped")).toBe("stopped");
+  });
+});
+```
+
+Add `RuntimeStatus` to that file's import from `./runtime` if it is not already there.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+```bash
+cd packages/contract && bun test src/runtime.test.ts
+```
+
+Expected: FAIL — `asleep` is not in the enum.
+
+- [ ] **Step 3: Add the status**
+
+In `packages/contract/src/runtime.ts`:
+
+```ts
+/**
+ * `asleep` — the substrate idled the runtime out and stopped billing it. Its
+ * node is legitimately offline; the runtime is healthy and can be woken.
+ * Distinct from `stopped`, which means an operator stopped it deliberately.
+ */
+export const RuntimeStatus = z.enum(["provisioning", "online", "stopped", "asleep", "error", "destroyed"]);
+```
+
+In `apps/hub/src/db/schema/nodes.ts`:
+
+```ts
+export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "online", "stopped", "asleep", "error", "destroyed"]);
+```
+
+Generate the migration:
+
+```bash
+cd apps/hub && bun run db:generate
+```
+
+Expected: a migration adding the enum value. Postgres `ALTER TYPE ... ADD VALUE` cannot run inside a transaction in older versions — if the generated SQL fails on boot, split it into its own migration file containing only the `ALTER TYPE`.
+
+- [ ] **Step 4: Write the failing route test**
+
+Create `apps/hub/src/routes/runtime-callback.test.ts`. Read `apps/hub/src/routes/node-posture.test.ts` first and reuse its app-construction and seeding shape.
+
+```ts
+test("a valid callback marks the runtime asleep", async () => {
+  // The whole point: only the worker knows a container idled out, so it tells us.
+  const { app, runtimeId } = await seedRuntime();
+  const res = await app.request(`/public/runtimes/${runtimeId}/state`, {
+    method: "POST",
+    headers: { Authorization: "Bearer cbtok", "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "asleep" }),
+  });
+  expect(res.status).toBe(200);
+
+  const row = await db.query.provisionedRuntimes.findFirst({
+    where: (t, { eq }) => eq(t.id, runtimeId),
+  });
+  expect(row?.status).toBe("asleep");
+});
+
+test("an unauthenticated callback is refused", async () => {
+  // This endpoint is public — it must be reachable by a container with no
+  // session. A missing token must therefore fail closed, or anyone could mark
+  // another user's runtime asleep.
+  const { app, runtimeId } = await seedRuntime();
+  const res = await app.request(`/public/runtimes/${runtimeId}/state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "asleep" }),
+  });
+  expect(res.status).toBe(401);
+});
+
+test("a wrong token is refused", async () => {
+  const { app, runtimeId } = await seedRuntime();
+  const res = await app.request(`/public/runtimes/${runtimeId}/state`, {
+    method: "POST",
+    headers: { Authorization: "Bearer nope", "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "asleep" }),
+  });
+  expect(res.status).toBe(401);
+});
+
+test("an unknown runtime is a 404, not a silent success", async () => {
+  const { app } = await seedRuntime();
+  const res = await app.request(`/public/runtimes/rt_nope/state`, {
+    method: "POST",
+    headers: { Authorization: "Bearer cbtok", "Content-Type": "application/json" },
+    body: JSON.stringify({ state: "asleep" }),
+  });
+  expect(res.status).toBe(404);
+});
+
+test("only asleep is accepted", async () => {
+  // The callback is not a general status-setting API. A container must not be
+  // able to declare itself destroyed or online.
+  const { app, runtimeId } = await seedRuntime();
+  for (const state of ["destroyed", "online", "error"]) {
+    const res = await app.request(`/public/runtimes/${runtimeId}/state`, {
+      method: "POST",
+      headers: { Authorization: "Bearer cbtok", "Content-Type": "application/json" },
+      body: JSON.stringify({ state }),
+    });
+    expect(res.status).toBe(400);
+  }
+});
+```
+
+Set `process.env.RUNTIME_CALLBACK_TOKEN = "cbtok"` at the top of the file, before any `src/` import, alongside the `DATABASE_URL` line those test files already set.
+
+- [ ] **Step 5: Run it and watch it fail**
+
+```bash
+cd apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test src/routes/runtime-callback.test.ts
+```
+
+Expected: FAIL — the module does not exist.
+
+- [ ] **Step 6: Write the route**
+
+Create `apps/hub/src/routes/runtime-callback.ts`:
+
+```ts
+/**
+ * Runtime Callback Route — POST /public/runtimes/:id/state
+ *
+ * How a substrate tells the hub that it idled a runtime out.
+ *
+ * Cloudflare sleeps containers on its own timer, so without this the hub sees
+ * only that a node stopped heartbeating and cannot distinguish "slept normally"
+ * from "died". Reporting a routine state as a fault is the failure shape this
+ * codebase keeps hitting, so the substrate reports it instead of us guessing.
+ *
+ * **Public** — the caller is a container with no session — so it authenticates
+ * with a shared bearer token and fails closed when none is configured.
+ *
+ * Deliberately narrow: `asleep` is the only accepted state. This is not a
+ * general status-setting API, and a container must not be able to declare
+ * itself destroyed or online.
+ */
+
+import { Hono } from "hono";
+import { eq } from "drizzle-orm";
+import { db } from "../db/drizzle";
+import { provisionedRuntimes } from "../db/schema/nodes";
+
+export const runtimeCallbackRoutes = new Hono().post(
+  "/runtimes/:id/state",
+  async (c) => {
+    const expected = process.env.RUNTIME_CALLBACK_TOKEN;
+    const header = c.req.header("Authorization") ?? "";
+    if (!expected || header !== `Bearer ${expected}`) {
+      return c.json({ error: "Unauthorized" }, 401);
+    }
+
+    let body: { state?: string };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid json" }, 400);
+    }
+
+    if (body.state !== "asleep") {
+      return c.json({ error: "only 'asleep' may be reported" }, 400);
+    }
+
+    const id = c.req.param("id");
+    const [row] = await db
+      .select()
+      .from(provisionedRuntimes)
+      .where(eq(provisionedRuntimes.id, id));
+    if (!row) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    await db
+      .update(provisionedRuntimes)
+      .set({ status: "asleep", updatedAt: new Date() })
+      .where(eq(provisionedRuntimes.id, id));
+
+    return c.json({ ok: true });
+  }
+);
+```
+
+Mount it in `apps/hub/src/index.ts` beside the other public routes:
+
+```ts
+import { runtimeCallbackRoutes } from './routes/runtime-callback.ts';
+```
+
+```ts
+  .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
+```
+
+- [ ] **Step 7: Run the suites**
+
+```bash
+cd packages/contract && bun test
+cd ../../apps/hub && DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
+```
+
+Expected: PASS on both.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add packages/contract apps/hub
+git commit -m "feat: asleep runtime status and the substrate sleep callback"
+```
+
+---
+
+## Task 5: Console shows asleep, and offers Wake
+
+**Files:**
+- Modify: `apps/console/src/lib/api/client.ts`
+- Modify: `apps/console/src/routes/runtimes/+page.svelte`
+- Modify: `apps/console/src/routes/runtimes/page.svelte.test.ts`
+
+**Interfaces:**
+- Consumes: `RuntimeStatus` including `asleep` from Task 4; the existing `startRuntime` client call.
+- Produces: a Wake control on asleep runtimes.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `apps/console/src/routes/runtimes/page.svelte.test.ts`, reusing its `mockRuntimes` fixture shape:
+
+```ts
+test("an asleep runtime reads as asleep, not broken", async () => {
+  // Sleeping is normal and cheap. Showing it as offline or errored would make
+  // the substrate's main feature look like a fault.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/asleep/i));
+});
+
+test("an asleep runtime offers Wake", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const { getByRole } = render(RuntimesPage);
+  await waitFor(() => expect(getByRole("button", { name: /wake/i })).toBeTruthy());
+});
+
+test("waking calls startRuntime", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const start = vi.spyOn(api, "startRuntime").mockResolvedValue(undefined as never);
+
+  const { getByRole } = render(RuntimesPage);
+  await waitFor(() => expect(getByRole("button", { name: /wake/i })).toBeTruthy());
+  fireEvent.click(getByRole("button", { name: /wake/i }));
+
+  await waitFor(() => expect(start).toHaveBeenCalledWith("rt-sleep"));
+});
+
+test("an online runtime offers no Wake", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-up", name: "awake", status: "online" as const },
+  ]);
+  const { queryByRole, getByText } = render(RuntimesPage);
+  await waitFor(() => expect(getByText("awake")).toBeTruthy());
+  expect(queryByRole("button", { name: /wake/i })).toBeNull();
+});
+```
+
+Check `startRuntime`'s real name in `client.ts` first (`grep -n "Runtime" src/lib/api/client.ts`) and use whatever the lifecycle call is actually called — if it is `startRuntime(id)` these are correct as written.
+
+- [ ] **Step 2: Run them and watch them fail**
+
+```bash
+cd apps/console && pnpm test -- runtimes
+```
+
+Expected: FAIL — nothing renders "asleep" or a Wake control.
+
+- [ ] **Step 3: Render it**
+
+In `apps/console/src/routes/runtimes/+page.svelte`, find the actions cell that already renders Destroy/Stop/Start controls and add a Wake button shown only for `asleep`. Read the surrounding markup and match it — reuse the existing button component and the existing lifecycle handler rather than adding a parallel one:
+
+```svelte
+        {#if rt.status === "asleep"}
+          <Button
+            variant="outline"
+            size="sm"
+            onclick={() => wake(rt.id)}
+          >
+            Wake
+          </Button>
+        {/if}
+```
+
+and a handler beside the existing lifecycle handlers:
+
+```ts
+  /** Wake a runtime the substrate idled out. Reuses the start path: to the
+   *  driver a wake IS a start, and the spike confirmed stop → start restarts a
+   *  container reliably. */
+  async function wake(id: string) {
+    await startRuntime(id);
+    await load();
+  }
+```
+
+Match the file's existing error handling for lifecycle actions — if the others wrap in try/catch with a toast, do the same rather than letting this one throw.
+
+Ensure the status badge renders `asleep` — check `statusBadgeClass` in `$lib/utils/status-badge` handles the new value and add a case if it does not.
+
+- [ ] **Step 4: Run the console suite**
+
+```bash
+cd apps/console && pnpm check && pnpm test && pnpm build
+```
+
+Expected: PASS on all three.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add apps/console
+git commit -m "feat(console): show asleep runtimes and offer Wake"
+```
+
+---
+
+## Task 6: Register the new driver
 
 **Files:**
 - Modify: `apps/hub/src/services/provisioner/bootstrap.ts`
@@ -769,7 +1193,7 @@ git commit -m "feat(hub): register CloudflareSandboxProvisioner for the cloudfla
 
 ---
 
-## Task 5: Deploy, verify live, and PR
+## Task 7: Deploy, verify live, and PR
 
 This is where the work is proven. Every substrate this session has surprised us in production after passing tests.
 
@@ -834,11 +1258,15 @@ Provision a Cloudflare runtime via `createRuntime` on the hub — not by hand, a
 - the runtime row reaches `status=online` with `runtime=cloudflare-container`
 - a node exists with `hostname=cloudchamber` and a recent `lastSeenAt`
 
-- [ ] **Step 5: Verify the restart — the point of the whole slice**
+- [ ] **Step 5: Verify the full sleep cycle — the point of the whole slice**
 
-Stop and start the container through the worker, then confirm the runtime **still points at the same `nodeId`** and the node returns online.
+Three things, in order. A failure in any of them means the driver is not done, however green the unit tests are.
 
-This is the acceptance test. It exercises runtime identity persistence (#245) on the substrate that needs it, and a failure here means the driver is not done however green the unit tests are.
+**(a) Explicit sleep → wake keeps the node.** Stop the container through the worker, confirm the runtime goes `asleep` and the node goes `offline`, then Wake it and confirm the runtime returns `online` with the **same `nodeId`**. That exercises runtime identity persistence (#245) on the substrate that needs it.
+
+**(b) Automatic sleep reports itself.** Redeploy the worker with `sleepAfter = "2m"`, provision a runtime, leave it idle, and confirm that **without anyone touching it** the runtime reaches `asleep` — not `offline`, not `error`. That proves the callback path, which is the only way the hub can tell "idled out" from "died". Restore `sleepAfter = "15m"` afterwards.
+
+**(c) The saving is real.** Confirm the container is genuinely stopped on Cloudflare after (b), not merely marked asleep in our database. A status we set ourselves is not evidence; the whole cost argument rests on the instance actually being gone.
 
 - [ ] **Step 6: Clean up**
 
@@ -857,18 +1285,32 @@ A new worker on `@cloudflare/containers` runs an image carrying a **released**
 The container dials the hub outbound and enrols itself; the driver only does
 lifecycle.
 
-## Always-on, deliberately
+## Stations sleep when idle
 
-Containers stay alive by overriding `onActivityExpired()` without stopping — the
-spike confirmed this keeps a station up indefinitely. Cloudflare's activity timer
-is driven by *incoming* requests and a node-agent receives none
-([cloudflare/containers#147](https://github.com/cloudflare/containers/issues/147)),
-so without this a station would sleep and go offline on a timer.
+Cloudflare stops charging once an instance sleeps, and for stations that idle most
+of the day that is roughly a **12x difference** — ~$2/month each rather than ~$28,
+about $90 across 39 rather than $1,090. Cost is the reason this substrate is worth
+having, so always-on was never really an option.
 
-Scale-to-zero needs "asleep" as a distinct station state and is out of scope.
-Cost of the choice: ~$28/month per always-on 4 GiB station. **This is a burst and
-geography substrate, not the default** — a Hetzner box runs the whole fleet for
-about €46/month.
+**Identity persistence (#245) is what made this tractable.** The blocker was never
+the sleeping; it was that a woken container came back as a *different node*. Now it
+re-enrols and resumes the same `nodeId`, keeping its stations and history.
+
+**Asleep is a distinct runtime status, and the worker reports it.** Cloudflare
+sleeps on its own timer, so without a callback the hub sees only a node that
+stopped heartbeating and cannot tell "idled out" from "died". Reporting a routine
+state as a fault is the failure shape this codebase keeps hitting. The node still
+goes `offline` — correctly, there is no connection — and the sweeper is untouched.
+
+`asleep` stays distinct from `stopped`: one is the substrate idling something out,
+the other is an operator doing it, and an operator needs to know which.
+
+**Explicit wake only.** Automatic wake on demand — any station verb waking a
+sleeping node and retrying — is the better experience and the larger change, since
+it touches the broker's offline path and every caller's latency assumptions.
+
+Even sleeping, this is a burst-and-geography substrate rather than the default: a
+Hetzner box runs the whole fleet for about €46/month.
 
 ## Two lessons from the dead driver, encoded as tests
 
