@@ -52,6 +52,17 @@ import (
 type piDescriptor struct {
 	dataDir    string // absolute path to ~/.pi/agent
 	sessionDir string // absolute path to the sessions directory
+
+	// Host seams, mirroring claudeCodeDescriptor. They are fields so that no
+	// test depends on what the developer happens to have installed: binary
+	// resolution ends in wellKnownBinaryDirs, which probes /opt/homebrew/bin
+	// whatever PATH says, so a machine with a real Pi install made the
+	// "nothing resolves" cases pass for the wrong reason (or fail outright).
+	// Production wiring in NewPi uses the real host.
+	userHome     string                       // OS user home; "" omits home-relative candidates
+	lookPath     func(string) (string, error) // exec.LookPath
+	isExecutable func(string) bool            // isExecutableFile
+	getenv       func(string) string          // os.Getenv
 }
 
 const (
@@ -88,7 +99,17 @@ const (
 // $HOME/.pi/agent, with PI_CODING_AGENT_SESSION_DIR overriding the sessions
 // directory alone.
 func NewPi(dataDir string) Descriptor {
-	p := &piDescriptor{dataDir: dataDir}
+	p := &piDescriptor{
+		dataDir:      dataDir,
+		lookPath:     exec.LookPath,
+		isExecutable: isExecutableFile,
+		getenv:       os.Getenv,
+	}
+	// userHome is "" when it can't be determined, which the binary locator
+	// reads as "skip the home-relative candidates".
+	if home, err := os.UserHomeDir(); err == nil {
+		p.userHome = home
+	}
 	if dataDir == "" {
 		p.dataDir = piDefaultDataDir()
 		p.sessionDir = os.Getenv(piSessionDirEnv)
@@ -148,14 +169,21 @@ func (p *piDescriptor) Detect() ([]Station, error) {
 	// start, so this descriptor does not implement Lifecycle at all.
 	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
 
-	// "acp" is advertised ONLY when the pi-acp adapter actually resolves. The
-	// console gates the Chat tab on this capability alone, so advertising it
-	// unconditionally (as the harnesses with an npx fallback can afford to)
-	// would buy every Pi station a Chat tab that fails the moment it is
-	// clicked. No adapter, no tab. Resolved once here rather than per station:
-	// it is a property of the node, not of the workspace.
-	if _, ok := piACPAdapter(); ok {
-		caps = append(caps, "acp")
+	// "acp" is advertised ONLY when BOTH halves of the chat path resolve: the
+	// pi-acp adapter, and the `pi` it spawns. The console gates the Chat tab on
+	// this capability alone, so advertising it unconditionally (as the harnesses
+	// with an npx fallback can afford to) would buy every Pi station a Chat tab
+	// that fails the moment it is clicked.
+	//
+	// Requiring `pi` too is the 2026-08-12 lesson: the adapter alone was checked,
+	// the tab appeared, and every session died in ~500ms because pi-acp could not
+	// find Pi. A gate that verifies half the chain advertises a capability the
+	// node does not have. Resolved once here rather than per station: both are
+	// properties of the node, not of the workspace.
+	if _, ok := p.acpAdapter(); ok {
+		if _, ok := p.piBinary(); ok {
+			caps = append(caps, "acp")
+		}
 	}
 
 	seen := make(map[string]bool)
@@ -322,7 +350,32 @@ const (
 	piACPBinaryEnv = "PI_ACP_PATH"
 )
 
-// piACPAdapter resolves the pi-acp adapter: the PI_ACP_PATH override (used
+// locator returns the shared executable resolver, wired to this descriptor's
+// host seams.
+func (p *piDescriptor) locator() binaryLocator {
+	return binaryLocator{
+		userHome:     p.userHome,
+		lookPath:     p.lookPath,
+		isExecutable: p.isExecutable,
+	}
+}
+
+// piBinary resolves the `pi` executable: the PI_PATH override (used verbatim),
+// then PATH, then the well-known install directories. It is the ONE place `pi`
+// is resolved — health's process pattern and the ACP session's PATH must agree
+// about which Pi this node has, or one of them is describing a different
+// machine.
+//
+// The well-known-dirs leg is what the LookPath-only version was missing. On the
+// operator's Mac (2026-08-12) `pi` is at /opt/homebrew/bin/pi while the
+// node-agent LaunchAgent runs with PATH=/usr/bin:/bin:/usr/sbin:/sbin, so
+// LookPath found nothing: health reported "process check unavailable" and the
+// ACP adapter was spawned with no way to find Pi at all.
+func (p *piDescriptor) piBinary() (string, bool) {
+	return p.locator().locate("pi", p.getenv(piBinaryEnv))
+}
+
+// acpAdapter resolves the pi-acp adapter: the PI_ACP_PATH override (used
 // verbatim), then PATH, then the well-known install directories — the shared
 // order in binary.go, which exists precisely because a service PATH is not the
 // operator's interactive PATH. NOTHING is hardcoded.
@@ -345,17 +398,8 @@ const (
 // adapter's shebang picks. Compare codexACPMinNodeMajor, which skips the
 // refusal for a related reason; claude-code enforces a floor because it has a
 // configured runtime to enforce it against.
-func piACPAdapter() (string, bool) {
-	userHome, err := os.UserHomeDir()
-	if err != nil {
-		userHome = "" // omits the home-relative candidates
-	}
-	loc := binaryLocator{
-		userHome:     userHome,
-		lookPath:     exec.LookPath,
-		isExecutable: isExecutableFile,
-	}
-	return loc.locate(piACPBinaryName, os.Getenv(piACPBinaryEnv))
+func (p *piDescriptor) acpAdapter() (string, bool) {
+	return p.locator().locate(piACPBinaryName, p.getenv(piACPBinaryEnv))
 }
 
 // ACPCommand implements ACPCommander. argv is the resolved adapter alone: it
@@ -364,16 +408,29 @@ func piACPAdapter() (string, bool) {
 // Health and Cleanup tabs operate on, which is what makes a chat session and
 // the rest of the station agree about which directory they are in.
 //
-// env is nil. Pi's credentials live in ~/.pi/agent/auth.json, which the adapter
-// reaches through Pi itself, so there is nothing to inject — and nothing about
-// a credential belongs in argv (world-readable via ps) or in a child env when
-// the file it already reads will do.
+// env carries ONE variable, PATH, with the directory holding the resolved `pi`
+// prepended to the inherited value. pi-acp spawns `pi --mode rpc` BY NAME, so
+// the adapter's own PATH decides whether a session can start at all — and the
+// node-agent's PATH is not the operator's. Observed live on 2026-08-12: a macOS
+// LaunchAgent with PATH=/usr/bin:/bin:/usr/sbin:/sbin spawned the adapter from
+// /opt/homebrew/bin (found by the well-known-dirs probe, so the capability was
+// advertised) with env=nil; pi-acp could not see /opt/homebrew/bin/pi, exited
+// at once, and the console showed "ACP Connection Closed" while the hub logged
+// a 502 in ~500ms with no acp.* audit row. Prepending rather than replacing is
+// deliberate: the adapter is still a Node program that needs the rest of the
+// host's PATH (this is the same move claude-code makes for its node runtime).
 //
-// Detect gates the "acp" capability on the same resolution, so in practice this
-// error is only reachable if the adapter is removed between a Detect and a
-// session open. It still names the adapter, the install command and the
-// override, because that race lands in the console as a session-open failure
-// and a message with nothing actionable in it wastes the operator's time.
+// No credential is injected. Pi's live in ~/.pi/agent/auth.json, which the
+// adapter reaches through Pi itself, and nothing about a credential belongs in
+// argv (world-readable via ps) or in a child env when the file it already reads
+// will do.
+//
+// Detect gates the "acp" capability on the same two resolutions, so in practice
+// these errors are only reachable if pi or the adapter is removed between a
+// Detect and a session open. They still name the missing binary, the install
+// command and the override, because that race lands in the console as a
+// session-open failure and a message with nothing actionable in it wastes the
+// operator's time.
 func (p *piDescriptor) ACPCommand(key string) ([]string, string, []string, error) {
 	// The station must exist before anything is probed on the host: an unknown
 	// key has no workspace to run in.
@@ -382,13 +439,28 @@ func (p *piDescriptor) ACPCommand(key string) ([]string, string, []string, error
 		return nil, "", nil, err
 	}
 
-	adapter, ok := piACPAdapter()
+	adapter, ok := p.acpAdapter()
 	if !ok {
 		return nil, "", nil, fmt.Errorf(
 			"pi: couldn't find the %s adapter on this node — install it (npm i -g %s) or set %s",
 			piACPBinaryName, piACPPackage, piACPBinaryEnv)
 	}
-	return []string{adapter}, wsPath, nil, nil
+
+	// An adapter that cannot find Pi is not a usable adapter. Failing here, by
+	// name, beats a session that opens and closes with nothing to read.
+	piPath, ok := p.piBinary()
+	if !ok {
+		return nil, "", nil, fmt.Errorf(
+			"pi: found the %s adapter but no `pi` executable for it to drive — install Pi or set %s",
+			piACPBinaryName, piBinaryEnv)
+	}
+	piDir := filepath.Dir(piPath)
+	if abs, err := filepath.Abs(piDir); err == nil {
+		piDir = abs
+	}
+	env := []string{"PATH=" + pathWithDirFirst(piDir, p.getenv("PATH"))}
+
+	return []string{adapter}, wsPath, env, nil
 }
 
 // Health returns a best-effort liveness/resource snapshot for a Pi station.
@@ -409,7 +481,7 @@ func (p *piDescriptor) Health(key string) (Health, error) {
 	// (a node_modules-laden workspace walk can exceed the hub's timeout).
 	health.DiskBytes = diskUsage(wsPath)
 
-	running, note := piProcessRunning()
+	running, note := p.piProcessRunning()
 	health.Running = running
 	if note != "" {
 		health.Note = &note
@@ -435,16 +507,13 @@ func (p *piDescriptor) Health(key string) (Health, error) {
 // differs (npm installs `bin/pi` as a symlink to the package's dist/cli.js, and
 // which one lands in argv depends on how Pi was launched).
 //
-// Resolution order: PI_PATH, then `pi` on PATH. Nothing is hardcoded — the npm
-// prefix is routinely user-local (see piBinaryEnv).
-func piEntryPaths() []string {
-	path := os.Getenv(piBinaryEnv)
-	if path == "" {
-		resolved, err := exec.LookPath("pi")
-		if err != nil {
-			return nil
-		}
-		path = resolved
+// Resolution is piBinary's — PI_PATH, PATH, then the well-known install dirs.
+// Nothing is hardcoded; the npm prefix is routinely user-local (see piBinaryEnv)
+// and a service PATH routinely misses it.
+func (p *piDescriptor) piEntryPaths() []string {
+	path, ok := p.piBinary()
+	if !ok {
+		return nil
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -489,8 +558,8 @@ func piEntryPaths() []string {
 //
 // ok is false when no Pi executable can be resolved at all, which is not a
 // pattern this function may guess at.
-func piProcessPattern() (pattern string, ok bool) {
-	paths := piEntryPaths()
+func (p *piDescriptor) piProcessPattern() (pattern string, ok bool) {
+	paths := p.piEntryPaths()
 	if len(paths) == 0 {
 		return "", false
 	}
@@ -511,8 +580,8 @@ func piProcessPattern() (pattern string, ok bool) {
 // ordinary resting state, so it returns false with NO note. A note is reserved
 // for the cases where the check genuinely could not run — pgrep missing, or no
 // Pi executable to build a safe pattern from.
-func piProcessRunning() (running bool, note string) {
-	pattern, ok := piProcessPattern()
+func (p *piDescriptor) piProcessRunning() (running bool, note string) {
+	pattern, ok := p.piProcessPattern()
 	if !ok {
 		return false, "process check unavailable (no pi executable found; set " + piBinaryEnv + ")"
 	}
