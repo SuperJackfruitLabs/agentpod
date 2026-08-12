@@ -6,9 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // piDescriptor implements Descriptor for the Pi leaf harness
@@ -59,6 +64,20 @@ const (
 	// directory through settings.json under-reports. That is accepted and
 	// documented rather than guessed at.
 	piSessionDirEnv = "PI_CODING_AGENT_SESSION_DIR"
+
+	// piBinaryEnv names the Pi executable explicitly, mirroring CODEX_PATH in
+	// codex.go. It exists because Pi is an npm package and the npm prefix is
+	// frequently user-local: on the fleet host `superchotu` (observed
+	// 2026-08-12) `pi` resolves to /home/openclaw/.npm-global/bin/pi, not to
+	// /usr/local or /opt/homebrew. Hardcoding a location would miss it, and a
+	// node-agent running as a service may have a PATH that misses it too.
+	piBinaryEnv = "PI_PATH"
+
+	// piDebugLogName is Pi's ONLY log file, and it lives beside the data dir
+	// rather than under a station: it is global, not per-workspace. It is also
+	// written only when the hidden /debug command is enabled, so on nearly
+	// every real station it does not exist at all.
+	piDebugLogName = "pi-debug.log"
 )
 
 // NewPi returns a Descriptor for the Pi harness.
@@ -222,25 +241,347 @@ func piCwdFromSessionFile(path string) (string, bool) {
 	return header.Cwd, true
 }
 
-// --- Descriptor surface implemented in a later task ---
+// resolveKey maps a station key back to its workspace path and the session
+// directories recorded against it.
 //
-// Health, ListDir, ReadFile and TailLogs land with the rest of the station
-// capabilities; they are stubbed here only so piDescriptor satisfies
-// Descriptor. Detect does not advertise a capability these would serve before
-// they are real.
+// Resolution re-reads the session headers rather than caching Detect's output:
+// the same source of truth, so a key can never resolve to a workspace Detect
+// would not have produced. Session directories are returned as a slice because
+// Pi writes one per workspace *string*, and two of them can name the same
+// workspace (Detect dedupes those through EvalSymlinks); LastActivity should
+// see every transcript belonging to the station.
+//
+// Unlike Detect, a workspace that no longer exists is NOT filtered out here.
+// Detect already keeps such keys from ever reaching the hub, and letting the
+// underlying os call report "no such file" is a clearer failure than a
+// station-not-found for a station the caller can see.
+func (p *piDescriptor) resolveKey(key string) (wsPath string, sessionDirs []string, err error) {
+	entries, err := os.ReadDir(p.sessionDir)
+	if err != nil && !os.IsNotExist(err) {
+		return "", nil, fmt.Errorf("pi: listing %s: %w", p.sessionDir, err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := filepath.Join(p.sessionDir, e.Name())
+		cwd, ok := piWorkspaceFromSessionDir(dir)
+		if !ok || piProjectKey(cwd) != key {
+			continue
+		}
+		wsPath = cwd
+		sessionDirs = append(sessionDirs, dir)
+	}
+	if wsPath == "" {
+		return "", nil, fmt.Errorf("pi: station not found: %q", key)
+	}
+	return wsPath, sessionDirs, nil
+}
 
+// workspaceForKey returns just the workspace path for a station key.
+func (p *piDescriptor) workspaceForKey(key string) (string, error) {
+	wsPath, _, err := p.resolveKey(key)
+	return wsPath, err
+}
+
+// Health returns a best-effort liveness/resource snapshot for a Pi station.
+//
+// Running is normally FALSE and that is correct, not a fault: Pi has no
+// daemon. It is invoked per command, so a station with nobody currently
+// talking to it has no process at all. Health therefore never treats the
+// absence of a process as an error, and never sets a note for it.
 func (p *piDescriptor) Health(key string) (Health, error) {
-	return Health{}, fmt.Errorf("pi: health %q: not implemented", key)
+	wsPath, sessionDirs, err := p.resolveKey(key)
+	if err != nil {
+		return Health{}, err
+	}
+
+	health := Health{}
+
+	// Disk usage from the shared async cache — never walk on the request path
+	// (a node_modules-laden workspace walk can exceed the hub's timeout).
+	health.DiskBytes = diskUsage(wsPath)
+
+	running, note := piProcessRunning()
+	health.Running = running
+	if note != "" {
+		health.Note = &note
+	}
+
+	// LastActivity: newest transcript mtime across the station's session dirs.
+	var newest time.Time
+	for _, dir := range sessionDirs {
+		if t := newestMtime(dir); t.After(newest) {
+			newest = t
+		}
+	}
+	if !newest.IsZero() {
+		s := newest.UTC().Format(time.RFC3339)
+		health.LastActivity = &s
+	}
+
+	return health, nil
 }
 
+// piEntryPaths returns the absolute paths a running Pi would carry in its
+// command line: the resolved `pi` executable, plus the symlink target when it
+// differs (npm installs `bin/pi` as a symlink to the package's dist/cli.js, and
+// which one lands in argv depends on how Pi was launched).
+//
+// Resolution order: PI_PATH, then `pi` on PATH. Nothing is hardcoded — the npm
+// prefix is routinely user-local (see piBinaryEnv).
+func piEntryPaths() []string {
+	path := os.Getenv(piBinaryEnv)
+	if path == "" {
+		resolved, err := exec.LookPath("pi")
+		if err != nil {
+			return nil
+		}
+		path = resolved
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	paths := []string{abs}
+	if real, err := filepath.EvalSymlinks(abs); err == nil && real != abs {
+		paths = append(paths, real)
+	}
+	return paths
+}
+
+// piProcessPattern builds the pgrep -f pattern that matches a live
+// `pi --mode rpc` process, and nothing else.
+//
+// Three properties, each paid for by a bug:
+//
+//  1. It matches on the RESOLVED ABSOLUTE PATH, never the bare word "pi",
+//     which occurs inside countless unrelated command lines.
+//
+//  2. It requires "--mode rpc" as well. `pgrep -x pi` cannot substitute:
+//     measured on macOS and on Linux (superchotu, 2026-08-12), Pi's `comm` is
+//     "node" — process.title = "pi" does not rewrite comm — so -x matches
+//     nothing and only -f can see the arguments.
+//
+//  3. It is ANCHORED, and allows the path only as the first or second token
+//     (the second covers the `node <pi> --mode rpc` form the shebang produces;
+//     comm is node, so that is the usual shape). This is what defeats the
+//     self-match hazard: `pgrep -f "dist/cli.js"` was observed matching the
+//     very shell that ran it, because that shell's own command line contained
+//     the pattern text. Any process that merely MENTIONS the Pi path — a pgrep
+//     caller, a grep, an editor, a debugging shell — carries it several tokens
+//     deep, past the anchor, so it cannot match. The same class of bug twice
+//     broke opencode health, where the broad "opencode" pattern matched
+//     docker-init's own cmdline and health could never report stopped.
+//
+// The cost is a false negative if Pi is ever launched under an interpreter
+// bearing its own flags (`node --flag <pi> --mode rpc`). That is the cheap
+// direction to be wrong for a daemonless harness whose resting state is
+// already "not running" — the expensive direction is reporting a station busy
+// when nothing is there.
+//
+// ok is false when no Pi executable can be resolved at all, which is not a
+// pattern this function may guess at.
+func piProcessPattern() (pattern string, ok bool) {
+	paths := piEntryPaths()
+	if len(paths) == 0 {
+		return "", false
+	}
+	quoted := make([]string, 0, len(paths))
+	for _, path := range paths {
+		// QuoteMeta's escapes (\. \+ \* \? \( \) \| \[ \] \{ \} \^ \$) are all
+		// valid POSIX ERE, which is the dialect pgrep compiles.
+		quoted = append(quoted, regexp.QuoteMeta(path))
+	}
+	// ^[optional interpreter token] <pi path> <anything> --mode rpc
+	return "^([^[:space:]]+[[:space:]]+)?(" + strings.Join(quoted, "|") +
+		")[[:space:]].*--mode[[:space:]=]+rpc", true
+}
+
+// piProcessRunning reports whether a `pi --mode rpc` process is alive.
+//
+// Best-effort by design. pgrep exiting 1 means "no match", which for Pi is the
+// ordinary resting state, so it returns false with NO note. A note is reserved
+// for the cases where the check genuinely could not run — pgrep missing, or no
+// Pi executable to build a safe pattern from.
+func piProcessRunning() (running bool, note string) {
+	pattern, ok := piProcessPattern()
+	if !ok {
+		return false, "process check unavailable (no pi executable found; set " + piBinaryEnv + ")"
+	}
+	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, "" // no match — normal for a daemonless harness
+		}
+		return false, "process check unavailable (pgrep not found or failed)"
+	}
+	return strings.TrimSpace(string(out)) != "", ""
+}
+
+// ListDir lists the directory at rel within the station's workspace.
+// Paths that escape the workspace via ".." are rejected.
 func (p *piDescriptor) ListDir(key, rel string) ([]FsEntry, error) {
-	return nil, fmt.Errorf("pi: ListDir %q: not implemented", key)
+	wsPath, err := p.workspaceForKey(key)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := safeJoin(wsPath, rel)
+	if err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(target)
+	if err != nil {
+		return nil, fmt.Errorf("pi: ListDir %q: %w", target, err)
+	}
+
+	result := make([]FsEntry, 0, len(entries))
+	for _, entry := range entries {
+		fsEntry := FsEntry{
+			Name: entry.Name(),
+			Path: filepath.Join(rel, entry.Name()),
+		}
+		switch {
+		case entry.Type()&fs.ModeSymlink != 0:
+			fsEntry.Type = "symlink"
+		case entry.IsDir():
+			fsEntry.Type = "dir"
+		default:
+			fsEntry.Type = "file"
+			if info, err := entry.Info(); err == nil {
+				sz := info.Size()
+				fsEntry.Size = &sz
+				mod := info.ModTime().UTC().Format(time.RFC3339)
+				fsEntry.Modified = &mod
+			}
+		}
+		result = append(result, fsEntry)
+	}
+	return result, nil
 }
 
+// ReadFile reads up to maxBytes from rel within the station's workspace.
+// maxBytes+1 bytes are requested so that a file exactly filling the budget is
+// distinguishable from one that overflows it.
 func (p *piDescriptor) ReadFile(key, rel string, maxBytes int64) ([]byte, string, bool, error) {
-	return nil, "", false, fmt.Errorf("pi: ReadFile %q: not implemented", key)
+	wsPath, err := p.workspaceForKey(key)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	target, err := safeJoin(wsPath, rel)
+	if err != nil {
+		return nil, "", false, err
+	}
+
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxBytes
+	}
+
+	f, err := os.Open(target)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("pi: ReadFile %q: %w", target, err)
+	}
+	defer f.Close()
+
+	buf := make([]byte, maxBytes+1)
+	n, err := io.ReadFull(f, buf)
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return nil, "", false, fmt.Errorf("pi: ReadFile read %q: %w", target, err)
+	}
+
+	truncated := int64(n) > maxBytes
+	if truncated {
+		n = int(maxBytes)
+	}
+	return buf[:n], "", truncated, nil
 }
 
+// TailLogs emits <dataDir>/pi-debug.log, Pi's single global log file.
+//
+// The file is usually ABSENT (it is written only with the hidden /debug
+// enabled), which makes Pi the worst case for the 2026-08-09 dogfooding bug:
+// follow mode with zero log files returned immediately, the hub closed the
+// SSE, and the console's Logs tab retry-looped into "Disconnected". Follow mode
+// therefore blocks in waitForLogFiles until the file appears or ctx is done.
+// One-shot mode with no file emits nothing and returns nil — not an error.
 func (p *piDescriptor) TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error {
-	return fmt.Errorf("pi: TailLogs %q: not implemented", key)
+	// Validate the key resolves to a known station.
+	if _, err := p.workspaceForKey(key); err != nil {
+		return err
+	}
+
+	logPath := filepath.Join(p.dataDir, piDebugLogName)
+	collect := func() []string {
+		if info, err := os.Stat(logPath); err == nil && !info.IsDir() {
+			return []string{logPath}
+		}
+		return nil
+	}
+
+	if !follow {
+		return emitLastNLines(collect(), tailDefaultN, tailMaxBytes, emit)
+	}
+
+	logFiles := waitForLogFiles(ctx, collect)
+	if err := emitLastNLines(logFiles, tailDefaultN, tailMaxBytes, emit); err != nil {
+		return err
+	}
+
+	var offset int64
+	if info, err := os.Stat(logPath); err == nil {
+		offset = info.Size()
+	}
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			n, err := emitLogFileFrom(logPath, offset, emit)
+			if err != nil {
+				continue
+			}
+			offset += n
+		}
+	}
+}
+
+// CleanPlan returns the cleanable items for a Pi station.
+//
+// The candidate-directory list is deliberately EMPTY. Every other descriptor
+// names directories (".cache", "tmp", …) that were observed to be caches on a
+// real machine; no Pi cache directory has been. A guessed entry here is a path
+// the console invites a user to delete, so the list stays empty until an
+// observation justifies widening it — the honest plan is the one that offers
+// nothing rather than the one that offers a plausible-looking source
+// directory. cleanPlanCommon still offers *.log files at the workspace root,
+// which is its generic behaviour for all harnesses and not a Pi-specific
+// claim.
+func (p *piDescriptor) CleanPlan(key string) ([]CleanItem, error) {
+	wsPath, err := p.workspaceForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return cleanPlanCommon(wsPath, nil)
+}
+
+// CleanApply removes selected cleanable paths from the Pi workspace. Paths are
+// re-jailed to the workspace AND intersected with the current plan, so an
+// off-plan path is silently skipped rather than removed.
+func (p *piDescriptor) CleanApply(key string, paths []string) (int64, error) {
+	wsPath, err := p.workspaceForKey(key)
+	if err != nil {
+		return 0, err
+	}
+	plan, err := p.CleanPlan(key)
+	if err != nil {
+		return 0, err
+	}
+	return cleanApplyCommon(wsPath, paths, plan)
 }
