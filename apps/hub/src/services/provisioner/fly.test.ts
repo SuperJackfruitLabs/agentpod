@@ -10,6 +10,7 @@ import { describe, it, expect } from "bun:test";
 import { noPacer } from "./fly-api";
 import {
   FlyMachinesProvisioner,
+  flyStateToRuntimeState,
   formatFlyExternalId,
   parseFlyExternalId,
 } from "./fly";
@@ -563,6 +564,151 @@ describe("FlyMachinesProvisioner — stop", () => {
 
     expect(urls.some((u) => u.includes("/stop"))).toBe(true);
     expect(urls.find((u) => u.includes("/wait"))).not.toContain("instance_id");
+  });
+});
+
+describe("FlyMachinesProvisioner — status", () => {
+  it("reads the machine and reports what Fly says", async () => {
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    expect(await driver.status(externalId)).toBe("running");
+
+    fake.apps.get(app)!.machines.get(machineId)!.state = "stopped";
+    expect(await driver.status(externalId)).toBe("stopped");
+  });
+
+  it("reports a machine caught MID-STOP as unknown, not stopped", async () => {
+    // The one that matters. #260/#261 shipped because `stopped` was written on a
+    // call returning rather than on evidence; status() is the evidence, so a
+    // status() that rounded `stopping` to `stopped` would reintroduce that bug
+    // one layer down, where the hub's evidence check cannot see it.
+    //
+    // The fake's POST .../stop settles synchronously and so cannot produce this
+    // transient (fly-fake-substrate.ts says as much); the state is set on the map
+    // directly, which is that file's documented way to exercise one.
+    //
+    // This asserts the WIRING, not the mapping: a status() that inlined
+    // `body.state === "stopped"` would pass every flyStateToRuntimeState test
+    // below and still hand stopRuntime a confirmed stop for a machine that is
+    // still shutting down.
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    fake.apps.get(app)!.machines.get(machineId)!.state = "stopping";
+    expect(await driver.status(externalId)).toBe("unknown");
+  });
+
+  it("reports a machine Fly has forgotten as stopped", async () => {
+    // A machine that does not exist is not running and cannot be billing —
+    // the same answer the Docker driver gives for a container the daemon has no
+    // record of. This is a real answer, not a guess.
+    const { driver } = flyDriver();
+    expect(await driver.status("agentpod-gone/machine-gone")).toBe("stopped");
+  });
+
+  it("throws when Fly cannot be reached at all", async () => {
+    // Not "unknown": a driver that cannot reach its substrate must say so, and
+    // the service layer degrades a throw to `unknown` itself rather than
+    // letting a network failure be laundered into an answer here.
+    const impl = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.status("app-x/machine-y")).rejects.toThrow(/fetch failed/);
+  });
+
+  it("PROPAGATES every Fly failure that is not a 404", async () => {
+    // 404 is the only status that is an answer, and this is what keeps the
+    // tolerance one status wide — a bare `catch { return "stopped" }` passes the
+    // 404 test above and fails only here.
+    //
+    // 401 is the case that would hurt most: an expired FLY_API_TOKEN would
+    // otherwise report every Fly runtime in the fleet as stopped at once, and
+    // the hub would believe it and write it. 429 is Fly's rate limit, which this
+    // driver's own pacer exists because of, and 500 is Fly having a bad day.
+    // None of the three is evidence that anything stopped.
+    for (const status of [401, 429, 500]) {
+      const impl = (async () =>
+        new Response(JSON.stringify({ error: `fly said ${status}` }), {
+          status,
+        })) as unknown as typeof globalThis.fetch;
+
+      const driver = new FlyMachinesProvisioner({
+        credentials: { get: () => "fly-token" },
+        fetchImpl: impl,
+        pacer: noPacer,
+      });
+      await expect(driver.status("app-x/machine-y")).rejects.toThrow(
+        new RegExp(`fly said ${status}`)
+      );
+    }
+  });
+});
+
+describe("flyStateToRuntimeState", () => {
+  it("treats anything holding compute as running", () => {
+    // `starting` and `replacing` are billing. The one thing no driver may ever
+    // do is guess `stopped`, because the hub turns that into a claim an
+    // operator reads as "this has stopped costing me money".
+    expect(flyStateToRuntimeState("started")).toBe("running");
+    expect(flyStateToRuntimeState("starting")).toBe("running");
+    expect(flyStateToRuntimeState("replacing")).toBe("running");
+  });
+
+  it("treats anything that has finished releasing compute as stopped", () => {
+    expect(flyStateToRuntimeState("stopped")).toBe("stopped");
+    // Suspended executes nothing: the guest is a memory snapshot on disk, woken
+    // by the same POST .../start this driver already uses for a stopped machine.
+    // The storage it holds is not the discriminator — a `stopped` Fly machine
+    // holds a rootfs and this driver's 3 GB volume, which bill for as long as
+    // the app exists. `stopped` on Fly has never meant "costing nothing";
+    // destroy() is what means that. Compute is the axis, and on that axis a
+    // suspended machine is down.
+    expect(flyStateToRuntimeState("suspended")).toBe("stopped");
+    expect(flyStateToRuntimeState("destroyed")).toBe("stopped");
+  });
+
+  it("refuses to round a transitional state to an answer", () => {
+    // Mid-flight, and not an answer. A `stopping` machine HAS NOT STOPPED, and
+    // saying it has is exactly the bug #260/#261 fixed. The sweeper asks again
+    // on the next tick and only reports a problem if it is still unanswered five
+    // minutes later, so `unknown` costs a tick and buys the truth.
+    expect(flyStateToRuntimeState("stopping")).toBe("unknown");
+    expect(flyStateToRuntimeState("suspending")).toBe("unknown");
+    expect(flyStateToRuntimeState("destroying")).toBe("unknown");
+    expect(flyStateToRuntimeState("restarting")).toBe("unknown");
+    expect(flyStateToRuntimeState("updating")).toBe("unknown");
+    // `created` means allocated but never run. This driver always starts what
+    // it creates, so seeing it means something happened that we did not do —
+    // which is exactly when a confident answer is worth least.
+    expect(flyStateToRuntimeState("created")).toBe("unknown");
+  });
+
+  it("refuses to round a terminal state whose resource story is unclear", () => {
+    // `failed` may or may not be about to be restarted — this driver sets
+    // restart.policy "always", so a failed machine is one Fly has given up
+    // restarting, and whether anything is still allocated for it is not
+    // something the probes established. `replaced` and `migrated` mean this
+    // machine's work moved elsewhere, which says nothing about whether the
+    // elsewhere is running. Guessing on any of the three would be guessing
+    // about money.
+    expect(flyStateToRuntimeState("failed")).toBe("unknown");
+    expect(flyStateToRuntimeState("replaced")).toBe("unknown");
+    expect(flyStateToRuntimeState("migrated")).toBe("unknown");
+  });
+
+  it("says unknown for a state Fly adds later", () => {
+    expect(flyStateToRuntimeState("hibernating")).toBe("unknown");
+    expect(flyStateToRuntimeState(undefined)).toBe("unknown");
+    expect(flyStateToRuntimeState(42)).toBe("unknown");
   });
 });
 

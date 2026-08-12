@@ -114,6 +114,72 @@ export function flyAppNameFor(prefix: string, runtimeId: string): string {
   return `${prefix}-${slug}`;
 }
 
+/**
+ * Fly's machine states, mapped to the three answers the hub understands.
+ *
+ * This mapping is load-bearing in a way most mappings are not: the hub writes
+ * the runtime status `stopped` ONLY on what status() reports, and an operator
+ * reads that word as "it has stopped costing me money". #260/#261 shipped on
+ * 2026-08-13 because stopRuntime wrote `stopped` merely because the provisioner
+ * call returned; a careless line here would reintroduce exactly that bug one
+ * layer down, where the hub's evidence check cannot see it. So the line is drawn
+ * on whether the machine is holding COMPUTE, not on whether the word sounds
+ * final:
+ *
+ *   started, starting, replacing            → running
+ *     All three have a guest allocated and billing. `starting` and `replacing`
+ *     are transients, and transients toward *up* are safe to call running: the
+ *     expensive mistake is only ever in the other direction.
+ *
+ *   stopped, suspended, destroyed           → stopped
+ *     None of the three executes anything. `destroyed` is the same answer a 404
+ *     gets below — a machine Fly no longer has cannot be running.
+ *
+ *     `suspended` is the one worth arguing about, because a suspended machine
+ *     does still hold storage: Fly snapshots the guest's memory to disk. But
+ *     storage cannot be the discriminator here, because a `stopped` Fly machine
+ *     holds storage too — its rootfs, and in this driver's case the 3 GB volume
+ *     that bills for as long as the app exists. `stopped` on this substrate has
+ *     never meant "costing nothing"; destroy() is what means that. On the axis
+ *     the hub is actually asking about, a suspended machine is down and is woken
+ *     by the same POST .../start a stopped one is. Reporting it `running` would
+ *     show the console a live station whose node-agent has been gone since the
+ *     snapshot.
+ *
+ *   everything else                         → unknown
+ *     `stopping`, `suspending`, `destroying`, `restarting`, `updating` are
+ *     MID-FLIGHT. A stopping machine has not stopped, and claiming it has is
+ *     precisely today's bug. `unknown` is the honest answer and the hub is built
+ *     for it: sweepStalledRuntimeStops leaves the runtime `stopping` and asks
+ *     again next tick, and only calls it an error after five minutes — it never
+ *     asserts on an unanswered probe.
+ *
+ *     `created` means allocated but never run. This driver always starts what it
+ *     creates, so seeing it means something happened that we did not do, which
+ *     is exactly when a confident answer is worth least.
+ *
+ *     `failed`, `replaced` and `migrated` are terminal but their resource story
+ *     is not settled: this driver sets restart.policy "always", and none of the
+ *     2026-08-12 probes established what remains allocated in any of the three.
+ *     An unmeasured guess about money is not an answer.
+ *
+ *     A state Fly adds next year lands here too, which is the safe place for it.
+ */
+export function flyStateToRuntimeState(state: unknown): RuntimeState {
+  switch (state) {
+    case "started":
+    case "starting":
+    case "replacing":
+      return "running";
+    case "stopped":
+    case "suspended":
+    case "destroyed":
+      return "stopped";
+    default:
+      return "unknown";
+  }
+}
+
 // ─── Driver ───────────────────────────────────────────────────────────────────
 
 export interface FlyMachinesOptions {
@@ -511,7 +577,41 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
       : undefined;
   }
 
-  async status(_externalId: string): Promise<RuntimeState> {
-    throw new Error("fly: status() is not implemented yet");
+  /**
+   * Ask Fly whether this machine is actually running.
+   *
+   * This is the ONLY evidence behind a `stopped` runtime on this substrate:
+   * stopRuntime writes `stopping` and confirms `stopped` on nothing but what
+   * this returns. The mapping from Fly's word to that answer is deliberate and
+   * documented on flyStateToRuntimeState — read it before changing a case.
+   *
+   * A 404 is reported `stopped`, and that is a real answer rather than a shrug:
+   * a machine Fly has no record of is not running and cannot be billing, the
+   * same answer the Docker driver gives for a container the daemon forgot.
+   * Telling it apart from a transport failure is only possible because
+   * FlyApiError carries `status`.
+   *
+   * EVERYTHING ELSE THROWS, and the narrowness is the point. An expired
+   * FLY_API_TOKEN 401s on every machine at once; a rate limit answers 429; Fly
+   * having a bad day answers 500; the network answers with no status at all.
+   * None of those is evidence that anything stopped, and a driver that folded
+   * them into `stopped` would report the whole fleet as having stopped costing
+   * money at the moment it lost the ability to look. The service layer catches
+   * the throw and degrades it to `unknown` itself (probeState in
+   * ../runtimes.ts, which logs the failure), so a probe that could not be
+   * answered stays visible instead of being laundered into an answer here.
+   */
+  async status(externalId: string): Promise<RuntimeState> {
+    const { app, machineId } = parseFlyExternalId(externalId);
+    try {
+      const { body } = await this.request(
+        "GET",
+        `/v1/apps/${app}/machines/${machineId}`
+      );
+      return flyStateToRuntimeState(body.state);
+    } catch (err) {
+      if (err instanceof FlyApiError && err.status === 404) return "stopped";
+      throw err;
+    }
   }
 }
