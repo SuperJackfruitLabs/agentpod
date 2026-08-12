@@ -53,6 +53,18 @@ afterEach(cleanup);
 
 const createdAt = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5 min ago
 
+/** What the hub's registry reports for the Docker driver. */
+const DOCKER_MANIFEST: api.DriverManifest = {
+  provider: "docker",
+  supportedTiers: ["small", "medium", "large"],
+  workspaceStorage: "rootfs",
+  stopSemantics: "resumable",
+  maxLifetimeMs: null,
+  imageBinding: "per-instance",
+  idleBehaviour: "never",
+  lifecycle: ["start", "stop", "status"],
+};
+
 const mockRuntimes = [
   {
     id: "rt-aaa111",
@@ -88,7 +100,10 @@ const mockRuntimes = [
 
 test("renders the Runtimes page header", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { container } = render(RuntimesPage);
 
@@ -99,7 +114,10 @@ test("renders the Runtimes page header", async () => {
 
 test("renders runtime rows with name, provider, and status after loading", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getAllByTestId, getByText } = render(RuntimesPage);
 
@@ -118,7 +136,10 @@ test("renders runtime rows with name, provider, and status after loading", async
 
 test("shows provider in each row", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getByText } = render(RuntimesPage);
 
@@ -130,7 +151,10 @@ test("shows provider in each row", async () => {
 
 test("Node column links to the node when present, shows a dash otherwise", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getAllByTestId, getByText } = render(RuntimesPage);
 
@@ -149,7 +173,10 @@ test("Node column links to the node when present, shows a dash otherwise", async
 
 test("shows a Created column with relative time for each row", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getAllByText, getAllByTestId } = render(RuntimesPage);
 
@@ -163,7 +190,10 @@ test("shows a Created column with relative time for each row", async () => {
 
 test("shows Stop button for online runtime and Start button for stopped runtime", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getAllByTestId } = render(RuntimesPage);
 
@@ -177,7 +207,10 @@ test("shows Stop button for online runtime and Start button for stopped runtime"
 
 test("shows Destroy buttons for non-provisioning, non-destroyed runtimes", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getAllByTestId } = render(RuntimesPage);
 
@@ -189,7 +222,10 @@ test("shows Destroy buttons for non-provisioning, non-destroyed runtimes", async
 
 test("clicking Destroy opens type-to-confirm dialog; typing the runtime name and confirming calls destroyRuntime", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue(mockRuntimes);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
   const destroySpy = vi.spyOn(api, "destroyRuntime").mockResolvedValue(undefined);
 
   const { getAllByTestId } = render(RuntimesPage);
@@ -234,7 +270,10 @@ test("clicking Destroy opens type-to-confirm dialog; typing the runtime name and
 
 test("shows empty state when listRuntimes returns []", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue([]);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getByTestId } = render(RuntimesPage);
 
@@ -246,7 +285,10 @@ test("shows empty state when listRuntimes returns []", async () => {
 
 test("shows empty state CTA button", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue([]);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getByTestId } = render(RuntimesPage);
 
@@ -258,7 +300,10 @@ test("shows empty state CTA button", async () => {
 
 test("shows error message when listRuntimes rejects", async () => {
   vi.spyOn(api, "listRuntimes").mockRejectedValue(new Error("network error"));
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   const { getByText } = render(RuntimesPage);
 
@@ -269,7 +314,10 @@ test("shows error message when listRuntimes rejects", async () => {
 
 test("calls listRuntimes on mount", async () => {
   const spy = vi.spyOn(api, "listRuntimes").mockResolvedValue([]);
-  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({ providers: ["docker"] });
+  vi.spyOn(api, "listRuntimeProviders").mockResolvedValue({
+    providers: ["docker"],
+    manifests: [DOCKER_MANIFEST],
+  });
 
   render(RuntimesPage);
 

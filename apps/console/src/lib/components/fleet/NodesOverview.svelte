@@ -3,7 +3,7 @@
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { replaceState } from "$app/navigation";
-  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, getFleet } from "$lib/api/client";
+  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, getFleet, type DriverManifest } from "$lib/api/client";
   import { toast } from "svelte-sonner";
   import type { NodeSummary, ProvisionedRuntime, FleetAgent } from "@agentpod/contract";
   import * as Table from "$lib/components/ui/table";
@@ -48,7 +48,7 @@
   // Runtime provisioning state
   let runtimes = $state<ProvisionedRuntime[]>([]);
   let providers = $state<string[]>(["docker", "cloudflare"]);
-  let capabilities = $state<Array<{ provider: string; tiers: string[] }>>([]);
+  let manifests = $state<DriverManifest[]>([]);
   let showNewRuntimeDialog = $state(false);
 
   // Provisioning runtimes: status==="provisioning" with no matching online node yet
@@ -107,7 +107,7 @@
       try {
         const res = await listRuntimeProviders();
         if (res.providers.length > 0) providers = res.providers;
-        if (res.capabilities) capabilities = res.capabilities;
+        if (res.manifests) manifests = res.manifests;
       } catch {
         // keep fallback ["docker", "cloudflare"]
       }
@@ -415,7 +415,7 @@
 <NewRuntimeDialog
   open={showNewRuntimeDialog}
   {providers}
-  {capabilities}
+  {manifests}
   onClose={() => (showNewRuntimeDialog = false)}
   onCreated={handleRuntimeCreated}
 />

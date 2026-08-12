@@ -61,6 +61,19 @@ const fakeCalls: {
 
 const fakeDockerProvisioner: RuntimeProvisioner = {
   provider: "docker",
+  // Declares what this fake actually implements: provision, destroy and start,
+  // but deliberately no stop — hence `lifecycle: ["start"]`, which keeps the
+  // declaration honest about the 400-unsupported path the tests below exercise.
+  manifest: {
+    provider: "docker",
+    workspaceStorage: "rootfs",
+    stopSemantics: "resumable",
+    maxLifetimeMs: null,
+    imageBinding: "per-instance",
+    supportedTiers: ["small", "medium", "large"],
+    idleBehaviour: "never",
+    lifecycle: ["start"],
+  },
   async provision(spec) {
     fakeCalls.provision.push(spec);
     return { externalId: `fake-container-${spec.runtimeId}` };
@@ -206,6 +219,31 @@ test("POST /api/runtimes with disabled provider → 400", async () => {
   expect(res.status).toBe(400);
 });
 
+test("POST /api/runtimes with a provider no driver registered → 400, and nothing is written", async () => {
+  // The contract no longer carries an enum of provider names, so "fly" now
+  // reaches the hub instead of being bounced by zod. That must not widen what
+  // the hub accepts: the registry is the authority, and a name it does not know
+  // is refused BEFORE a runtime row, an enrolment token or a driver call
+  // exists. If this ever returns 201, or leaves a row behind, the validation
+  // that used to live in the enum has been lost rather than moved.
+  const res = await testApp.request("/api/runtimes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Test-User-Id": TEST_USER,
+      "Host": "localhost:3001",
+    },
+    body: JSON.stringify({ provider: "fly", name: "fly-box" }),
+  });
+  expect(res.status).toBe(400);
+
+  const rows = await db
+    .select()
+    .from(provisionedRuntimes)
+    .where(eq(provisionedRuntimes.provider, "fly"));
+  expect(rows).toHaveLength(0);
+});
+
 test("GET /api/runtimes → only the caller's runtimes", async () => {
   // Create one runtime for TEST_USER and one for OTHER_USER
   await createRuntime(TEST_USER, "user1-box");
@@ -254,9 +292,18 @@ test("GET /api/runtimes/providers → lists enabled providers", async () => {
     headers: { "X-Test-User-Id": TEST_USER },
   });
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { providers: string[] };
+  const body = (await res.json()) as {
+    providers: string[];
+    manifests: { provider: string; supportedTiers: string[] }[];
+  };
   expect(Array.isArray(body.providers)).toBe(true);
   expect(body.providers).toContain("docker");
+  // `providers` and `manifests` are served together because the hub and the
+  // console deploy separately: the deployed console still reads `providers`,
+  // so removing it the moment the hub learned manifests would blank the New
+  // Runtime dialog until the console caught up.
+  const docker = body.manifests.find((m) => m.provider === "docker");
+  expect(docker?.supportedTiers).toEqual(["small", "medium", "large"]);
 }, 15_000);
 
 test("DELETE /api/runtimes/:id → fake destroy() called, status destroyed", async () => {

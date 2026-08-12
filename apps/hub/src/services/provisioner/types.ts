@@ -5,7 +5,18 @@
  * that auto-enroll into the fleet via one-time enrollment tokens.
  */
 
-export type RuntimeProviderName = "docker" | "cloudflare";
+/**
+ * A provider name. Deliberately not a union.
+ *
+ * The union it replaces (`"docker" | "cloudflare"`) meant a new driver could
+ * not be *named* without editing the contract, this file and the console — and
+ * the compiler could not tell you which of the two names in the literal set was
+ * actually usable, because that depends on what is registered and enabled at
+ * runtime, not on what someone typed here. Validity is now answered by the
+ * registry: `getProvisioner` refuses a name no driver registered, and
+ * `isProviderEnabled` refuses one this deployment has not turned on.
+ */
+export type RuntimeProviderName = string;
 
 /** Resource tier controlling CPU/memory allocation. */
 export type ResourceTier = "small" | "medium" | "large";
@@ -45,9 +56,110 @@ export interface ProvisionSpec {
 export type RuntimeState = "running" | "stopped" | "unknown";
 
 /**
+ * What a driver declares about its substrate, before anyone runs it.
+ *
+ * Every field here exists because its absence already cost something. The
+ * interface this replaces was designed around Docker — the one substrate whose
+ * disk survives a stop, whose image is chosen per container, and which never
+ * reaps anything for being idle. Each of those Docker-shaped assumptions was
+ * discovered to be wrong only in production, on a substrate that did not share
+ * it. Declaring them makes the next substrate's differences a compile-time
+ * question instead of an incident.
+ *
+ * The manifest is REQUIRED on every driver, so omitting one does not compile.
+ */
+export interface DriverManifest {
+  /**
+   * Stable provider name.
+   *
+   * Replaces the hardcoded RuntimeProviderName union: a fifth driver should not
+   * require an edit in the contract, the hub and the console just to be named.
+   */
+  readonly provider: string;
+
+  /**
+   * Where a station's workspace actually survives, if anywhere.
+   *
+   * Deliberately not a boolean. "Is the disk persistent?" is a question that
+   * flatters Docker and hides the interesting part; three of the four surveyed
+   * substrates destroy the workspace on the rootfs, and each answers with a
+   * different mechanism — a volume, an external archive (our R2 snapshots), or
+   * nothing at all. The R2 machinery built for Cloudflare is the general case,
+   * not the exception.
+   */
+  readonly workspaceStorage: "rootfs" | "volume" | "external-archive";
+
+  /**
+   * Does stop→start preserve the instance, or is stop the end of it?
+   *
+   * THE field. Had it been required, the Cloudflare workspace loss would have
+   * been a compile-time question rather than a production discovery: a
+   * container whose disk is wiped on sleep, found out when a user's file
+   * vanished. The interface had no way to say "my disk does not survive", so
+   * nobody was ever made to think about it. An author forced to type
+   * "terminal" here has to answer, at that moment, what happens to the files.
+   */
+  readonly stopSemantics: "resumable" | "terminal";
+
+  /**
+   * Platform-imposed ceiling after which the substrate destroys a healthy
+   * runtime, regardless of what it is doing. `null` means no such ceiling.
+   *
+   * Modal's hard 24-hour sandbox lifetime is the case in point: a limit that is
+   * invisible in every test short enough to run in CI, and fatal to a long-lived
+   * station.
+   */
+  readonly maxLifetimeMs: number | null;
+
+  /**
+   * Can ProvisionSpec.image be honoured per instance, or is it fixed at deploy
+   * time?
+   *
+   * Cloudflare's image is baked into the worker at deploy, and the driver
+   * silently ignored spec.image until someone noticed the wrong harness had
+   * booted. Declaring it turns a hand-written refusal into an enforced one.
+   */
+  readonly imageBinding: "per-instance" | "fixed";
+
+  /**
+   * Tiers this driver can actually satisfy.
+   *
+   * resourceTier used to be dropped on the floor by drivers that could not vary
+   * sizing — Cloudflare fixes instance_type per class at worker deploy time.
+   * The console builds its tier list from this rather than a hardcoded map that
+   * rots the moment a worker is redeployed at a different instance type.
+   */
+  readonly supportedTiers: readonly ResourceTier[];
+
+  /**
+   * Who sleeps an idle runtime, and on what signal.
+   *
+   * "platform-inbound" is the trap: platforms that key idleness on INBOUND
+   * activity read our fleet as idle while it is busy, because the node-agent
+   * dials out and receives nothing. That is what tore down Cloudflare sandboxes
+   * mid-work, and it is why Fly Sprites were ruled out. "hub-driven" means the
+   * hub decides; "never" means the substrate reaps nothing on its own.
+   */
+  readonly idleBehaviour: "never" | "platform-inbound" | "hub-driven";
+
+  /**
+   * Lifecycle verbs beyond provision/destroy that this driver implements.
+   *
+   * These are optional methods on RuntimeProvisioner, which until now were
+   * discovered by reading other drivers. `status` in particular is the ONLY
+   * evidence the hub has for writing `stopped` — a substrate that cannot answer
+   * must say so here rather than have its silence read as confirmation.
+   */
+  readonly lifecycle: readonly ("start" | "stop" | "status")[];
+}
+
+/**
  * Implemented by each driver (docker, cloudflare) to create/manage runtimes.
  */
 export interface RuntimeProvisioner {
+  /** What this driver declares about its substrate. Required: see DriverManifest. */
+  readonly manifest: DriverManifest;
+
   readonly provider: RuntimeProviderName;
 
   /**

@@ -4,7 +4,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Button } from "$lib/components/ui/button";
   import { Field } from "$lib/components/ui/field";
-  import { provisionRuntime } from "$lib/api/client";
+  import { provisionRuntime, type DriverManifest } from "$lib/api/client";
 
   // Select components report their value as `string | string[]`; every
   // Select.Root here uses type="single", so coerce back to a plain string
@@ -16,25 +16,30 @@
     open: boolean;
     providers: string[];
     /**
-     * Which tiers each provider can actually satisfy. Read from the hub rather
-     * than hardcoded here: Cloudflare fixes instance_type at worker deploy
-     * time, and a map baked into the UI would rot the moment a worker is
-     * redeployed at a different instance type.
+     * What each provider's driver declares about itself, straight from the
+     * hub's registry. The form is built from these rather than from anything
+     * hardcoded here: Cloudflare fixes instance_type at worker deploy time, so
+     * a tier map baked into the UI would rot the moment a worker is redeployed
+     * at a different instance type — and a provider this file has never heard
+     * of must still get a usable form.
      */
-    capabilities?: Array<{ provider: string; tiers: string[] }>;
+    manifests?: DriverManifest[];
     onClose: () => void;
     onCreated?: () => void;
   }
 
-  let { open, providers, capabilities = [], onClose, onCreated }: Props = $props();
+  let { open, providers, manifests = [], onClose, onCreated }: Props = $props();
 
-  const ALL_TIERS = ["small", "medium", "large"];
+  // Fallback for a hub too old to report manifests. Only the tiers that every
+  // driver in that era supported, so an unreported provider cannot be offered
+  // a tier its driver will refuse.
+  const FALLBACK_TIERS = ["small"];
 
   // Only the tiers the selected provider can satisfy. Offering one it cannot
   // means the driver refuses the request and the user sees a backend error for
   // a choice the form invited them to make.
   const tiers = $derived(
-    capabilities.find((c) => c.provider === provider)?.tiers ?? ALL_TIERS,
+    manifests.find((m) => m.provider === provider)?.supportedTiers ?? FALLBACK_TIERS,
   );
   const harnessOptions = [
     { value: "none", label: "Generic" },

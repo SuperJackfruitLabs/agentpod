@@ -5,8 +5,10 @@
  * agentpod-node. The container dials the hub outbound and enrols itself, so this
  * driver's only job is lifecycle.
  *
- * Replaces the dead OpenCode-era driver in `cloudflare.ts`. The lesson carried
- * over from it: **every response is validated**. That driver documented an
+ * Replaced the dead OpenCode-era driver `cloudflare.ts`, deleted 2026-08-12 when
+ * the manifest became required and there was nothing true to declare for a
+ * driver that had never provisioned anything. The lesson carried over from it:
+ * **every response is validated**. That driver documented an
  * ASSUMPTION about the worker's contract and never checked it, so a 2xx with the
  * wrong body would have produced a runtime stuck in `provisioning` with no error
  * logged anywhere.
@@ -20,6 +22,7 @@ import type {
   ProvisionSpec,
   ResourceTier,
   RuntimeState,
+  DriverManifest,
 } from "./types";
 
 export interface CloudflareSandboxOptions {
@@ -56,6 +59,16 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
    */
   readonly supportedTiers: ResourceTier[];
 
+  /**
+   * Everything below is something this driver already enforces by hand; the
+   * manifest only says it out loud, where the hub can read it before a
+   * provision rather than after an incident.
+   *
+   * Assigned in the constructor, not as a field initialiser, because
+   * `supportedTiers` is not knowable until `deployedTier` is.
+   */
+  readonly manifest: DriverManifest;
+
   private readonly workerUrl: string;
   private readonly apiToken: string;
   private readonly deployedImage: string;
@@ -79,6 +92,44 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
     this.deployedTier = deployedTier;
     this.supportedTiers = [deployedTier as ResourceTier];
     this.fetchImpl = fetchImpl;
+
+    this.manifest = {
+      provider: "cloudflare",
+      // The container disk does NOT survive a sleep. The workspace lives only
+      // because `snapshot-wrapper.sh` archives it to R2 on SIGTERM and restores
+      // it on boot. This field is the one the interface could not previously
+      // express, and its absence is what cost a user their work: a driver whose
+      // rootfs is wiped looked identical to Docker's, whose rootfs is not.
+      workspaceStorage: "external-archive",
+      // start() and stop() below map to real worker routes and the same sandbox
+      // id comes back afterwards. "resumable" is about the INSTANCE, not the
+      // disk — the disk is covered by workspaceStorage above, and the two
+      // differ here precisely because the R2 archive is what bridges them.
+      stopSemantics: "resumable",
+      // Cloudflare imposes no ceiling on how long a sandbox may exist; what it
+      // imposes is the idle timer, declared below. A container that keeps being
+      // touched is never destroyed for age.
+      maxLifetimeMs: null,
+      // wrangler.toml bakes `image` into the worker at deploy time, so
+      // spec.image cannot be honoured per instance — provision() refuses a
+      // differing image rather than quietly booting the wrong harness.
+      imageBinding: "fixed",
+      // Derived, never hardcoded: provision() refuses any tier but
+      // `deployedTier`, so advertising a constant here would let the console
+      // offer a tier this driver then rejects the moment a worker is redeployed
+      // at a different instance type.
+      supportedTiers: this.supportedTiers,
+      // `sleepAfter = "15m"` in the worker, and its timer counts INBOUND
+      // requests only. A node-agent dials out and receives nothing, so a busy
+      // station reads as idle — which is how a live station vanished
+      // mid-session on 2026-08-12. touch() exists solely to keep pushing this
+      // deadline out; the trap is the substrate's, not ours.
+      idleBehaviour: "platform-inbound",
+      // All three are implemented below. status() in particular is what lets
+      // the hub write `stopped` on evidence — but only against a worker
+      // deployed with the state-reporting GET /sandbox/:id.
+      lifecycle: ["start", "stop", "status"],
+    };
   }
 
   private async call(
