@@ -415,7 +415,13 @@ test("refresh re-reads folders that are already expanded", async () => {
   // expanded folder invisible, because that folder's contents are cached.
   // Per-path, not a blanket mock: returning the same dir for every path makes
   // mockDir contain itself and the tree recurses forever.
-  const child: FsEntry = { name: "child.txt", path: `${mockDir.path}/child.txt`, type: "file", size: 3 };
+  const child: FsEntry = {
+    name: "child.txt",
+    path: `${mockDir.path}/child.txt`,
+    type: "file",
+    size: 3,
+    modified: null,
+  };
   const spy = vi
     .spyOn(api, "listFiles")
     .mockImplementation(async (_id: string, path: string) =>
