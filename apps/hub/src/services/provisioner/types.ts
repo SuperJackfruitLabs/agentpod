@@ -5,7 +5,18 @@
  * that auto-enroll into the fleet via one-time enrollment tokens.
  */
 
-export type RuntimeProviderName = "docker" | "cloudflare";
+/**
+ * A provider name. Deliberately not a union.
+ *
+ * The union it replaces (`"docker" | "cloudflare"`) meant a new driver could
+ * not be *named* without editing the contract, this file and the console — and
+ * the compiler could not tell you which of the two names in the literal set was
+ * actually usable, because that depends on what is registered and enabled at
+ * runtime, not on what someone typed here. Validity is now answered by the
+ * registry: `getProvisioner` refuses a name no driver registered, and
+ * `isProviderEnabled` refuses one this deployment has not turned on.
+ */
+export type RuntimeProviderName = string;
 
 /** Resource tier controlling CPU/memory allocation. */
 export type ResourceTier = "small" | "medium" | "large";

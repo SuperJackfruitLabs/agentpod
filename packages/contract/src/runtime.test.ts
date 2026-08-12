@@ -8,8 +8,20 @@ describe("ProvisionRequest", () => {
     expect(result.resourceTier).toBe("small");
   });
 
-  it("throws for an invalid provider", () => {
-    expect(() => ProvisionRequest.parse({ provider: "bogus", name: "x" })).toThrow();
+  it("accepts any provider name — the registry decides what is valid, not the enum", () => {
+    // A driver the contract has never heard of must be expressible on the wire:
+    // adding Fly or Modal should touch the driver and nothing else. The enum
+    // that used to live here made "add a provider" a three-package edit.
+    const r = ProvisionRequest.parse({ provider: "fly", name: "x", resourceTier: "small" });
+    expect(r.provider).toBe("fly");
+  });
+
+  it("still rejects an empty provider", () => {
+    // Widening the wire format is not the same as accepting anything: the shape
+    // is still checked here, and *which* names the hub will actually provision
+    // is checked by the registry — see the 400 for an unregistered provider in
+    // apps/hub/src/routes/runtimes.test.ts.
+    expect(() => ProvisionRequest.parse({ provider: "", name: "x" })).toThrow();
   });
 
   it("throws when name is empty string (min 1)", () => {

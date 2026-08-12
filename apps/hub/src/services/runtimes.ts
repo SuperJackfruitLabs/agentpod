@@ -36,11 +36,7 @@ import {
   isProviderEnabled,
 } from "./provisioner/registry";
 import type { ProvisionedRuntime } from "@agentpod/contract";
-import type {
-  RuntimeProviderName,
-  RuntimeProvisioner,
-  RuntimeState,
-} from "./provisioner/types";
+import type { RuntimeProvisioner, RuntimeState } from "./provisioner/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -107,8 +103,15 @@ export async function createRuntime(
 ): Promise<ProvisionedRuntime> {
   const provider = req.provider;
 
-  // Guard — throws with "provider disabled: X" or "unknown provider: X"
-  if (!isProviderEnabled(provider as RuntimeProviderName)) {
+  // Guard — 400 before anything is written.
+  //
+  // This is where the provider enum's validation went. The contract accepts any
+  // non-empty name now, so a name this deployment has not enabled — including
+  // one no driver has ever registered, whose env flag therefore cannot be set —
+  // is refused here, before a runtime row, an enrolment token or a driver call
+  // exists. getProvisioner() below is the second half of the same check: it
+  // refuses a name nothing registered under.
+  if (!isProviderEnabled(provider)) {
     throw Object.assign(
       new Error(`provider disabled: ${provider}`),
       { status: 400 }

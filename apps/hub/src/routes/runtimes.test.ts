@@ -219,6 +219,31 @@ test("POST /api/runtimes with disabled provider → 400", async () => {
   expect(res.status).toBe(400);
 });
 
+test("POST /api/runtimes with a provider no driver registered → 400, and nothing is written", async () => {
+  // The contract no longer carries an enum of provider names, so "fly" now
+  // reaches the hub instead of being bounced by zod. That must not widen what
+  // the hub accepts: the registry is the authority, and a name it does not know
+  // is refused BEFORE a runtime row, an enrolment token or a driver call
+  // exists. If this ever returns 201, or leaves a row behind, the validation
+  // that used to live in the enum has been lost rather than moved.
+  const res = await testApp.request("/api/runtimes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Test-User-Id": TEST_USER,
+      "Host": "localhost:3001",
+    },
+    body: JSON.stringify({ provider: "fly", name: "fly-box" }),
+  });
+  expect(res.status).toBe(400);
+
+  const rows = await db
+    .select()
+    .from(provisionedRuntimes)
+    .where(eq(provisionedRuntimes.provider, "fly"));
+  expect(rows).toHaveLength(0);
+});
+
 test("GET /api/runtimes → only the caller's runtimes", async () => {
   // Create one runtime for TEST_USER and one for OTHER_USER
   await createRuntime(TEST_USER, "user1-box");
