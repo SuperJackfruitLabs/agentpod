@@ -7,7 +7,7 @@
  * Auth: Authorization: Bearer <nodeId>:<nodeSecret>
  * On open:       register + set online
  * On heartbeat:  refresh online + ack
- * On close:      unregister + set offline
+ * On close:      cancel deferred work + unregister + set offline
  */
 
 import { Hono } from "hono";
@@ -43,6 +43,31 @@ export const gatewayRoutes = new Hono().get(
       resolveAuth = r;
     });
 
+    // Deferred work this connection scheduled, so onClose can cancel it.
+    // onOpen fires auto-adopt retries and a capability refresh on timers
+    // nothing held a handle to, so a node that connected and hung up a
+    // millisecond later still got three adopt attempts and a refresh aimed at
+    // it — DB and broker work charged to a socket that was already gone, worst
+    // for exactly the crash-looping node that reconnects most often.
+    const pending = new Map<ReturnType<typeof setTimeout>, (ok: boolean) => void>();
+    let closed = false;
+
+    /**
+     * Sleep that this connection can cancel. Resolves true if the delay
+     * elapsed with the socket still open, false if onClose cancelled it —
+     * callers must bail on false rather than do node work for a dead socket.
+     */
+    function sleep(ms: number): Promise<boolean> {
+      if (closed) return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => {
+          pending.delete(timer);
+          resolve(!closed);
+        }, ms);
+        pending.set(timer, resolve);
+      });
+    }
+
     return {
       async onOpen(_e, ws) {
         if (
@@ -64,7 +89,9 @@ export const gatewayRoutes = new Hono().get(
         // Fire-and-forget with retries — never blocks or throws into the gateway.
         void (async () => {
           for (const delay of [1500, 4000, 9000]) {
-            await new Promise((res) => setTimeout(res, delay));
+            // Cancelled by onClose: stop retrying rather than keep adopting
+            // for a connection that no longer exists.
+            if (!(await sleep(delay))) return;
             try {
               await autoAdoptProvisionedHarness(nodeId);
             } catch {
@@ -79,7 +106,7 @@ export const gatewayRoutes = new Hono().get(
         // a new capability appears only on stations adopted after the update.
         // Fire-and-forget: it must never block or throw into the gateway.
         void (async () => {
-          await new Promise((res) => setTimeout(res, 2000));
+          if (!(await sleep(2000))) return;
           try {
             await refreshAdoptedCapabilities(nodeId);
           } catch {
@@ -129,6 +156,20 @@ export const gatewayRoutes = new Hono().get(
 
       async onClose() {
         resolveAuth(false); // unblock any onMessage awaiting auth on early close
+
+        // Cancel this connection's deferred work. Deliberately NOT behind the
+        // epoch guard below: `pending` is this closure's own state, and a
+        // replacement socket scheduled its own timers in its own closure, so
+        // cancelling here can never starve the fresh connection. Gating it on
+        // isCurrent would do the opposite — a replaced socket would fail its
+        // own guard and leak its timers, which is precisely the bug.
+        closed = true;
+        for (const [timer, resolve] of pending) {
+          clearTimeout(timer);
+          resolve(false); // unblock the awaiting closure so it can return
+        }
+        pending.clear();
+
         // Epoch guard: only the currently registered socket tears down. A late
         // close from a replaced socket must not mark the fresh connection
         // offline or drop its send entry.

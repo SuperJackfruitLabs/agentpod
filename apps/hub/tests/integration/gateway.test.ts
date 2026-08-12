@@ -30,7 +30,11 @@ import { listNodes } from "../../src/services/node-registry";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import { connectionManager } from "../../src/services/connection-manager";
-import { pollUntil, waitForNodeOnline } from "../helpers/wait";
+import {
+  pollUntil,
+  waitForNodeOnline,
+  waitForNodeUnregistered,
+} from "../helpers/wait";
 
 /**
  * Barrier for "this socket's onOpen finished registering it".
@@ -74,6 +78,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
+    await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM nodes              WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM enrollment_tokens  WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM "user"             WHERE id      = ${TEST_USER_ID}`;
@@ -332,3 +337,122 @@ test("hello frame version is persisted to agentVersion on the node row", async (
     server.stop(true);
   }
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Deferred work scheduled by onOpen must not outlive the connection (#267)
+//
+// onOpen schedules auto-adopt attempts (first at 1.5 s) and a capability
+// refresh (2 s) on timers. Both reach the node the same way — through
+// `broker.request(nodeId, "detect")` — so a `detect` req handed to whatever
+// send fn the connection manager holds for the node is the observable that
+// the deferred work ran.
+//
+// The two tests are a pair and must stay one. The first proves those timers
+// really do fire and really do reach the node under this harness; without it
+// the second test's "no detect ever arrived" would pass just as well against
+// a gateway that never scheduled anything at all.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Watch window: comfortably past both the 1.5 s and 2 s deadlines. */
+const DEFERRED_WINDOW_MS = 3_000;
+
+/**
+ * Enroll a node that auto-adopt will actually do work for. It returns early
+ * unless the node has a provisioned runtime with a real harness, so without
+ * this row the deferred work would never reach the broker and neither test
+ * below would observe anything.
+ */
+async function enrollProvisionedNode(hostname: string) {
+  const { token } = await mintEnrollmentToken(TEST_USER_ID);
+  const creds = await enrollNode(token, {
+    hostname, os: "linux", arch: "amd64", cpuCount: 1,
+  });
+  await rawSql`
+    INSERT INTO provisioned_runtimes (id, user_id, provider, status, node_id, name, harness)
+    VALUES (${`rt-${creds.nodeId}`}, ${TEST_USER_ID}, 'docker', 'online',
+            ${creds.nodeId}, ${hostname}, 'opencode')
+  `;
+  return creds;
+}
+
+test("onOpen's deferred work reaches a node whose socket stays open", async () => {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  try {
+    const { nodeId, nodeSecret } = await enrollProvisionedNode("deferred-live-host");
+    const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+      headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+    } as RequestInit & { headers: Record<string, string> });
+    await new Promise<void>((res, rej) => {
+      ws.onopen = () => res();
+      ws.onerror = () => rej(new Error("WebSocket connection error"));
+    });
+
+    const detects: string[] = [];
+    const gotDetect = new Promise<void>((res) => {
+      ws.onmessage = (e) => {
+        const msg = JSON.parse(String(e.data));
+        if (msg.type !== "req" || msg.verb !== "detect") return;
+        detects.push(msg.id);
+        // Answer with a failure: nothing is adopted, and the broker request
+        // does not sit pending for its full 10 s timeout after the test ends.
+        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: false, error: "test" }));
+        res();
+      };
+    });
+
+    await waitForNodeOnline(nodeId);
+    await Promise.race([
+      gotDetect,
+      new Promise((r) => setTimeout(r, DEFERRED_WINDOW_MS)),
+    ]);
+    expect(detects.length).toBeGreaterThan(0);
+
+    ws.close();
+  } finally {
+    server.stop(true);
+  }
+}, 15_000);
+
+test("a socket that closes before its deferred work fires cancels it", async () => {
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  try {
+    const { nodeId, nodeSecret } = await enrollProvisionedNode("deferred-closed-host");
+    const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+      headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+    } as RequestInit & { headers: Record<string, string> });
+    await new Promise<void>((res, rej) => {
+      ws.onopen = () => res();
+      ws.onerror = () => rej(new Error("WebSocket connection error"));
+    });
+    await waitForNodeOnline(nodeId);
+
+    // Close well inside the 1.5 s deadline for the first auto-adopt attempt.
+    ws.close();
+    // unregister happens after the cancellation in onClose, so this is the
+    // barrier for "onClose has run" — no sleeping to guess at it.
+    await waitForNodeUnregistered(nodeId);
+
+    // Stand in for the node having reconnected on a fresh socket, which is
+    // what makes the leak observable: give the connection manager a send fn
+    // that records what the hub pushes at the node. The closed socket's
+    // timers are now the only thing that could put anything here.
+    const pushed: Array<{ type: string; verb?: string }> = [];
+    connectionManager.register(nodeId, (m) => {
+      pushed.push(m as { type: string; verb?: string });
+    });
+
+    try {
+      // Sleeping is legitimate here and only here: proving something does NOT
+      // happen needs a deadline, and this one is double the 1.5 s it waits out.
+      await new Promise((r) => setTimeout(r, DEFERRED_WINDOW_MS));
+      const verbs = pushed
+        .filter((m) => m.type === "req")
+        .map((m) => m.verb);
+      expect(verbs).toEqual([]);
+    } finally {
+      connectionManager.unregister(nodeId);
+    }
+  } finally {
+    server.stop(true);
+  }
+}, 15_000);
