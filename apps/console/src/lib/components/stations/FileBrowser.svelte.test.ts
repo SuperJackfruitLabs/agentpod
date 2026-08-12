@@ -391,3 +391,50 @@ test("FileBrowser: closes a tab with its close button", async () => {
   });
   expect(getByRole("tab", { name: "index.ts" }).getAttribute("aria-selected")).toBe("true");
 });
+
+test("a read-only viewer can still refresh the file list", async () => {
+  // The file list is a cached view of a machine an agent is actively changing.
+  // Before this, a file the agent created only appeared after a full page
+  // reload, and the toolbar holding the action was gated behind canWrite.
+  const spy = vi.spyOn(api, "listFiles").mockResolvedValue([mockDir, mockFile]);
+
+  const { getByRole } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: false },
+  });
+
+  await waitFor(() => expect(spy).toHaveBeenCalledWith("station_1", ""));
+  const callsBefore = spy.mock.calls.length;
+
+  await fireEvent.click(getByRole("button", { name: /refresh file list/i }));
+
+  await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(callsBefore));
+});
+
+test("refresh re-reads folders that are already expanded", async () => {
+  // Reloading only the root would leave a file the agent created inside an
+  // expanded folder invisible, because that folder's contents are cached.
+  // Per-path, not a blanket mock: returning the same dir for every path makes
+  // mockDir contain itself and the tree recurses forever.
+  const child: FsEntry = { name: "child.txt", path: `${mockDir.path}/child.txt`, type: "file", size: 3 };
+  const spy = vi
+    .spyOn(api, "listFiles")
+    .mockImplementation(async (_id: string, path: string) =>
+      path === "" ? [mockDir, mockFile] : [child],
+    );
+
+  const { getByRole, getByText } = render(FileBrowser, {
+    props: { stationId: "station_1", canWrite: false },
+  });
+
+  await waitFor(() => expect(getByText(mockDir.name)).toBeTruthy());
+  await fireEvent.click(getByText(mockDir.name));
+  await waitFor(() => expect(spy).toHaveBeenCalledWith("station_1", mockDir.path));
+
+  spy.mockClear();
+  await fireEvent.click(getByRole("button", { name: /refresh file list/i }));
+
+  await waitFor(() => {
+    expect(spy).toHaveBeenCalledWith("station_1", "");
+    expect(spy).toHaveBeenCalledWith("station_1", mockDir.path);
+  });
+});

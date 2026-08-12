@@ -98,7 +98,13 @@
 </script>
 
 <!-- Outer wrapper: flex row — side nav + content column -->
-<div class={cn("min-h-screen flex", className)}>
+<!--
+  h-screen, not min-h-screen: a floor lets the flex column grow with its content,
+  so panes that set `overflow-y-auto` never engage and the whole PAGE scrolls
+  instead. Capping the shell is what makes inner scroll regions (file tree, file
+  preview, logs, terminal) scroll in place.
+-->
+<div class={cn("h-screen overflow-hidden flex", className)}>
 
   <!-- =========================================================
        Desktop side nav  (hidden on mobile, visible md+)
@@ -179,7 +185,12 @@
     {/if}
 
     <!-- Page content -->
-    <main class="flex-1 flex flex-col">
+    <!--
+      min-h-0 lets flex children shrink below their content height so their own
+      overflow rules apply; overflow-y-auto keeps ordinary long pages scrolling
+      as before, now inside main rather than the document.
+    -->
+    <main class="flex-1 flex flex-col min-h-0 overflow-y-auto">
       {@render children?.()}
     </main>
 
