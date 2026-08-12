@@ -3,10 +3,17 @@
 The Cloudflare substrate for AgentPod stations. Replaces `../worker/`, which is
 dead — see its `DEAD.md`.
 
-A container runs a **released** `agentpod-node`, verified against `SHA256SUMS`
-exactly as `install.sh` and self-update do, so a Cloudflare station runs the same
-binary as the rest of the fleet. It dials the hub outbound and enrols itself; the
-hub driver only does lifecycle.
+A container runs a **released** `agentpod-node` plus the **OpenCode harness**,
+mirroring `apps/node-agent/deploy/Dockerfile.opencode`. The binary is verified
+against `SHA256SUMS` exactly as `install.sh` and self-update do, so a Cloudflare
+station runs the same binary as the rest of the fleet. It dials the hub outbound
+and enrols itself; the hub driver only does lifecycle.
+
+`entrypoint.sh` is a **byte-identical copy** of `node-opencode-entrypoint.sh`,
+enforced by `test/entrypoint-parity.test.ts`. That script double-forks to avoid a
+zombie that freezes the health check and uses a sentinel so lifecycle `Stop` is
+not undone by the supervision loop — both fixes for live-fleet bugs. Change the
+original and copy it across; do not edit this one alone.
 
 ## Stations sleep
 
@@ -79,21 +86,21 @@ Then on the hub, in `/etc/agentpod/hub.env`:
 ENABLE_CLOUDFLARE_SANDBOXES=true
 CLOUDFLARE_WORKER_URL=https://<worker-url>
 CLOUDFLARE_WORKER_TOKEN=<the same secret>
-CLOUDFLARE_SANDBOX_IMAGE=<what imageForHarness returns for the harness you provision>
+CLOUDFLARE_SANDBOX_IMAGE=agentpod-node-opencode:local
 RUNTIME_CALLBACK_TOKEN=<shared secret for the sleep callback>
 CLOUDFLARE_INSTANCE_TIER=large   # the tier this worker's instance_type provides
 ```
 
+`CLOUDFLARE_SANDBOX_IMAGE` must match what `imageForHarness` returns for the
+harness you provision — `agentpod-node-opencode:local` for `opencode`. Cloudflare
+bakes the image at deploy time, and the driver **refuses** a mismatched spec
+rather than silently ignoring it.
+
 `CLOUDFLARE_INSTANCE_TIER` must match the `instance_type` in `wrangler.toml`
 (`standard-1` is 4 GiB, which is the Docker `large` tier). Cloudflare fixes the
-instance type per container class, so the driver **refuses** any other tier
-rather than quietly handing out a size nobody asked for. Provisioning a
-`small` Cloudflare station therefore fails by design until per-tier container
-classes exist.
-
-`CLOUDFLARE_SANDBOX_IMAGE` must match, because Cloudflare bakes the image at
-deploy time and the driver **refuses** a mismatched spec rather than silently
-ignoring it.
+instance type per container class, so the driver refuses any other tier for the
+same reason. Provisioning a `small` Cloudflare station therefore fails by design
+until per-tier container classes exist.
 
 Changing `AGENTPOD_VERSION` in the Dockerfile means redeploying the worker — the
 image is not selectable per request.
