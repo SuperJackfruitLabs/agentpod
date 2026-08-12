@@ -676,6 +676,7 @@ item here that is distribution rather than capability.*
       > a second consumer, so the next drift gets noticed sooner.
 - [ ] Ship the first driver wave. **Re-planned 2026-08-12 after researching the substrate
       market and reading our own code; three premises in the original line were wrong.**
+      **Steps 2, 3 and 5 shipped the same day; 1, 4 and 6 remain.**
 
       **(a) "The Docker and Cloudflare drivers we already have" overstates both.** Docker
       runtimes all land *on the hub box* — `DockerRuntimeProvisioner` defaults to
@@ -684,6 +685,7 @@ item here that is distribution rather than capability.*
       reads it from env. And Cloudflare has **never run on this deployment**:
       `ENABLE_CLOUDFLARE_SANDBOXES` is unset, so the live hub logs `Provisioners registered:
       docker`. It worked once in the OpenCode era; it is not a verified reference driver today.
+      *(Superseded 2026-08-12 by step 3 — it is one now, on a new driver.)*
 
       **(b) Generic SSH is not a provisioner.** Docker and Cloudflare *create* a sandbox; SSH
       *enrols a machine you already own*, where `resourceTier` and `image` are meaningless and
@@ -703,18 +705,86 @@ item here that is distribution rather than capability.*
       **Revised order** — cheap and concrete first, generalise only once a second driver has
       actually run:
       1. Wire a remote Docker host from env — gets runtimes off the control-plane box.
-      2. gVisor (`runsc`) as a runtime option. The isolation upgrade that needs **no nested
-         virtualisation and no bare metal**: `systrap` runs on ordinary cloud VMs, integration
-         is `docker run --runtime=runsc`, overhead 5–20%. Every other isolation step (Kata,
-         Firecracker, `agent-sandbox`) demands bare metal or a cluster.
-      3. Revive and *verify* Cloudflare. It is already in the provider union, so this needs
-         zero registry work and answers whether the existing driver interface holds against a
-         genuinely different substrate.
+      2. ~~gVisor (`runsc`) as a runtime option.~~ **Shipped 2026-08-12** in
+         [#240](https://github.com/rakeshgangwar/agentpod/pull/240) — the docker driver reads
+         `DOCKER_RUNTIME`, the orchestrator passes it through, and a runtime persists and
+         displays the container runtime it actually ran under. The sizing held: `systrap` runs
+         on ordinary cloud VMs, integration is `docker run --runtime=runsc`, overhead 5–20%,
+         and every other isolation step (Kata, Firecracker, `agent-sandbox`) still demands bare
+         metal or a cluster. **What it also produced is
+         [#243](https://github.com/rakeshgangwar/agentpod/issues/243), which is the part worth
+         keeping.** Every user-defined Docker network injects `nameserver 127.0.0.11` and runs
+         an embedded DNS proxy on that loopback address inside the container's netns, and
+         gVisor's netstack cannot reach it — so a sandboxed runtime on `agentpod-net` got an
+         address, pinged 1.1.1.1 in 10ms, and never resolved the hub. `--dns` does not help; on
+         a user-defined network it only changes what the embedded proxy forwards upstream.
+         **A sandboxed runtime therefore requires a built-in network**, and the fix
+         ([#244](https://github.com/rakeshgangwar/agentpod/pull/244)) fails closed:
+         `assertRuntimeSupportsNetwork` refuses the combination at provision time rather than
+         switching networks silently or falling back to `runc`, because the alternative is
+         provisioning reporting success while the container restart-loops forever. The guard
+         then immediately caught a second defect on live infrastructure — `DOCKER_NETWORK` had
+         never been passed to the orchestrator at all, so an operator who had configured it
+         correctly had been configuring nothing. A guard that fires on its first contact with
+         production is evidence the setting it guards was never exercised.
+      3. ~~Revive and *verify* Cloudflare.~~ **Shipped 2026-08-12 and verified live.** A new
+         driver ([#247](https://github.com/rakeshgangwar/agentpod/pull/247)), the OpenCode
+         harness added to the sandbox image
+         ([#248](https://github.com/rakeshgangwar/agentpod/pull/248)), and workspace
+         persistence plus activity renewal
+         ([#249](https://github.com/rakeshgangwar/agentpod/pull/249)). The interface question
+         it was posed to answer came back yes — no registry work was needed and nothing
+         downstream special-cases the provider — but the substrate question came back much
+         longer, and is recorded below. Incidental but worth having on the record: Cloudflare
+         containers run on Firecracker, visible in the worker deploy output.
       4. Open the registry — dynamic names, capability manifests, conformance suite — with
          Fly or Modal as the forcing function, informed by (3).
-      5. Sleep/wake as a first-class station state (see below).
+      5. ~~Sleep/wake as a first-class station state.~~ **Shipped 2026-08-12** in #247: an
+         `asleep` runtime status in the contract, a substrate callback
+         `POST /public/runtimes/:id/state` so the substrate reports its own lifecycle instead
+         of the hub inferring it from silence, and an explicit Wake action in the console. It
+         does not dissolve the conflict below — a slept sandbox is still an offline station —
+         but it makes it a state the console can name rather than a station that has
+         apparently died.
       6. Operated substrate as a paid tier. Needs multi-tenancy the hub does not have, so it
          follows the orgs work rather than leading it.
+
+      **What verifying Cloudflare actually cost.** A station verified as fully working on
+      2026-08-12 — health, logs, files, chat and terminal all audited `ok` in `station_audit` —
+      came back from the operator as "file browser and terminal not working". Neither was
+      broken. The hub's own logs carry the whole story: container starts 04:44:58, station
+      adopted 04:45:02, chat, `fs.write` and `term.open` all ok at 04:55, runtime marked
+      ASLEEP at 04:59:58 — **exactly fifteen minutes after start** — and the operator returns
+      at 05:16:33 to a `/detected` that answers 502. Two facts combined into silent data loss:
+      **(1)** `sleepAfter` is fed only by *incoming* requests, and a node-agent dials *out*, so
+      a station idles out about fifteen minutes after it starts no matter how hard it is being
+      used; **(2)** Cloudflare container disk is ephemeral — their docs: *"All disk is
+      ephemeral. When a Container instance goes to sleep, the next time it is started, it will
+      have a fresh disk as defined by its container image."* The README written at 04:56 was
+      destroyed at 04:59:58.
+
+      **Runtime identity persistence
+      ([#245](https://github.com/rakeshgangwar/agentpod/pull/245)) made this worse, not
+      better.** The station came back with the same identity and an empty workspace, so from
+      the console it looked like it had survived. Identity is not state, and persisting the
+      first without the second is a more convincing lie than losing both. The fix is R2-backed
+      workspace snapshots — archive on SIGTERM, where Cloudflare documents fifteen minutes
+      before SIGKILL, plus a periodic archive for the containers that never get a clean one —
+      together with hub-driven activity renewal through `POST /sandbox/:id/touch`, so station
+      activity the substrate cannot see extends the idle deadline it owns. Then the live
+      acceptance test found one more: DELETE returned 200 and **left the archive in R2**,
+      because destroy sends SIGTERM and the dying container's final upload landed after the
+      delete had run. Fixed by revoking the per-sandbox snapshot token first, so the last write
+      cannot be accepted.
+
+      > **A substrate's failure modes are properties of the substrate, not of our code, and
+      > they are only discoverable by running on it.** Idle accounting that cannot see an
+      > outbound connection, disk that does not survive a sleep, and a shutdown grace period
+      > long enough to race a delete are not bugs we wrote and not things a driver interface
+      > can abstract; they are the terms of the substrate. Every one of them was found on the
+      > real thing, with the test suite green at the moment of discovery. This is the argument
+      > for step (3) existing at all — "revive and *verify*" was the whole point, and the
+      > verification, not the driver, is what produced everything above.
 
       > **The conflict that shapes all of this.** Scale-to-zero is what makes rented substrates
       > affordable, but AgentPod stations are *connection-oriented*: the node dials out over
@@ -728,6 +798,83 @@ item here that is distribution rather than capability.*
       Kubernetes `agent-sandbox` stays in the second wave (§6); it is a SIG Apps subproject on
       gVisor with Firecracker on its own 2026–27 roadmap, and it needs a cluster. Each driver
       must still land as an ordinary enrolled station with zero downstream special-casing.
+- [x] ~~**Durable enrolment tokens for provisioned runtimes**~~ — shipped 2026-08-12 in
+      [#252](https://github.com/rakeshgangwar/agentpod/pull/252), by deleting one argument. It
+      is recorded here for how it shipped rather than for what it fixed. #245 added
+      `RUNTIME_TOKEN_TTL_MS` — ten years — *precisely* so a station on ephemeral disk could
+      re-enrol on every boot, **and never updated the only caller.** `runtimes.ts` went on
+      passing `ttlMs: 30 * 60 * 1000`, and an explicit `opts.ttlMs` beats the default it was
+      added to supply, so the durable-token feature was dead code in production from the day it
+      shipped. The consequence was not partial: **every Cloudflare station was permanently
+      bricked thirty minutes after it was created.** Disk is ephemeral, so `agentpod-node
+      enroll` runs on every boot and re-presents the same token; past the window the hub
+      answers 401, the entrypoint's `set -e` kills the container — `exitCode: 1` about 892 ms
+      in — and the node never connects, while the hub goes on reporting the runtime online
+      (#254 below). The evidence is one token's history: enrolled 200 at 04:44, then 401 at
+      07:01, 07:25 and 07:33.
+
+      **Why it shipped green.** #245's test called `mintEnrollmentToken` directly, got the
+      ten-year default, and passed. `createRuntime` — the only path that mints these tokens in
+      production — was never exercised by it. The regression test now goes through
+      `createRuntime` and asserts on the persisted `enrollment_tokens.expires_at`.
+
+      > **A test that asserts the helper rather than the path the user takes will stay green
+      > through the outage it was written to prevent.** The defect here was not in the helper
+      > and never could have been: the helper was correct, the default was correct, and the
+      > only caller overrode both. This is the same shape as the posture path lists above —
+      > CI cannot fail on a claim nothing in CI evaluates — and the remedy is the same one:
+      > test the path that runs in production, not the unit that is convenient to call.
+- [ ] [#253](https://github.com/rakeshgangwar/agentpod/issues/253) — **a Cloudflare runtime
+      created before the snapshot deploy has workspace persistence silently disabled forever.**
+      `createWithEnv` writes the sandbox's environment to Durable Object storage once, at
+      creation, and `wake()` replays that frozen map, so the snapshot keys added on 2026-08-12
+      reach new sandboxes only. The container's wrapper gates both restore and archive on those
+      keys and returns early without them, so an affected station enrols, heartbeats, serves a
+      terminal and looks entirely healthy while dropping the workspace on every sleep. There is
+      no backfill short of destroying and re-creating the runtime. The blast radius is bounded;
+      the shape is not — any substrate-owned environment value added at creation reaches new
+      sandboxes and silently skips every existing one.
+- [ ] [#254](https://github.com/rakeshgangwar/agentpod/issues/254) — **`startRuntime` marks a
+      runtime `online` because the substrate returned 200, not because a node arrived.** The
+      enrolment path writes `online` on evidence; this path writes it on a request having been
+      accepted, and nothing re-checks it or walks it back when no node connects. In the #252
+      incident it read `online` for a runtime whose container was exiting in under a second,
+      and so sent a human chasing restarts that could never work — each one re-running a
+      container that died before it could enrol. "Started but never came back" is the most
+      common way a provisioned runtime fails and the one state this code cannot represent,
+      which is precisely the class a fleet console exists to surface. `asleep` shows the shape
+      is already available: the substrate callback reports real lifecycle when asked to.
+- [x] ~~**Provider-scoped resource tiers**~~ — shipped 2026-08-12 in
+      [#250](https://github.com/rakeshgangwar/agentpod/pull/250). Cloudflare fixes
+      `instance_type` at worker deploy time, so its driver refuses any other tier, while the
+      create dialog offered small/medium/large and defaulted to small: the common path was a
+      guaranteed provisioning failure whose only feedback was a backend error. The hub now
+      reports each provider's satisfiable tiers and the dialog builds its list from those
+      capabilities, rather than from a map baked into the console that would rot the moment a
+      worker is redeployed at a different instance type. A single-substrate console had
+      quietly encoded Docker's tier menu as *the* tier menu; the second substrate is what
+      found it.
+- [x] ~~**Pane scroll containment, and a file-list refresh**~~ — shipped 2026-08-12 in
+      [#251](https://github.com/rakeshgangwar/agentpod/pull/251). Three separately reported
+      symptoms had one cause: `app-shell` used `min-h-screen` — a floor, not a cap — and
+      `<main>` had no `min-h-0`, so the flex column grew with its content and every inner
+      `overflow-y-auto` pane was inert, scrolling the whole page instead. The panes had all
+      declared their overflow correctly; nothing above them bounded the height, and files,
+      logs, terminal and changeset were affected identically by that one break. The refresh
+      control added alongside it reloads every folder already expanded rather than only the
+      root, and is available to read-only viewers, because re-reading a cached view of a
+      machine an agent is changing is not a write.
+- [ ] **A sixth harness: Pi** — requested ad hoc on 2026-08-12 and currently being specced.
+      Flagged as ad hoc deliberately: it did not come from this roadmap and displaces nothing
+      on it. Pi (<https://pi.dev>, MIT, `@earendil-works/pi-coding-agent`) does **not** speak
+      ACP natively — the maintainer declined that upstream, in Pi's issue #175 — but a
+      community adapter, `pi-acp` (0.0.33), does, and it matches the external-Node-adapter
+      pattern the claude-code and codex descriptors already use, so the integration shape is
+      known rather than novel. Pi has no daemon, so its container needs no supervision loop.
+      **It touches the contributor bundle in Horizon 2 without tripping its trigger:** that
+      trigger is the first request *from outside* to add a harness, and this is an internal
+      one, so the bundle stays where it is. It is, however, the second data point that adding
+      a harness is still hand-written Go.
 - [ ] **Coalesce before projecting.** Measured on real stations: the same trivial prompt yields
       57 ACP events from Codex and **1,051 from Hermes**, which at one-activity-per-event would
       be over a thousand POSTs at a board for one instruction — and an 18× spread across
@@ -776,8 +923,9 @@ tags, a fleet-level concurrency cap (§7).
 > safe — and the original roadmap split them across horizons on the strength of a premise that
 > isn't true yet. There is no drift bug anywhere in this repo's history: the ACP program
 > expanded the contract across five harnesses, with hand-written Go mirrors, and none drifted.
-> Nobody is asking to add a sixth harness. Building for contributors before courting them is
-> the surface-area risk in §10 wearing a helpful face.
+> Nobody *outside* is asking to add a sixth harness — the one request to date, Pi on
+> 2026-08-12, is ours, and it is hand-written Go like the other five. Building for
+> contributors before courting them is the surface-area risk in §10 wearing a helpful face.
 >
 > **The trigger, so they don't drift forever:** the first outside request to add a harness, or
 > the second person committing. Until then Horizon 0's golden-fixture round-trip test carries
