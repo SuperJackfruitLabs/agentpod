@@ -902,6 +902,78 @@ test("an exhausted reconnect budget shows the offline strip with a working Retry
   expect(u.queryByText("Couldn't reach the hub — check your connection.")).toBeNull();
 });
 
+// ─── Session preamble (agent output before the first prompt) ────────────────
+//
+// Live defect: a Pi station's Chat tab opened with the harness banner ("pi
+// v0.84.1 / Skills / …SKILL.md") sitting there as the first agent message,
+// before the user had said anything — the adapter forwards the human-readable
+// stdout lines that precede the NDJSON stream. The information is worth having;
+// impersonating a conversational turn is not. Identification is POSITIONAL —
+// anything the agent says before the first user prompt — so no banner format
+// from another project is baked in here.
+
+const BANNER = "pi v0.84.1\n\nSkills\n\n/s/basecamp/SKILL.md";
+
+const bannerChunk = (seq: number, text: string) =>
+  ev(seq, "agent-update", { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+
+test("pre-prompt agent output goes to the header, never into the conversation", async () => {
+  const u = await renderConnected();
+
+  u.ws.fireMessage({ t: "event", event: bannerChunk(1, BANNER) });
+  await tick();
+
+  // Header: collapsed to one line, expandable to the whole banner.
+  const trigger = u.getByRole("button", { name: /pi v0\.84\.1/ });
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  await fireEvent.click(trigger);
+  await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
+  expect(u.getByTestId("session-preamble-text").textContent).toContain("/s/basecamp/SKILL.md");
+
+  // Conversation: still nothing has been said.
+  expect(u.queryAllByTestId("response-stub")).toHaveLength(0);
+  expect(u.getByText("No conversation yet.")).toBeTruthy();
+});
+
+test("an agent reply AFTER a prompt stays in the conversation and is no preamble", async () => {
+  const u = await renderConnected();
+
+  u.ws.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "run the tests" }) });
+  u.ws.fireMessage({ t: "event", event: bannerChunk(2, "on it") });
+  await tick();
+
+  expect(u.getByTestId("response-stub").textContent).toContain("on it");
+  expect(u.queryByTestId("session-preamble")).toBeNull();
+});
+
+test("no pre-prompt output → no header affordance at all", async () => {
+  const u = await renderConnected();
+
+  expect(u.queryByTestId("session-preamble")).toBeNull();
+});
+
+test("a reloaded session history renders its preamble in the header, not the transcript", async () => {
+  // Reattaching replays the persisted stream from seq 0 — the banner is again
+  // simply what precedes the first user-prompt event.
+  const u = await renderConnected();
+
+  for (const event of [
+    bannerChunk(1, BANNER),
+    ev(2, "user-prompt", { text: "run the tests" }),
+    bannerChunk(3, "on it"),
+  ]) {
+    u.ws.fireMessage({ t: "event", event });
+  }
+  u.ws.fireMessage({ t: "replay-done", lastSeq: 3 });
+  await tick();
+
+  expect(u.getByRole("button", { name: /pi v0\.84\.1/ })).toBeTruthy();
+  const responses = u.queryAllByTestId("response-stub");
+  expect(responses).toHaveLength(1);
+  expect(responses[0].textContent).toContain("on it");
+  expect(u.getByText("run the tests")).toBeTruthy();
+});
+
 test("unmount closes the socket but never ends the session", async () => {
   const u = await renderConnected();
   const end = vi.spyOn(api, "endAcpSession");

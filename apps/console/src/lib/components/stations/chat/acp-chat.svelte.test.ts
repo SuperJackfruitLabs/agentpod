@@ -745,6 +745,68 @@ test("pendingPermissions counts unanswered permission items", async () => {
   expect(chat.pendingPermissions).toBe(0);
 });
 
+// ─── Session preamble: agent output that precedes the first prompt ───────────
+
+test("pre-prompt agent output is exposed as preamble and kept out of the conversation", async () => {
+  const { chat, ws } = await connectedChat();
+
+  // The harness banner arrives as an agent message before anyone has spoken.
+  ws.fireMessage({ t: "event", event: chunk(1, "pi v0.84.1\n\nSkills\n\n/s/basecamp/SKILL.md") });
+
+  expect(chat.preamble?.summary).toBe("pi v0.84.1");
+  expect(chat.preamble?.text).toContain("/s/basecamp/SKILL.md");
+  expect(chat.conversation).toEqual([]);
+
+  // A real turn: the reply is conversation, and the preamble stays put.
+  ws.fireMessage({ t: "event", event: ev(2, "user-prompt", { text: "hi" }) });
+  ws.fireMessage({ t: "event", event: chunk(3, "hello") });
+
+  expect(chat.preamble?.summary).toBe("pi v0.84.1");
+  expect(chat.conversation.map((it) => it.kind)).toEqual(["user", "assistant"]);
+});
+
+test("a replayed history splits the same way — preamble is positional, not remembered", async () => {
+  // Reattaching replays the persisted stream from seq 0, so the banner is just
+  // whatever precedes the first user-prompt event. Same rule, no extra state.
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row(), row({ id: "s2" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  for (const event of [
+    chunk(1, "pi v0.84.1\nSkills"),
+    ev(2, "user-prompt", { text: "hi" }),
+    chunk(3, "hello"),
+  ]) {
+    ws.fireMessage({ t: "event", event });
+  }
+  ws.fireMessage({ t: "replay-done", lastSeq: 3 });
+
+  expect(chat.preamble).toEqual({ text: "pi v0.84.1\nSkills", summary: "pi v0.84.1", more: 1 });
+  expect(chat.conversation.map((it) => it.kind)).toEqual(["user", "assistant"]);
+});
+
+test("no pre-prompt output → no preamble, and switching sessions drops the old one", async () => {
+  vi.spyOn(api, "listAcpSessions").mockResolvedValue([row(), row({ id: "s2" })]);
+  const chat = new AcpChat("st1");
+  await chat.init();
+  const ws = MockWebSocket.latest()!;
+  ws.open();
+  ws.fireMessage({ t: "event", event: chunk(1, "pi v0.84.1") });
+  expect(chat.preamble?.summary).toBe("pi v0.84.1");
+
+  await chat.attach("s2");
+  // A fresh transcript means a fresh preamble — never the previous session's.
+  expect(chat.preamble).toBeNull();
+
+  const ws2 = MockWebSocket.latest()!;
+  ws2.open();
+  ws2.fireMessage({ t: "event", event: ev(1, "user-prompt", { text: "hi" }) });
+  ws2.fireMessage({ t: "event", event: chunk(2, "hello") });
+  expect(chat.preamble).toBeNull();
+  expect(chat.conversation).toHaveLength(2);
+});
+
 // ─── The dead socket: a send into a connection nothing has noticed is gone ───
 //
 // Live-dogfooding defect: after a laptop sleep the browser still held a socket

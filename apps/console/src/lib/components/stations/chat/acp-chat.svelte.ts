@@ -75,6 +75,9 @@ import {
   dropPendingPrompt,
   emptyTranscript,
   foldEvent,
+  splitPreamble,
+  type ChatItem,
+  type SessionPreamble,
   type Transcript,
 } from "./transcript";
 
@@ -219,6 +222,31 @@ export class AcpChat {
 
   get transcript(): Transcript {
     return this.#transcript;
+  }
+
+  /**
+   * The transcript split into session metadata and the conversation proper.
+   *
+   * Derived HERE rather than in the view so the live stream and a replayed
+   * history share one rule: both land in `#transcript`, and the rule is purely
+   * positional (see `splitPreamble`) — nothing has to be remembered across a
+   * reattach. It also means a session swap can't leak the previous session's
+   * banner: `attachRow` replaces the transcript, and this follows it.
+   */
+  #view = $derived(splitPreamble(this.#transcript.items));
+
+  /**
+   * What the agent said before the user's first prompt — the harness banner.
+   * Session metadata for the header, NOT a conversational turn. Null when the
+   * agent hasn't spoken first (which is most harnesses, most of the time).
+   */
+  get preamble(): SessionPreamble | null {
+    return this.#view.preamble;
+  }
+
+  /** The transcript as the conversation should render it — preamble removed. */
+  get conversation(): ChatItem[] {
+    return this.#view.items;
   }
 
   get connection(): ChatConnection {

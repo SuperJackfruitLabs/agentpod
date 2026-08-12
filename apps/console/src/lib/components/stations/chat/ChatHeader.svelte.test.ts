@@ -420,3 +420,60 @@ test("the capped switcher still adds no second live region", async () => {
 
   expect(u.getAllByRole("status")).toHaveLength(1);
 });
+
+// ─── Session preamble (pre-prompt agent output) ──────────────────────────────
+
+/** The disclosure's body — `hidden` while collapsed (bits-ui keeps it mounted). */
+function preambleBody(container: HTMLElement): HTMLElement {
+  const el = container.querySelector<HTMLElement>(
+    "[data-testid='session-preamble'] [data-slot='collapsible-content']",
+  );
+  if (!el) throw new Error("preamble content not rendered");
+  return el;
+}
+
+test("the preamble collapses to its first line and expands to the full text", async () => {
+  const u = setup({
+    preamble: {
+      text: "pi v0.84.1\n\nSkills\n\n/s/basecamp/SKILL.md",
+      summary: "pi v0.84.1",
+      more: 2,
+    },
+  });
+
+  const trigger = u.getByRole("button", { name: /pi v0\.84\.1/ });
+  expect(trigger.textContent).toContain("pi v0.84.1");
+  expect(trigger.textContent).toContain("2");
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  // Collapsed: the rest of the banner is off screen. (bits-ui keeps its content
+  // mounted and marks it `hidden` — the same collapsed state Reasoning asserts
+  // through aria-expanded.)
+  expect(preambleBody(u.container).hasAttribute("hidden")).toBe(true);
+
+  await fireEvent.click(trigger);
+
+  await waitFor(() => expect(preambleBody(u.container).hasAttribute("hidden")).toBe(false));
+  expect(u.getByTestId("session-preamble-text").textContent).toContain("/s/basecamp/SKILL.md");
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+});
+
+test("a one-line preamble shows no 'more' count", () => {
+  const u = setup({ preamble: { text: "pi v0.84.1", summary: "pi v0.84.1", more: 0 } });
+
+  expect(u.getByRole("button", { name: /pi v0\.84\.1/ }).textContent).not.toContain("more");
+});
+
+test("no preamble renders no affordance at all", () => {
+  const u = setup();
+
+  expect(u.queryByTestId("session-preamble")).toBeNull();
+  expect(u.queryByTestId("session-preamble-text")).toBeNull();
+});
+
+test("the preamble adds no second live region", () => {
+  // The status line is the header's ONE announcement; session metadata is not
+  // news to read out.
+  const u = setup({ preamble: { text: "pi v0.84.1", summary: "pi v0.84.1", more: 0 } });
+
+  expect(u.getAllByRole("status")).toHaveLength(1);
+});

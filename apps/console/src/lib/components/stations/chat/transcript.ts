@@ -60,6 +60,16 @@ export interface Transcript {
   usage?: { used: number; size: number };
 }
 
+/** Session metadata lifted out of the transcript — see `splitPreamble`. */
+export interface SessionPreamble {
+  /** The whole preamble, verbatim (ends trimmed), for the expanded view. */
+  text: string;
+  /** First non-empty line — the collapsed one-liner ("pi v0.84.1"). */
+  summary: string;
+  /** How many further non-empty lines `text` holds beyond the summary. */
+  more: number;
+}
+
 export function emptyTranscript(): Transcript {
   return { items: [], lastSeq: 0, status: "starting", usage: undefined };
 }
@@ -83,6 +93,59 @@ export function dropPendingPrompt(t: Transcript): { transcript: Transcript; text
   const last = t.items.at(-1);
   if (last?.kind !== "user" || last.pending !== true) return { transcript: t, text: null };
   return { transcript: { ...t, items: t.items.slice(0, -1) }, text: last.text };
+}
+
+/**
+ * Split a session's items into its PREAMBLE — agent output that arrived before
+ * the user's first prompt — and the conversation proper.
+ *
+ * Harnesses announce themselves before anyone has spoken: pi prints a
+ * human-readable banner on stdout ("pi v0.84.1", loaded skills) before its
+ * NDJSON protocol stream begins, and the adapter forwards those pre-protocol
+ * lines as an agent message. It is genuinely useful — it names the exact
+ * harness version answering you — but it is session METADATA, and rendering it
+ * as the first turn of a conversation nobody has started is a lie about who
+ * said what.
+ *
+ * Identification is POSITIONAL, never by content. Matching on "pi v" or
+ * "Skills" would bake another project's banner format into this console and
+ * would rot silently the moment they reworded it; "the agent spoke before the
+ * user did" holds for every harness that does the same thing, and needs no
+ * remembering — a replayed history splits exactly like a live stream, because
+ * position is a property of the items, not of how they arrived.
+ *
+ * Only agent MESSAGES are lifted. Notices (errors, "session ended") and tool
+ * calls that precede the first prompt are events in their own right and stay
+ * in the transcript, where the user can see them next to what followed.
+ *
+ * Returns the SAME items reference when there is nothing to lift, so views
+ * don't re-key an untouched list. A preamble of pure whitespace yields `null`
+ * (no header affordance) while still being lifted out — an empty bubble is no
+ * better in the transcript than in the header.
+ */
+export function splitPreamble(items: ChatItem[]): {
+  preamble: SessionPreamble | null;
+  items: ChatItem[];
+} {
+  const firstPrompt = items.findIndex((it) => it.kind === "user");
+  const end = firstPrompt === -1 ? items.length : firstPrompt;
+
+  const texts: string[] = [];
+  for (let i = 0; i < end; i += 1) {
+    const it = items[i];
+    if (it.kind === "assistant") texts.push(it.text);
+  }
+  if (texts.length === 0) return { preamble: null, items };
+
+  const rest = items.filter((it, i) => !(i < end && it.kind === "assistant"));
+  const text = texts.join("\n").replace(/^\s+|\s+$/g, "");
+  const lines = text.split("\n").filter((line) => line.trim().length > 0);
+  if (lines.length === 0) return { preamble: null, items: rest };
+
+  return {
+    preamble: { text, summary: lines[0].trim(), more: lines.length - 1 },
+    items: rest,
+  };
 }
 
 // ─── Defensive narrowing helpers ─────────────────────────────────────────────
