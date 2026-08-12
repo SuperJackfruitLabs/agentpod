@@ -17,6 +17,7 @@ import {
 import type { FlyMachinesOptions } from "./fly";
 import { createFlyFakeSubstrate } from "./fly-fake-substrate";
 import type { ProvisionSpec } from "./types";
+import { config } from "../../config";
 
 describe("FlyMachinesProvisioner — declarations", () => {
   const make = () =>
@@ -113,6 +114,106 @@ function flyDriver(overrides: Partial<FlyMachinesOptions> = {}) {
   });
   return { driver, fake };
 }
+
+/**
+ * Where the driver's non-secret settings come from.
+ *
+ * config.ts is the hub's single source of truth for settings, and for these
+ * four it was a source of nothing: `config.fly.orgSlug`, `.region`,
+ * `.appPrefix` and `.volumeSizeGb` were read by validate-config and by no one
+ * else, while the driver read FLY_ORG_SLUG / FLY_REGION / FLY_APP_PREFIX /
+ * FLY_VOLUME_SIZE_GB out of the environment a second time. Two independent
+ * reads of the same variable agree only by coincidence — and the coincidence
+ * had a sharp edge: boot validation refuses a `volumeSizeGb < 1`, so the value
+ * it VALIDATES has to be the value the driver USES, or the check guards
+ * nothing. Changing a default in config.ts would silently change nothing at
+ * all.
+ *
+ * The TOKEN is deliberately excluded and stays on requireCredentials — that is
+ * the seam a per-org encrypted credential store replaces. Non-secret settings
+ * are a different question and belong in config.
+ */
+describe("FlyMachinesProvisioner — settings come from config", () => {
+  // config is `as const` for callers; these tests are the exception that has to
+  // write to it, so they cast, and they restore in a finally.
+  function overrideFlyConfig(overrides: Partial<typeof config.fly>): () => void {
+    const target = config.fly as unknown as Record<string, unknown>;
+    const saved: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(overrides)) {
+      saved[key] = target[key];
+      target[key] = value;
+    }
+    return () => {
+      for (const [key, value] of Object.entries(saved)) target[key] = value;
+    };
+  }
+
+  it("provisions with the org, region, prefix and volume size config holds", async () => {
+    const restore = overrideFlyConfig({
+      orgSlug: "acme-org",
+      region: "fra",
+      appPrefix: "acme",
+      volumeSizeGb: 11,
+    });
+    try {
+      const fake = createFlyFakeSubstrate();
+      // No settings passed: these are the defaults, and the defaults are the
+      // whole point.
+      const driver = new FlyMachinesProvisioner({
+        credentials: { get: () => "fly-token" },
+        fetchImpl: fake.fetchImpl,
+        pacer: noPacer,
+      });
+
+      await driver.provision(SPEC);
+
+      const appCreate = fake.calls.find((c) => c.path === "/v1/apps")!;
+      expect(appCreate.body).toMatchObject({
+        app_name: "acme-rt-abc123def456",
+        org_slug: "acme-org",
+      });
+      const volumeCreate = fake.calls.find((c) =>
+        c.path.endsWith("/volumes")
+      )!;
+      expect(volumeCreate.body).toMatchObject({ region: "fra", size_gb: 11 });
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not re-read the environment behind config's back", async () => {
+    // config is evaluated once, at import, and boot validation runs against
+    // that snapshot. A driver that read process.env again at construction time
+    // could provision against a value nothing had validated.
+    const saved = process.env.FLY_REGION;
+    process.env.FLY_REGION = "iad";
+    try {
+      const fake = createFlyFakeSubstrate();
+      const driver = new FlyMachinesProvisioner({
+        credentials: { get: () => "fly-token" },
+        fetchImpl: fake.fetchImpl,
+        pacer: noPacer,
+      });
+
+      await driver.provision(SPEC);
+
+      const volumeCreate = fake.calls.find((c) => c.path.endsWith("/volumes"))!;
+      expect(volumeCreate.body).toMatchObject({ region: config.fly.region });
+    } finally {
+      if (saved === undefined) delete process.env.FLY_REGION;
+      else process.env.FLY_REGION = saved;
+    }
+  });
+
+  it("still lets a caller pass settings explicitly", async () => {
+    // Every other test in this file constructs the driver with explicit
+    // settings; config is the DEFAULT, not a replacement for the argument.
+    const { driver, fake } = flyDriver({ region: "iad", volumeSizeGb: 10 });
+    await driver.provision(SPEC);
+    const volumeCreate = fake.calls.find((c) => c.path.endsWith("/volumes"))!;
+    expect(volumeCreate.body).toMatchObject({ region: "iad", size_gb: 10 });
+  });
+});
 
 describe("FlyMachinesProvisioner — provision", () => {
   it("creates the app, THEN the volume, THEN the machine", async () => {

@@ -29,6 +29,7 @@ import type { CredentialResolver } from "./credentials";
 import { envCredentialResolver, requireCredentials } from "./credentials";
 import type { FlyRequest, Pacer } from "./fly-api";
 import { createFlyClient, FlyApiError } from "./fly-api";
+import { config } from "../../config";
 
 // ─── Substrate constants ──────────────────────────────────────────────────────
 
@@ -283,13 +284,27 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
   private readonly appPrefix: string;
   private readonly volumeSizeGb: number;
 
+  /**
+   * The non-secret settings default from `config.fly`, not from `process.env`.
+   *
+   * config.ts is where this hub reads its environment, once, at import — and it
+   * is what `validate-config` refuses the boot against. Reading FLY_REGION and
+   * friends again here made config's copies dead entries that merely happened
+   * to agree, and made the `volumeSizeGb >= 1` boot check a promise about a
+   * number the driver never saw.
+   *
+   * The TOKEN is the deliberate exception: it stays on `requireCredentials`,
+   * which is the seam a per-org encrypted credential store replaces. A secret
+   * resolved per organisation is a different problem from a deployment-wide
+   * setting, and config is the wrong shape for it.
+   */
   constructor({
     credentials = envCredentialResolver(),
-    orgSlug = process.env.FLY_ORG_SLUG || "personal",
+    orgSlug = config.fly.orgSlug,
     // Measured 2026-08-12: "bom" is refused on a non-paid plan, "sin" works.
-    region = process.env.FLY_REGION || "sin",
-    appPrefix = process.env.FLY_APP_PREFIX || "agentpod",
-    volumeSizeGb = Number(process.env.FLY_VOLUME_SIZE_GB || 3),
+    region = config.fly.region,
+    appPrefix = config.fly.appPrefix,
+    volumeSizeGb = config.fly.volumeSizeGb,
     baseUrl,
     fetchImpl,
     pacer,
