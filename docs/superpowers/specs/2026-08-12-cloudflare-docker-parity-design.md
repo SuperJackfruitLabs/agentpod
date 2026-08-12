@@ -81,6 +81,11 @@ Two properties this must have, both carrying tests:
 **Snapshot set:** `/workspace` and `~/.local/share/opencode`. The second is where OpenCode keeps
 its own session state; without it a woken station has the files but no memory of the conversation.
 
+**No size cap.** An earlier draft of this spec called for one. Implementing it showed the idea was
+wrong: every cap either truncates the archive or refuses the upload, and both silently lose the
+work this exists to protect. The archive size is logged on every snapshot instead, so a workspace
+growing without bound is visible rather than silently dropped.
+
 **Known risk — the `exec` problem.** The entrypoint currently ends with
 `exec /agentpod-node run`, which replaces the shell, leaving no process to trap SIGTERM. It must
 instead run the node-agent as a child and `wait`. That changes the PID-1 semantics the script's
