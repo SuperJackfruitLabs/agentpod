@@ -208,10 +208,17 @@ from Docker rather than from config, so you can confirm rather than assume.
 fails loudly.** It never falls back to `runc` — a silent fallback would leave you
 believing you had kernel isolation when you had none.
 
+> **Do not enable this yet — [#243](https://github.com/rakeshgangwar/agentpod/issues/243).**
+> A runtime provisioned under `runsc` never enrols: DNS does not resolve inside
+> containers on `agentpod-net`, the network the provisioner uses. On the default
+> bridge it works, which is why the original spike passed. ICMP works and the
+> container gets an address, so this is narrower than "no networking", but the
+> cause is not yet established. `DOCKER_RUNTIME` is unset on the reference hub.
+
 Verified on the reference box (Ubuntu 24.04, kernel 6.8, Docker 29.6.1): the
 node-agent enrols, heartbeats, allocates PTYs for the terminal capability, and
-runs ACP stdio children under `runsc` identically to `runc`. Expect 5–20% CPU
-overhead depending on syscall frequency.
+runs ACP stdio children under `runsc` identically to `runc` — **on the default
+bridge**. Expect 5–20% CPU overhead depending on syscall frequency.
 
 ---
 
