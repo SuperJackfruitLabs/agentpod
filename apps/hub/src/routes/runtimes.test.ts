@@ -945,3 +945,78 @@ test("a runtime still being provisioned (no external id yet) is not swept", asyn
   expect(swept).not.toContain(id);
   expect((await rowOf(id)).status).toBe("provisioning");
 }, 30_000);
+
+// ─── external_started_at: the age of the CURRENT instance ─────────────────────
+//
+// A substrate with a lifetime ceiling — Modal destroys a sandbox at 24h, with no
+// warning callback and no way back — forces the hub to know how old the
+// *instance* is. `created_at` cannot answer that: once a runtime has been
+// re-created against its durable anchor, the row is older than the thing
+// running. These tests pin the only three answers the column may give: "when
+// the substrate accepted this instance", "null, because provisioning failed and
+// there is no instance", and "null, because nobody wrote one".
+
+test("provisioning records when the instance started, not only when the row was made", async () => {
+  const before = Date.now();
+  const { id } = (await (await createRuntime(TEST_USER, "instance-clock")).json()) as {
+    id: string;
+  };
+
+  const row = await rowOf(id);
+  expect(row.externalStartedAt).toBeInstanceOf(Date);
+  // Bounded on both sides. The rotation sweeper subtracts this from now(), so a
+  // constant, a far-off default or a zero is worse than useless: it would date
+  // an instance that is not the one running.
+  expect(row.externalStartedAt!.getTime()).toBeGreaterThanOrEqual(before);
+  expect(row.externalStartedAt!.getTime()).toBeLessThanOrEqual(Date.now());
+  // It is written with the externalId because the two describe the same
+  // instance: one names it, the other dates it, and they must not disagree.
+  expect(row.externalId).toBe(`fake-container-${id}`);
+}, 30_000);
+
+test("a runtime whose provision failed has NO instance start time", async () => {
+  // The guard that keeps this column from decaying into a second created_at.
+  // Nothing was started here, so there is no age to report — and a DEFAULT
+  // now(), or a write at insert time, would hand sweepExpiringRuntimes the age
+  // of an instance that does not exist. Its answer to an old instance is to
+  // terminate and re-create, so a fabricated timestamp buys a billed sandbox
+  // for a runtime that failed.
+  const refusing: RuntimeProvisioner = {
+    ...fakeDockerProvisioner,
+    async provision(spec) {
+      fakeCalls.provision.push(spec);
+      throw new Error("substrate refused");
+    },
+  };
+
+  await withProvisioner(refusing, async () => {
+    const res = await createRuntime(TEST_USER, "never-started");
+    expect(res.status).toBe(502);
+
+    const [row] = await db
+      .select()
+      .from(provisionedRuntimes)
+      .where(eq(provisionedRuntimes.name, "never-started"));
+    expect(row!.status).toBe("error");
+    expect(row!.externalId).toBeNull();
+    expect(row!.externalStartedAt).toBeNull();
+  });
+}, 30_000);
+
+test("a row written without an instance start time keeps NULL — the column is additive", async () => {
+  // Every provisioned_runtimes row on the live hub predates this column, and a
+  // driver with no ceiling (docker, cloudflare) never writes it. So the
+  // migration has to be additive in the strict sense: an INSERT naming only the
+  // pre-existing columns must still succeed (no NOT NULL), and must leave the
+  // new column NULL rather than dating an instance the hub never started (no
+  // DEFAULT). Both halves are what makes this deployable against live rows.
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes
+      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${TEST_USER}, 'docker', 'ext-legacy-row', 'online', 'legacy', 'small', 'none',
+            now() - interval '30 days', now() - interval '30 days')
+  `;
+
+  expect((await rowOf(id)).externalStartedAt).toBeNull();
+}, 30_000);

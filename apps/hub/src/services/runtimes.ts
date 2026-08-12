@@ -192,7 +192,22 @@ export async function createRuntime(
 
     await db
       .update(provisionedRuntimes)
-      .set({ externalId, runtime: runtime ?? null, updatedAt: new Date() })
+      .set({
+        externalId,
+        runtime: runtime ?? null,
+        // The instance clock starts where the instance does: the substrate has
+        // just accepted this one. It is set HERE, beside the externalId, and
+        // not at insert time, because until provision() resolves there is no
+        // instance to date — a failed provision must leave this null.
+        //
+        // Every later write of externalId has to set this too. A substrate that
+        // replaces the instance (Modal terminates a sandbox at its 24h ceiling
+        // and the hub re-creates against the same volume) would otherwise keep
+        // the age of the instance it replaced, and be rotated again on the very
+        // next sweep — for ever.
+        externalStartedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(provisionedRuntimes.id, id));
 
     const [row] = await db
