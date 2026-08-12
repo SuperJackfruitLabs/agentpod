@@ -15,7 +15,7 @@
  * by this module. Do not add log statements that reference spec.enrollToken.
  */
 
-import type { RuntimeProvisioner, ProvisionSpec } from "./types";
+import type { RuntimeProvisioner, ProvisionSpec, ResourceTier } from "./types";
 
 export interface CloudflareSandboxOptions {
   workerUrl?: string;
@@ -43,6 +43,14 @@ export interface CloudflareSandboxOptions {
 export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
   readonly provider = "cloudflare" as const;
 
+  /**
+   * Exactly one tier: Cloudflare fixes instance_type per container class, so
+   * this worker provides the tier it was deployed with and nothing else. The
+   * console reads this to build its form, which is why provisioning can no
+   * longer be offered in a shape this driver would refuse.
+   */
+  readonly supportedTiers: ResourceTier[];
+
   private readonly workerUrl: string;
   private readonly apiToken: string;
   private readonly deployedImage: string;
@@ -64,6 +72,7 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
     this.deployedImage = deployedImage;
     this.callbackToken = callbackToken;
     this.deployedTier = deployedTier;
+    this.supportedTiers = [deployedTier as ResourceTier];
     this.fetchImpl = fetchImpl;
   }
 

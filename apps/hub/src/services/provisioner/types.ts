@@ -7,6 +7,9 @@
 
 export type RuntimeProviderName = "docker" | "cloudflare";
 
+/** Resource tier controlling CPU/memory allocation. */
+export type ResourceTier = "small" | "medium" | "large";
+
 /**
  * The spec passed to a provisioner when creating a new runtime.
  * Contains everything the container/sandbox needs to boot and self-enroll.
@@ -35,6 +38,16 @@ export interface ProvisionSpec {
  */
 export interface RuntimeProvisioner {
   readonly provider: RuntimeProviderName;
+
+  /**
+   * Tiers this driver can actually satisfy. Omit when the driver supports all
+   * of them (Docker maps each to real cpu/memory limits).
+   *
+   * Cloudflare fixes instance_type at worker deploy time, so it supports
+   * exactly one — and the console reads this rather than hardcoding a map that
+   * would rot the moment a worker is redeployed at a different instance type.
+   */
+  readonly supportedTiers?: ResourceTier[];
 
   /**
    * Create and start a new runtime for the given spec.

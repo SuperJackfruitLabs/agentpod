@@ -26,6 +26,7 @@
   // ── State ───────────────────────────────────────────────────────────────────
   let runtimes = $state<ProvisionedRuntime[]>([]);
   let providers = $state<string[]>(["docker", "cloudflare"]);
+  let capabilities = $state<Array<{ provider: string; tiers: string[] }>>([]);
   let isLoading = $state(true);
   let error = $state<string | null>(null);
   let showNewRuntimeDialog = $state(false);
@@ -56,6 +57,7 @@
     try {
       const res = await listRuntimeProviders();
       if (res.providers.length > 0) providers = res.providers;
+      if (res.capabilities) capabilities = res.capabilities;
     } catch {
       // keep ["docker", "cloudflare"]
     }
@@ -337,6 +339,7 @@
 <NewRuntimeDialog
   open={showNewRuntimeDialog}
   {providers}
+  {capabilities}
   onClose={() => (showNewRuntimeDialog = false)}
   onCreated={handleRuntimeCreated}
 />

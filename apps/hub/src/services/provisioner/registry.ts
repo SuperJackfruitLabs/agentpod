@@ -11,7 +11,7 @@
  *     (reuses the existing Cloudflare feature-flag name from config.ts)
  */
 
-import type { RuntimeProvisioner, RuntimeProviderName } from "./types";
+import type { RuntimeProvisioner, RuntimeProviderName, ResourceTier } from "./types";
 
 // ─── Known provider names (type-checked set) ──────────────────────────────────
 
@@ -58,6 +58,31 @@ export function enabledProviders(): RuntimeProviderName[] {
     }
   }
   return result;
+}
+
+/** Every tier, for a driver that does not restrict them. */
+const ALL_TIERS: ResourceTier[] = ["small", "medium", "large"];
+
+/**
+ * What each enabled provider can actually do, for the UI to build its form from.
+ *
+ * Exists so the console never offers a choice the driver will refuse. Cloudflare
+ * fixes `instance_type` at worker deploy time and supports exactly one tier, so
+ * a dialog offering small/medium/large produced a guaranteed provisioning
+ * failure with a backend error as the only feedback.
+ *
+ * The capability is read from the driver rather than hardcoded in the console:
+ * a hardcoded map in the UI would silently rot the moment a worker is redeployed
+ * at a different instance type.
+ */
+export function providerCapabilities(): Array<{
+  provider: RuntimeProviderName;
+  tiers: ResourceTier[];
+}> {
+  return enabledProviders().map((provider) => {
+    const driver = _registry.get(provider);
+    return { provider, tiers: driver?.supportedTiers ?? ALL_TIERS };
+  });
 }
 
 /**
