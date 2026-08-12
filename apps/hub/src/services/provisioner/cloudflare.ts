@@ -1,4 +1,25 @@
 /**
+ * Cloudflare runtime provisioner driver — **DEAD as of 2026-08-12.**
+ *
+ * This driver has never provisioned a working fleet runtime and cannot: the
+ * worker it targets (`cloudflare/worker/`, see its DEAD.md) is OpenCode-era and
+ * ignores both `image` and `env`, so the enrolment token never reaches the
+ * container and the container has no `agentpod-node` binary to use it.
+ *
+ * **The dangerous part is that it would look like it worked.** The worker's
+ * routes match what the ASSUMPTION block below describes, so a provision
+ * returns 2xx, this driver reports success and persists an externalId, and the
+ * runtime row then sits in `provisioning` forever with no error logged
+ * anywhere. That is the same silent-success failure as #243.
+ *
+ * It is left in place, still unregistered (`ENABLE_CLOUDFLARE_SANDBOXES` is
+ * unset everywhere), because its tests pin the RuntimeProvisioner interface for
+ * a non-Docker provider. Do not enable it. A replacement built on the modern
+ * `@cloudflare/sandbox` SDK is tracked separately.
+ *
+ * ── Original header, preserved because the ASSUMPTION is exactly what went
+ *    wrong: the routes were verified, the semantics never were ───────────────
+ *
  * Cloudflare runtime provisioner driver (P4 Task 6).
  *
  * Creates and destroys node-agent sandboxes via the Cloudflare Worker REST API.
