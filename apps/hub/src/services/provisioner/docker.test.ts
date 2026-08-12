@@ -35,6 +35,8 @@ class FakeDockerOrchestrator {
   runtimeToReport: string | undefined = undefined;
   /** Set to make createSandbox throw, as Docker does for an unknown runtime. */
   createError: Error | null = null;
+  /** Set to make deleteSandbox throw, as the orchestrator does for a missing container. */
+  deleteError: Error | null = null;
 
   async createSandbox(config: SandboxConfig): Promise<Sandbox> {
     if (this.createError) throw this.createError;
@@ -62,6 +64,7 @@ class FakeDockerOrchestrator {
 
   async deleteSandbox(id: string, removeVolumes: boolean): Promise<void> {
     this.calls.push({ method: "deleteSandbox", args: [id, removeVolumes] });
+    if (this.deleteError) throw this.deleteError;
   }
 
   /** Helper: find a recorded call by method name */
@@ -219,6 +222,28 @@ describe("DockerRuntimeProvisioner", () => {
       await makeProvisioner(fake).destroy("c1");
       const call = fake.callTo("deleteSandbox");
       expect(call!.args[1]).toBe(true);
+    });
+
+    it("succeeds when the container is already gone (conformance rule 6)", async () => {
+      // The orchestrator resolves a container by name and then label and throws
+      // `Sandbox not found: <id>` when neither matches. destroyRuntime turns a
+      // driver throw into a 502 and leaves the row un-destroyed, so a destroy
+      // that half-succeeded — container removed, a later step failed — could
+      // never be retried to completion and wedged the runtime for good.
+      // Nothing to remove is the goal state, not a failure.
+      const fake = new FakeDockerOrchestrator();
+      fake.deleteError = new Error("Sandbox not found: c1");
+      await expect(makeProvisioner(fake).destroy("c1")).resolves.toBeUndefined();
+    });
+
+    it("still fails when the daemon itself cannot be reached", async () => {
+      // The tolerance above must stay pinned to the daemon's "no such container"
+      // answer. A socket that will not connect is silence, not an answer — the
+      // container may well be running and billing — and reporting a successful
+      // destroy for it is a worse bug than the one being fixed.
+      const fake = new FakeDockerOrchestrator();
+      fake.deleteError = new Error("connect ENOENT /var/run/docker.sock");
+      await expect(makeProvisioner(fake).destroy("c1")).rejects.toThrow(/ENOENT/);
     });
   });
 

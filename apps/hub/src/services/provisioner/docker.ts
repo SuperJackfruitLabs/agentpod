@@ -36,6 +36,24 @@ const RUNTIME_RESOURCE_TIERS: Record<
   large:  { cpus: "2.0", memory: "4g",    pidsLimit: 512 },
 };
 
+// ─── "The daemon says there is no such container" ─────────────────────────────
+
+/**
+ * True only for DockerOrchestrator's own "nothing matched" signal.
+ *
+ * That message is thrown by `getContainer` **after** two successful
+ * `listContainers` calls — one by name, one by label — so it is an answer from
+ * a reachable daemon, not a failure to ask. Every way of not reaching the
+ * daemon (`connect ENOENT /var/run/docker.sock`, ECONNREFUSED, a TLS or
+ * timeout error from dockerode) surfaces as a different error out of
+ * `listContainers` and is deliberately NOT matched here: an unreachable daemon
+ * must never read as "already gone", because the container may well still be
+ * running and billing.
+ */
+function isAlreadyGone(err: unknown): boolean {
+  return (err as Error)?.message?.startsWith("Sandbox not found") === true;
+}
+
 // ─── Driver ───────────────────────────────────────────────────────────────────
 
 export class DockerRuntimeProvisioner implements RuntimeProvisioner {
@@ -143,9 +161,25 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
 
   /**
    * Permanently remove the container and its volumes.
+   *
+   * Idempotent (conformance rule 6): a container the daemon has no record of is
+   * already in the state destroy is asked to produce, so this returns rather
+   * than throwing. It has to. `destroyRuntime` turns a driver throw into a 502
+   * and leaves the row un-destroyed, so before this tolerance existed a destroy
+   * that half-succeeded — container removed, a later step failed — could never
+   * be retried to completion and wedged the runtime permanently.
+   *
+   * Only that one condition is forgiven (see isAlreadyGone). A daemon that
+   * cannot be reached still throws: reporting a successful destroy for a
+   * container nobody could look at would be the worse bug.
    */
   async destroy(externalId: string): Promise<void> {
-    await this.orchestrator.deleteSandbox(externalId, true);
+    try {
+      await this.orchestrator.deleteSandbox(externalId, true);
+    } catch (err) {
+      if (isAlreadyGone(err)) return;
+      throw err;
+    }
   }
 
   /**
@@ -179,7 +213,7 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
     try {
       sandbox = await this.orchestrator.inspectSandbox(externalId);
     } catch (err) {
-      if ((err as Error).message?.startsWith("Sandbox not found")) return "stopped";
+      if (isAlreadyGone(err)) return "stopped";
       throw err;
     }
 

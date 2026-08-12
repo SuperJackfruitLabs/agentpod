@@ -143,6 +143,11 @@ export const config = {
     accountId: getEnv('CLOUDFLARE_ACCOUNT_ID', ''),
     apiToken: getEnv('CLOUDFLARE_API_TOKEN', ''),
     workerUrl: getEnv('CLOUDFLARE_WORKER_URL', ''),
+    // The image wrangler.toml baked into the deployed worker. The sandbox
+    // driver declares imageBinding: "fixed" and refuses a spec that asks for
+    // anything else — but only when it knows this value, which is why
+    // validate-config.ts requires it whenever `enabled` is true.
+    sandboxImage: getEnv('CLOUDFLARE_SANDBOX_IMAGE', ''),
     r2Bucket: getEnv('CLOUDFLARE_R2_BUCKET', 'agentpod-workspaces'),
     defaultProvider: getEnv('DEFAULT_SANDBOX_PROVIDER', 'docker') as 'docker' | 'cloudflare',
     autoSelect: getEnvBool('AUTO_SELECT_PROVIDER', false),

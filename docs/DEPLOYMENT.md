@@ -134,6 +134,13 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 
 # Cloudflare provisioner: leave off unless you have a verified CF Sandbox setup.
 # ENABLE_CLOUDFLARE_SANDBOXES=false
+# If you turn it on, these are required alongside it — see cloudflare/worker-v2/README.md.
+# The hub refuses to boot with ENABLE_CLOUDFLARE_SANDBOXES=true and no CLOUDFLARE_SANDBOX_IMAGE.
+# CLOUDFLARE_WORKER_URL=https://<worker-url>
+# CLOUDFLARE_WORKER_TOKEN=<the AGENTPOD_WORKER_TOKEN secret set on the worker>
+# CLOUDFLARE_SANDBOX_IMAGE=agentpod-node-opencode:local
+# RUNTIME_CALLBACK_TOKEN=<shared secret for the sleep callback>
+# CLOUDFLARE_INSTANCE_TIER=large
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -141,6 +148,7 @@ chmod 600 /etc/agentpod/hub.env
 > **Key constraints**
 > - `BETTER_AUTH_SECRET`: ≥ 32 characters.
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
+> - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
 > - Never commit this file to source control.
 
 ---

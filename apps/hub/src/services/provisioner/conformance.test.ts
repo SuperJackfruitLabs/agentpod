@@ -477,42 +477,37 @@ describe("assertConforms — destroy", () => {
 
 describe("assertConforms — the real drivers", () => {
   /**
-   * FINDING, 2026-08-13: the real Docker driver satisfies every declaration it
-   * makes, and fails the one rule that checks something it never declared.
+   * FINDING, 2026-08-13, FIXED 2026-08-13: the real Docker driver satisfies
+   * every declaration it makes. It used to fail rule 6, the one rule that
+   * checks something no manifest field declares.
    *
    * assertConforms is fail-fast and destroy idempotency is the LAST thing it
-   * probes, so reaching this message is itself the proof that imageBinding,
+   * probes, so reaching the end is itself the proof that imageBinding,
    * supportedTiers, stopSemantics, workspaceStorage (including the stop→start
-   * witness) and status all passed.
+   * witness) and status all passed too.
    *
-   * The gap is real, not an artefact of the fake: DockerOrchestrator.deleteSandbox
+   * The gap was real, not an artefact of the fake: DockerOrchestrator.deleteSandbox
    * resolves the container by name and then label and throws
-   * `Sandbox not found: <id>` when neither matches, and the driver forwards that
-   * to the caller. destroyRuntime() turns it into a 502 and leaves the row
+   * `Sandbox not found: <id>` when neither matches, and the driver forwarded that
+   * to the caller. destroyRuntime() turned it into a 502 and left the row
    * un-destroyed — so a destroy that half-succeeded (container gone, DB update
-   * or a later step failed) can never be retried to completion. The runtime is
-   * wedged for good.
+   * or a later step failed) could never be retried to completion, and the
+   * runtime was wedged for good.
    *
-   * This is NOT patched here on purpose. Rules 1–5 check declarations against
-   * behaviour; rule 6 checks an invariant no manifest field carries, so a real
-   * driver failing it is a finding about the driver rather than evidence that
-   * the suite is miscalibrated. Fixing it is a one-line tolerance in
-   * docker.ts/docker-orchestrator.ts plus its own regression test, and belongs
-   * in a change that is about the Docker driver.
-   *
-   * When that lands, this test goes red — flip it to `.resolves.toBeUndefined()`.
+   * The fix is one tolerance in DockerRuntimeProvisioner.destroy, pinned to that
+   * exact message and to nothing else: the substrate below still throws it, and
+   * a daemon that cannot be reached still fails loudly (see docker.test.ts).
    */
-  it("holds the real Docker driver to every declaration, and catches its one undeclared gap", async () => {
-    await expect(assertConforms(dockerDriver())).rejects.toThrow(
-      /destroy: destroy\(\) is not idempotent/
-    );
+  it("holds the real Docker driver to every declaration, including destroy idempotency", async () => {
+    await expect(assertConforms(dockerDriver())).resolves.toBeUndefined();
   });
 
-  it("accepts the real Docker driver where a repeat destroy is tolerated", async () => {
-    // Diagnostic, not the conformance claim above: the substrate here forgives
-    // deleting something already gone, and with that single behaviour changed
-    // the driver passes all six rules. It isolates the gap to one line and
-    // proves nothing else about Docker's declarations is in question.
+  it("accepts the real Docker driver where the substrate itself tolerates a repeat destroy", async () => {
+    // Diagnostic kept from the investigation: with the substrate forgiving a
+    // delete of something already gone, the driver passed all six rules even
+    // before the fix. It isolated the gap to one line and proved nothing else
+    // about Docker's declarations was in question. It must keep passing — the
+    // driver's own tolerance is additional to this, not a replacement for it.
     await expect(
       assertConforms(dockerDriver({ tolerateRepeatDestroy: true }))
     ).resolves.toBeUndefined();
