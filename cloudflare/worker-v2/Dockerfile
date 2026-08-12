@@ -24,4 +24,12 @@ RUN set -eux; \
 
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
+
+# Workspace persistence. Disk on this substrate is ephemeral, so the wrapper
+# restores the workspace on start and archives it on SIGTERM. It runs the
+# entrypoint as a child rather than replacing it, which keeps the entrypoint
+# byte-identical to the fleet's Docker one.
+COPY snapshot-wrapper.sh /snapshot-wrapper.sh
+RUN chmod +x /snapshot-wrapper.sh
+
+ENTRYPOINT ["/snapshot-wrapper.sh", "/entrypoint.sh"]
