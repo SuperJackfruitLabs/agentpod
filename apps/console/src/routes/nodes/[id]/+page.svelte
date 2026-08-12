@@ -174,7 +174,7 @@
     {:else if stations.detected.length === 0}
       <Empty
         title="No agents found on this node"
-        description="AgentPod looks for hermes, openclaw, claude-code, codex, and opencode. Start one and rescan."
+        description="AgentPod looks for hermes, openclaw, claude-code, codex, opencode, and pi. Start one and rescan."
       >
         <Button variant="outline" size="sm" onclick={loadStations}>Rescan</Button>
       </Empty>

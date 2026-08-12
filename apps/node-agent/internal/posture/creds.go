@@ -55,6 +55,21 @@ var CredentialPaths = map[string][]string{
 
 	// This Mac 2026-08-11: present, 600.
 	"opencode": {".local/share/opencode/auth.json"},
+
+	// This Mac 2026-08-12, Pi 0.84.1: ~/.pi/agent held auth.json (mode 600, API
+	// keys and OAuth tokens) and models-store.json (mode 600, cached model
+	// catalogs), alongside settings.json (mode 644), bin/ and sessions/.
+	// settings.json is not a credential file and is deliberately not listed.
+	// models.json was ABSENT — Pi writes it on demand — but it is listed because
+	// a custom provider definition puts literal API keys in it; an absent path is
+	// silent, so listing it costs nothing and catches the machine that has one.
+	// trust.json, which Pi's docs also mention, holds trust decisions rather than
+	// secrets and is not listed.
+	"pi": {
+		".pi/agent/auth.json",
+		".pi/agent/models-store.json",
+		".pi/agent/models.json",
+	},
 }
 
 // KnownHarnesses returns every harness this package can check credentials for.

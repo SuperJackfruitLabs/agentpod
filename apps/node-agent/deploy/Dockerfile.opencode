@@ -1,20 +1,19 @@
 # syntax=docker/dockerfile:1
 
-# Stage 1: Build the static node-agent binary
-FROM golang:1.26 AS builder
-WORKDIR /src
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /agentpod-node ./cmd/agentpod-node
-
-# Stage 2: Runtime — bun base (Debian) for opencode
-FROM oven/bun:1-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git procps \
-    && rm -rf /var/lib/apt/lists/*
-# procps provides `pgrep`, used by the OpenCode descriptor's running-process
-# health check and its supervised-serve Stop/Start; without it the station
-# Health panel shows "process check unavailable".
+# OpenCode harness image.
 #
+# The agentpod-node binary, ca-certificates, curl, git and procps come from the
+# shared base image, which must be built first:
+#
+#   docker build -f apps/node-agent/deploy/Dockerfile.base -t agentpod-node:base apps/node-agent
+FROM agentpod-node:base
+
+# bun, copied out of its own published image rather than fetched by a network
+# install script. BUN_INSTALL_BIN is what oven/bun's image sets, and is what
+# puts `bun add -g` binaries (i.e. `opencode`) on PATH.
+COPY --from=oven/bun:1-slim /usr/local/bin/bun /usr/local/bin/bun
+ENV BUN_INSTALL_BIN=/usr/local/bin
+
 # `sqlite3` is deliberately NOT installed. The entrypoint used to hand-seed
 # opencode.db (the descriptor's PRIMARY project-discovery path) with a schema
 # snapshot that broke across opencode-ai version bumps (see
@@ -28,7 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the node-agent's ACPCommand uses to spawn `opencode acp` sessions).
 RUN bun add -g opencode-ai@1.18.15
 
-COPY --from=builder /agentpod-node /agentpod-node
+# OpenCode ships its own entrypoint rather than the base image's: `opencode
+# serve` is a daemon, so the container needs a supervision loop.
 COPY deploy/node-opencode-entrypoint.sh /node-opencode-entrypoint.sh
 RUN chmod +x /node-opencode-entrypoint.sh
 

@@ -14,7 +14,12 @@ export type RuntimeStatus = z.infer<typeof RuntimeStatus>;
 export const ResourceTier = z.enum(["small", "medium", "large"]);
 export type ResourceTier = z.infer<typeof ResourceTier>;
 
-export const RuntimeHarness = z.enum(["none", "opencode"]);
+/**
+ * Values must match the node-agent descriptor's `Harness()` string exactly:
+ * auto-adoption pairs a provisioned runtime with its detected station by
+ * string equality on this field.
+ */
+export const RuntimeHarness = z.enum(["none", "opencode", "pi"]);
 export type RuntimeHarness = z.infer<typeof RuntimeHarness>;
 
 export const ProvisionRequest = z.object({

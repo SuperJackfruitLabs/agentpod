@@ -56,21 +56,35 @@ Tune for a shared box (optional): set `shared_buffers = 256MB` in `/etc/postgres
 
 ## 3. Build the node-agent Docker images
 
-Build both images on the Docker host from the repo root. The context path is `apps/node-agent`; the Dockerfiles live in `apps/node-agent/deploy/`.
+Build the images on the Docker host from the repo root. The context path is `apps/node-agent`; the Dockerfiles live in `apps/node-agent/deploy/`.
+
+`Dockerfile.base` carries everything shared — the Go build stage, the runtime distro, `ca-certificates curl git procps`, and the `agentpod-node` binary — and every harness image is `FROM agentpod-node:base`. **Build the base first**, or the harness builds fail to resolve their `FROM`. Rebuild it (and then the harness images) whenever the node-agent source changes.
 
 ```bash
 cd /opt/agentpod
 
-# Base node-agent image (no harness preloaded)
+# Shared base image — build this first
+docker build \
+  -t agentpod-node:base \
+  -f apps/node-agent/deploy/Dockerfile.base \
+  apps/node-agent
+
+# Generic node-agent image (no harness preloaded)
 docker build \
   -t agentpod-node:local \
   -f apps/node-agent/deploy/Dockerfile \
   apps/node-agent
 
-# OpenCode harness image (bun + opencode-ai@0.5.5 preloaded)
+# OpenCode harness image (bun + opencode-ai@1.18.15 preloaded)
 docker build \
   -t agentpod-node-opencode:local \
   -f apps/node-agent/deploy/Dockerfile.opencode \
+  apps/node-agent
+
+# Pi harness image (Node 24 + @earendil-works/pi-coding-agent@0.84.1 + pi-acp@0.0.33)
+docker build \
+  -t agentpod-node-pi:local \
+  -f apps/node-agent/deploy/Dockerfile.pi \
   apps/node-agent
 ```
 

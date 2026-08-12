@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1
+
+# Shared base for every node-agent container image. The per-harness images
+# (Dockerfile, Dockerfile.opencode, ...) are `FROM agentpod-node:base` and add
+# only what their harness needs, so the build stage, the runtime distro and the
+# common tooling are defined exactly once.
+#
+# This image must be built FIRST — the harness Dockerfiles will not resolve
+# without it:
+#
+#   docker build -f apps/node-agent/deploy/Dockerfile.base -t agentpod-node:base apps/node-agent
+#
+# It sets no ENTRYPOINT on purpose: each harness layer chooses its own (the
+# generic enrol-then-run script, or a harness supervision loop).
+
+# Stage 1: Build the static node-agent binary
+FROM golang:1.26 AS builder
+WORKDIR /src
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /agentpod-node ./cmd/agentpod-node
+
+# Stage 2: Runtime base
+# Debian rather than alpine because the harness layers install glibc-linked
+# toolchains on top of it (bun for OpenCode, node for Pi). Trixie specifically:
+# it is the distro oven/bun:1-slim is built on, so the OpenCode image keeps the
+# exact userland it already runs on today.
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git procps \
+    && rm -rf /var/lib/apt/lists/*
+# procps provides `pgrep`, used by the descriptors' running-process health
+# checks (and by OpenCode's supervised-serve Stop/Start); without it the
+# station Health panel shows "process check unavailable". ca-certificates is
+# needed to dial the hub over WSS; curl and git are what an agent working
+# inside the container reaches for first.
+
+COPY --from=builder /agentpod-node /agentpod-node
+
+# The generic entrypoint (enrol, then exec the run loop) lives here because
+# more than one harness layer uses it verbatim — a harness only ships its own
+# entrypoint when it needs supervision, as OpenCode does.
+COPY deploy/node-entrypoint.sh /node-entrypoint.sh
+RUN chmod +x /node-entrypoint.sh
