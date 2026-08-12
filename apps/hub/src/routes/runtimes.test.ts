@@ -36,6 +36,8 @@ import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { registerProvisioner, resetProvisioners } from "../services/provisioner/registry";
 import type { RuntimeProvisioner, ProvisionSpec } from "../services/provisioner/types";
 import { runtimeRoutes } from "./runtimes";
+import { sweepStalledRuntimeStarts, START_TIMEOUT_MS } from "../services/runtimes";
+import { enrollNode } from "../services/enrollment";
 import type { AuthUser } from "../auth/middleware";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -517,3 +519,142 @@ test("a driver that reports no runtime stores null", async () => {
   expect(res.status).toBe(201);
   expect(((await res.json()) as Record<string, unknown>).runtime).toBeNull();
 });
+
+// ─── "started but never came back" (issue #254) ───────────────────────────────
+//
+// `online` is a claim that a node for this runtime is connected. The start path
+// cannot know that: it only knows the substrate accepted a start request. On
+// 2026-08-12 a runtime read `online` while its container was crash-exiting in
+// 892 ms, and the operator restarted it twice on the strength of the lie.
+
+async function startVia(id: string, userId = TEST_USER) {
+  return testApp.request(`/api/runtimes/${id}/start`, {
+    method: "POST",
+    headers: { "X-Test-User-Id": userId },
+  });
+}
+
+async function rowOf(id: string) {
+  const [row] = await db
+    .select()
+    .from(provisionedRuntimes)
+    .where(eq(provisionedRuntimes.id, id));
+  return row!;
+}
+
+test("a started runtime is not online until a node actually arrives", async () => {
+  const createRes = await createRuntime(TEST_USER, "start-no-evidence");
+  const { id } = (await createRes.json()) as { id: string };
+
+  // The fake driver's start() resolves — the substrate accepted the request.
+  const res = await startVia(id);
+  expect(res.status).toBe(204);
+  expect(fakeCalls.start).toHaveLength(1);
+
+  // ...but no node has enrolled, so the hub must not claim it is online.
+  const row = await rowOf(id);
+  expect(row.status).not.toBe("online");
+  expect(row.status).toBe("starting");
+}, 30_000);
+
+test("a start whose node never arrives times out into error with the reason", async () => {
+  // The state the old code could not represent: started, never came back.
+  const createRes = await createRuntime(TEST_USER, "start-never-returns");
+  const { id } = (await createRes.json()) as { id: string };
+  await startVia(id);
+
+  // Before the deadline it is still legitimately "starting".
+  expect(await sweepStalledRuntimeStarts(Date.now())).not.toContain(id);
+  expect((await rowOf(id)).status).toBe("starting");
+
+  const swept = await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+  expect(swept).toContain(id);
+
+  const row = await rowOf(id);
+  expect(row.status).toBe("error");
+  // The console must be able to say *why*, not just show a red light.
+  expect(row.statusReason).toContain("no node enrolled");
+}, 30_000);
+
+test("a node enrolling is what makes a started runtime online", async () => {
+  const createRes = await createRuntime(TEST_USER, "start-then-enrol");
+  const { id } = (await createRes.json()) as { id: string };
+  const enrollToken = fakeCalls.provision[0]!.enrollToken;
+
+  await startVia(id);
+  expect((await rowOf(id)).status).toBe("starting");
+
+  await enrollNode(enrollToken, {
+    hostname: "startbox",
+    os: "linux",
+    arch: "amd64",
+    cpuCount: 2,
+  });
+
+  const row = await rowOf(id);
+  expect(row.status).toBe("online");
+  expect(row.nodeId).toBeTruthy();
+  // A stale failure reason must not linger next to a green badge.
+  expect(row.statusReason).toBeNull();
+}, 30_000);
+
+test("an error reason from an earlier failure is cleared when the runtime is started again", async () => {
+  const createRes = await createRuntime(TEST_USER, "start-clears-reason");
+  const { id } = (await createRes.json()) as { id: string };
+  await startVia(id);
+  await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+  expect((await rowOf(id)).statusReason).toBeTruthy();
+
+  await startVia(id);
+  const row = await rowOf(id);
+  expect(row.status).toBe("starting");
+  expect(row.statusReason).toBeNull();
+}, 30_000);
+
+test("an asleep runtime is never swept into error", async () => {
+  // A sleeping runtime's node is legitimately offline and it wakes on demand.
+  // Reporting a routine state as a fault is the failure shape this codebase
+  // keeps hitting — the sweeper must not reintroduce it.
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes
+      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep', 'asleep', 'sleeper', 'small', 'none',
+            now() - interval '1 day', now() - interval '1 day')
+  `;
+
+  const swept = await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+  expect(swept).not.toContain(id);
+  expect((await rowOf(id)).status).toBe("asleep");
+}, 30_000);
+
+test("a created runtime whose node never arrives times out too", async () => {
+  // createRuntime has the same shape as startRuntime: it asks a substrate and
+  // then waits. A create that never enrols used to read "provisioning" forever.
+  const createRes = await createRuntime(TEST_USER, "create-never-returns");
+  const { id } = (await createRes.json()) as { id: string };
+  expect((await rowOf(id)).status).toBe("provisioning");
+
+  const swept = await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+  expect(swept).toContain(id);
+
+  const row = await rowOf(id);
+  expect(row.status).toBe("error");
+  expect(row.statusReason).toContain("no node enrolled");
+}, 30_000);
+
+test("a runtime still being provisioned (no external id yet) is not swept", async () => {
+  // Between the row insert and provision() resolving there is no container to
+  // have failed — a slow image pull must not be reported as a failure.
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes
+      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${TEST_USER}, 'docker', NULL, 'provisioning', 'slow-pull', 'small', 'none',
+            now() - interval '1 day', now() - interval '1 day')
+  `;
+
+  const swept = await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000);
+  expect(swept).not.toContain(id);
+  expect((await rowOf(id)).status).toBe("provisioning");
+}, 30_000);

@@ -174,7 +174,11 @@
       accessorKey: "status",
       header: "Status",
       enableSorting: false,
-      cell: (ctx) => renderSnippet(statusCell, { value: ctx.getValue<string>() }),
+      cell: (ctx) =>
+        renderSnippet(statusCell, {
+          value: ctx.getValue<string>(),
+          reason: ctx.row.original.statusReason ?? null,
+        }),
     },
     {
       accessorKey: "createdAt",
@@ -217,10 +221,24 @@
   {/if}
 {/snippet}
 
-{#snippet statusCell({ value }: { value: string })}
-  <Badge variant="outline" class={statusBadgeClass(value)} data-testid="status-badge">
-    {value}
-  </Badge>
+{#snippet statusCell({ value, reason }: { value: string; reason: string | null })}
+  <div class="flex flex-col items-start gap-1">
+    <Badge variant="outline" class={statusBadgeClass(value)} data-testid="status-badge">
+      {value}
+    </Badge>
+    <!-- Why, when the status alone doesn't say. An operator who sees only
+         "error" restarts things; one who reads "no node enrolled within 2m of
+         the start request" goes and looks at the container instead. -->
+    {#if reason}
+      <span
+        class="max-w-[22rem] text-xs leading-snug text-muted-foreground"
+        title={reason}
+        data-testid="status-reason"
+      >
+        {reason}
+      </span>
+    {/if}
+  </div>
 {/snippet}
 
 {#snippet createdCell({ value }: { value: string })}

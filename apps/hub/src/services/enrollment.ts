@@ -148,7 +148,10 @@ export async function enrollNode(
       if (updated.length > 0) {
         await db
           .update(provisionedRuntimes)
-          .set({ status: "online", updatedAt: new Date() })
+          // A node is here: this is the evidence "online" is a claim about.
+          // Clearing statusReason retires any earlier "never came back" note —
+          // it just did.
+          .set({ status: "online", statusReason: null, updatedAt: new Date() })
           .where(eq(provisionedRuntimes.id, runtime.id));
 
         return { nodeId: runtime.nodeId, nodeSecret };
@@ -201,7 +204,7 @@ export async function enrollNode(
   if (row.provisionedRuntimeId) {
     await db
       .update(provisionedRuntimes)
-      .set({ nodeId, status: "online", updatedAt: new Date() })
+      .set({ nodeId, status: "online", statusReason: null, updatedAt: new Date() })
       .where(eq(provisionedRuntimes.id, row.provisionedRuntimeId));
   }
 
