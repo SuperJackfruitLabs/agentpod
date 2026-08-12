@@ -23,6 +23,7 @@ import {
   verifyNodeCredential,
 } from "../../src/services/enrollment";
 import { listNodes } from "../../src/services/node-registry";
+import { adoptStations } from "../../src/services/station-registry";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { nodeEnrollRoutes } from "../../src/routes/nodes";
 
@@ -342,5 +343,33 @@ describe("Enrollment service", () => {
       SELECT count(*)::int AS n FROM nodes WHERE id = ${nodeId}
     `) as Array<{ n: number }>;
     expect(nodeRows[0]!.n).toBe(1);
+  });
+
+  test("adopted stations survive a re-enrolment", async () => {
+    // Identity is only worth persisting if what hangs off it persists too.
+    // Stations key on nodeId, so keeping the id keeps the fleet's view intact —
+    // this is the difference between "the runtime came back" and "the runtime
+    // came back as itself".
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+    const { nodeId } = await enrollNode(token, HOST_INFO);
+
+    await adoptStations(TEST_USER_ID, nodeId, ["opencode:workspace"], [
+      {
+        key: "opencode:workspace", harness: "opencode", kind: "leaf",
+        displayName: "workspace", parentKey: null, workspacePath: "/workspace",
+        capabilities: ["health", "acp"], adopted: false,
+      },
+    ]);
+
+    await enrollNode(token, HOST_INFO);
+
+    const rows = (await rawSql`
+      SELECT station_key FROM stations WHERE node_id = ${nodeId}
+    `) as Array<{ station_key: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.station_key).toBe("opencode:workspace");
   });
 });
