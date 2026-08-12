@@ -42,6 +42,7 @@ import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
 import { stationChangesetRoutes } from './routes/station-changeset.ts';
 import { nodePostureRoutes } from './routes/node-posture.ts';
+import { runtimeCallbackRoutes } from './routes/runtime-callback.ts';
 // ACP session routes (REST session management + console session WebSocket)
 import { stationAcpRoutes } from './routes/station-acp.ts';
 import { acpProxyRouter } from './routes/acp-proxy.ts';
@@ -127,6 +128,7 @@ const app = new Hono()
   .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
+  .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
   .route('/api', acpProxyRouter);                          // WS /api/acp/proxy — Doors: an editor's stdio, piped by `apn acp`
 

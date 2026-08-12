@@ -1,0 +1,24 @@
+name = "agentpod-sandbox-v2"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = true
+
+[[durable_objects.bindings]]
+name = "NODE_AGENT"
+class_name = "NodeAgentContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NodeAgentContainer"]
+
+[[containers]]
+class_name = "NodeAgentContainer"
+image = "./Dockerfile"
+# 4 GiB. A live opencode runtime OOM-killed its ACP session at 513MB rss, and
+# the Docker "small" tier had to go to 1g for `opencode serve` plus one
+# `opencode acp` to coexist; standard-1 leaves real headroom.
+instance_type = "standard-1"
+max_instances = 20

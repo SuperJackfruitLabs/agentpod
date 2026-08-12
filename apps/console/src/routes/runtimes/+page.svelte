@@ -102,6 +102,26 @@
     }
   }
 
+  /**
+   * Wake a runtime the substrate idled out.
+   *
+   * Reuses the start path deliberately: to the driver a wake IS a start, and a
+   * second lifecycle route would be free to drift from it.
+   */
+  async function handleWake(rt: ProvisionedRuntime) {
+    actionInFlight[rt.id] = true;
+    try {
+      await startRuntime(rt.id);
+      await loadRuntimes();
+    } catch (e) {
+      toast.error("Couldn’t wake the runtime", {
+        description: e instanceof Error ? e.message : "Unknown error",
+      });
+    } finally {
+      delete actionInFlight[rt.id];
+    }
+  }
+
   async function handleStop(rt: ProvisionedRuntime) {
     actionInFlight[rt.id] = true;
     try {
@@ -217,6 +237,21 @@
         data-testid="start-btn"
       >
         {actionInFlight[rt.id] ? "Starting…" : "Start"}
+      </button>
+    {/if}
+
+    <!-- Wake: shown when the substrate idled the runtime out. Distinct from
+         Start, which is for a runtime an operator stopped — the label should
+         match what actually happened. -->
+    {#if rt.status === "asleep"}
+      <button
+        type="button"
+        disabled={!!actionInFlight[rt.id]}
+        onclick={() => handleWake(rt)}
+        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
+        data-testid="wake-btn"
+      >
+        {actionInFlight[rt.id] ? "Waking…" : "Wake"}
       </button>
     {/if}
 

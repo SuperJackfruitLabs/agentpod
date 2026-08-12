@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { ProvisionRequest, ProvisionedRuntime } from "./runtime";
+import { ProvisionRequest, ProvisionedRuntime, RuntimeStatus } from "./runtime";
 import { RuntimeHarness } from "./runtime";
 
 describe("ProvisionRequest", () => {
@@ -83,5 +83,19 @@ describe("ProvisionedRuntime.runtime", () => {
     // and a row created before this field existed never had one recorded.
     expect(ProvisionedRuntime.parse(BASE).runtime).toBeUndefined();
     expect(ProvisionedRuntime.parse({ ...BASE, runtime: null }).runtime).toBeNull();
+  });
+});
+
+describe("RuntimeStatus asleep", () => {
+  it("accepts asleep", () => {
+    // A slept container is not stopped and not broken. Without its own value the
+    // console cannot tell an operator "this idled out" from "this failed".
+    expect(RuntimeStatus.parse("asleep")).toBe("asleep");
+  });
+
+  it("keeps stopped distinct", () => {
+    // `stopped` means an operator did it. Collapsing the two would lose the
+    // difference between "I did that" and "it happened on its own".
+    expect(RuntimeStatus.parse("stopped")).toBe("stopped");
   });
 });

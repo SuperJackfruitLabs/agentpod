@@ -9,13 +9,13 @@
  */
 import { registerProvisioner, isProviderEnabled } from "./registry";
 import { DockerRuntimeProvisioner } from "./docker";
-import { CloudflareRuntimeProvisioner } from "./cloudflare";
+import { CloudflareSandboxProvisioner } from "./cloudflare-sandbox";
 
 export function registerEnabledProvisioners(): void {
   if (isProviderEnabled("docker")) {
     registerProvisioner(new DockerRuntimeProvisioner());
   }
   if (isProviderEnabled("cloudflare")) {
-    registerProvisioner(new CloudflareRuntimeProvisioner());
+    registerProvisioner(new CloudflareSandboxProvisioner());
   }
 }

@@ -3,7 +3,12 @@ import { z } from "zod";
 export const RuntimeProvider = z.enum(["docker", "cloudflare"]);
 export type RuntimeProvider = z.infer<typeof RuntimeProvider>;
 
-export const RuntimeStatus = z.enum(["provisioning", "online", "stopped", "error", "destroyed"]);
+/**
+ * `asleep` — the substrate idled the runtime out and stopped billing it. Its
+ * node is legitimately offline; the runtime is healthy and can be woken.
+ * Distinct from `stopped`, which means an operator stopped it deliberately.
+ */
+export const RuntimeStatus = z.enum(["provisioning", "online", "stopped", "asleep", "error", "destroyed"]);
 export type RuntimeStatus = z.infer<typeof RuntimeStatus>;
 
 export const ResourceTier = z.enum(["small", "medium", "large"]);
