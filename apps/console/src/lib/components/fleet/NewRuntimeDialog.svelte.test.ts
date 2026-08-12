@@ -179,3 +179,52 @@ test("failed provisionRuntime shows inline error and does NOT call onClose", asy
     expect(onCreated).not.toHaveBeenCalled();
   });
 });
+
+test("offers only the tiers the selected provider can actually satisfy", async () => {
+  // Cloudflare fixes instance_type at worker deploy time, so it supports one
+  // tier. Offering small/medium/large made provisioning fail with a backend
+  // error as the only feedback — the dialog must not present a doomed choice.
+  const { getByText, queryByText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["cloudflare"],
+      capabilities: [{ provider: "cloudflare", tiers: ["large"] }],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  // The trigger shows the selected tier, which must already be a supported one.
+  expect(getByText("large")).toBeTruthy();
+  expect(queryByText("small")).toBeNull();
+  expect(queryByText("medium")).toBeNull();
+});
+
+test("defaults the tier to one the provider supports", async () => {
+  // The default was hardcoded to "small", which cloudflare refuses.
+  const spy = vi.spyOn(api, "provisionRuntime").mockResolvedValue({
+    ...mockRuntime,
+    provider: "cloudflare" as const,
+    resourceTier: "large" as const,
+  });
+
+  const { getByRole, getByPlaceholderText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["cloudflare"],
+      capabilities: [{ provider: "cloudflare", tiers: ["large"] }],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  const input = getByPlaceholderText(/my-runtime|name/i);
+  await fireEvent.input(input, { target: { value: "cf-box" } });
+  await fireEvent.click(getByRole("button", { name: /^create runtime$/i }));
+
+  await waitFor(() =>
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "cloudflare", resourceTier: "large" })
+    )
+  );
+});

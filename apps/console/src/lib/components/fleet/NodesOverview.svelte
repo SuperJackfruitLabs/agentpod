@@ -48,6 +48,7 @@
   // Runtime provisioning state
   let runtimes = $state<ProvisionedRuntime[]>([]);
   let providers = $state<string[]>(["docker", "cloudflare"]);
+  let capabilities = $state<Array<{ provider: string; tiers: string[] }>>([]);
   let showNewRuntimeDialog = $state(false);
 
   // Provisioning runtimes: status==="provisioning" with no matching online node yet
@@ -106,6 +107,7 @@
       try {
         const res = await listRuntimeProviders();
         if (res.providers.length > 0) providers = res.providers;
+        if (res.capabilities) capabilities = res.capabilities;
       } catch {
         // keep fallback ["docker", "cloudflare"]
       }
@@ -413,6 +415,7 @@
 <NewRuntimeDialog
   open={showNewRuntimeDialog}
   {providers}
+  {capabilities}
   onClose={() => (showNewRuntimeDialog = false)}
   onCreated={handleRuntimeCreated}
 />

@@ -80,7 +80,11 @@ export const provisionRuntime = (req: {
 export const listRuntimes = () => http<ProvisionedRuntime[]>("/api/runtimes");
 
 export const listRuntimeProviders = () =>
-  http<{ providers: string[] }>("/api/runtimes/providers");
+  http<{
+    providers: string[];
+    /** Tiers each provider can satisfy — the dialog builds its form from this. */
+    capabilities?: Array<{ provider: string; tiers: string[] }>;
+  }>("/api/runtimes/providers");
 
 export const destroyRuntime = (id: string) =>
   http<void>(`/api/runtimes/${id}`, { method: "DELETE" });

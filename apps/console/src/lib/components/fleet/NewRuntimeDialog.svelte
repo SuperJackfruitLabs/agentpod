@@ -15,13 +15,27 @@
   interface Props {
     open: boolean;
     providers: string[];
+    /**
+     * Which tiers each provider can actually satisfy. Read from the hub rather
+     * than hardcoded here: Cloudflare fixes instance_type at worker deploy
+     * time, and a map baked into the UI would rot the moment a worker is
+     * redeployed at a different instance type.
+     */
+    capabilities?: Array<{ provider: string; tiers: string[] }>;
     onClose: () => void;
     onCreated?: () => void;
   }
 
-  let { open, providers, onClose, onCreated }: Props = $props();
+  let { open, providers, capabilities = [], onClose, onCreated }: Props = $props();
 
-  const tiers = ["small", "medium", "large"];
+  const ALL_TIERS = ["small", "medium", "large"];
+
+  // Only the tiers the selected provider can satisfy. Offering one it cannot
+  // means the driver refuses the request and the user sees a backend error for
+  // a choice the form invited them to make.
+  const tiers = $derived(
+    capabilities.find((c) => c.provider === provider)?.tiers ?? ALL_TIERS,
+  );
   const harnessOptions = [
     { value: "none", label: "Generic" },
     { value: "opencode", label: "OpenCode" },
@@ -40,9 +54,16 @@
     if (open) {
       name = "";
       error = null;
-      resourceTier = "small";
       harness = "none";
       provider = providers[0] ?? "docker";
+    }
+  });
+
+  // Keep the selected tier valid: on open, and whenever the provider changes to
+  // one that does not offer the current selection.
+  $effect(() => {
+    if (!tiers.includes(resourceTier)) {
+      resourceTier = tiers[0] ?? "small";
     }
   });
 

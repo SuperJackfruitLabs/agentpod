@@ -7,10 +7,11 @@
  * No DB or external I/O — pure unit test.
  */
 
-import { test, expect, beforeEach, afterEach, describe } from "bun:test";
+import { test, it, expect, beforeEach, afterEach, describe } from "bun:test";
 import {
   registerProvisioner,
   enabledProviders,
+  providerCapabilities,
   getProvisioner,
   resetProvisioners,
 } from "./registry";
@@ -169,5 +170,42 @@ describe("resetProvisioners (test isolation)", () => {
     registerProvisioner(fakeDockerProvisioner());
     resetProvisioners();
     expect(() => getProvisioner("docker")).toThrow("provider not registered: docker");
+  });
+});
+
+// ─── Provider capabilities ────────────────────────────────────────────────────
+
+
+describe("providerCapabilities", () => {
+  it("reports the tiers a provider can actually satisfy", () => {
+    // The console must not offer a choice the driver will refuse. Cloudflare
+    // fixes instance_type at worker deploy time, so it supports exactly one
+    // tier — offering "small" produced a guaranteed provisioning failure.
+    process.env.ENABLE_CLOUDFLARE_SANDBOXES = "true";
+    registerProvisioner({
+      provider: "cloudflare",
+      supportedTiers: ["large"],
+      provision: async () => ({ externalId: "x" }),
+      destroy: async () => {},
+    } as never);
+
+    const caps = providerCapabilities();
+    const cf = caps.find((c) => c.provider === "cloudflare");
+    expect(cf?.tiers).toEqual(["large"]);
+  });
+
+  it("defaults to every tier for a driver that does not restrict them", () => {
+    // Docker maps all three tiers to real cpu/memory limits, so a driver that
+    // says nothing must keep offering all of them.
+    process.env.ENABLE_DOCKER_PROVISIONING = "true";
+    registerProvisioner({
+      provider: "docker",
+      provision: async () => ({ externalId: "x" }),
+      destroy: async () => {},
+    } as never);
+
+    const caps = providerCapabilities();
+    const docker = caps.find((c) => c.provider === "docker");
+    expect(docker?.tiers).toEqual(["small", "medium", "large"]);
   });
 });

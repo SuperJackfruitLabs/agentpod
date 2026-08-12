@@ -22,6 +22,7 @@ import {
   getProvisioner,
   getProvisionerUnguarded,
   enabledProviders,
+  providerCapabilities,
   isProviderEnabled,
 } from "./provisioner/registry";
 import type { ProvisionedRuntime } from "@agentpod/contract";
@@ -340,4 +341,4 @@ export async function stopRuntime(userId: string, id: string): Promise<void> {
 }
 
 // Re-export for convenience (routes use this)
-export { enabledProviders };
+export { enabledProviders, providerCapabilities };

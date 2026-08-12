@@ -32,6 +32,7 @@ import {
   startRuntime,
   stopRuntime,
   enabledProviders,
+  providerCapabilities,
 } from "../services/runtimes";
 
 export const runtimeRoutes = new Hono()
@@ -67,7 +68,7 @@ export const runtimeRoutes = new Hono()
   // ── GET /api/runtimes/providers ───────────────────────────────────────────
   // Must be registered BEFORE /:id to avoid being shadowed.
   .get("/providers", (c) => {
-    return c.json({ providers: enabledProviders() });
+    return c.json({ providers: enabledProviders(), capabilities: providerCapabilities() });
   })
 
   // ── GET /api/runtimes ─────────────────────────────────────────────────────
