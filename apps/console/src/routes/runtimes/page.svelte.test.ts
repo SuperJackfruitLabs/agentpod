@@ -304,3 +304,49 @@ test("a runtime with no reported runtime shows none", async () => {
   await waitFor(() => expect(container.textContent).toMatch(/plain/));
   expect(container.textContent).not.toMatch(/runsc|runc/);
 });
+
+// ---------------------------------------------------------------------------
+// Asleep + Wake
+// ---------------------------------------------------------------------------
+
+test("an asleep runtime reads as asleep, not broken", async () => {
+  // Sleeping is normal and cheap. Showing it as offline or errored would make
+  // the substrate's main feature look like a fault.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/asleep/i));
+});
+
+test("an asleep runtime offers Wake", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const { getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("wake-btn")).toBeTruthy());
+});
+
+test("waking calls startRuntime", async () => {
+  // To the driver a wake IS a start; reusing that path avoids a second
+  // lifecycle route that could drift from it.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-sleep", name: "napping", status: "asleep" as never },
+  ]);
+  const start = vi.spyOn(api, "startRuntime").mockResolvedValue(undefined as never);
+
+  const { getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("wake-btn")).toBeTruthy());
+  fireEvent.click(getByTestId("wake-btn"));
+
+  await waitFor(() => expect(start).toHaveBeenCalledWith("rt-sleep"));
+});
+
+test("an online runtime offers no Wake", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-up", name: "awake", status: "online" as const },
+  ]);
+  const { queryByTestId, getByText } = render(RuntimesPage);
+  await waitFor(() => expect(getByText("awake")).toBeTruthy());
+  expect(queryByTestId("wake-btn")).toBeNull();
+});

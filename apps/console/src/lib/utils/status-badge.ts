@@ -50,6 +50,9 @@ export function tokenFor(status: string): StatusToken {
 
     case "sleeping":
     case "hibernated":
+    // A runtime the substrate idled out to stop billing it. Not an error and
+    // not operator-stopped — it wakes on demand.
+    case "asleep":
       return "sleeping";
 
     // stopped / offline / unknown / anything else
