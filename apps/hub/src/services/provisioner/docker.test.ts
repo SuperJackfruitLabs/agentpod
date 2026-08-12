@@ -31,8 +31,13 @@ interface RecordedCall {
 class FakeDockerOrchestrator {
   readonly calls: RecordedCall[] = [];
   capturedConfig: SandboxConfig | null = null;
+  /** What inspect would report as the container's runtime. */
+  runtimeToReport: string | undefined = undefined;
+  /** Set to make createSandbox throw, as Docker does for an unknown runtime. */
+  createError: Error | null = null;
 
   async createSandbox(config: SandboxConfig): Promise<Sandbox> {
+    if (this.createError) throw this.createError;
     this.capturedConfig = config;
     this.calls.push({ method: "createSandbox", args: [config] });
     return {
@@ -43,6 +48,7 @@ class FakeDockerOrchestrator {
       urls: {},
       createdAt: new Date(),
       image: config.image,
+      runtime: this.runtimeToReport,
     };
   }
 
@@ -221,5 +227,63 @@ describe("DockerRuntimeProvisioner", () => {
       expect(call).toBeDefined();
       expect(call!.args[0]).toBe("c1");
     });
+  });
+});
+
+// ─── Runtime selection ────────────────────────────────────────────────────────
+
+describe("DockerRuntimeProvisioner runtime selection", () => {
+  const ORIGINAL = process.env.DOCKER_RUNTIME;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.DOCKER_RUNTIME;
+    else process.env.DOCKER_RUNTIME = ORIGINAL;
+  });
+
+  const SPEC = {
+    runtimeId: "rt_1",
+    name: "n",
+    resourceTier: "small" as const,
+    hubUrl: "https://hub.example",
+    enrollToken: "enr_x",
+    image: "agentpod-node:local",
+  };
+
+  it("returns the runtime the orchestrator observed, not the one configured", async () => {
+    // The whole point of the field. If config says runsc and Docker actually
+    // ran runc, we must record runc — that mismatch is what this catches, and
+    // recording the request instead would hide it forever.
+    process.env.DOCKER_RUNTIME = "runsc";
+
+    const fake = new FakeDockerOrchestrator();
+    fake.runtimeToReport = "runc"; // Docker disagreed with us
+
+    const res = await makeProvisioner(fake).provision(SPEC);
+    expect(res.runtime).toBe("runc");
+  });
+
+  it("omits runtime when the orchestrator reports none", async () => {
+    delete process.env.DOCKER_RUNTIME;
+
+    const fake = new FakeDockerOrchestrator();
+    fake.runtimeToReport = undefined;
+
+    const res = await makeProvisioner(fake).provision(SPEC);
+    expect(res.runtime).toBeUndefined();
+    // externalId is the runtimeId, NOT the container id — destroy/start/stop
+    // look the container up by name "agentpod-<id>", so this is the lifecycle
+    // key and must not drift.
+    expect(res.externalId).toBe(SPEC.runtimeId);
+  });
+
+  it("surfaces an unavailable runtime as a failure, never a silent fallback", async () => {
+    // Docker rejects an unknown runtime at create. That must reach the caller:
+    // quietly running under runc would leave the operator believing they had
+    // kernel isolation when they had none.
+    process.env.DOCKER_RUNTIME = "not-installed";
+
+    const fake = new FakeDockerOrchestrator();
+    fake.createError = new Error("Unknown runtime specified not-installed");
+
+    await expect(makeProvisioner(fake).provision(SPEC)).rejects.toThrow(/not-installed/);
   });
 });

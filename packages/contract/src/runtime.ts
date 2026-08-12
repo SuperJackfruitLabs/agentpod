@@ -30,6 +30,12 @@ export const ProvisionedRuntime = z.object({
   name: z.string(),
   resourceTier: ResourceTier,
   harness: RuntimeHarness,
+  /**
+   * Container runtime the provider reports this runtime is running under, e.g.
+   * "runsc" for gVisor. Null for providers with no such concept and for rows
+   * created before it was recorded — never inferred.
+   */
+  runtime: z.string().min(1).nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

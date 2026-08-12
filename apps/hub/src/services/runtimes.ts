@@ -61,6 +61,7 @@ function toContract(row: RuntimeRow): ProvisionedRuntime {
     name: row.name,
     resourceTier: row.resourceTier as ProvisionedRuntime["resourceTier"],
     harness: (row.harness ?? "none") as ProvisionedRuntime["harness"],
+    runtime: row.runtime ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -143,7 +144,7 @@ export async function createRuntime(
   }
 
   try {
-    const { externalId } = await provisioner.provision({
+    const { externalId, runtime } = await provisioner.provision({
       runtimeId: id,
       name: req.name,
       resourceTier: (req.resourceTier ?? "small") as "small" | "medium" | "large",
@@ -154,7 +155,7 @@ export async function createRuntime(
 
     await db
       .update(provisionedRuntimes)
-      .set({ externalId, updatedAt: new Date() })
+      .set({ externalId, runtime: runtime ?? null, updatedAt: new Date() })
       .where(eq(provisionedRuntimes.id, id));
 
     const [row] = await db
