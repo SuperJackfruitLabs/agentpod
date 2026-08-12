@@ -23,6 +23,7 @@ import { Hono } from "hono";
 import { rawSql } from "../../src/db/drizzle";
 import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { waitForNodeOnline } from "../helpers/wait";
 import {
   mintEnrollmentToken,
   enrollNode,
@@ -114,8 +115,9 @@ test(
         }
       };
 
-      // Allow onOpen → connectionManager.register to complete
-      await new Promise((r) => setTimeout(r, 150));
+      // onOpen → verifyNodeCredential (argon2id) → register outlasts any fixed
+      // sleep under load; wait for the registration itself.
+      await waitForNodeOnline(nodeId);
 
       // Call broker.request — should resolve with the station data
       const result = await broker.request(nodeId, "detect", {}, {

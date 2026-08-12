@@ -30,6 +30,26 @@ import { listNodes } from "../../src/services/node-registry";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
 import { connectionManager } from "../../src/services/connection-manager";
+import { pollUntil, waitForNodeOnline } from "../helpers/wait";
+
+/**
+ * Barrier for "this socket's onOpen finished registering it".
+ *
+ * The gateway resolves `authReady` only after `connectionManager.register`,
+ * and onMessage awaits `authReady` — so an ack proves the registration
+ * already happened. Needed where `waitForNodeOnline` cannot tell the sockets
+ * apart because an earlier socket already has the node marked online.
+ */
+async function awaitSocketRegistered(ws: WebSocket): Promise<void> {
+  const ack = new Promise<void>((res) => {
+    ws.onmessage = (e) => {
+      if ((JSON.parse(String(e.data)) as { type: string }).type === "ack") res();
+    };
+  });
+  ws.send(JSON.stringify({ type: "heartbeat", ts: Date.now() }));
+  await ack;
+  ws.onmessage = null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Minimal test server (avoids importing full index.ts which has many side effects)
@@ -93,20 +113,18 @@ test("a node that connects to the gateway shows online via listNodes", async () 
       ws.onerror = () => rej(new Error("WebSocket connection error"));
     });
 
-    // Give the onOpen handler time to call setNodeStatus
-    await new Promise((r) => setTimeout(r, 200));
-
-    // Node should be online
-    const list = await listNodes(TEST_USER_ID);
-    const node = list.find((n) => n.id === nodeId);
+    // Wait for onOpen's setNodeStatus rather than guessing how long the
+    // argon2id credential verify plus two DB round trips will take.
+    const node = await pollUntil(async () =>
+      (await listNodes(TEST_USER_ID)).find((n) => n.id === nodeId && n.status === "online")
+    );
     expect(node?.status).toBe("online");
 
     // Close the connection — node should go offline
     ws.close();
-    await new Promise((r) => setTimeout(r, 200));
-
-    const listAfterClose = await listNodes(TEST_USER_ID);
-    const nodeAfterClose = listAfterClose.find((n) => n.id === nodeId);
+    const nodeAfterClose = await pollUntil(async () =>
+      (await listNodes(TEST_USER_ID)).find((n) => n.id === nodeId && n.status === "offline")
+    );
     expect(nodeAfterClose?.status).toBe("offline");
   } finally {
     server.stop(true);
@@ -183,7 +201,7 @@ test("heartbeat keeps node online and receives ack", async () => {
       ws.onerror = () => rej(new Error("WebSocket connection error"));
     });
 
-    await new Promise((r) => setTimeout(r, 100));
+    await waitForNodeOnline(nodeId);
 
     // Send a heartbeat and await the ack
     const ackPromise = new Promise<unknown>((res) => {
@@ -211,15 +229,21 @@ test("a late close from a replaced socket does not mark the reconnected node off
 
     const wsOld = new WebSocket(url, { headers } as RequestInit & { headers: Record<string, string> });
     await new Promise<void>((res, rej) => { wsOld.onopen = () => res(); wsOld.onerror = () => rej(new Error("old socket failed")); });
-    await new Promise((r) => setTimeout(r, 200));
+    await waitForNodeOnline(nodeId);
 
     // Node reconnects on a new socket while the old one is still open.
     const wsNew = new WebSocket(url, { headers } as RequestInit & { headers: Record<string, string> });
     await new Promise<void>((res, rej) => { wsNew.onopen = () => res(); wsNew.onerror = () => rej(new Error("new socket failed")); });
-    await new Promise((r) => setTimeout(r, 200));
+    // The node is already online from wsOld, so isOnline cannot tell the two
+    // sockets apart — use the ack barrier to know wsNew's onOpen registered.
+    await awaitSocketRegistered(wsNew);
 
     // The OLD socket closes late.
+    const closed = new Promise<void>((res) => { wsOld.onclose = () => res(); });
     wsOld.close();
+    await closed;
+    // onClose's teardown is async after the close event; give the epoch guard
+    // a chance to run the (wrong) teardown if it is going to.
     await new Promise((r) => setTimeout(r, 200));
 
     // Node must still be online, and the NEW socket must still be routable.
@@ -246,7 +270,7 @@ test("a heartbeat from a socket with no registry entry re-registers it", async (
       headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
     } as RequestInit & { headers: Record<string, string> });
     await new Promise<void>((res, rej) => { ws.onopen = () => res(); ws.onerror = () => rej(new Error("connect failed")); });
-    await new Promise((r) => setTimeout(r, 200));
+    await waitForNodeOnline(nodeId);
 
     // Simulate a sweep: the registry entry is gone but the socket is alive.
     connectionManager.unregister(nodeId);
@@ -294,11 +318,13 @@ test("hello frame version is persisted to agentVersion on the node row", async (
     // dropped-hello race that left agent_version null in production.
     ws.send(JSON.stringify({ type: "hello", hostInfo: { hostname: "version-host", os: "linux", arch: "amd64", cpuCount: 2 }, version: "v0.1.1" }));
 
-    await new Promise((r) => setTimeout(r, 300));
-
-    // Verify agentVersion was persisted
-    const list = await listNodes(TEST_USER_ID);
-    const node = list.find((n) => n.id === nodeId);
+    // Verify agentVersion was persisted — poll rather than guess how long the
+    // auth-then-hello path takes; a hello that is never ingested still fails.
+    const node = await pollUntil(async () =>
+      (await listNodes(TEST_USER_ID)).find(
+        (n) => n.id === nodeId && n.agentVersion === "v0.1.1"
+      )
+    );
     expect(node?.agentVersion).toBe("v0.1.1");
 
     ws.close();

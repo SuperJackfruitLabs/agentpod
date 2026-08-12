@@ -29,6 +29,7 @@ import { nodes } from "../db/schema/nodes";
 import { stationAudit } from "../db/schema/audit";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { nodePostureRoutes } from "./node-posture";
@@ -148,7 +149,23 @@ async function connectFakeNode(
     ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: report }));
   };
 
-  await new Promise((r) => setTimeout(r, 250));
+  // Two things must land before a posture request can be judged, and neither
+  // has a duration worth guessing at: the gateway's onOpen (argon2id verify,
+  // then register) and the hello frame's writes, which are what the capability
+  // gate reads. Wait for both — the version write is the last thing onMessage
+  // does before the capability write, so a node that sent capabilities is only
+  // ready once the column is populated too.
+  await waitForNodeOnline(nodeId);
+  await pollUntil(async () => {
+    const [row] = await db
+      .select({ version: nodes.agentVersion, caps: nodes.capabilities })
+      .from(nodes)
+      .where(eq(nodes.id, nodeId));
+    if (row?.version !== "v0.1.22") return false;
+    // A node that sent no capabilities leaves the column null by design; there
+    // is nothing further to wait for.
+    return capabilities === null || row.caps !== null;
+  });
   return ws;
 }
 

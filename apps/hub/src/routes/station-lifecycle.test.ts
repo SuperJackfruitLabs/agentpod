@@ -25,6 +25,7 @@ import { db, rawSql } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { stationLifecycleRoutes } from "./station-lifecycle";
@@ -155,7 +156,9 @@ async function connectFakeNode(
     }
   };
 
-  await new Promise((r) => setTimeout(r, 150));
+  // onOpen → verifyNodeCredential (argon2id) → register outlasts any fixed
+  // sleep under load; wait for the registration itself.
+  await waitForNodeOnline(nodeId);
   return ws;
 }
 
