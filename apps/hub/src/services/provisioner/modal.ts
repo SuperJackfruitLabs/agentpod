@@ -85,6 +85,16 @@ export const MODAL_RESOURCE_TIERS: Record<ResourceTier, { cpu: number; memoryMiB
   large: { cpu: 2, memoryMiB: 4096 },
 };
 
+/**
+ * The sandbox's main process.
+ *
+ * Passed as a COMMAND, not baked as an ENTRYPOINT: Modal requires any image
+ * ENTRYPOINT to `exec "$@"`, and our node-agent entrypoint does not — it enrols
+ * and then execs its own run loop. Dockerfile.modal clears ENTRYPOINT and this
+ * supplies the command instead. See Task 13.
+ */
+export const MODAL_ENTRYPOINT = ["/modal-entrypoint.sh"];
+
 /** Separator for the composite external id. Legal in neither half. */
 const EXTERNAL_ID_SEPARATOR = "#";
 
@@ -212,10 +222,69 @@ export class ModalRuntimeProvisioner implements RuntimeProvisioner {
     };
   }
 
-  async provision(
-    _spec: ProvisionSpec
-  ): Promise<{ externalId: string; runtime?: string }> {
-    throw new Error("modal: provision is implemented in Task 3");
+  /**
+   * Create one sandbox for a runtime, mounting that runtime's durable Volume.
+   *
+   * Called for a first provision and for every recreation alike — there is no
+   * separate "start". Both refusals below happen BEFORE the substrate is
+   * touched, so a rejected spec cannot leave a paid, empty Volume behind with
+   * no runtime row pointing at it.
+   */
+  async provision(spec: ProvisionSpec): Promise<{ externalId: string; runtime?: string }> {
+    // Modal pulls from a registry. A bare local tag — which is the default a
+    // Docker-first hub hands out — produces a sandbox that never boots and a
+    // runtime that sits in `provisioning` until the sweeper expires it, with
+    // nothing anywhere naming the cause.
+    if (!spec.image.includes("/")) {
+      throw new Error(
+        `modal: image "${spec.image}" is not a registry reference Modal can pull ` +
+          `(no registry host). Push a linux/amd64 image and set ` +
+          `NODE_AGENT_MODAL_IMAGE — see docs/DEPLOYMENT.md.`
+      );
+    }
+
+    // Unreachable through the typed API, reachable from a DB row written before
+    // a tier was renamed. Without this the lookup yields undefined and the
+    // sandbox is sized by Modal's defaults instead of by the operator's choice.
+    const tier = MODAL_RESOURCE_TIERS[spec.resourceTier];
+    if (!tier) {
+      throw new Error(`modal: unsupported resource tier "${spec.resourceTier}"`);
+    }
+
+    const volumeName = volumeNameFor(spec.runtimeId);
+    const { sandboxId } = await this.api.createSandbox({
+      appName: this.appName,
+      image: spec.image,
+      // Created if missing, re-attached if not: the same runtime id always
+      // reaches the same workspace, which is what makes a rolling series of
+      // sandboxes look like one durable runtime. Derived from the RUNTIME id,
+      // never from the sandbox or the name — a volume keyed to anything that
+      // changes across recreation loses the workspace on every restart, and
+      // loses it silently.
+      volumeName,
+      mountPath: MODAL_WORKSPACE_PATH,
+      workdir: MODAL_WORKSPACE_PATH,
+      command: MODAL_ENTRYPOINT,
+      // The token lives here and only here — never in the Volume, never in a
+      // log. Each sandbox enrols with a freshly minted one.
+      env: {
+        AGENTPOD_HUB_URL: spec.hubUrl,
+        AGENTPOD_ENROLL_TOKEN: spec.enrollToken,
+      },
+      cpu: tier.cpu,
+      memoryMiB: tier.memoryMiB,
+      // Load-bearing, not tidy: Modal's default is FIVE MINUTES. This is the
+      // same number the manifest declares, so the rotation sweeper and the
+      // platform's own kill clock cannot disagree. And deliberately no
+      // idleTimeoutMs — idle reaping is opt-in, and opting in would reap a busy
+      // station whose agent only ever dials out.
+      timeoutMs: this.maxLifetimeMs,
+    });
+
+    return {
+      externalId: encodeExternalId(volumeName, sandboxId),
+      runtime: "modal-sandbox",
+    };
   }
 
   async destroy(_externalId: string): Promise<void> {

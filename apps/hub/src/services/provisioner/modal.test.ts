@@ -16,9 +16,9 @@ import {
   MODAL_MAX_LIFETIME_MS,
   MODAL_WORKSPACE_PATH,
 } from "./modal";
-import type { ModalApi } from "./modal-api";
-import { MODAL_CREDENTIAL_KEYS } from "./modal-api";
-import type { RuntimeProvisioner } from "./types";
+import type { ModalApi, ModalCreateSandboxParams } from "./modal-api";
+import { MODAL_CREDENTIAL_KEYS, ModalNotFoundError } from "./modal-api";
+import type { ProvisionSpec, ResourceTier, RuntimeProvisioner } from "./types";
 
 /** A port that answers nothing — enough for declaration-only tests. */
 const inertApi: ModalApi = {
@@ -30,6 +30,66 @@ const inertApi: ModalApi = {
     return null;
   },
   async deleteVolume() {},
+};
+
+/**
+ * A faithful fake Modal.
+ *
+ * Faithful means unfriendly where Modal is unfriendly: an unknown sandbox id
+ * and a second delete of the same volume both raise ModalNotFoundError. A
+ * lenient fake would make destroy idempotency (conformance rule 6) pass for
+ * free, which is the same as not checking it.
+ */
+function fakeModal() {
+  const created: ModalCreateSandboxParams[] = [];
+  const terminated: string[] = [];
+  const deletedVolumes: string[] = [];
+  /** sandboxId → exit code; null means still running. */
+  const sandboxes = new Map<string, number | null>();
+  const volumes = new Set<string>();
+  let counter = 0;
+
+  const api: ModalApi = {
+    async createSandbox(params) {
+      created.push(params);
+      volumes.add(params.volumeName);
+      const sandboxId = `sb-${++counter}`;
+      sandboxes.set(sandboxId, null);
+      return { sandboxId };
+    },
+    async terminateSandbox(sandboxId) {
+      if (!sandboxes.has(sandboxId)) {
+        throw new ModalNotFoundError(`Sandbox '${sandboxId}' not found`);
+      }
+      terminated.push(sandboxId);
+      // Modal retains a terminated sandbox and reports its exit code.
+      sandboxes.set(sandboxId, 137);
+    },
+    async pollSandbox(sandboxId) {
+      if (!sandboxes.has(sandboxId)) {
+        throw new ModalNotFoundError(`Sandbox '${sandboxId}' not found`);
+      }
+      return sandboxes.get(sandboxId)!;
+    },
+    async deleteVolume(name) {
+      if (!volumes.has(name)) {
+        throw new ModalNotFoundError(`Volume '${name}' not found`);
+      }
+      volumes.delete(name);
+      deletedVolumes.push(name);
+    },
+  };
+
+  return { api, created, terminated, deletedVolumes, sandboxes, volumes };
+}
+
+const SPEC: ProvisionSpec = {
+  runtimeId: "rt_abc123",
+  name: "modal-box",
+  resourceTier: "medium",
+  hubUrl: "https://hub.example",
+  enrollToken: "enr_secret",
+  image: "ghcr.io/example/agentpod-node-modal:v1",
 };
 
 /**
@@ -169,5 +229,132 @@ describe("modal credential keys", () => {
     // requireCredentials() reports every missing key at once; declaring only
     // one here would cost an operator a redeploy per key.
     expect(MODAL_CREDENTIAL_KEYS).toEqual(["MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"]);
+  });
+});
+
+describe("ModalRuntimeProvisioner — provision", () => {
+  it("anchors the workspace in a volume named after the RUNTIME, not the sandbox", async () => {
+    const modal = fakeModal();
+    const res = await new ModalRuntimeProvisioner({ api: modal.api }).provision(SPEC);
+
+    expect(modal.created[0]!.volumeName).toBe("agentpod-rt-abc123");
+    expect(modal.created[0]!.mountPath).toBe("/workspace");
+    // The composite id: the hub stores one string, and this driver needs both
+    // the volume that survives and the sandbox that does not. The volume half
+    // must be the volume that was actually mounted — destroy() deletes what
+    // this string names, and a mismatch would delete a live runtime's anchor.
+    expect(res.externalId).toBe("agentpod-rt-abc123#sb-1");
+    expect(res.runtime).toBe("modal-sandbox");
+  });
+
+  it("re-attaches the SAME volume when the same runtime is provisioned again", async () => {
+    // This is the whole design: a Modal runtime is a rolling series of
+    // sandboxes anchored by one Volume, and "start" is a create.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const first = await driver.provision(SPEC);
+    const second = await driver.provision(SPEC);
+
+    expect(modal.created[1]!.volumeName).toBe(modal.created[0]!.volumeName);
+    expect(second.externalId).not.toBe(first.externalId);
+  });
+
+  it("gives two DIFFERENT runtimes two different volumes", async () => {
+    // The anchor's other direction. Reusing a volume across runtimes is the
+    // same class of silent failure as failing to reuse it within one: two
+    // stations writing over each other's workspace, visible only as corrupted
+    // user files and never as an error.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+    await driver.provision({ ...SPEC, runtimeId: "rt_other" });
+
+    expect(modal.created[1]!.volumeName).not.toBe(modal.created[0]!.volumeName);
+    expect(modal.volumes.size).toBe(2);
+  });
+
+  it("injects the hub url and the enrolment token, and sets no idle timer", async () => {
+    const modal = fakeModal();
+    await new ModalRuntimeProvisioner({ api: modal.api }).provision(SPEC);
+    const params = modal.created[0]!;
+    expect(params.env.AGENTPOD_HUB_URL).toBe("https://hub.example");
+    expect(params.env.AGENTPOD_ENROLL_TOKEN).toBe("enr_secret");
+    expect(params.command).toEqual(["/modal-entrypoint.sh"]);
+    expect(params.workdir).toBe("/workspace");
+    // Asserted HERE and not only in the adapter's test, because the adapter
+    // forwards what it is handed: idle reaping is opt-in on Modal, and opting
+    // in would reap a busy station whose agent only ever dials out — the exact
+    // trap that tore down live Cloudflare sandboxes on 2026-08-12.
+    expect(params).not.toHaveProperty("idleTimeoutMs");
+  });
+
+  it("sets the sandbox timeout to the declared ceiling", async () => {
+    // Modal's default is five minutes. A station that dies in five minutes is
+    // not a station, and nothing in the API warns you.
+    const modal = fakeModal();
+    await new ModalRuntimeProvisioner({ api: modal.api }).provision(SPEC);
+    expect(modal.created[0]!.timeoutMs).toBe(86_400_000);
+  });
+
+  it("uses the CONFIGURED lifetime, so timeoutMs and the manifest never disagree", async () => {
+    // sweepExpiringRuntimes rotates on manifest.maxLifetimeMs; the sandbox dies
+    // on timeoutMs. A hardcoded day here would pass the test above and still
+    // let a hub configured for a shorter ceiling — the ten-minute setting that
+    // exists so rotation can be verified at all — rotate against a sandbox
+    // Modal is keeping alive for twenty-four hours.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api, maxLifetimeMs: 600_000 });
+    await driver.provision(SPEC);
+    // Both against the same number on purpose: what the sandbox is given and
+    // what the manifest promises are the two halves that must not drift.
+    expect(modal.created[0]!.timeoutMs).toBe(600_000);
+    expect(driver.manifest.maxLifetimeMs).toBe(600_000);
+  });
+
+  it("honours the resource tier instead of quietly rounding it", async () => {
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision({ ...SPEC, resourceTier: "small" });
+    await driver.provision({ ...SPEC, runtimeId: "rt_two", resourceTier: "large" });
+    expect(modal.created[0]).toMatchObject({ cpu: 0.5, memoryMiB: 1024 });
+    expect(modal.created[1]).toMatchObject({ cpu: 2, memoryMiB: 4096 });
+  });
+
+  it("refuses a tier it has no sizing for, naming it", async () => {
+    // Not reachable through the typed API, but reachable from a DB row written
+    // before a tier was renamed. Without the guard the lookup yields undefined
+    // and the sandbox is created with cpu: undefined — a sizing decision made
+    // by Modal's defaults, silently, for a tier the operator chose.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(
+      driver.provision({ ...SPEC, resourceTier: "gigantic" as ResourceTier })
+    ).rejects.toThrow(/gigantic/);
+    expect(modal.created).toEqual([]);
+  });
+
+  it("refuses an image Modal could never pull, naming it", async () => {
+    // agentpod-node:local is the DEFAULT for a Docker-first hub and is
+    // meaningless to Modal, which pulls from a registry. Failing here with the
+    // image named beats a sandbox that never boots and a runtime that sits in
+    // `provisioning` until the sweeper gives up.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(
+      driver.provision({ ...SPEC, image: "agentpod-node:local" })
+    ).rejects.toThrow(/agentpod-node:local/);
+  });
+
+  it("creates NOTHING when it refuses, leaving no volume behind to bill for", async () => {
+    // A refusal raised after the volume exists leaves a paid, empty anchor with
+    // no runtime row pointing at it — invisible in the console and billed
+    // monthly. Refuse first, touch the substrate second.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(
+      driver.provision({ ...SPEC, image: "agentpod-node:local" })
+    ).rejects.toThrow();
+    expect(modal.created).toEqual([]);
+    expect(modal.volumes.size).toBe(0);
   });
 });
