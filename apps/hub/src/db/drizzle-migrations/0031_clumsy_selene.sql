@@ -1,0 +1,1 @@
+ALTER TYPE "public"."runtime_status" ADD VALUE 'asleep' BEFORE 'error';
