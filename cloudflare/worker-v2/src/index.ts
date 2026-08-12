@@ -69,6 +69,19 @@ export class NodeAgentContainer extends Container {
   }
 
   /**
+   * Revoke the snapshot token so no further upload is accepted.
+   *
+   * Called BEFORE destroy, and the ordering is the whole point. destroy() sends
+   * SIGTERM, which makes the container archive its workspace on the way out — so
+   * deleting the R2 object first and destroying second loses the race, and the
+   * dying container recreates the archive we just deleted. Observed live on
+   * 2026-08-12: a destroy returned 200 and left the archive behind.
+   */
+  async revokeSnapshotToken(): Promise<void> {
+    await this.ctx.storage.delete("snapshotToken");
+  }
+
+  /**
    * Push the idle deadline out. Called when the hub routes a verb to this
    * station, because Cloudflare's activity timer counts only INCOMING requests
    * and a node-agent dials out — so without this a station sleeps 15 minutes
@@ -242,6 +255,11 @@ export default {
     }
 
     if (request.method === "DELETE" && !parts[2]) {
+      // Revoke FIRST: destroy sends SIGTERM, and the dying container archives on
+      // its way out. Deleting the object before that upload lands leaves the
+      // archive behind — observed live on 2026-08-12. With the token revoked the
+      // late upload is refused, so the delete below is final.
+      await container.revokeSnapshotToken();
       await container.destroy();
       // Delete the archive too, or a destroyed runtime keeps billing for R2
       // storage nobody can ever reach again.
