@@ -27,6 +27,7 @@ import type {
   RuntimeState,
 } from "./types";
 import type { ModalApi } from "./modal-api";
+import { ModalNotFoundError } from "./modal-api";
 
 /**
  * Modal's hard ceiling on a sandbox's life. Not configurable by us.
@@ -291,11 +292,78 @@ export class ModalRuntimeProvisioner implements RuntimeProvisioner {
     throw new Error("modal: destroy is implemented in Task 5");
   }
 
-  async stop(_externalId: string): Promise<void> {
-    throw new Error("modal: stop is implemented in Task 4");
+  /**
+   * Terminate the sandbox. IRREVERSIBLE — Modal has no start verb.
+   *
+   * The Volume is deliberately untouched: it is the runtime's identity, and the
+   * hub restarts a terminal runtime by provisioning a NEW sandbox against the
+   * same volume (see reprovisionRuntime in ../runtimes.ts). A stop that also
+   * deleted the volume would make every stop a destroy — the Cloudflare
+   * workspace loss in a new costume, with the button labelled Stop.
+   *
+   * Only "already gone" is tolerated. stopRuntime() writes `stopping` once this
+   * resolves and then trusts status() for the rest, so a stop() that resolved
+   * on a connection reset would hand a still-running sandbox to a path built to
+   * confirm one that is not.
+   */
+  async stop(externalId: string): Promise<void> {
+    const { sandboxId } = decodeExternalId(externalId);
+    try {
+      await this.api.terminateSandbox(sandboxId);
+    } catch (err) {
+      // Already gone is the state the caller asked for — and on this substrate
+      // it is routine, since the 24-hour ceiling reaps a sandbox a day whether
+      // or not anyone pressed Stop. Anything else is real and must surface.
+      if (err instanceof ModalNotFoundError) return;
+      throw err;
+    }
   }
 
-  async status(_externalId: string): Promise<RuntimeState> {
-    throw new Error("modal: status is implemented in Task 4");
+  /**
+   * Ask Modal whether this sandbox is still running.
+   *
+   * This is the hub's ONLY evidence for writing the runtime status `stopped`,
+   * which an operator reads as "it has stopped costing me money" (PR #260/#261
+   * exists because `stopped` was once written merely because a driver call
+   * returned). The mapping is therefore deliberate in all four directions:
+   *
+   *   poll() === null        → "running".  Modal's own live/finished signal.
+   *   poll() === <exit code> → "stopped".  ANY exit code, INCLUDING 0. `0` is a
+   *                            valid exit code and is falsy, so this compares
+   *                            against null explicitly; a truthiness test would
+   *                            report the one cleanly-finished sandbox as
+   *                            running, leave its stop unconfirmed, and flip the
+   *                            runtime to `error` five minutes later. This is
+   *                            also the 24-hour-ceiling case: at the driver
+   *                            level "stopped" means exactly "this sandbox is
+   *                            not running", which is true however it ended.
+   *   ModalNotFoundError     → "stopped".  An ANSWER, not a silence: an
+   *                            authenticated call reached Modal and Modal
+   *                            asserted no such sandbox exists in this
+   *                            workspace. Nothing that does not exist is
+   *                            running or billing. `unknown` would send every
+   *                            stop of an already-reaped sandbox — one per
+   *                            runtime per day here — through
+   *                            sweepStalledRuntimeStops' five-minute timeout
+   *                            and out as `error`, an alarm about a bill nobody
+   *                            is paying.
+   *   anything else          → rethrow.  NEVER "stopped". An expired
+   *                            MODAL_TOKEN_SECRET fails every call at once, so
+   *                            laundering errors into "stopped" would report
+   *                            every Modal runtime in the fleet as stopped
+   *                            simultaneously while all of them keep running
+   *                            and billing. probeState() in ../runtimes.ts logs
+   *                            the throw and degrades it to `unknown`, which the
+   *                            sweeper escalates to `error` — loud, and correct.
+   */
+  async status(externalId: string): Promise<RuntimeState> {
+    const { sandboxId } = decodeExternalId(externalId);
+    try {
+      const exitCode = await this.api.pollSandbox(sandboxId);
+      return exitCode === null ? "running" : "stopped";
+    } catch (err) {
+      if (err instanceof ModalNotFoundError) return "stopped";
+      throw err;
+    }
   }
 }

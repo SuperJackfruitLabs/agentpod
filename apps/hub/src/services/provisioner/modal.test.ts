@@ -358,3 +358,168 @@ describe("ModalRuntimeProvisioner — provision", () => {
     expect(modal.volumes.size).toBe(0);
   });
 });
+
+describe("ModalRuntimeProvisioner — stop", () => {
+  it("terminates the sandbox in the composite id", async () => {
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    await driver.stop(externalId);
+    expect(modal.terminated).toEqual(["sb-1"]);
+  });
+
+  it("terminates the sandbox half, never the volume half", async () => {
+    // The composite id carries two names and terminateSandbox takes one string.
+    // Handing it the volume half would terminate nothing, tolerate the
+    // resulting not-found as success, and report a stop that never happened —
+    // with the sandbox still running and still billing.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+    await driver.stop("agentpod-rt-abc123#sb-1");
+    expect(modal.terminated).toEqual(["sb-1"]);
+    expect(modal.sandboxes.get("sb-1")).not.toBeNull();
+  });
+
+  it("does NOT delete the volume — stopping must not destroy the workspace", async () => {
+    // The Volume is the runtime's identity. A stop that took it would make
+    // every stop a destroy, which is the Cloudflare data loss in a new costume.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    await driver.stop(externalId);
+    expect(modal.deletedVolumes).toEqual([]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+  });
+
+  it("treats an already-gone sandbox as stopped rather than an error", async () => {
+    // Modal has no start verb, so the sandbox behind an externalId can already
+    // be gone by the time an operator presses Stop — the 24-hour ceiling takes
+    // one every day. "Already in the state you asked for" is a success.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(driver.stop("agentpod-rt-abc123#sb-never")).resolves.toBeUndefined();
+  });
+
+  it("does NOT swallow a substrate failure — only not-found is tolerable", async () => {
+    // Tolerating "already gone" must not slide into tolerating everything.
+    // stopRuntime() writes `stopping` after stop() resolves and then trusts
+    // status() for the rest; a stop() that resolved on a connection reset would
+    // hand a runtime that is still running to a path built to confirm one that
+    // is not.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.api.terminateSandbox = async () => {
+      throw new Error("connection reset");
+    };
+    await expect(driver.stop(externalId)).rejects.toThrow(/connection reset/);
+  });
+
+  it("refuses a malformed external id instead of terminating something else", async () => {
+    // A stop that quietly resolved on an unparseable id would report a stop
+    // that could not have happened, for a runtime nothing had addressed.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+    await expect(driver.stop("sb-1")).rejects.toThrow(/external id/i);
+    expect(modal.terminated).toEqual([]);
+  });
+});
+
+describe("ModalRuntimeProvisioner — status", () => {
+  it("reports running while poll() has no exit code", async () => {
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    expect(await driver.status(externalId)).toBe("running");
+  });
+
+  it("reports stopped once the sandbox has an exit code", async () => {
+    // Including the 24-hour-ceiling case: at the driver level `stopped` means
+    // exactly "this sandbox is not running", which is true however it ended.
+    // Nothing here turns that into the hub's word `stopped` — only
+    // sweepStalledRuntimeStops does, and only for a runtime someone asked to
+    // stop.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    await driver.stop(externalId);
+    expect(await driver.status(externalId)).toBe("stopped");
+  });
+
+  it("reports stopped for exit code 0 — a clean exit is still an exit", async () => {
+    // poll() answers `null` while running and the EXIT CODE once finished, and
+    // 0 is both a valid exit code and falsy. A truthiness test here inverts the
+    // answer for the one exit that means "the work finished cleanly": the hub
+    // would read a finished sandbox as running, leave a stop unconfirmed, and
+    // flip the runtime to `error` five minutes later.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.sandboxes.set("sb-1", 0);
+    expect(await driver.status(externalId)).toBe("stopped");
+  });
+
+  it("reports stopped for a sandbox Modal says does not exist", async () => {
+    // A ModalNotFoundError is an ANSWER, not a silence: an authenticated call
+    // reached Modal and Modal asserted there is no such sandbox in this
+    // workspace. Nothing that does not exist is running, and nothing that does
+    // not exist is billing, so `stopped` is the true statement. `unknown` here
+    // would put every stop of an already-reaped sandbox — and Modal reaps one
+    // per runtime per day — through sweepStalledRuntimeStops' 5-minute timeout
+    // and out the other side as `error: check the substrate before assuming
+    // this runtime has stopped costing money`, an alarm about a bill nobody is
+    // paying.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    expect(await driver.status("agentpod-rt-abc123#sb-never")).toBe("stopped");
+  });
+
+  it("propagates a transport failure instead of inventing an answer", async () => {
+    // probeState() in runtimes.ts logs it and degrades to `unknown`, which the
+    // stop sweeper escalates to `error` after five minutes. Answering `stopped`
+    // here would launder an unreachable substrate into the one word an operator
+    // reads as "it has stopped costing me money".
+    const modal = fakeModal();
+    modal.api.pollSandbox = async () => {
+      throw new Error("connection reset");
+    };
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(driver.status("agentpod-rt-abc123#sb-1")).rejects.toThrow(/connection reset/);
+  });
+
+  it("propagates an auth failure rather than reporting the whole fleet stopped", async () => {
+    // The failure this rule exists for: an expired MODAL_TOKEN_SECRET makes
+    // EVERY call fail at once, so a driver that mapped any error to `stopped`
+    // would report every Modal runtime in the fleet as stopped simultaneously
+    // while all of them keep running and billing. Only ModalNotFoundError —
+    // Modal's positive statement about one sandbox — is an answer.
+    const modal = fakeModal();
+    modal.api.pollSandbox = async () => {
+      throw new Error("401 Unauthorized: invalid token");
+    };
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(driver.status("agentpod-rt-abc123#sb-1")).rejects.toThrow(/401/);
+  });
+
+  it("refuses a malformed external id instead of guessing at one half", async () => {
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+    await expect(driver.status("sb-1")).rejects.toThrow(/external id/i);
+  });
+
+  it("asks and nothing more — status never terminates or deletes", async () => {
+    // status() runs on the sweeper's 15-second tick against every stopping
+    // runtime. A verb that mutated anything would be doing it repeatedly, in
+    // the background, to runtimes nobody touched.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    expect(await driver.status(externalId)).toBe("running");
+    expect(modal.terminated).toEqual([]);
+    expect(modal.deletedVolumes).toEqual([]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+  });
+});
