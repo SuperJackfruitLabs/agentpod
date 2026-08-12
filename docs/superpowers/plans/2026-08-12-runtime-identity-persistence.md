@@ -34,7 +34,8 @@ Tests live in `apps/hub/tests/integration/enrollment.test.ts` and already cover 
 **`apps/hub`**
 - `src/services/enrollment.ts` *(modify)* — the whole behaviour change lives here.
 - `tests/integration/enrollment.test.ts` *(modify)* — re-enrolment, rotation, rejection, concurrency.
-- `src/services/runtimes.ts` *(modify)* — mint runtime-bound tokens as durable.
+
+`src/services/runtimes.ts` needs **no change**: it already passes `provisionedRuntimeId` when minting, and the durable lifetime is decided inside `mintEnrollmentToken` from that field.
 
 ---
 
