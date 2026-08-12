@@ -220,4 +220,127 @@ describe("Enrollment service", () => {
     });
     expect(t.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(65_000);
   });
+
+  // ─── runtime-bound re-enrolment ───────────────────────────────────────────
+
+  test("re-enrolling a runtime-bound token returns the SAME node", async () => {
+    // The headline behaviour. On an ephemeral-disk substrate the container
+    // re-enrols on every restart; today that mints a new node and orphans the
+    // old one, so the runtime loses its stations, capabilities and history.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+
+    const first = await enrollNode(token, HOST_INFO);
+    const second = await enrollNode(token, HOST_INFO);
+
+    expect(second.nodeId).toBe(first.nodeId);
+  });
+
+  test("re-enrolment rotates the secret and invalidates the old one", async () => {
+    // The container never stores a secret durably, so a fresh one each restart
+    // costs nothing — and a secret that leaked from a previous incarnation
+    // stops working.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+
+    const first = await enrollNode(token, HOST_INFO);
+    const second = await enrollNode(token, HOST_INFO);
+
+    expect(second.nodeSecret).not.toBe(first.nodeSecret);
+    expect(await verifyNodeCredential(second.nodeId, second.nodeSecret)).toBe(true);
+    expect(await verifyNodeCredential(first.nodeId, first.nodeSecret)).toBe(false);
+  });
+
+  test("re-enrolment does not create a second node", async () => {
+    // Guards the orphaning directly: counting rows catches a bug that returning
+    // the right id from the wrong code path would hide.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+
+    await enrollNode(token, HOST_INFO);
+    await enrollNode(token, HOST_INFO);
+    await enrollNode(token, HOST_INFO);
+
+    const rows = (await rawSql`
+      SELECT node_id FROM provisioned_runtimes WHERE id = ${runtimeId}
+    `) as Array<{ node_id: string }>;
+    const nodeId = rows[0]!.node_id;
+
+    const nodeRows = (await rawSql`
+      SELECT count(*)::int AS n FROM nodes WHERE id = ${nodeId}
+    `) as Array<{ n: number }>;
+    expect(nodeRows[0]!.n).toBe(1);
+  });
+
+  test("an unbound token is still strictly one-time", async () => {
+    // The security property this change must not erode. A reusable token is a
+    // durable credential; only runtime-bound ones earn that, because they
+    // resolve to exactly one runtime and are revoked by destroying it.
+    const { token } = await mintEnrollmentToken(TEST_USER_ID);
+    await enrollNode(token, HOST_INFO);
+    await expect(enrollNode(token, HOST_INFO)).rejects.toThrow(
+      /invalid or expired enrollment token/
+    );
+  });
+
+  test("a runtime-bound token whose runtime is gone is rejected", async () => {
+    // provisionedRuntimeId is ON DELETE SET NULL, so a destroyed runtime leaves
+    // a token pointing at nothing. It must not silently degrade into "mint me
+    // anything" — the identity it referred to is gone on purpose.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+    await enrollNode(token, HOST_INFO);
+
+    await rawSql`DELETE FROM provisioned_runtimes WHERE id = ${runtimeId}`;
+
+    await expect(enrollNode(token, HOST_INFO)).rejects.toThrow();
+  });
+
+  test("first boot on a runtime-bound token still mints and links", async () => {
+    // The existing provisioning path must be untouched.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+
+    const { nodeId } = await enrollNode(token, HOST_INFO);
+
+    const rows = (await rawSql`
+      SELECT node_id, status FROM provisioned_runtimes WHERE id = ${runtimeId}
+    `) as Array<{ node_id: string; status: string }>;
+    expect(rows[0]!.node_id).toBe(nodeId);
+    expect(rows[0]!.status).toBe("online");
+  });
+
+  test("concurrent re-enrolment converges on one node", async () => {
+    // Runtime-bound re-enrolment cannot gate on usedAt, so it loses the atomic
+    // consume that protects the unbound path. Two containers starting at once
+    // must still not produce two nodes.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const { token } = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+    const { nodeId } = await enrollNode(token, HOST_INFO);
+
+    const results = await Promise.allSettled([
+      enrollNode(token, HOST_INFO),
+      enrollNode(token, HOST_INFO),
+    ]);
+    for (const r of results) {
+      if (r.status === "fulfilled") expect(r.value.nodeId).toBe(nodeId);
+    }
+
+    const nodeRows = (await rawSql`
+      SELECT count(*)::int AS n FROM nodes WHERE id = ${nodeId}
+    `) as Array<{ n: number }>;
+    expect(nodeRows[0]!.n).toBe(1);
+  });
 });

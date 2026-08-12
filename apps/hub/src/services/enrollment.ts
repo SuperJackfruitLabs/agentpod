@@ -68,9 +68,19 @@ export async function mintEnrollmentToken(
 }
 
 /**
- * Enroll a node using a valid, unused enrollment token.
+ * Enroll a node using a valid enrollment token.
+ *
  * Returns the node's persistent credentials (nodeId + nodeSecret).
- * Throws if the token is invalid, expired, or already used.
+ *
+ * Two paths:
+ *   - **Runtime-bound token whose runtime already has a node** — returns that
+ *     node with a rotated secret. This is what lets a runtime on an
+ *     ephemeral-disk substrate survive a restart instead of orphaning itself.
+ *   - **Everything else** — consumes the token atomically and mints a new node.
+ *     Unbound tokens remain strictly one-time.
+ *
+ * Throws if the token is invalid, expired, already used (unbound only), or
+ * bound to a runtime that no longer exists.
  */
 export async function enrollNode(
   token: string,
@@ -78,10 +88,80 @@ export async function enrollNode(
 ): Promise<EnrollResponse> {
   const hash = await sha256(token);
 
-  // Atomically consume the token: mark usedAt only if the token exists,
-  // is unused, and has not expired. This single UPDATE eliminates the
-  // TOCTOU race where two concurrent requests could both pass a SELECT
-  // guard before either writes usedAt.
+  // ── Runtime-bound re-enrolment ────────────────────────────────────────────
+  //
+  // A provisioned runtime on an ephemeral-disk substrate loses its config on
+  // every restart and re-presents this token. Minting a new node there would
+  // orphan the runtime's stations, capabilities and history — so if the runtime
+  // already has a node, we resume it.
+  //
+  // Deliberately does NOT gate on usedAt: that gate is what makes an unbound
+  // token one-time, and re-presentation is the whole point here.
+  const [bound] = await db
+    .select()
+    .from(enrollmentTokens)
+    .where(
+      and(
+        eq(enrollmentTokens.tokenHash, hash),
+        gt(enrollmentTokens.expiresAt, new Date())
+      )
+    );
+
+  if (bound?.provisionedRuntimeId) {
+    const [runtime] = await db
+      .select()
+      .from(provisionedRuntimes)
+      .where(eq(provisionedRuntimes.id, bound.provisionedRuntimeId));
+
+    // The runtime was destroyed. Its identity is gone on purpose, and this
+    // token must not degrade into an unbound one that mints something new.
+    if (!runtime) {
+      throw new Error("invalid or expired enrollment token");
+    }
+
+    if (runtime.nodeId) {
+      // Rotate the secret. The container stores nothing durably, so a fresh
+      // secret costs nothing and retires any that leaked from a previous
+      // incarnation.
+      const nodeSecret =
+        crypto.randomUUID().replace(/-/g, "") +
+        crypto.randomUUID().replace(/-/g, "");
+
+      // Concurrent re-enrolments converge here rather than creating a second
+      // node: both target the same row, and the loser's secret is simply
+      // superseded — which the node-agent handles by reconnecting.
+      const updated = await db
+        .update(nodes)
+        .set({
+          secretHash: await Bun.password.hash(nodeSecret),
+          hostname: hostInfo.hostname,
+          os: hostInfo.os,
+          arch: hostInfo.arch,
+          cpuCount: hostInfo.cpuCount,
+        })
+        .where(eq(nodes.id, runtime.nodeId))
+        .returning();
+
+      // If the node row is gone the runtime points at nothing; fall through and
+      // treat it as a first boot rather than failing — the runtime is real and
+      // wants a node.
+      if (updated.length > 0) {
+        await db
+          .update(provisionedRuntimes)
+          .set({ status: "online", updatedAt: new Date() })
+          .where(eq(provisionedRuntimes.id, runtime.id));
+
+        return { nodeId: runtime.nodeId, nodeSecret };
+      }
+    }
+  }
+
+  // ── First enrolment ───────────────────────────────────────────────────────
+  //
+  // Atomically consume the token: mark usedAt only if the token exists, is
+  // unused, and has not expired. This single UPDATE eliminates the TOCTOU race
+  // where two concurrent requests could both pass a SELECT guard before either
+  // writes usedAt.
   const [row] = await db
     .update(enrollmentTokens)
     .set({ usedAt: new Date() })
