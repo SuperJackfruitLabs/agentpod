@@ -171,4 +171,28 @@ describe("CloudflareSandboxProvisioner", () => {
     const p = new CloudflareSandboxProvisioner({ workerUrl: "", apiToken: "tok" });
     await expect(p.provision(SPEC)).rejects.toThrow(/CLOUDFLARE_WORKER_URL/);
   });
+
+  // ── manifest: the refusals above, said out loud ────────────────────────────
+
+  it("declares the constraints that made this driver refuse things", () => {
+    const m = new CloudflareSandboxProvisioner({ deployedTier: "large" }).manifest;
+    // Every value here is a fact this driver already enforces by hand.
+    expect(m.workspaceStorage).toBe("external-archive"); // R2, because the disk is wiped on sleep
+    expect(m.stopSemantics).toBe("resumable");
+    expect(m.imageBinding).toBe("fixed"); // baked at worker deploy time
+    expect(m.supportedTiers).toEqual(["large"]); // instance_type is fixed per class
+    expect(m.idleBehaviour).toBe("platform-inbound"); // sleepAfter, fed by inbound requests only
+    expect(m.maxLifetimeMs).toBeNull();
+    expect(m.lifecycle).toEqual(
+      expect.arrayContaining(["start", "stop", "status"])
+    );
+  });
+
+  it("declares the tier the worker was actually deployed with, not a constant", () => {
+    // provision() refuses anything but deployedTier. If the manifest hardcoded
+    // "large", a worker deployed at another instance type would advertise a tier
+    // it then refuses — two sources of one truth, drifting.
+    const p = new CloudflareSandboxProvisioner({ deployedTier: "small" });
+    expect(p.manifest.supportedTiers).toEqual(["small"]);
+  });
 });

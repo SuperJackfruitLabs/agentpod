@@ -24,6 +24,7 @@ import { Hono } from "hono";
 import { rawSql } from "../db/drizzle";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { stationTerminalRoutes } from "./station-terminal";
@@ -190,8 +191,9 @@ async function connectFakeNode(
     }
   };
 
-  // Allow onOpen → connectionManager.register to settle
-  await new Promise((r) => setTimeout(r, 150));
+  // onOpen → verifyNodeCredential (argon2id) → register outlasts any fixed
+  // sleep under load; wait for the registration itself.
+  await waitForNodeOnline(nodeId);
   return ws;
 }
 
@@ -331,7 +333,7 @@ test(
       });
 
       // Wait for the attach handshake to complete on the node side.
-      await new Promise((r) => setTimeout(r, 300));
+      await pollUntil(() => attachIdRef[0] !== null);
       expect(attachIdRef[0]).not.toBeNull(); // term.attach must have been sent
 
       // Send input from the client.

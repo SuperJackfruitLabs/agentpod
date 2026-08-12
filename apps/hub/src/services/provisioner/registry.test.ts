@@ -11,17 +11,34 @@ import { test, it, expect, beforeEach, afterEach, describe } from "bun:test";
 import {
   registerProvisioner,
   enabledProviders,
-  providerCapabilities,
+  providerManifests,
   getProvisioner,
   resetProvisioners,
 } from "./registry";
 import type { RuntimeProvisioner, ProvisionSpec } from "./types";
+import { DockerRuntimeProvisioner } from "./docker";
 
 // ─── Fake provisioner factories ───────────────────────────────────────────────
+
+// Each fake declares a manifest that matches what the fake itself does: it
+// provisions and destroys, nothing more. These are registry tests, so the
+// values only have to be coherent — but they are real DriverManifests, not
+// casts, because a cast here would hide exactly the omission the required
+// field exists to catch.
 
 function fakeDockerProvisioner(): RuntimeProvisioner {
   return {
     provider: "docker",
+    manifest: {
+      provider: "docker",
+      workspaceStorage: "rootfs",
+      stopSemantics: "resumable",
+      maxLifetimeMs: null,
+      imageBinding: "per-instance",
+      supportedTiers: ["small", "medium", "large"],
+      idleBehaviour: "never",
+      lifecycle: [],
+    },
     async provision(_spec: ProvisionSpec) {
       return { externalId: "container-fake-001" };
     },
@@ -32,6 +49,16 @@ function fakeDockerProvisioner(): RuntimeProvisioner {
 function fakeCloudflareProvisioner(): RuntimeProvisioner {
   return {
     provider: "cloudflare",
+    manifest: {
+      provider: "cloudflare",
+      workspaceStorage: "external-archive",
+      stopSemantics: "resumable",
+      maxLifetimeMs: null,
+      imageBinding: "fixed",
+      supportedTiers: ["large"],
+      idleBehaviour: "platform-inbound",
+      lifecycle: [],
+    },
     async provision(_spec: ProvisionSpec) {
       return { externalId: "cf-sandbox-fake-001" };
     },
@@ -60,7 +87,13 @@ function restoreEnv(...keys: string[]) {
   savedEnv = {};
 }
 
-const ENV_KEYS = ["ENABLE_DOCKER_PROVISIONING", "ENABLE_CLOUDFLARE_SANDBOXES"];
+const ENV_KEYS = [
+  "ENABLE_DOCKER_PROVISIONING",
+  "ENABLE_CLOUDFLARE_SANDBOXES",
+  // A driver the registry has never been told about, used below to prove a new
+  // one needs no edit here to be gated.
+  "ENABLE_FLY_PROVISIONING",
+];
 
 // ─── Setup / Teardown ─────────────────────────────────────────────────────────
 
@@ -70,6 +103,7 @@ beforeEach(() => {
   // Start with both flags off
   delete process.env.ENABLE_DOCKER_PROVISIONING;
   delete process.env.ENABLE_CLOUDFLARE_SANDBOXES;
+  delete process.env.ENABLE_FLY_PROVISIONING;
 });
 
 afterEach(() => {
@@ -116,8 +150,12 @@ describe("getProvisioner — error cases", () => {
     expect(() => getProvisioner("bogus")).toThrow("unknown provider: bogus");
   });
 
-  test("known provider (docker) but flag off → throws 'provider disabled: docker'", () => {
-    // Flag is unset (both deleted in beforeEach)
+  test("registered provider (docker) but flag off → throws 'provider disabled: docker'", () => {
+    // A registered driver is what makes "docker" a real name now, so the
+    // disabled path is reached through one — not through a literal set of
+    // provider names that the registry has to be told about separately.
+    // Flag is unset (both deleted in beforeEach).
+    registerProvisioner(fakeDockerProvisioner());
     expect(() => getProvisioner("docker")).toThrow("provider disabled: docker");
   });
 
@@ -130,6 +168,44 @@ describe("getProvisioner — error cases", () => {
   test("flag on but not registered (cloudflare) → throws 'provider not registered: cloudflare'", () => {
     process.env.ENABLE_CLOUDFLARE_SANDBOXES = "true";
     expect(() => getProvisioner("cloudflare")).toThrow("provider not registered: cloudflare");
+  });
+});
+
+describe("provider names are data, not a literal set", () => {
+  test("a driver this file has never heard of registers, and is gated by ENABLE_<NAME>_PROVISIONING", () => {
+    // No edit anywhere in the registry was needed to name "fly": the flag name
+    // is derived from the provider, so a new driver arrives with its own gate.
+    const fly: RuntimeProvisioner = {
+      ...fakeDockerProvisioner(),
+      provider: "fly",
+      manifest: { ...fakeDockerProvisioner().manifest, provider: "fly" },
+    };
+    registerProvisioner(fly);
+
+    // Flag off → registered but refused, and never listed.
+    expect(() => getProvisioner("fly")).toThrow("provider disabled: fly");
+    expect(enabledProviders()).not.toContain("fly");
+
+    process.env.ENABLE_FLY_PROVISIONING = "true";
+    expect(getProvisioner("fly")).toBe(fly);
+    expect(enabledProviders()).toContain("fly");
+  });
+
+  test("cloudflare keeps its historical flag name", () => {
+    // ENABLE_CLOUDFLARE_SANDBOXES is set in the deployed hub. Deriving
+    // ENABLE_CLOUDFLARE_PROVISIONING instead would have disabled Cloudflare
+    // provisioning in production the moment this shipped.
+    registerProvisioner(fakeCloudflareProvisioner());
+    process.env.ENABLE_CLOUDFLARE_SANDBOXES = "true";
+    expect(enabledProviders()).toContain("cloudflare");
+  });
+
+  test("even with its flag on, an unregistered name is refused", () => {
+    // The contract no longer rejects unknown provider names, so this is the
+    // check that stops one reaching a driver: nothing is registered as "fly",
+    // so there is nothing to hand back, flag or no flag.
+    process.env.ENABLE_FLY_PROVISIONING = "true";
+    expect(() => getProvisioner("fly")).toThrow("provider not registered: fly");
   });
 });
 
@@ -173,39 +249,26 @@ describe("resetProvisioners (test isolation)", () => {
   });
 });
 
-// ─── Provider capabilities ────────────────────────────────────────────────────
+// ─── Provider manifests ───────────────────────────────────────────────────────
 
-
-describe("providerCapabilities", () => {
-  it("reports the tiers a provider can actually satisfy", () => {
-    // The console must not offer a choice the driver will refuse. Cloudflare
-    // fixes instance_type at worker deploy time, so it supports exactly one
-    // tier — offering "small" produced a guaranteed provisioning failure.
-    process.env.ENABLE_CLOUDFLARE_SANDBOXES = "true";
-    registerProvisioner({
-      provider: "cloudflare",
-      supportedTiers: ["large"],
-      provision: async () => ({ externalId: "x" }),
-      destroy: async () => {},
-    } as never);
-
-    const caps = providerCapabilities();
-    const cf = caps.find((c) => c.provider === "cloudflare");
-    expect(cf?.tiers).toEqual(["large"]);
+describe("providerManifests", () => {
+  it("serves each enabled provider's full manifest", () => {
+    // The registry hands over what the driver declared, whole. The narrower
+    // shape it replaces (`{provider, tiers}`) forced every new consumer —
+    // console tier lists, conformance checks — to widen the registry first.
+    process.env.ENABLE_DOCKER_PROVISIONING = "true";
+    registerProvisioner(new DockerRuntimeProvisioner());
+    const manifests = providerManifests();
+    expect(manifests).toHaveLength(1);
+    const m = manifests[0]!;
+    expect(m.provider).toBe("docker");
+    expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
   });
 
-  it("defaults to every tier for a driver that does not restrict them", () => {
-    // Docker maps all three tiers to real cpu/memory limits, so a driver that
-    // says nothing must keep offering all of them.
-    process.env.ENABLE_DOCKER_PROVISIONING = "true";
-    registerProvisioner({
-      provider: "docker",
-      provision: async () => ({ externalId: "x" }),
-      destroy: async () => {},
-    } as never);
-
-    const caps = providerCapabilities();
-    const docker = caps.find((c) => c.provider === "docker");
-    expect(docker?.tiers).toEqual(["small", "medium", "large"]);
+  it("omits a registered provider whose env flag is off", () => {
+    // Gating is the registry's job; a manifest served for a disabled provider
+    // would put a choice in the console that createRuntime then refuses.
+    registerProvisioner(fakeDockerProvisioner());
+    expect(providerManifests()).toEqual([]);
   });
 });

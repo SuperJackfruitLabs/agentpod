@@ -180,6 +180,26 @@ test("failed provisionRuntime shows inline error and does NOT call onClose", asy
   });
 });
 
+test("offers a provider the console has never heard of, if the hub reports it", async () => {
+  // The point of the registry: adding a driver must not require a console edit.
+  // "fly" appears in no list in this repo — it is offered because the hub said
+  // so, and its tier list comes from the manifest the hub sent with it.
+  const { getByText, queryByText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["fly"],
+      manifests: [{ provider: "fly", supportedTiers: ["medium"], imageBinding: "per-instance" }],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  expect(getByText("fly")).toBeTruthy();
+  // The tier defaults to the one this unknown provider declared, not "small".
+  expect(getByText("medium")).toBeTruthy();
+  expect(queryByText("small")).toBeNull();
+});
+
 test("offers only the tiers the selected provider can actually satisfy", async () => {
   // Cloudflare fixes instance_type at worker deploy time, so it supports one
   // tier. Offering small/medium/large made provisioning fail with a backend
@@ -188,7 +208,9 @@ test("offers only the tiers the selected provider can actually satisfy", async (
     props: {
       open: true,
       providers: ["cloudflare"],
-      capabilities: [{ provider: "cloudflare", tiers: ["large"] }],
+      manifests: [
+        { provider: "cloudflare", supportedTiers: ["large"], imageBinding: "fixed" },
+      ],
       onClose: () => {},
       onCreated: () => {},
     },
@@ -212,7 +234,9 @@ test("defaults the tier to one the provider supports", async () => {
     props: {
       open: true,
       providers: ["cloudflare"],
-      capabilities: [{ provider: "cloudflare", tiers: ["large"] }],
+      manifests: [
+        { provider: "cloudflare", supportedTiers: ["large"], imageBinding: "fixed" },
+      ],
       onClose: () => {},
       onCreated: () => {},
     },

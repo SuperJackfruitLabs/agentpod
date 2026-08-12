@@ -26,3 +26,5 @@ Test DB requirements (pgvector image + env override): see root `CLAUDE.md` / `TE
 ## Tests
 
 Unit next to code or `tests/unit/`; DB-touching in `tests/integration/` (per-file row cleanup in `afterAll`). WS/gateway tests build a minimal Hono app — never import `src/index.ts` (it starts the sweeper and boot hooks).
+
+- **Never sleep for a barrier.** `bun test` runs all 55 files sequentially **in one process with one module registry**, so `connectionManager`, the broker and the Postgres pool are shared by the whole run and everything gets slower as it goes. A fixed `setTimeout` standing in for "the node has registered" is a coin toss: gateway `onOpen` runs an argon2id `verifyNodeCredential` (~105 ms idle, far more under suite load) before `connectionManager.register`. Use `waitForNodeOnline(nodeId)` from `tests/helpers/wait.ts` — the flake this cost is issue #64. Sleeping is only legitimate to prove something does *not* happen.

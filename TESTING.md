@@ -47,8 +47,13 @@ DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod"
 ```
 
 Migrations apply automatically via the test helpers (`ensurePgMigrations`).
-Test files set env vars **before** importing anything from `src/` (ESM import
-order — see the header comment in any `tests/integration/*.test.ts`).
+
+Test files open with a `process.env.DATABASE_URL = process.env.DATABASE_URL || ...`
+preamble "before any `src/` imports". Treat that as a comment, not a mechanism:
+ESM hoists the `import`s above it, so `src/db/drizzle.ts` has already read the
+variable by the time the assignment runs (and in a full run it is evaluated once,
+for the whole process). **The `DATABASE_URL` on the command line is what actually
+points the suite at the test database** — the preamble is a no-op fallback.
 
 ## Conventions
 
@@ -58,6 +63,16 @@ order — see the header comment in any `tests/integration/*.test.ts`).
   `tests/unit/`; DB-touching tests in `tests/integration/`, each cleaning up
   its own rows in `afterAll`. Gateway/WS tests build a minimal Hono app rather
   than importing `src/index.ts` (which starts the sweeper and boot hooks).
+- **Hub — never sleep for a barrier.** `bun test` runs every hub test file
+  sequentially inside **one process with one module registry**: the
+  `connectionManager`, the broker and the Postgres pool are shared by all 55
+  files, so a file that passes alone runs under much more load in the full
+  suite. Waiting a fixed number of milliseconds for something to become true is
+  therefore a coin toss — the gateway's `onOpen` verifies an argon2id hash
+  (~105 ms idle, more under load) before it registers the node, which is what
+  turned a 150 ms sleep into issue #64's random reds. Wait on the condition
+  with `waitForNodeOnline` / `pollUntil` from `apps/hub/tests/helpers/wait.ts`.
+  A plain sleep is only correct when proving something does *not* happen.
 - **Node-agent**: standard library only — `httptest` for hub stubs, temp dirs,
   injected command runners (see `selfupdate`'s `RunCommand` seam). Two
   macOS-specific traps: don't leave unreaped child processes named after

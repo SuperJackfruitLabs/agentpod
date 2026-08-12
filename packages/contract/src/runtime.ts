@@ -1,6 +1,21 @@
 import { z } from "zod";
 
-export const RuntimeProvider = z.enum(["docker", "cloudflare"]);
+/**
+ * A provider name, not a closed set of them.
+ *
+ * This was `z.enum(["docker", "cloudflare"])`, which made every new driver a
+ * three-package edit — contract, hub, console — before it could even be named.
+ * The registry is the authority on which providers exist now: a driver declares
+ * itself with a DriverManifest and the hub serves that list.
+ *
+ * Widening the wire format does NOT widen what the hub accepts. `createRuntime`
+ * still refuses a provider that is not registered and enabled, and the route
+ * turns that into a 400 — see the unregistered-provider test in
+ * apps/hub/src/routes/runtimes.test.ts. What changed is where the "no such
+ * provider" answer comes from: the registry, which knows, instead of an enum
+ * copied into three packages, which goes stale.
+ */
+export const RuntimeProvider = z.string().min(1);
 export type RuntimeProvider = z.infer<typeof RuntimeProvider>;
 
 /**
