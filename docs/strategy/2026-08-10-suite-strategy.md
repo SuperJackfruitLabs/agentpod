@@ -834,16 +834,74 @@ item here that is distribution rather than capability.*
       no backfill short of destroying and re-creating the runtime. The blast radius is bounded;
       the shape is not — any substrate-owned environment value added at creation reaches new
       sandboxes and silently skips every existing one.
-- [ ] [#254](https://github.com/rakeshgangwar/agentpod/issues/254) — **`startRuntime` marks a
-      runtime `online` because the substrate returned 200, not because a node arrived.** The
-      enrolment path writes `online` on evidence; this path writes it on a request having been
-      accepted, and nothing re-checks it or walks it back when no node connects. In the #252
-      incident it read `online` for a runtime whose container was exiting in under a second,
-      and so sent a human chasing restarts that could never work — each one re-running a
-      container that died before it could enrol. "Started but never came back" is the most
-      common way a provisioned runtime fails and the one state this code cannot represent,
-      which is precisely the class a fleet console exists to surface. `asleep` shows the shape
-      is already available: the substrate callback reports real lifecycle when asked to.
+- [x] ~~**A runtime is `online` only when a node has arrived**~~ — shipped 2026-08-12 in
+      [#260](https://github.com/rakeshgangwar/agentpod/pull/260), merged and deployed, closing
+      [#254](https://github.com/rakeshgangwar/agentpod/issues/254). `startRuntime` marked a
+      runtime `online` because the substrate returned 200, not because a node arrived, and
+      nothing re-checked it or walked it back. In the #252 incident it read `online` for a
+      runtime whose container was exiting in under a second, and so sent a human chasing
+      restarts that could never work. `online` is now **evidence-only**: `enrollment.ts` is its
+      sole writer, and it writes it because a node actually enrolled. `startRuntime` writes a
+      new `starting` state instead (migration `0032_runtime_starting_status.sql`), and a
+      sweeper on the existing 15s node-sweeper tick expires a start that never produces a node
+      into `error` with a `statusReason` the console renders under the badge. Three boundaries
+      carry the judgement: the timeout is two minutes; only rows with an `externalId` are
+      swept, because before `provision()` resolves there is no container to have failed and a
+      slow image pull is not a failure to report; and `asleep` is never swept, because sleeping
+      is the substrate reporting correctly rather than a start going missing. **`error` is not
+      terminal** — the sweep is a compare-and-set on the status it read, so a node that enrols
+      late still flips the row to `online` and clears the reason. The console's badge map
+      already handled `starting` and is now pinned by a test, and `apps/hub/CLAUDE.md` carries
+      the invariant so it cannot be quietly undone.
+
+      **The design deliberately did not reuse `provisioning`,** which would have been free. Its
+      epistemics are identical — "the substrate accepted a request, no node yet" — but the
+      event it names is not: a runtime the operator has just restarted reporting *provisioning*
+      invites "am I losing my workspace?", and the runtimes page hides Destroy while
+      `provisioning`, which would have left a stuck start unactionable for the whole timeout.
+
+      > **Two states can be epistemically identical and still not interchangeable.** A status
+      > is read by an operator as a claim about what happened, and the UI hangs affordances off
+      > it, so reusing one to save a migration imports both its story and its behaviour.
+- [x] ~~**A runtime is `stopped` only when the substrate says the container is**~~ — shipped
+      2026-08-12 in [#261](https://github.com/rakeshgangwar/agentpod/pull/261), merged and
+      deployed. The same class as #260 in the opposite direction, and the more expensive
+      direction: `stopRuntime` wrote `stopped` because `provisioner.stop()` resolved, and an
+      operator reads `stopped` as *"it has stopped costing me money"* — about $28/month per
+      4 GiB Cloudflare station.
+
+      **It could not ride along with #260, and the reason is the whole design.** #260 had an
+      evidence source sitting there already: enrolment. Stopping had none, and the obvious
+      substitute is wrong — **the absence of a node is not proof a container stopped.** Nodes go
+      offline for network reasons while their container keeps running, and billing. Positive,
+      substrate-specific evidence had to exist before the status could be honest, so the driver
+      interface grew an optional `status?(externalId) → "running" | "stopped" | "unknown"`.
+      Docker answers by inspecting the container: `paused` and `restarting` count as running, an
+      absent container is stopped, an unreachable daemon is unknown. Cloudflare had no such
+      channel, so the evidence had to be **built** — `GET /sandbox/:id` now reports
+      `ctx.container.running`, which is the substrate speaking about itself rather than our
+      record of what we last saw.
+
+      Between the request and the evidence sits a new `stopping` state (migration
+      `0033_runtime_stopping_status.sql`), reconciled by `sweepStalledRuntimeStops` on the same
+      15s tick. Its timeout is five minutes rather than two, because a stop legitimately
+      outlasts a start: Cloudflare archives the workspace to R2 on SIGTERM and documents fifteen
+      minutes before SIGKILL. Confirmed-down resolves at any age, so ordinary stops stay fast
+      and Docker usually confirms inline.
+
+      **The `unknown` case is split deliberately, and that split is where the honesty is.** A
+      driver that *has* a status channel and will not answer stays `stopping` and becomes
+      `error` past the timeout — that is an anomaly, and an anomaly wants a human. A driver with
+      **no** `status()` at all is written `stopped` immediately, with `statusReason:
+      "unverified: …"`, because that stop can never be confirmed by anybody: waiting would
+      strand the row forever, and erroring every stop on such a driver would train operators to
+      ignore the one signal that is supposed to mean something.
+
+      > **"Unverifiable" and "not verified yet" are different states and must not share a
+      > resolution.** Treating both as failure makes the alarm meaningless; treating both as
+      > success hides the real one. Where a signal cannot be obtained at all, say so in the
+      > record — `unverified:` in the reason — rather than letting a status imply evidence
+      > nobody has.
 - [x] ~~**Provider-scoped resource tiers**~~ — shipped 2026-08-12 in
       [#250](https://github.com/rakeshgangwar/agentpod/pull/250). Cloudflare fixes
       `instance_type` at worker deploy time, so its driver refuses any other tier, while the
@@ -864,17 +922,44 @@ item here that is distribution rather than capability.*
       control added alongside it reloads every folder already expanded rather than only the
       root, and is available to read-only viewers, because re-reading a cached view of a
       machine an agent is changing is not a write.
-- [ ] **A sixth harness: Pi** — requested ad hoc on 2026-08-12 and currently being specced.
-      Flagged as ad hoc deliberately: it did not come from this roadmap and displaces nothing
-      on it. Pi (<https://pi.dev>, MIT, `@earendil-works/pi-coding-agent`) does **not** speak
-      ACP natively — the maintainer declined that upstream, in Pi's issue #175 — but a
-      community adapter, `pi-acp` (0.0.33), does, and it matches the external-Node-adapter
-      pattern the claude-code and codex descriptors already use, so the integration shape is
-      known rather than novel. Pi has no daemon, so its container needs no supervision loop.
-      **It touches the contributor bundle in Horizon 2 without tripping its trigger:** that
-      trigger is the first request *from outside* to add a harness, and this is an internal
-      one, so the bundle stays where it is. It is, however, the second data point that adding
-      a harness is still hand-written Go.
+- [x] ~~**A sixth harness: Pi**~~ — shipped 2026-08-12 in
+      [#257](https://github.com/rakeshgangwar/agentpod/pull/257) (detection, chat and container
+      image) and [#258](https://github.com/rakeshgangwar/agentpod/pull/258) (the ACP PATH fix),
+      released as `v0.1.23` and `v0.1.24`, and verified live on the operator's Mac: both Pi
+      projects detected, and a real chat exchange completed. Requested ad hoc, and flagged as
+      such deliberately — it did not come from this roadmap and displaced nothing on it. **It
+      touches the contributor bundle in Horizon 2 without tripping its trigger:** that trigger
+      is the first request *from outside* to add a harness, and this was an internal one, so
+      the bundle stays where it is. It is, however, the second data point that adding a harness
+      is still hand-written Go.
+
+      Detection takes the workspace path **verbatim from each session file's header**, so no
+      decode step exists anywhere in it. That was not caution, it was proven necessary live: a
+      real project at `…/Projects/idea-bank` encodes to `--Users-…-Projects-idea-bank--`, which
+      a decode-the-directory-name strategy turns into a path that does not exist — and the
+      station would simply have failed to appear, with nothing on screen to say why. Pi has no
+      daemon, so `lifecycle` is never advertised and the container needs no supervision loop:
+      **no second entrypoint-parity pair arose.** The container images were refactored to a
+      shared base with per-harness layers at the same time, because deferring that would have
+      made the refactor touch three images instead of two. Chat goes through the pinned
+      community adapter `pi-acp@0.0.33` — Pi does not speak ACP and its maintainer declined it
+      upstream in earendil-works/pi#175 — which is the third instance of the external-Node-adapter
+      pattern the claude-code and codex descriptors already use, so the integration shape was
+      known rather than novel.
+
+      **The retro that matters is #258.** Tasks 1–7 were green: 21 Pi unit tests, a six-harness
+      ACP conformance suite, a detect gate passing inside the built container, and four green CI
+      checks. **And the feature did not work.** `ACPCommand` returned `env = nil`, so the adapter
+      inherited the node-agent's launchd PATH — `/usr/bin:/bin:/usr/sbin:/sbin` — could not find
+      `pi` to spawn, and Chat closed its connection with no explanation. Every test had placed a
+      stub on the *test process's* PATH, which is not the PATH anything runs under in
+      production: complete tests of the wrong environment. The same resolution gap had silently
+      broken the health check as well, and one test was passing in CI only because CI has no Pi
+      installed.
+
+      > **A test that models an environment nobody runs in can be thorough, green, and
+      > worthless. Verify the path the user actually takes, in the environment it actually runs
+      > in.**
 - [ ] **Coalesce before projecting.** Measured on real stations: the same trivial prompt yields
       57 ACP events from Codex and **1,051 from Hermes**, which at one-activity-per-event would
       be over a thousand POSTs at a board for one instruction — and an 18× spread across
