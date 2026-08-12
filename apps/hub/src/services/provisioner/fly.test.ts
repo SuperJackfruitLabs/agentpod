@@ -327,6 +327,111 @@ describe("FlyMachinesProvisioner — provision", () => {
   });
 });
 
+describe("FlyMachinesProvisioner — start", () => {
+  it("starts the machine and waits for it to be started", async () => {
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    // Put it down first so start has something to do.
+    const machine = fake.apps.get(app)!.machines.get(machineId)!;
+    machine.state = "stopped";
+
+    fake.calls.length = 0;
+    await driver.start(externalId);
+
+    expect(fake.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      `POST /v1/apps/${app}/machines/${machineId}/start`,
+      `GET /v1/apps/${app}/machines/${machineId}/wait`,
+    ]);
+    expect(machine.state).toBe("started");
+  });
+
+  it("does not throw when the wait times out", async () => {
+    // 408 is Fly saying "not yet", not "it failed". startRuntime writes
+    // `starting`, never `online`, and sweepStalledRuntimeStarts walks a machine
+    // that never arrives to `error` after two minutes. Throwing here would turn
+    // a slow image pull into a 500 in the operator's face while the machine was
+    // in fact coming up fine.
+    const impl = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/wait")) {
+        return new Response(JSON.stringify({ error: "timeout reached" }), { status: 408 });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.start("app-x/machine-y")).resolves.toBeUndefined();
+  });
+
+  it("DOES throw when the start itself is refused", async () => {
+    // A 404 or a 422 is Fly refusing, not waiting. Swallowing that would leave
+    // the runtime `starting` until the sweeper gave up two minutes later with a
+    // reason that named nothing.
+    const impl = (async () =>
+      new Response(JSON.stringify({ error: "machine not found" }), {
+        status: 404,
+      })) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.start("app-x/machine-y")).rejects.toThrow(/machine not found/);
+  });
+
+  it("propagates a wait failure that is NOT a 408, so a timeout stays distinguishable from a fault", async () => {
+    // The 408 tolerance is a narrow exemption for Fly's own "not yet", not a
+    // blanket "whatever the wait says, carry on". A driver that swallowed every
+    // wait failure would report a confident outcome on no evidence at all —
+    // exactly the class of bug that produced #261 (a `stopped` written because a
+    // call returned, not because anything confirmed it). The only reason this
+    // narrowing is expressible is FlyApiError.status.
+    const impl = (async (url: string | URL) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith("/wait")) {
+        return new Response(JSON.stringify({ error: "internal server error" }), {
+          status: 500,
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.start("app-x/machine-y")).rejects.toThrow(/internal server error/);
+  });
+
+  it("sends state and timeout on the wait request", async () => {
+    const urls: string[] = [];
+    const impl = (async (url: string | URL) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await driver.start("app-x/machine-y");
+
+    const wait = urls.find((u) => u.includes("/wait"))!;
+    expect(wait).toBe(
+      "https://api.machines.dev/v1/apps/app-x/machines/machine-y/wait?state=started&timeout=60"
+    );
+  });
+});
+
 describe("the Fly fake substrate is unfriendly where Fly is", () => {
   // The fake is what every later task's tests are checked against, so a
   // tolerant one would make all of them pass for free and prove nothing. These

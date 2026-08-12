@@ -399,8 +399,69 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
     throw new Error("fly: destroy() is not implemented yet");
   }
 
-  async start(_externalId: string): Promise<void> {
-    throw new Error("fly: start() is not implemented yet");
+  /**
+   * Start a stopped machine and give Fly a chance to confirm it.
+   *
+   * It waits rather than trusting the POST: `POST .../start` returns as soon as
+   * Fly has accepted the request, which is not the same as a machine being up —
+   * the same gap that produced #261, where a `stopped` was written because a
+   * call returned rather than because anything had confirmed it. Measured
+   * 2026-08-12: a start keeps the machine id and re-attaches the volume, but the
+   * ROOTFS IS WIPED, so nothing about the previous run's filesystem carries over
+   * and there is nothing to reuse here — the machine is coming up cold, which is
+   * exactly why it is worth waiting for.
+   *
+   * The wait is still not the hub's source of truth: startRuntime writes
+   * `starting`, never `online`, and only an enrolment writes `online`. It means
+   * an ordinary start has usually already happened by the time the API call
+   * returns, instead of leaving the console spinning for a sweeper tick.
+   */
+  async start(externalId: string): Promise<void> {
+    const { app, machineId } = parseFlyExternalId(externalId);
+    await this.request("POST", `/v1/apps/${app}/machines/${machineId}/start`);
+    await this.waitFor(app, machineId, "started");
+  }
+
+  /**
+   * Block on Fly's `wait?state=` until the machine reaches a state, or until
+   * Fly gives up.
+   *
+   * A 408 is swallowed on purpose: it is Fly saying "not yet", not "it failed".
+   * The hub already has the machinery for a machine that is slow or never
+   * arrives — `starting`/`stopping` plus sweepStalledRuntimeStarts and
+   * sweepStalledRuntimeStops — and a driver that threw here would turn a slow
+   * image pull into an error in the operator's face for a machine that was
+   * coming up fine.
+   *
+   * The exemption is exactly one status wide, and that narrowness is the whole
+   * point. EVERY other status still throws: a 404 or a 422 is a refusal and a
+   * 500 is a fault, and a helper that shrugged at all of them would report a
+   * confident outcome on no evidence — the failure mode of #261, pointed the
+   * other way. Telling the two apart is only possible because FlyApiError
+   * carries `status`.
+   */
+  private async waitFor(
+    app: string,
+    machineId: string,
+    state: "started" | "stopped",
+    instanceId?: string
+  ): Promise<void> {
+    const query = new URLSearchParams({ state, timeout: String(WAIT_TIMEOUT_S) });
+    // Fly REQUIRES instance_id when waiting for `stopped` — a start assigns a
+    // new one (measured 2026-08-12), so "which run of this machine" is a real
+    // question and the stop wait refuses to guess. Started-waits ignore it, so
+    // the parameter is carried here rather than duplicated in the caller.
+    if (instanceId) query.set("instance_id", instanceId);
+
+    try {
+      await this.request(
+        "GET",
+        `/v1/apps/${app}/machines/${machineId}/wait?${query.toString()}`
+      );
+    } catch (err) {
+      if (err instanceof FlyApiError && err.status === 408) return;
+      throw err;
+    }
   }
 
   async stop(_externalId: string): Promise<void> {
