@@ -3,7 +3,7 @@
   import { listFiles, writeFile, mkdir, move, del } from "$lib/api/client";
   import { toast } from "svelte-sonner";
   import type { FsEntry } from "@agentpod/contract";
-  import { ChevronRight, ChevronDown, Loader2, Trash2, FilePlus, FolderPlus, Pencil } from "@lucide/svelte";
+  import { ChevronRight, ChevronDown, Loader2, Trash2, FilePlus, FolderPlus, Pencil, RefreshCw } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
   import { autofocus } from "$lib/actions/autofocus";
@@ -83,6 +83,19 @@
     } finally {
       isLoading = false;
     }
+  }
+
+  /**
+   * Reload the tree from the station.
+   *
+   * Reloads every folder already loaded, not just the root: an agent that
+   * creates a file inside an expanded folder would otherwise stay invisible
+   * until a full page reload, because that folder's contents are cached.
+   */
+  async function refreshAll() {
+    const loaded = [...folderContents.keys()];
+    await refresh();
+    await Promise.all(loaded.map((p) => loadDirContents(p)));
   }
 
   async function ensureExpanded(path: string) {
@@ -235,9 +248,23 @@
   }
 </script>
 
-<!-- Write toolbar (always rendered when canWrite so tests can find buttons) -->
-{#if canWrite}
-  <div class="flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5 bg-muted/5">
+<!-- Toolbar. Refresh is always available: the file list is a cached view of a
+     machine someone else (an agent) is changing, and a read-only viewer needs to
+     re-read it just as much as a writer does. -->
+<div class="flex shrink-0 items-center gap-1 border-b border-border/60 px-2 py-1.5 bg-muted/5">
+  <Button
+    variant="ghost"
+    size="sm"
+    class="h-7 gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+    onclick={refreshAll}
+    disabled={isLoading}
+    title="Refresh file list"
+    aria-label="Refresh file list"
+  >
+    <RefreshCw class="h-3.5 w-3.5 {isLoading ? 'animate-spin' : ''}" />
+    Refresh
+  </Button>
+  {#if canWrite}
     <Button
       variant="ghost"
       size="sm"
@@ -258,8 +285,10 @@
       <FolderPlus class="h-3.5 w-3.5" />
       New Folder
     </Button>
-  </div>
+  {/if}
+</div>
 
+{#if canWrite}
   <!-- Inline create input -->
   {#if newItemMode !== null}
     <div class="shrink-0 px-2 py-1.5 border-b border-border/60 bg-muted/5">
