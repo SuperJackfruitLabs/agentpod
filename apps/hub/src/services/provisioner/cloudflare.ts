@@ -1,6 +1,8 @@
 /**
  * Cloudflare runtime provisioner driver — **DEAD as of 2026-08-12.**
  *
+ * SUPERSEDED by ./cloudflare-sandbox.ts, which is what the registry now wires.
+ *
  * This driver has never provisioned a working fleet runtime and cannot: the
  * worker it targets (`cloudflare/worker/`, see its DEAD.md) is OpenCode-era and
  * ignores both `image` and `env`, so the enrolment token never reaches the
