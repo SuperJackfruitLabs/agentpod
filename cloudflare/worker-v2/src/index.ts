@@ -2,6 +2,12 @@ import { Container, getContainer } from "@cloudflare/containers";
 import { isAuthorised } from "./auth";
 import { handleSnapshot, handleDestroy, type SnapshotDeps } from "./snapshot";
 import {
+  SNAPSHOT_TOKEN_KEY,
+  createStartEnv,
+  storedStartEnv,
+  type SubstrateContext,
+} from "./env";
+import {
   deriveState,
   handleStatus,
   STATE_KEY,
@@ -79,41 +85,36 @@ export class NodeAgentContainer extends Container {
   }
 
   /**
-   * Start with the environment this sandbox was created with, persisting it so
-   * a later wake can reuse it.
+   * Start a NEW sandbox: persist the caller-owned environment, then start with
+   * it plus the substrate-owned variables derived for this request.
    *
-   * The env MUST be stored, not merely passed to start(): a container's
-   * environment does not survive a stop, and a woken container with no
-   * AGENTPOD_HUB_URL or AGENTPOD_ENROLL_TOKEN fails `agentpod-node enroll`,
+   * The caller-owned half MUST be stored, not merely passed to start(): a
+   * container's environment does not survive a stop, and a woken container with
+   * no AGENTPOD_HUB_URL or AGENTPOD_ENROLL_TOKEN fails `agentpod-node enroll`,
    * exits under `set -e`, and is restarted forever. That produced 7 live
    * instances in a silent restart loop the first time this was deployed.
+   *
+   * The substrate-owned half is deliberately NOT stored — see src/env.ts.
    */
-  async createWithEnv(envVars: Record<string, string>): Promise<void> {
-    await this.ctx.storage.put("envVars", envVars);
-    this.envVars = envVars;
+  async createWithEnv(
+    envVars: Record<string, string>,
+    ctx: SubstrateContext
+  ): Promise<void> {
+    this.envVars = await createStartEnv(this.ctx.storage, ctx, envVars);
     await this.start();
   }
 
   /**
-   * The per-sandbox snapshot token, minted on first use and kept for the life
-   * of the sandbox so it survives sleep/wake alongside envVars.
+   * Read the per-sandbox snapshot token without minting one, for authenticating
+   * a container's request.
    *
+   * Minting happens on the start paths only (src/env.ts), so a request naming
+   * an unknown or destroyed sandbox cannot bring a token into existence.
    * Deliberately NOT the worker admin token: a container holding that could
    * create and destroy sandboxes across the whole fleet.
    */
-  async snapshotToken(): Promise<string> {
-    const existing = await this.ctx.storage.get<string>("snapshotToken");
-    if (existing) return existing;
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    const token = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
-    await this.ctx.storage.put("snapshotToken", token);
-    return token;
-  }
-
-  /** Read the stored token without minting one, for authenticating a request. */
   async storedSnapshotToken(): Promise<string | null> {
-    return (await this.ctx.storage.get<string>("snapshotToken")) ?? null;
+    return (await this.ctx.storage.get<string>(SNAPSHOT_TOKEN_KEY)) ?? null;
   }
 
   /**
@@ -126,7 +127,7 @@ export class NodeAgentContainer extends Container {
    * 2026-08-12: a destroy returned 200 and left the archive behind.
    */
   async revokeSnapshotToken(): Promise<void> {
-    await this.ctx.storage.delete("snapshotToken");
+    await this.ctx.storage.delete(SNAPSHOT_TOKEN_KEY);
   }
 
   /**
@@ -141,18 +142,21 @@ export class NodeAgentContainer extends Container {
   }
 
   /**
-   * Wake: start again with the stored environment.
+   * Wake: start again with the stored caller-owned environment, MERGED with
+   * substrate-owned variables derived afresh for this request.
    *
-   * Throws when there is none rather than starting a container that cannot
+   * The merge is the fix for #253. Replaying the stored map verbatim froze the
+   * environment at creation, so a sandbox created before the snapshot feature
+   * shipped could never learn about it and dropped its workspace on every
+   * sleep, silently, forever. Deriving instead of replaying means a
+   * worker-side change reaches EXISTING sandboxes on their next start.
+   *
+   * Throws when nothing was stored rather than starting a container that cannot
    * enrol — a restart loop is far worse than a failed request, because it is
    * silent and it bills.
    */
-  async wake(): Promise<void> {
-    const envVars = await this.ctx.storage.get<Record<string, string>>("envVars");
-    if (!envVars) {
-      throw new Error("no stored environment for this sandbox; create it first");
-    }
-    this.envVars = envVars;
+  async wake(ctx: SubstrateContext): Promise<void> {
+    this.envVars = await storedStartEnv(this.ctx.storage, ctx);
     await this.start();
   }
 
@@ -288,18 +292,20 @@ export default {
       const c = getContainer(env.NODE_AGENT, body.id);
       // The token is passed through but never logged, here or anywhere in this
       // worker. Do not add log statements that reference body.enrollToken.
-      const snapshotToken = await c.snapshotToken();
-      await c.createWithEnv({
-        AGENTPOD_HUB_URL: body.hubUrl,
-        AGENTPOD_ENROLL_TOKEN: body.enrollToken,
-        // Read by the container class's notifyHub, not by agentpod-node.
-        AGENTPOD_RUNTIME_ID: body.id,
-        AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
-        // Where the entrypoint archives and restores /workspace. Derived from
-        // the request so the worker never has to be told its own URL.
-        AGENTPOD_SNAPSHOT_URL: `${url.origin}/sandbox/${body.id}/snapshot`,
-        AGENTPOD_SNAPSHOT_TOKEN: snapshotToken,
-      });
+      //
+      // Only caller-owned variables are listed here. The snapshot URL and token
+      // are substrate-owned and derived on every start, create included — see
+      // src/env.ts. Adding one of those here would freeze it again (#253).
+      await c.createWithEnv(
+        {
+          AGENTPOD_HUB_URL: body.hubUrl,
+          AGENTPOD_ENROLL_TOKEN: body.enrollToken,
+          // Read by the container class's notifyHub, not by agentpod-node.
+          AGENTPOD_RUNTIME_ID: body.id,
+          AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
+        },
+        { origin: url.origin, sandboxId: body.id }
+      );
       return json({ sandboxId: body.id }, 201);
     }
 
@@ -340,12 +346,15 @@ export default {
       return json({ touched: id });
     }
 
-    // The wake path. Uses the STORED environment — a bare start() would boot a
-    // container with no hub URL or enrolment token, which cannot enrol and gets
-    // restarted forever.
+    // The wake path. Uses the STORED caller-owned environment — a bare start()
+    // would boot a container with no hub URL or enrolment token, which cannot
+    // enrol and gets restarted forever — merged with substrate-owned variables
+    // derived from THIS request. The origin is taken from the request rather
+    // than from storage on purpose: the sandboxes that need healing are exactly
+    // the ones with nothing useful stored (#253).
     if (request.method === "POST" && parts[2] === "start") {
       try {
-        await container.wake();
+        await container.wake({ origin: url.origin, sandboxId: id });
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, 409);
       }

@@ -69,6 +69,31 @@ archive, and it cannot delete even its own — deletion happens only on the
 admin-authenticated destroy path, so a compromised harness cannot erase the
 user's work.
 
+## The container's environment: caller-owned vs substrate-owned
+
+A container's environment does not survive a stop, so the worker hands it back on
+every start. It used to do that by storing the whole map at creation and
+replaying it verbatim — which froze it. `AGENTPOD_SNAPSHOT_URL` and
+`AGENTPOD_SNAPSHOT_TOKEN`, added on 2026-08-12, therefore reached sandboxes
+created after that deploy and no others; a runtime created 72 minutes earlier
+enrolled, heartbeated and served a terminal while archiving nothing, silently,
+for the life of the sandbox (#253).
+
+`src/env.ts` now splits the environment by ownership, and the split is explicit
+so a new variable has to pick a side:
+
+- **Caller-owned** (`AGENTPOD_HUB_URL`, `AGENTPOD_ENROLL_TOKEN`,
+  `AGENTPOD_RUNTIME_ID`, `AGENTPOD_RUNTIME_CALLBACK_TOKEN`) — minted by the hub
+  and unknowable to the worker afterwards. Stored at creation, replayed verbatim.
+- **Substrate-owned** (`SUBSTRATE_OWNED_KEYS`: the snapshot URL and token) —
+  facts about where this worker is and what it minted. Re-derived on **every**
+  start from the request origin and DO storage, and never persisted.
+
+The consequence worth knowing: a worker-side change to a substrate-owned variable
+reaches **existing** sandboxes on their next start, not just new ones. If you
+cannot recompute a value from the request and DO storage it is caller-owned;
+if you can, making it substrate-owned is what stops this bug recurring.
+
 ## Deploy
 
 ```bash
