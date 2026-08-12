@@ -3,6 +3,7 @@
 **Status:** approved 2026-08-12
 **Horizon:** 1 — step 3 of the re-planned driver wave
 **Depends on:** `2026-08-12-runtime-identity-persistence-design.md` (hard dependency)
+**Revised 2026-08-12** — sleep/wake is **in scope**. See "Sleep and wake".
 **Evidence:** `2026-08-12-cloudflare-sandbox-spike-findings.md`
 
 ## Problem
@@ -33,18 +34,58 @@ on the one above and must not ship before it.
 
 ## Design
 
-### Always-on, not scale-to-zero
+### Sleep and wake
 
-Containers keep themselves alive by overriding `onActivityExpired()` and declining to stop.
+Stations **sleep when idle and wake on demand**. This was briefly scoped out on
+the grounds that the spike showed sleep is not a *correctness* blocker — a
+container can stay alive indefinitely by overriding `onActivityExpired()` without
+stopping. That reasoning was wrong, because cost is the reason this substrate is
+interesting at all:
 
-The alternative — letting them sleep and waking on demand — is a **cost optimisation**, and
-the spike showed it is not needed for correctness. Deferring it keeps this driver small and
-keeps "asleep" out of the station state machine until someone wants the saving.
+| | Per station | × 39 |
+|---|---|---|
+| Always-on (4 GiB) | ~$28/mo | ~$1,090/mo |
+| Sleeping when idle, awake ~2h/day | ~$2/mo | ~$90/mo |
 
-The cost is stated plainly so the choice is informed: roughly **$28/month per always-on
-4 GiB station**, about **$1,090/month across 39**, against ~€46/month for a Hetzner box
-that would run the fleet. Cloudflare earns burst, untrusted code and geography — it is not
-the default substrate for standing stations, and the roadmap already says so.
+Cloudflare stops charging once an instance sleeps. Roughly a **12× difference**,
+which is the difference between a viable second substrate and an expensive one.
+
+**Identity persistence is what makes this possible now.** The original blocker was
+never the sleeping — it was that a woken container came back as a *different
+node*. With runtime-bound re-enrolment merged, a woken container re-enrols and
+resumes the **same `nodeId`**, keeping its stations and history.
+
+**Explicit wake in this slice; automatic wake later.** A Wake control in the
+console, plus wake-on-provision. Automatic wake — any station verb against a
+sleeping node wakes it and retries — is the better experience and the larger
+change, because it touches the broker's offline path and forces everything
+downstream to tolerate seconds of latency. Clean seam; the explicit form is
+useful alone.
+
+### Asleep is a state, and the hub must be told
+
+When Cloudflare sleeps a container on its own timer, the hub sees only that the
+node stopped heartbeating. It cannot distinguish **slept normally** from **died**,
+and showing `offline` for a routine expected condition is precisely the dishonest
+status this codebase has been bitten by repeatedly — a scanner grading machines A
+without reading them, a runtime reporting success while restart-looping.
+
+So the worker **tells** the hub. Its container `onStop` hook posts to a small
+authenticated hub endpoint, which sets the runtime's status to `asleep`.
+
+- `runtime_status` gains **`asleep`**, alongside `provisioning · online · stopped
+  · error · destroyed`. `stopped` already exists and means *deliberately stopped
+  by an operator*; conflating the two would lose the distinction between "I
+  stopped this" and "it idled out", which is the one an operator needs.
+- **The node still goes `offline`, and that is correct.** There is genuinely no
+  connection. The sweeper is untouched: it is not wrong, and teaching it about
+  sleeping nodes would couple it to a substrate.
+- The console shows the *runtime* as asleep with a Wake control, so a sleeping
+  station reads as normal rather than broken.
+
+`sleepAfter` is configurable on the worker, defaulting to **15 minutes** — long
+enough that a short pause in a conversation does not cost a wake, short enough
+that an abandoned station stops billing the same hour.
 
 ### Two pieces
 
@@ -55,7 +96,7 @@ built on `@cloudflare/containers`. It exposes exactly what the driver needs:
 |---|---|
 | `POST /sandbox` | Start a container for a runtime, with hub URL and enrolment token in its environment |
 | `DELETE /sandbox/:id` | Destroy it |
-| `POST /sandbox/:id/stop` · `/start` | Lifecycle, mapping to the driver's optional `stop`/`start` |
+| `POST /sandbox/:id/stop` · `/start` | Lifecycle, mapping to the driver's optional `stop`/`start`. `start` is also the wake path — the spike confirmed `stop` then `start` restarts a container reliably. |
 | `GET /health` | Liveness, for the driver to fail fast on a misconfigured URL |
 
 Authenticated with a shared bearer token, as the old one was.
@@ -92,7 +133,9 @@ work is needed — the provider name is already in the union. `CLOUDFLARE_WORKER
 
 ## Out of scope
 
-- **Sleep/wake as a station state** — deferred, see above.
+- **Automatic wake on demand** — deferred. Any station verb waking a sleeping
+  node and retrying is the better experience, but it changes the broker's offline
+  path and every caller's latency assumptions. Explicit wake first.
 - **Opening the registry** — `cloudflare` is already a known provider; nothing here needs
   dynamic names or capability manifests.
 - **Deleting the old worker and driver** — they stay marked dead until this replaces them
@@ -102,6 +145,13 @@ work is needed — the provider name is already in the union. `CLOUDFLARE_WORKER
 
 ## Testing
 
+- **Sleeping sets `asleep`, not `offline` or `error`** — the callback path, and the
+  distinction an operator relies on to tell "idled out" from "broken".
+- **A wake resumes the same `nodeId`** — the acceptance test for the whole slice,
+  and the one that exercises identity persistence on the substrate that needs it.
+- **`stopped` and `asleep` stay distinct** — an operator-stopped runtime must not
+  be reported as having idled out, or the console loses the difference between
+  "I did that" and "it happened".
 - **Driver unit tests against a fake fetch**, mirroring the existing cloudflare tests:
   provision posts the right body, destroy targets the right id, lifecycle maps correctly.
 - **A response that does not match the expected shape fails the provision** — the specific
@@ -119,7 +169,13 @@ work is needed — the provider name is already in the union. `CLOUDFLARE_WORKER
 worker. That is a platform property, not a design choice, and it makes Cloudflare a poor
 fit for per-runtime harness selection.
 
-**Always-on costs real money.** Documented above. Not the default substrate.
+**A wake costs seconds.** A woken container boots, enrols and reconnects before the
+station is usable. Explicit wake makes that latency visible and attributable,
+which is part of why it comes first.
+
+**Even sleeping, this is not the default substrate.** ~$2/month idle per station
+beats always-on by 12×, but a Hetzner box runs the whole fleet for about €46.
+Cloudflare earns burst, untrusted code and geography.
 
 **Ephemeral disk means a restarted station loses its workspace**, not just its identity.
 Identity is solved by the dependency; workspace persistence is not, and a Cloudflare
