@@ -287,3 +287,31 @@ describe("DockerRuntimeProvisioner runtime selection", () => {
     await expect(makeProvisioner(fake).provision(SPEC)).rejects.toThrow(/not-installed/);
   });
 });
+
+describe("DockerRuntimeProvisioner network selection", () => {
+  const ORIGINAL = process.env.DOCKER_NETWORK;
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.DOCKER_NETWORK;
+    else process.env.DOCKER_NETWORK = ORIGINAL;
+  });
+
+  it("passes DOCKER_NETWORK through to the orchestrator", () => {
+    // config.ts exposed DOCKER_NETWORK for a long time but nothing passed it
+    // here, so setting it did nothing. That silent no-op is what made the #243
+    // guard fire on a hub that was, as far as its operator knew, configured
+    // correctly.
+    process.env.DOCKER_NETWORK = "bridge";
+    const p = new DockerRuntimeProvisioner();
+    const cfg = (p as unknown as { orchestrator: { config: { defaultNetwork: string } } })
+      .orchestrator.config;
+    expect(cfg.defaultNetwork).toBe("bridge");
+  });
+
+  it("defaults to agentpod-net when unset", () => {
+    delete process.env.DOCKER_NETWORK;
+    const p = new DockerRuntimeProvisioner();
+    const cfg = (p as unknown as { orchestrator: { config: { defaultNetwork: string } } })
+      .orchestrator.config;
+    expect(cfg.defaultNetwork).toBe("agentpod-net");
+  });
+});
