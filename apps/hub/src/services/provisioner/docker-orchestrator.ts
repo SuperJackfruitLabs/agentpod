@@ -100,6 +100,40 @@ const DEFAULT_CONFIG: Required<DockerOrchestratorConfig> = {
   defaultResources: { cpus: "1.0", memory: "2g", pidsLimit: 256 },
 };
 
+// ─── Runtime / network compatibility ──────────────────────────────────────────
+
+/**
+ * Docker's built-in networks. These write the host's real resolvers into
+ * /etc/resolv.conf. Every other network is user-defined, and Docker injects
+ * `nameserver 127.0.0.11` plus an embedded DNS proxy on that loopback address
+ * inside the container's network namespace.
+ */
+const BUILTIN_NETWORKS = new Set(["bridge", "host", "none"]);
+
+/**
+ * Refuses a sandboxed runtime on a user-defined network (#243).
+ *
+ * gVisor's netstack cannot reach Docker's embedded resolver at 127.0.0.11, so
+ * every lookup times out and a node-agent never enrols — while ICMP, TCP and
+ * UDP to real addresses all work, which makes it read as "DNS randomly broke".
+ * `--dns` does not help: it only changes what the embedded proxy forwards
+ * upstream, and resolv.conf still points at 127.0.0.11.
+ *
+ * This throws rather than silently switching networks or falling back to runc.
+ * The failure it prevents is the worst kind: provisioning reports success and
+ * the container then restart-loops forever.
+ */
+export function assertRuntimeSupportsNetwork(runtime: string, network: string): void {
+  if (!runtime || BUILTIN_NETWORKS.has(network)) return;
+  throw new Error(
+    `runtime "${runtime}" cannot be used on the user-defined network "${network}": ` +
+      `Docker's embedded DNS resolver (127.0.0.11) is unreachable from a sandboxed ` +
+      `runtime, so containers never resolve the hub and never enrol. ` +
+      `Set DOCKER_NETWORK=bridge alongside DOCKER_RUNTIME, or unset DOCKER_RUNTIME. ` +
+      `See https://github.com/rakeshgangwar/agentpod/issues/243`
+  );
+}
+
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
 export class DockerOrchestrator {
@@ -187,6 +221,7 @@ export class DockerOrchestrator {
     containerName: string
   ): ContainerCreateOptions {
     const network = config.network ?? this.config.defaultNetwork;
+    assertRuntimeSupportsNetwork(this.config.runtime, network);
     const resources = { ...this.config.defaultResources, ...config.resources };
 
     const binds: string[] = config.volumes.map((v) => {

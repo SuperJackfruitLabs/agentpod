@@ -196,9 +196,21 @@ Verify Docker sees it, then enable it for newly provisioned runtimes:
 
 ```bash
 docker info --format '{{range $k,$v := .Runtimes}}{{$k}} {{end}}'   # expect runsc listed
-echo 'DOCKER_RUNTIME=runsc' >> /etc/agentpod/hub.env
+printf 'DOCKER_RUNTIME=runsc\nDOCKER_NETWORK=bridge\n' >> /etc/agentpod/hub.env
 systemctl restart agentpod-hub
 ```
+
+> **`DOCKER_NETWORK=bridge` is required, not optional** ([#243](https://github.com/rakeshgangwar/agentpod/issues/243)).
+> Every user-defined Docker network injects `nameserver 127.0.0.11` and runs an
+> embedded DNS proxy on that loopback address inside the container. A sandboxed
+> runtime cannot reach it, so the container never resolves the hub and never
+> enrols — while ICMP, TCP and UDP to real addresses all work, which makes it
+> read as "DNS randomly broke". `--dns` does **not** help: it only changes what
+> the embedded proxy forwards upstream.
+>
+> The hub refuses this combination rather than provisioning a runtime that would
+> restart-loop forever, so a misconfiguration fails at provision time with an
+> error naming the fix.
 
 Existing runtimes keep whatever they were created with; this affects new ones.
 The console's **Isolation** column shows each runtime's actual runtime, read back
@@ -208,17 +220,12 @@ from Docker rather than from config, so you can confirm rather than assume.
 fails loudly.** It never falls back to `runc` — a silent fallback would leave you
 believing you had kernel isolation when you had none.
 
-> **Do not enable this yet — [#243](https://github.com/rakeshgangwar/agentpod/issues/243).**
-> A runtime provisioned under `runsc` never enrols: DNS does not resolve inside
-> containers on `agentpod-net`, the network the provisioner uses. On the default
-> bridge it works, which is why the original spike passed. ICMP works and the
-> container gets an address, so this is narrower than "no networking", but the
-> cause is not yet established. `DOCKER_RUNTIME` is unset on the reference hub.
-
 Verified on the reference box (Ubuntu 24.04, kernel 6.8, Docker 29.6.1): the
 node-agent enrols, heartbeats, allocates PTYs for the terminal capability, and
-runs ACP stdio children under `runsc` identically to `runc` — **on the default
-bridge**. Expect 5–20% CPU overhead depending on syscall frequency.
+runs ACP stdio children under `runsc` identically to `runc`. Verified end to end
+on 2026-08-12 by provisioning through `createRuntime`: the runtime came back
+`status=online runtime=runsc` with its node heartbeating. Expect 5–20% CPU
+overhead depending on syscall frequency.
 
 ---
 

@@ -45,6 +45,11 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
       // Set by the operator to harden the host, e.g. DOCKER_RUNTIME=runsc for
       // gVisor. Unset keeps Docker's default and today's exact behaviour.
       runtime: process.env.DOCKER_RUNTIME || "",
+      // config.ts has exposed DOCKER_NETWORK for a long time but nothing ever
+      // passed it here, so the orchestrator always used its own default. That
+      // matters now: a sandboxed runtime REQUIRES a built-in network, because
+      // Docker's embedded resolver is unreachable from one (#243).
+      defaultNetwork: process.env.DOCKER_NETWORK || "agentpod-net",
     })
   ) {}
 
