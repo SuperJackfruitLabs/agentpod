@@ -13,6 +13,7 @@ import { connectionManager } from "./connection-manager";
 import { dropNode } from "./broker";
 import { clearNode } from "./health-cache";
 import { setNodeStatus } from "./node-registry";
+import { sweepStalledRuntimeStarts } from "./runtimes";
 
 export const SWEEP_INTERVAL_MS = 15_000;
 export const OFFLINE_THRESHOLD_MS = 45_000;
@@ -40,11 +41,20 @@ export async function sweepStaleNodes(now: number = Date.now()): Promise<string[
   return stale.map((s) => s.id);
 }
 
-/** Start the periodic sweeper. Returns a stop function. */
+/**
+ * Start the periodic sweeper. Returns a stop function.
+ *
+ * Two expiries share the tick because they are the same idea at two levels: a
+ * node that stopped talking, and a runtime that was asked to run and never
+ * produced a node at all (see sweepStalledRuntimeStarts).
+ */
 export function startNodeSweeper(): () => void {
   const timer = setInterval(() => {
     void sweepStaleNodes().catch((err) =>
       console.error("[sweeper] sweep failed:", err)
+    );
+    void sweepStalledRuntimeStarts().catch((err) =>
+      console.error("[sweeper] runtime sweep failed:", err)
     );
   }, SWEEP_INTERVAL_MS);
   return () => clearInterval(timer);

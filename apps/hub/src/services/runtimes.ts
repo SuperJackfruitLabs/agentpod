@@ -6,6 +6,11 @@
  *   destroy → driver.destroy → mark destroyed
  *   start / stop → driver.start/stop (guard on capability)
  *
+ * Status honesty: `online` means "a node for this runtime is connected" and is
+ * written only by enrolment (enrollment.ts). Everything here can say at most
+ * "the substrate accepted my request" — hence `provisioning` / `starting`, and
+ * sweepStalledRuntimeStarts() to expire the ones that never come back.
+ *
  * Error semantics for routes:
  *   - "provider disabled: X"     → 400 (user chose a disabled provider)
  *   - "provider not registered"  → 400 (same surface — misconfigured)
@@ -14,7 +19,7 @@
  *   - driver provision() throw   → status set to "error"; rethrow (→ 502)
  */
 
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { mintEnrollmentToken } from "./enrollment";
@@ -67,6 +72,7 @@ function toContract(row: RuntimeRow): ProvisionedRuntime {
     resourceTier: row.resourceTier as ProvisionedRuntime["resourceTier"],
     harness: (row.harness ?? "none") as ProvisionedRuntime["harness"],
     runtime: row.runtime ?? null,
+    statusReason: row.statusReason ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -137,7 +143,11 @@ export async function createRuntime(
   } catch (err) {
     await db
       .update(provisionedRuntimes)
-      .set({ status: "error", updatedAt: new Date() })
+      .set({
+        status: "error",
+        statusReason: `could not mint an enrolment token: ${(err as Error).message}`,
+        updatedAt: new Date(),
+      })
       .where(eq(provisionedRuntimes.id, id));
     throw Object.assign(err as Error, { status: 502 });
   }
@@ -149,7 +159,11 @@ export async function createRuntime(
     // Driver not registered (env flag on but no driver wired) → 400
     await db
       .update(provisionedRuntimes)
-      .set({ status: "error", updatedAt: new Date() })
+      .set({
+        status: "error",
+        statusReason: (err as Error).message,
+        updatedAt: new Date(),
+      })
       .where(eq(provisionedRuntimes.id, id));
     throw Object.assign(err as Error, { status: 400 });
   }
@@ -178,7 +192,11 @@ export async function createRuntime(
   } catch (err) {
     await db
       .update(provisionedRuntimes)
-      .set({ status: "error", updatedAt: new Date() })
+      .set({
+        status: "error",
+        statusReason: `the ${provider} driver failed to provision it: ${(err as Error).message}`,
+        updatedAt: new Date(),
+      })
       .where(eq(provisionedRuntimes.id, id));
     // Surface as 502 — the driver (external system) failed
     throw Object.assign(err as Error, { status: 502 });
@@ -269,7 +287,11 @@ export async function destroyRuntime(userId: string, id: string): Promise<void> 
 }
 
 /**
- * Start a stopped runtime. Throws 400 if the driver has no start() support.
+ * Start (or wake) a runtime. Throws 400 if the driver has no start() support.
+ *
+ * Leaves the runtime `starting`, never `online`: see the comment on the write.
+ * A wake takes the same path, so an asleep runtime goes asleep → starting →
+ * online (or → error, if the substrate says yes and nothing comes back).
  */
 export async function startRuntime(userId: string, id: string): Promise<void> {
   const [row] = await db
@@ -303,10 +325,102 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
 
   await provisioner.start(row.externalId);
 
+  // NOT "online". All we know is that the substrate accepted a start request;
+  // whether a node exists is a different question, and only enrolment can
+  // answer it (see enrollment.ts, the evidence-based writer of "online").
+  //
+  // On 2026-08-12 this line claimed online for a container that crash-exited in
+  // 892 ms, and the operator restarted it twice on the strength of that claim.
+  // `starting` is the honest state, and sweepStalledRuntimeStarts() below walks
+  // it back to `error` with a reason when no node ever arrives.
   await db
     .update(provisionedRuntimes)
-    .set({ status: "online", updatedAt: new Date() })
+    .set({ status: "starting", statusReason: null, updatedAt: new Date() })
     .where(eq(provisionedRuntimes.id, id));
+}
+
+/**
+ * How long a runtime may sit in `starting`/`provisioning` before the hub
+ * concludes its node is never coming.
+ *
+ * A node-agent enrols within seconds of its container booting, so two minutes
+ * is many times the honest worst case (cold image pull excluded — see below)
+ * while still answering the operator's question in the time they would spend
+ * staring at the console.
+ */
+export const START_TIMEOUT_MS = 2 * 60_000;
+
+const humanMs = (ms: number) =>
+  ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1000)}s`;
+
+/**
+ * Expire runtimes that were asked to run and never came back.
+ *
+ * "Started but never came back" is the most common way a provisioned runtime
+ * fails and used to be invisible: `starting`/`provisioning` had no exit except
+ * a node arriving, so a runtime whose container died on boot sat there — or,
+ * before #254, sat there lying about being `online`.
+ *
+ * Deliberately narrow:
+ *   - Only `starting` and `provisioning` are considered. `asleep` is a healthy
+ *     state whose node is legitimately offline and must never be reclassified
+ *     as failed; `stopped`/`online`/`error`/`destroyed` are not waiting on
+ *     anything.
+ *   - Only rows with an externalId. Between the insert and provision()
+ *     resolving there is no container yet, so a slow image pull is not a
+ *     failure.
+ *   - The write is a compare-and-set on the status we read. A node that enrols
+ *     mid-sweep wins: evidence always beats a timeout.
+ *
+ * Not terminal — a late enrolment still flips the runtime to `online`.
+ *
+ * @param now injectable clock for tests.
+ * @returns the ids actually flipped to `error`.
+ */
+export async function sweepStalledRuntimeStarts(
+  now: number = Date.now()
+): Promise<string[]> {
+  const cutoff = new Date(now - START_TIMEOUT_MS);
+
+  const stalled = await db
+    .select({ id: provisionedRuntimes.id, status: provisionedRuntimes.status })
+    .from(provisionedRuntimes)
+    .where(
+      and(
+        inArray(provisionedRuntimes.status, ["starting", "provisioning"]),
+        isNotNull(provisionedRuntimes.externalId),
+        lt(provisionedRuntimes.updatedAt, cutoff)
+      )
+    );
+
+  const expired: string[] = [];
+  for (const row of stalled) {
+    const verb = row.status === "starting" ? "the start request" : "provisioning";
+    const flipped = await db
+      .update(provisionedRuntimes)
+      .set({
+        status: "error",
+        statusReason:
+          `no node enrolled within ${humanMs(START_TIMEOUT_MS)} of ${verb} — ` +
+          `the container was asked to run but never came back ` +
+          `(check the substrate's container logs)`,
+        updatedAt: new Date(now),
+      })
+      .where(
+        and(
+          eq(provisionedRuntimes.id, row.id),
+          eq(provisionedRuntimes.status, row.status)
+        )
+      )
+      .returning({ id: provisionedRuntimes.id });
+
+    if (flipped.length > 0) {
+      expired.push(row.id);
+      console.log(`[runtime-sweeper] ${row.id} ${row.status} → error (no node enrolled)`);
+    }
+  }
+
+  return expired;
 }
 
 /**

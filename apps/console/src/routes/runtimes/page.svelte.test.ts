@@ -342,6 +342,64 @@ test("waking calls startRuntime", async () => {
   await waitFor(() => expect(start).toHaveBeenCalledWith("rt-sleep"));
 });
 
+// ---------------------------------------------------------------------------
+// Starting + why a runtime failed (issue #254)
+// ---------------------------------------------------------------------------
+
+test("a starting runtime reads as starting, not online", async () => {
+  // The substrate accepting a start request is not a node being connected.
+  // Showing green here is what sent an operator restarting a container that
+  // was crash-exiting in under a second.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-starting", name: "booting", status: "starting" as never },
+  ]);
+
+  const { getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("starting"));
+  // Styled as in-flight, not as running — an unmapped status would render bare.
+  expect(getByTestId("status-badge").className).toContain("status-starting");
+});
+
+test("a starting runtime offers no Start or Stop, but can still be destroyed", async () => {
+  // Nothing to do but wait — except escape, if it never comes back.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-starting", name: "booting", status: "starting" as never },
+  ]);
+
+  const { queryByTestId, getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("destroy-btn")).toBeTruthy());
+  expect(queryByTestId("start-btn")).toBeNull();
+  expect(queryByTestId("stop-btn")).toBeNull();
+});
+
+test("a failed runtime shows why it failed", async () => {
+  // "error" alone leaves the operator's actual question unanswered. The whole
+  // point of the timeout is that the console can say the container never came
+  // back, rather than inviting another pointless restart.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    {
+      ...mockRuntimes[0]!,
+      id: "rt-dead",
+      name: "never-returned",
+      status: "error" as const,
+      statusReason: "no node enrolled within 2m of the start request — the container was asked to run but never came back",
+    },
+  ]);
+
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/no node enrolled/));
+});
+
+test("a healthy runtime shows no reason line", async () => {
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-ok", name: "fine", statusReason: null },
+  ]);
+
+  const { queryByTestId, getByText } = render(RuntimesPage);
+  await waitFor(() => expect(getByText("fine")).toBeTruthy());
+  expect(queryByTestId("status-reason")).toBeNull();
+});
+
 test("an online runtime offers no Wake", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue([
     { ...mockRuntimes[0]!, id: "rt-up", name: "awake", status: "online" as const },

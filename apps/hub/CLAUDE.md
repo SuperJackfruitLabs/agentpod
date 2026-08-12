@@ -15,7 +15,8 @@ Test DB requirements (pgvector image + env override): see root `CLAUDE.md` / `TE
 ## Architecture facts that bite
 
 - **Node gateway** (`routes/gateway.ts`, WSS `/public/nodes/gateway`, auth `Bearer <nodeId>:<nodeSecret>`): onMessage must await `authReady` (one-shot frames race async auth); teardown is epoch-guarded (`connectionManager.isCurrent`) so a late close from a replaced socket can't kill a fresh connection; a heartbeat on an unregistered socket re-registers it.
-- **Sweeper** (`services/node-sweeper.ts`): every 15s, expires online nodes silent >45s (agent heartbeats every 15s) with the same full teardown as a real close. False positives self-heal via heartbeat re-register.
+- **Sweeper** (`services/node-sweeper.ts`): every 15s, expires online nodes silent >45s (agent heartbeats every 15s) with the same full teardown as a real close. False positives self-heal via heartbeat re-register. The same tick runs `sweepStalledRuntimeStarts` (`services/runtimes.ts`): a runtime left `starting`/`provisioning` for >2min with an externalId becomes `error` + `statusReason`.
+- **Runtime `online` is evidence-only**: only `enrollment.ts` writes it, because a node enrolled. `startRuntime` writes `starting` — the substrate accepting a start request is not a node existing (issue #254). Never widen a lifecycle write back to `online` on a driver call returning.
 - **Broker** (`services/broker.ts`): request/stream correlation by UUID; `request()` never rejects — resolves `{ok:false, error}` on timeout/offline/disconnect.
 - **Auth**: Better Auth, session cookies; secret comes from config (`BETTER_AUTH_SECRET`) passed explicitly to `betterAuth({secret})`. First signup becomes admin, then signup closes (`system_settings`).
 - **Stations**: presence in the `stations` table = adopted; there is no `adopted` column. Observe routes (`/api/stations/:id/...`) proxy to the node via broker and 502 on node-side failure.

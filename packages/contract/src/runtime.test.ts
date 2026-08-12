@@ -93,6 +93,41 @@ describe("ProvisionedRuntime.runtime", () => {
   });
 });
 
+describe("RuntimeStatus starting", () => {
+  it("accepts starting", () => {
+    // "the substrate accepted a start request" is not "a node is connected".
+    // Without its own value the hub had to claim online on no evidence.
+    expect(RuntimeStatus.parse("starting")).toBe("starting");
+  });
+
+  it("keeps online distinct", () => {
+    // online is now a claim about a node actually being connected.
+    expect(RuntimeStatus.parse("online")).toBe("online");
+  });
+});
+
+describe("ProvisionedRuntime.statusReason", () => {
+  const BASE = {
+    id: "rt_1", ownerId: "u_1", provider: "docker" as const, externalId: "abc",
+    status: "error" as const, nodeId: null, name: "n",
+    resourceTier: "small" as const, harness: "none" as const,
+    createdAt: "2026-08-12T00:00:00Z", updatedAt: "2026-08-12T00:00:00Z",
+  };
+
+  it("carries why a runtime failed", () => {
+    const parsed = ProvisionedRuntime.parse({
+      ...BASE,
+      statusReason: "no node enrolled within 2m of the start request",
+    });
+    expect(parsed.statusReason).toContain("no node enrolled");
+  });
+
+  it("is absent when there is nothing to explain", () => {
+    expect(ProvisionedRuntime.parse(BASE).statusReason).toBeUndefined();
+    expect(ProvisionedRuntime.parse({ ...BASE, statusReason: null }).statusReason).toBeNull();
+  });
+});
+
 describe("RuntimeStatus asleep", () => {
   it("accepts asleep", () => {
     // A slept container is not stopped and not broken. Without its own value the

@@ -4,11 +4,17 @@ export const RuntimeProvider = z.enum(["docker", "cloudflare"]);
 export type RuntimeProvider = z.infer<typeof RuntimeProvider>;
 
 /**
+ * `starting` — the substrate accepted a start request and no node has arrived
+ * yet. It is NOT `online`: `online` means a node for this runtime is connected,
+ * which only enrolment can establish. A start that never produces a node times
+ * out into `error` with a reason, so "started but never came back" — the most
+ * common way a provisioned runtime fails — is a state the console can show.
+ *
  * `asleep` — the substrate idled the runtime out and stopped billing it. Its
  * node is legitimately offline; the runtime is healthy and can be woken.
  * Distinct from `stopped`, which means an operator stopped it deliberately.
  */
-export const RuntimeStatus = z.enum(["provisioning", "online", "stopped", "asleep", "error", "destroyed"]);
+export const RuntimeStatus = z.enum(["provisioning", "starting", "online", "stopped", "asleep", "error", "destroyed"]);
 export type RuntimeStatus = z.infer<typeof RuntimeStatus>;
 
 export const ResourceTier = z.enum(["small", "medium", "large"]);
@@ -46,6 +52,14 @@ export const ProvisionedRuntime = z.object({
    * created before it was recorded — never inferred.
    */
   runtime: z.string().min(1).nullable().optional(),
+  /**
+   * Why the runtime is in its current status, when the status alone does not
+   * say. Set on failures — an `error` that reads "no node enrolled within 2m of
+   * the start request" answers the operator's actual question ("why is it not
+   * coming back") instead of leaving them to restart something that cannot
+   * work. Null/absent whenever there is nothing to explain.
+   */
+  statusReason: z.string().min(1).nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

@@ -225,6 +225,13 @@
       "when": 1786506652047,
       "tag": "0031_clumsy_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786532106455,
+      "tag": "0032_runtime_starting_status",
+      "breakpoints": true
     }
   ]
 }

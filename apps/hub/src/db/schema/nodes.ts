@@ -21,7 +21,7 @@ export const nodes = pgTable("nodes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("nodes_user_id_idx").on(t.userId)]);
 
-export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "online", "stopped", "asleep", "error", "destroyed"]);
+export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "starting", "online", "stopped", "asleep", "error", "destroyed"]);
 
 export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   id: text("id").primaryKey(),
@@ -29,6 +29,10 @@ export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   provider: text("provider").notNull(),
   externalId: text("external_id"),
   status: runtimeStatusEnum("status").notNull().default("provisioning"),
+  // Why the runtime is in its current status, when the status alone doesn't
+  // say — e.g. "no node enrolled within 2m of the start request". Null when
+  // there is nothing to explain.
+  statusReason: text("status_reason"),
   nodeId: text("node_id").references(() => nodes.id, { onDelete: "set null" }),
   name: text("name").notNull(),
   resourceTier: text("resource_tier").notNull().default("small"),
