@@ -11,9 +11,27 @@ function getEnv(key: string, defaultValue?: string): string {
   return value;
 }
 
-function getEnvInt(key: string, defaultValue: number): number {
-  const value = process.env[key];
-  if (value === undefined) {
+/**
+ * Read an integer setting, falling back to `defaultValue`.
+ *
+ * A PRESENT BUT EMPTY variable counts as unset. This is not leniency for its
+ * own sake: every deployment surface — a docker-compose `environment:` entry,
+ * a `.env` line, a systemd `Environment=`, a copied block from
+ * docs/DEPLOYMENT.md with the comment removed but the value not filled in —
+ * turns "I did not set this" into "" rather than into absent. Treating "" as a
+ * parse failure meant a blank line in an operator's env file threw HERE, at
+ * module scope, before `validateConfig()` exists to say anything useful, and it
+ * did so for every hub regardless of which substrates it had enabled: a
+ * docker-only hub could be stopped from booting by a blank FLY_VOLUME_SIZE_GB.
+ * A value nobody supplied is a value nobody supplied.
+ *
+ * A non-empty value that is not an integer is still a refusal — that is an
+ * operator saying something the hub cannot honour, not an operator saying
+ * nothing.
+ */
+export function getEnvInt(key: string, defaultValue: number): number {
+  const value = process.env[key]?.trim();
+  if (value === undefined || value === '') {
     return defaultValue;
   }
   const parsed = parseInt(value, 10);
