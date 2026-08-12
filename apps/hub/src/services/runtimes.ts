@@ -115,13 +115,19 @@ export async function createRuntime(
     updatedAt: now,
   });
 
-  // Mint a short-lived enrollment token linked to this runtime.
-  // The node-agent container will use it to self-enroll and flip the runtime online.
+  // Mint an enrollment token linked to this runtime. The node-agent container
+  // uses it to self-enroll and flip the runtime online.
+  //
+  // No ttlMs override: a runtime-bound token gets the durable
+  // RUNTIME_TOKEN_TTL_MS default on purpose. On an ephemeral-disk substrate the
+  // container's config does not survive a restart, so it re-presents this same
+  // token on EVERY boot — an expiry would mean a runtime that silently loses
+  // the ability to come back after its first sleep. The token is revoked by
+  // destroying the runtime, not by waiting.
   let enrollToken: string;
   try {
     const result = await mintEnrollmentToken(userId, {
       provisionedRuntimeId: id,
-      ttlMs: 30 * 60 * 1000, // 30-minute window for the container to boot and enroll
     });
     enrollToken = result.token;
   } catch (err) {
