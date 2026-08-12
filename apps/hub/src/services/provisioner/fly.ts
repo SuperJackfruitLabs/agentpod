@@ -249,10 +249,150 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
     });
   }
 
+  /**
+   * Create a Fly app, a volume in it, and a machine mounting that volume.
+   *
+   * The order is not stylistic. A Fly volume is pinned to a physical host, so a
+   * machine created before its volume can be placed on a different host and
+   * fail to attach.
+   */
   async provision(
-    _spec: ProvisionSpec
+    spec: ProvisionSpec
   ): Promise<{ externalId: string; runtime?: string }> {
-    throw new Error("fly: provision() is not implemented yet");
+    const app = flyAppNameFor(this.appPrefix, spec.runtimeId);
+    const guest = FLY_TIERS[spec.resourceTier];
+    if (!guest) {
+      throw new Error(
+        `fly: cannot provision resource tier "${spec.resourceTier}"`
+      );
+    }
+
+    await this.ensureApp(app);
+
+    let machineId: string;
+    try {
+      const volumeId = await this.createVolume(app);
+      machineId = await this.createMachine(app, volumeId, guest, spec);
+    } catch (err) {
+      // provision() is about to throw, so the hub will never learn this app's
+      // name — nothing will ever come back to destroy it. An orphaned app with
+      // a volume in it bills monthly for a runtime the console never showed.
+      await this.deleteAppQuietly(app);
+      throw err;
+    }
+
+    return {
+      externalId: formatFlyExternalId(app, machineId),
+      runtime: "fly-machine",
+    };
+  }
+
+  /**
+   * Create the app, tolerating one that is already there.
+   *
+   * A retried provision — or a destroy that failed after the app was made —
+   * finds it existing. That is the state this method exists to produce, so it
+   * is not an error.
+   */
+  private async ensureApp(app: string): Promise<void> {
+    try {
+      await this.request("POST", "/v1/apps", {
+        app_name: app,
+        org_slug: this.orgSlug,
+        // Its own 6PN network. A shared network would put every customer's
+        // station on one private network, reachable by internal DNS.
+        network: app,
+      });
+    } catch (err) {
+      if (
+        err instanceof FlyApiError &&
+        (err.status === 409 || /already\s+(exists|been taken)/i.test(err.message))
+      ) {
+        return;
+      }
+      throw err;
+    }
+  }
+
+  private async createVolume(app: string): Promise<string> {
+    const { body } = await this.request("POST", `/v1/apps/${app}/volumes`, {
+      name: FLY_VOLUME_NAME,
+      region: this.region,
+      size_gb: this.volumeSizeGb,
+    });
+    const id = body.id;
+    if (typeof id !== "string" || !id) {
+      throw new Error(
+        `fly: unexpected response from POST /v1/apps/${app}/volumes (no volume id)`
+      );
+    }
+    return id;
+  }
+
+  private async createMachine(
+    app: string,
+    volumeId: string,
+    guest: { cpu_kind: string; cpus: number; memory_mb: number },
+    spec: ProvisionSpec
+  ): Promise<string> {
+    const { body } = await this.request("POST", `/v1/apps/${app}/machines`, {
+      name: app,
+      region: this.region,
+      config: {
+        // Honoured per machine — the input Cloudflare had to refuse.
+        image: spec.image,
+        guest,
+        env: {
+          AGENTPOD_HUB_URL: spec.hubUrl,
+          // NOTE: never logged from this module. Do not add a log statement
+          // that references spec.enrollToken.
+          AGENTPOD_ENROLL_TOKEN: spec.enrollToken,
+          // agentpod-node stores nodeId/nodeSecret under os.UserConfigDir(),
+          // i.e. under HOME, and opencode keeps its session state under
+          // $HOME/.local/share/opencode. On the rootfs both are wiped by every
+          // stop→start; on the volume neither is.
+          HOME: `${FLY_VOLUME_MOUNT}/home`,
+        },
+        mounts: [{ volume: volumeId, path: FLY_VOLUME_MOUNT }],
+        // The default, on-failure, leaves a machine `stopped` after a clean
+        // exit — a station that quietly never comes back.
+        restart: { policy: "always" },
+        metadata: {
+          agentpod_runtime_id: spec.runtimeId,
+          agentpod_managed: "true",
+        },
+        // DELIBERATELY NO `services`. Fly's autostop is Fly-Proxy-driven and
+        // only touches machines with inbound services configured. Measured
+        // 2026-08-12: 25 minutes idle with only outbound traffic, `started`
+        // throughout. Adding a services block here would recreate Cloudflare's
+        // failure exactly — a node-agent dials out and receives nothing, so a
+        // busy station reads as idle and gets reaped mid-session.
+        //
+        // And deliberately no `persist_rootfs`: Fly's own docs disclaim it for
+        // critical data. The volume above is the answer.
+      },
+    });
+
+    const id = body.id;
+    if (typeof id !== "string" || !id) {
+      throw new Error(
+        `fly: unexpected response from POST /v1/apps/${app}/machines (no machine id)`
+      );
+    }
+    return id;
+  }
+
+  /**
+   * Best effort cleanup of a half-built runtime. Never throws: the caller is
+   * already throwing the real failure, and replacing it with a cleanup error
+   * would hide why provisioning failed.
+   */
+  private async deleteAppQuietly(app: string): Promise<void> {
+    try {
+      await this.request("DELETE", `/v1/apps/${app}`);
+    } catch {
+      // Swallowed on purpose — see above.
+    }
   }
 
   async destroy(_externalId: string): Promise<void> {
