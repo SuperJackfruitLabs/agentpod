@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { handleSnapshot, snapshotKey, type SnapshotDeps } from "../src/snapshot";
+import { handleSnapshot, handleDestroy, snapshotKey, type SnapshotDeps } from "../src/snapshot";
 
 const TOKEN_A = "tok-sandbox-a-0000000000000000";
 const TOKEN_B = "tok-sandbox-b-1111111111111111";
@@ -93,6 +93,70 @@ describe("handleSnapshot — what a container token must NOT buy", () => {
     const { deps } = fakeDeps({ "snapshots/rt_a.tar.gz": "work" });
     const res = await handleSnapshot("rt_a", "DELETE", req(TOKEN_A, "DELETE"), deps);
     expect(res.status).toBe(405);
+  });
+});
+
+describe("handleDestroy — regression: the archive must not survive a destroy", () => {
+  /**
+   * Live failure, 2026-08-12: `DELETE /sandbox/:id` returned 200 and left the
+   * archive in R2. destroy() sends SIGTERM, the dying container archives on its
+   * way out, and that upload landed AFTER the delete — recreating the object
+   * that had just been removed. Every destroyed runtime leaked paid storage.
+   *
+   * The fix is ordering: revoke the token first, so a late upload is refused.
+   */
+  function destroyHarness() {
+    const order: string[] = [];
+    const objects = new Map<string, string>([["snapshots/rt_a.tar.gz", "work"]]);
+    let token: string | null = TOKEN_A;
+    const deps = {
+      revokeToken: async () => {
+        order.push("revoke");
+        token = null;
+      },
+      destroy: async () => {
+        order.push("destroy");
+      },
+      tokenFor: async () => token,
+      get: async (key: string) => (objects.has(key) ? { body: objects.get(key)! } : null),
+      put: async (key: string, body: unknown) => {
+        objects.set(key, await new Response(body as BodyInit).text());
+      },
+      delete: async (key: string) => {
+        order.push("delete");
+        objects.delete(key);
+      },
+    };
+    return { deps, order, objects };
+  }
+
+  it("revokes the token BEFORE destroying, then deletes", async () => {
+    const { deps, order } = destroyHarness();
+    await handleDestroy("rt_a", deps);
+    expect(order).toEqual(["revoke", "destroy", "delete"]);
+  });
+
+  it("REFUSES the dying container's final upload, so the delete is final", async () => {
+    // The actual failure, reproduced: destroy, then the container's last gasp
+    // arrives with the token it was given at create time.
+    const { deps, objects } = destroyHarness();
+    await handleDestroy("rt_a", deps);
+    expect(objects.has("snapshots/rt_a.tar.gz")).toBe(false);
+
+    const late = await handleSnapshot(
+      "rt_a",
+      "PUT",
+      new Request("https://w.example/sandbox/rt_a/snapshot", {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${TOKEN_A}` },
+        body: "last gasp",
+      }),
+      deps
+    );
+
+    expect(late.status).toBe(401);
+    // The whole point: the archive stays deleted.
+    expect(objects.has("snapshots/rt_a.tar.gz")).toBe(false);
   });
 });
 

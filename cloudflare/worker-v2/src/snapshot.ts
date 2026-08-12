@@ -34,6 +34,28 @@ export interface SnapshotDeps {
 const json = (body: unknown, status: number) =>
   Response.json(body as Record<string, unknown>, { status });
 
+/** What destroying a sandbox needs, beyond the archive storage itself. */
+export interface DestroyDeps extends SnapshotDeps {
+  revokeToken(): Promise<void>;
+  destroy(): Promise<void>;
+}
+
+/**
+ * Destroy a sandbox and its archive, in an order that actually holds.
+ *
+ * **Revoke first.** `destroy()` sends SIGTERM, and the dying container archives
+ * its workspace on the way out. Deleting the object before that upload lands
+ * loses the race and the archive comes back — observed live on 2026-08-12, when
+ * a destroy returned 200 and left the object in R2, leaking paid storage for a
+ * runtime nobody could ever reach again. With the token revoked the late upload
+ * is refused, so the delete below is final.
+ */
+export async function handleDestroy(id: string, deps: DestroyDeps): Promise<void> {
+  await deps.revokeToken();
+  await deps.destroy();
+  await deps.delete(snapshotKey(id));
+}
+
 /**
  * Handle GET (restore) and PUT (snapshot) for one sandbox's archive.
  *

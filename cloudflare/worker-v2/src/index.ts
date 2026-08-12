@@ -1,6 +1,6 @@
 import { Container, getContainer } from "@cloudflare/containers";
 import { isAuthorised } from "./auth";
-import { handleSnapshot, snapshotKey, type SnapshotDeps } from "./snapshot";
+import { handleSnapshot, handleDestroy, type SnapshotDeps } from "./snapshot";
 
 interface Env {
   // Typed with the container class so getContainer returns a stub carrying its
@@ -121,8 +121,10 @@ export class NodeAgentContainer extends Container {
    * is no connection — but the RUNTIME is `asleep`, not broken, and only this
    * worker knows the difference.
    *
-   * Safe because a woken container re-enrols and resumes the same nodeId
-   * (runtime identity persistence, #245). Before that, sleeping lost the station.
+   * Safe only because BOTH halves hold: a woken container resumes the same
+   * nodeId (#245) *and* restores its workspace from R2 (snapshot-wrapper.sh).
+   * Identity alone was not enough — with it, a woken station came back looking
+   * like itself with an empty workspace, which is worse than an obvious failure.
    */
   override async onActivityExpired() {
     console.log("[agentpod] idle — sleeping");
@@ -255,15 +257,18 @@ export default {
     }
 
     if (request.method === "DELETE" && !parts[2]) {
-      // Revoke FIRST: destroy sends SIGTERM, and the dying container archives on
-      // its way out. Deleting the object before that upload lands leaves the
-      // archive behind — observed live on 2026-08-12. With the token revoked the
-      // late upload is refused, so the delete below is final.
-      await container.revokeSnapshotToken();
-      await container.destroy();
-      // Delete the archive too, or a destroyed runtime keeps billing for R2
-      // storage nobody can ever reach again.
-      await env.SNAPSHOTS.delete(snapshotKey(id));
+      // Ordering lives in handleDestroy, which is where its regression test can
+      // reach it — see the 2026-08-12 live failure recorded there.
+      await handleDestroy(id, {
+        revokeToken: () => container.revokeSnapshotToken(),
+        destroy: () => container.destroy(),
+        tokenFor: () => container.storedSnapshotToken(),
+        get: (key) => env.SNAPSHOTS.get(key),
+        put: async (key, body) => {
+          await env.SNAPSHOTS.put(key, body as ReadableStream);
+        },
+        delete: (key) => env.SNAPSHOTS.delete(key),
+      });
       return json({ destroyed: id });
     }
 
