@@ -38,6 +38,24 @@ const testApp = new Hono().route("/public/nodes", nodeEnrollRoutes);
 
 const TEST_USER_ID = "test-user-enrollment-001";
 
+const HOST_INFO = { hostname: "identity-test", os: "linux", arch: "amd64", cpuCount: 2 };
+
+/**
+ * Insert a provisioned_runtimes row and return its id.
+ *
+ * Written directly rather than through createRuntime() so these tests need no
+ * provisioner registration — the identity behaviour under test is independent
+ * of which driver created the runtime.
+ */
+async function seedRuntime(userId: string): Promise<string> {
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes (id, user_id, provider, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${userId}, 'docker', 'provisioning', 'identity-test', 'small', 'none', now(), now())
+  `;
+  return id;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Setup & Teardown
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,6 +73,8 @@ beforeAll(async () => {
 afterAll(async () => {
   // Clean up in FK order: nodes → enrollment_tokens → user
   try {
+    await rawSql`DELETE FROM stations             WHERE user_id = ${TEST_USER_ID}`;
+    await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM nodes           WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER_ID}`;
     await rawSql`DELETE FROM "user"           WHERE id      = ${TEST_USER_ID}`;
@@ -170,5 +190,34 @@ describe("Enrollment service", () => {
     expect(bad.status).toBe(401);
     const missing = await testApp.request("/public/nodes/credential-check");
     expect(missing.status).toBe(401);
+  });
+
+  // ─── runtime-bound token lifetime ──────────────────────────────────────────
+
+  test("a runtime-bound token is minted durable, an unbound one is not", async () => {
+    // A runtime-bound token has to survive as long as its runtime — it is
+    // re-presented on every container restart, which may be months later. An
+    // unbound token is pasted into a shell by a human within the hour.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+
+    const bound = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+    });
+    const unbound = await mintEnrollmentToken(TEST_USER_ID);
+
+    const oneDay = 24 * 60 * 60 * 1000;
+    expect(bound.expiresAt.getTime() - Date.now()).toBeGreaterThan(oneDay);
+    expect(unbound.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(60 * 60 * 1000 + 5_000);
+  });
+
+  test("an explicit ttlMs still wins for a runtime-bound token", async () => {
+    // The durable default must not take away a caller's ability to say
+    // otherwise — tests and future callers may want a short-lived bound token.
+    const runtimeId = await seedRuntime(TEST_USER_ID);
+    const t = await mintEnrollmentToken(TEST_USER_ID, {
+      provisionedRuntimeId: runtimeId,
+      ttlMs: 60_000,
+    });
+    expect(t.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(65_000);
   });
 });

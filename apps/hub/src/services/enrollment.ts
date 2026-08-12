@@ -22,12 +22,25 @@ const sha256 = async (s: string): Promise<string> =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Mint a one-time enrollment token for a user.
+ * Lifetime for a runtime-bound token: ten years, i.e. "as long as the runtime".
+ *
+ * A runtime-bound token is re-presented on every container restart, which on an
+ * ephemeral-disk substrate is routine and may happen long after provisioning.
+ * An expiry here would mean a runtime that silently stops being able to come
+ * back — the exact failure this work exists to remove.
+ *
+ * It is revoked by destroying the runtime, not by waiting.
+ */
+export const RUNTIME_TOKEN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Mint an enrollment token for a user.
  * The raw token is returned once; only its SHA-256 hash is persisted.
  *
  * @param userId - The user to mint the token for.
  * @param opts   - Optional settings:
- *   - ttlMs              — token lifetime in ms (default: 1 hour)
+ *   - ttlMs              — token lifetime in ms. Defaults to 1 hour, or
+ *                          RUNTIME_TOKEN_TTL_MS when provisionedRuntimeId is set.
  *   - provisionedRuntimeId — when set, the token is linked to that runtime so
  *                            enrollNode can flip it online automatically.
  */
@@ -35,7 +48,8 @@ export async function mintEnrollmentToken(
   userId: string,
   opts?: { ttlMs?: number; provisionedRuntimeId?: string }
 ): Promise<{ token: string; expiresAt: Date }> {
-  const ttlMs = opts?.ttlMs ?? 60 * 60 * 1000;
+  const ttlMs =
+    opts?.ttlMs ?? (opts?.provisionedRuntimeId ? RUNTIME_TOKEN_TTL_MS : 60 * 60 * 1000);
   const token =
     prefixedId("enr") + crypto.randomUUID().replace(/-/g, "");
   const expiresAt = new Date(Date.now() + ttlMs);
