@@ -32,6 +32,7 @@ import { Hono } from "hono";
 import { rawSql } from "../db/drizzle";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { gatewayRoutes } from "../routes/gateway";
 import { websocket } from "../ws";
@@ -240,8 +241,9 @@ async function connectFakeNode(
     }
   };
 
-  // Allow onOpen → connectionManager.register to settle
-  await new Promise((r) => setTimeout(r, 150));
+  // onOpen → verifyNodeCredential (argon2id) → register outlasts any fixed
+  // sleep under load; wait for the registration itself.
+  await waitForNodeOnline(nodeId);
   return ws;
 }
 
