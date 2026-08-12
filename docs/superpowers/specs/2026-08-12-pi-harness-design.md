@@ -23,9 +23,22 @@ this section exists — see *Detection-path discipline* below.
   models-store.json   -rw-------   cached model catalogs
   settings.json       -rw-r--r--
   bin/rg                           pi-managed ripgrep
-  sessions/--Users-rakeshgangwar-Projects-research--/
-      2026-08-12T08-10-23-796Z_<uuid>.jsonl
+  sessions/
+    --Users-rakeshgangwar-Projects-research--/   2026-08-12T08-10-23-796Z_<uuid>.jsonl
+    --Users-rakeshgangwar-Projects-idea-bank--/  <ts>_<uuid>.jsonl
+    --private-tmp--/                             (no .jsonl at all)
 ```
+
+Two of those three directories settle design decisions on their own:
+
+- **`--Users-rakeshgangwar-Projects-idea-bank--`** decodes naively to
+  `/Users/rakeshgangwar/Projects/idea/bank`, which does not exist. Its header says
+  `/Users/rakeshgangwar/Projects/idea-bank`. A decode-the-directory-name strategy would have
+  filtered this station out **silently** — a real project, invisible. This is the hyphen
+  ambiguity `opencode.go` documents, observed live on the second project that existed.
+- **`--private-tmp--`** was created by a `pi --mode rpc` probe that never wrote a session, so the
+  directory exists with no `.jsonl` inside. It also shows Pi stores the **resolved** path
+  (`/tmp` → `/private/tmp`), which is why detection dedupes through `filepath.EvalSymlinks`.
 
 Findings that shape the design:
 
@@ -156,14 +169,31 @@ profile directories with their own secrets.
 
 `HarnessProcessNames` gains nothing unless Pi is observed binding a port. It is stdio-only.
 
-## Container image
+## Container image — base + per-harness layers
 
-A standalone `Dockerfile.pi`, **not** a base-image refactor.
+**The refactor lands with Pi, not after it.** An earlier draft deferred it; that was wrong, and
+the reason is simple arithmetic: deferring does not avoid the refactor, it makes it touch three
+harness images instead of the two that exist today. The cheapest moment to do it is always now.
 
-The refactor (a shared `agentpod-node:base` with thin per-harness layers) is the right end state
-and is deliberately deferred: it touches the working OpenCode image and the Cloudflare path on
-the same day Pi lands, and Pi does not need it. Its trigger is the fourth harness image, or the
-first time a change has to be made in three Dockerfiles at once.
+```
+Dockerfile.base   → agentpod-node:base   verified agentpod-node binary + shared entrypoint
+Dockerfile        → FROM base            generic, no harness
+Dockerfile.opencode → FROM base          + bun, opencode-ai@1.18.15, supervision entrypoint
+Dockerfile.pi     → FROM base            + node 24, pi@0.84.1, pi-acp@0.0.33
+```
+
+Rejected alternatives, recorded so they are not re-proposed:
+
+- **One Dockerfile with `ARG HARNESS`** — fewer files, but every harness's install logic lands in
+  one script and they start interfering.
+- **Installing the harness at container start from env** — needs network at boot, makes start
+  time depend on npm, and makes the running image non-deterministic. That is the opposite of what
+  the SHA256-verified binary buys us.
+
+The refactor touches the working OpenCode image and, through it, the Cloudflare path. It
+therefore gets its own task and its own verification: **the OpenCode image must be rebuilt from
+the new base and a station provisioned from it before Pi's layer is written.** Pi must not be the
+thing that discovers a regression in OpenCode's image.
 
 Pi's image is the boring one, because **Pi needs no supervision loop**. All the entrypoint
 complexity in `node-opencode-entrypoint.sh` — the double-fork, the stop sentinel,
@@ -233,14 +263,14 @@ The live row is the acceptance criterion. Everything above it is scaffolding.
 Every external path in this design carries a dated observation, and the `models.json` /
 `trust.json` finding above is what that rule catches when followed.
 
-**Open gap, stated rather than hidden:** the only Pi installation available today is one machine
-with one project. A single-station fixture cannot exercise multi-station detection, and macOS
-cannot confirm Linux process naming. Both must be verified on a Linux host running Pi before this
-is called done.
+**Open gap, stated rather than hidden:** the Pi installation available today is a Mac with two
+real projects — enough to exercise multi-station detection, and it already produced the
+hyphen-path and empty-session-dir cases above. What it cannot show is **Linux process naming**:
+`comm` is `node` here, and the Linux binary may differ. That must be verified on a Linux host
+running Pi before this is called done.
 
 ## Out of scope
 
-- The base-image refactor (trigger: fourth harness image).
 - A Pi Cloudflare worker deployment.
 - A multi-harness image.
 - Pi's experimental `@earendil-works/pi-server` (Unix-socket CBOR, published 6 days ago, marked
