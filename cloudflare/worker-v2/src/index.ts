@@ -26,6 +26,38 @@ export class NodeAgentContainer extends Container {
     console.log("[agentpod] container started", new Date().toISOString());
   }
 
+  /**
+   * Start with the environment this sandbox was created with, persisting it so
+   * a later wake can reuse it.
+   *
+   * The env MUST be stored, not merely passed to start(): a container's
+   * environment does not survive a stop, and a woken container with no
+   * AGENTPOD_HUB_URL or AGENTPOD_ENROLL_TOKEN fails `agentpod-node enroll`,
+   * exits under `set -e`, and is restarted forever. That produced 7 live
+   * instances in a silent restart loop the first time this was deployed.
+   */
+  async createWithEnv(envVars: Record<string, string>): Promise<void> {
+    await this.ctx.storage.put("envVars", envVars);
+    this.envVars = envVars;
+    await this.start();
+  }
+
+  /**
+   * Wake: start again with the stored environment.
+   *
+   * Throws when there is none rather than starting a container that cannot
+   * enrol — a restart loop is far worse than a failed request, because it is
+   * silent and it bills.
+   */
+  async wake(): Promise<void> {
+    const envVars = await this.ctx.storage.get<Record<string, string>>("envVars");
+    if (!envVars) {
+      throw new Error("no stored environment for this sandbox; create it first");
+    }
+    this.envVars = envVars;
+    await this.start();
+  }
+
   override onStop({ exitCode, reason }: { exitCode: number; reason: string }) {
     console.log("[agentpod] container stopped", { exitCode, reason });
   }
@@ -124,14 +156,12 @@ export default {
       const c = getContainer(env.NODE_AGENT, body.id);
       // The token is passed through but never logged, here or anywhere in this
       // worker. Do not add log statements that reference body.enrollToken.
-      await c.start({
-        envVars: {
-          AGENTPOD_HUB_URL: body.hubUrl,
-          AGENTPOD_ENROLL_TOKEN: body.enrollToken,
-          // Read by the container class's notifyHub, not by agentpod-node.
-          AGENTPOD_RUNTIME_ID: body.id,
-          AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
-        },
+      await c.createWithEnv({
+        AGENTPOD_HUB_URL: body.hubUrl,
+        AGENTPOD_ENROLL_TOKEN: body.enrollToken,
+        // Read by the container class's notifyHub, not by agentpod-node.
+        AGENTPOD_RUNTIME_ID: body.id,
+        AGENTPOD_RUNTIME_CALLBACK_TOKEN: body.callbackToken,
       });
       return json({ sandboxId: body.id }, 201);
     }
@@ -150,10 +180,15 @@ export default {
       return json({ destroyed: id });
     }
 
-    // Also the wake path: to this worker a wake IS a start, and the spike
-    // confirmed stop → start restarts a container reliably.
+    // The wake path. Uses the STORED environment — a bare start() would boot a
+    // container with no hub URL or enrolment token, which cannot enrol and gets
+    // restarted forever.
     if (request.method === "POST" && parts[2] === "start") {
-      await container.start();
+      try {
+        await container.wake();
+      } catch (e) {
+        return json({ error: e instanceof Error ? e.message : String(e) }, 409);
+      }
       return json({ started: id });
     }
 
