@@ -100,6 +100,19 @@ describe("DockerRuntimeProvisioner", () => {
     expect(p.provider).toBe("docker");
   });
 
+  it("declares a manifest describing what it can actually do", () => {
+    const m = new DockerRuntimeProvisioner().manifest;
+    // Docker is the only substrate whose disk survives a stop — the spec's table
+    // shows the other three do not, which is why this is declared, not assumed.
+    expect(m.workspaceStorage).toBe("rootfs");
+    expect(m.stopSemantics).toBe("resumable");
+    expect(m.maxLifetimeMs).toBeNull();
+    expect(m.imageBinding).toBe("per-instance");
+    expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
+    expect(m.idleBehaviour).toBe("never");
+    expect(m.lifecycle).toEqual(expect.arrayContaining(["start", "stop", "status"]));
+  });
+
   describe("provision", () => {
     it("calls createSandbox exactly once", async () => {
       const fake = new FakeDockerOrchestrator();

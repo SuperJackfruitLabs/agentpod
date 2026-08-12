@@ -9,7 +9,12 @@
  * never logged by this module.
  */
 
-import type { RuntimeProvisioner, ProvisionSpec, RuntimeState } from "./types";
+import type {
+  RuntimeProvisioner,
+  ProvisionSpec,
+  RuntimeState,
+  DriverManifest,
+} from "./types";
 import { DockerOrchestrator } from "./docker-orchestrator";
 import type { ResourceLimits, Sandbox } from "./docker-orchestrator";
 
@@ -35,6 +40,40 @@ const RUNTIME_RESOURCE_TIERS: Record<
 
 export class DockerRuntimeProvisioner implements RuntimeProvisioner {
   readonly provider = "docker" as const;
+
+  /**
+   * What this driver already does — not what it might grow into.
+   *
+   * Docker is the outlier the rest of the interface was accidentally designed
+   * around: it is the only surveyed substrate whose workspace survives a
+   * stop→start on the container filesystem, which is exactly why every other
+   * driver's differences went unnoticed until production.
+   */
+  readonly manifest: DriverManifest = {
+    provider: "docker",
+    // The container filesystem itself. No archive, no volume — the rootfs is
+    // still there after stopSandbox, which is the assumption the interface
+    // silently inherited and Cloudflare then violated.
+    workspaceStorage: "rootfs",
+    // stopSandbox pauses the container; startSandbox brings the same container
+    // back with the same id and the same disk.
+    stopSemantics: "resumable",
+    // The daemon reaps nothing on a clock. A container runs until told not to.
+    maxLifetimeMs: null,
+    // spec.image goes straight into createSandbox — the driver is deliberately
+    // image-agnostic and never reads NODE_AGENT_IMAGE itself.
+    imageBinding: "per-instance",
+    // All three map to real cpu/memory/pids limits in RUNTIME_RESOURCE_TIERS
+    // above; none is refused.
+    supportedTiers: ["small", "medium", "large"],
+    // Nothing sleeps an idle container. Docker has no notion of inbound
+    // activity to key idleness on, so the trap that ruled out Fly Sprites and
+    // bit Cloudflare cannot arise here.
+    idleBehaviour: "never",
+    // All three are implemented below, status included — which is why a Docker
+    // runtime can be written `stopped` on evidence rather than assumption.
+    lifecycle: ["start", "stop", "status"],
+  };
 
   /**
    * @param orchestrator Injected for testing; defaults to a real DockerOrchestrator
