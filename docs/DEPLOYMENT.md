@@ -80,6 +80,12 @@ docker build \
   -t agentpod-node-opencode:local \
   -f apps/node-agent/deploy/Dockerfile.opencode \
   apps/node-agent
+
+# Pi harness image (Node 24 + @earendil-works/pi-coding-agent@0.84.1 + pi-acp@0.0.33)
+docker build \
+  -t agentpod-node-pi:local \
+  -f apps/node-agent/deploy/Dockerfile.pi \
+  apps/node-agent
 ```
 
 Verify: `docker images | grep agentpod-node`
