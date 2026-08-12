@@ -79,11 +79,33 @@ export const provisionRuntime = (req: {
 
 export const listRuntimes = () => http<ProvisionedRuntime[]>("/api/runtimes");
 
+/**
+ * What a provisioner driver declares about its substrate, as reported by the
+ * hub's driver registry.
+ *
+ * Structurally mirrors the hub's `DriverManifest` without importing it — the
+ * console shares only the contract package with the hub. Only the fields the
+ * console renders from are required; the rest are declared optional so the hub
+ * can add a field (or a whole new driver) without a console edit, which is the
+ * point of the registry.
+ */
+export type DriverManifest = {
+  provider: string;
+  /** Tiers this driver can actually satisfy — the dialog builds its tier list from this. */
+  supportedTiers: string[];
+  workspaceStorage?: "rootfs" | "volume" | "external-archive";
+  stopSemantics?: "resumable" | "terminal";
+  maxLifetimeMs?: number | null;
+  imageBinding?: "per-instance" | "fixed";
+  idleBehaviour?: "never" | "platform-inbound" | "hub-driven";
+  lifecycle?: Array<"start" | "stop" | "status">;
+};
+
 export const listRuntimeProviders = () =>
   http<{
     providers: string[];
-    /** Tiers each provider can satisfy — the dialog builds its form from this. */
-    capabilities?: Array<{ provider: string; tiers: string[] }>;
+    /** One manifest per enabled provider — the dialog builds its form from these. */
+    manifests?: DriverManifest[];
   }>("/api/runtimes/providers");
 
 export const destroyRuntime = (id: string) =>

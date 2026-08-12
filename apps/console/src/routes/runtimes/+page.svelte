@@ -6,6 +6,7 @@
     startRuntime,
     stopRuntime,
     listRuntimeProviders,
+    type DriverManifest,
   } from "$lib/api/client";
   import type { ProvisionedRuntime } from "@agentpod/contract";
   import type { ColumnDef } from "@tanstack/table-core";
@@ -26,7 +27,7 @@
   // ── State ───────────────────────────────────────────────────────────────────
   let runtimes = $state<ProvisionedRuntime[]>([]);
   let providers = $state<string[]>(["docker", "cloudflare"]);
-  let capabilities = $state<Array<{ provider: string; tiers: string[] }>>([]);
+  let manifests = $state<DriverManifest[]>([]);
   let isLoading = $state(true);
   let error = $state<string | null>(null);
   let showNewRuntimeDialog = $state(false);
@@ -57,7 +58,7 @@
     try {
       const res = await listRuntimeProviders();
       if (res.providers.length > 0) providers = res.providers;
-      if (res.capabilities) capabilities = res.capabilities;
+      if (res.manifests) manifests = res.manifests;
     } catch {
       // keep ["docker", "cloudflare"]
     }
@@ -357,7 +358,7 @@
 <NewRuntimeDialog
   open={showNewRuntimeDialog}
   {providers}
-  {capabilities}
+  {manifests}
   onClose={() => (showNewRuntimeDialog = false)}
   onCreated={handleRuntimeCreated}
 />
