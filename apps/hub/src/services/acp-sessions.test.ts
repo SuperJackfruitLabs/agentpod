@@ -49,6 +49,7 @@ import { db, rawSql } from "../db/drizzle";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { waitForNodeUnregistered } from "../../tests/helpers/wait";
 import {
   connectFakeAcpNode,
   parsedNodeMsgs,
@@ -1041,8 +1042,11 @@ test(
       });
 
       // Reconnect: no second acp.close for the already-cleared orphan.
+      // The old socket must be OUT of the connection manager first, or the
+      // reconnect's own "is it online yet" barrier is satisfied by the corpse
+      // of this one and fake2 gets asserted against before it has registered.
       fake.close();
-      await new Promise((r) => setTimeout(r, 200));
+      await waitForNodeUnregistered(nodeId);
       const fake2 = await connectFakeAcpNode(server.port!, nodeId, nodeSecret, {
         stationKey: "acp-orphan-station",
       });

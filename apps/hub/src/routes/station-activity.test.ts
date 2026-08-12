@@ -23,6 +23,10 @@ import { db, rawSql } from "../db/drizzle";
 import { stationAudit } from "../db/schema/audit";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import {
+  waitForNodeOnline,
+  waitForNodeUnregistered,
+} from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { gatewayRoutes } from "./gateway";
 import { stationRoutes } from "./stations";
@@ -103,6 +107,12 @@ afterAll(async () => {
 
 /** Start a minimal Bun server with a fake node gateway, adopt the station. */
 async function setupServer() {
+  // Every test in this file reconnects the SAME node id. The previous test's
+  // socket must be out of the connection manager before this one dials, or the
+  // "is it online yet" barrier below is satisfied by the dying connection and
+  // its teardown can unregister the node out from under this test.
+  await waitForNodeUnregistered(nodeId);
+
   const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
 
   const baseUrl = `http://localhost:${server.port}`;
@@ -144,8 +154,9 @@ async function setupServer() {
     }
   };
 
-  // Allow node WS to register
-  await new Promise((r) => setTimeout(r, 150));
+  // onOpen → verifyNodeCredential (argon2id) → register outlasts any fixed
+  // sleep under load; wait for the registration itself.
+  await waitForNodeOnline(nodeId);
 
   // Adopt the station via the API
   const adoptRes = await fetch(`${baseUrl}/api/nodes/${nodeId}/stations/adopt`, {

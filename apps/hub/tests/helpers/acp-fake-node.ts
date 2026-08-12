@@ -31,6 +31,12 @@
  * prompts (e.g. to flip the toolCall kind for accept-edits coverage).
  */
 
+import { pollUntil, waitForNodeOnline } from "./wait";
+
+// `pollUntil` used to live here; it now has a home alongside the other
+// deterministic waits. Re-exported so existing importers keep working.
+export { pollUntil };
+
 const encoder = new TextEncoder();
 
 const b64encode = (s: string) => Buffer.from(encoder.encode(s)).toString("base64");
@@ -120,21 +126,6 @@ export function parsedNodeMsgs(raw: string[]): Record<string, unknown>[] {
       }
     })
     .filter((m): m is Record<string, unknown> => m !== null);
-}
-
-/** Poll condition() every pollMs until truthy, or throw after timeoutMs. Supports async conditions. */
-export async function pollUntil<T>(
-  condition: () => T | undefined | null | false | Promise<T | undefined | null | false>,
-  timeoutMs = 5000,
-  pollMs = 30
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const result = await condition();
-    if (result) return result as T;
-    await new Promise((r) => setTimeout(r, pollMs));
-  }
-  throw new Error(`pollUntil timed out after ${timeoutMs} ms`);
 }
 
 export async function connectFakeAcpNode(
@@ -509,8 +500,10 @@ export async function connectFakeAcpNode(
     }
   };
 
-  // Allow onOpen → connectionManager.register to settle.
-  await new Promise((r) => setTimeout(r, 150));
+  // onOpen → verifyNodeCredential (argon2id) → connectionManager.register is
+  // slower than any fixed sleep is safe against under full-suite load; wait for
+  // the registration itself.
+  await waitForNodeOnline(nodeId);
 
   return {
     ws,
