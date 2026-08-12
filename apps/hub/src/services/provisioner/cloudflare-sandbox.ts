@@ -15,7 +15,12 @@
  * by this module. Do not add log statements that reference spec.enrollToken.
  */
 
-import type { RuntimeProvisioner, ProvisionSpec, ResourceTier } from "./types";
+import type {
+  RuntimeProvisioner,
+  ProvisionSpec,
+  ResourceTier,
+  RuntimeState,
+} from "./types";
 
 export interface CloudflareSandboxOptions {
   workerUrl?: string;
@@ -164,6 +169,27 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
 
   async stop(externalId: string): Promise<void> {
     await this.call(`/sandbox/${externalId}/stop`, { method: "POST" });
+  }
+
+  /**
+   * Ask the worker whether this sandbox's container is actually running.
+   *
+   * The evidence behind a `stopped` runtime on this substrate. Cloudflare's
+   * stop() returns as soon as the container is signalled — the exit lands
+   * later, after the container has archived its workspace on SIGTERM — so this
+   * is what eventually confirms the stop, via the hub's sweeper.
+   *
+   * **Requires a worker deployed with the state-reporting GET /sandbox/:id.**
+   * An older deployment answers `{sandboxId}` with no `state`, and that reads
+   * as `unknown` — never as `stopped`. Treating a missing field as "it stopped"
+   * would recreate the very bug this exists to fix, on nothing more than an
+   * un-redeployed worker. Unknown is safe: the hub keeps asking and, if the
+   * answer never comes, says the stop was not confirmed instead of pretending.
+   */
+  async status(externalId: string): Promise<RuntimeState> {
+    const body = await this.call(`/sandbox/${externalId}`, { method: "GET" });
+    const state = body.state;
+    return state === "running" || state === "stopped" ? state : "unknown";
   }
 
   /**

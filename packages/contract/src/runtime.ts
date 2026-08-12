@@ -10,11 +10,18 @@ export type RuntimeProvider = z.infer<typeof RuntimeProvider>;
  * out into `error` with a reason, so "started but never came back" — the most
  * common way a provisioned runtime fails — is a state the console can show.
  *
+ * `stopping` — the substrate accepted a stop request and has not yet confirmed
+ * the container is down. The mirror image of `starting`, and it exists for the
+ * same reason: `stopped` is what an operator reads as "it has stopped costing
+ * me money", so it may only be written on the substrate's own evidence. A stop
+ * that is never confirmed times out into `error` with a reason, because the
+ * absence of a node proves nothing — nodes go offline while containers bill on.
+ *
  * `asleep` — the substrate idled the runtime out and stopped billing it. Its
  * node is legitimately offline; the runtime is healthy and can be woken.
  * Distinct from `stopped`, which means an operator stopped it deliberately.
  */
-export const RuntimeStatus = z.enum(["provisioning", "starting", "online", "stopped", "asleep", "error", "destroyed"]);
+export const RuntimeStatus = z.enum(["provisioning", "starting", "online", "stopping", "stopped", "asleep", "error", "destroyed"]);
 export type RuntimeStatus = z.infer<typeof RuntimeStatus>;
 
 export const ResourceTier = z.enum(["small", "medium", "large"]);

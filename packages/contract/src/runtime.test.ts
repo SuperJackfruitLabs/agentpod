@@ -106,6 +106,20 @@ describe("RuntimeStatus starting", () => {
   });
 });
 
+describe("RuntimeStatus stopping", () => {
+  it("accepts stopping", () => {
+    // "the substrate accepted a stop request" is not "the container is down".
+    // Without its own value the hub had to claim stopped on no evidence, and an
+    // operator reads stopped as "billing has ended".
+    expect(RuntimeStatus.parse("stopping")).toBe("stopping");
+  });
+
+  it("keeps stopped distinct", () => {
+    // stopped is now a claim the substrate itself has confirmed.
+    expect(RuntimeStatus.parse("stopped")).toBe("stopped");
+  });
+});
+
 describe("ProvisionedRuntime.statusReason", () => {
   const BASE = {
     id: "rt_1", ownerId: "u_1", provider: "docker" as const, externalId: "abc",

@@ -232,6 +232,13 @@
       "when": 1786532106455,
       "tag": "0032_runtime_starting_status",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786534120547,
+      "tag": "0033_runtime_stopping_status",
+      "breakpoints": true
     }
   ]
 }

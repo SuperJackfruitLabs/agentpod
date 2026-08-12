@@ -141,6 +141,32 @@ describe("CloudflareSandboxProvisioner", () => {
     expect(res.externalId).toBe("rt_abc");
   });
 
+  // ── status(): the only evidence the hub has for writing "stopped" ──────────
+
+  it("reports the container state the worker gives it", async () => {
+    const { impl, calls } = fakeFetch({ sandboxId: "rt_abc", state: "stopped" }, 200);
+    expect(await make(impl).status!("rt_abc")).toBe("stopped");
+    expect(calls[0]!.url).toBe("https://w.example/sandbox/rt_abc");
+  });
+
+  it("reports running while the container is still up", async () => {
+    const { impl } = fakeFetch({ sandboxId: "rt_abc", state: "running" }, 200);
+    expect(await make(impl).status!("rt_abc")).toBe("running");
+  });
+
+  it("says unknown against a worker that does not report state yet", async () => {
+    // The pre-deploy shape: GET /sandbox/:id answered {sandboxId} and nothing
+    // else. Reading a missing field as "stopped" would recreate the exact bug
+    // this exists to fix, on a worker that had simply not been redeployed.
+    const { impl } = fakeFetch({ sandboxId: "rt_abc" }, 200);
+    expect(await make(impl).status!("rt_abc")).toBe("unknown");
+  });
+
+  it("says unknown for a state it does not recognise", async () => {
+    const { impl } = fakeFetch({ sandboxId: "rt_abc", state: "sleeping-ish" }, 200);
+    expect(await make(impl).status!("rt_abc")).toBe("unknown");
+  });
+
   it("fails clearly when the worker url is not configured", async () => {
     const p = new CloudflareSandboxProvisioner({ workerUrl: "", apiToken: "tok" });
     await expect(p.provision(SPEC)).rejects.toThrow(/CLOUDFLARE_WORKER_URL/);

@@ -21,7 +21,7 @@ export const nodes = pgTable("nodes", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [index("nodes_user_id_idx").on(t.userId)]);
 
-export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "starting", "online", "stopped", "asleep", "error", "destroyed"]);
+export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "starting", "online", "stopping", "stopped", "asleep", "error", "destroyed"]);
 
 export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   id: text("id").primaryKey(),

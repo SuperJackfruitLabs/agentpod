@@ -288,6 +288,68 @@ describe("DockerRuntimeProvisioner runtime selection", () => {
   });
 });
 
+describe("DockerRuntimeProvisioner.status", () => {
+  /** Fake that answers inspectSandbox with whatever the test wants. */
+  class InspectingFake extends FakeDockerOrchestrator {
+    statusToReport: Sandbox["status"] = "running";
+    inspectError: Error | null = null;
+
+    async inspectSandbox(id: string): Promise<Sandbox> {
+      this.calls.push({ method: "inspectSandbox", args: [id] });
+      if (this.inspectError) throw this.inspectError;
+      return {
+        id,
+        containerId: FAKE_CONTAINER_ID,
+        name: id,
+        status: this.statusToReport,
+        urls: {},
+        createdAt: new Date(),
+        image: "img",
+      };
+    }
+  }
+
+  const answerFor = async (status: Sandbox["status"]) => {
+    const fake = new InspectingFake();
+    fake.statusToReport = status;
+    return makeProvisioner(fake).status!("rt_1");
+  };
+
+  it("reports a live container as running", async () => {
+    expect(await answerFor("running")).toBe("running");
+  });
+
+  it("counts paused and restarting as running — both still hold the resources", async () => {
+    // Neither is "stopped": a paused container still owns its memory, and a
+    // restarting one is on its way back up. Calling either stopped would tell
+    // the operator the meter had stopped when it had not.
+    expect(await answerFor("paused")).toBe("running");
+    expect(await answerFor("restarting")).toBe("running");
+  });
+
+  it("reports an exited or dead container as stopped", async () => {
+    expect(await answerFor("exited")).toBe("stopped");
+    expect(await answerFor("dead")).toBe("stopped");
+    expect(await answerFor("stopped")).toBe("stopped");
+  });
+
+  it("reports a container gone from the daemon as stopped", async () => {
+    // The daemon answered and there is no such container: it cannot be running
+    // and it cannot be billing. That IS evidence, unlike silence.
+    const fake = new InspectingFake();
+    fake.inspectError = new Error("Sandbox not found: rt_1");
+    expect(await makeProvisioner(fake).status!("rt_1")).toBe("stopped");
+  });
+
+  it("refuses to answer when the daemon itself cannot be reached", async () => {
+    // No answer is not an answer. The service layer degrades this to "unknown"
+    // rather than letting it read as confirmation.
+    const fake = new InspectingFake();
+    fake.inspectError = new Error("connect ENOENT /var/run/docker.sock");
+    await expect(makeProvisioner(fake).status!("rt_1")).rejects.toThrow(/ENOENT/);
+  });
+});
+
 describe("DockerRuntimeProvisioner network selection", () => {
   const ORIGINAL = process.env.DOCKER_NETWORK;
   afterEach(() => {

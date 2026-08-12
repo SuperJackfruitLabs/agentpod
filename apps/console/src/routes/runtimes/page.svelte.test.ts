@@ -400,6 +400,73 @@ test("a healthy runtime shows no reason line", async () => {
   expect(queryByTestId("status-reason")).toBeNull();
 });
 
+// ---------------------------------------------------------------------------
+// Stopping + whether a stop was actually confirmed (sibling of #254)
+// ---------------------------------------------------------------------------
+
+test("a stopping runtime reads as stopping, not stopped", async () => {
+  // `stopped` is what an operator reads as "this has stopped costing me
+  // money". Until the substrate confirms the container is down, the console
+  // must not say it — and an unmapped status would render as bare text.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-stopping", name: "winding-down", status: "stopping" as never },
+  ]);
+
+  const { getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("stopping"));
+  // Styled as in-flight, like `starting` — the same "ask sent, not yet true".
+  expect(getByTestId("status-badge").className).toContain("status-starting");
+});
+
+test("a stopping runtime offers no Start or Stop, but can still be destroyed", async () => {
+  // Stopping it again is meaningless and starting it mid-stop is a race.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-stopping", name: "winding-down", status: "stopping" as never },
+  ]);
+
+  const { queryByTestId, getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("destroy-btn")).toBeTruthy());
+  expect(queryByTestId("start-btn")).toBeNull();
+  expect(queryByTestId("stop-btn")).toBeNull();
+});
+
+test("a stop that was never confirmed says so instead of showing a clean stopped", async () => {
+  // The whole point: an operator who stops a runtime and sees a bare `stopped`
+  // walks away believing the meter stopped. This one is told it did not.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    {
+      ...mockRuntimes[0]!,
+      id: "rt-unconfirmed",
+      name: "maybe-still-billing",
+      status: "error" as const,
+      statusReason:
+        "the stop was not confirmed within 5m: the cloudflare substrate still reports it running — it may still be billing",
+    },
+  ]);
+
+  const { container } = render(RuntimesPage);
+  await waitFor(() => expect(container.textContent).toMatch(/stop was not confirmed/));
+  expect(container.textContent).toMatch(/still be billing/);
+});
+
+test("a stop nobody could verify is stopped, with the caveat attached", async () => {
+  // A driver that cannot report container state gets `stopped` — stranding it
+  // in `stopping` forever would be its own lie — but never a silent one.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    {
+      ...mockRuntimes[0]!,
+      id: "rt-unverified",
+      name: "probably-off",
+      status: "stopped" as const,
+      statusReason: "unverified: the docker driver cannot report container state",
+    },
+  ]);
+
+  const { getByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("stopped"));
+  expect(getByTestId("status-reason").textContent).toMatch(/unverified/);
+});
+
 test("an online runtime offers no Wake", async () => {
   vi.spyOn(api, "listRuntimes").mockResolvedValue([
     { ...mockRuntimes[0]!, id: "rt-up", name: "awake", status: "online" as const },
