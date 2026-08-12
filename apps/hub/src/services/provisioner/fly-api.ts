@@ -72,6 +72,58 @@ export interface Pacer {
  */
 export const noPacer: Pacer = { take: async () => {} };
 
+/**
+ * Token bucket over Fly's published limit: 1 request/second per action, burst 3.
+ *
+ * A bucket rather than a fixed delay because the shape of our traffic is bursty
+ * and then idle: a provision is four calls back to back and then nothing for
+ * hours. A fixed 1s gap would make every provision four seconds slower for no
+ * reason, and a naive "sleep 1s between calls" would still stampede when two
+ * runtimes are created at once — hence the chain, which serialises every
+ * caller through one queue.
+ *
+ * `now` and `sleep` are injected so the tests can drive a clock instead of
+ * spending real seconds.
+ */
+export function createFlyPacer({
+  capacity = 3,
+  refillMs = 1000,
+  now = () => Date.now(),
+  sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+}: {
+  capacity?: number;
+  refillMs?: number;
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
+} = {}): Pacer {
+  let tokens = capacity;
+  let last = now();
+  let chain: Promise<void> = Promise.resolve();
+
+  const acquire = async (): Promise<void> => {
+    const t = now();
+    const refilled = Math.floor((t - last) / refillMs);
+    if (refilled > 0) {
+      tokens = Math.min(capacity, tokens + refilled);
+      last += refilled * refillMs;
+    }
+
+    if (tokens > 0) {
+      tokens -= 1;
+      return;
+    }
+
+    await sleep(refillMs - (now() - last));
+    last += refillMs;
+    tokens = Math.min(capacity, tokens + 1) - 1;
+  };
+
+  // Chained so concurrent callers queue rather than each reading a stale token
+  // count. `acquire` never rejects, but the second argument keeps one caller's
+  // hypothetical failure from wedging the queue for everyone after it.
+  return { take: () => (chain = chain.then(acquire, acquire)) };
+}
+
 export type FlyRequest = (
   method: string,
   path: string,
@@ -122,7 +174,7 @@ export function createFlyClient({
   token,
   baseUrl = FLY_API_BASE,
   fetchImpl = globalThis.fetch,
-  pacer = noPacer,
+  pacer = createFlyPacer(),
 }: FlyClientOptions): FlyRequest {
   const base = baseUrl.replace(/\/$/, "");
 
