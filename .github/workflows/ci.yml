@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop, redesign/fleet-console]
+    branches: [main, develop, redesign/fleet-console, provisioner-registry]
   pull_request:
     branches: [main, develop, redesign/fleet-console]
 
