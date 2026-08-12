@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -257,6 +258,31 @@ func TestCredentialPathsDropTheFilesThatNeverExisted(t *testing.T) {
 			if slices.Contains(CredentialPaths[harness], p) {
 				t.Errorf("%s: %q does not exist on any real machine and must be removed", harness, p)
 			}
+		}
+	}
+}
+
+// Verified against a live Pi 0.84.1 install on 2026-08-12: ~/.pi/agent held
+// auth.json (0600), models-store.json (0600) and settings.json (0644), plus
+// bin/ and sessions/. settings.json is not a credential file and is not listed;
+// models.json was absent but is listed because it holds literal API keys once a
+// custom provider is defined.
+func TestPiCredentialPathsMatchRealLayout(t *testing.T) {
+	got := CredentialPaths["pi"]
+	want := []string{".pi/agent/auth.json", ".pi/agent/models-store.json", ".pi/agent/models.json"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestPiCredentialPathsDropFilesThatNeverExisted(t *testing.T) {
+	// trust.json is documented by Pi but is created on demand and was absent on
+	// the machine observed 2026-08-12. It records trust decisions, not secrets.
+	// Naming files that do not exist is how the scanner once graded a machine
+	// "A" without opening anything.
+	for _, p := range CredentialPaths["pi"] {
+		if strings.Contains(p, "trust.json") {
+			t.Errorf("trust.json must not be listed: %s", p)
 		}
 	}
 }

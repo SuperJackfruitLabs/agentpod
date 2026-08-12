@@ -26,6 +26,7 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 		NodeBinary:   cfg.NodeBinary,
 	}))
 	reg.Register(descriptor.NewOpenCode(""))
+	reg.Register(descriptor.NewPi(""))
 	reg.Register(descriptor.NewCodexFrom(descriptor.CodexConfig{
 		AcpBinary:   cfg.CodexAcpBinary,
 		CodexBinary: cfg.CodexBinary,
