@@ -11,7 +11,7 @@
  *     (reuses the existing Cloudflare feature-flag name from config.ts)
  */
 
-import type { RuntimeProvisioner, RuntimeProviderName, ResourceTier } from "./types";
+import type { RuntimeProvisioner, RuntimeProviderName, DriverManifest } from "./types";
 
 // ─── Known provider names (type-checked set) ──────────────────────────────────
 
@@ -60,29 +60,27 @@ export function enabledProviders(): RuntimeProviderName[] {
   return result;
 }
 
-/** Every tier, for a driver that does not restrict them. */
-const ALL_TIERS: ResourceTier[] = ["small", "medium", "large"];
-
 /**
- * What each enabled provider can actually do, for the UI to build its form from.
+ * What each enabled provider declares about itself, for the hub and the console
+ * to build on.
  *
  * Exists so the console never offers a choice the driver will refuse. Cloudflare
  * fixes `instance_type` at worker deploy time and supports exactly one tier, so
  * a dialog offering small/medium/large produced a guaranteed provisioning
  * failure with a backend error as the only feedback.
  *
- * The capability is read from the driver rather than hardcoded in the console:
+ * The declaration is read from the driver rather than hardcoded in the console:
  * a hardcoded map in the UI would silently rot the moment a worker is redeployed
  * at a different instance type.
+ *
+ * This serves the whole manifest, not the `{provider, tiers}` pair it replaces.
+ * That narrower shape meant every new consumer — stop semantics, image binding,
+ * idle behaviour — had to widen the registry before it could ask its question,
+ * and there is no fallback here on purpose: `manifest` is required on every
+ * driver, so defaulting could only ever mask a driver that failed to declare.
  */
-export function providerCapabilities(): Array<{
-  provider: RuntimeProviderName;
-  tiers: ResourceTier[];
-}> {
-  return enabledProviders().map((provider) => {
-    const driver = _registry.get(provider);
-    return { provider, tiers: driver?.supportedTiers ?? ALL_TIERS };
-  });
+export function providerManifests(): DriverManifest[] {
+  return enabledProviders().map((provider) => _registry.get(provider)!.manifest);
 }
 
 /**

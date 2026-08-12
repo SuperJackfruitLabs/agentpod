@@ -11,17 +11,34 @@ import { test, it, expect, beforeEach, afterEach, describe } from "bun:test";
 import {
   registerProvisioner,
   enabledProviders,
-  providerCapabilities,
+  providerManifests,
   getProvisioner,
   resetProvisioners,
 } from "./registry";
 import type { RuntimeProvisioner, ProvisionSpec } from "./types";
+import { DockerRuntimeProvisioner } from "./docker";
 
 // ─── Fake provisioner factories ───────────────────────────────────────────────
+
+// Each fake declares a manifest that matches what the fake itself does: it
+// provisions and destroys, nothing more. These are registry tests, so the
+// values only have to be coherent — but they are real DriverManifests, not
+// casts, because a cast here would hide exactly the omission the required
+// field exists to catch.
 
 function fakeDockerProvisioner(): RuntimeProvisioner {
   return {
     provider: "docker",
+    manifest: {
+      provider: "docker",
+      workspaceStorage: "rootfs",
+      stopSemantics: "resumable",
+      maxLifetimeMs: null,
+      imageBinding: "per-instance",
+      supportedTiers: ["small", "medium", "large"],
+      idleBehaviour: "never",
+      lifecycle: [],
+    },
     async provision(_spec: ProvisionSpec) {
       return { externalId: "container-fake-001" };
     },
@@ -32,6 +49,16 @@ function fakeDockerProvisioner(): RuntimeProvisioner {
 function fakeCloudflareProvisioner(): RuntimeProvisioner {
   return {
     provider: "cloudflare",
+    manifest: {
+      provider: "cloudflare",
+      workspaceStorage: "external-archive",
+      stopSemantics: "resumable",
+      maxLifetimeMs: null,
+      imageBinding: "fixed",
+      supportedTiers: ["large"],
+      idleBehaviour: "platform-inbound",
+      lifecycle: [],
+    },
     async provision(_spec: ProvisionSpec) {
       return { externalId: "cf-sandbox-fake-001" };
     },
@@ -173,39 +200,26 @@ describe("resetProvisioners (test isolation)", () => {
   });
 });
 
-// ─── Provider capabilities ────────────────────────────────────────────────────
+// ─── Provider manifests ───────────────────────────────────────────────────────
 
-
-describe("providerCapabilities", () => {
-  it("reports the tiers a provider can actually satisfy", () => {
-    // The console must not offer a choice the driver will refuse. Cloudflare
-    // fixes instance_type at worker deploy time, so it supports exactly one
-    // tier — offering "small" produced a guaranteed provisioning failure.
-    process.env.ENABLE_CLOUDFLARE_SANDBOXES = "true";
-    registerProvisioner({
-      provider: "cloudflare",
-      supportedTiers: ["large"],
-      provision: async () => ({ externalId: "x" }),
-      destroy: async () => {},
-    } as never);
-
-    const caps = providerCapabilities();
-    const cf = caps.find((c) => c.provider === "cloudflare");
-    expect(cf?.tiers).toEqual(["large"]);
+describe("providerManifests", () => {
+  it("serves each enabled provider's full manifest", () => {
+    // The registry hands over what the driver declared, whole. The narrower
+    // shape it replaces (`{provider, tiers}`) forced every new consumer —
+    // console tier lists, conformance checks — to widen the registry first.
+    process.env.ENABLE_DOCKER_PROVISIONING = "true";
+    registerProvisioner(new DockerRuntimeProvisioner());
+    const manifests = providerManifests();
+    expect(manifests).toHaveLength(1);
+    const m = manifests[0]!;
+    expect(m.provider).toBe("docker");
+    expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
   });
 
-  it("defaults to every tier for a driver that does not restrict them", () => {
-    // Docker maps all three tiers to real cpu/memory limits, so a driver that
-    // says nothing must keep offering all of them.
-    process.env.ENABLE_DOCKER_PROVISIONING = "true";
-    registerProvisioner({
-      provider: "docker",
-      provision: async () => ({ externalId: "x" }),
-      destroy: async () => {},
-    } as never);
-
-    const caps = providerCapabilities();
-    const docker = caps.find((c) => c.provider === "docker");
-    expect(docker?.tiers).toEqual(["small", "medium", "large"]);
+  it("omits a registered provider whose env flag is off", () => {
+    // Gating is the registry's job; a manifest served for a disabled provider
+    // would put a choice in the console that createRuntime then refuses.
+    registerProvisioner(fakeDockerProvisioner());
+    expect(providerManifests()).toEqual([]);
   });
 });

@@ -61,6 +61,19 @@ const fakeCalls: {
 
 const fakeDockerProvisioner: RuntimeProvisioner = {
   provider: "docker",
+  // Declares what this fake actually implements: provision, destroy and start,
+  // but deliberately no stop — hence `lifecycle: ["start"]`, which keeps the
+  // declaration honest about the 400-unsupported path the tests below exercise.
+  manifest: {
+    provider: "docker",
+    workspaceStorage: "rootfs",
+    stopSemantics: "resumable",
+    maxLifetimeMs: null,
+    imageBinding: "per-instance",
+    supportedTiers: ["small", "medium", "large"],
+    idleBehaviour: "never",
+    lifecycle: ["start"],
+  },
   async provision(spec) {
     fakeCalls.provision.push(spec);
     return { externalId: `fake-container-${spec.runtimeId}` };
@@ -254,9 +267,18 @@ test("GET /api/runtimes/providers → lists enabled providers", async () => {
     headers: { "X-Test-User-Id": TEST_USER },
   });
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { providers: string[] };
+  const body = (await res.json()) as {
+    providers: string[];
+    manifests: { provider: string; supportedTiers: string[] }[];
+  };
   expect(Array.isArray(body.providers)).toBe(true);
   expect(body.providers).toContain("docker");
+  // `providers` and `manifests` are served together because the hub and the
+  // console deploy separately: the deployed console still reads `providers`,
+  // so removing it the moment the hub learned manifests would blank the New
+  // Runtime dialog until the console caught up.
+  const docker = body.manifests.find((m) => m.provider === "docker");
+  expect(docker?.supportedTiers).toEqual(["small", "medium", "large"]);
 }, 15_000);
 
 test("DELETE /api/runtimes/:id → fake destroy() called, status destroyed", async () => {

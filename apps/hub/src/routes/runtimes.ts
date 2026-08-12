@@ -32,7 +32,7 @@ import {
   startRuntime,
   stopRuntime,
   enabledProviders,
-  providerCapabilities,
+  providerManifests,
 } from "../services/runtimes";
 
 export const runtimeRoutes = new Hono()
@@ -68,7 +68,10 @@ export const runtimeRoutes = new Hono()
   // ── GET /api/runtimes/providers ───────────────────────────────────────────
   // Must be registered BEFORE /:id to avoid being shadowed.
   .get("/providers", (c) => {
-    return c.json({ providers: enabledProviders(), capabilities: providerCapabilities() });
+    // `providers` is kept alongside `manifests` on purpose: the deployed console
+    // still reads it, and hub and console deploy separately. Dropping it here
+    // would empty the New Runtime dialog for everyone between the two deploys.
+    return c.json({ providers: enabledProviders(), manifests: providerManifests() });
   })
 
   // ── GET /api/runtimes ─────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ import {
   getProvisioner,
   getProvisionerUnguarded,
   enabledProviders,
-  providerCapabilities,
+  providerManifests,
   isProviderEnabled,
 } from "./provisioner/registry";
 import type { ProvisionedRuntime } from "@agentpod/contract";
@@ -688,4 +688,4 @@ export async function sweepStalledRuntimeStops(
 }
 
 // Re-export for convenience (routes use this)
-export { enabledProviders, providerCapabilities };
+export { enabledProviders, providerManifests };
