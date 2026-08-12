@@ -288,8 +288,62 @@ export class ModalRuntimeProvisioner implements RuntimeProvisioner {
     };
   }
 
-  async destroy(_externalId: string): Promise<void> {
-    throw new Error("modal: destroy is implemented in Task 5");
+  /**
+   * Permanently remove the runtime: the sandbox, and then the Volume that
+   * outlives sandboxes.
+   *
+   * BOTH, always. Unlike stop(), which must never touch the Volume because the
+   * Volume is the runtime's identity, destroy() must take it: a Modal Volume
+   * exists independently of any sandbox and bills for as long as it exists, so
+   * one left behind is a permanent charge for a runtime the operator has been
+   * told is gone, with no console row left that could even name it.
+   *
+   * ORDER: terminate first, delete second. Deleting a Volume still mounted by a
+   * live sandbox is a race Modal is under no obligation to make pleasant, and
+   * the ordering also decides what a partial failure leaves behind. Terminate
+   * first and the worst interruption leaves sandbox down / volume present /
+   * externalId still on the row — the cheap half surviving, addressable, and
+   * retryable. Reversed, the same interruption leaves compute running against a
+   * workspace that has been deleted underneath it: the larger bill, plus a
+   * runtime that can no longer be made whole.
+   *
+   * Only ModalNotFoundError is tolerated, and it is tolerated on BOTH steps
+   * rather than one:
+   *
+   *   - on the terminate, because the 24-hour ceiling reaps a sandbox per
+   *     runtime per day, so "the sandbox is already gone and only the billing
+   *     Volume is left" is the ordinary case, not an edge one;
+   *   - on the delete, because that is what makes the retry converge.
+   *
+   * Nothing else is tolerated. destroyRuntime() turns a throw into a 502 and
+   * leaves the row un-destroyed with its externalId intact, which is exactly
+   * what a retry needs; whereas a destroy that resolved on an expired token or
+   * a connection reset would have the hub write `destroyed`, forget the
+   * externalId, and strand a Volume that bills for ever with nothing anywhere
+   * that can address it. The retry therefore converges: a re-terminate of an
+   * already-terminated sandbox is a no-op (or a tolerated not-found), and the
+   * delete is attempted again until the substrate accepts it.
+   *
+   * decodeExternalId() throwing is load-bearing here for the same reason. With
+   * not-found tolerated on both calls, the codec is the ONLY thing preventing a
+   * malformed or half-empty id from addressing nothing, having both not-founds
+   * swallowed, and reporting a successful destroy that deleted nothing — which
+   * is the leak the Fly driver shipped.
+   */
+  async destroy(externalId: string): Promise<void> {
+    const { volumeName, sandboxId } = decodeExternalId(externalId);
+
+    try {
+      await this.api.terminateSandbox(sandboxId);
+    } catch (err) {
+      if (!(err instanceof ModalNotFoundError)) throw err;
+    }
+
+    try {
+      await this.api.deleteVolume(volumeName);
+    } catch (err) {
+      if (!(err instanceof ModalNotFoundError)) throw err;
+    }
   }
 
   /**

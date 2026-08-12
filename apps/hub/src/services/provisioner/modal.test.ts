@@ -523,3 +523,238 @@ describe("ModalRuntimeProvisioner — status", () => {
     expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
   });
 });
+
+describe("ModalRuntimeProvisioner — destroy", () => {
+  it("takes the sandbox AND the volume", async () => {
+    // The one verb where forgetting the Volume costs money forever. A Modal
+    // Volume outlives every sandbox that mounted it and bills for as long as it
+    // exists, so a destroy that only terminated would leave a permanent charge
+    // with no console row left to explain it.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+
+    await driver.destroy(externalId);
+
+    expect(modal.terminated).toEqual(["sb-1"]);
+    expect(modal.deletedVolumes).toEqual(["agentpod-rt-abc123"]);
+    // Not just "delete was called": the anchor is actually gone from the
+    // substrate. This is the assertion a silently-skipped delete cannot pass.
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(false);
+  });
+
+  it("terminates the sandbox BEFORE deleting the volume it has mounted", async () => {
+    // Order is not cosmetic here. Deleting a Volume still mounted by a live
+    // sandbox is a race Modal is under no obligation to make pleasant, and if
+    // the process dies between the two steps the surviving state must be the
+    // cheap, retryable one: sandbox down, volume present, externalId still on
+    // the row. Reversed, the same crash leaves compute running against a
+    // workspace that no longer exists — the larger bill and the unrecoverable
+    // half.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+
+    const order: string[] = [];
+    const terminate = modal.api.terminateSandbox;
+    const remove = modal.api.deleteVolume;
+    modal.api.terminateSandbox = async (id) => {
+      order.push("terminate");
+      return terminate(id);
+    };
+    modal.api.deleteVolume = async (name) => {
+      order.push("deleteVolume");
+      return remove(name);
+    };
+
+    await driver.destroy(externalId);
+
+    expect(order).toEqual(["terminate", "deleteVolume"]);
+  });
+
+  it("is idempotent — a second destroy resolves", async () => {
+    // Conformance rule 6, and not a theoretical one: destroyRuntime() turns a
+    // driver throw into a 502 and leaves the row un-destroyed, so a retry that
+    // threw on "already gone" could never finish a half-done destroy — the
+    // runtime would be wedged permanently, which is exactly the bug found in
+    // the Docker driver.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+
+    await driver.destroy(externalId);
+    await expect(driver.destroy(externalId)).resolves.toBeUndefined();
+    // And the second pass invents no new work.
+    expect(modal.deletedVolumes).toEqual(["agentpod-rt-abc123"]);
+  });
+
+  it("resolves for a runtime this substrate has never heard of", async () => {
+    // The hub can hold an externalId whose sandbox and volume are both long
+    // gone — a workspace deleted from Modal's dashboard, a row restored from a
+    // backup. Destroying that must reach the state the caller asked for, not a
+    // 502 that leaves the row alive for ever.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await expect(
+      driver.destroy("agentpod-rt-gone#sb-gone")
+    ).resolves.toBeUndefined();
+  });
+
+  it("still deletes the volume when the sandbox is already gone", async () => {
+    // The likeliest half-done destroy on this substrate: the 24-hour ceiling
+    // already took the sandbox and the Volume is all that is left — which is
+    // also the only half still billing. A destroy that gave up at the
+    // not-found terminate would leak precisely the expensive part.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.sandboxes.delete("sb-1");
+
+    await driver.destroy(externalId);
+
+    expect(modal.deletedVolumes).toEqual(["agentpod-rt-abc123"]);
+  });
+
+  it("still terminates the sandbox when the volume is already gone", async () => {
+    // The mirror case, and the more expensive one: a Volume removed by hand
+    // leaves a sandbox running and billing compute. Tolerating the volume's
+    // absence must not come at the price of leaving that sandbox alive.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.volumes.delete("agentpod-rt-abc123");
+
+    await expect(driver.destroy(externalId)).resolves.toBeUndefined();
+    expect(modal.terminated).toEqual(["sb-1"]);
+  });
+
+  it("does NOT swallow a substrate failure on the volume delete", async () => {
+    // Tolerating "already gone" must not become tolerating everything. A
+    // destroy that resolved on a connection reset would have destroyRuntime()
+    // write `destroyed` and forget the externalId — and the Volume it named
+    // would bill for ever with nothing left anywhere that could address it.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.api.deleteVolume = async () => {
+      throw new Error("connection reset");
+    };
+
+    await expect(driver.destroy(externalId)).rejects.toThrow(/connection reset/);
+  });
+
+  it("does NOT swallow an auth failure on the volume delete", async () => {
+    // An expired MODAL_TOKEN_SECRET fails every call at once. A bare catch here
+    // would report a successful destroy for every Modal runtime in the fleet
+    // while none of them were deleted and all of them kept billing.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.api.deleteVolume = async () => {
+      throw new Error("401 Unauthorized: invalid token");
+    };
+
+    await expect(driver.destroy(externalId)).rejects.toThrow(/401/);
+  });
+
+  it("does NOT swallow a substrate failure on the terminate, and leaves the volume alone", async () => {
+    // Two rules in one. The throw must surface — a destroy that resolved here
+    // would forget a still-running sandbox. And the Volume must survive: with
+    // the terminate unconfirmed the sandbox may well still be mounting it, and
+    // the retry needs the anchor intact to finish the job properly.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+    modal.api.terminateSandbox = async () => {
+      throw new Error("connection reset");
+    };
+
+    await expect(driver.destroy(externalId)).rejects.toThrow(/connection reset/);
+    expect(modal.deletedVolumes).toEqual([]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+  });
+
+  it("converges on retry after a partial destroy — the volume is really taken", async () => {
+    // The money case end to end. First attempt: sandbox terminated, volume
+    // delete fails on transport, driver throws, destroyRuntime() 502s and the
+    // row keeps its externalId. Second attempt, once the substrate is back: the
+    // already-terminated sandbox is tolerated and the Volume — the half that is
+    // still billing — is finally gone. If this did not converge, the only way
+    // to stop paying would be Modal's dashboard.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    const { externalId } = await driver.provision(SPEC);
+
+    const remove = modal.api.deleteVolume;
+    modal.api.deleteVolume = async () => {
+      throw new Error("connection reset");
+    };
+    await expect(driver.destroy(externalId)).rejects.toThrow(/connection reset/);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+
+    modal.api.deleteVolume = remove;
+    await expect(driver.destroy(externalId)).resolves.toBeUndefined();
+    expect(modal.deletedVolumes).toEqual(["agentpod-rt-abc123"]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(false);
+  });
+
+  it("refuses a malformed external id instead of destroying something else", async () => {
+    // A bare sandbox id names no volume. Guessing one — or handing the whole
+    // string to either call — would either delete another runtime's anchor or
+    // resolve on a not-found while the real sandbox kept running.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+
+    await expect(driver.destroy("sb-1")).rejects.toThrow(/external id/i);
+    expect(modal.terminated).toEqual([]);
+    expect(modal.deletedVolumes).toEqual([]);
+  });
+
+  it("refuses an id with an empty volume half rather than reporting a false success", async () => {
+    // This is the Fly driver's shipped bug, transplanted: a codec that let an
+    // empty half through addressed nothing, and the not-found that came back
+    // was read by destroy as "already gone" — a 200 on the way out while a
+    // machine and its volume kept billing. Tolerating not-found makes the codec
+    // the ONLY thing standing between a bypass and a silent leak.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+
+    await expect(driver.destroy("#sb-1")).rejects.toThrow(/external id/i);
+    expect(modal.terminated).toEqual([]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+  });
+
+  it("refuses an id with an empty sandbox half rather than taking the volume anyway", async () => {
+    // The other direction, and worse: proceeding would delete a live runtime's
+    // workspace while its sandbox kept running, having tolerated the empty
+    // sandbox id's not-found as success.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC);
+
+    await expect(driver.destroy("agentpod-rt-abc123#")).rejects.toThrow(/external id/i);
+    expect(modal.deletedVolumes).toEqual([]);
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+  });
+
+  it("deletes the volume half and terminates the sandbox half, never swapped", async () => {
+    // Both calls take a bare string, so swapping them is a one-character typo
+    // that not-found tolerance would hide completely: every call would raise
+    // ModalNotFoundError, both would be swallowed, and destroy would resolve
+    // having deleted nothing at all. Two live runtimes make the swap visible.
+    const modal = fakeModal();
+    const driver = new ModalRuntimeProvisioner({ api: modal.api });
+    await driver.provision(SPEC); // agentpod-rt-abc123 # sb-1
+    await driver.provision({ ...SPEC, runtimeId: "rt_other" }); // agentpod-rt-other # sb-2
+
+    await driver.destroy(encodeExternalId("agentpod-rt-other", "sb-1"));
+
+    expect(modal.terminated).toEqual(["sb-1"]);
+    expect(modal.deletedVolumes).toEqual(["agentpod-rt-other"]);
+    // The untouched runtime is untouched.
+    expect(modal.volumes.has("agentpod-rt-abc123")).toBe(true);
+    expect(modal.sandboxes.get("sb-2")).toBeNull();
+  });
+});
