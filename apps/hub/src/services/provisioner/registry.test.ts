@@ -14,6 +14,7 @@ import {
   providerManifests,
   getProvisioner,
   resetProvisioners,
+  providerEnvFlag,
 } from "./registry";
 import type { RuntimeProvisioner, ProvisionSpec } from "./types";
 import { DockerRuntimeProvisioner } from "./docker";
@@ -270,5 +271,14 @@ describe("providerManifests", () => {
     // would put a choice in the console that createRuntime then refuses.
     registerProvisioner(fakeDockerProvisioner());
     expect(providerManifests()).toEqual([]);
+  });
+});
+
+describe("fly provider gating", () => {
+  it("derives ENABLE_FLY_PROVISIONING without any edit to the registry", () => {
+    // The whole point of the groundwork: a driver named "fly" gets its flag
+    // from the rule. If this ever needs a line in LEGACY_ENV_FLAGS, the
+    // registry has stopped being open.
+    expect(providerEnvFlag("fly")).toBe("ENABLE_FLY_PROVISIONING");
   });
 });

@@ -153,6 +153,25 @@ export const config = {
     autoSelect: getEnvBool('AUTO_SELECT_PROVIDER', false),
   },
 
+  fly: {
+    enabled: getEnvBool('ENABLE_FLY_PROVISIONING', false),
+    // Read here ONLY so validate-config can refuse the boot with a message
+    // naming the variable. The DRIVER resolves this through
+    // requireCredentials(), which is the seam the per-org encrypted store
+    // (Horizon 3) replaces — do not make the driver read config.fly.apiToken.
+    apiToken: getEnv('FLY_API_TOKEN', ''),
+    // App creation requires an ORG-scoped token; Fly's app-scoped deploy tokens
+    // can do everything else but not that.
+    orgSlug: getEnv('FLY_ORG_SLUG', 'personal'),
+    // Measured 2026-08-12: "bom" is refused on a non-paid plan ("legacy or
+    // non-paid plan"), "sin" works.
+    region: getEnv('FLY_REGION', 'sin'),
+    appPrefix: getEnv('FLY_APP_PREFIX', 'agentpod'),
+    // The workspace lives here, because the Fly rootfs is wiped on every
+    // stop→start.
+    volumeSizeGb: getEnvInt('FLY_VOLUME_SIZE_GB', 3),
+  },
+
   metamcp: {
     // Internal URL for MetaMCP (used for tRPC/auth calls from API container)
     // Port 12008 is the Next.js frontend which proxies auth + tRPC
