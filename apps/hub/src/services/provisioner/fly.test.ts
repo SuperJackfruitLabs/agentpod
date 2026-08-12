@@ -712,6 +712,140 @@ describe("flyStateToRuntimeState", () => {
   });
 });
 
+describe("FlyMachinesProvisioner — destroy", () => {
+  it("deletes the app, which takes the machine and the volume with it", async () => {
+    // One call, not three. The app owns both, so deleting it is atomic from the
+    // hub's point of view; three ordered deletes would be three places to fail
+    // half-way and leave a volume behind. A leaked Fly volume bills every month
+    // for a runtime the console no longer shows, and nothing ever comes back to
+    // look for it — the hub forgets the external id the moment the row goes.
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app } = parseFlyExternalId(externalId);
+
+    fake.calls.length = 0;
+    await driver.destroy(externalId);
+
+    expect(fake.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      `DELETE /v1/apps/${app}`,
+    ]);
+    // The fake cascades exactly as Fly does: no app, therefore no machine and
+    // no volume. Asserting the app is gone is asserting all three.
+    expect(fake.apps.has(app)).toBe(false);
+  });
+
+  it("IS IDEMPOTENT — a second destroy does not throw", async () => {
+    // Conformance rule 6, and not theoretical: the Docker driver forwarded its
+    // orchestrator's `Sandbox not found`, destroyRuntime turned that into a 502
+    // and left the row un-destroyed, so a destroy that half-succeeded could
+    // never be retried to completion and the runtime was wedged permanently.
+    // The retry is the whole cleanup mechanism; it only works if arriving at an
+    // already-destroyed app is a success.
+    const { driver } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+
+    await driver.destroy(externalId);
+    await expect(driver.destroy(externalId)).resolves.toBeUndefined();
+  });
+
+  it("succeeds for an app it never created at all", async () => {
+    // The same rule from the other end: a runtime row whose app was destroyed
+    // out of band still has to be destroyable, or an operator cannot clear it
+    // from the console without touching the database.
+    const { driver, fake } = flyDriver();
+    await expect(driver.destroy("agentpod-never-existed/machine-x")).resolves
+      .toBeUndefined();
+    // And it really did ask — a destroy that returned without calling Fly would
+    // pass this assertion for the wrong reason.
+    expect(fake.calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      "DELETE /v1/apps/agentpod-never-existed",
+    ]);
+  });
+
+  it("still throws when Fly cannot be reached", async () => {
+    // Only "already gone" is forgiven. Reporting a successful destroy for an app
+    // nobody could look at is the worse bug of the two: destroyRuntime deletes
+    // the row on a driver returning, so the hub forgets the external id while
+    // the machine and its volume keep billing, with nothing in the console left
+    // to say they exist.
+    const impl = (async () =>
+      new Response(JSON.stringify({ error: "internal server error" }), {
+        status: 500,
+      })) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.destroy("app-x/machine-y")).rejects.toThrow(/500/);
+  });
+
+  it("PROPAGATES every Fly failure that is not a 404", async () => {
+    // What keeps the tolerance exactly one status wide. A bare
+    // `catch { return }` passes both idempotence tests above and fails only
+    // here — which is the shape of the mistake worth guarding, because "make
+    // destroy idempotent" reads like an instruction to swallow errors.
+    //
+    // 401 is the case that would hurt most: an expired FLY_API_TOKEN 401s on
+    // every app at once, so a swallowing destroy would let an operator clear a
+    // whole fleet out of the console while every machine and volume kept
+    // billing. 403 is a token scoped to the wrong org, 429 is Fly's rate limit,
+    // and 500 is Fly having a bad day. None of the four is evidence that
+    // anything was deleted.
+    for (const status of [401, 403, 429, 500]) {
+      const impl = (async () =>
+        new Response(JSON.stringify({ error: `fly said ${status}` }), {
+          status,
+        })) as unknown as typeof globalThis.fetch;
+
+      const driver = new FlyMachinesProvisioner({
+        credentials: { get: () => "fly-token" },
+        fetchImpl: impl,
+        pacer: noPacer,
+      });
+      await expect(driver.destroy("app-x/machine-y")).rejects.toThrow(
+        new RegExp(`fly said ${status}`)
+      );
+    }
+  });
+
+  it("throws when the transport fails, which carries no status at all", async () => {
+    // A DNS failure or a dropped connection produces a TypeError, not a
+    // FlyApiError — so an `err.status !== 404` test written without the
+    // instanceof guard would read `undefined !== 404` correctly, but one
+    // written as `err.status === 404 ? return : throw` on a bare `any` would
+    // still need this to prove it. Nothing was deleted; the destroy must fail.
+    const impl = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof globalThis.fetch;
+
+    const driver = new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      fetchImpl: impl,
+      pacer: noPacer,
+    });
+    await expect(driver.destroy("app-x/machine-y")).rejects.toThrow(/fetch failed/);
+  });
+
+  it("REFUSES a malformed id instead of reading its 404 as already-gone", async () => {
+    // Where the external-id codec's guard and destroy's 404 tolerance meet, and
+    // the one place they could combine into a silent leak.
+    //
+    // An id missing its app half interpolates to `DELETE /v1/apps/`, which
+    // addresses no app and answers 404 — and this method's whole job is to read
+    // a 404 as "already gone" and return happily. destroyRuntime would then
+    // delete the row for a machine and a 3 GB volume that were never touched.
+    // parseFlyExternalId refusing FIRST is what makes the tolerance safe, so
+    // this asserts both that it throws and that nothing was sent.
+    for (const bad of ["no-slash-here", "/machine-only", "app-only/", ""]) {
+      const { driver, fake } = flyDriver();
+      await expect(driver.destroy(bad)).rejects.toThrow(/malformed external id/);
+      expect(fake.calls).toEqual([]);
+    }
+  });
+});
+
 describe("the Fly fake substrate is unfriendly where Fly is", () => {
   // The fake is what every later task's tests are checked against, so a
   // tolerant one would make all of them pass for free and prove nothing. These

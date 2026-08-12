@@ -461,8 +461,49 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
     }
   }
 
-  async destroy(_externalId: string): Promise<void> {
-    throw new Error("fly: destroy() is not implemented yet");
+  /**
+   * Permanently destroy the runtime by deleting its app.
+   *
+   * ONE call, not three. The app owns the machine and the volume, so deleting it
+   * takes both — which is the reason this driver gives every runtime an app to
+   * itself. Three ordered deletes would be three places to fail half-way, and
+   * the resource left behind by the likeliest of those failures is the volume:
+   * it survives its machine, it bills every month, and destroyRuntime removes
+   * the row on this method returning, so the hub forgets the external id and
+   * nothing ever comes back to look for it.
+   *
+   * IDEMPOTENT (conformance rule 6). An app Fly has no record of is already in
+   * the state destroy is asked to produce, so a 404 returns rather than throws.
+   * It has to: destroyRuntime turns a driver throw into a 502 and leaves the row
+   * un-destroyed, so the retry is the only mechanism that finishes a destroy
+   * that half-succeeded. The Docker driver forwarded its orchestrator's
+   * `Sandbox not found` instead, and a runtime that hit it could never be
+   * retried to completion — it was wedged permanently. Fixed 2026-08-12.
+   *
+   * The tolerance is EXACTLY one status wide, and the narrowness is the point.
+   * "Make destroy idempotent" reads like an instruction to swallow errors, and a
+   * bare catch here would be the worse bug in the same place: an expired
+   * FLY_API_TOKEN 401s on every app at once, so an operator clearing runtimes
+   * out of the console would empty it while every machine and volume kept
+   * billing, with nothing left on screen to say they exist. A 403, a 429, a 500
+   * and a transport failure that carries no status at all are all in the same
+   * position — none is evidence that anything was deleted. Telling them apart
+   * from the one that is, is only possible because FlyApiError carries `status`.
+   *
+   * That tolerance is also why parseFlyExternalId REFUSES a malformed id rather
+   * than returning a best effort: an id missing its app half would interpolate
+   * to `DELETE /v1/apps/`, which addresses no app and answers 404 — and this
+   * method reads a 404 as "already gone". A machine and its volume would be
+   * silently abandoned, still billing, by a call that reported success.
+   */
+  async destroy(externalId: string): Promise<void> {
+    const { app } = parseFlyExternalId(externalId);
+    try {
+      await this.request("DELETE", `/v1/apps/${app}`);
+    } catch (err) {
+      if (err instanceof FlyApiError && err.status === 404) return;
+      throw err;
+    }
   }
 
   /**
