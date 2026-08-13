@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { getTableName, is, Table } from "drizzle-orm";
+import { eq, getTableName, is, Table } from "drizzle-orm";
 
 import * as schema from "../../src/db/schema";
 import {
@@ -30,6 +30,7 @@ import {
   TENANT_SCOPED_TABLES,
   TenantIsolationError,
   tenantScope,
+  tenantScopedSelect,
 } from "../../src/db/tenant-scope";
 import { TenantId } from "@agentpod/contract";
 
@@ -155,15 +156,20 @@ describe("tenant guard — a scoped predicate cannot be built without a tenant",
     );
   });
 
-  test("binds tenant_id as the first predicate", () => {
-    // Ordering is the kaambaan invariant and it is cheap to keep: the tenant is
-    // never one condition among several that a later edit might drop.
-    const sql = tenantScope(schema.nodes, TENANT);
-    const rendered = JSON.stringify(sql);
-    expect(rendered).toContain("tenant_id");
-    expect(rendered.indexOf("tenant_id")).toBeLessThan(
-      rendered.indexOf("user_id") === -1 ? Infinity : rendered.indexOf("user_id"),
-    );
+  test("binds tenant_id as the first predicate, ahead of the caller's own", () => {
+    // Ordering is the kaambaan invariant and it costs nothing to keep: the
+    // tenant is never one condition among several that a later edit might
+    // reorder away. Rendered rather than inspected — what matters is the SQL
+    // that reaches Postgres, not the shape of the builder that produced it.
+    const { sql, params } = tenantScopedSelect(
+      schema.nodes,
+      TENANT,
+      eq(schema.nodes.userId, "some-user"),
+    ).toSQL();
+
+    expect(sql).toContain("tenant_id");
+    expect(sql.indexOf("tenant_id")).toBeLessThan(sql.indexOf("user_id"));
+    expect(params[0]).toBe(TENANT);
   });
 
   test("accepts a valid tenant on a registered table", () => {
