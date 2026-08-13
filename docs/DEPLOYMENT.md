@@ -141,6 +141,30 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # CLOUDFLARE_SANDBOX_IMAGE=agentpod-node-opencode:local
 # RUNTIME_CALLBACK_TOKEN=<shared secret for the sleep callback>
 # CLOUDFLARE_INSTANCE_TIER=large
+
+# Modal provisioner: leave off unless you have read the cost note in OPERATING.md.
+# Modal bills wall-clock at roughly 3x standard Modal rates for as long as a
+# sandbox exists, which makes a mostly-idle station its worst case.
+# ENABLE_MODAL_PROVISIONING=false
+# The hub refuses to boot with ENABLE_MODAL_PROVISIONING=true and any of
+# MODAL_TOKEN_ID / MODAL_TOKEN_SECRET / NODE_AGENT_MODAL_IMAGE /
+# PROVISIONING_HUB_URL missing. The refusal names the variable.
+# MODAL_TOKEN_ID=<from the Modal dashboard>
+# MODAL_TOKEN_SECRET=<from the Modal dashboard>
+# A PUBLIC registry image Modal can pull: linux/amd64, carrying python and pip.
+# Build it with apps/node-agent/deploy/Dockerfile.modal.
+# NODE_AGENT_MODAL_IMAGE=ghcr.io/<owner>/agentpod-node-modal:v0.1.0
+# Only covers the Generic harness. Set these too if you provision an
+# OpenCode or Pi runtime on Modal — otherwise it falls back to the local
+# Docker tag and the driver refuses the provision.
+# NODE_AGENT_MODAL_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-modal-opencode:v0.1.0
+# NODE_AGENT_MODAL_PI_IMAGE=ghcr.io/<owner>/agentpod-node-modal-pi:v0.1.0
+# Modal App the sandboxes are grouped under. Grouping only; carries no state.
+# MODAL_APP_NAME=agentpod
+# Shortens the lifetime ceiling for a rotation drill. Optional, clamped to 24h,
+# and not validated at boot — see "Modal provisioner" in docs/OPERATING.md
+# before setting it.
+# MODAL_MAX_LIFETIME_MS=86400000
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -149,6 +173,11 @@ chmod 600 /etc/agentpod/hub.env
 > - `BETTER_AUTH_SECRET`: ≥ 32 characters.
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
 > - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
+> - Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `NODE_AGENT_MODAL_IMAGE` and `PROVISIONING_HUB_URL` are **all** required whenever `ENABLE_MODAL_PROVISIONING=true`, and the hub exits at startup without them, naming each one. That is deliberate: two of the four would otherwise fail silently, later, on somebody else's runtime.
+> - `NODE_AGENT_MODAL_IMAGE` must be a **public registry** reference. The driver pulls it with `images.fromRegistry(tag)` and no Modal Secret, so a private repository cannot be authenticated to and a local Docker tag like `agentpod-node:local` gives Modal nothing to pull. Boot validation rejects any value without a registry host in it; a private-but-well-formed tag passes validation and then fails at provision time.
+> - `NODE_AGENT_MODAL_IMAGE` covers the **Generic** harness only. A Modal runtime created with the OpenCode or Pi harness resolves `NODE_AGENT_MODAL_OPENCODE_IMAGE` / `NODE_AGENT_MODAL_PI_IMAGE` first, then the un-scoped `NODE_AGENT_OPENCODE_IMAGE` / `NODE_AGENT_PI_IMAGE`, then the local Docker default. Boot validation does not check these, so provision either fails with "not a registry reference Modal can pull", or — worse — silently hands Modal whatever your Docker deployment set.
+> - `PROVISIONING_HUB_URL` is required for Modal (not merely recommended, as it is for Docker) because Modal destroys every sandbox at 24 hours and the hub re-creates them on a timer, with no incoming request to take an origin from. It must be reachable **from inside a Modal sandbox** — a public URL or a tunnel, never `localhost`.
+> - On Modal's Starter plan an API token is **workspace-wide**; scoping a token per environment requires Modal's Team plan (~$250/month). Use a Modal workspace dedicated to AgentPod.
 > - Never commit this file to source control.
 
 ---

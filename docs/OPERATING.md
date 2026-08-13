@@ -319,6 +319,134 @@ Open the runtime's detail panel → **Destroy**. This stops and removes the cont
 
 Available in the UI if `ENABLE_CLOUDFLARE_SANDBOXES=true` is set in the hub env. Status: **live-unverified in v0.1.0** — use Docker for production provisioning.
 
+### Modal provisioner
+
+Available in the **New runtime** provider list if `ENABLE_MODAL_PROVISIONING=true` is set in the hub env. Configuration: see the `── Provisioning ──` block in `docs/DEPLOYMENT.md`.
+
+#### Cost, before anything else
+
+Modal **Sandboxes** carry roughly a **3× premium over standard Modal compute**, and they bill **wall-clock for as long as the sandbox exists** — not CPU burned. A sandbox sitting at 0% CPU waiting for its operator costs the same as one working flat out. A minimal always-on runtime is about **$21/month**; **Volumes bill separately**, on stored bytes, and keep billing until they are deleted.
+
+A mostly-idle fleet is therefore Modal's worst case, and AgentPod fleets are mostly idle. Modal earns its place for short, bursty, isolated work — a runtime you create, use, and destroy the same day. For a long-lived station that sits waiting for someone to open a terminal, Docker is cheaper by a wide margin and Cloudflare sleeps when idle where Modal does not.
+
+> Pricing figures are Modal's published rates read on **2026-08-13**. Re-check them before turning this on; nothing in the hub reads Modal's price list, and nothing here will tell you if it moves.
+
+#### What a Modal runtime actually is
+
+**A rolling series of disposable sandboxes anchored by one named Volume.** The Volume is named `agentpod-<runtime id>`, holds the workspace at `/workspace`, and outlives every sandbox. The sandbox is disposable and always will be.
+
+That shape is not an optimisation. Probed against a real Modal account on **2026-08-13**:
+
+- `terminate` is **irreversible**, and Modal has **no start verb at all**. Every restart is a new sandbox with a new id and a fresh root filesystem.
+- Every sandbox is destroyed by the platform at **24 hours**, however healthy it is, with **no warning and no callback**. Nothing in Modal's API rotates for you.
+- A Volume mounted **by name** does carry a workspace from one sandbox to the next — a different sandbox id read back a sentinel the previous one wrote. This single fact is what makes Modal usable.
+- Modal's **idle** timer is opt-in and off by default, and AgentPod never opts in. A busy-but-quiet station is not reaped the way a Cloudflare sandbox was on 2026-08-12.
+
+Anything written outside `/workspace` — including anything in `$HOME` — is written in sand. That is deliberate for `$HOME`: the node-agent's `config.json` holds the node id and node secret, and keeping it on the disposable root filesystem means no credential is ever left at rest in shared storage. Every new sandbox enrols afresh, the hub resumes the same node with a rotated secret, and the runtime keeps its node id and its history.
+
+#### The 24-hour ceiling, and rotation
+
+Left alone, a Modal station would simply die once a day. The hub does not leave it alone.
+
+`sweepExpiringRuntimes` runs on the existing 15-second sweeper tick and re-creates a runtime's sandbox **30 minutes before the ceiling**, i.e. at about 23h30m of instance age. It re-provisions with the **same runtime id**, so the volume name is the same and the workspace is re-attached; the station re-enrols and **keeps its node id**.
+
+What you see, per runtime, roughly once a day:
+
+1. The status goes to **`provisioning`** for a moment as the sweeper claims the row, then to **`starting`**, both carrying the `statusReason`:
+   *"re-created before this substrate's 24h instance lifetime ceiling destroyed it — the workspace is anchored outside the instance and carries over"*.
+2. The runtime returns to **`online`** once the new sandbox's node-agent enrols — usually within seconds.
+3. Files under `/workspace` carry over. **Processes do not.** Anything running inside the sandbox — a long-lived agent session, a dev server, a `tmux` you left attached — is gone. Treat a Modal station as something that restarts nightly.
+
+Rotation is deliberately narrow, and each narrowing is a refusal to spend money:
+
+- **Only `online` and `starting` rows rotate.** A `stopped`, `asleep`, `stopping`, `error` or `destroyed` runtime is never rotated. Age alone would always say a stopped runtime is due, and resurrecting one starts a sandbox nobody asked for that bills wall-clock until a human notices.
+- **Age only.** The substrate is never asked whether the sandbox is alive. A sandbox that crashed in its first minute will crash the same way again, and re-creating it would rebuild and re-bill it every 15 seconds with nobody watching. The node going offline already surfaces that; **Start** is one click for the human who looks.
+- **If the re-create fails**, the runtime goes to `error` with a reason naming the ceiling, rather than staying `online` and asserting health up to the moment it vanishes.
+
+#### `MODAL_MAX_LIFETIME_MS` — read this before setting it
+
+Optional, in milliseconds, clamped to 24 hours: it can only ever **shorten** the ceiling. It is read by the driver at hub startup, is **not** validated at boot, and an unset or unparseable value falls back to 24 hours silently. It is also handed to Modal as the sandbox's own timeout, so shortening it genuinely makes Modal kill the sandbox sooner — which is what makes it honest for a rotation drill.
+
+The rotation margin is **`min(30 minutes, ceiling ÷ 2)`**, not a flat 30 minutes. So:
+
+| Ceiling | Rotates at instance age |
+|---|---|
+| 24h (default) | 23h30m |
+| 2h | 1h30m |
+| 60m | 30m (the midpoint) |
+| 30m | 15m (the midpoint) |
+| 10m | 5m (the midpoint) |
+
+Anything **60 minutes or less rotates at the midpoint**. The clamp is deliberate and load-bearing: with a flat 30-minute margin, any ceiling under 30 minutes makes the rotation threshold negative — every instance is born past due, and the hub bills a brand-new sandbox on **every 15-second tick**, forever, with no human in the loop.
+
+To rehearse rotation without waiting a day, set `MODAL_MAX_LIFETIME_MS=1800000` (30 minutes) and restart the hub. Rotation is then due at **15 minutes** of instance age, so a runtime created just now waits 15 minutes; one that has already been up longer than that rotates on the next tick. Unset the variable afterwards — leaving it on makes every station restart every quarter of an hour and re-enrol each time.
+
+#### Stop, Start, Destroy — what each one takes
+
+Modal has no reversible stop, so these verbs do not mean quite what they mean on Docker.
+
+| Action | Sandbox | Volume (`/workspace`) | Notes |
+|---|---|---|---|
+| **Stop** | terminated, permanently | untouched | The runtime keeps its identity and its files. Reaches `stopped` only once the driver polls Modal and confirms — never merely because the stop call returned. |
+| **Start** | a **new** sandbox | re-attached by name | There is no start verb on Modal; the hub re-provisions against the same runtime id. New container, same workspace, same node id, rotated node secret. |
+| **Destroy** | terminated | **deleted** | The only action that takes your work, and it is not recoverable. |
+
+**Where the buttons are.** For a Modal runtime, use the **Runtimes** page (`/runtimes`). **Start** appears when the runtime is `stopped` or `error`; **Stop** appears when it is `online`; **Destroy** appears in every state but `provisioning` and `destroyed`. The Stop/Start buttons on a *node's* detail panel are Docker-only — a provisioned Modal node shows just **Destroy** there.
+
+**A leaked Volume bills forever and the console cannot show it.** Destroy terminates the sandbox first and deletes the Volume second, and tolerates "already gone" on both — the 24-hour ceiling means the sandbox really is often gone already. Any *other* failure leaves the runtime un-destroyed with its external id intact, on purpose, so that retrying **Destroy** converges. If a destroy ever reports an error, retry it, and then check the Modal dashboard for a Volume named `agentpod-<runtime id>`. Once the runtime row is gone, nothing in AgentPod knows that Volume exists.
+
+#### Credentials and RBAC
+
+`MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET`, from the Modal dashboard, in the hub environment.
+
+**On Modal's Starter plan a token is workspace-wide.** Scoping a token per environment requires Modal's **Team plan (~$250/month)**. There is no way to engineer around this from the hub's side: on Starter, the hub's token can see and destroy everything in that Modal workspace. Use a Modal workspace dedicated to AgentPod and nothing else.
+
+These tokens create infrastructure in a Modal workspace. They cannot reach an enrolled node — enrolment is outbound-dialled and SSH runs from your own machine.
+
+#### The image
+
+Modal pulls from a registry, runs **linux/amd64 only**, and requires **python and pip** in the image. Build it from `apps/node-agent/deploy/Dockerfile.modal` and set `NODE_AGENT_MODAL_IMAGE` to the pushed tag.
+
+Three things are non-negotiable, each fatal on its own and each failing quietly:
+
+1. **python3 and pip must be present.** The driver pulls the image and nothing else; Modal does not inject a python. Without it the sandbox never boots and the only symptom is a runtime stuck in `provisioning` until the sweeper expires it two minutes later.
+2. **`ENTRYPOINT` must be empty.** Modal requires any image `ENTRYPOINT` to end in `exec "$@"` so its runtime can take over the command, and the fleet's entrypoint never can — it enrols and then execs its own run loop. `Dockerfile.modal` clears `ENTRYPOINT` and the driver passes `/modal-entrypoint.sh` as the sandbox **command** instead.
+3. **linux/amd64 only.** On Apple Silicon the default build is arm64 and Modal rejects it — and the **base** must be amd64 too, or the build fails. `Dockerfile.modal` takes `ARG BASE_IMAGE` so you can build an amd64 base under its own tag instead of clobbering the arm64 `agentpod-node:base` your local Docker provisioner runs.
+
+```bash
+# amd64 base (Apple Silicon: this runs under emulation and is slow — wait it out)
+docker buildx build --platform linux/amd64 \
+  -f apps/node-agent/deploy/Dockerfile.base \
+  -t agentpod-node:base-amd64 --load apps/node-agent
+
+# the Modal layer, pushed to a PUBLIC repository
+docker buildx build --platform linux/amd64 \
+  --build-arg BASE_IMAGE=agentpod-node:base-amd64 \
+  -f apps/node-agent/deploy/Dockerfile.modal \
+  -t ghcr.io/<owner>/agentpod-node-modal:v0.1.0 --push apps/node-agent
+```
+
+**The repository must be public.** The driver calls Modal's `images.fromRegistry(tag)` with no Secret, so Modal has no credential to authenticate to a private registry with. A private tag passes the hub's boot check — it looks like a registry reference — and then fails at provision time.
+
+These images are **hand-built and pushed by convention; there is no CI pipeline for any of them.** Do not infer one from the tag.
+
+To sanity-check a built image before pushing, run its entrypoint test against a bind mount standing in for the Volume:
+
+```bash
+mkdir -p /tmp/fake-volume
+docker run --rm --platform linux/amd64 \
+  -v "$PWD/apps/node-agent/deploy":/t -v /tmp/fake-volume:/workspace \
+  --entrypoint sh agentpod-node-modal:local /t/test-modal-entrypoint.sh
+```
+
+#### When a Modal runtime does not come up
+
+- **Hub exits at startup naming a `MODAL_*` variable** — working as designed. Set the variable it names; the check is in `apps/hub/src/utils/validate-config.ts`.
+- **Provision fails with "not a registry reference Modal can pull"** — the resolved image had no registry host. Most often this is a runtime created with the OpenCode or Pi harness while only `NODE_AGENT_MODAL_IMAGE` was set; set `NODE_AGENT_MODAL_OPENCODE_IMAGE` / `NODE_AGENT_MODAL_PI_IMAGE` too.
+- **Stuck in `provisioning`, then `error` after two minutes** — the sandbox booted but never enrolled. Read the sandbox's logs in the Modal dashboard. The usual causes are an image without python, an arm64 image, and a `PROVISIONING_HUB_URL` the sandbox cannot reach.
+- **`[modal] WARNING: /workspace does not look like a mounted Volume`** in the sandbox log — work written there will be lost at the next rotation. Do not use that station.
+- **Every Modal runtime reports trouble at once** — suspect the credentials, not the fleet. An expired `MODAL_TOKEN_SECRET` fails every call. The driver deliberately refuses to translate an unreachable substrate into `stopped`, so this surfaces as `error`, loudly, rather than as a fleet that has quietly gone quiet.
+
 ---
 
 ## 5. Cmd-K palette
