@@ -50,8 +50,8 @@ afterAll(async () => {
 async function seedRuntime(): Promise<string> {
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
-    INSERT INTO provisioned_runtimes (id, user_id, provider, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'cloudflare', 'online', 'callback-test', 'small', 'none', now(), now())
+    INSERT INTO provisioned_runtimes (tenant_id, id, user_id, provider, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'cloudflare', 'online', 'callback-test', 'small', 'none', now(), now())
   `;
   return id;
 }

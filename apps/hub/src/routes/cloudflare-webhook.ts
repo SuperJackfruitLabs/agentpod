@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { createLogger } from "../utils/logger";
 import { db } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
 import { cloudflareSandboxes } from "../db/schema/cloudflare";
 import { eq } from "drizzle-orm";
 
@@ -123,6 +124,7 @@ async function handleSandboxCreated(data: { sandboxId: string; userId?: string }
 
   if (existing.length === 0) {
     await db.insert(cloudflareSandboxes).values({
+      tenantId: await resolveTenantForUser(data.userId),
       id: data.sandboxId,
       userId: data.userId,
       status: "running",

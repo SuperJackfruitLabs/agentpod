@@ -30,6 +30,7 @@ process.env.ENABLE_MODAL_PROVISIONING = "true";
 process.env.PROVISIONING_HUB_URL = "https://hub.test";
 
 import { test, expect, beforeAll, afterAll, afterEach } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
@@ -207,7 +208,7 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
       return next();
     }
     return c.json({ error: "Unauthorized", message: "Valid session or API key required" }, 401);
@@ -579,10 +580,12 @@ test("DELETE /api/runtimes/:id removes the provisioned node + its stations (no g
   // link the runtime to it (as the gateway's enrollNode would).
   const nodeId = "node_ghost_test_001";
   await db.insert(nodes).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: nodeId, userId: TEST_USER, name: "ghost", hostname: "ghostbox",
     os: "linux", arch: "amd64", secretHash: "x",
   });
   await db.insert(stations).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: "st_ghost_001", userId: TEST_USER, nodeId, harness: "opencode",
     stationKey: "opencode:ws", kind: "workspace", displayName: "/workspace",
   });
@@ -916,8 +919,8 @@ test("an asleep runtime is never swept into error", async () => {
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep', 'asleep', 'sleeper', 'small', 'none',
+      (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep', 'asleep', 'sleeper', 'small', 'none',
             now() - interval '1 day', now() - interval '1 day')
   `;
 
@@ -1232,8 +1235,8 @@ test("an asleep runtime is never swept by the stop sweeper", async () => {
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep-stop', 'asleep', 'sleeper2', 'small', 'none',
+      (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'cloudflare', 'ext-asleep-stop', 'asleep', 'sleeper2', 'small', 'none',
             now() - interval '1 day', now() - interval '1 day')
   `;
 
@@ -1264,8 +1267,8 @@ test("a runtime still being provisioned (no external id yet) is not swept", asyn
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'docker', NULL, 'provisioning', 'slow-pull', 'small', 'none',
+      (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'docker', NULL, 'provisioning', 'slow-pull', 'small', 'none',
             now() - interval '1 day', now() - interval '1 day')
   `;
 
@@ -1341,8 +1344,8 @@ test("a row written without an instance start time keeps NULL — the column is 
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'docker', 'ext-legacy-row', 'online', 'legacy', 'small', 'none',
+      (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'docker', 'ext-legacy-row', 'online', 'legacy', 'small', 'none',
             now() - interval '30 days', now() - interval '30 days')
   `;
 
@@ -1840,8 +1843,8 @@ test("skips a row with no instance clock instead of guessing its age", async () 
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${TEST_USER}, 'modal', 'vol-legacy#sb-legacy', 'online', 'legacy-modal', 'small', 'none',
+      (tenant_id, id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${TEST_USER}, 'modal', 'vol-legacy#sb-legacy', 'online', 'legacy-modal', 'small', 'none',
             now() - interval '30 days', now() - interval '30 days')
   `;
 

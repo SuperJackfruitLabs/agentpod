@@ -1,10 +1,12 @@
-import { pgTable, text, integer, timestamp, index, pgEnum, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, index, uniqueIndex, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { tenants } from "./tenants";
 
 export const nodeStatusEnum = pgEnum("node_status", ["online", "offline"]);
 
 export const nodes = pgTable("nodes", {
   id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   hostname: text("hostname").notNull(),
@@ -19,12 +21,19 @@ export const nodes = pgTable("nodes", {
   status: nodeStatusEnum("status").notNull().default("offline"),
   lastSeenAt: timestamp("last_seen_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-}, (t) => [index("nodes_user_id_idx").on(t.userId)]);
+}, (t) => [
+  index("nodes_user_id_idx").on(t.userId),
+  index("nodes_tenant_id_idx").on(t.tenantId),
+  // Composite target for the child FKs below: a station cannot claim a node in
+  // another tenant, because the pair it references has to exist.
+  uniqueIndex("nodes_id_tenant_idx").on(t.id, t.tenantId),
+]);
 
 export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "starting", "online", "stopping", "stopped", "asleep", "error", "destroyed"]);
 
 export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(),
   externalId: text("external_id"),
@@ -54,14 +63,21 @@ export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   externalStartedAt: timestamp("external_started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (t) => [index("provisioned_runtimes_user_id_idx").on(t.userId)]);
+}, (t) => [
+  index("provisioned_runtimes_user_id_idx").on(t.userId),
+  index("provisioned_runtimes_tenant_id_idx").on(t.tenantId),
+]);
 
 export const enrollmentTokens = pgTable("enrollment_tokens", {
   id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   provisionedRuntimeId: text("provisioned_runtime_id").references(() => provisionedRuntimes.id, { onDelete: "set null" }),
-}, (t) => [index("enrollment_tokens_user_id_idx").on(t.userId)]);
+}, (t) => [
+  index("enrollment_tokens_user_id_idx").on(t.userId),
+  index("enrollment_tokens_tenant_id_idx").on(t.tenantId),
+]);

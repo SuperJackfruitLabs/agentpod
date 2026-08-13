@@ -65,6 +65,7 @@ const testApp = new Hono()
     c.set("user", {
       id: userId && userId !== "anonymous" ? userId : "anonymous",
       authType: "api_key",
+        tenantId: "fleet_00000000000000000000",
     } satisfies AuthUser);
     return next();
   })

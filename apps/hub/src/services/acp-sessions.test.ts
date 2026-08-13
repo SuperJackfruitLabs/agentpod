@@ -40,6 +40,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { Hono } from "hono";
 import { asc, eq } from "drizzle-orm";
 import type { AcpEvent, DetectedStation } from "@agentpod/contract";
@@ -999,6 +1000,7 @@ test(
       ]);
       const staleId = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         id: staleId,
         stationId: station!.id,
         userId: TEST_USER,
@@ -1113,6 +1115,7 @@ test(
       // A stale row as if the hub crashed mid-session.
       const staleId = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         id: staleId,
         stationId: station.id,
         userId: TEST_USER,
@@ -1124,6 +1127,7 @@ test(
         lastEventAt: new Date(),
       });
       await db.insert(acpEvents).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         sessionId: staleId,
         seq: 1,
         type: "state",
@@ -1135,6 +1139,7 @@ test(
       // concurrent sessions before the restart) — each must be closed by id.
       const staleId2 = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         id: staleId2,
         stationId: station.id,
         userId: TEST_USER,
@@ -1149,6 +1154,7 @@ test(
       // A stale row whose station is gone (transcript survives; no close possible).
       const orphanId = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         id: orphanId,
         stationId: "station_deleted_long_ago",
         userId: TEST_USER,
@@ -1569,6 +1575,7 @@ test(
         const id = `acps_${crypto.randomUUID()}`;
         orphanIds.push(id);
         await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
           id,
           stationId: station.id,
           userId: TEST_USER,
@@ -1583,6 +1590,7 @@ test(
       // … and a poisoned marker pointing at the process the LIVE session holds.
       const poisonedId = `acps_${crypto.randomUUID()}`;
       await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
         id: poisonedId,
         stationId: station.id,
         userId: TEST_USER,

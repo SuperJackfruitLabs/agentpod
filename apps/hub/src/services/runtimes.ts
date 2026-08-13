@@ -34,6 +34,8 @@
 
 import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
+import { tenantScope } from "../db/tenant-scope";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { mintEnrollmentToken } from "./enrollment";
 import {
@@ -157,6 +159,7 @@ export async function createRuntime(
 
   await db.insert(provisionedRuntimes).values({
     id,
+    tenantId: await resolveTenantForUser(userId),
     userId,
     provider,
     status: "provisioning",
@@ -274,9 +277,11 @@ export async function listRuntimes(userId: string): Promise<ProvisionedRuntime[]
     .select()
     .from(provisionedRuntimes)
     .where(
-      and(
+      tenantScope(
+        provisionedRuntimes,
+        await resolveTenantForUser(userId),
         eq(provisionedRuntimes.userId, userId),
-        ne(provisionedRuntimes.status, "destroyed")
+        ne(provisionedRuntimes.status, "destroyed"),
       )
     );
 

@@ -11,6 +11,9 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
+import { nodes } from "../db/schema/nodes";
+import { tenantScope } from "../db/tenant-scope";
+import { resolveTenantForUser } from "../auth/tenant";
 import { VERB_RESULTS } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
@@ -42,12 +45,25 @@ export async function adoptStations(
   const toAdopt = detected.filter((d) => keys.includes(d.key));
   if (toAdopt.length === 0) return [];
 
+  // A station's tenant is its node's, read from the node rather than resolved
+  // from the caller. The composite FK (stations.node_id, tenant_id) → nodes
+  // makes the alternative unrepresentable anyway: a request cannot adopt a
+  // station into a tenant its node is not in, so asking the node is the only
+  // answer that can succeed.
+  const [nodeRow] = await db
+    .select({ tenantId: nodes.tenantId })
+    .from(nodes)
+    .where(eq(nodes.id, nodeId));
+  if (!nodeRow) throw new Error(`cannot adopt stations on unknown node ${nodeId}`);
+  const tenantId = nodeRow.tenantId;
+
   // ── First pass: upsert all rows without parent links ─────────────────────
   for (const station of toAdopt) {
     await db
       .insert(stations)
       .values({
         id: `station_${crypto.randomUUID()}`,
+        tenantId,
         userId,
         nodeId,
         harness: station.harness,
@@ -113,10 +129,13 @@ export async function listAdopted(
   userId: string,
   nodeId: string
 ): Promise<StationRow[]> {
+  const tenantId = await resolveTenantForUser(userId);
   return db
     .select()
     .from(stations)
-    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+    .where(
+      tenantScope(stations, tenantId, eq(stations.userId, userId), eq(stations.nodeId, nodeId)),
+    );
 }
 
 // ─── getStation ───────────────────────────────────────────────────────────────

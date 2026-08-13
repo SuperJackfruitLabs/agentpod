@@ -17,6 +17,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { Hono } from "hono";
 
 import { db, rawSql } from "../db/drizzle";
@@ -47,9 +48,9 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     } else {
-      c.set("user", { id: "anonymous", authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: "anonymous", authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     }
     return next();
   })
@@ -187,23 +188,27 @@ test(
 
       await db.insert(stationAudit).values([
         {
+        tenantId: BOOTSTRAP_TENANT_ID,
           id: "audit_row_older",
           userId: TEST_USER,
           nodeId,
           stationKey: STATION_KEY,
           verb: "fs.list",
-          paramsSummary: {},
+          paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
           result: "ok",
           error: null,
           createdAt: older,
         },
         {
+        tenantId: BOOTSTRAP_TENANT_ID,
           id: "audit_row_newer",
           userId: TEST_USER,
           nodeId,
           stationKey: STATION_KEY,
           verb: "fs.read",
-          paramsSummary: {},
+          paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
           result: "ok",
           error: null,
           createdAt: now,

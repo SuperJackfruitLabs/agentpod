@@ -18,6 +18,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { eq } from "drizzle-orm";
 import { db, rawSql } from "../db/drizzle";
 import { provisionedRuntimes } from "../db/schema/nodes";
@@ -91,6 +92,7 @@ test("linked path: mintEnrollmentToken({ provisionedRuntimeId }) → enrollNode 
   // Insert a provisioning runtime row (no nodeId yet)
   const runtimeId = `rt_test_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await db.insert(provisionedRuntimes).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: runtimeId,
     userId: TEST_USER,
     provider: "docker",

@@ -17,11 +17,15 @@ import {
   jsonb,
   primaryKey,
   index,
+  uniqueIndex,
+  foreignKey,
   check,
 } from "drizzle-orm/pg-core";
+import { tenants } from "./tenants";
 
 export const acpSessions = pgTable("acp_sessions", {
   id: text("id").primaryKey(),                                        // "acps_" + uuid-ish
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   // Deliberately NOT a FK to stations.id (no ON DELETE CASCADE), mirroring the
   // station_audit.stationKey precedent: transcripts must survive station
   // deletion. Destroying a throwaway runtime/station must not silently erase
@@ -42,10 +46,18 @@ export const acpSessions = pgTable("acp_sessions", {
   index("acp_sessions_station_id_idx").on(t.stationId),
   // Ordering index for the paginated per-station history list (newest first).
   index("acp_sessions_station_activity_idx").on(t.stationId, t.lastEventAt.desc()),
+  index("acp_sessions_tenant_id_idx").on(t.tenantId),
+  // Composite target for the two child tables below.
+  uniqueIndex("acp_sessions_id_tenant_idx").on(t.id, t.tenantId),
 ]);
 
 export const acpEvents = pgTable("acp_events", {
   sessionId: text("session_id").notNull().references(() => acpSessions.id, { onDelete: "cascade" }),
+  // A transcript belongs to the tenant its session does. Carried on the row
+  // rather than reached through the session, so that reading the largest table
+  // in the database does not require a join to be safe — and enforced as a
+  // composite FK below, so the copy cannot disagree with the original.
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   seq: integer("seq").notNull(),
   type: text("type").notNull(),
   payload: jsonb("payload").notNull(),
@@ -64,6 +76,12 @@ export const acpEvents = pgTable("acp_events", {
   // once ended and older than the retention window, and its events go with it.
   // That keeps a transcript whole, which a legal record has to be.
   index("acp_events_created_at_idx").on(t.createdAt),
+  index("acp_events_tenant_id_idx").on(t.tenantId),
+  foreignKey({
+    columns: [t.sessionId, t.tenantId],
+    foreignColumns: [acpSessions.id, acpSessions.tenantId],
+    name: "acp_events_session_tenant_fk",
+  }).onDelete("cascade"),
 ]);
 
 /**
@@ -86,6 +104,7 @@ export const acpEvents = pgTable("acp_events", {
  */
 export const acpRuns = pgTable("acp_runs", {
   id: text("id").primaryKey(),                                        // "attempt_" + uuid (AcpRunId)
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   sessionId: text("session_id").notNull().references(() => acpSessions.id, { onDelete: "cascade" }),
   stationId: text("station_id").notNull(),
 
@@ -106,6 +125,12 @@ export const acpRuns = pgTable("acp_runs", {
   index("acp_runs_station_started_idx").on(t.stationId, t.startedAt.desc()),
   // The join from the board's side: given kaambaan's runId, find what ran.
   index("acp_runs_external_idx").on(t.externalRunId),
+  index("acp_runs_tenant_id_idx").on(t.tenantId),
+  foreignKey({
+    columns: [t.sessionId, t.tenantId],
+    foreignColumns: [acpSessions.id, acpSessions.tenantId],
+    name: "acp_runs_session_tenant_fk",
+  }).onDelete("cascade"),
 
   // Our own key is ours. A `run_…` here would be an orchestrator's work run
   // standing in as this hub's primary key — the collision this table was born

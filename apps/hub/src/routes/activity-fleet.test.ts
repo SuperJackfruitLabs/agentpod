@@ -18,6 +18,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { Hono } from "hono";
 
 import { db, rawSql } from "../db/drizzle";
@@ -38,11 +39,12 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     } else {
       c.set("user", {
         id: "anonymous",
         authType: "api_key",
+        tenantId: "fleet_00000000000000000000",
       } satisfies AuthUser);
     }
     return next();
@@ -85,34 +87,40 @@ test(
 
     await db.insert(stationAudit).values([
       {
+        tenantId: BOOTSTRAP_TENANT_ID,
         id: "fleet-audit-a-older",
         userId: USER_A,
         nodeId: "node-a-test",
         stationKey: "station-a-test",
         verb: "fs.list",
-        paramsSummary: {},
+        paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
         result: "ok",
         error: null,
         createdAt: older,
       },
       {
+        tenantId: BOOTSTRAP_TENANT_ID,
         id: "fleet-audit-a-newer",
         userId: USER_A,
         nodeId: "node-a-test",
         stationKey: "station-a-test",
         verb: "fs.read",
-        paramsSummary: {},
+        paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
         result: "ok",
         error: null,
         createdAt: now,
       },
       {
+        tenantId: BOOTSTRAP_TENANT_ID,
         id: "fleet-audit-b-1",
         userId: USER_B,
         nodeId: "node-b-test",
         stationKey: "station-b-test",
         verb: "terminal.start",
-        paramsSummary: {},
+        paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
         result: "ok",
         error: null,
         createdAt: now,
@@ -163,23 +171,27 @@ test(
 
     await db.insert(stationAudit).values([
       {
+        tenantId: BOOTSTRAP_TENANT_ID,
         id: "fleet-audit-sep-a",
         userId: USER_A,
         nodeId: "node-a",
         stationKey: "key-a",
         verb: "fs.write",
-        paramsSummary: {},
+        paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
         result: "ok",
         error: null,
         createdAt: now,
       },
       {
+        tenantId: BOOTSTRAP_TENANT_ID,
         id: "fleet-audit-sep-b",
         userId: USER_B,
         nodeId: "node-b",
         stationKey: "key-b",
         verb: "terminal.start",
-        paramsSummary: {},
+        paramsSummary: {
+        tenantId: BOOTSTRAP_TENANT_ID,},
         result: "ok",
         error: null,
         createdAt: now,

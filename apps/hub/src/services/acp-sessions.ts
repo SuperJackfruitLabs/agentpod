@@ -46,6 +46,7 @@ import type {
   AcpSessionStatus,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
@@ -150,6 +151,8 @@ export interface CreateSessionInput {
 
 interface LiveSession {
   id: string;
+  /** The session's tenant, carried so every event write inherits it. */
+  tenantId: string;
   stationId: string;
   userId: string;
   nodeId: string;
@@ -341,6 +344,11 @@ function persistEvent(
   const done = enqueue(live, async () => {
     await db.insert(acpEvents).values({
       sessionId: live.id,
+      // The session's tenant, not a re-resolved one. acp_events carries a
+      // composite FK to (acp_sessions.id, tenant_id), so an event can only ever
+      // sit in its session's tenant — copying it from `live` is the copy the
+      // database checks.
+      tenantId: live.tenantId,
       seq,
       type,
       payload: payload as object,
@@ -640,8 +648,13 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
 
   const id = `acps_${crypto.randomUUID()}`;
   const now = new Date();
+  // Resolved once, here, and carried on the live session: every event this
+  // session ever writes inherits it, so a transcript cannot end up split across
+  // tenants by a later re-resolution.
+  const tenantId = await resolveTenantForUser(userId);
   const live: LiveSession = {
     id,
+    tenantId,
     stationId,
     userId,
     nodeId,
@@ -673,6 +686,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     await boundedDb(
       db.insert(acpSessions).values({
         id,
+        tenantId: live.tenantId,
         stationId,
         userId,
         mode,
@@ -1034,8 +1048,17 @@ async function appendEndedState(sessionId: string, reason: string): Promise<void
   const seq = Number(agg?.maxSeq ?? 0) + 1;
   const createdAt = new Date();
   const payload = { status: "ended", reason };
+  // This session is not live, so its tenant is read back from the row rather
+  // than carried in memory. Same rule as persistEvent: the event's tenant is the
+  // session's, which the composite FK then checks.
+  const [sessionRow] = await db
+    .select({ tenantId: acpSessions.tenantId })
+    .from(acpSessions)
+    .where(eq(acpSessions.id, sessionId));
+  if (!sessionRow) return;
   await db.insert(acpEvents).values({
     sessionId,
+    tenantId: sessionRow.tenantId,
     seq,
     type: "state",
     payload,

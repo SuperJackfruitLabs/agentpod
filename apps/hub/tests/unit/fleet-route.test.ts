@@ -70,6 +70,7 @@ function makeTestApp() {
       c.set("user", {
         id: TEST_USER_ID,
         authType: "api_key",
+        tenantId: "fleet_00000000000000000000",
       } satisfies AuthUser);
       return next();
     })
@@ -175,7 +176,7 @@ describe("GET /api/fleet/stats", () => {
     });
     const app = new Hono()
       .use("/api/fleet/*", async (c, next) => {
-        c.set("user", { id: TEST_USER_ID, authType: "api_key" } satisfies AuthUser);
+        c.set("user", { id: TEST_USER_ID, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
         return next();
       })
       .route("/api/fleet", routes);

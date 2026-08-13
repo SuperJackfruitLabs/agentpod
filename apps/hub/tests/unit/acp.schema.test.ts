@@ -53,8 +53,17 @@ test("acpSessions.stationId column is named station_id", () => {
 });
 
 test("acpSessions.stationId has NO foreign key (transcripts must survive station deletion)", () => {
+  // Asserts the property rather than a count. This used to read
+  // `foreignKeys.length === 0`, which meant the right thing only for as long as
+  // station_id was the sole candidate — adding the tenant FK broke it while the
+  // invariant it guards was untouched. Naming the column keeps it pointed at
+  // what actually matters: destroying a throwaway station must not cascade a
+  // transcript away.
   const config = getTableConfig(acpSessions);
-  expect(config.foreignKeys.length).toBe(0);
+  const stationFks = config.foreignKeys.filter((fk) =>
+    fk.reference().columns.some((c) => c.name === "station_id"),
+  );
+  expect(stationFks).toEqual([]);
 });
 
 test("acpSessions has an index on station_id", () => {
@@ -88,9 +97,26 @@ test("acpSessions has a (station_id, last_event_at desc) activity index", () => 
 
 test("acpEvents.sessionId still has a foreign key to acpSessions.id ON DELETE CASCADE", () => {
   const config = getTableConfig(acpEvents);
-  expect(config.foreignKeys.length).toBe(1);
-  const fk = config.foreignKeys[0];
-  expect(fk.onDelete).toBe("cascade");
+  const sessionFk = config.foreignKeys.find((fk) => {
+    const cols = fk.reference().columns.map((c) => c.name);
+    return cols.includes("session_id") && !cols.includes("tenant_id");
+  });
+  expect(sessionFk).toBeDefined();
+  expect(sessionFk!.onDelete).toBe("cascade");
+});
+
+test("acpEvents carries a composite FK pinning an event to its session's tenant", () => {
+  // The copied fact, held honest. acp_events.tenant_id duplicates
+  // acp_sessions.tenant_id so the largest table in the database can be read
+  // safely without a join; this is what stops the copy drifting from the
+  // original, and it cascades for the same reason the plain session FK does.
+  const config = getTableConfig(acpEvents);
+  const composite = config.foreignKeys.find((fk) => {
+    const cols = fk.reference().columns.map((c) => c.name).sort();
+    return cols.join() === ["session_id", "tenant_id"].join();
+  });
+  expect(composite).toBeDefined();
+  expect(composite!.onDelete).toBe("cascade");
 });
 
 test("acpEvents.sessionId column is named session_id", () => {

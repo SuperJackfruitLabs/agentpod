@@ -51,8 +51,8 @@ const HOST_INFO = { hostname: "identity-test", os: "linux", arch: "amd64", cpuCo
 async function seedRuntime(userId: string): Promise<string> {
   const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   await rawSql`
-    INSERT INTO provisioned_runtimes (id, user_id, provider, status, name, resource_tier, harness, created_at, updated_at)
-    VALUES (${id}, ${userId}, 'docker', 'provisioning', 'identity-test', 'small', 'none', now(), now())
+    INSERT INTO provisioned_runtimes (tenant_id, id, user_id, provider, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES ('fleet_00000000000000000000', ${id}, ${userId}, 'docker', 'provisioning', 'identity-test', 'small', 'none', now(), now())
   `;
   return id;
 }

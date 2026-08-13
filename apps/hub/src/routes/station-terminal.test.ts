@@ -46,10 +46,10 @@ const testApp = new Hono()
   .use("/api/*", async (c, next) => {
     const userId = c.req.header("X-Test-User-Id");
     if (userId && userId !== "anonymous") {
-      c.set("user", { id: userId, authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: userId, authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     } else {
       // No header → anonymous; the terminal route rejects this with 1008.
-      c.set("user", { id: "anonymous", authType: "api_key" } satisfies AuthUser);
+      c.set("user", { id: "anonymous", authType: "api_key" , tenantId: "fleet_00000000000000000000"} satisfies AuthUser);
     }
     return next();
   })

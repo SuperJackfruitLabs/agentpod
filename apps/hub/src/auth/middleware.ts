@@ -11,6 +11,7 @@ import { createMiddleware } from "hono/factory";
 import type { Context, Next } from "hono";
 import { timingSafeEqual } from "crypto";
 import { auth, type Session, type User } from "./drizzle-auth";
+import { BOOTSTRAP_TENANT_ID } from "./tenant";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
 
@@ -41,6 +42,16 @@ export interface AuthUser {
   name?: string;
   image?: string;
   authType: "better_auth" | "api_key";
+  /**
+   * The isolation boundary this caller acts in.
+   *
+   * Resolved here, at the same layer that resolves `config.defaultUserId` for
+   * the service-auth caller — which is plain configuration and never was a
+   * membership lookup either. One tenant exists today, so every authenticated
+   * caller gets it; when the Organization plane arrives this becomes a
+   * membership lookup and nothing below this layer changes. See ./tenant.ts.
+   */
+  tenantId: string;
 }
 
 /**
@@ -73,6 +84,7 @@ export const sessionMiddleware = createMiddleware(async (c: Context, next: Next)
         name: session.user.name,
         image: session.user.image ?? undefined,
         authType: "better_auth",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", session.session);
       c.set("betterAuthUser", session.user);
@@ -82,6 +94,7 @@ export const sessionMiddleware = createMiddleware(async (c: Context, next: Next)
       c.set("user", {
         id: "anonymous",
         authType: "api_key",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", null);
       c.set("betterAuthUser", null);
@@ -91,6 +104,7 @@ export const sessionMiddleware = createMiddleware(async (c: Context, next: Next)
     c.set("user", {
       id: "anonymous",
       authType: "api_key",
+      tenantId: BOOTSTRAP_TENANT_ID,
     });
     c.set("session", null);
     c.set("betterAuthUser", null);
@@ -126,6 +140,7 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
         name: session.user.name,
         image: session.user.image ?? undefined,
         authType: "better_auth",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", session.session);
       c.set("betterAuthUser", session.user);
@@ -151,6 +166,7 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
       c.set("user", {
         id: config.defaultUserId,
         authType: "api_key",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", null);
       c.set("betterAuthUser", null);
@@ -170,6 +186,7 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
           name: session.user.name,
           image: session.user.image ?? undefined,
           authType: "better_auth",
+          tenantId: BOOTSTRAP_TENANT_ID,
         });
         c.set("session", session.session);
         c.set("betterAuthUser", session.user);
@@ -219,6 +236,7 @@ export const optionalAuthMiddleware = createMiddleware(async (c: Context, next: 
         name: session.user.name,
         image: session.user.image ?? undefined,
         authType: "better_auth",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", session.session);
       c.set("betterAuthUser", session.user);
@@ -238,6 +256,7 @@ export const optionalAuthMiddleware = createMiddleware(async (c: Context, next: 
       c.set("user", {
         id: config.defaultUserId,
         authType: "api_key",
+        tenantId: BOOTSTRAP_TENANT_ID,
       });
       c.set("session", null);
       c.set("betterAuthUser", null);

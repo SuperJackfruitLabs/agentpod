@@ -5,6 +5,10 @@
  * Each module defines tables for a specific domain.
  */
 
+// Tenants — the local isolation boundary every scoped table hangs off.
+// First, because everything below references it.
+export * from "./tenants";
+
 // Authentication (Better Auth tables)
 export * from "./auth";
 

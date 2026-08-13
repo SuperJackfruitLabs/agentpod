@@ -25,6 +25,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { db, rawSql } from "../db/drizzle";
 import { provisionedRuntimes } from "../db/schema/nodes";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
@@ -112,6 +113,7 @@ beforeAll(async () => {
   testNodeId = enrolledA.nodeId;
 
   await db.insert(provisionedRuntimes).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: `runtime_autoadopt_opencode_${crypto.randomUUID().slice(0, 8)}`,
     userId: TEST_USER,
     provider: "docker",
@@ -132,6 +134,7 @@ beforeAll(async () => {
   noneNodeId = enrolledB.nodeId;
 
   await db.insert(provisionedRuntimes).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: `runtime_autoadopt_none_${crypto.randomUUID().slice(0, 8)}`,
     userId: TEST_USER,
     provider: "docker",
@@ -273,6 +276,7 @@ test(
     const failNodeId = enrolledC.nodeId;
 
     await db.insert(provisionedRuntimes).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
       id: `runtime_autoadopt_fail_${crypto.randomUUID().slice(0, 8)}`,
       userId: TEST_USER,
       provider: "docker",

@@ -28,6 +28,7 @@ import {
   KaambaanMembershipId,
   KaambaanAgentId,
   KaambaanRunId,
+  TenantId,
   NodeId,
   RuntimeId,
   EnrollmentTokenId,
@@ -90,6 +91,7 @@ const VALIDATORS: Record<string, ZodType> = {
 
   // AgentPod-owned. AgentPod is the only minter, so these are pinned to exactly
   // what the mint sites produce.
+  "agentpod.tenant": TenantId,
   "agentpod.node": NodeId,
   "agentpod.runtime": RuntimeId,
   "agentpod.enrollmentToken": EnrollmentTokenId,

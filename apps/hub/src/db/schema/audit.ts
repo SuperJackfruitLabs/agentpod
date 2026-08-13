@@ -9,11 +9,13 @@
  */
 
 import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { tenants } from "./tenants";
 
 export const stationAudit = pgTable(
   "station_audit",
   {
     id:           text("id").primaryKey(),
+    tenantId:     text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
     userId:       text("user_id").notNull(),
     nodeId:       text("node_id").notNull(),
     stationKey:   text("station_key").notNull(),
@@ -28,5 +30,6 @@ export const stationAudit = pgTable(
     index("station_audit_station_key_idx").on(t.stationKey),
     index("station_audit_node_id_idx").on(t.nodeId),
     index("station_audit_created_at_idx").on(t.createdAt),
+    index("station_audit_tenant_id_idx").on(t.tenantId),
   ]
 );

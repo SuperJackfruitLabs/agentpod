@@ -21,6 +21,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 
 import { db, rawSql } from "../../src/db/drizzle";
 import { acpSessions, acpRuns } from "../../src/db/schema/acp";
@@ -38,6 +39,10 @@ type RunRow = typeof acpRuns.$inferInsert;
 
 const runRow = (over: Partial<RunRow>): RunRow => ({
   id: OWN_ID,
+  // An attempt sits in its session's tenant — the composite FK added by
+  // migration 0036 means these must agree, and the session below is seeded into
+  // the same one.
+  tenantId: BOOTSTRAP_TENANT_ID,
   sessionId: SESSION_ID,
   stationId: STATION_ID,
   state: "working",
@@ -74,6 +79,7 @@ beforeAll(async () => {
   await rawSql`DELETE FROM acp_runs WHERE station_id = ${STATION_ID}`;
   await rawSql`DELETE FROM acp_sessions WHERE station_id = ${STATION_ID}`;
   await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id: SESSION_ID,
     stationId: STATION_ID,
     userId: USER_ID,
