@@ -5,8 +5,8 @@
  * Endpoint: GET /public/nodes/gateway (WebSocket upgrade)
  *
  * Auth: Authorization: Bearer <nodeId>:<nodeSecret>
- * On open:       register + set online
- * On heartbeat:  refresh online + ack
+ * On open:       register + set online + complete any pending runtime start
+ * On heartbeat:  refresh online + ack (+ the same start completion)
  * On close:      cancel deferred work + unregister + set offline
  */
 
@@ -19,6 +19,7 @@ import type { Send } from "../services/connection-manager";
 import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
 import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
+import { completeRuntimeStartForNode } from "../services/runtimes";
 import { refreshAdoptedCapabilities } from "../services/station-registry";
 import { recordHealth, clearNode } from "../services/health-cache";
 
@@ -83,6 +84,17 @@ export const gatewayRoutes = new Hono().get(
         send = (m) => ws.send(JSON.stringify(m));
         connectionManager.register(nodeId, send);
         await setNodeStatus(nodeId, "online");
+        // A node the hub already knows dialling in is evidence its container is
+        // up — the same evidence enrolment carries. A resumed instance (Fly)
+        // keeps its credential and never re-enrols, so without this its runtime
+        // stayed `starting` until the sweeper called it an error (#281).
+        // Epoch-guarded: a socket already replaced mid-await does not speak for
+        // the node — the replacement runs this same completion for itself.
+        // Awaited before resolveAuth so the runtime row is settled before any
+        // frame is processed; completeRuntimeStartForNode never throws.
+        if (connectionManager.isCurrent(nodeId, send)) {
+          await completeRuntimeStartForNode(nodeId);
+        }
         resolveAuth(true);
 
         // Auto-adopt provisioned harness station once the node can answer detect.
@@ -143,6 +155,13 @@ export const gatewayRoutes = new Hono().get(
             connectionManager.register(authed, send);
           }
           await setNodeStatus(authed, "online");
+          // Same evidence as a connect, for the case onOpen cannot cover:
+          // startRuntime writes `starting` after the driver call returns, so a
+          // runtime can enter `starting` while its node's socket is already
+          // open and no onOpen will ever fire for it. A beat away beats the
+          // sweeper's two-minute error. No-ops (no write, no row matched)
+          // whenever the runtime is not `starting`, which is almost always.
+          await completeRuntimeStartForNode(authed);
           connectionManager.send(authed, { type: "ack", ts: Date.now() });
         } else if (parsed.data.type === "health") {
           recordHealth(authed, parsed.data.stations);
