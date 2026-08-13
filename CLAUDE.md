@@ -23,8 +23,8 @@ On an enrolled node, `apn status|stop|start|restart|logs [-f]` and `apn service 
 ## Workflow
 
 - TDD: failing test first, including a regression test for every bug fix.
-- Branches: work on `develop`; release via PR → `main` (required checks: `contract`, `hub`, `node-agent`, `console`).
-- Releases: tag `v*` on `main` → `release-node-agent.yml` publishes binaries + `install.sh` + `SHA256SUMS` (self-update verifies against SHA256SUMS — an incomplete release bricks fleet updates).
+- Branches: work on `develop`; release via PR → `main` (required checks: `contract`, `hub`, `node-agent`, `console`, `worker`; `strict`, so a branch must be up to date before it merges — and nothing, including a workflow, can push straight to `main`).
+- Releases: tag `v*` on `main` → `release-node-agent.yml` publishes binaries + `install.sh` + `SHA256SUMS` (self-update verifies against SHA256SUMS — an incomplete release bricks fleet updates), then opens a `chore/fly-pin-<tag>` PR moving the Fly images' `ARG AGENTPOD_VERSION` onto it. Merge that PR before publishing Fly images; `fly/node-image/check-version-pin.sh` fails CI until you do.
 - Console production builds need `PUBLIC_HUB_URL=https://hub.agentpod.dev` baked in at build time (a plain build points the deployed console at localhost).
 
 ## Gotchas

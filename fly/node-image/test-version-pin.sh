@@ -69,6 +69,11 @@ RUN curl -fsSL -o /agentpod-node "https://github.com/rakeshgangwar/agentpod/rele
 EOF
 }
 
+# What a Dockerfile currently pins, read the same way both scripts read it.
+real_pin_of() {
+  sed -n 's/^ARG AGENTPOD_VERSION=\([^ ]*\).*$/\1/p' "$1" | head -n 1
+}
+
 # Pin equal to latest: passes.
 write_dockerfile Dockerfile v0.1.24
 write_dockerfile Dockerfile.pi v0.1.24
@@ -121,14 +126,145 @@ else
   pass "a Dockerfile with no ARG default is an error"
 fi
 
+# ── Moving the pin: bump-version-pin.sh ──────────────────────────────────────
+# The check above is only half the story. Nothing moved the pin until #302, so
+# every release produced a mechanical two-line PR (#294, #301) before a Fly
+# image could be published. These cases are the ones the release workflow rides
+# on, so they are exercised here rather than only in a workflow nobody can run
+# without cutting a release.
+BUMP="$HERE/bump-version-pin.sh"
+
+# A file the bump must not touch beyond the ARG line: the surrounding comments
+# are what tell the next reader why the pin exists at all.
+write_pinned_pair() {
+  write_dockerfile Dockerfile "$1"
+  write_dockerfile Dockerfile.pi "${2:-$1}"
+}
+
+# Behind the release: both files move, and the run reports it as a change.
+write_pinned_pair v0.1.25
+if sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1; then
+  if [ "$(real_pin_of "$TMP/Dockerfile")" = v0.1.26 ] &&
+    [ "$(real_pin_of "$TMP/Dockerfile.pi")" = v0.1.26 ] &&
+    grep -q "changed=1" "$TMP/out"; then
+    pass "a pin behind the release is bumped in both Dockerfiles"
+  else
+    fail "bump left the pins at $(real_pin_of "$TMP/Dockerfile")/$(real_pin_of "$TMP/Dockerfile.pi"): $(cat "$TMP/out")"
+  fi
+else
+  fail "bump of a stale pin exited non-zero: $(cat "$TMP/out")"
+fi
+
+# The bumped result must satisfy the guard — the two scripts agreeing is the
+# whole point, and is why the bump reuses --compare instead of its own parser.
+if sh "$CHECK" --latest v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1; then
+  pass "the bumped Dockerfiles pass the guard"
+else
+  fail "the bumped Dockerfiles still fail the guard: $(cat "$TMP/out")"
+fi
+
+# Nothing but the ARG line changes: same line count, comments intact.
+write_pinned_pair v0.1.25
+before_lines="$(wc -l <"$TMP/Dockerfile")"
+sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" >/dev/null 2>&1
+after_lines="$(wc -l <"$TMP/Dockerfile")"
+if [ "$before_lines" = "$after_lines" ] && grep -q "releases/download" "$TMP/Dockerfile"; then
+  pass "the bump rewrites only the ARG line"
+else
+  fail "the bump disturbed the file: $before_lines -> $after_lines lines"
+fi
+
+# Already current: a clean no-op. This is the re-run case — cutting the same
+# release twice, or re-running the workflow, must not produce an empty commit
+# or a failed job.
+write_pinned_pair v0.1.26
+cp "$TMP/Dockerfile" "$TMP/Dockerfile.orig"
+if sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1; then
+  if cmp -s "$TMP/Dockerfile" "$TMP/Dockerfile.orig" && grep -q "changed=0" "$TMP/out"; then
+    pass "a pin already at the release is a no-op, reported as changed=0"
+  else
+    fail "an already-current pin was rewritten or misreported: $(cat "$TMP/out")"
+  fi
+else
+  fail "an already-current pin failed the bump: $(cat "$TMP/out")"
+fi
+
+# Ahead of the target: re-running the release workflow for an OLDER tag must
+# not walk the fleet's Fly images backwards.
+write_pinned_pair v0.1.26
+cp "$TMP/Dockerfile" "$TMP/Dockerfile.orig"
+if sh "$BUMP" --to v0.1.24 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1; then
+  if cmp -s "$TMP/Dockerfile" "$TMP/Dockerfile.orig" && grep -q "changed=0" "$TMP/out"; then
+    pass "a pin ahead of the target is left alone (no downgrade)"
+  else
+    fail "a newer pin was downgraded: $(cat "$TMP/out")"
+  fi
+else
+  fail "a newer pin failed the bump: $(cat "$TMP/out")"
+fi
+
+# The lexical trap, in the bump path this time: v0.1.9 must be treated as
+# behind v0.1.24, not ahead of it.
+write_pinned_pair v0.1.9
+sh "$BUMP" --to v0.1.24 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1 || true
+if [ "$(real_pin_of "$TMP/Dockerfile")" = v0.1.24 ]; then
+  pass "v0.1.9 is bumped to v0.1.24 (not read as newer)"
+else
+  fail "v0.1.9 was not bumped to v0.1.24: $(cat "$TMP/out")"
+fi
+
+# One file behind and one already current: only the behind one is rewritten,
+# and the run still reports a change.
+write_pinned_pair v0.1.25 v0.1.26
+if sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >"$TMP/out" 2>&1 &&
+  [ "$(real_pin_of "$TMP/Dockerfile")" = v0.1.26 ] &&
+  [ "$(real_pin_of "$TMP/Dockerfile.pi")" = v0.1.26 ] &&
+  grep -q "changed=1" "$TMP/out"; then
+  pass "a mixed pair converges on the target"
+else
+  fail "a mixed pair did not converge: $(cat "$TMP/out")"
+fi
+
+# A target that is not a version must be refused before anything is written,
+# rather than baked into a Dockerfile as a download URL that 404s.
+write_pinned_pair v0.1.25
+cp "$TMP/Dockerfile" "$TMP/Dockerfile.orig"
+if sh "$BUMP" --to latest "$TMP/Dockerfile" >"$TMP/out" 2>&1; then
+  fail "a non-version target was accepted: $(cat "$TMP/out")"
+else
+  if cmp -s "$TMP/Dockerfile" "$TMP/Dockerfile.orig"; then
+    pass "a non-version target is refused and writes nothing"
+  else
+    fail "a non-version target was refused but the file was already rewritten"
+  fi
+fi
+
+# A Dockerfile with no ARG default is an error, not a silent skip — the same
+# stance the guard takes.
+if sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile.nopin" >/dev/null 2>&1; then
+  fail "a Dockerfile with no ARG default was bumped silently"
+else
+  pass "bumping a Dockerfile with no ARG default is an error"
+fi
+
+# The release workflow branches on `changed`, so the value has to arrive in
+# GITHUB_OUTPUT and not only on stdout.
+write_pinned_pair v0.1.25
+: >"$TMP/gh_output"
+GITHUB_OUTPUT="$TMP/gh_output" sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >/dev/null 2>&1
+GITHUB_OUTPUT="$TMP/gh_output" sh "$BUMP" --to v0.1.26 "$TMP/Dockerfile" "$TMP/Dockerfile.pi" >/dev/null 2>&1
+if [ "$(grep -c '^changed=1$' "$TMP/gh_output")" = 1 ] &&
+  [ "$(grep -c '^changed=0$' "$TMP/gh_output")" = 1 ]; then
+  pass "changed= is written to GITHUB_OUTPUT, 1 then 0 across two runs"
+else
+  fail "GITHUB_OUTPUT did not record the change: $(cat "$TMP/gh_output")"
+fi
+
 # ── The real Dockerfiles, offline ────────────────────────────────────────────
 # Their pins must agree with each other regardless of what the latest release
 # is; the against-latest half of the check needs the network and runs in CI.
-real_pin() {
-  sed -n 's/^ARG AGENTPOD_VERSION=\([^ ]*\).*$/\1/p' "$1" | head -n 1
-}
-a="$(real_pin "$HERE/Dockerfile")"
-b="$(real_pin "$HERE/Dockerfile.pi")"
+a="$(real_pin_of "$HERE/Dockerfile")"
+b="$(real_pin_of "$HERE/Dockerfile.pi")"
 if [ -n "$a" ] && [ "$a" = "$b" ]; then
   pass "both Fly Dockerfiles pin $a"
 else

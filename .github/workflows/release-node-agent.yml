@@ -58,7 +58,7 @@ jobs:
       - name: Upload binary to release (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name || inputs.tag }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         working-directory: apps/node-agent
         run: |
           # Create the release once (first arch to get here wins; races are benign).
@@ -90,7 +90,7 @@ jobs:
       - name: Upload static assets to release (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name || inputs.tag }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
@@ -118,7 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.ref_name || inputs.tag }}"
+          TAG="${{ inputs.tag || github.ref_name }}"
           mkdir -p release-assets
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
 
@@ -131,7 +131,7 @@ jobs:
       - name: Upload SHA256SUMS to release (retry x3)
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name || inputs.tag }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           ok=0
           for i in 1 2 3; do
@@ -143,3 +143,140 @@ jobs:
             sleep $((i * 10))
           done
           [ "$ok" = 1 ]
+
+  # ── Move the Fly images onto the release just cut ──────────────────────────
+  #
+  # The Fly images bake in a RELEASED node-agent binary (verified against the
+  # SHA256SUMS this workflow just published) rather than compiling one, so they
+  # carry a version pin. #292 made a stale pin fail the publish, which was the
+  # right call and immediately worked — and turned every release into a
+  # mechanical two-line PR before a Fly image could be published at all
+  # (#294 for v0.1.25, #301 for v0.1.26, both on the same day). This job is the
+  # other half: the pin becomes a consequence of releasing (#302).
+  #
+  # It opens a PR rather than pushing to main. `main` requires the contract /
+  # hub / node-agent / console / worker checks and is `strict` (a pushed commit
+  # must already be up to date and green), so a workflow push would be rejected
+  # by the branch protection AFTER the release is already published — the worst
+  # possible time to discover it.
+  #
+  # Nothing here can un-publish the release above: the release is complete
+  # before this job starts, so a failure here is a red job on a good release,
+  # not a broken release.
+  fly-pin:
+    name: Bump the Fly node-agent pin
+    runs-on: ubuntu-latest
+    needs: sha256sums
+    permissions:
+      contents: write
+      pull-requests: write
+      # gh workflow run, below.
+      actions: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+
+    steps:
+      # main, not the tag: the bump lands on the branch, and the tag's tree is
+      # by definition the pre-bump one.
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+
+      # An incomplete release bricks fleet self-update (it verifies against
+      # SHA256SUMS), and pointing the Fly images at one would bake that into an
+      # image too. The jobs above deliberately run through a failed arch so a
+      # partial release still gets its static assets — which means "we got
+      # here" is not the same as "the release is whole", and this is where that
+      # gets checked.
+      - name: Refuse to pin to an incomplete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          case "$TAG" in
+            v[0-9]*.[0-9]*) ;;
+            *) echo "not a node-agent release tag: '$TAG'"; exit 1 ;;
+          esac
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name')"
+          missing=""
+          for want in agentpod-node-linux-amd64 agentpod-node-linux-arm64 SHA256SUMS; do
+            printf '%s\n' "$assets" | grep -qx "$want" || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "release $TAG is missing:$missing — not moving the Fly pin onto it" >&2
+            exit 1
+          fi
+          echo "release $TAG carries the linux binaries and SHA256SUMS"
+
+      # Same comparator as the guard (`check-version-pin.sh --compare`), so the
+      # two can never disagree about which version is newer. Sets
+      # steps.bump.outputs.changed: 0 when both files already pin $TAG, which is
+      # what a re-run or a re-cut tag hits, and is a clean success — no branch,
+      # no empty commit, no PR.
+      - name: Bump the ARG in both Fly Dockerfiles
+        id: bump
+        run: sh fly/node-image/bump-version-pin.sh --to "$TAG"
+
+      - name: Open the bump PR
+        if: steps.bump.outputs.changed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          branch="chore/fly-pin-$TAG"
+
+          # Belt and braces: `changed=1` already means the files differ, but an
+          # empty commit here would fail the job on an otherwise fine release.
+          if git diff --quiet -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi; then
+            echo "nothing to commit despite changed=1 — leaving the pin alone" >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -m "chore(fly): pin the node-agent to $TAG" \
+            -m "Opened by release-node-agent.yml when $TAG was released (#302)." \
+            -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi
+          # Force: re-running the release for the same tag must reach the same
+          # end state rather than failing on a branch left by the first run.
+          git push --force origin "HEAD:refs/heads/$branch"
+
+          url="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" \
+            --state open --json url --jq '.[0].url')"
+          if [ -n "$url" ]; then
+            echo "reusing the open PR for $branch"
+          else
+            body="$(printf '%s\n' \
+              "Opened automatically by \`release-node-agent.yml\` when **$TAG** was released (#302)." \
+              "" \
+              "Both Fly Dockerfiles now pin \`ARG AGENTPOD_VERSION=$TAG\`, so \`check-version-pin.sh\` stops refusing a Fly publish. The images still download the released binary and verify it against this release's \`SHA256SUMS\` — that is unchanged." \
+              "" \
+              "Merging this is all that is needed; publishing the images is still a separate, manual \`publish-images\` run." \
+              "" \
+              "If the required checks sit at *Expected*, CI did not attach — a PR opened with \`GITHUB_TOKEN\` cannot trigger workflow runs. Kick it with \`gh workflow run ci.yml --ref $branch\`.")"
+            url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch" \
+              --title "chore(fly): pin the node-agent to $TAG" --body "$body")"
+          fi
+          echo "Fly pin -> $TAG: $url" >> "$GITHUB_STEP_SUMMARY"
+
+          # A PR opened with GITHUB_TOKEN does not itself trigger `pull_request`
+          # workflows, so the required checks would sit at "Expected" forever.
+          # workflow_dispatch is the documented exception to that rule, and the
+          # check runs it produces land on this branch's head commit — the same
+          # SHA the PR asks to merge. Not fatal if it fails: the PR is already
+          # open and says how to kick CI by hand.
+          if gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"; then
+            echo "dispatched ci.yml on $branch" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::could not dispatch ci.yml on $branch; run 'gh workflow run ci.yml --ref $branch' to get the required checks to report"
+          fi
+
+      # Reached when both Dockerfiles already pin $TAG (a re-run, or a re-cut
+      # tag) or pin something newer (re-running an older release). Either way
+      # there is nothing to do and that is a success, not a red job.
+      - name: Note that the pin needed no change
+        if: steps.bump.outputs.changed == '0'
+        run: echo "Fly pin needs no change for $TAG — see the bump step's log." >> "$GITHUB_STEP_SUMMARY"

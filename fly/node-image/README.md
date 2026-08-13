@@ -91,6 +91,30 @@ That check exists because they went stale in exactly that way: both sat on
 v0.1.22 while the fleet ran v0.1.24, which meant no node-agent fix could reach a
 Fly station however often the image was republished (issue #290).
 
+**Moving the pin is not your job.** `release-node-agent.yml`'s `fly-pin` job runs
+`bump-version-pin.sh --to <the tag just released>` and opens
+`chore/fly-pin-<tag>` against `main`; merging it is the whole ritual. The guard
+alone made every release cost a mechanical two-line PR before a Fly image could
+be published (#294, #301 in one day), which is the kind of step that eventually
+gets routed around rather than done (issue #302). The pin is now a consequence
+of releasing; the guard stays as the backstop for anything that bypasses that
+path.
+
+It opens a PR rather than pushing to `main`, because `main` requires the
+contract / hub / node-agent / console / worker checks and is `strict`, so a
+push from a workflow would be rejected *after* the release is already
+published. A PR opened with `GITHUB_TOKEN` cannot trigger `pull_request`
+workflows, so the job also dispatches `ci.yml` on the branch to get those checks
+to report — `gh workflow run ci.yml --ref chore/fly-pin-<tag>` by hand if it did
+not.
+
+`bump-version-pin.sh` never *lowers* a pin (re-running an older release leaves
+it alone) and is a no-op when the pin is already current, so re-running the
+release workflow produces no second commit and no failure. It decides newer vs
+older by calling `check-version-pin.sh --compare` rather than parsing versions
+itself: one comparator, so the two can never disagree about whether `v0.1.9`
+precedes `v0.1.24`.
+
 ## Pointing the hub at it
 
 `imageForHarness()` resolves the image for every provider, so the tag goes in
@@ -117,10 +141,12 @@ local tag.
 job, which also runs `sh fly/node-image/check-version-pin.sh` against the live
 release list.
 
-The pin test is offline (every case passes an explicit `--latest`) and covers
-the comparison that a string compare gets backwards: `v0.1.9` is *older* than
-`v0.1.24`. `check-version-pin.sh --compare A B` prints `older|same|newer` if you
-want to check a pair by hand.
+The pin test is offline (every case passes an explicit `--latest` or `--to`) and
+covers both halves: the comparison that a string compare gets backwards
+(`v0.1.9` is *older* than `v0.1.24`), and what `bump-version-pin.sh` does when
+the pin is behind, already current, or ahead of the target.
+`check-version-pin.sh --compare A B` prints `older|same|newer` if you want to
+check a pair by hand.
 
 The `/workspace` half of that test needs a writable `/`, so it skips on macOS.
 To run it for real, bind-mount the directory into the built image:
