@@ -1,7 +1,19 @@
-# Fly Machines runtime image
+# Fly Machines runtime images
 
-The image a `fly` provisioned runtime boots: the released `agentpod-node` binary
-plus the OpenCode harness, with its workspace anchored on a mounted Fly Volume.
+What a `fly` provisioned runtime boots: the released `agentpod-node` binary plus
+one harness, with its workspace anchored on a mounted Fly Volume.
+
+| Dockerfile | Harness | Published as | Hub variable |
+|---|---|---|---|
+| `Dockerfile` | OpenCode | `ghcr.io/rakeshgangwar/agentpod-node-opencode-fly` | `NODE_AGENT_FLY_OPENCODE_IMAGE` |
+| `Dockerfile.pi` | Pi | `ghcr.io/rakeshgangwar/agentpod-node-pi-fly` | `NODE_AGENT_FLY_PI_IMAGE` |
+
+There is no generic (harness-less) Fly image, so a **Generic** Fly runtime cannot
+work; the hub warns about it at boot naming `NODE_AGENT_FLY_IMAGE`.
+
+Both are pinned to the same `AGENTPOD_VERSION`, deliberately: two stations on one
+substrate running different node-agent builds makes "it works on the other one"
+mean nothing.
 
 ## Why the wrapper exists
 
@@ -37,12 +49,25 @@ on the volume, so identity survives on disk as well as in the hub.
 
 ## Build and push
 
-Build context is the **repository root**:
+**Prefer CI**: `.github/workflows/publish-images.yml` (Actions → publish-images →
+Run workflow → `fly` or `fly-pi`, or `all`, and a tag). It builds natively on an
+amd64 runner, pushes to GHCR, labels the image with the source commit, and then
+verifies the image it pushed — `agentpod-node version` runs, and the harness
+binary resolves from a *minimal service PATH* with the image's own `ENV`
+discarded. That last check is the one that matters here: the node-agent spawns
+ACP adapters with a service PATH, not a shell's, which is how a working-in-the-
+shell Pi install once produced sessions that died in 500 ms.
+
+By hand, with the build context at the **repository root**:
 
 ```bash
 docker buildx build --platform linux/amd64 \
   -f fly/node-image/Dockerfile \
   -t ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22 --push .
+
+docker buildx build --platform linux/amd64 \
+  -f fly/node-image/Dockerfile.pi \
+  -t ghcr.io/rakeshgangwar/agentpod-node-pi-fly:v0.1.22 --push .
 ```
 
 `--platform linux/amd64` is required: Fly Machines are amd64, and an arm64 image
@@ -53,23 +78,24 @@ The package must be **public** — Fly pulls anonymously.
 `AGENTPOD_VERSION` selects which released binary is baked in; it defaults to the
 fleet version in the Dockerfile and is verified against `SHA256SUMS`.
 
-No CI workflow builds this image — like every other image in this repo it is
-built by hand, and the tag the hub points at is the record of which build is
-live.
-
 ## Pointing the hub at it
 
 `imageForHarness()` resolves the image for every provider, so the tag goes in
 the hub's env:
 
 ```
-NODE_AGENT_OPENCODE_IMAGE=ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22
+NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22
+NODE_AGENT_FLY_PI_IMAGE=ghcr.io/rakeshgangwar/agentpod-node-pi-fly:v0.1.22
 ```
 
-A registry-qualified tag works for Docker provisioning too (the daemon pulls
-it), which is what lets one hub run both providers. A bare local tag such as
-`agentpod-node-opencode:local` cannot work on Fly — there is no such image in
-any registry, and the machine create fails on the pull.
+The provider-scoped names are the safe choice on a hub that also runs Docker,
+because they leave the Docker tags alone. The un-scoped
+`NODE_AGENT_OPENCODE_IMAGE` works too — a registry-qualified tag is fine for
+Docker, since the daemon pulls it — and is what lets one variable serve both
+providers. A bare local tag such as `agentpod-node-opencode:local` cannot work on
+Fly: there is no such image in any registry, and the machine create fails on the
+pull. The hub warns at boot, per harness, when the image it would hand Fly is a
+local tag.
 
 ## Tests
 

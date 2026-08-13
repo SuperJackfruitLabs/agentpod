@@ -12,8 +12,8 @@
 #
 # NOTE: the published package MUST end up public — Modal calls
 # `images.fromRegistry(tag)` with no Secret and cannot authenticate to a private
-# registry. Measured on the first Fly run: the package came out `public` with no
-# UI step needed. Re-check with
+# registry, and Fly pulls anonymously. Measured on the first Fly run: the
+# package came out `public` with no UI step needed. Re-check with
 # `gh api '/user/packages?package_type=container'` after adding a new image
 # rather than assuming, since this is an account-level default, not a guarantee
 # of this workflow.
@@ -27,7 +27,7 @@ on:
         required: true
         default: all
         type: choice
-        options: [all, fly, modal]
+        options: [all, fly, fly-pi, modal, modal-opencode, modal-pi]
       tag:
         description: Tag to publish (e.g. v0.1.24)
         required: true
@@ -41,23 +41,62 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     strategy:
-      # Independent images: one failing must not cancel the other, or a Modal
+      # Independent images: one failing must not cancel the others, or a Modal
       # build problem hides a good Fly image.
       fail-fast: false
       matrix:
         include:
-          # `context` is per image and is NOT cosmetic: Fly's Dockerfile COPYs
-          # repo-root-relative paths (apps/node-agent/..., fly/node-image/...),
-          # while Dockerfile.modal COPYs `deploy/...` relative to apps/node-agent.
-          # Building Modal from the repo root fails at COPY, not at push.
+          # Each row carries four things that are NOT cosmetic:
+          #
+          #   context      — Fly's Dockerfiles COPY repo-root-relative paths
+          #                  (apps/node-agent/..., fly/node-image/...), while the
+          #                  Modal ones COPY `deploy/...` relative to
+          #                  apps/node-agent. Building either from the wrong
+          #                  context fails at COPY, not at push (issue #276).
+          #   local_base   — which un-published image this one is FROM, and must
+          #                  therefore be built on the runner first. `none` is
+          #                  the Fly images, which start from a public base and
+          #                  bake in a RELEASED node-agent binary instead of
+          #                  compiling one.
+          #   harness      — which harness binary the verify step must find ON
+          #                  PATH. `none` is a bare node image.
+          #   modal        — whether the Modal-specific constraints (python3,
+          #                  pip, empty ENTRYPOINT) are checked.
           - name: fly
             dockerfile: fly/node-image/Dockerfile
             context: .
             image: agentpod-node-opencode-fly
+            local_base: none
+            harness: opencode
+            modal: "no"
+          - name: fly-pi
+            dockerfile: fly/node-image/Dockerfile.pi
+            context: .
+            image: agentpod-node-pi-fly
+            local_base: none
+            harness: pi
+            modal: "no"
           - name: modal
             dockerfile: apps/node-agent/deploy/Dockerfile.modal
             context: apps/node-agent
             image: agentpod-node-modal
+            local_base: base
+            harness: none
+            modal: "yes"
+          - name: modal-opencode
+            dockerfile: apps/node-agent/deploy/Dockerfile.modal.opencode
+            context: apps/node-agent
+            image: agentpod-node-modal-opencode
+            local_base: opencode
+            harness: opencode
+            modal: "yes"
+          - name: modal-pi
+            dockerfile: apps/node-agent/deploy/Dockerfile.modal.pi
+            context: apps/node-agent
+            image: agentpod-node-modal-pi
+            local_base: pi
+            harness: pi
+            modal: "yes"
     steps:
       - name: Skip images not selected
         id: gate
@@ -84,16 +123,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Both harness images are FROM agentpod-node:base, which is not published.
-      # The runner is amd64, so this is a native build — no emulation, and no
-      # risk of clobbering a developer's local arm64 base tag.
+      # agentpod-node:base is not published anywhere, so every image that is
+      # FROM it (directly, or through a harness layer) has to build it here. The
+      # runner is amd64, so this is a native build — no emulation, and no risk
+      # of clobbering a developer's local arm64 base tag.
       - name: Build the base image
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && matrix.local_base != 'none'
         run: |
           docker build \
             --platform linux/amd64 \
             -f apps/node-agent/deploy/Dockerfile.base \
             -t agentpod-node:base \
+            apps/node-agent
+
+      # The Modal harness images are FROM the harness image rather than beside
+      # it, so that the opencode/pi version pins have ONE definition
+      # (Dockerfile.opencode, Dockerfile.pi) instead of a copy per substrate
+      # that drifts on the next bump. That makes the harness layer a build
+      # dependency, and it is equally unpublished.
+      - name: Build the harness layer this image extends
+        if: steps.gate.outputs.run == 'true' && matrix.local_base != 'none' && matrix.local_base != 'base'
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            -f "apps/node-agent/deploy/Dockerfile.${{ matrix.local_base }}" \
+            -t "agentpod-node-${{ matrix.local_base }}:local" \
             apps/node-agent
 
       - name: Build and push
@@ -113,17 +167,63 @@ jobs:
           echo "published ${ref}:${{ inputs.tag }} from ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
 
       # A pushed image nobody verified is how a broken station reaches a
-      # substrate. These are the same checks the image tasks ran locally.
+      # substrate. Every claim an image makes is checked against the image that
+      # was actually pushed, not against the Dockerfile that was supposed to
+      # produce it.
       - name: Verify what was published
         if: steps.gate.outputs.run == 'true'
         run: |
+          set -eux
           ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag }}"
+
+          # Every image: the node-agent binary is there and runs.
           docker run --rm --entrypoint /agentpod-node "$ref" version
-          if [ "${{ matrix.name }}" = "modal" ]; then
-            # Modal's runtime is Python and it takes over the entrypoint; an
-            # image missing either is accepted at push and fails at first boot.
+
+          if [ "${{ matrix.modal }}" = "yes" ]; then
+            # Modal's runtime is Python and it takes over the container command;
+            # an image missing either is accepted at push and fails at first boot.
             docker run --rm --entrypoint python3 "$ref" --version
             docker run --rm --entrypoint sh "$ref" -c 'python3 -m pip --version'
-            test -z "$(docker inspect -f '{{json .Config.Entrypoint}}' "$ref" | tr -d 'null')" \
-              || { echo "Modal image must have an empty ENTRYPOINT"; exit 1; }
+
+            # An empty ENTRYPOINT reads back as `null` when nothing ever set one
+            # and as `[]` when a harness layer's ENTRYPOINT was cleared by this
+            # image — both are empty, and only a non-empty one is the failure
+            # (Modal requires any ENTRYPOINT to end in `exec "$@"`, and ours
+            # never can). Matching on the two shapes rather than stripping
+            # characters out of the JSON, which quietly passed `[]` as truthy.
+            entrypoint="$(docker inspect -f '{{json .Config.Entrypoint}}' "$ref")"
+            case "$entrypoint" in
+              null|"[]") ;;
+              *) echo "Modal image must have an empty ENTRYPOINT, got: $entrypoint"; exit 1 ;;
+            esac
           fi
+
+          # The harness binary must be findable by a NON-LOGIN, NON-INTERACTIVE
+          # process — which is what the node-agent is, and what it spawns ACP
+          # adapters as. `env -i` throws away the image's own ENV and hands the
+          # command systemd's default PATH; an install that only works from a
+          # developer's shell (a moved npm prefix, a profile script, a
+          # user-local bin) fails here instead of failing live. This is the
+          # check that would have caught the 2026-08-12 pi-acp incident, where
+          # the adapter was spawned with a minimal PATH and could not see `pi`.
+          service_path='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+          case "${{ matrix.harness }}" in
+            opencode)
+              docker run --rm --entrypoint env "$ref" -i "PATH=$service_path" HOME=/root \
+                sh -c 'command -v opencode && opencode --version'
+              ;;
+            pi)
+              docker run --rm --entrypoint env "$ref" -i "PATH=$service_path" HOME=/root \
+                sh -c 'command -v pi && command -v pi-acp && pi --version'
+              ;;
+            none)
+              # A bare node image must NOT carry a harness: the hub resolves a
+              # separate image per harness, and one that quietly bundled a
+              # harness would make a "Generic" runtime detect stations nobody
+              # asked for.
+              docker run --rm --entrypoint sh "$ref" -c '
+                if command -v opencode >/dev/null 2>&1 || command -v pi >/dev/null 2>&1; then
+                  echo "harness-less image unexpectedly contains a harness"; exit 1
+                fi'
+              ;;
+          esac

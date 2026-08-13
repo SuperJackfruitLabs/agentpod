@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+
+# Modal runtime image: node-agent + the OpenCode harness.
+#
+# Dockerfile.modal is the SAME image without a harness — it is `agentpod-node:base`
+# plus python/pip, and it can therefore only run a bare node. That is why
+# `provider=modal, harness=opencode` answered 502 on the live hub (issue #283):
+# with no Modal-scoped OpenCode image to resolve, imageForHarness() fell back to
+# the local Docker tag and the driver refused it before creating a sandbox.
+#
+# BUILT ON TOP OF THE HARNESS IMAGE, NOT BESIDE IT. `FROM agentpod-node-opencode`
+# means the opencode version pin, the BUN_INSTALL_BIN placement and the
+# deliberate absence of sqlite3 have exactly one definition (Dockerfile.opencode)
+# rather than a copy here that drifts on the next version bump. This file adds
+# only what MODAL needs on top of a working harness image.
+#
+# BUILD CONTEXT IS apps/node-agent, and both parents must exist as amd64:
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.base \
+#     -t agentpod-node:base --load apps/node-agent
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.opencode \
+#     -t agentpod-node-opencode:local --load apps/node-agent
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.modal.opencode \
+#     -t ghcr.io/<owner>/agentpod-node-modal-opencode:<version> --push apps/node-agent
+#
+# On Apple Silicon the intermediate tags above are the arm64 ones the local
+# Docker provisioner runs, so pass --build-arg BASE_IMAGE=<your amd64 tag>
+# rather than clobbering them. See Dockerfile.modal for the full explanation.
+#
+# The pushed tag becomes NODE_AGENT_MODAL_OPENCODE_IMAGE, and the hub now
+# REFUSES TO BOOT with ENABLE_MODAL_PROVISIONING=true and no registry reference
+# for it (apps/hub/src/utils/validate-config.ts) — the console offers OpenCode
+# for every provider, so an unset variable is a promise the hub cannot keep.
+#
+# The repository must be PUBLIC: `images.fromRegistry(tag)` is called with no
+# Secret, so Modal cannot authenticate to a private registry.
+#
+# Published by .github/workflows/publish-images.yml (manual dispatch).
+ARG BASE_IMAGE=agentpod-node-opencode:local
+FROM ${BASE_IMAGE}
+
+# The three things Modal requires, each fatal on its own — python3 + pip in the
+# image, an empty ENTRYPOINT, and linux/amd64. Dockerfile.modal carries the full
+# reasoning for all three; this file repeats the mechanics, not the essay.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# The sandbox's main process: anchors /workspace and HOME, then execs the inner
+# entrypoint. Byte-identical to the one the generic Modal image runs.
+COPY deploy/modal-entrypoint.sh /modal-entrypoint.sh
+RUN chmod +x /modal-entrypoint.sh
+
+# WHICH inner entrypoint, declared by the image because the driver cannot know.
+# Modal passes the identical command ["/modal-entrypoint.sh"] to every image it
+# starts, so an OpenCode image that did not say this would run the generic
+# enrol-then-run script and never start `opencode serve` — leaving a station
+# whose Health panel reads "stopped", whose lifecycle Stop/Start verbs are not
+# advertised (they are gated on AGENTPOD_OPENCODE_SUPERVISED, which that script
+# exports), and whose project list is empty because nothing seeded the
+# discovery directory the descriptor enumerates.
+ENV AGENTPOD_INNER_ENTRYPOINT=/node-opencode-entrypoint.sh
+# This is the ONE thing in this image that rests on Modal honouring an image's
+# ENV in a sandbox. If it ever did not, the failure is quiet and specific: the
+# station enrols and looks healthy, its Health panel reports opencode stopped,
+# and no `opencode serve` appears in the sandbox log. That is the first thing to
+# check on a live boot of this image — the wrapper's behaviour itself is covered
+# by deploy/test-modal-entrypoint.sh.
+
+# KNOWN COST, stated rather than discovered later: opencode keeps its session
+# state under $HOME/.local/share/opencode, and on Modal HOME must stay on the
+# disposable rootfs — the Volume holds the workspace and must never hold node
+# credentials (see modal-entrypoint.sh). Modal destroys every sandbox within 24
+# hours and the hub rotates before it does, so an OpenCode station on Modal
+# keeps its FILES across a rotation and loses its conversation history. Fly,
+# whose HOME lives on the volume, keeps both.
+
+# The mount point for the runtime's Modal Volume, created so the path exists
+# even in a sandbox started without one — the wrapper then reports that the
+# workspace is not a real mount instead of dying on a missing directory.
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Cleared on purpose, and here it is CLEARING something: Dockerfile.opencode
+# sets ENTRYPOINT ["/node-opencode-entrypoint.sh"], which Modal's runtime cannot
+# take over (it does not end in `exec "$@"`). An image that inherited it is
+# accepted at push and fails at first boot. The driver supplies the command.
+ENTRYPOINT []

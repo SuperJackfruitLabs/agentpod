@@ -121,6 +121,13 @@ jobs:
       - name: Test the Fly image workspace wrapper
         run: sh fly/node-image/test-volume-workspace.sh
 
+      # Same reasoning as above, and newly load-bearing: modal-entrypoint.sh is
+      # now the main process of THREE published images, and it is what decides
+      # which inner entrypoint a harness image runs. A macOS dev box skips two
+      # of its checks (it cannot mkdir /root); this job does not.
+      - name: Test the Modal image entrypoint wrapper
+        run: sh apps/node-agent/deploy/test-modal-entrypoint.sh
+
   console:
     name: console
     runs-on: ubuntu-latest

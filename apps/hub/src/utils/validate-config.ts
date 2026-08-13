@@ -1,4 +1,11 @@
+import { RuntimeHarness } from "@agentpod/contract";
 import { config } from "../config";
+import {
+  harnessImageEnvVar,
+  imageForHarness,
+  isPullableFromRegistry,
+  providerImageEnvVar,
+} from "../services/runtimes-image";
 
 export interface ValidationError {
   field: string;
@@ -7,6 +14,111 @@ export interface ValidationError {
 
 /** Where non-fatal advice goes. Injectable so tests are not noisy. */
 type Warn = (message: string) => void;
+
+/**
+ * How the hub resolves a harness's image on a provider. Injectable for the same
+ * reason `warn` is: the rules below must be exercisable against a config object
+ * without a test's answers depending on the developer's own environment.
+ * Production passes the real resolver — the SAME one createRuntime hands to the
+ * driver, which is the entire point of checking it here.
+ */
+type ResolveImage = (harness: string, provider: string) => string;
+
+/**
+ * Substrates that PULL their images, and what a missing one costs there.
+ *
+ * Docker is absent because its images come from the host daemon, where a local
+ * tag is exactly right. Cloudflare is absent because its image is baked into
+ * the deployed worker (`imageBinding: "fixed"`) and is covered by
+ * CLOUDFLARE_SANDBOX_IMAGE above — a per-harness variable would be a fiction
+ * there, since the driver refuses any image but the deployed one.
+ *
+ * `fatal` differs between the two, and not out of squeamishness:
+ *
+ *   Modal — every harness the console advertises has a published image
+ *   (agentpod-node-modal, -modal-opencode, -modal-pi), so a Modal operator can
+ *   satisfy this in three lines. Refusing the boot is what turns issue #283's
+ *   failure ("502 The provisioning driver failed", discovered by a user
+ *   clicking Create) into a sentence at startup naming the variable.
+ *
+ *   Fly — there is NO generic (harness-less) Fly image published. A fatal rule
+ *   would therefore make ENABLE_FLY_PROVISIONING=true unbootable no matter what
+ *   the operator did, taking down a substrate that serves OpenCode and Pi
+ *   perfectly well. So Fly is reported at boot instead. When a generic Fly image
+ *   exists, flip this to true — that is the whole change.
+ */
+const REGISTRY_PULLING_PROVIDERS: readonly {
+  provider: string;
+  flag: string;
+  fatal: boolean;
+  enabled: (cfg: typeof config) => boolean;
+  /** Harnesses covered by a rule of their own, so they are not reported twice. */
+  alreadyChecked: readonly string[];
+}[] = [
+  {
+    provider: "modal",
+    flag: "ENABLE_MODAL_PROVISIONING",
+    fatal: true,
+    enabled: (cfg) => cfg.modal.enabled,
+    // NODE_AGENT_MODAL_IMAGE is a config field with its own rule above;
+    // reporting the same variable twice would read as two separate problems.
+    alreadyChecked: ["none"],
+  },
+  {
+    provider: "fly",
+    flag: "ENABLE_FLY_PROVISIONING",
+    fatal: false,
+    enabled: (cfg) => cfg.fly.enabled,
+    // Fly has no image rule of its own, so its generic image is checked here or
+    // nowhere.
+    alreadyChecked: [],
+  },
+];
+
+/**
+ * Every harness the console offers for EVERY provider — the New Runtime dialog
+ * lists all of them regardless of substrate, so every one of them is a promise
+ * the hub has to keep. Read from the contract rather than copied, so adding a
+ * harness to `RuntimeHarness` automatically extends this check instead of
+ * silently adding a fourth way to answer 502.
+ */
+const ADVERTISED_HARNESSES: readonly string[] = RuntimeHarness.options;
+
+/**
+ * "The image this provider would actually be handed for this harness is a local
+ * Docker tag, and this provider cannot pull those."
+ *
+ * The check asks the resolver, not the environment: an operator who points the
+ * un-scoped NODE_AGENT_PI_IMAGE at a registry reference has configured Pi for
+ * every provider, and demanding the provider-scoped variable on top would
+ * refuse a hub that works.
+ */
+function harnessImageProblems(
+  provider: string,
+  flag: string,
+  resolveImage: ResolveImage,
+  skipHarnesses: readonly string[] = []
+): ValidationError[] {
+  const problems: ValidationError[] = [];
+  for (const harness of ADVERTISED_HARNESSES) {
+    if (skipHarnesses.includes(harness)) continue;
+    const resolved = resolveImage(harness, provider);
+    if (isPullableFromRegistry(resolved)) continue;
+    problems.push({
+      field: providerImageEnvVar(harness, provider),
+      message:
+        `The ${provider} substrate pulls its images from a registry, but the ` +
+        `"${harness}" harness resolves to "${resolved}" — a tag that exists only in a ` +
+        `local Docker daemon. The console offers every harness for every provider, so ` +
+        `a runtime created with "${harness}" on ${provider} fails at provision time. ` +
+        `Set ${providerImageEnvVar(harness, provider)} to a public registry reference, ` +
+        `or point the un-scoped ${harnessImageEnvVar(harness)} at one. This substrate ` +
+        `is enabled by ${flag}=true; unset it and nothing here applies. ` +
+        `See docs/DEPLOYMENT.md.`,
+    });
+  }
+  return problems;
+}
 
 function hasMinimumEntropy(value: string, minLength: number = 32): boolean {
   if (value.length < minLength) return false;
@@ -39,7 +151,8 @@ function hasMinimumEntropy(value: string, minLength: number = 32): boolean {
  */
 export function collectConfigErrors(
   cfg: typeof config = config,
-  warn: Warn = console.warn
+  warn: Warn = console.warn,
+  resolveImage: ResolveImage = imageForHarness
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -220,6 +333,27 @@ export function collectConfigErrors(
         `Must be at least 1 (got ${cfg.fly.volumeSizeGb}). The workspace lives on this volume ` +
         "because the Fly rootfs does not survive a stop.",
     });
+  }
+
+  // ── Per-harness images on the substrates that pull them ────────────────────
+  //
+  // Issue #283: the hub checked NODE_AGENT_MODAL_IMAGE and nothing else, so a
+  // Modal hub booted clean while being unable to serve either harness the
+  // console offers. The generic image is a config-object value and is already
+  // checked above; the per-harness variables are read by nothing except the
+  // resolver, so this asks the resolver.
+  for (const { provider, flag, fatal, enabled, alreadyChecked } of REGISTRY_PULLING_PROVIDERS) {
+    if (!enabled(cfg)) continue;
+
+    const problems = harnessImageProblems(provider, flag, resolveImage, alreadyChecked);
+
+    if (fatal) {
+      errors.push(...problems);
+    } else {
+      for (const problem of problems) {
+        warn(`⚠️  WARNING: ${problem.field}: ${problem.message}`);
+      }
+    }
   }
 
   return errors;

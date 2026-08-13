@@ -117,8 +117,18 @@ cd "$WORKSPACE"
 
 # No arguments is the production case: the driver passes only this script, and
 # the fleet's own entrypoint (enrol, then exec the run loop) takes it from here.
+#
+# WHICH inner entrypoint is the IMAGE's business, not the driver's. Modal takes
+# over the container command, so every Modal image gets the identical argv
+# ["/modal-entrypoint.sh"] (MODAL_ENTRYPOINT in modal.ts) — the driver has no
+# idea which harness it is starting, and teaching it would mean the hub knowing
+# the internal layout of every image it pulls. An image whose harness needs a
+# different inner script therefore declares it as an ENV: the OpenCode image
+# sets AGENTPOD_INNER_ENTRYPOINT=/node-opencode-entrypoint.sh, because
+# `opencode serve` is a daemon and needs that script's supervision loop, while
+# Pi and the generic image have no daemon and the default is correct for them.
 if [ "$#" -eq 0 ]; then
-  set -- /node-entrypoint.sh
+  set -- "${AGENTPOD_INNER_ENTRYPOINT:-/node-entrypoint.sh}"
 fi
 
 exec "$@"

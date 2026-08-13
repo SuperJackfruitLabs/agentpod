@@ -1,0 +1,89 @@
+# syntax=docker/dockerfile:1
+
+# Modal runtime image: node-agent + the Pi harness.
+#
+# Before this image, Pi could not run on ANY provisioned substrate: the fleet
+# had a Pi descriptor and a Pi Docker image, and neither Modal nor Fly had an
+# image to pull (issue #283).
+#
+# BUILT ON TOP OF THE HARNESS IMAGE, NOT BESIDE IT. `FROM agentpod-node-pi`
+# means the Node 24 source, the `@earendil-works/pi-coding-agent@0.84.1` and
+# `pi-acp@0.0.33` pins and the --ignore-scripts/ripgrep pairing have exactly one
+# definition (Dockerfile.pi). This file adds only what MODAL needs on top.
+#
+# BUILD CONTEXT IS apps/node-agent, and both parents must exist as amd64:
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.base \
+#     -t agentpod-node:base --load apps/node-agent
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.pi \
+#     -t agentpod-node-pi:local --load apps/node-agent
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.modal.pi \
+#     -t ghcr.io/<owner>/agentpod-node-modal-pi:<version> --push apps/node-agent
+#
+# On Apple Silicon the intermediate tags above are the arm64 ones the local
+# Docker provisioner runs, so pass --build-arg BASE_IMAGE=<your amd64 tag>
+# rather than clobbering them. See Dockerfile.modal for the full explanation.
+#
+# The pushed tag becomes NODE_AGENT_MODAL_PI_IMAGE, and the hub now REFUSES TO
+# BOOT with ENABLE_MODAL_PROVISIONING=true and no registry reference for it.
+#
+# The repository must be PUBLIC: `images.fromRegistry(tag)` is called with no
+# Secret, so Modal cannot authenticate to a private registry.
+#
+# Published by .github/workflows/publish-images.yml (manual dispatch).
+ARG BASE_IMAGE=agentpod-node-pi:local
+FROM ${BASE_IMAGE}
+
+# WHERE `pi` AND `pi-acp` HAVE TO BE, and why an image is the wrong place to be
+# clever about it. When the node-agent starts an ACP session it spawns the
+# adapter itself, and a spawned process gets the node-agent's PATH — which, for
+# a non-login, non-interactive service, is a minimal one. On 2026-08-12 a live
+# macOS node spawned pi-acp with env=nil, the adapter could not see
+# /opt/homebrew/bin/pi, and the session died; 21 unit tests, a container gate
+# and four green CI checks all missed it, because every one of them ran with a
+# developer's PATH. internal/descriptor/pi.go now prepends the resolved `pi`
+# directory to the child's PATH and falls back to the well-known dirs
+# (/usr/local/bin, /usr/bin, ...) when PATH misses it — but that only works if
+# the binaries are actually in one of them.
+#
+# They are, and not by accident: the NodeSource nodejs package (installed in
+# Dockerfile.pi) uses /usr as its npm prefix, so `npm install -g` links the
+# `pi` and `pi-acp` shims into /usr/bin. No ENV PATH, no profile script, no
+# shell: a process started with the sparsest imaginable environment still finds
+# them. Anything that moved the npm prefix (a `--prefix`, an NPM_CONFIG_PREFIX,
+# a user-local install) would put them somewhere only an interactive shell can
+# see and reintroduce exactly that bug — which is why the publish workflow
+# resolves `pi` under an explicit minimal PATH rather than trusting this
+# comment.
+
+# The three things Modal requires, each fatal on its own — python3 + pip in the
+# image, an empty ENTRYPOINT, and linux/amd64. Dockerfile.modal carries the full
+# reasoning for all three; this file repeats the mechanics, not the essay.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# The sandbox's main process: anchors /workspace and HOME, then execs the inner
+# entrypoint. Byte-identical to the one the generic Modal image runs.
+COPY deploy/modal-entrypoint.sh /modal-entrypoint.sh
+RUN chmod +x /modal-entrypoint.sh
+
+# No AGENTPOD_INNER_ENTRYPOINT here, unlike the OpenCode image: Pi has no
+# daemon — it is invoked per command — so the wrapper's default,
+# /node-entrypoint.sh (enrol, then run), is the right inner command. That is the
+# same reason Dockerfile.pi ships no supervision loop of its own.
+
+# The mount point for the runtime's Modal Volume, created so the path exists
+# even in a sandbox started without one — the wrapper then reports that the
+# workspace is not a real mount instead of dying on a missing directory.
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Cleared on purpose, and here it is CLEARING something: Dockerfile.pi sets
+# ENTRYPOINT ["/node-entrypoint.sh"], which Modal's runtime cannot take over (it
+# does not end in `exec "$@"`). An image that inherited it is accepted at push
+# and fails at first boot. The driver supplies the command.
+ENTRYPOINT []

@@ -201,7 +201,14 @@ describe("validateConfig — modal", () => {
       "MODAL_TOKEN_SECRET",
       "MODAL_APP_NAME",
       "NODE_AGENT_MODAL_IMAGE",
+      "NODE_AGENT_MODAL_OPENCODE_IMAGE",
+      "NODE_AGENT_MODAL_PI_IMAGE",
+      "NODE_AGENT_FLY_IMAGE",
+      "NODE_AGENT_FLY_OPENCODE_IMAGE",
+      "NODE_AGENT_FLY_PI_IMAGE",
       "NODE_AGENT_IMAGE",
+      "NODE_AGENT_OPENCODE_IMAGE",
+      "NODE_AGENT_PI_IMAGE",
       "PROVISIONING_HUB_URL",
       "ENABLE_CLOUDFLARE_SANDBOXES",
       "CLOUDFLARE_SANDBOX_IMAGE",
@@ -275,6 +282,25 @@ describe("validateConfig — modal", () => {
     expect(result.fields).toEqual([]);
   });
 
+  it("REFUSES a Modal hub that set only the generic image (issue #283)", () => {
+    // The variables below are exactly what DEPLOYMENT.md used to ask for, and
+    // they produced a hub that booted and then answered 502 for the two
+    // harnesses the console offers. Driven through real env parsing because the
+    // subject is the VARIABLE NAMES: a rule that reported a name the resolver
+    // does not read would send an operator to set something with no effect.
+    const result = collectInChild({
+      ENABLE_MODAL_PROVISIONING: "true",
+      MODAL_TOKEN_ID: "ak-live-id",
+      MODAL_TOKEN_SECRET: "as-live-secret",
+      NODE_AGENT_MODAL_IMAGE: "ghcr.io/example/agentpod-node-modal:v1",
+      PROVISIONING_HUB_URL: "https://hub.example",
+    });
+    expect(result.fields).toEqual([
+      "NODE_AGENT_MODAL_OPENCODE_IMAGE",
+      "NODE_AGENT_MODAL_PI_IMAGE",
+    ]);
+  });
+
   it("boots a Modal hub configured with the documented variable names", () => {
     // This is the test that catches a config.ts reading the wrong env var —
     // e.g. taking the image from Docker's NODE_AGENT_IMAGE. Every rule above
@@ -285,6 +311,9 @@ describe("validateConfig — modal", () => {
       MODAL_TOKEN_ID: "ak-live-id",
       MODAL_TOKEN_SECRET: "as-live-secret",
       NODE_AGENT_MODAL_IMAGE: "ghcr.io/example/agentpod-node-modal:v1",
+      NODE_AGENT_MODAL_OPENCODE_IMAGE:
+        "ghcr.io/example/agentpod-node-modal-opencode:v1",
+      NODE_AGENT_MODAL_PI_IMAGE: "ghcr.io/example/agentpod-node-modal-pi:v1",
       MODAL_APP_NAME: "agentpod-prod",
       PROVISIONING_HUB_URL: "https://hub.example",
     });
@@ -385,5 +414,187 @@ describe("fly provisioning config", () => {
       fly: { ...config.fly, enabled: false, apiToken: "", volumeSizeGb: 0 },
     } as typeof config;
     expect(flyErrors(live)).toEqual([]);
+  });
+});
+
+// ─── Per-harness images on the substrates that PULL them ─────────────────────
+
+/**
+ * The gap issue #283 was found through: a hub with Modal enabled and only
+ * `NODE_AGENT_MODAL_IMAGE` set boots cleanly, offers OpenCode and Pi in the New
+ * Runtime dialog (the console offers all three harnesses for every provider),
+ * and then answers 502 the moment anyone picks one — because
+ * `imageForHarness("opencode", "modal")` falls through to the local Docker tag
+ * and the driver refuses it as "not a registry reference Modal can pull".
+ *
+ * WHY THE RESOLVED IMAGE, NOT THE PRESENCE OF A VARIABLE. The rule asks the
+ * SAME function the provisioner asks. An operator who points the un-scoped
+ * `NODE_AGENT_PI_IMAGE` at a registry reference has genuinely configured Pi
+ * everywhere, and a check that demanded the provider-scoped name would refuse a
+ * working hub — while a check that merely counted variables would pass a hub
+ * whose variable holds `agentpod-node-pi:local`.
+ *
+ * WHY MODAL REFUSES THE BOOT AND FLY ONLY REPORTS. Not squeamishness: after
+ * this change every advertised harness HAS a published Modal image
+ * (agentpod-node-modal, -modal-opencode, -modal-pi), so demanding all three
+ * costs a Modal operator three lines they can actually satisfy. Fly has no
+ * generic (harness-less) image published at all, so a fatal rule there would
+ * make `ENABLE_FLY_PROVISIONING=true` unbootable no matter what the operator
+ * did — turning a substrate that serves OpenCode and Pi perfectly well into a
+ * hub that will not start. When a Fly generic image exists, this becomes fatal
+ * for Fly too, and the test below is where that change gets recorded.
+ */
+describe("validateConfig — per-harness images on registry-pulling providers", () => {
+  const LOCAL_DEFAULTS: Record<string, string> = {
+    none: "agentpod-node:local",
+    opencode: "agentpod-node-opencode:local",
+    pi: "agentpod-node-pi:local",
+  };
+
+  /**
+   * A stand-in for imageForHarness keyed `"<provider>:<harness>"`, falling back
+   * to the same local defaults production falls back to. Injected rather than
+   * driven through process.env so these tests cannot be broken by a developer's
+   * apps/hub/.env — the real variable NAMES are covered in the child-process
+   * tests further down, which is the only place they can be.
+   */
+  const resolving =
+    (images: Record<string, string>) => (harness: string, provider: string) =>
+      images[`${provider}:${harness}`] ?? LOCAL_DEFAULTS[harness] ?? "agentpod-node:local";
+
+  /**
+   * Image errors only. The built-in ENCRYPTION_KEY default is 33 characters and
+   * is therefore always an error in a hand-built config — a pre-existing quirk
+   * (see collectInChild above) that has nothing to do with images and would
+   * otherwise sit in every assertion here.
+   */
+  const errorsWith = (cfg: typeof config, images: Record<string, string>) =>
+    collectConfigErrors(cfg, quiet, resolving(images)).filter((e) =>
+      e.field.startsWith("NODE_AGENT_")
+    );
+
+  const warningsWith = (cfg: typeof config, images: Record<string, string>) => {
+    const warnings: string[] = [];
+    collectConfigErrors(cfg, (m) => warnings.push(m), resolving(images));
+    return warnings;
+  };
+
+  const modalHub = (over: Partial<typeof config.modal> = {}) =>
+    ({
+      ...config,
+      modal: {
+        ...config.modal,
+        enabled: true,
+        tokenId: "tok-id",
+        tokenSecret: "tok-secret",
+        image: "ghcr.io/example/agentpod-node-modal:v1",
+        ...over,
+      },
+      provisioningHubUrl: "https://hub.example",
+    }) as typeof config;
+
+  const flyHub = (over: Partial<typeof config.fly> = {}) =>
+    ({
+      ...config,
+      fly: { ...config.fly, enabled: true, apiToken: "fly-token", volumeSizeGb: 3, ...over },
+    }) as typeof config;
+
+  const MODAL_IMAGES = {
+    "modal:none": "ghcr.io/example/agentpod-node-modal:v1",
+    "modal:opencode": "ghcr.io/example/agentpod-node-modal-opencode:v1",
+    "modal:pi": "ghcr.io/example/agentpod-node-modal-pi:v1",
+  };
+
+  it("REFUSES a Modal hub that cannot serve a harness the console offers", () => {
+    // Exactly the live failure in #283: the generic image is set, the other two
+    // are not, and nothing said so until a user clicked Create.
+    const fields = errorsWith(modalHub(), {
+      "modal:none": "ghcr.io/example/agentpod-node-modal:v1",
+    }).map((e) => e.field);
+    expect(fields).toContain("NODE_AGENT_MODAL_OPENCODE_IMAGE");
+    expect(fields).toContain("NODE_AGENT_MODAL_PI_IMAGE");
+  });
+
+  it("names the harness, the substrate and the variable that closes the gap", () => {
+    // A boot refusal is only worth having if the operator can act on it without
+    // reading the source.
+    const error = errorsWith(modalHub(), {}).find(
+      (e) => e.field === "NODE_AGENT_MODAL_PI_IMAGE"
+    )!;
+    expect(error.message).toMatch(/pi/);
+    expect(error.message).toMatch(/ENABLE_MODAL_PROVISIONING/);
+    expect(error.message).toMatch(/agentpod-node-pi:local/);
+  });
+
+  it("accepts a Modal hub with every advertised harness pointed at a registry", () => {
+    const fields = errorsWith(modalHub(), MODAL_IMAGES).map((e) => e.field);
+    expect(fields).not.toContain("NODE_AGENT_MODAL_OPENCODE_IMAGE");
+    expect(fields).not.toContain("NODE_AGENT_MODAL_PI_IMAGE");
+  });
+
+  it("accepts an un-scoped variable that is itself a registry reference", () => {
+    // NODE_AGENT_OPENCODE_IMAGE=ghcr.io/... serves Docker and Modal at once —
+    // documented, legitimate, and invisible to a rule that counted variables
+    // instead of asking what the provisioner would actually be handed.
+    const fields = errorsWith(modalHub(), {
+      ...MODAL_IMAGES,
+      "modal:opencode": "ghcr.io/example/shared-opencode:v1",
+    }).map((e) => e.field);
+    expect(fields).not.toContain("NODE_AGENT_MODAL_OPENCODE_IMAGE");
+  });
+
+  it("says nothing about harness images when Modal is disabled", () => {
+    // Every deployment today. A hub that never registers the driver must not be
+    // stopped from booting by that driver's variables.
+    const fields = errorsWith(modalHub({ enabled: false }), {}).map((e) => e.field);
+    expect(fields).not.toContain("NODE_AGENT_MODAL_OPENCODE_IMAGE");
+    expect(fields).not.toContain("NODE_AGENT_MODAL_PI_IMAGE");
+  });
+
+  it("REPORTS a Fly harness with no registry image, without refusing the boot", () => {
+    const cfg = flyHub();
+    const images = { "fly:opencode": "ghcr.io/example/agentpod-node-opencode-fly:v1" };
+    const warnings = warningsWith(cfg, images).join("\n");
+    // Pi and the generic image are unconfigured, so both are named...
+    expect(warnings).toMatch(/NODE_AGENT_FLY_PI_IMAGE/);
+    expect(warnings).toMatch(/NODE_AGENT_FLY_IMAGE/);
+    // ...the one that IS configured is not...
+    expect(warnings).not.toMatch(/NODE_AGENT_FLY_OPENCODE_IMAGE/);
+    // ...and the hub still boots, which is the whole difference from Modal.
+    expect(errorsWith(cfg, images).map((e) => e.field)).toEqual([]);
+  });
+
+  it("says nothing about Fly harness images when Fly is off", () => {
+    expect(warningsWith(flyHub({ enabled: false }), {}).join("\n")).not.toMatch(
+      /NODE_AGENT_FLY/
+    );
+  });
+
+  it("reports nothing when every Fly harness resolves to a registry image", () => {
+    const warnings = warningsWith(flyHub(), {
+      "fly:none": "ghcr.io/example/agentpod-node-fly:v1",
+      "fly:opencode": "ghcr.io/example/agentpod-node-opencode-fly:v1",
+      "fly:pi": "ghcr.io/example/agentpod-node-pi-fly:v1",
+    }).join("\n");
+    expect(warnings).not.toMatch(/NODE_AGENT_FLY/);
+  });
+
+  it("leaves the live hub — docker + cloudflare, local tags everywhere — alone", () => {
+    // The rule is about substrates that PULL. Docker's images come from the
+    // host daemon and Cloudflare's is baked into the deployed worker
+    // (imageBinding: "fixed", covered by CLOUDFLARE_SANDBOX_IMAGE), so a local
+    // tag is correct for both and must never be reported here.
+    const live = {
+      ...config,
+      cloudflare: {
+        ...config.cloudflare,
+        enabled: true,
+        sandboxImage: "agentpod-node-opencode:local",
+      },
+      modal: { ...config.modal, enabled: false },
+      fly: { ...config.fly, enabled: false },
+    } as typeof config;
+    expect(errorsWith(live, {}).map((e) => e.field)).toEqual([]);
+    expect(warningsWith(live, {}).join("\n")).not.toMatch(/NODE_AGENT_/);
   });
 });
