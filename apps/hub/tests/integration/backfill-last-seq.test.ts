@@ -26,6 +26,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, beforeAll, afterAll } from "bun:test";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +62,7 @@ function loadBackfillSql(): string {
 async function insertSession(id: string, lastSeq: number): Promise<void> {
   const now = new Date();
   await db.insert(acpSessions).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     id,
     stationId: STATION_ID,
     userId: USER_ID,
@@ -77,6 +79,7 @@ async function insertSession(id: string, lastSeq: number): Promise<void> {
 
 async function insertEvent(sessionId: string, seq: number): Promise<void> {
   await db.insert(acpEvents).values({
+    tenantId: BOOTSTRAP_TENANT_ID,
     sessionId,
     seq,
     type: "state",

@@ -16,6 +16,7 @@
 
 import { eq } from "drizzle-orm";
 import type { Database } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
 import { stationAudit } from "../db/schema/audit";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -96,6 +97,7 @@ export async function recordAudit(
 
   await db.insert(stationAudit).values({
     id,
+    tenantId: await resolveTenantForUser(args.userId),
     userId: args.userId,
     nodeId: args.nodeId,
     stationKey: args.stationKey,

@@ -368,8 +368,8 @@ async function enrollProvisionedNode(hostname: string) {
     hostname, os: "linux", arch: "amd64", cpuCount: 1,
   });
   await rawSql`
-    INSERT INTO provisioned_runtimes (id, user_id, provider, status, node_id, name, harness)
-    VALUES (${`rt-${creds.nodeId}`}, ${TEST_USER_ID}, 'docker', 'online',
+    INSERT INTO provisioned_runtimes (tenant_id, id, user_id, provider, status, node_id, name, harness)
+    VALUES ('fleet_00000000000000000000', ${`rt-${creds.nodeId}`}, ${TEST_USER_ID}, 'docker', 'online',
             ${creds.nodeId}, ${hostname}, 'opencode')
   `;
   return creds;

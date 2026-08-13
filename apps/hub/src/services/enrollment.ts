@@ -1,5 +1,6 @@
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
 import { nodes, enrollmentTokens, provisionedRuntimes } from "../db/schema/nodes";
 import type { HostInfo, EnrollResponse } from "@agentpod/contract";
 
@@ -56,6 +57,9 @@ export async function mintEnrollmentToken(
 
   await db.insert(enrollmentTokens).values({
     id: prefixedId("etk"),
+    // A root row: its tenant comes from the principal minting it. Everything
+    // enrolled with this token inherits the tenant from here.
+    tenantId: await resolveTenantForUser(userId),
     userId,
     tokenHash: await sha256(token),
     expiresAt,
@@ -189,6 +193,11 @@ export async function enrollNode(
 
   await db.insert(nodes).values({
     id: nodeId,
+    // The node inherits the TOKEN's tenant, not a freshly resolved one. The
+    // token is the authority that admitted this node to the fleet, so a node
+    // cannot land in a tenant other than the one whose token enrolled it —
+    // which stays true once tokens can be minted for more than one.
+    tenantId: row.tenantId,
     userId: row.userId,
     name: hostInfo.hostname,
     hostname: hostInfo.hostname,

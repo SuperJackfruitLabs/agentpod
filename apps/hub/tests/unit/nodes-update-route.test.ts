@@ -52,6 +52,7 @@ function makeTestApp(mockRequest: RequestFn) {
       c.set("user", {
         id: TEST_USER_ID,
         authType: "api_key",
+        tenantId: "fleet_00000000000000000000",
       } satisfies AuthUser);
       return next();
     })

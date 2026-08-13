@@ -86,8 +86,8 @@ async function enrolledNodeWithRuntime(
   const runtimeId = `rt-${creds.nodeId}`;
   await rawSql`
     INSERT INTO provisioned_runtimes
-      (id, user_id, provider, external_id, status, status_reason, node_id, name, harness)
-    VALUES (${runtimeId}, ${TEST_USER_ID}, 'fly', ${`fly-${creds.nodeId}`},
+      (tenant_id, id, user_id, provider, external_id, status, status_reason, node_id, name, harness)
+    VALUES ('fleet_00000000000000000000', ${runtimeId}, ${TEST_USER_ID}, 'fly', ${`fly-${creds.nodeId}`},
             ${status}::runtime_status, ${statusReason}, ${creds.nodeId}, ${hostname}, 'opencode')
   `;
   return { ...creds, runtimeId };

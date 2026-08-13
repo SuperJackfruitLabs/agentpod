@@ -34,6 +34,7 @@
 
 import { and, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import { db } from "../db/drizzle";
+import { resolveTenantForUser } from "../auth/tenant";
 import { provisionedRuntimes, nodes } from "../db/schema/nodes";
 import { mintEnrollmentToken } from "./enrollment";
 import {
@@ -157,6 +158,7 @@ export async function createRuntime(
 
   await db.insert(provisionedRuntimes).values({
     id,
+    tenantId: await resolveTenantForUser(userId),
     userId,
     provider,
     status: "provisioning",
