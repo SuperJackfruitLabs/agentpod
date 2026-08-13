@@ -34,4 +34,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends ripgrep \
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1 \
  && npm install -g --ignore-scripts pi-acp@0.0.33
 
+# The workspace the descriptor reports as this node's station (issue #286).
+#
+# Pi's stations are derived from EXISTING sessions, so a container where Pi has
+# never run reported none at all and came up online-but-unusable: every
+# station-scoped route (Chat, Files, Terminal) needs a station id.
+# internal/descriptor/pi.go now reports the workspace directory itself as a
+# station — but only when the directory actually exists, which is what keeps
+# bare-metal fleet hosts unchanged. The Fly and Modal Pi images already have
+# /workspace (a volume symlink and a Volume mount respectively); the Docker one
+# had nothing at that path, so it is created here.
+#
+# WORKDIR too, so a terminal or an ACP session opened in this container starts
+# where the user's files are rather than at /.
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
 ENTRYPOINT ["/node-entrypoint.sh"]

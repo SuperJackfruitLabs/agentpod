@@ -53,6 +53,11 @@ type piDescriptor struct {
 	dataDir    string // absolute path to ~/.pi/agent
 	sessionDir string // absolute path to the sessions directory
 
+	// workspaceDir is the node's workspace directory, reported as a station in
+	// its own right when it exists and Pi is installed here. See
+	// workspaceStation for why a session-derived station list is not enough.
+	workspaceDir string
+
 	// Host seams, mirroring claudeCodeDescriptor. They are fields so that no
 	// test depends on what the developer happens to have installed: binary
 	// resolution ends in wellKnownBinaryDirs, which probes /opt/homebrew/bin
@@ -83,6 +88,20 @@ const (
 	// /usr/local or /opt/homebrew. Hardcoding a location would miss it, and a
 	// node-agent running as a service may have a PATH that misses it too.
 	piBinaryEnv = "PI_PATH"
+
+	// piWorkspaceEnv overrides the workspace directory the descriptor reports
+	// as a station. It is the same name modal-entrypoint.sh already uses for
+	// "where the workspace is", so a substrate that mounts it elsewhere has one
+	// knob rather than two. Unset is the normal case on every image today.
+	piWorkspaceEnv = "AGENTPOD_WORKSPACE_PATH"
+
+	// piDefaultWorkspaceDir is the provisioned convention across all three
+	// substrates: Docker creates it, Fly symlinks it onto the volume
+	// (fly/node-image/volume-workspace.sh) and Modal mounts the runtime's
+	// Volume at it. It is also the path opencode.go hardcodes for the same
+	// reason. On a bare-metal fleet host it simply does not exist, which is
+	// what keeps this descriptor's behaviour there unchanged.
+	piDefaultWorkspaceDir = "/workspace"
 
 	// piDebugLogName is Pi's ONLY log file, and it lives beside the data dir
 	// rather than under a station: it is global, not per-workspace. It is also
@@ -117,6 +136,12 @@ func NewPi(dataDir string) Descriptor {
 	if p.sessionDir == "" {
 		p.sessionDir = filepath.Join(p.dataDir, "sessions")
 	}
+	// Independent of dataDir: the workspace is where work happens, not where Pi
+	// keeps its state, and an explicit dataDir says nothing about it.
+	p.workspaceDir = os.Getenv(piWorkspaceEnv)
+	if p.workspaceDir == "" {
+		p.workspaceDir = piDefaultWorkspaceDir
+	}
 	return p
 }
 
@@ -146,25 +171,85 @@ func piProjectKey(workspacePath string) string {
 	return fmt.Sprintf("pi:%x", h[:4])
 }
 
+// workspaceStation returns the node's workspace directory when it should be
+// reported as a station, and the path it resolves to for deduplication.
+//
+// WHY THIS EXISTS (issue #286). Every other source of Pi stations is a session
+// that already happened, so a machine where Pi has never run reported NONE. A
+// freshly provisioned Pi runtime therefore reached `online` with zero stations
+// and was unusable: Chat, Files and Terminal are all station-scoped routes, and
+// there was no station id to scope them to (measured live on Modal 2026-08-13,
+// GET /api/nodes/<id>/stations → []). Seeding a fake session in the image was
+// the alternative and was rejected: it fabricates harness state to satisfy a
+// lister, and the fabricated session would show up in the console as a real one.
+//
+// TWO conditions, each load-bearing:
+//
+//   - The directory must exist. On a bare-metal fleet host there is no
+//     /workspace, so nothing is added and detection there is byte-for-byte what
+//     it was — this station is ADDITIVE, never a replacement for the sessions a
+//     used host reports.
+//
+//   - Pi must be installed on this node. Every node-agent registers every
+//     descriptor, and every provisioned image has a /workspace — the OpenCode
+//     ones included. Without this leg, every OpenCode runtime would grow a
+//     phantom Pi station whose every tab has nothing behind it.
+//
+// The key is piProjectKey(path), the SAME scheme a session-derived station
+// uses, which is what makes the identity stable: the moment someone chats here
+// Pi writes a session whose cwd is this directory, and Detect's dedupe collapses
+// the two into the one station the hub already adopted, under the key it was
+// adopted with.
+func (p *piDescriptor) workspaceStation() (wsPath, resolved string, ok bool) {
+	if p.workspaceDir == "" {
+		return "", "", false
+	}
+	info, err := os.Stat(p.workspaceDir)
+	if err != nil || !info.IsDir() {
+		return "", "", false
+	}
+	if _, ok := p.piBinary(); !ok {
+		return "", "", false
+	}
+	resolved, err = filepath.EvalSymlinks(p.workspaceDir)
+	if err != nil {
+		resolved = p.workspaceDir
+	}
+	return p.workspaceDir, resolved, true
+}
+
+// piStation builds the Station value for a workspace path. One constructor for
+// both sources, so a session-derived station and the workspace station cannot
+// drift in key scheme, capabilities or display name.
+func piStation(wsPath string, caps []string) Station {
+	wsCopy := wsPath
+	return Station{
+		Key:           piProjectKey(wsPath),
+		Harness:       "pi",
+		Kind:          "leaf",
+		DisplayName:   filepath.Base(wsPath),
+		ParentKey:     nil,
+		WorkspacePath: &wsCopy,
+		Capabilities:  AppendChangesetCap(caps, &wsCopy),
+		MatrixId:      nil,
+	}
+}
+
 // Detect discovers leaf stations for Pi, one per workspace.
 //
-// It enumerates <sessionDir>/*/ and reads each session's workspace path from
-// the first line of a *.jsonl file. Directories with no readable session file
-// are skipped; workspaces that no longer exist are filtered out; and resolved
-// paths are deduplicated through filepath.EvalSymlinks because Pi stores the
-// RESOLVED path (/tmp is recorded as /private/tmp).
+// The node's own workspace directory is reported first (see workspaceStation),
+// so a machine where Pi has never run still has one usable station. It then
+// enumerates <sessionDir>/*/ and reads each session's workspace path from the
+// first line of a *.jsonl file — those stations are ADDED to the workspace one,
+// which is what keeps a used fleet host reporting exactly what it reported
+// before. Directories with no readable session file are skipped; workspaces
+// that no longer exist are filtered out; and resolved paths are deduplicated
+// through filepath.EvalSymlinks because Pi stores the RESOLVED path (/tmp is
+// recorded as /private/tmp).
 //
 // A missing data/session directory is not an error — it just means Pi has
 // never run here.
 func (p *piDescriptor) Detect() ([]Station, error) {
-	entries, err := os.ReadDir(p.sessionDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []Station{}, nil
-		}
-		return nil, fmt.Errorf("pi: listing %s: %w", p.sessionDir, err)
-	}
-
 	// "lifecycle" is NEVER advertised: Pi has no persistent process to stop or
 	// start, so this descriptor does not implement Lifecycle at all.
 	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
@@ -189,6 +274,22 @@ func (p *piDescriptor) Detect() ([]Station, error) {
 	seen := make(map[string]bool)
 	stations := []Station{}
 
+	// First, so that a session recorded against this same directory dedupes
+	// INTO it rather than the other way round: the workspace station's key is
+	// the one the hub adopts on arrival, and it must not change later.
+	if wsPath, resolved, ok := p.workspaceStation(); ok {
+		seen[resolved] = true
+		stations = append(stations, piStation(wsPath, caps))
+	}
+
+	entries, err := os.ReadDir(p.sessionDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return stations, nil // Pi has never run here
+		}
+		return nil, fmt.Errorf("pi: listing %s: %w", p.sessionDir, err)
+	}
+
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -209,17 +310,7 @@ func (p *piDescriptor) Detect() ([]Station, error) {
 		}
 		seen[resolved] = true
 
-		wsCopy := wsPath
-		stations = append(stations, Station{
-			Key:           piProjectKey(wsPath),
-			Harness:       "pi",
-			Kind:          "leaf",
-			DisplayName:   filepath.Base(wsPath),
-			ParentKey:     nil,
-			WorkspacePath: &wsCopy,
-			Capabilities:  AppendChangesetCap(caps, &wsCopy),
-			MatrixId:      nil,
-		})
+		stations = append(stations, piStation(wsPath, caps))
 	}
 
 	return stations, nil
@@ -294,6 +385,15 @@ func piCwdFromSessionFile(path string) (string, bool) {
 // underlying os call report "no such file" is a clearer failure than a
 // station-not-found for a station the caller can see.
 func (p *piDescriptor) resolveKey(key string) (wsPath string, sessionDirs []string, err error) {
+	// The workspace station has no session to be read out of — it is reported
+	// because the directory is there, so it resolves the same way. Without this
+	// the station would list in the console and every verb against it (fs,
+	// health, terminal, acp, cleanup) would answer "station not found", which is
+	// the bug this fix exists to remove wearing a different hat.
+	if ws, _, ok := p.workspaceStation(); ok && piProjectKey(ws) == key {
+		wsPath = ws
+	}
+
 	entries, err := os.ReadDir(p.sessionDir)
 	if err != nil && !os.IsNotExist(err) {
 		return "", nil, fmt.Errorf("pi: listing %s: %w", p.sessionDir, err)

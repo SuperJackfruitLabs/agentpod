@@ -80,6 +80,19 @@ than guessed at.
 
 **One Pi install yields many stations** — one per workspace, like OpenCode and Claude Code.
 
+**Amended 2026-08-13 (issue #286): the node's own workspace is a station too.** Deriving stations
+from existing sessions alone means a machine where Pi has never run reports none — which is every
+freshly provisioned Pi runtime. Measured live on Modal: the runtime reached `online` and
+`GET /api/nodes/<id>/stations` returned `[]`, so there was no station id for Chat, Files or
+Terminal to be scoped to. `Detect` therefore reports the workspace directory itself
+(`AGENTPOD_WORKSPACE_PATH`, default `/workspace`) as a station whenever that directory exists
+**and** Pi is installed on the node — the second condition because every node-agent registers
+every descriptor and every provisioned image has a `/workspace`, OpenCode's included. Sessions are
+added to that station list, never substituted for it, so a fleet host (which has no `/workspace`)
+detects exactly what it detected before. The workspace station uses the same
+`pi:<hash-of-path>` key, so the session Pi writes on the first chat dedupes into the station the
+hub already adopted instead of creating a second one.
+
 ### Key scheme
 
 `pi:<first 8 hex of SHA256(workspacePath)>` — matching `opencode.go` and `codex.go`. The key is
