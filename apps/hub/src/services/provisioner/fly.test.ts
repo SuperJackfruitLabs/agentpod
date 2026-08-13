@@ -614,6 +614,34 @@ describe("FlyMachinesProvisioner — start", () => {
     await expect(driver.start("app-x/machine-y")).rejects.toThrow(/internal server error/);
   });
 
+  /**
+   * Issue #284 asked every driver what its substrate answers for a start on an
+   * instance that is already running. Docker answers HTTP 304, which is why that
+   * driver now maps it to a no-op.
+   *
+   * FOR FLY THE ANSWER IS NOT ESTABLISHED. The 2026-08-12/13 probes against a
+   * real account measured stop→start, the wait endpoint's 408, the 404 for a
+   * gone machine and the region refusal — none of them measured
+   * `POST .../machines/{id}/start` against a machine already in `started`. No
+   * mapping is therefore written into fly.ts: a guessed status code in a driver
+   * is exactly the kind of claim this repo's manifest culture exists to refuse,
+   * and it would be a claim about when to STOP reporting an error.
+   *
+   * What this test pins is what the code does today, against a fake that models
+   * only measured behaviour: the calls go out and nothing throws. If a live
+   * probe later shows Fly refusing with a status of its own, this is the test
+   * that will have to change, and the fake with it.
+   */
+  it("is not known to refuse a start on a machine Fly already reports started", async () => {
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+    // The fake records `started` at creation, so this machine is already up.
+    expect(fake.apps.get(app)!.machines.get(machineId)!.state).toBe("started");
+
+    await expect(driver.start(externalId)).resolves.toBeUndefined();
+  });
+
   it("sends state and timeout on the wait request", async () => {
     const urls: string[] = [];
     const impl = (async (url: string | URL) => {
@@ -653,6 +681,21 @@ describe("FlyMachinesProvisioner — stop", () => {
       `GET /v1/apps/${app}/machines/${machineId}/wait`,
     ]);
     expect(fake.apps.get(app)!.machines.get(machineId)!.state).toBe("stopped");
+  });
+
+  it("is not known to refuse a stop on a machine already stopped", async () => {
+    // The other half of the #284 question, with the same answer: unmeasured. A
+    // second stop goes out as GET machine → POST stop → wait, and against the
+    // fake it resolves. Whether live Fly answers something distinguishable for a
+    // machine already in `stopped` was not probed, so nothing here is mapped.
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    await driver.stop(externalId);
+    expect(fake.apps.get(app)!.machines.get(machineId)!.state).toBe("stopped");
+
+    await expect(driver.stop(externalId)).resolves.toBeUndefined();
   });
 
   it("passes instance_id on the wait, which Fly rejects the request without", async () => {

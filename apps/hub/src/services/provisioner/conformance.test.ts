@@ -82,6 +82,10 @@ interface FakeBehaviour {
   statusThrows?: boolean;
   /** destroy() rejects once the instance is already gone. */
   destroyThrowsWhenGone?: boolean;
+  /** start() rejects for an instance that is already running — Docker's 304. */
+  startThrowsWhenRunning?: boolean;
+  /** stop() rejects for an instance that is already stopped — Docker's 304. */
+  stopThrowsWhenStopped?: boolean;
   /** Declares a lifecycle verb it does not implement. */
   omitMethods?: ReadonlyArray<"start" | "stop" | "status">;
 }
@@ -137,6 +141,9 @@ function fakeDriver(
     driver.start = async (externalId: string) => {
       const found = instances.get(externalId);
       if (!found) throw new Error(`fake: no such instance ${externalId}`);
+      if (found.running && behaviour.startThrowsWhenRunning) {
+        throw new Error("fake: container already started");
+      }
       found.running = true;
     };
   }
@@ -144,6 +151,9 @@ function fakeDriver(
     driver.stop = async (externalId: string) => {
       const found = instances.get(externalId);
       if (!found) throw new Error(`fake: no such instance ${externalId}`);
+      if (!found.running && behaviour.stopThrowsWhenStopped) {
+        throw new Error("fake: container already stopped");
+      }
       // A wiped rootfs is not "the instance is asleep": everything the instance
       // was lives on that disk, so stopping it ends it.
       if (behaviour.rootfsWipedOnStop) instances.delete(externalId);
@@ -175,6 +185,14 @@ function fakeDriver(
  * nothing matches, so this does too. A lenient fake would make every lifecycle
  * rule pass for free, which is the same as not checking them.
  */
+/** docker-modem's error for a 304, carrying the status the driver branches on. */
+function dockerNotModified(reason: string): Error {
+  return Object.assign(new Error(`(HTTP code 304) ${reason} -  `), {
+    statusCode: 304,
+    reason,
+  });
+}
+
 class FakeDockerSubstrate {
   private readonly containers = new Map<string, Sandbox>();
 
@@ -199,12 +217,30 @@ class FakeDockerSubstrate {
     return sandbox;
   }
 
+  /**
+   * Refuses a redundant start exactly as the daemon does.
+   *
+   * dockerode declares `304: "container already started"` for
+   * `POST /containers/{id}/start` and docker-modem raises it as an Error with
+   * `statusCode` on it. Modelling it is what makes rule 7 mean anything here:
+   * before the driver mapped that status, this fake would have failed the rule —
+   * and the live hub DID, answering 500 to a second click on Start (#284).
+   */
   async startSandbox(id: string): Promise<void> {
-    this.get(id).status = "running";
+    const sandbox = this.get(id);
+    if (sandbox.status === "running") {
+      throw dockerNotModified("container already started");
+    }
+    sandbox.status = "running";
   }
 
+  /** The same, for `POST /containers/{id}/stop` on a container already down. */
   async stopSandbox(id: string): Promise<void> {
-    this.get(id).status = "exited";
+    const sandbox = this.get(id);
+    if (sandbox.status !== "running") {
+      throw dockerNotModified("container already stopped");
+    }
+    sandbox.status = "exited";
   }
 
   async inspectSandbox(id: string): Promise<Sandbox> {
@@ -582,6 +618,24 @@ describe("assertConforms — destroy", () => {
     // wedges the runtime for good.
     const driver = fakeDriver(base, { destroyThrowsWhenGone: true });
     await expect(assertConforms(driver)).rejects.toThrow(/destroy/i);
+  });
+});
+
+// ─── Rule 7: a redundant start/stop ───────────────────────────────────────────
+
+describe("assertConforms — redundant start/stop", () => {
+  it("rejects a driver that throws when asked to start what is already running", async () => {
+    // The live defect, in one flag: Docker's 304 travelled up as an exception
+    // and the hub answered 500 for a second click on Start (#284). A caller
+    // cannot retry sensibly against that, and the error log stops being a place
+    // where a REAL start failure is visible.
+    const driver = fakeDriver(base, { startThrowsWhenRunning: true });
+    await expect(assertConforms(driver)).rejects.toThrow(/start/i);
+  });
+
+  it("rejects a driver that throws when asked to stop what is already stopped", async () => {
+    const driver = fakeDriver(base, { stopThrowsWhenStopped: true });
+    await expect(assertConforms(driver)).rejects.toThrow(/stop\(\) is not idempotent/i);
   });
 });
 

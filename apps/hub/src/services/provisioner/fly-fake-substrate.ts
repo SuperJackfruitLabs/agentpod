@@ -42,6 +42,14 @@
  *     records `started` immediately; a test that needs a transient sets
  *     `machine.state` on the map directly, which is how the state mapping is
  *     exercised.
+ *   - **Any answer of its own for a start on a machine already `started`, or a
+ *     stop on one already `stopped`.** Docker answers HTTP 304 there ("the end
+ *     state you asked for already holds"), and issue #284 is what that costs
+ *     when a driver forwards it as a failure. Fly's answer was NOT among the
+ *     2026-08-12/13 probes, and this file may not call the live API to settle
+ *     it. So both verbs simply succeed here, and fly.ts maps nothing — an
+ *     invented status code would put a guess exactly where a driver decides
+ *     whether to report an error.
  *   - **Refusing to DELETE a running machine without `force`,** and **refusing
  *     a duplicate machine name in an app.** Both are real, neither was measured
  *     by the 2026-08-12 probes, and this file may not call the live API to

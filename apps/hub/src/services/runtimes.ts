@@ -47,6 +47,7 @@ import { imageForHarness } from "./runtimes-image";
 import { HARNESS_MIN_MEMORY_MB, tierFitsHarness } from "@agentpod/contract";
 import type { ProvisionedRuntime, ResourceTier } from "@agentpod/contract";
 import type { RuntimeProvisioner, RuntimeState } from "./provisioner/types";
+import { wasAlreadyInTargetState } from "./provisioner/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -534,7 +535,30 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
     throw Object.assign(new Error("runtime has no external id"), { status: 400 });
   }
 
-  await provisioner.start(row.externalId);
+  const outcome = await provisioner.start(row.externalId);
+
+  // The substrate says there was nothing to do: this instance is ALREADY
+  // running. That is the state the caller asked for, so the request succeeded —
+  // and it succeeded without changing anything, so nothing is written.
+  //
+  // Returning here rather than falling through to `starting` is the point.
+  // `online` is written by enrolment alone, and the row that says it is the only
+  // record that a node ever arrived; overwriting it with `starting` on a
+  // redundant click would hand a live runtime to sweepStalledRuntimeStarts,
+  // which flips anything still `starting` after two minutes to `error`. A
+  // double-click would take a healthy station down.
+  //
+  // Reconciling a row that DISAGREES with the substrate — `stopped` on the row,
+  // container running — is a different job and deliberately not done here: this
+  // path has one piece of evidence, about one instance, gathered as a side
+  // effect of a button press. status() and its sweepers are what the hub uses to
+  // write state from evidence, and they run on every tick rather than on a click.
+  if (wasAlreadyInTargetState(outcome)) {
+    console.log(
+      `[runtimes] ${id}: start was a no-op — ${row.provider} reports it already running`
+    );
+    return;
+  }
 
   // NOT "online". All we know is that the substrate accepted a start request;
   // whether a node exists is a different question, and only enrolment can
