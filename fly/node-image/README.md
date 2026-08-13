@@ -75,8 +75,21 @@ built on an Apple laptop fails at boot with an exec format error.
 
 The package must be **public** — Fly pulls anonymously.
 
-`AGENTPOD_VERSION` selects which released binary is baked in; it defaults to the
-fleet version in the Dockerfile and is verified against `SHA256SUMS`.
+`AGENTPOD_VERSION` selects which released binary is baked in, verified against
+`SHA256SUMS`.
+
+**A CI publish does not use the Dockerfile default.** `publish-images.yml`
+resolves the latest node-agent release at build time and passes it as
+`--build-arg AGENTPOD_VERSION=…`, then asserts the pushed image reports that
+version — so a published Fly image always carries the newest verified binary.
+Its optional `node_agent_version` input pins an older release on purpose.
+
+The `ARG` default is what a hand-build (the `docker buildx` lines above) gets,
+so it still matters, and `check-version-pin.sh` fails the node-agent CI job when
+either Dockerfile's default falls behind the latest release or the two disagree.
+That check exists because they went stale in exactly that way: both sat on
+v0.1.22 while the fleet ran v0.1.24, which meant no node-agent fix could reach a
+Fly station however often the image was republished (issue #290).
 
 ## Pointing the hub at it
 
@@ -99,8 +112,15 @@ local tag.
 
 ## Tests
 
-`sh fly/node-image/test-volume-workspace.sh` — runs in CI in the `node-agent`
-job.
+`sh fly/node-image/test-volume-workspace.sh` and
+`sh fly/node-image/test-version-pin.sh` — both run in CI in the `node-agent`
+job, which also runs `sh fly/node-image/check-version-pin.sh` against the live
+release list.
+
+The pin test is offline (every case passes an explicit `--latest`) and covers
+the comparison that a string compare gets backwards: `v0.1.9` is *older* than
+`v0.1.24`. `check-version-pin.sh --compare A B` prints `older|same|newer` if you
+want to check a pair by hand.
 
 The `/workspace` half of that test needs a writable `/`, so it skips on macOS.
 To run it for real, bind-mount the directory into the built image:

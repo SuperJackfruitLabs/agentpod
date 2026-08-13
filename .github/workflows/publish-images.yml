@@ -32,6 +32,16 @@ on:
         description: Tag to publish (e.g. v0.1.24)
         required: true
         type: string
+      # Fly images only — the Modal ones compile the node-agent from the checked
+      # out source and have no version to pin. Blank means "the latest release",
+      # resolved at build time, which is what makes a published Fly image carry
+      # the newest verified binary without anyone remembering to edit a
+      # Dockerfile (issue #290). Set it to publish a specific older release on
+      # purpose.
+      node_agent_version:
+        description: node-agent release to bake into the Fly images (blank = latest release)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -62,6 +72,13 @@ jobs:
           #                  PATH. `none` is a bare node image.
           #   modal        — whether the Modal-specific constraints (python3,
           #                  pip, empty ENTRYPOINT) are checked.
+          #   agent_pin    — whether this image takes AGENTPOD_VERSION, i.e.
+          #                  bakes in a RELEASED binary. "yes" for the Fly
+          #                  images only; the Modal ones `go build` the agent
+          #                  from this checkout, so passing them a version would
+          #                  be a no-op build-arg and checking a pin they do not
+          #                  have would fail a Modal-only publish on a Fly-only
+          #                  concern.
           - name: fly
             dockerfile: fly/node-image/Dockerfile
             context: .
@@ -69,6 +86,7 @@ jobs:
             local_base: none
             harness: opencode
             modal: "no"
+            agent_pin: "yes"
           - name: fly-pi
             dockerfile: fly/node-image/Dockerfile.pi
             context: .
@@ -76,6 +94,7 @@ jobs:
             local_base: none
             harness: pi
             modal: "no"
+            agent_pin: "yes"
           - name: modal
             dockerfile: apps/node-agent/deploy/Dockerfile.modal
             context: apps/node-agent
@@ -83,6 +102,7 @@ jobs:
             local_base: base
             harness: none
             modal: "yes"
+            agent_pin: "no"
           - name: modal-opencode
             dockerfile: apps/node-agent/deploy/Dockerfile.modal.opencode
             context: apps/node-agent
@@ -90,6 +110,7 @@ jobs:
             local_base: opencode
             harness: opencode
             modal: "yes"
+            agent_pin: "no"
           - name: modal-pi
             dockerfile: apps/node-agent/deploy/Dockerfile.modal.pi
             context: apps/node-agent
@@ -97,6 +118,7 @@ jobs:
             local_base: pi
             harness: pi
             modal: "yes"
+            agent_pin: "no"
     steps:
       - name: Skip images not selected
         id: gate
@@ -122,6 +144,44 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Which node-agent RELEASE the Fly images bake in, resolved at build time
+      # instead of read from the Dockerfile's ARG default. Before this, the
+      # default WAS the published version: it said v0.1.22 for two releases, so
+      # every Fly station ran an agent missing fixes the rest of the fleet had,
+      # and republishing could not change that (issue #290). Resolving here
+      # means a Fly publish always ships the newest release, and the pin in the
+      # Dockerfile is only what a local `docker build` falls back to.
+      #
+      # Fly rows only. The Modal images compile the agent from this checkout, so
+      # this step, its build-arg and its staleness check are all skipped for
+      # them — a modal-only publish never touches any of this.
+      - name: Resolve the node-agent release for the Fly images
+        id: agent
+        if: steps.gate.outputs.run == 'true' && matrix.agent_pin == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.node_agent_version }}
+        run: |
+          set -eu
+          if [ -n "${REQUESTED:-}" ]; then
+            version="$REQUESTED"
+          else
+            version="$(sh fly/node-image/check-version-pin.sh --print-latest)"
+          fi
+          case "$version" in
+            v[0-9]*.[0-9]*) ;;
+            *) echo "not a vMAJOR.MINOR.PATCH node-agent version: '$version'"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "baking node-agent $version into ${{ matrix.image }}" >> "$GITHUB_STEP_SUMMARY"
+
+          # The ARG defaults must not be BEHIND what is being published, or the
+          # repo goes on describing an image that no longer exists and the next
+          # local build silently produces a worse one. Requesting an older
+          # version on purpose still passes — the defaults are ahead of it, not
+          # behind.
+          sh fly/node-image/check-version-pin.sh --latest "$version"
 
       # agentpod-node:base is not published anywhere, so every image that is
       # FROM it (directly, or through a harness layer) has to build it here. The
@@ -152,16 +212,25 @@ jobs:
 
       - name: Build and push
         if: steps.gate.outputs.run == 'true'
+        env:
+          # Empty for the Modal images, whose Dockerfiles have no such ARG:
+          # passing one would be a silently ignored build-arg (or a warning
+          # nobody reads), so the argument is only added when there is one.
+          AGENT_VERSION: ${{ steps.agent.outputs.version }}
         run: |
           ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
-          docker build \
-            --platform linux/amd64 \
-            -f "${{ matrix.dockerfile }}" \
-            -t "${ref}:${{ inputs.tag }}" \
-            -t "${ref}:latest" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            "${{ matrix.context }}"
+          args=(
+            --platform linux/amd64
+            -f "${{ matrix.dockerfile }}"
+            -t "${ref}:${{ inputs.tag }}"
+            -t "${ref}:latest"
+            --label "org.opencontainers.image.revision=${{ github.sha }}"
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}"
+          )
+          if [ -n "$AGENT_VERSION" ]; then
+            args+=(--build-arg "AGENTPOD_VERSION=$AGENT_VERSION")
+          fi
+          docker build "${args[@]}" "${{ matrix.context }}"
           docker push "${ref}:${{ inputs.tag }}"
           docker push "${ref}:latest"
           echo "published ${ref}:${{ inputs.tag }} from ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
@@ -177,7 +246,19 @@ jobs:
           ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag }}"
 
           # Every image: the node-agent binary is there and runs.
-          docker run --rm --entrypoint /agentpod-node "$ref" version
+          agent_version_out="$(docker run --rm --entrypoint /agentpod-node "$ref" version)"
+
+          if [ "${{ matrix.agent_pin }}" = "yes" ]; then
+            # And for the Fly images, that it is the release this run resolved.
+            # They bake in a downloaded binary, so the version is a fact about
+            # the pushed image rather than about the checkout — which makes it
+            # the one check that catches a build-arg that never reached the
+            # Dockerfile, the failure mode that let v0.1.22 keep shipping.
+            case "$agent_version_out" in
+              "agentpod-node ${{ steps.agent.outputs.version }} "*) ;;
+              *) echo "expected node-agent ${{ steps.agent.outputs.version }}, image reports: $agent_version_out"; exit 1 ;;
+            esac
+          fi
 
           if [ "${{ matrix.modal }}" = "yes" ]; then
             # Modal's runtime is Python and it takes over the container command;

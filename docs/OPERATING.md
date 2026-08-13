@@ -447,6 +447,8 @@ docker buildx build --platform linux/amd64 \
 
 It also stamps the source commit as an image label, which a hand-built tag records nowhere. The commands above remain accurate for building locally when iterating on a Dockerfile.
 
+**Which node-agent a Fly image carries is resolved by the workflow, not pinned in the repo.** The Fly images bake in a *released* binary (verified against `SHA256SUMS`) rather than compiling one the way the Modal images do, so they need a version — and the workflow resolves the latest release at build time, passes it as `--build-arg AGENTPOD_VERSION=…`, and then asserts the pushed image reports that version. A Fly publish therefore always ships the newest agent, with no Dockerfile edit to remember. Leave the optional `node_agent_version` input blank for that; set it only to publish an older release on purpose. The input and the check apply to `fly`/`fly-pi` only — a Modal-only publish never reads them. (Before this, both Fly Dockerfiles hardcoded `v0.1.22` while the fleet ran `v0.1.24`, so a merged node-agent fix could not reach a Fly station at all: issue #290. CI now fails when those `ARG` defaults — which is what a hand-build uses — fall behind the latest release.)
+
 To sanity-check a built image before pushing, run its entrypoint test against a bind mount standing in for the Volume:
 
 ```bash
