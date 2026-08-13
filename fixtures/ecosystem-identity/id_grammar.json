@@ -109,7 +109,7 @@
       "grammarSource": "kaambaan packages/contract/src/ids.ts:21 — idSchema('run')",
       "mintedAs": "^run_[0-9a-f]{16}$",
       "mintSource": "kaambaan apps/api/src/ids.ts:2 newId(), called at apps/api/src/board/board-do.ts:1253 (claim → INSERT INTO runs)",
-      "note": "The join key. Kaambaan mints the work run; AgentPod executes it and must never mint a rival id for the same attempt. See run_join_key.json — and see `knownConflicts` below, because AgentPod has reserved the same `run_` prefix for its own primary key.",
+      "note": "The join key. Kaambaan mints the work run; AgentPod executes it and must never mint a rival id for the same attempt. See run_join_key.json. AgentPod used to reserve this same prefix for its own acp_runs primary key; it gave the claim up on 2026-08-14 and moved to `attempt_` — see `resolvedConflicts` below and the `agentpod.acpRun` entity.",
       "accept": [
         { "value": "run_e074a2160c4b4f28", "mint": true, "note": "canonical claim result" },
         { "value": "run_Aa0Bb1", "mint": false, "note": "kaambaan's own test suite asserts this parses (packages/contract/test/ids.test.ts:8). AgentPod must not be stricter than the minter's contract about an id it did not mint." }
@@ -117,6 +117,7 @@
       "reject": [
         { "value": "task_e074a2160c4b4f28", "reason": "other-entity" },
         { "value": "card_3d4e5f6071829304", "reason": "other-entity" },
+        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "other-entity", "note": "an AgentPod acp_runs id — one attempt at executing a work run, not the work run. This pair used to be indistinguishable; keeping it in both reject lists is what stops the collision returning." },
         { "value": "run_", "reason": "prefix-only" },
         { "value": "run_abc", "reason": "too-short" },
         { "value": "run_e074a216-0c4b", "reason": "wrong-alphabet" },
@@ -227,7 +228,34 @@
       "reject": [
         { "value": "acp_3d4e5f60", "reason": "other-entity", "note": "`acp_<8 hex>` is a DIFFERENT id: the node-agent's process-local ACP session id (apps/node-agent/internal/acp/manager.go:40-46, 32 bits of entropy, collision-retried in-process). The hub's `acps_<uuid>` doubles as the node-side instance discriminator (acp-sessions.ts:688-691), so both prefixes are live in the same subsystem and differ by one character." },
         { "value": "run_e074a2160c4b4f28", "reason": "other-entity", "note": "a kaambaan run id" },
+        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "other-entity", "note": "an AgentPod acp_runs id. Same family and same subsystem — acp_runs.session_id is a FK to acp_sessions.id — so these two travel together and must not be interchangeable." },
         { "value": "acps_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.acpRun",
+      "owner": "agentpod",
+      "prefix": "attempt",
+      "grammar": "^attempt_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "grammarSource": "agentpod packages/contract/src/ids.ts — AcpRunId. Also enforced in the database: acp_runs carries a CHECK constraint (`acp_runs_id_is_agentpod_attempt`) added by migration 0035.",
+      "mintedAs": "^attempt_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "mintSource": "NONE — nothing in apps/hub/src inserts into acp_runs yet, and no such statement has existed at any commit. The grammar is reserved and enforced ahead of its first writer, which is the only moment the rename was free.",
+      "note": "WAS `run_`, colliding head-on with kaambaan's work run — the schema file carried the comment `\"run_\" + uuid-ish` two lines above `We never mint a rival id` and contradicted itself. AgentPod moved because AgentPod is the executor: kaambaan mints work runs and has live production data, while acp_runs has no writer and no rows. `attempt` also names the thing correctly — a run here is a PROMPT-TURN, opening when a prompt is submitted and closing when the agent yields, while kaambaan's work run is a claimed card that takes as many prompt-turns as the work takes. One work run is executed as a series of attempts; the two never counted 1:1 and were never the same entity, whatever the shared prefix implied. Hyphenated-UUID family, matching its sibling acps_ in the same subsystem; `acpr_` was rejected as one character from `acps_`, which the acp_/acps_ near-miss below already shows is a trap.",
+      "accept": [
+        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "mint": true }
+      ],
+      "reject": [
+        { "value": "run_e074a2160c4b4f28", "reason": "other-entity", "note": "THE COLLISION. A kaambaan work run id. Before 2026-08-14 this shape was AgentPod's own primary key too, and the two were indistinguishable strings; this is the case that fails if the `run_` prefix is ever restored." },
+        { "value": "run_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "wrong-prefix", "note": "the exact old AgentPod grammar — the old prefix with the current suffix. Rejecting only kaambaan's minted shape would let a hub keep the contested prefix as long as it spelled the suffix differently." },
+        { "value": "attempt_9f1c2ab04d7e4b3a8c880d6e2f7c1b90", "reason": "wrong-alphabet", "note": "hyphens stripped — the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted." },
+        { "value": "attempt_9F1C2AB0-4D7E-4B3A-8C88-0D6E2F7C1B90", "reason": "wrong-alphabet", "note": "uppercase" },
+        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88", "reason": "too-short" },
+        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "reason": "other-entity", "note": "the ACP session this run belongs to — acp_runs.session_id references it, so both ids are in hand at every call site that will ever write a run" },
+        { "value": "attempts_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "prefix-not-anchored" },
+        { "value": "attempt_", "reason": "prefix-only" },
+        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90\n", "reason": "trailing-newline" },
         { "value": "", "reason": "empty" }
       ]
     },
@@ -281,14 +309,18 @@
       { "prefix": "acp", "owner": "agentpod", "entity": "nodeLocalAcpSession", "status": "minted-never-declared", "note": "node-agent only — `acp_<8 hex>`, apps/node-agent/internal/acp/manager.go:40-46. One character away from the hub's `acps_`, and the hub's id is passed to the node as the instance discriminator, so both live in the same subsystem." },
       { "prefix": "audit", "owner": "agentpod", "entity": "auditEntry", "status": "minted-never-declared", "note": "apps/hub/src/services/audit.ts:94 — `audit_${crypto.randomUUID()}`, hyphenated-UUID family" },
       { "prefix": "enr", "owner": "agentpod", "entity": "enrollmentTokenSecret", "status": "credential" },
-      { "prefix": "chg", "owner": "agentpod", "entity": "change", "status": "reserved-never-minted", "note": "only appears as a test literal in packages/contract/src/run.test.ts:76; Change is a reserved schema with no writer" },
-      { "prefix": "run", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "COLLISION — see knownConflicts" }
+      { "prefix": "chg", "owner": "agentpod", "entity": "change", "status": "reserved-never-minted", "note": "only appears as a test literal in packages/contract/src/run.test.ts; Change is a reserved schema with no writer" },
+      { "prefix": "attempt", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "acp_runs.id. Reserved but validated and CHECK-constrained ahead of its first writer — see the agentpod.acpRun entity, and resolvedConflicts for the `run_` prefix it replaced." }
     ],
-    "knownConflicts": [
+    "knownConflicts": [],
+    "resolvedConflicts": [
       {
         "prefix": "run",
-        "claimedBy": ["kaambaan", "agentpod"],
-        "detail": "kaambaan mints `run_<16 hex>` for a work run (apps/api/src/board/board-do.ts:1253). AgentPod reserves the SAME prefix for acp_runs.id — apps/hub/src/db/schema/acp.ts:69 carries the comment `\"run_\" + uuid-ish` directly above a primary key whose neighbouring column comment reads `We never mint a rival id`. Nothing mints an AgentPod run id yet, so nothing is broken today; the moment something does, a `run_…` value is ambiguous about which system it came from, and the acp_runs_external_idx reverse join (schema/acp.ts:88) becomes unsafe to reason about. Resolving this is a decision for both repos, not a fix this corpus can make. Recorded so it cannot be forgotten."
+        "wasClaimedBy": ["kaambaan", "agentpod"],
+        "nowClaimedBy": "kaambaan",
+        "resolvedAt": "2026-08-14",
+        "resolution": "AgentPod's acp_runs.id moved to `attempt_<uuid>`.",
+        "detail": "kaambaan mints `run_<16 hex>` for a work run (apps/api/src/board/board-do.ts:1253) and has live production data. AgentPod had reserved the SAME prefix for acp_runs.id — the schema file carried the comment `\"run_\" + uuid-ish` six lines above `We never mint a rival id` and so contradicted itself — but AgentPod is the executor, not the minter: no statement inserting into acp_runs exists at any commit in this repository, so no row anywhere carries the old prefix and the rename cost nothing. It stops being free the moment the bridge writes its first run, which is why it happened now. `attempt` is not a synonym for `run`: an AgentPod run is a prompt-turn and a kaambaan work run is a claimed card, so one work run is executed as a series of attempts and the shapes now say so. Recorded here, and asserted, so the collision cannot return unnoticed."
       }
     ]
   },
@@ -296,8 +328,8 @@
   "openDisagreements": [
     "Principal shape: kaambaan `usr_<16 hex>`; AgentPod a bare unprefixed UUID. No mapping exists in either repo.",
     "Token length: kaambaan takes 16 hex from a UUID, AgentPod takes 20. Same source, different slice, no reason recorded in either.",
-    "Alphabet: AgentPod has TWO families — `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, audit). kaambaan's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
+    "Alphabet: AgentPod has TWO families — `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, attempt, audit). kaambaan's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
     "Tenancy: kaambaan pins every principal to exactly one tenant at the storage layer; AgentPod has no tenant concept at all, so no AgentPod id carries tenancy. Out of scope here, flagged because it is the largest remaining modelling decision (see docs/strategy/2026-08-13-ecosystem-identity-decisions.md).",
-    "Prefix `run` is claimed by both repos — see prefixRegistry.knownConflicts."
+    "RESOLVED 2026-08-14 — prefix `run` was claimed by both repos; AgentPod moved acp_runs.id to `attempt_` and kaambaan keeps `run_`. See prefixRegistry.resolvedConflicts."
   ]
 }

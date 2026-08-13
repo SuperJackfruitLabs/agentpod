@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { AcpRunId } from "./ids";
+
 // ─── Run state ───────────────────────────────────────────────────────────────
 
 /**
@@ -52,16 +54,26 @@ export const isRunInterrupted = (s: RunState): boolean =>
  * with no board attached at all, which is why it is optional rather than
  * required.
  *
+ * `id` is AgentPod's own key and lives in a **different id space** — `attempt_`,
+ * not `run_` — so which system minted a value is legible from the value itself
+ * rather than from the column it happens to sit in. Both directions are refused
+ * below: a kaambaan work run id cannot be this row's `id` (`AcpRunId` rejects
+ * it), and one of AgentPod's own attempt ids cannot be an `externalRunId`. That
+ * is the invariant §3 states, made executable — the comment that used to say
+ * "we never mint a rival id" sat six lines under a schema comment declaring the
+ * rival id, and did not prevent it.
+ *
  * The two external fields are **one fact and arrive together**, enforced below.
- * An `externalRunId` with no source is unattributable — and because both repos
- * currently claim the `run_` prefix (kaambaan mints it; `acp_runs.id` reserves
- * it in a schema comment), a bare `run_…` does not say which system produced it.
- * The reverse join the board needs, `acp_runs_external_idx`, would then return a
- * row that cannot be traced back to a board. A source with no id is the mirror
- * image: an origin nothing can be joined to.
+ * An `externalRunId` with no source is unattributable: disjoint prefixes say the
+ * id is not AgentPod's, but `externalSource` is deliberately open (§7), so shape
+ * alone cannot say *which* orchestrator it belongs to, and the reverse join the
+ * board needs, `acp_runs_external_idx`, would return a row that cannot be traced
+ * back to a board. A source with no id is the mirror image: an origin nothing
+ * can be joined to.
  */
 const Run_ = z.object({
-  id: z.string().min(1),
+  /** AgentPod's own key for this attempt — `attempt_<uuid>`, never kaambaan's `run_`. */
+  id: AcpRunId,
   sessionId: z.string().min(1),
   stationId: z.string().min(1),
 
@@ -88,7 +100,15 @@ export const Run = Run_.refine(
       "externalRunId and externalSource must both be present or both absent — an external run id with no source cannot be joined back to the orchestrator that minted it",
     path: ["externalSource"],
   },
-);
+).refine((r) => r.externalRunId === undefined || !AcpRunId.safeParse(r.externalRunId).success, {
+  // An `attempt_…` arriving as an external id is either AgentPod's own key
+  // copied into the wrong column or a dispatch loop. Either way it is not a
+  // board's identifier, and the reverse join through acp_runs_external_idx
+  // would point back at this hub.
+  message:
+    "externalRunId must not be one of AgentPod's own attempt ids — an external run belongs to the orchestrator that minted it",
+  path: ["externalRunId"],
+});
 export type Run = z.infer<typeof Run>;
 
 // ─── Change ──────────────────────────────────────────────────────────────────
@@ -118,14 +138,17 @@ export type ChangeStatus = z.infer<typeof ChangeStatus>;
  * another's (§7).
  *
  * `runIds` is a list because a change outlives the run that produced it — a
- * first attempt, a revision after review, a CI fix.
+ * first attempt, a revision after review, a CI fix. They are AgentPod attempt
+ * ids, never a board's work run: the work run is upstream of all of them, and
+ * substituting it here is the same conflation the `run_`/`attempt_` split
+ * exists to prevent.
  */
 export const Change = z.object({
   id: z.string().min(1),
   stationId: z.string().min(1),
 
   /** Every attempt that contributed. Runs are immutable; the change is not. */
-  runIds: z.array(z.string().min(1)).default([]),
+  runIds: z.array(AcpRunId).default([]),
 
   /** The commit this change is built against. */
   baseRef: z.string().min(1),

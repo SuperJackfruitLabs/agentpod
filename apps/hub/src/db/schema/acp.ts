@@ -8,7 +8,17 @@
  * ACP Slice 2 (hub sessions).
  */
 
-import { pgTable, text, integer, timestamp, jsonb, primaryKey, index } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import {
+  pgTable,
+  text,
+  integer,
+  timestamp,
+  jsonb,
+  primaryKey,
+  index,
+  check,
+} from "drizzle-orm/pg-core";
 
 export const acpSessions = pgTable("acp_sessions", {
   id: text("id").primaryKey(),                                        // "acps_" + uuid-ish
@@ -64,14 +74,24 @@ export const acpEvents = pgTable("acp_events", {
  *
  * Not a FK to stations.id, for the same reason acp_sessions is not: destroying a
  * throwaway runtime must not erase the record of what ran on it.
+ *
+ * **The id space is `attempt_`, not `run_`.** `run_` is kaambaan's, for the work
+ * run it mints and dispatches; this row is one prompt-turn spent executing one
+ * of those, and a claimed card takes as many prompt-turns as the work takes, so
+ * the two never counted 1:1. This file used to declare `"run_" +
+ * uuid-ish` six lines above the comment "We never mint a rival id" — it minted
+ * one in the same breath, and the two ids were indistinguishable strings. The
+ * CHECK constraints below are what enforces the split now, because the comment
+ * demonstrably did not.
  */
 export const acpRuns = pgTable("acp_runs", {
-  id: text("id").primaryKey(),                                        // "run_" + uuid-ish
+  id: text("id").primaryKey(),                                        // "attempt_" + uuid (AcpRunId)
   sessionId: text("session_id").notNull().references(() => acpSessions.id, { onDelete: "cascade" }),
   stationId: text("station_id").notNull(),
 
   // kaambaan's runId when this attempt came from a claim; null when it did not.
-  // We never mint a rival id — see packages/contract/src/run.ts.
+  // We never mint a rival id — and since the two id spaces are now disjoint,
+  // that is checked rather than asserted. See packages/contract/src/run.ts.
   externalRunId: text("external_run_id"),
   externalSource: text("external_source"),                            // "kaambaan", or another orchestrator
 
@@ -86,4 +106,24 @@ export const acpRuns = pgTable("acp_runs", {
   index("acp_runs_station_started_idx").on(t.stationId, t.startedAt.desc()),
   // The join from the board's side: given kaambaan's runId, find what ran.
   index("acp_runs_external_idx").on(t.externalRunId),
+
+  // Our own key is ours. A `run_…` here would be an orchestrator's work run
+  // standing in as this hub's primary key — the collision this table was born
+  // with. Prefix-only, deliberately: the suffix family may change, the id space
+  // may not.
+  check("acp_runs_id_is_agentpod_attempt", sql`${t.id} LIKE 'attempt\\_%'`),
+  // The mirror: an external id may be any shape an orchestrator mints (§7 keeps
+  // externalSource open), but it may never be one of ours.
+  check(
+    "acp_runs_external_is_not_agentpod",
+    sql`${t.externalRunId} IS NULL OR ${t.externalRunId} NOT LIKE 'attempt\\_%'`,
+  ),
+  // One fact, two columns: an external run id with no source cannot be joined
+  // back to the board that minted it, and a source with no id names an origin
+  // nothing points at. Enforced in the contract too (#307) — here as well
+  // because a writer can bypass the contract but not the table.
+  check(
+    "acp_runs_external_pair",
+    sql`(${t.externalRunId} IS NULL) = (${t.externalSource} IS NULL)`,
+  ),
 ]);

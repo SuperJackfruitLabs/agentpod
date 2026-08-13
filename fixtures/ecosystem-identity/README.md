@@ -17,7 +17,7 @@ repo boundary instead of a language boundary.
 
 | File | What it pins |
 |---|---|
-| `id_grammar.json` | What each repo mints and validates for every entity id, plus the full prefix registry and the collisions in it. |
+| `id_grammar.json` | What each repo mints and validates for every entity id, plus the full prefix registry and the collisions in it — open (`knownConflicts`) and settled (`resolvedConflicts`). |
 | `run_join_key.json` | The run join key: *kaambaan mints the work run; AgentPod executes it; no competing run id for dispatched work.* |
 
 Both are plain JSON and depend on no type from any repo. That is deliberate — a corpus that
@@ -36,7 +36,7 @@ bare `z.string()` cannot catch and the one most likely to reach production.
 
 ## How AgentPod consumes it
 
-`packages/contract/src/ids.ts` holds the validators; `packages/contract/tests/ecosystem-identity.test.ts`
+`packages/contract/src/ids.ts` holds the validators; `packages/contract/src/ecosystem-identity.test.ts`
 drives them from these files. It runs under the `contract` CI job with everything else:
 
 ```bash
@@ -44,7 +44,27 @@ cd packages/contract && bun test
 ```
 
 The test fails if a corpus entity has no validator mapped to it, so adding an entity here
-cannot silently go untested.
+cannot silently go untested. It also shows every validator every *other* entity's canonical
+minted id and requires all of them to be rejected — the general form of the `run_` collision
+below, so a new one fails without anyone remembering to write a test for it.
+
+## Resolving a collision
+
+`prefixRegistry.knownConflicts` is for prefixes two owners genuinely both claim. It is not a
+parking space: an entry there means the corpus can prove a name is ambiguous and cannot prove
+which system a value came from.
+
+When a collision is settled, the entry moves to `resolvedConflicts`, which records who gave
+the claim up and what they moved to. The move is checked, not taken on trust — a resolved
+prefix must have exactly one owner left in `claims`, so declaring a conflict resolved while
+still claiming the prefix fails the suite.
+
+`run` is the worked example. kaambaan mints `run_<16 hex>` for a work run and has production
+data; AgentPod had reserved the same prefix for `acp_runs.id` in a schema comment that sat six
+lines above another comment promising it never minted a rival id. AgentPod moved to `attempt_`
+on 2026-08-14 — it is the executor, not the minter, and had never written an `acp_runs` row.
+The kaambaan-side change is nil: the corpus asks kaambaan to keep minting exactly what it
+already mints.
 
 ## How kaambaan (or any peer) consumes it
 
