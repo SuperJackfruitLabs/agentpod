@@ -238,7 +238,14 @@
     updatingNodes[nodeId] = true;
     try {
       const result = await updateNode(nodeId);
-      if (result.ok) {
+      if (result.ok && result.updating === false) {
+        // The node was already on the latest release and did not restart, so
+        // nothing will ever clear a spinner here (issue #296).
+        delete updatingNodes[nodeId];
+        toast.success("Already up to date", {
+          description: `This node is running ${result.tag ?? "the latest release"}.`,
+        });
+      } else if (result.ok) {
         // Keep "updating…" state — node will blip offline→online on the new version
         // and the next fleet refresh will clear updateAvailable.
       } else {

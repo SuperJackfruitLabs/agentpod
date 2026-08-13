@@ -173,6 +173,33 @@ test("Update button calls updateNode(nodeId) and enters updating state", async (
   expect(api.updateNode).toHaveBeenCalledWith(agentWithUpdate.nodeId);
 });
 
+// Issue #296: a node already on the latest release answers updating:false and
+// does NOT restart. Nothing will bring it offline→online, so the button would
+// sit on "Updating…" forever if the no-op were treated like a started update.
+test("Update on an already-current node leaves 'updating…' instead of hanging on it", async () => {
+  const { toast } = await import("svelte-sonner");
+  vi.spyOn(api, "updateNode").mockResolvedValue({
+    ok: true,
+    updating: false,
+    tag: "v0.1.25",
+    currentVersion: "v0.1.25",
+    reason: "already up to date",
+  });
+
+  const { getByRole } = render(AgentTable, { props: { agents: [agentWithUpdate] } });
+
+  await fireEvent.click(getByRole("button", { name: /^update$/i }));
+
+  await waitFor(() => {
+    expect(toast.success).toHaveBeenCalledWith(
+      "Already up to date",
+      expect.objectContaining({ description: expect.stringContaining("v0.1.25") })
+    );
+  });
+  // The button is clickable again rather than stuck mid-update.
+  expect(getByRole("button", { name: /^update$/i })).toBeTruthy();
+});
+
 test("agents from two different nodes produce two group headers", () => {
   const agent3 = makeAgent({
     stationId: "s3",

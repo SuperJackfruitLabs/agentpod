@@ -13,6 +13,51 @@ type RequestFn = (
   params: unknown
 ) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
 
+/** What the node's "update" verb answers inside the broker envelope's `data`. */
+type UpdateResult = {
+  ok?: boolean;
+  error?: string;
+  updating?: boolean;
+  tag?: string;
+  currentVersion?: string;
+  reason?: string;
+};
+
+// ─── Error-to-status helper ───────────────────────────────────────────────────
+
+/**
+ * Map a node-side update failure onto a status.
+ *
+ * Same split every other broker-proxying route in the hub uses (node-posture,
+ * station-cleanup, station-changeset, station-lifecycle): the node not being
+ * reachable is a conflict with the fleet's current state and retryable as-is,
+ * everything else is an upstream failure. 5xx stays reserved for "the hub
+ * itself broke" only in the 500 sense — 502 explicitly says the failure came
+ * from the node, not from here.
+ */
+function brokerErrorStatus(error: string | undefined): 409 | 502 {
+  if (error === "node offline" || error === "node disconnected") return 409;
+  return 502;
+}
+
+/**
+ * Read the `force` flag from either `?force=1` (convenient from curl) or a
+ * `{"force":true}` JSON body. An absent or unparseable body is not an error —
+ * the console posts no body at all.
+ */
+async function readForce(c: {
+  req: { query(k: string): string | undefined; json(): Promise<unknown> };
+}): Promise<boolean> {
+  const q = c.req.query("force");
+  if (q === "1" || q === "true") return true;
+  const body = await c.req.json().catch(() => null);
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    (body as { force?: unknown }).force === true
+  );
+}
+
 // ─── Factory (allows broker injection for unit tests) ─────────────────────────
 
 /**
@@ -31,21 +76,66 @@ export function createNodeRoutes(deps?: { request?: RequestFn }) {
        */
       .get("/", async (c) => c.json(await listNodes(c.get("user").id)))
       /**
-       * POST /api/nodes/:id/update
+       * POST /api/nodes/:id/update  [?force=1  |  body {"force":true}]
        *
-       * Sends an "update" RPC to the node via the broker.  The node
-       * self-updates in-process and exits so systemd/Restart=always can
-       * bring it back on the new binary.
+       * Sends an "update" RPC to the node via the broker. When the node is
+       * behind the latest release it self-updates in-process and exits so
+       * systemd/Restart=always can bring it back on the new binary; when it is
+       * already current it answers `updating:false` and stays up. `force`
+       * re-applies the current release — the escape hatch for a corrupt binary.
        *
-       * Returns the raw broker result:
-       *   { ok: true,  updating: true, tag: "<latest>" }  — update kicked off
-       *   { ok: false, error: "node offline" }             — node not connected
-       *   { ok: false, error: "timeout" }                  — no response in 15 s
+       * The status answers "did the update happen", not "did the WebSocket
+       * round-trip happen" (issue #296). The route used to return the broker
+       * envelope verbatim, so a node that refused the verb answered
+       * `HTTP 200 {"ok":false,"error":"descriptor: unknown verb \"update\""}` —
+       * success to any caller that checks the status, while the node did
+       * nothing. That is a bad failure to hide, because the symptom of a
+       * silently failed update is nothing at all: the node keeps running the
+       * old binary and looks healthy.
+       *
+       *   200 { ok: true, updating: true,  tag, currentVersion }  — update started
+       *   200 { ok: true, updating: false, tag, reason }          — already current, no restart
+       *   409 { ok: false, error: "node offline" }                — not connected
+       *   502 { ok: false, error: "<what the node said>" }        — node refused or failed
+       *
+       * The node's own error text is passed through rather than replaced with
+       * status copy: `descriptor: unknown verb "update"` IS the diagnosis, and
+       * the console surfaces a hub-supplied `error` field in its toast.
        */
       .post("/:id/update", async (c) => {
         const nodeId = c.req.param("id");
-        const r = await _request(nodeId, "update", {});
-        return c.json(r);
+        const force = await readForce(c);
+        const r = await _request(nodeId, "update", { force });
+
+        // The RPC never reached the node, or the node rejected the frame.
+        if (!r.ok) {
+          return c.json(
+            { ok: false as const, error: r.error ?? "update failed" },
+            brokerErrorStatus(r.error)
+          );
+        }
+
+        // The round-trip succeeded but the update itself did not — e.g. the
+        // download 404'd or the checksum did not match. Same class of lie as
+        // the envelope case if it were reported as 200.
+        const data = (r.data ?? {}) as UpdateResult;
+        if (data.ok === false) {
+          return c.json(
+            { ok: false as const, error: data.error ?? "update failed" },
+            502
+          );
+        }
+
+        // Flattened: the node's payload arrives nested under `data`, so a
+        // caller reading `body.updating` off the envelope always saw undefined
+        // and could not tell a started update from a no-op.
+        return c.json({
+          ok: true as const,
+          updating: data.updating ?? false,
+          tag: data.tag,
+          currentVersion: data.currentVersion,
+          reason: data.reason,
+        });
       })
   );
 }
