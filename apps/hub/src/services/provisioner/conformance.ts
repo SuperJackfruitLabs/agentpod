@@ -12,7 +12,9 @@
  *                       console offered three sizes and gave you one.
  *   3. stopSemantics  — Modal's terminate is irreversible. A hub that believes
  *                       there is a start to call leaves a station starting for
- *                       ever.
+ *                       ever. Checked both ways since startRuntime began
+ *                       dispatching on the field: "resumable" without a start()
+ *                       is a runtime that can be stopped exactly once.
  *   4. workspaceStorage — the Cloudflare data loss: a container whose disk was
  *                       wiped on sleep looked exactly like Docker's, whose disk
  *                       is not, because the interface had no way to say so.
@@ -129,9 +131,14 @@ export async function assertConforms(
     harness(provider, `probe.image must not be the probe's own sentinel image`);
   }
 
+  // workspaceStorage first, and deliberately: a `rootfs` + `resumable` driver
+  // with no start is a violation of BOTH this rule and stopSemantics, and of the
+  // two, the workspaceStorage message is the one that names what is actually at
+  // stake for that driver — an unverifiable claim about a user's files. The
+  // narrower rule gets to speak first.
+  assertWorkspaceStorageIsCoherent(provider, manifest);
   assertStopSemantics(provider, manifest, driver);
   assertLifecycleIsImplemented(provider, manifest, driver);
-  assertWorkspaceStorageIsCoherent(provider, manifest);
 
   const tier = probe.tier ?? manifest.supportedTiers[0] ?? "small";
   if (!manifest.supportedTiers.includes(tier) && manifest.supportedTiers.length > 0) {
@@ -158,18 +165,44 @@ export async function assertConforms(
 // ─── Rule 3: stopSemantics ────────────────────────────────────────────────────
 
 /**
+ * Both directions, because `startRuntime` now DISPATCHES on this field.
+ *
  * `terminal` means stop is the end of the instance — Modal's terminate cannot
  * be undone, and every restart is a new sandbox with a new id and a fresh
  * filesystem. A start verb on such a driver is not a small inaccuracy: the hub
  * calls start on a stopped runtime, and a driver that accepts the call reports
  * success for something that can never happen.
+ *
+ * `resumable` is the claim that the instance survives a stop and can be brought
+ * back, and it is now the field that routes a start request to `driver.start()`
+ * rather than to a re-provision. Until that branch existed this direction was
+ * inert — nothing in production read `stopSemantics`, so a driver could declare
+ * `resumable` with no start() at no cost. It costs something now: the hub
+ * believes the instance can come back, refuses to re-create it (re-creating a
+ * resumable instance would throw away the disk the declaration promises), and
+ * the runtime can be stopped exactly once. The rule below is what stops that
+ * driver shipping.
  */
 function assertStopSemantics(
   provider: string,
   manifest: DriverManifest,
   driver: RuntimeProvisioner
 ): void {
-  if (manifest.stopSemantics !== "terminal") return;
+  if (manifest.stopSemantics === "resumable") {
+    if (typeof driver.start !== "function") {
+      violation(
+        provider,
+        "stopSemantics",
+        `declared "resumable", so a stopped instance is supposed to come back — ` +
+          `but the driver implements no start(). startRuntime reads this field ` +
+          `to decide between calling start() and provisioning a replacement, ` +
+          `and it will not re-create a resumable instance: doing so would ` +
+          `destroy the very disk this declaration promises survives. Implement ` +
+          `start(), or declare "terminal" and mean it.`
+      );
+    }
+    return;
+  }
 
   if (manifest.lifecycle.includes("start")) {
     violation(

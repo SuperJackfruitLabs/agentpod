@@ -13,7 +13,11 @@ import { connectionManager } from "./connection-manager";
 import { dropNode } from "./broker";
 import { clearNode } from "./health-cache";
 import { setNodeStatus } from "./node-registry";
-import { sweepStalledRuntimeStarts, sweepStalledRuntimeStops } from "./runtimes";
+import {
+  sweepStalledRuntimeStarts,
+  sweepStalledRuntimeStops,
+  sweepExpiringRuntimes,
+} from "./runtimes";
 
 export const SWEEP_INTERVAL_MS = 15_000;
 export const OFFLINE_THRESHOLD_MS = 45_000;
@@ -44,10 +48,12 @@ export async function sweepStaleNodes(now: number = Date.now()): Promise<string[
 /**
  * Start the periodic sweeper. Returns a stop function.
  *
- * Three expiries share the tick because they are the same idea at three levels:
- * a node that stopped talking, a runtime that was asked to run and never
- * produced a node at all (sweepStalledRuntimeStarts), and a runtime that was
- * asked to stop and has not been seen to (sweepStalledRuntimeStops).
+ * Four expiries share the tick because they are the same idea at four levels: a
+ * node that stopped talking, a runtime that was asked to run and never produced
+ * a node at all (sweepStalledRuntimeStarts), a runtime that was asked to stop
+ * and has not been seen to (sweepStalledRuntimeStops), and the one nobody asked
+ * for — a runtime the SUBSTRATE is about to destroy for age while it is working
+ * perfectly (sweepExpiringRuntimes).
  */
 export function startNodeSweeper(): () => void {
   const timer = setInterval(() => {
@@ -61,6 +67,15 @@ export function startNodeSweeper(): () => void {
     // `stopping` runtime into `stopped` once the substrate says it is down.
     void sweepStalledRuntimeStops().catch((err) =>
       console.error("[sweeper] runtime stop sweep failed:", err)
+    );
+    // And the one nobody asked for: a runtime the substrate is about to destroy
+    // for age. A capped substrate (Modal's sandboxes die at 24 hours however
+    // healthy they are, with no warning and no way back) would otherwise take a
+    // station down once a day, so the hub replaces the instance before that
+    // lands. Driven by the driver's declared ceiling, so uncapped substrates
+    // cost nothing here.
+    void sweepExpiringRuntimes().catch((err) =>
+      console.error("[sweeper] runtime rotation sweep failed:", err)
     );
   }, SWEEP_INTERVAL_MS);
   return () => clearInterval(timer);

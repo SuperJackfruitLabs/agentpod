@@ -135,6 +135,62 @@ export function collectConfigErrors(
     });
   }
 
+  // Conditional for the same reason as the Cloudflare rule above: a hub that
+  // never talks to Modal must not be stopped from booting by Modal's variables.
+  // The live hub runs `docker, cloudflare` and has never heard of
+  // ENABLE_MODAL_PROVISIONING; unset must stay indistinguishable from off.
+  //
+  // Why refuse to boot at all, when two of these already fail elsewhere? The
+  // death is not new — createModalApi() calls requireCredentials() during
+  // registration, so a hub with the flag on and no tokens already dies at
+  // startup, just with an uncaught stack trace instead of a sentence naming the
+  // variable. validateConfig() runs first (src/index.ts) and swaps one for the
+  // other. The other two variables are why this is more than cosmetic:
+  // NODE_AGENT_MODAL_IMAGE and PROVISIONING_HUB_URL do not fail at boot at all.
+  // They fail silently, later, on somebody else's runtime.
+  if (cfg.modal.enabled) {
+    if (!cfg.modal.tokenId) {
+      errors.push({
+        field: "MODAL_TOKEN_ID",
+        message:
+          "Required when ENABLE_MODAL_PROVISIONING=true. Create it in the Modal " +
+          "dashboard. Note: on Modal's Starter plan a token is WORKSPACE-WIDE — " +
+          "per-resource scoping needs the $250/mo Team plan — so use a workspace " +
+          "dedicated to AgentPod.",
+      });
+    }
+    // Reported separately from the id, not as one "credentials are missing"
+    // error: half-configured is the deploy an operator actually produces, and a
+    // combined message would send them to re-check the half that was right.
+    if (!cfg.modal.tokenSecret) {
+      errors.push({
+        field: "MODAL_TOKEN_SECRET",
+        message:
+          "Required when ENABLE_MODAL_PROVISIONING=true, alongside MODAL_TOKEN_ID.",
+      });
+    }
+    if (!cfg.modal.image || !cfg.modal.image.includes("/")) {
+      errors.push({
+        field: "NODE_AGENT_MODAL_IMAGE",
+        message:
+          "Required when ENABLE_MODAL_PROVISIONING=true, and it must be a registry " +
+          "reference Modal can pull (linux/amd64, carrying python and pip). The " +
+          "Docker default `agentpod-node:local` is meaningless to Modal: the sandbox " +
+          "never boots and the runtime sits in `provisioning` until it is expired. " +
+          "See docs/DEPLOYMENT.md.",
+      });
+    }
+    if (!cfg.provisioningHubUrl) {
+      errors.push({
+        field: "PROVISIONING_HUB_URL",
+        message:
+          "Required when ENABLE_MODAL_PROVISIONING=true: Modal destroys a sandbox at " +
+          "24 hours, so the hub re-creates it on a timer with no request to take an " +
+          "origin from. Unset, every rotation fails a day after anyone was watching.",
+      });
+    }
+  }
+
   // Conditional for the same reason as CLOUDFLARE_SANDBOX_IMAGE above: required
   // only where the Fly driver is actually registered.
   //

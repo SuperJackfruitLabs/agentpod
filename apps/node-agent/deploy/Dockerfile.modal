@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1
+
+# node-agent image for the Modal provisioner.
+#
+# Three things Modal requires that our other images do not provide, each fatal
+# on its own:
+#
+#   1. python3 and pip must be present in the image. Modal's runtime is Python
+#      and the driver pulls the image with `images.fromRegistry(tag)` and
+#      nothing else (apps/hub/src/services/provisioner/modal-api.ts) — it does
+#      NOT ask Modal to inject a standalone python, so the image must carry one.
+#      An image without it does not boot, and the failure surfaces only as a
+#      sandbox that never enrols.
+#   2. Any ENTRYPOINT must end in `exec "$@"` so Modal's runtime can take over
+#      the container's command. Ours never can: /node-entrypoint.sh enrols and
+#      then execs its own run loop, ignoring "$@" entirely. Dockerfile.base sets
+#      no ENTRYPOINT (each harness layer picks its own), so there is nothing to
+#      undo here — the explicit clear below is a guard against a future base
+#      acquiring one, since the failure it would cause is silent. The driver
+#      passes /modal-entrypoint.sh as the sandbox COMMAND instead
+#      (MODAL_ENTRYPOINT in apps/hub/src/services/provisioner/modal.ts).
+#   3. linux/amd64 only. Build with --platform. On an Apple Silicon machine the
+#      default build is arm64, Modal rejects it, and the build runs under
+#      emulation — slow, and worth waiting for rather than working around.
+#
+# BUILD. Both stages must be amd64, including the base: `FROM agentpod-node:base`
+# resolves from the local image store, and a base built for the host's arm64
+# fails the build (or, worse on a mixed store, silently supplies the wrong
+# architecture). BASE_IMAGE exists so an Apple Silicon dev can build an amd64
+# base under its own tag instead of clobbering the arm64 `agentpod-node:base`
+# that the Docker provisioner runs locally:
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.base \
+#     -t agentpod-node:base-amd64 --load apps/node-agent
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg BASE_IMAGE=agentpod-node:base-amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.modal \
+#     -t agentpod-node-modal:local --load apps/node-agent
+#
+# On an amd64 host the default BASE_IMAGE is right and only --platform matters.
+#
+# PUSH (the tag becomes NODE_AGENT_MODAL_IMAGE):
+#
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg BASE_IMAGE=agentpod-node:base-amd64 \
+#     -f apps/node-agent/deploy/Dockerfile.modal \
+#     -t ghcr.io/<owner>/agentpod-node-modal:<version> --push apps/node-agent
+#
+# The repository must be PUBLIC: `createModalApi` calls
+# `images.fromRegistry(tag)` with no Secret, so Modal cannot authenticate to a
+# private registry. Extend the adapter first if that changes.
+#
+# There is no CI pipeline for this image, as for none of the images here — they
+# are hand-built and pushed. Don't infer one from the tag.
+ARG BASE_IMAGE=agentpod-node:base
+FROM ${BASE_IMAGE}
+
+# python3-pip rather than just python3: Modal expects pip present, and on Debian
+# trixie pip is a separate package. It is externally managed (PEP 668), so
+# anything installing into it needs a venv or --break-system-packages; that is a
+# property of the distro, not of this image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# The sandbox's main process. A wrapper: it anchors the workspace and node
+# identity and then execs the fleet's own /node-entrypoint.sh, so enrol-then-run
+# keeps a single definition. See the script for what "anchors" means and why
+# each part is not merely assumed.
+COPY deploy/modal-entrypoint.sh /modal-entrypoint.sh
+RUN chmod +x /modal-entrypoint.sh
+
+# test-modal-entrypoint.sh is deliberately NOT copied in — a production image
+# should not ship its own test. It runs against the built image by bind mount:
+#
+#   mkdir -p /tmp/fake-volume
+#   docker run --rm --platform linux/amd64 \
+#     -v "$PWD/apps/node-agent/deploy":/t -v /tmp/fake-volume:/workspace \
+#     --entrypoint sh agentpod-node-modal:local /t/test-modal-entrypoint.sh
+#
+# The bind mount stands in for the Modal Volume, which is why the test can check
+# the mount-evidence branch as well as the missing-workspace one.
+
+# The mount point for the runtime's Modal Volume, created so the path exists
+# even in a sandbox started without one — the wrapper then reports that the
+# workspace is not a real mount instead of dying on a missing directory.
+RUN mkdir -p /workspace
+WORKDIR /workspace
+
+# Cleared on purpose: see (2) above. The driver supplies the command.
+ENTRYPOINT []

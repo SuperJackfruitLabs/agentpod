@@ -239,6 +239,13 @@
       "when": 1786534120547,
       "tag": "0033_runtime_stopping_status",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786578432361,
+      "tag": "0034_runtime_external_started_at",
+      "breakpoints": true
     }
   ]
 }

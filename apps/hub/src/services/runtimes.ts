@@ -6,6 +6,11 @@
  *   destroy → driver.destroy → mark destroyed
  *   start / stop → driver.start/stop (guard on capability)
  *
+ * "start" is not one verb, though. On a substrate whose stop is terminal there
+ * is no start to call, and the honest restart is a create against the anchor
+ * that carries the workspace — so startRuntime branches on the driver's
+ * declared `stopSemantics` and reprovisionRuntime handles that half.
+ *
  * Status honesty: `online` means "a node for this runtime is connected" and is
  * written only by enrolment (enrollment.ts). Everything here can say at most
  * "the substrate accepted my request" — hence `provisioning` / `starting`, and
@@ -44,26 +49,51 @@ const prefixedId = (prefix: string) =>
   `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 
 /**
- * Resolve the container image for a given harness.
- * Image resolution lives in the service layer so drivers are image-agnostic —
- * they receive the resolved image via ProvisionSpec.image.
+ * Resolve the container image for a harness on a given provider.
  *
- * Env overrides allow operators to pin specific image tags per harness:
- *   NODE_AGENT_OPENCODE_IMAGE — opencode harness (default: agentpod-node-opencode:local)
- *   NODE_AGENT_PI_IMAGE       — pi harness      (default: agentpod-node-pi:local)
- *   NODE_AGENT_IMAGE          — generic / no harness (default: agentpod-node:local)
+ * Image resolution lives in the service layer so drivers stay image-agnostic —
+ * they always receive the resolved image via ProvisionSpec.image and never read
+ * env themselves.
+ *
+ * It is provider-scoped because two enabled substrates need different
+ * references for the same harness: Docker runs `agentpod-node-opencode:local`
+ * from the host daemon, while Modal pulls from a registry and runs linux/amd64
+ * only. One variable cannot serve both, and the failure mode when it tries is
+ * silent — a sandbox that never boots, a runtime stuck in `provisioning`, and a
+ * sweeper message two minutes later that names nothing.
+ *
+ * Resolution order, first non-empty hit wins:
+ *   NODE_AGENT_<PROVIDER>_<HARNESS>_IMAGE   e.g. NODE_AGENT_MODAL_OPENCODE_IMAGE
+ *   NODE_AGENT_<HARNESS>_IMAGE              e.g. NODE_AGENT_OPENCODE_IMAGE
+ *   the built-in local default
+ *
+ * With no provider-scoped variable set, this resolves exactly what it resolved
+ * before — Docker and Cloudflare are unchanged, which is checked against the
+ * documented variable names in runtimes-image.test.ts.
+ *
+ * The provider-scoped name is not free-form: `NODE_AGENT_MODAL_IMAGE` is the
+ * same variable `config.ts` reads and `validate-config.ts` refuses to boot
+ * without. The two must stay in step, or an operator satisfies the boot check
+ * and Modal is still handed a tag it cannot pull.
  */
-function imageForHarness(harness: string): string {
-  if (harness === "opencode") {
-    return process.env.NODE_AGENT_OPENCODE_IMAGE ?? "agentpod-node-opencode:local";
-  }
-  if (harness === "pi") {
-    return process.env.NODE_AGENT_PI_IMAGE ?? "agentpod-node-pi:local";
-  }
-  return process.env.NODE_AGENT_IMAGE ?? "agentpod-node:local";
+export function imageForHarness(harness: string, provider: string): string {
+  const suffix = harness === "opencode" ? "_OPENCODE" : harness === "pi" ? "_PI" : "";
+  const scope = provider.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const fallback =
+    suffix === "_OPENCODE"
+      ? "agentpod-node-opencode:local"
+      : suffix === "_PI"
+        ? "agentpod-node-pi:local"
+        : "agentpod-node:local";
+
+  return (
+    process.env[`NODE_AGENT_${scope}${suffix}_IMAGE`] ||
+    process.env[`NODE_AGENT${suffix}_IMAGE`] ||
+    fallback
+  );
 }
 
-type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
+export type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
 
 function toContract(row: RuntimeRow): ProvisionedRuntime {
   return {
@@ -187,12 +217,27 @@ export async function createRuntime(
       resourceTier: (req.resourceTier ?? "small") as "small" | "medium" | "large",
       hubUrl,
       enrollToken,
-      image: imageForHarness(harness),
+      image: imageForHarness(harness, provider),
     });
 
     await db
       .update(provisionedRuntimes)
-      .set({ externalId, runtime: runtime ?? null, updatedAt: new Date() })
+      .set({
+        externalId,
+        runtime: runtime ?? null,
+        // The instance clock starts where the instance does: the substrate has
+        // just accepted this one. It is set HERE, beside the externalId, and
+        // not at insert time, because until provision() resolves there is no
+        // instance to date — a failed provision must leave this null.
+        //
+        // Every later write of externalId has to set this too. A substrate that
+        // replaces the instance (Modal terminates a sandbox at its 24h ceiling
+        // and the hub re-creates against the same volume) would otherwise keep
+        // the age of the instance it replaced, and be rotated again on the very
+        // next sweep — for ever.
+        externalStartedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(provisionedRuntimes.id, id));
 
     const [row] = await db
@@ -299,7 +344,142 @@ export async function destroyRuntime(userId: string, id: string): Promise<void> 
 }
 
 /**
- * Start (or wake) a runtime. Throws 400 if the driver has no start() support.
+ * The hub URL a provisioned container should dial.
+ *
+ * Request-scoped for createRuntime, which can take the origin of the call that
+ * asked for the runtime. A re-create cannot: it runs on a rotation timer with no
+ * request in sight, so there it has to come from configuration. Throwing here is
+ * the point — the alternative is a container handed a hub URL of "" or
+ * "localhost", which boots, fails to enrol, and reports nothing but a runtime
+ * that never came back.
+ */
+function provisioningHubUrl(): string {
+  const url = process.env.PROVISIONING_HUB_URL;
+  if (!url) {
+    throw Object.assign(
+      new Error(
+        "PROVISIONING_HUB_URL is not set, so a runtime cannot be re-created — " +
+          "the new container would have no hub to enrol against"
+      ),
+      { status: 502 }
+    );
+  }
+  return url;
+}
+
+/**
+ * Re-create a runtime's instance on a substrate whose stop is terminal.
+ *
+ * This is what "start" means when there is no start verb. Modal's terminate
+ * cannot be undone and every restart is a new sandbox with a new id and a fresh
+ * rootfs — so the thing that persists is the driver's anchor, and a driver
+ * anchors by `spec.runtimeId`. Provisioning again with the SAME runtimeId
+ * therefore re-attaches the same workspace. A fresh id would look like it
+ * worked: a new sandbox, a new Volume, an empty workspace, and the old Volume
+ * orphaned — still billed, still holding the only copy of the station's work.
+ *
+ * Three things happen alongside the create, and each is easy to forget:
+ *
+ *  - The old instance is terminated FIRST, best effort. Leaving it behind is a
+ *    sandbox nobody is watching and everybody is paying for, and two live
+ *    sandboxes on one Volume is the corruption case. Best effort, because the
+ *    old one is very often already gone (that is the 24h ceiling doing its job)
+ *    and refusing to create a replacement because the corpse would not die again
+ *    helps nobody — but a failure is recorded in statusReason, where the console
+ *    shows it, rather than left to a log nobody reads.
+ *  - A FRESH enrolment token is minted. The hub stores only a hash, so it cannot
+ *    re-present the original; a new runtime-bound token is durable by default
+ *    (RUNTIME_TOKEN_TTL_MS) and enrollNode resumes the existing node with a
+ *    rotated secret rather than orphaning it.
+ *  - `externalStartedAt` is rewritten. The new sandbox has its own ceiling, and
+ *    an instance clock left at the old value would have the rotation sweep find
+ *    a freshly created sandbox already expired and replace it again on the very
+ *    next tick, for ever.
+ *
+ * Leaves the runtime `starting` — never `online`. The substrate accepting a
+ * create is not a node existing, and sweepStalledRuntimeStarts walks it back to
+ * `error` if none arrives.
+ */
+export async function reprovisionRuntime(
+  row: RuntimeRow,
+  reason: string
+): Promise<void> {
+  const provisioner = getProvisionerUnguarded(row.provider);
+  if (!provisioner) {
+    throw Object.assign(new Error(`provider not available: ${row.provider}`), {
+      status: 502,
+    });
+  }
+
+  const hubUrl = provisioningHubUrl();
+
+  let terminateWarning: string | null = null;
+  if (row.externalId && provisioner.stop) {
+    try {
+      await provisioner.stop(row.externalId);
+    } catch (err) {
+      terminateWarning =
+        `the previous instance (${row.externalId}) could not be terminated: ` +
+        `${(err as Error).message} — check the substrate, it may still be billing`;
+      console.warn(`[runtimes] ${row.id}: ${terminateWarning}`);
+    }
+  }
+
+  const { token } = await mintEnrollmentToken(row.userId, {
+    provisionedRuntimeId: row.id,
+  });
+
+  try {
+    const { externalId, runtime } = await provisioner.provision({
+      runtimeId: row.id,
+      name: row.name,
+      resourceTier: row.resourceTier as "small" | "medium" | "large",
+      hubUrl,
+      enrollToken: token,
+      // Provider-scoped: a re-provision is the path a rotating substrate takes
+      // every 24 hours, so it must resolve the same reference the original
+      // create did — and Modal's reference is not Docker's.
+      image: imageForHarness(row.harness ?? "none", row.provider),
+    });
+
+    await db
+      .update(provisionedRuntimes)
+      .set({
+        externalId,
+        runtime: runtime ?? row.runtime ?? null,
+        externalStartedAt: new Date(),
+        status: "starting",
+        statusReason: terminateWarning ? `${reason}. ${terminateWarning}` : reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(provisionedRuntimes.id, row.id));
+  } catch (err) {
+    // A re-create is a create, and a create can be refused. Leaving the row
+    // `starting` would hand the operator a spinner for something that has
+    // already failed, and the stalled-start sweeper would eventually blame the
+    // wrong thing ("no node enrolled") two minutes later.
+    await db
+      .update(provisionedRuntimes)
+      .set({
+        status: "error",
+        statusReason:
+          `the ${row.provider} driver failed to re-create it: ${(err as Error).message}` +
+          (terminateWarning ? `. ${terminateWarning}` : ""),
+        updatedAt: new Date(),
+      })
+      .where(eq(provisionedRuntimes.id, row.id));
+    throw Object.assign(err as Error, { status: 502 });
+  }
+}
+
+/**
+ * Start (or wake) a runtime.
+ *
+ * Two shapes, chosen by the driver's `stopSemantics`:
+ *   - `resumable` (docker, cloudflare) — start the instance that is already
+ *     there. Throws 400 if such a driver has no start() support.
+ *   - `terminal` (modal) — there is nothing to start, so this re-creates the
+ *     instance against the same anchor. See reprovisionRuntime.
  *
  * Leaves the runtime `starting`, never `online`: see the comment on the write.
  * A wake takes the same path, so an asleep runtime goes asleep → starting →
@@ -324,6 +504,24 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
       { status: 502 }
     );
   }
+  // A driver whose stop is terminal has no start to call — Modal's terminate is
+  // irreversible — so a restart on such a substrate IS a create, against the
+  // anchor that carries the workspace. Manifest-driven rather than
+  // provider-specific: any future terminal substrate gets this for free, and the
+  // console's Start button needs no idea which kind it is talking to.
+  //
+  // The condition is the MANIFEST, not the missing method. A resumable driver
+  // that happens to lack start() keeps its 400: its instance survives a stop, so
+  // destroying it and building a replacement would throw away the disk the
+  // declaration promises. Conformance rule 3 now refuses such a driver outright.
+  if (provisioner.manifest.stopSemantics === "terminal") {
+    await reprovisionRuntime(
+      row,
+      "re-created: this substrate has no start, so a start is a new instance"
+    );
+    return;
+  }
+
   if (!provisioner.start) {
     throw Object.assign(
       new Error(`provider ${row.provider} does not support start`),
@@ -363,7 +561,11 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
 export const START_TIMEOUT_MS = 2 * 60_000;
 
 const humanMs = (ms: number) =>
-  ms >= 60_000 ? `${Math.round(ms / 60_000)}m` : `${Math.round(ms / 1000)}s`;
+  ms >= 3_600_000
+    ? `${Math.round(ms / 3_600_000)}h`
+    : ms >= 60_000
+      ? `${Math.round(ms / 60_000)}m`
+      : `${Math.round(ms / 1000)}s`;
 
 /**
  * Expire runtimes that were asked to run and never came back.
@@ -688,6 +890,155 @@ export async function sweepStalledRuntimeStops(
   }
 
   return { stopped, failed };
+}
+
+/**
+ * How long before a substrate's ceiling a runtime is rotated.
+ *
+ * Long enough for a full re-create and re-enrolment (a node enrols within
+ * seconds of its container booting; START_TIMEOUT_MS allows two minutes) with
+ * room for the next 15s tick to retry if the first attempt is refused, and short
+ * enough that rotation stays a rare event rather than a routine tax on a
+ * runtime's life — every rotation is a fresh rootfs and a re-enrolment.
+ *
+ * A ceiling shorter than this margin does NOT mean "always rotate": see
+ * rotationMarginFor.
+ */
+export const ROTATION_MARGIN_MS = 30 * 60_000;
+
+/**
+ * The margin to apply to one substrate's ceiling.
+ *
+ * Straight subtraction breaks for any ceiling shorter than the margin: the
+ * threshold goes negative, every instance is born past due, and the sweeper
+ * re-creates it on every tick — a paid rotation loop with nobody in it. That is
+ * not hypothetical. The Modal driver takes a MODAL_MAX_LIFETIME_MS override
+ * whose stated purpose is verifying rotation in ten minutes rather than a day,
+ * and ten minutes is a third of this margin.
+ *
+ * So the margin never exceeds half the ceiling: a short-lived substrate rotates
+ * at the midpoint of its instance's life, which is the same shape of promise
+ * (replace it with time to spare) at a smaller scale.
+ */
+function rotationMarginFor(ceilingMs: number): number {
+  return Math.min(ROTATION_MARGIN_MS, ceilingMs / 2);
+}
+
+/**
+ * Rotate runtimes the substrate is about to destroy for age.
+ *
+ * The third sweep on the same tick, and the same idea one step further out:
+ * sweepStalledRuntimeStarts handles a runtime that never arrived,
+ * sweepStalledRuntimeStops one that would not leave, and this one a runtime the
+ * PLATFORM is about to kill while it is working perfectly.
+ *
+ * Modal is why it exists — a hard 24-hour sandbox lifetime, no warning
+ * callback, no way to extend it and no way back afterwards, so an unrotated
+ * Modal station simply dies once a day. Nothing here knows that, though: it is
+ * written against `manifest.maxLifetimeMs`, the same number the driver hands its
+ * substrate as the instance's own timeout, so a substrate with no ceiling is
+ * skipped entirely and one added tomorrow is covered without an edit here.
+ *
+ * Deliberately narrow. Each of these is a refusal to do something expensive:
+ *   - Only `online` and `starting`. A `stopped` or `asleep` runtime must NEVER
+ *     be rotated: re-creating one starts an instance nobody asked for that bills
+ *     wall-clock until a human notices, and age alone would always say it is
+ *     due, because a stopped runtime only gets older. `stopping` is an operator
+ *     mid-stop and `error`/`destroyed` already need a human; none of them is
+ *     improved by a new instance appearing on the meter.
+ *   - Only rows with an externalId and an externalStartedAt. Without the second
+ *     there is no age to judge, and both ways of guessing are wrong in the same
+ *     direction: created_at rotates every pre-existing row immediately, and
+ *     treating null as zero does too.
+ *   - AGE ONLY. The substrate is never asked whether the instance is alive. A
+ *     sandbox that died in its first minute will die the same way again, and
+ *     re-creating it would rebuild it every fifteen seconds, billing each
+ *     attempt, with nobody watching. The node going offline already surfaces
+ *     that, and Start is one click for the human who looks.
+ *   - Every write is a compare-and-set on the status that was read, so an
+ *     operator stopping a runtime mid-sweep wins, and two overlapping ticks
+ *     rotate once — two live instances on one anchor is the corruption case.
+ *
+ * @param now injectable clock for tests.
+ * @returns the ids actually rotated.
+ */
+export async function sweepExpiringRuntimes(
+  now: number = Date.now()
+): Promise<string[]> {
+  const live = await db
+    .select()
+    .from(provisionedRuntimes)
+    .where(
+      and(
+        inArray(provisionedRuntimes.status, ["online", "starting"]),
+        isNotNull(provisionedRuntimes.externalId),
+        isNotNull(provisionedRuntimes.externalStartedAt)
+      )
+    );
+
+  const rotated: string[] = [];
+
+  for (const row of live) {
+    const provisioner = getProvisionerUnguarded(row.provider);
+    const ceiling = provisioner?.manifest.maxLifetimeMs ?? null;
+    // No ceiling declared (docker, cloudflare), no registered driver to ask, or
+    // a nonsense zero: nothing here destroys an instance for age, so rotating
+    // one would throw away a working workspace to solve a problem that
+    // substrate does not have.
+    if (!ceiling || ceiling <= 0) continue;
+
+    const age = now - row.externalStartedAt!.getTime();
+    if (age < ceiling - rotationMarginFor(ceiling)) continue;
+
+    const reason =
+      `re-created before this substrate's ${humanMs(ceiling)} instance lifetime ` +
+      `ceiling destroyed it` +
+      (provisioner!.manifest.workspaceStorage === "rootfs"
+        ? " — the instance's disk does not survive, so check the workspace"
+        : " — the workspace is anchored outside the instance and carries over");
+
+    // Claim the row first, and claim it on the status we read. The status write
+    // IS the lock: a concurrent stop, or a second tick that overlaps this one,
+    // finds the row already moved and leaves it alone.
+    const claimed = await db
+      .update(provisionedRuntimes)
+      .set({ status: "provisioning", statusReason: reason, updatedAt: new Date(now) })
+      .where(
+        and(
+          eq(provisionedRuntimes.id, row.id),
+          eq(provisionedRuntimes.status, row.status)
+        )
+      )
+      .returning({ id: provisionedRuntimes.id });
+    if (claimed.length === 0) continue;
+
+    try {
+      await reprovisionRuntime(row, reason);
+      rotated.push(row.id);
+      console.log(
+        `[runtime-sweeper] ${row.id} rotated ahead of the ${humanMs(ceiling)} ${row.provider} ceiling`
+      );
+    } catch (err) {
+      // The platform is going to destroy this instance within the margin and the
+      // hub could not replace it. Leaving it `online` would be the console
+      // asserting health right up to the moment it vanishes.
+      await db
+        .update(provisionedRuntimes)
+        .set({
+          status: "error",
+          statusReason:
+            `could not re-create this runtime before its ${humanMs(ceiling)} ` +
+            `lifetime ceiling: ${(err as Error).message}`,
+          updatedAt: new Date(now),
+        })
+        .where(eq(provisionedRuntimes.id, row.id));
+      console.error(
+        `[runtime-sweeper] ${row.id} rotation failed: ${(err as Error).message}`
+      );
+    }
+  }
+
+  return rotated;
 }
 
 // Re-export for convenience (routes use this)

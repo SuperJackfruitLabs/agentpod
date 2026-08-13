@@ -8,20 +8,24 @@
  *     incident replayed: the suite exists so those become checkable rather than
  *     remembered.
  *
- *  2. The two real drivers, against fake substrates. Their declarations are
+ *  2. The real drivers, against fake substrates. Their declarations are
  *     known-true, so this is what validates the suite against reality before it
  *     gates anything new. If a real driver fails, suspect the suite first.
  *
  * NOTHING here touches a real substrate: the Docker driver is handed a fake
- * orchestrator and the Cloudflare driver a fake fetch, exactly as their own unit
- * tests do. A conformance check that needed a daemon or an API token would run
- * nowhere, which is how the Cloudflare worker went a year without CI.
+ * orchestrator, the Cloudflare driver a fake fetch and the Modal driver a fake
+ * ModalApi, exactly as their own unit tests do. A conformance check that needed
+ * a daemon or an API token would run nowhere, which is how the Cloudflare worker
+ * went a year without CI.
  */
 
 import { describe, it, expect } from "bun:test";
 import { assertConforms } from "./conformance";
 import { DockerRuntimeProvisioner } from "./docker";
 import { CloudflareSandboxProvisioner } from "./cloudflare-sandbox";
+import { ModalRuntimeProvisioner } from "./modal";
+import { ModalNotFoundError } from "./modal-api";
+import type { ModalApi } from "./modal-api";
 import { FlyMachinesProvisioner } from "./fly";
 import { createFlyFakeSubstrate } from "./fly-fake-substrate";
 import { noPacer } from "./fly-api";
@@ -295,6 +299,63 @@ const cloudflareDriver = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   });
 
+// ─── A fake Modal substrate ───────────────────────────────────────────────────
+
+/**
+ * Faithful stand-in for Modal, and a self-contained copy rather than an import
+ * from `modal.test.ts` — a shared helper would let one file's convenience
+ * quietly weaken another file's rule, and this file has to stay runnable on its
+ * own.
+ *
+ * The unfriendly parts are the load-bearing ones, mirroring exactly what the
+ * adapter maps `NotFoundError` to:
+ *
+ *   - an unknown sandbox id throws from terminate and poll;
+ *   - deleting a volume that is already gone throws.
+ *
+ * Both of those are what make rule 6 mean something here: destroy() takes the
+ * sandbox AND the volume, so a fake that shrugged at a repeat delete would hand
+ * Modal destroy idempotency for free. A terminated sandbox is RETAINED and
+ * reports its exit code, which is what Modal does — the sandbox record outlives
+ * the sandbox, and only the volume is really removable twice.
+ */
+function fakeModalApi(): ModalApi {
+  /** sandboxId → exit code; null means still running. */
+  const sandboxes = new Map<string, number | null>();
+  const volumes = new Set<string>();
+  let counter = 0;
+
+  return {
+    async createSandbox(params) {
+      // createIfMissing: the same runtime always reaches the same volume.
+      volumes.add(params.volumeName);
+      const sandboxId = `sb-${++counter}`;
+      sandboxes.set(sandboxId, null);
+      return { sandboxId };
+    },
+    async terminateSandbox(sandboxId) {
+      if (!sandboxes.has(sandboxId)) {
+        throw new ModalNotFoundError(`Sandbox '${sandboxId}' not found`);
+      }
+      sandboxes.set(sandboxId, 137);
+    },
+    async pollSandbox(sandboxId) {
+      if (!sandboxes.has(sandboxId)) {
+        throw new ModalNotFoundError(`Sandbox '${sandboxId}' not found`);
+      }
+      return sandboxes.get(sandboxId)!;
+    },
+    async deleteVolume(name) {
+      if (!volumes.has(name)) {
+        throw new ModalNotFoundError(`Volume '${name}' not found`);
+      }
+      volumes.delete(name);
+    },
+  };
+}
+
+const modalDriver = () => new ModalRuntimeProvisioner({ api: fakeModalApi() });
+
 // ─── Rule 1: imageBinding ─────────────────────────────────────────────────────
 
 describe("assertConforms — imageBinding", () => {
@@ -392,6 +453,38 @@ describe("assertConforms — stopSemantics", () => {
     });
     (driver as { start?: unknown }).start = async () => {};
     await expect(assertConforms(driver)).rejects.toThrow(/stopSemantics/i);
+  });
+
+  it("rejects a resumable driver that implements no start()", async () => {
+    // The other direction, and the one that had no rule until startRuntime
+    // started BRANCHING on this field. "terminal" now routes a start into a
+    // re-provision; "resumable" routes it into driver.start(). A driver that
+    // declares resumable and implements no start() is therefore a runtime that
+    // can be stopped and never started again — the manifest promising the
+    // opposite of what the substrate can do, in the one place the hub now
+    // trusts it. Until this rule existed the field was inert and the lie was
+    // free.
+    const driver = fakeDriver({
+      ...base,
+      workspaceStorage: "volume",
+      stopSemantics: "resumable",
+      lifecycle: ["stop", "status"],
+    });
+    await expect(assertConforms(driver)).rejects.toThrow(
+      /stopSemantics:.*implements no start\(\)/s
+    );
+  });
+
+  it("accepts a resumable driver that implements start() — the rule is not vacuous", async () => {
+    // Same manifest but for the one field under test, so a rule that rejected
+    // everything (or that fired on the wrong field) cannot pass unnoticed.
+    const driver = fakeDriver({
+      ...base,
+      workspaceStorage: "volume",
+      stopSemantics: "resumable",
+      lifecycle: ["start", "stop", "status"],
+    });
+    await expect(assertConforms(driver)).resolves.toBeUndefined();
   });
 });
 
@@ -532,6 +625,47 @@ describe("assertConforms — the real drivers", () => {
     await expect(
       assertConforms(cloudflareDriver({ deployedImage: "" }))
     ).rejects.toThrow(/imageBinding/i);
+  });
+
+  /**
+   * The point of the whole manifest exercise: Modal is the first substrate whose
+   * constraints the interface was NOT accidentally designed around. Terminal
+   * stop, a 24-hour ceiling, no start verb, a workspace that lives in a Volume
+   * rather than on the rootfs — if the manifest generalises at all, it
+   * generalises here.
+   *
+   * assertConforms is fail-fast and destroy idempotency is the LAST thing it
+   * probes, so reaching the end is itself the proof that imageBinding,
+   * supportedTiers, stopSemantics (no start verb, and none implemented),
+   * workspaceStorage and status all held too.
+   *
+   * NO `{ image }` IS PASSED, deliberately. That argument exists for a `fixed`
+   * driver, whose deployed image is a fact only its deployment knows; Modal
+   * declares `imageBinding: "per-instance"` and honours any registry reference,
+   * so the suite's own PROBE_IMAGE is exactly what a real caller would hand it.
+   * Handing a per-instance driver a pre-vetted image would also be the one way
+   * to hide a real defect: Modal refuses an image with no registry host, and if
+   * the suite's probe image ever lost its host, this test passing an image of
+   * its own would keep going green while the driver rejected what the suite
+   * actually builds. Let it break there instead.
+   */
+  it("holds the real Modal driver to every declaration", async () => {
+    await expect(assertConforms(modalDriver())).resolves.toBeUndefined();
+  });
+
+  it("REFUSES a Modal driver that grew a start() method", async () => {
+    // stopSemantics "terminal" means terminate cannot be undone: every restart
+    // is a NEW sandbox with a new id and a fresh rootfs. The hub reaches for
+    // start() by method presence, so a well-meaning start() added later — not
+    // declared in the manifest, so invisible to review — would have the hub
+    // reporting success for something that can never happen, and a station
+    // "starting" for ever. The refusal must name the field AND the method, or
+    // it proves nothing about which rule fired.
+    const grown = modalDriver() as RuntimeProvisioner;
+    grown.start = async () => {};
+    await expect(assertConforms(grown)).rejects.toThrow(
+      /stopSemantics:.*implements start\(\)/s
+    );
   });
 
   /**

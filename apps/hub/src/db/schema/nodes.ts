@@ -40,6 +40,18 @@ export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   // Container runtime the provider reported, e.g. "runsc". Null when the
   // provider has no such concept, or the row predates the field.
   runtime: text("runtime"),
+  // When the CURRENT external instance started — which is not created_at on a
+  // substrate that replaces the instance while the runtime lives on. Written
+  // wherever externalId is written, because the two describe the same instance:
+  // one names it, this one dates it.
+  //
+  // Nullable and never defaulted, on purpose. Null means "there is no instance
+  // to date" — a row that predates this column, a provision that failed, or a
+  // runtime that has not been created yet — and a sweeper deciding whether the
+  // substrate is about to destroy an instance must be able to tell that from a
+  // real age. A DEFAULT now() would make every such row look like a brand-new
+  // instance and cost a real one.
+  externalStartedAt: timestamp("external_started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [index("provisioned_runtimes_user_id_idx").on(t.userId)]);

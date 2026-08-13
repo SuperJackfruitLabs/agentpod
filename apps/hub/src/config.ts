@@ -177,6 +177,23 @@ export const config = {
     autoSelect: getEnvBool('AUTO_SELECT_PROVIDER', false),
   },
 
+  modal: {
+    enabled: getEnvBool('ENABLE_MODAL_PROVISIONING', false),
+    // Workspace-wide on Modal's Starter plan: per-resource scoping needs the
+    // $250/mo Team plan. Use a Modal workspace dedicated to AgentPod.
+    tokenId: getEnv('MODAL_TOKEN_ID', ''),
+    tokenSecret: getEnv('MODAL_TOKEN_SECRET', ''),
+    // Modal pulls from a registry and runs linux/amd64 only, so the local tags
+    // a Docker-first hub uses are meaningless to it.
+    image: getEnv('NODE_AGENT_MODAL_IMAGE', ''),
+    appName: getEnv('MODAL_APP_NAME', 'agentpod'),
+  },
+
+  // Hub URL a provisioned container dials to enrol. Request-scoped for a
+  // console-initiated create, but a rotating substrate re-creates instances on
+  // a timer with no request in sight — so it must be configured.
+  provisioningHubUrl: getEnv('PROVISIONING_HUB_URL', ''),
+
   fly: {
     enabled: getEnvBool('ENABLE_FLY_PROVISIONING', false),
     // Read here ONLY so validate-config can refuse the boot with a message
