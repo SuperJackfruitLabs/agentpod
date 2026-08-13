@@ -49,23 +49,48 @@ const prefixedId = (prefix: string) =>
   `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 
 /**
- * Resolve the container image for a given harness.
- * Image resolution lives in the service layer so drivers are image-agnostic —
- * they receive the resolved image via ProvisionSpec.image.
+ * Resolve the container image for a harness on a given provider.
  *
- * Env overrides allow operators to pin specific image tags per harness:
- *   NODE_AGENT_OPENCODE_IMAGE — opencode harness (default: agentpod-node-opencode:local)
- *   NODE_AGENT_PI_IMAGE       — pi harness      (default: agentpod-node-pi:local)
- *   NODE_AGENT_IMAGE          — generic / no harness (default: agentpod-node:local)
+ * Image resolution lives in the service layer so drivers stay image-agnostic —
+ * they always receive the resolved image via ProvisionSpec.image and never read
+ * env themselves.
+ *
+ * It is provider-scoped because two enabled substrates need different
+ * references for the same harness: Docker runs `agentpod-node-opencode:local`
+ * from the host daemon, while Modal pulls from a registry and runs linux/amd64
+ * only. One variable cannot serve both, and the failure mode when it tries is
+ * silent — a sandbox that never boots, a runtime stuck in `provisioning`, and a
+ * sweeper message two minutes later that names nothing.
+ *
+ * Resolution order, first non-empty hit wins:
+ *   NODE_AGENT_<PROVIDER>_<HARNESS>_IMAGE   e.g. NODE_AGENT_MODAL_OPENCODE_IMAGE
+ *   NODE_AGENT_<HARNESS>_IMAGE              e.g. NODE_AGENT_OPENCODE_IMAGE
+ *   the built-in local default
+ *
+ * With no provider-scoped variable set, this resolves exactly what it resolved
+ * before — Docker and Cloudflare are unchanged, which is checked against the
+ * documented variable names in runtimes-image.test.ts.
+ *
+ * The provider-scoped name is not free-form: `NODE_AGENT_MODAL_IMAGE` is the
+ * same variable `config.ts` reads and `validate-config.ts` refuses to boot
+ * without. The two must stay in step, or an operator satisfies the boot check
+ * and Modal is still handed a tag it cannot pull.
  */
-function imageForHarness(harness: string): string {
-  if (harness === "opencode") {
-    return process.env.NODE_AGENT_OPENCODE_IMAGE ?? "agentpod-node-opencode:local";
-  }
-  if (harness === "pi") {
-    return process.env.NODE_AGENT_PI_IMAGE ?? "agentpod-node-pi:local";
-  }
-  return process.env.NODE_AGENT_IMAGE ?? "agentpod-node:local";
+export function imageForHarness(harness: string, provider: string): string {
+  const suffix = harness === "opencode" ? "_OPENCODE" : harness === "pi" ? "_PI" : "";
+  const scope = provider.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+  const fallback =
+    suffix === "_OPENCODE"
+      ? "agentpod-node-opencode:local"
+      : suffix === "_PI"
+        ? "agentpod-node-pi:local"
+        : "agentpod-node:local";
+
+  return (
+    process.env[`NODE_AGENT_${scope}${suffix}_IMAGE`] ||
+    process.env[`NODE_AGENT${suffix}_IMAGE`] ||
+    fallback
+  );
 }
 
 export type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
@@ -192,7 +217,7 @@ export async function createRuntime(
       resourceTier: (req.resourceTier ?? "small") as "small" | "medium" | "large",
       hubUrl,
       enrollToken,
-      image: imageForHarness(harness),
+      image: imageForHarness(harness, provider),
     });
 
     await db
@@ -411,9 +436,10 @@ export async function reprovisionRuntime(
       resourceTier: row.resourceTier as "small" | "medium" | "large",
       hubUrl,
       enrollToken: token,
-      // One argument today; Task 12 makes image resolution provider-aware and
-      // updates this call and createRuntime's together.
-      image: imageForHarness(row.harness ?? "none"),
+      // Provider-scoped: a re-provision is the path a rotating substrate takes
+      // every 24 hours, so it must resolve the same reference the original
+      // create did — and Modal's reference is not Docker's.
+      image: imageForHarness(row.harness ?? "none", row.provider),
     });
 
     await db

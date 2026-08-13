@@ -1263,6 +1263,43 @@ test("re-creating mints a fresh enrolment token, because the old one is not in t
   expect(tokenRows.length).toBe(2);
 }, 30_000);
 
+test("every path resolves the image for the runtime's OWN provider", async () => {
+  // Provider-scoped image resolution is only worth anything if both call sites
+  // use it. The re-create path is the one that matters most and is the easiest
+  // to get wrong: a rotation runs every 24 hours with no request and nobody
+  // watching, and a re-create that resolved Docker's local tag would hand Modal
+  // an image it cannot pull — the sandbox never boots, the runtime sits in
+  // `starting`, and the sweeper names nothing useful two minutes later.
+  //
+  // The docker assertion is the other half: one variable set for one provider
+  // must not move the live hub, which runs docker + cloudflare.
+  const MODAL_IMAGE = "ghcr.io/example/agentpod-node-modal:v1";
+  const previous = process.env.NODE_AGENT_MODAL_IMAGE;
+  process.env.NODE_AGENT_MODAL_IMAGE = MODAL_IMAGE;
+  try {
+    const { id } = await createModalRuntime("scoped-image");
+    // Call site 1: createRuntime.
+    expect(terminalCalls.provision.at(-1)!.image).toBe(MODAL_IMAGE);
+
+    // Call site 2: reprovisionRuntime, reached through start-as-create.
+    await startVia(id);
+    expect(terminalCalls.provision).toHaveLength(2);
+    expect(terminalCalls.provision.at(-1)!.image).toBe(MODAL_IMAGE);
+
+    // ...and the Docker runtime on the same hub is untouched by Modal's variable.
+    const dockerRes = await createRuntime(TEST_USER, "docker-image-unmoved");
+    expect(dockerRes.status).toBe(201);
+    expect(fakeCalls.provision.at(-1)!.image).toBe(
+      process.env.NODE_AGENT_IMAGE ?? "agentpod-node:local"
+    );
+  } finally {
+    // `bun test` shares one process: a stray NODE_AGENT_MODAL_IMAGE would
+    // follow this file into every later one.
+    if (previous === undefined) delete process.env.NODE_AGENT_MODAL_IMAGE;
+    else process.env.NODE_AGENT_MODAL_IMAGE = previous;
+  }
+}, 30_000);
+
 test("a re-create the substrate refuses leaves the runtime in error, saying so", async () => {
   // A create can fail, and this one is a create. Leaving the row `starting`
   // after the substrate said no would hand the operator a spinner for something
