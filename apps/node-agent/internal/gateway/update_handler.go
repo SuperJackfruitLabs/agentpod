@@ -12,6 +12,10 @@ import (
 // updateHandler wraps an inner Handler and intercepts the "update" verb to
 // trigger an in-process self-update via selfupdate.Apply, then exits so that
 // the system supervisor (e.g. systemd Restart=always) can start the new binary.
+//
+// The exit is conditional on selfupdate.Apply having actually swapped a
+// binary: an update request against a node already on the latest release
+// answers {"ok":true,"updating":false} and leaves the process alone.
 type updateHandler struct {
 	inner   Handler
 	version string
@@ -48,9 +52,41 @@ func (h *updateHandler) Handle(
 		return h.inner.Handle(ctx, verb, p, emit)
 	}
 
-	res, err := h.apply(ctx, selfupdate.Options{CurrentVersion: h.version})
+	// `{"force":true}` re-applies the release the node is already running —
+	// the escape hatch for a corrupt binary whose reported version is current.
+	// Unreadable params are simply "no options given": failing an update over
+	// a malformed payload would be worse than ignoring it.
+	var params struct {
+		Force bool `json:"force"`
+	}
+	if len(p) > 0 {
+		_ = json.Unmarshal(p, &params)
+	}
+
+	res, err := h.apply(ctx, selfupdate.Options{
+		CurrentVersion: h.version,
+		Force:          params.Force,
+	})
 	if err != nil {
 		return map[string]any{"ok": false, "error": err.Error()}, false, nil
+	}
+
+	out := map[string]any{
+		"ok":             true,
+		"updating":       res.Updated,
+		"tag":            res.LatestTag,
+		"currentVersion": res.CurrentVersion,
+	}
+	if res.Reason != "" {
+		out["reason"] = res.Reason
+	}
+
+	// Nothing was swapped — the node is already on the latest release, so
+	// exiting would restart it to arrive exactly where it started. On Fly that
+	// restart is a full VM reboot, costing the station its uptime and every
+	// in-flight session on it (issue #296).
+	if !res.Updated {
+		return out, false, nil
 	}
 
 	// Respond to the hub before exiting so it can mark the node as updating.
@@ -60,7 +96,7 @@ func (h *updateHandler) Handle(
 		h.exit(0)
 	}()
 
-	return map[string]any{"ok": true, "updating": true, "tag": res.LatestTag}, false, nil
+	return out, false, nil
 }
 
 // HandleFrame forwards inbound terminal input/resize frames to the inner handler

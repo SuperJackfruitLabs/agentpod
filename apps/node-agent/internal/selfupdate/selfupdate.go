@@ -281,13 +281,35 @@ func applyTag(ctx context.Context, opts Options, tag string) (Result, error) {
 	}, nil
 }
 
-// Apply resolves the latest GitHub release tag, then downloads, verifies, and
-// atomically swaps the binary. It does NOT restart the service — the caller is
-// responsible for exiting so that the supervisor (e.g. systemd Restart=always)
-// can start the new binary.
+// upToDate reports whether the running version is at or ahead of tag, i.e.
+// whether applying tag would be pointless work.
 //
-// This is the preferred entry point for programmatic callers such as the
-// gateway "update" verb handler.
+// A version the comparator cannot read (the default build stamps the literal
+// "dev", and the pre-`update`-verb agents in the fleet report nothing at all)
+// is deliberately NOT up to date: refusing to update because the version is
+// unreadable would strand exactly the nodes most in need of an update.
+func upToDate(currentVersion, tag string) bool {
+	cmp, err := CompareVersions(currentVersion, tag)
+	return err == nil && cmp >= 0
+}
+
+// Apply resolves the latest GitHub release tag and, unless the node is already
+// running it, downloads, verifies, and atomically swaps the binary. It does
+// NOT restart the service — the caller is responsible for exiting so that the
+// supervisor (e.g. systemd Restart=always) can start the new binary.
+//
+// The version comparison lives HERE, on the node, rather than in the hub that
+// triggers the update (issue #296). The node is the only authority on which
+// binary is actually running: the hub's agent_version column is whatever the
+// node last reported, it is empty for exactly the stale agents this matters
+// for, and it can go out of date between the hub deciding and the node acting.
+// Deciding here also means every trigger of an update — the hub's button, a
+// future bulk rollout, `agentpod-node update` — gets the same answer.
+//
+// Callers MUST branch on Result.Updated: when it is false nothing was swapped,
+// so restarting the process buys nothing and costs the node its uptime (on Fly
+// a restart is a full VM reboot). Options.Force re-applies the current release
+// anyway, which is the escape hatch for a corrupt binary on a current version.
 func Apply(ctx context.Context, opts Options) (Result, error) {
 	// Apply defaults.
 	if opts.HTTPClient == nil {
@@ -305,39 +327,12 @@ func Apply(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	return applyTag(ctx, opts, tag)
-}
-
-// Update orchestrates a full self-update: resolve latest tag, compare to
-// current version, download+verify the binary, swap it in, restart the service.
-func Update(ctx context.Context, opts Options) (Result, error) {
-	// Apply defaults.
-	if opts.HTTPClient == nil {
-		opts.HTTPClient = http.DefaultClient
-	}
-	if opts.APIBase == "" {
-		opts.APIBase = "https://api.github.com"
-	}
-	if opts.DLBase == "" {
-		opts.DLBase = "https://github.com"
-	}
-	if opts.RunCommand == nil {
-		opts.RunCommand = func(name string, args ...string) error {
-			return exec.Command(name, args...).Run()
-		}
-	}
-
-	tag, err := LatestTag(ctx, opts.HTTPClient, opts.APIBase)
-	if err != nil {
-		return Result{}, err
-	}
-
 	res := Result{
 		CurrentVersion: opts.CurrentVersion,
 		LatestTag:      tag,
 	}
 
-	if tag == opts.CurrentVersion && !opts.Force {
+	if !opts.Force && upToDate(opts.CurrentVersion, tag) {
 		res.Reason = "already up to date"
 		return res, nil
 	}
@@ -347,15 +342,36 @@ func Update(ctx context.Context, opts Options) (Result, error) {
 		return res, nil
 	}
 
-	updated, err := applyTag(ctx, opts, tag)
+	return applyTag(ctx, opts, tag)
+}
+
+// Update orchestrates a full self-update: resolve latest tag, compare to
+// current version, download+verify the binary, swap it in, restart the service.
+//
+// It is Apply plus the restart, and shares Apply's up-to-date short-circuit so
+// the CLI path and the hub-triggered path can never disagree about whether an
+// update is needed.
+func Update(ctx context.Context, opts Options) (Result, error) {
+	if opts.RunCommand == nil {
+		opts.RunCommand = func(name string, args ...string) error {
+			return exec.Command(name, args...).Run()
+		}
+	}
+
+	res, err := Apply(ctx, opts)
 	if err != nil {
 		return Result{}, err
+	}
+	if !res.Updated {
+		// Nothing was swapped (already current, or CheckOnly) — there is
+		// nothing for a restart to pick up.
+		return res, nil
 	}
 
 	// Restart the service. Even if this fails the binary has been updated.
 	if err := restartService(runtime.GOOS, opts.RunCommand); err != nil {
-		return updated, err
+		return res, err
 	}
 
-	return updated, nil
+	return res, nil
 }

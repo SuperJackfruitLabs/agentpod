@@ -57,11 +57,28 @@ export const getFleet = () =>
 
 export const listNodes = () => http<NodeSummary[]>("/api/nodes");
 
-export const updateNode = (id: string) =>
-  http<{ ok: boolean; updating?: boolean; tag?: string; error?: string }>(
-    `/api/nodes/${id}/update`,
-    { method: "POST" }
-  );
+/**
+ * Ask a node to self-update.
+ *
+ * `updating` is the load-bearing field: false means the node was already on
+ * the latest release and did NOT restart, so the caller must stop showing
+ * "updating…" and say so instead. A node-side failure is a non-2xx and throws
+ * an ApiError carrying the node's own message (issue #296).
+ *
+ * `force` re-applies the current release — the escape hatch for a node whose
+ * binary is corrupt but whose reported version is current.
+ */
+export const updateNode = (id: string, opts?: { force?: boolean }) =>
+  http<{
+    ok: boolean;
+    updating?: boolean;
+    tag?: string;
+    currentVersion?: string;
+    reason?: string;
+    error?: string;
+  }>(`/api/nodes/${id}/update${opts?.force ? "?force=1" : ""}`, {
+    method: "POST",
+  });
 
 // ─── Runtime endpoints ────────────────────────────────────────────────────────
 
