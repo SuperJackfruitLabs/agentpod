@@ -60,6 +60,16 @@ describe("Run — a station attempt", () => {
     expect(r.externalSource).toBe("kaambaan");
   });
 
+  test("rejects an external run id with no source, and a source with no id", () => {
+    // Regression: both fields were independently optional, so a run could record
+    // kaambaan's id without saying it was kaambaan's. Because both repos claim
+    // the `run_` prefix, an unattributed `run_…` is indistinguishable from
+    // AgentPod's own key, and the acp_runs_external_idx reverse join returns a
+    // row that cannot be traced to a board.
+    expect(Run.safeParse({ ...base, externalRunId: "run_e074a2160c4b4f28" }).success).toBe(false);
+    expect(Run.safeParse({ ...base, externalSource: "kaambaan" }).success).toBe(false);
+  });
+
   test("endSeq and endedAt are absent while the run is live", () => {
     const r = Run.parse(base);
     expect(r.endSeq).toBeNull();

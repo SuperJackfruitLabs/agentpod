@@ -1,0 +1,303 @@
+{
+  "corpus": "ecosystem-identity/id-grammar",
+  "version": 1,
+  "authoredAt": "2026-08-13",
+  "authoredFrom": "code, not documentation — every `grammarSource` and `mintSource` is a file:line that was read",
+  "purpose": "Two repos with separate release cadences must agree on what an identifier means. Neither can import the other's types, so this corpus is the shared artefact: each repo checks it in, maps the entities it owns or consumes onto its own validators, and proves acceptance and rejection against these lists. A repo that disagrees with a peer fails its own test suite rather than failing in production.",
+  "howToRead": {
+    "grammar": "The regex EVERY validator in the suite must implement for this entity. A validator that accepts less will reject a peer's legitimate id; one that accepts more lets a mis-wired id through.",
+    "mintedAs": "The narrower shape the minter actually produces today. Informational: it documents the gap between what is minted and what is accepted, which is where drift hides.",
+    "accept": "Values a validator MUST accept. `mint: true` marks values that also satisfy `mintedAs`.",
+    "reject": "Values a validator MUST reject. These are the point of the corpus — the `mem_`/`mbr_` drift in kaambaan survived because nothing ever validated a minted id against a schema, and a corpus of only-valid examples would have missed it too."
+  },
+
+  "entities": [
+    {
+      "entity": "kaambaan.tenant",
+      "owner": "kaambaan",
+      "prefix": "tnt",
+      "grammar": "^tnt_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan packages/contract/src/ids.ts:7-12 — idSchema('tnt')",
+      "mintedAs": "^tnt_[0-9a-f]{16}$",
+      "mintSource": "kaambaan apps/api/src/ids.ts:2 newId(), called at apps/api/src/db/catalog.ts:45",
+      "accept": [
+        { "value": "tnt_5f2b8c1a9d3e4076", "mint": true, "note": "canonical: what newId('tnt') produces" },
+        { "value": "tnt_Aa0Bb1", "mint": false, "note": "shortest and mixed-case: minted ids are never like this, but the declared grammar accepts it, so a peer that rejects it is wrong about kaambaan's contract" }
+      ],
+      "reject": [
+        { "value": "tenant_5f2b8c1a9d3e4076", "reason": "wrong-prefix", "note": "the spelled-out word, not the declared prefix" },
+        { "value": "usr_a1b2c3d4e5f60718", "reason": "other-entity", "note": "a perfectly valid id of a different entity — this is the failure that a bare z.string() cannot catch" },
+        { "value": "tnt_ab", "reason": "too-short" },
+        { "value": "tnt_abc-12", "reason": "wrong-alphabet", "note": "hyphen; kaambaan's alphabet is base62 with no separators" },
+        { "value": "tnt_", "reason": "prefix-only" },
+        { "value": "5f2b8c1a9d3e4076", "reason": "no-prefix" },
+        { "value": "tnt5f2b8c1a9d3e4076", "reason": "no-separator" },
+        { "value": "tnts_5f2b8c1a9d3e4076", "reason": "prefix-not-anchored", "note": "catches a regex missing its leading ^ or matching the prefix as a substring" },
+        { "value": "xtnt_5f2b8c1a9d3e4076", "reason": "prefix-not-anchored" },
+        { "value": "tnt_5f2b8c1a9d3e4076\n", "reason": "trailing-newline", "note": "some regex flavours let `$` match before a trailing newline; a suite-wide id must not" },
+        { "value": " tnt_5f2b8c1a9d3e4076", "reason": "leading-whitespace" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "kaambaan.user",
+      "owner": "kaambaan",
+      "prefix": "usr",
+      "grammar": "^usr_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan packages/contract/src/ids.ts:13 — idSchema('usr')",
+      "mintedAs": "^usr_[0-9a-f]{16}$",
+      "mintSource": "kaambaan apps/api/src/db/catalog.ts:36 — newId('usr')",
+      "note": "This is the principal id on the kaambaan side. AgentPod's user id is NOT this shape — see agentpod.user. There is no mapping between them anywhere in either repo today.",
+      "accept": [
+        { "value": "usr_a1b2c3d4e5f60718", "mint": true }
+      ],
+      "reject": [
+        { "value": "user_a1b2c3d4e5f60718", "reason": "wrong-prefix" },
+        { "value": "tnt_5f2b8c1a9d3e4076", "reason": "other-entity" },
+        { "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "reason": "wrong-alphabet", "note": "an AgentPod user id, which is a bare UUID. Handing one to kaambaan as a principal is a real, reachable mistake once a bridge exists." },
+        { "value": "usr_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "kaambaan.membership",
+      "owner": "kaambaan",
+      "prefix": "mbr",
+      "grammar": "^mbr_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan packages/contract/src/ids.ts:15 — idSchema('mbr')",
+      "mintedAs": "^mbr_[0-9a-f]{16}$",
+      "mintSource": "kaambaan apps/api/src/db/catalog.ts:48 — newId('mbr')",
+      "note": "The regression case. The contract declared `mem_` while the API minted `mbr_`; nothing validated a minted id against the schema, so the two disagreed for as long as both existed. Fixed in kaambaan 7740f06. This entry exists so it cannot recur silently in either repo.",
+      "accept": [
+        { "value": "mbr_0c4b4f289d3a51b6", "mint": true }
+      ],
+      "reject": [
+        { "value": "mem_0c4b4f289d3a51b6", "reason": "wrong-prefix", "note": "the abbreviation the contract used to declare. Must stay rejected." },
+        { "value": "member_0c4b4f289d3a51b6", "reason": "wrong-prefix" },
+        { "value": "mbr_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "kaambaan.agent",
+      "owner": "kaambaan",
+      "prefix": "agt",
+      "grammar": "^agt_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan packages/contract/src/ids.ts:17 — idSchema('agt')",
+      "mintedAs": "^agt_[0-9a-f]{16}$",
+      "mintSource": "kaambaan apps/api/src/db/catalog.ts:60 — newId('agt')",
+      "note": "The agent is a principal in its own right (ecosystem decision 3), so this id — not a human's — is what attribution hangs off for dispatched work.",
+      "accept": [
+        { "value": "agt_9f1c2ab04d7e6b3a", "mint": true }
+      ],
+      "reject": [
+        { "value": "agent_9f1c2ab04d7e6b3a", "reason": "wrong-prefix" },
+        { "value": "kbn_9f1c2ab04d7e6b3a4c5d6e7f8091a2b3c4d5e6f70819", "reason": "credential-not-identifier", "note": "`kbn_` is kaambaan's AGENT BEARER TOKEN (apps/api/src/auth/agent-token.ts:10), not an agent id. It is 48 hex chars and is a secret. A validator that accepts it here would let a credential be stored in an id column." },
+        { "value": "agt_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "kaambaan.run",
+      "owner": "kaambaan",
+      "prefix": "run",
+      "grammar": "^run_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan packages/contract/src/ids.ts:21 — idSchema('run')",
+      "mintedAs": "^run_[0-9a-f]{16}$",
+      "mintSource": "kaambaan apps/api/src/ids.ts:2 newId(), called at apps/api/src/board/board-do.ts:1253 (claim → INSERT INTO runs)",
+      "note": "The join key. Kaambaan mints the work run; AgentPod executes it and must never mint a rival id for the same attempt. See run_join_key.json — and see `knownConflicts` below, because AgentPod has reserved the same `run_` prefix for its own primary key.",
+      "accept": [
+        { "value": "run_e074a2160c4b4f28", "mint": true, "note": "canonical claim result" },
+        { "value": "run_Aa0Bb1", "mint": false, "note": "kaambaan's own test suite asserts this parses (packages/contract/test/ids.test.ts:8). AgentPod must not be stricter than the minter's contract about an id it did not mint." }
+      ],
+      "reject": [
+        { "value": "task_e074a2160c4b4f28", "reason": "other-entity" },
+        { "value": "card_3d4e5f6071829304", "reason": "other-entity" },
+        { "value": "run_", "reason": "prefix-only" },
+        { "value": "run_abc", "reason": "too-short" },
+        { "value": "run_e074a216-0c4b", "reason": "wrong-alphabet" },
+        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "reason": "other-entity", "note": "an AgentPod ACP session id. The bridge spike today correlates a kaambaan run to an AgentPod session in a console.log line and nothing else (kaambaan/../bridge/spike/src/bridge.ts:30-31), so confusing the two is exactly the mistake in reach." },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.node",
+      "owner": "agentpod",
+      "prefix": "node",
+      "grammar": "^node_[0-9a-f]{20}$",
+      "grammarSource": "NONE — AgentPod had no id validator of any kind before this corpus. Every id field in packages/contract/src is a bare z.string(). The grammar here is derived from the mint site and this corpus is its first enforcement.",
+      "mintedAs": "^node_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:12 prefixedId(), called at :185 — `crypto.randomUUID().replace(/-/g,'').slice(0,20)`",
+      "note": "20 lowercase hex, not kaambaan's 16. The two repos use different lengths from the same underlying source (a UUID with its hyphens stripped). Nothing forces them to agree and nothing has noticed.",
+      "accept": [
+        { "value": "node_9f1c2ab04d7e6b3a5c88", "mint": true }
+      ],
+      "reject": [
+        { "value": "node_9f1c2ab04d7e6b3a", "reason": "too-short", "note": "16 hex — kaambaan's length. A kaambaan-shaped id must not pass as an AgentPod node id." },
+        { "value": "node_9F1C2AB04D7E6B3A5C88", "reason": "wrong-alphabet", "note": "uppercase hex is never minted; accepting it means two spellings of the same id can both exist as distinct primary keys" },
+        { "value": "node_9f1c2ab0-4d7e-6b3a-5c88-000000000000", "reason": "wrong-alphabet", "note": "hyphenated UUID — the shape AgentPod's OTHER id family uses (see agentpod.station)" },
+        { "value": "nodes_9f1c2ab04d7e6b3a5c88", "reason": "prefix-not-anchored" },
+        { "value": "rt_3d4e5f60718293a4b5c6", "reason": "other-entity" },
+        { "value": "node_", "reason": "prefix-only" },
+        { "value": "node_9f1c2ab04d7e6b3a5c88\n", "reason": "trailing-newline" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.runtime",
+      "owner": "agentpod",
+      "prefix": "rt",
+      "grammar": "^rt_[0-9a-f]{20}$",
+      "grammarSource": "NONE before this corpus — RuntimeSummary.id is z.string() (packages/contract/src/runtime.ts:197)",
+      "mintedAs": "^rt_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/services/runtimes.ts:54-55 prefixedId(), called at :155 — prefixedId('rt')",
+      "note": "Do not confuse `rt_…` (AgentPod's runtime, a provisioned container/machine) with `runtimes.externalId`, which is the SUBSTRATE's handle (e.g. a Fly app/machine pair) and has no suite-wide grammar at all.",
+      "accept": [
+        { "value": "rt_3d4e5f60718293a4b5c6", "mint": true }
+      ],
+      "reject": [
+        { "value": "runtime_3d4e5f60718293a4b5c6", "reason": "wrong-prefix" },
+        { "value": "rt_3d4e5f60718293a4b5", "reason": "too-short", "note": "19 hex" },
+        { "value": "rt_3d4e5f60718293a4b5c6d", "reason": "too-long", "note": "21 hex — catches a regex missing its trailing $" },
+        { "value": "node_9f1c2ab04d7e6b3a5c88", "reason": "other-entity" },
+        { "value": "rt_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.enrollmentToken",
+      "owner": "agentpod",
+      "prefix": "etk",
+      "grammar": "^etk_[0-9a-f]{20}$",
+      "grammarSource": "NONE before this corpus",
+      "mintedAs": "^etk_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:58 — prefixedId('etk')",
+      "note": "The enrollment token ROW id. The token itself is a different thing with a different shape — `enr_` + 20 hex + 32 hex (enrollment.ts:54) — and is a secret. They are kept apart here so a validator cannot be written that blurs them.",
+      "accept": [
+        { "value": "etk_7b2e9a103c5d4e8fb012", "mint": true }
+      ],
+      "reject": [
+        { "value": "enr_7b2e9a103c5d4e8fb0125f2b8c1a9d3e40760c4b4f289d3a51b6", "reason": "credential-not-identifier", "note": "the enrollment token secret, which starts with a different prefix and is 52 hex long" },
+        { "value": "etk_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.station",
+      "owner": "agentpod",
+      "prefix": "station",
+      "grammar": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "grammarSource": "NONE before this corpus",
+      "mintedAs": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "mintSource": "agentpod apps/hub/src/services/station-registry.ts:50 — `station_${crypto.randomUUID()}` (hyphens KEPT)",
+      "note": "A second, incompatible AgentPod grammar: prefix + a hyphenated UUID. Note what this means across the seam — kaambaan's own id schema is `^<prefix>_[A-Za-z0-9]{6,}$`, whose alphabet has no hyphen, so kaambaan's contract would REJECT every AgentPod station id it was ever handed. That is a live disagreement, not a hypothetical.",
+      "accept": [
+        { "value": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90", "mint": true }
+      ],
+      "reject": [
+        { "value": "station_4a1482de9c3f4b178a550d6e2f7c1b90", "reason": "wrong-alphabet", "note": "hyphens stripped — the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted." },
+        { "value": "station_4a1482de-9c3f-4b17-8a55", "reason": "too-short" },
+        { "value": "station_4A1482DE-9C3F-4B17-8A55-0D6E2F7C1B90", "reason": "wrong-alphabet", "note": "uppercase" },
+        { "value": "station_", "reason": "prefix-only" },
+        { "value": "codex:4a1482de", "reason": "other-entity", "note": "a station KEY (harness:hash), which is what the node-agent reports and is not an id at all — see StationHealthReport.key" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.acpSession",
+      "owner": "agentpod",
+      "prefix": "acps",
+      "grammar": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "grammarSource": "NONE before this corpus — AcpSessionRow.id is z.string() (packages/contract/src/acp-session.ts)",
+      "mintedAs": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "mintSource": "agentpod apps/hub/src/services/acp-sessions.ts:641 — `acps_${crypto.randomUUID()}`",
+      "note": "The session is the ONLY identity on the ACP wire today: neither AcpClientMsg nor AcpServerMsg carries a run or correlation id. A dispatched run is therefore currently observable only as 'some session on some station'.",
+      "accept": [
+        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "mint": true }
+      ],
+      "reject": [
+        { "value": "acp_3d4e5f60", "reason": "other-entity", "note": "`acp_<8 hex>` is a DIFFERENT id: the node-agent's process-local ACP session id (apps/node-agent/internal/acp/manager.go:40-46, 32 bits of entropy, collision-retried in-process). The hub's `acps_<uuid>` doubles as the node-side instance discriminator (acp-sessions.ts:688-691), so both prefixes are live in the same subsystem and differ by one character." },
+        { "value": "run_e074a2160c4b4f28", "reason": "other-entity", "note": "a kaambaan run id" },
+        { "value": "acps_", "reason": "prefix-only" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.user",
+      "owner": "agentpod",
+      "prefix": null,
+      "grammar": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "grammarSource": "NONE before this corpus",
+      "mintedAs": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "mintSource": "agentpod Better Auth — `advanced.generateId: () => crypto.randomUUID()` at apps/hub/src/auth/drizzle-auth.ts:249 (the live config; apps/hub/src/auth/index.ts:171 is a legacy duplicate). The override applies to every Better Auth model, so user/session/account/verification ids all take this shape. Admin-created users bypass Better Auth entirely and call crypto.randomUUID() directly at apps/hub/src/routes/admin.ts:432 — same grammar by coincidence, not by shared code.",
+      "note": "THE HEADLINE DISAGREEMENT. AgentPod's principal id carries no prefix and is not type-legible: a bare UUID says nothing about what it identifies. kaambaan's principal is `usr_<16 hex>`. The two cannot be exchanged, and no mapping table exists in either repo. There is also no organization id to map: the Better Auth organization plugin is NOT installed (plugin list at apps/hub/src/auth/drizzle-auth.ts:110-123) and 'organization' appears nowhere in apps/hub/src or in any of the 35 migrations. Ecosystem decision 2 (`mxid → Principal` must be minted by an explicit link, never inferred) applies here identically: the AgentPod↔kaambaan principal link must be minted, not derived from a matching email.",
+      "accept": [
+        { "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "mint": true }
+      ],
+      "reject": [
+        { "value": "usr_a1b2c3d4e5f60718", "reason": "other-entity", "note": "a kaambaan principal. Nothing today would stop one being written into an AgentPod user column." },
+        { "value": "user_f47ac10b-58cc-4372-a567-0e02b2c3d479", "reason": "wrong-prefix", "note": "there is no prefix; adding one is as wrong as omitting a required one" },
+        { "value": "f47ac10b58cc4372a5670e02b2c3d479", "reason": "wrong-alphabet", "note": "hyphens stripped" },
+        { "value": "f47ac10b-58cc-4372-a567", "reason": "too-short" },
+        { "value": "", "reason": "empty" }
+      ]
+    }
+  ],
+
+  "prefixRegistry": {
+    "note": "Every prefix either repo claims, so a new collision is visible the moment it is added. `status` records what is true in code, which is not always what a table declares.",
+    "claims": [
+      { "prefix": "tnt", "owner": "kaambaan", "entity": "tenant", "status": "declared-and-minted" },
+      { "prefix": "usr", "owner": "kaambaan", "entity": "user", "status": "declared-and-minted" },
+      { "prefix": "mbr", "owner": "kaambaan", "entity": "membership", "status": "declared-and-minted" },
+      { "prefix": "brd", "owner": "kaambaan", "entity": "board", "status": "declared-and-minted" },
+      { "prefix": "agt", "owner": "kaambaan", "entity": "agent", "status": "declared-and-minted" },
+      { "prefix": "tok", "owner": "kaambaan", "entity": "token", "status": "declared-and-minted" },
+      { "prefix": "card", "owner": "kaambaan", "entity": "card", "status": "declared-and-minted" },
+      { "prefix": "ctx", "owner": "kaambaan", "entity": "context", "status": "declared-and-minted" },
+      { "prefix": "ref", "owner": "kaambaan", "entity": "reference", "status": "declared-and-minted" },
+      { "prefix": "gate", "owner": "kaambaan", "entity": "gate", "status": "declared-and-minted" },
+      { "prefix": "run", "owner": "kaambaan", "entity": "run", "status": "declared-and-minted" },
+      { "prefix": "task", "owner": "kaambaan", "entity": "task", "status": "declared-never-minted", "note": "TaskId exists in kaambaan's contract and Run.taskId references it, but no newId('task') call exists and the runs table stores card_id. Declared but unreachable." },
+      { "prefix": "evt", "owner": "kaambaan", "entity": "event", "status": "declared-never-minted", "note": "EventId is declared; activities are keyed by an AUTOINCREMENT seq instead (board-do.ts activities table)." },
+      { "prefix": "push", "owner": "kaambaan", "entity": "pushConfig", "status": "minted-never-declared", "note": "SAME CLASS AS THE mem_/mbr_ BUG, still open. newId('push') at apps/api/src/board/board-do.ts:1023 mints a prefix absent from ID_PREFIXES and from every schema in packages/contract/src/ids.ts. Found by this corpus; not fixed here, because kaambaan is not this repo's to change." },
+      { "prefix": "kbn", "owner": "kaambaan", "entity": "agentBearerToken", "status": "credential", "note": "a secret, not an identifier — apps/api/src/auth/agent-token.ts:10, 48 hex chars" },
+
+      { "prefix": "node", "owner": "agentpod", "entity": "node", "status": "minted-never-declared" },
+      { "prefix": "rt", "owner": "agentpod", "entity": "runtime", "status": "minted-never-declared" },
+      { "prefix": "etk", "owner": "agentpod", "entity": "enrollmentToken", "status": "minted-never-declared" },
+      { "prefix": "station", "owner": "agentpod", "entity": "station", "status": "minted-never-declared" },
+      { "prefix": "acps", "owner": "agentpod", "entity": "acpSession", "status": "minted-never-declared" },
+      { "prefix": "acp", "owner": "agentpod", "entity": "nodeLocalAcpSession", "status": "minted-never-declared", "note": "node-agent only — `acp_<8 hex>`, apps/node-agent/internal/acp/manager.go:40-46. One character away from the hub's `acps_`, and the hub's id is passed to the node as the instance discriminator, so both live in the same subsystem." },
+      { "prefix": "audit", "owner": "agentpod", "entity": "auditEntry", "status": "minted-never-declared", "note": "apps/hub/src/services/audit.ts:94 — `audit_${crypto.randomUUID()}`, hyphenated-UUID family" },
+      { "prefix": "enr", "owner": "agentpod", "entity": "enrollmentTokenSecret", "status": "credential" },
+      { "prefix": "chg", "owner": "agentpod", "entity": "change", "status": "reserved-never-minted", "note": "only appears as a test literal in packages/contract/src/run.test.ts:76; Change is a reserved schema with no writer" },
+      { "prefix": "run", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "COLLISION — see knownConflicts" }
+    ],
+    "knownConflicts": [
+      {
+        "prefix": "run",
+        "claimedBy": ["kaambaan", "agentpod"],
+        "detail": "kaambaan mints `run_<16 hex>` for a work run (apps/api/src/board/board-do.ts:1253). AgentPod reserves the SAME prefix for acp_runs.id — apps/hub/src/db/schema/acp.ts:69 carries the comment `\"run_\" + uuid-ish` directly above a primary key whose neighbouring column comment reads `We never mint a rival id`. Nothing mints an AgentPod run id yet, so nothing is broken today; the moment something does, a `run_…` value is ambiguous about which system it came from, and the acp_runs_external_idx reverse join (schema/acp.ts:88) becomes unsafe to reason about. Resolving this is a decision for both repos, not a fix this corpus can make. Recorded so it cannot be forgotten."
+      }
+    ]
+  },
+
+  "openDisagreements": [
+    "Principal shape: kaambaan `usr_<16 hex>`; AgentPod a bare unprefixed UUID. No mapping exists in either repo.",
+    "Token length: kaambaan takes 16 hex from a UUID, AgentPod takes 20. Same source, different slice, no reason recorded in either.",
+    "Alphabet: AgentPod has TWO families — `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, audit). kaambaan's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
+    "Tenancy: kaambaan pins every principal to exactly one tenant at the storage layer; AgentPod has no tenant concept at all, so no AgentPod id carries tenancy. Out of scope here, flagged because it is the largest remaining modelling decision (see docs/strategy/2026-08-13-ecosystem-identity-decisions.md).",
+    "Prefix `run` is claimed by both repos — see prefixRegistry.knownConflicts."
+  ]
+}
