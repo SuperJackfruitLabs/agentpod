@@ -39,13 +39,19 @@ import { stations } from "../db/schema/stations";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { registerProvisioner, resetProvisioners } from "../services/provisioner/registry";
-import type { RuntimeProvisioner, ProvisionSpec } from "../services/provisioner/types";
+import type {
+  RuntimeProvisioner,
+  ProvisionSpec,
+  RuntimeState,
+} from "../services/provisioner/types";
 import { runtimeRoutes } from "./runtimes";
 import {
   sweepStalledRuntimeStarts,
   START_TIMEOUT_MS,
   sweepStalledRuntimeStops,
   STOP_TIMEOUT_MS,
+  sweepExpiringRuntimes,
+  ROTATION_MARGIN_MS,
 } from "../services/runtimes";
 import { enrollNode } from "../services/enrollment";
 import type { AuthUser } from "../auth/middleware";
@@ -104,15 +110,26 @@ const fakeDockerProvisioner: RuntimeProvisioner = {
 const terminalCalls: {
   provision: ProvisionSpec[];
   stop: string[];
+  /** Every id the hub asked the substrate about. Rotation must ask about none. */
+  status: string[];
   /** Interleaved log, so "terminate BEFORE create" is checkable, not assumed. */
   order: string[];
-} = { provision: [], stop: [], order: [] };
+} = { provision: [], stop: [], status: [], order: [] };
 
 let terminalCounter = 0;
 /** Makes the substrate refuse to terminate the instance being replaced. */
 let terminalStopFails = false;
 /** Makes the substrate refuse to create the replacement. */
 let terminalProvisionFails = false;
+/** What the substrate reports about a sandbox, when it is asked at all. */
+let terminalState: RuntimeState = "running";
+/**
+ * Runs once, inside the next provision() call, then clears itself.
+ *
+ * The seam a test needs to act WHILE the hub is mid-flight — an operator
+ * stopping one runtime while a sweep is busy re-creating another.
+ */
+let terminalDuringProvision: ((spec: ProvisionSpec) => Promise<void>) | null = null;
 
 const fakeTerminalProvisioner: RuntimeProvisioner = {
   provider: "modal",
@@ -129,6 +146,11 @@ const fakeTerminalProvisioner: RuntimeProvisioner = {
   async provision(spec) {
     terminalCalls.provision.push(spec);
     terminalCalls.order.push(`provision:${spec.runtimeId}`);
+    if (terminalDuringProvision) {
+      const hook = terminalDuringProvision;
+      terminalDuringProvision = null;
+      await hook(spec);
+    }
     if (terminalProvisionFails) throw new Error("modal: no capacity");
     return { externalId: `vol-${spec.runtimeId}#sb-${++terminalCounter}` };
   },
@@ -138,8 +160,9 @@ const fakeTerminalProvisioner: RuntimeProvisioner = {
     terminalCalls.order.push(`stop:${externalId}`);
     if (terminalStopFails) throw new Error("modal: sandbox already terminated");
   },
-  async status() {
-    return "running";
+  async status(externalId) {
+    terminalCalls.status.push(externalId);
+    return terminalState;
   },
   // Deliberately NO start(): conformance rule 3 forbids one on a terminal
   // driver, and this is the case startRuntime has to handle without it.
@@ -198,9 +221,12 @@ afterEach(() => {
   fakeCalls.start.length = 0;
   terminalCalls.provision.length = 0;
   terminalCalls.stop.length = 0;
+  terminalCalls.status.length = 0;
   terminalCalls.order.length = 0;
   terminalStopFails = false;
   terminalProvisionFails = false;
+  terminalState = "running";
+  terminalDuringProvision = null;
 });
 
 afterAll(async () => {
@@ -1306,4 +1332,386 @@ test("a resumable driver with no start() still refuses — re-creating is not a 
     const after = await rowOf(id);
     expect(after.externalId).toBe(before.externalId);
   });
+}, 30_000);
+
+// ─── Rotation: the substrate is about to kill a healthy runtime ───────────────
+//
+// Modal destroys a sandbox at 24 hours however well it is working, with no
+// warning callback, no way to extend it and no way back afterwards. Nothing in
+// the API rotates for you, so the hub replaces the instance ahead of the
+// deadline — early enough that the replacement has enrolled before the platform
+// takes the original, and against the same anchor, so the workspace carries
+// over.
+//
+// The tests below are as much about what must NOT be rotated as what must. On a
+// substrate that bills wall-clock for as long as an instance exists, a sweeper
+// that re-creates the wrong runtime is not a bug that shows up in a dashboard,
+// it is a bill that arrives at the end of the month.
+
+/** The ceiling the terminal fake declares — read from it, never re-typed. */
+const CEILING_MS = fakeTerminalProvisioner.manifest.maxLifetimeMs!;
+
+/** Backdate the CURRENT instance's clock, leaving the row's own dates alone. */
+async function ageInstanceBy(id: string, ms: number) {
+  await db
+    .update(provisionedRuntimes)
+    .set({ externalStartedAt: new Date(Date.now() - ms) })
+    .where(eq(provisionedRuntimes.id, id));
+}
+
+async function setRuntimeStatus(
+  id: string,
+  status: (typeof provisionedRuntimes.$inferSelect)["status"]
+) {
+  await db
+    .update(provisionedRuntimes)
+    .set({ status })
+    .where(eq(provisionedRuntimes.id, id));
+}
+
+/** An instance one second past the point where rotation is due. */
+const PAST_DUE_MS = CEILING_MS - ROTATION_MARGIN_MS + 1_000;
+
+/**
+ * Forget the calls a test's own setup made.
+ *
+ * Every createModalRuntime is itself a provision, so counting from zero after
+ * setup is what makes "the sweep touched the substrate N times" readable — and
+ * for the tests that must see NO substrate call, it is the assertion.
+ */
+function forgetSubstrateCalls() {
+  terminalCalls.provision.length = 0;
+  terminalCalls.stop.length = 0;
+  terminalCalls.status.length = 0;
+  terminalCalls.order.length = 0;
+}
+
+/**
+ * The instances this sweep created FOR ONE RUNTIME.
+ *
+ * The sweep is global — it has to be, it runs on a timer with no request — so
+ * rows other tests left behind are swept too, and a bare count would make these
+ * assertions depend on what ran before them.
+ */
+const provisionsFor = (id: string) =>
+  terminalCalls.provision.filter((p) => p.runtimeId === id);
+
+test("rotates a runtime before the substrate's ceiling destroys it", async () => {
+  const { id, externalId } = await createModalRuntime("ages");
+  await setRuntimeStatus(id, "online");
+  await ageInstanceBy(id, PAST_DUE_MS);
+  const before = await rowOf(id);
+
+  const rotated = await sweepExpiringRuntimes();
+  expect(rotated).toContain(id);
+
+  const after = await rowOf(id);
+  // A different sandbox...
+  expect(after.externalId).not.toBe(externalId);
+  // ...on the SAME anchor: the volume half of the external id is derived from
+  // the runtime id, so the workspace follows. A rotation that produced a new
+  // anchor would hand the station an empty disk and orphan a paid volume
+  // holding the only copy of its work.
+  expect(after.externalId!.startsWith(`vol-${id}#`)).toBe(true);
+  expect(terminalCalls.provision.at(-1)!.runtimeId).toBe(id);
+
+  // `starting`, never `online`: a substrate accepting a create is not a node
+  // existing. Only enrolment writes online.
+  expect(after.status).toBe("starting");
+  // The operator has to be able to tell this apart from a failure they caused —
+  // the console renders statusReason under the badge.
+  expect(after.statusReason).toMatch(/24|ceiling|lifetime/i);
+
+  // The replacement gets its own clock. Left at the old value it would be found
+  // "expired" on the very next tick and re-created again, for ever.
+  expect(after.externalStartedAt!.getTime()).toBeGreaterThan(
+    before.externalStartedAt!.getTime()
+  );
+  expect(Date.now() - after.externalStartedAt!.getTime()).toBeLessThan(60_000);
+
+  // The old sandbox is terminated rather than left running beside its
+  // replacement — two live sandboxes on one volume is the corruption case, and
+  // the abandoned one bills until somebody notices.
+  expect(terminalCalls.stop).toEqual([externalId]);
+
+  // A fresh enrolment token, because the hub stores only a hash of the first.
+  const tokenRows = await db
+    .select()
+    .from(enrollmentTokens)
+    .where(eq(enrollmentTokens.provisionedRuntimeId, id));
+  expect(tokenRows.length).toBe(2);
+}, 30_000);
+
+test("does not rotate one minute before rotation is due", async () => {
+  // The margin is not decoration: it is the time the replacement needs to be
+  // created and enrolled before the platform takes the original. But firing
+  // early is its own cost — every rotation is a re-enrolment and a fresh
+  // rootfs — so the boundary is pinned from both sides (with the test above).
+  const { id, externalId } = await createModalRuntime("nearly-due");
+  await setRuntimeStatus(id, "online");
+  await ageInstanceBy(id, CEILING_MS - ROTATION_MARGIN_MS - 60_000);
+  forgetSubstrateCalls();
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+  expect((await rowOf(id)).externalId).toBe(externalId);
+  expect(provisionsFor(id)).toHaveLength(0);
+}, 30_000);
+
+test("does not rotate a young sandbox", async () => {
+  const { id, externalId } = await createModalRuntime("young");
+  await setRuntimeStatus(id, "online");
+  forgetSubstrateCalls();
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+  const after = await rowOf(id);
+  expect(after.externalId).toBe(externalId);
+  expect(after.status).toBe("online");
+  expect(provisionsFor(id)).toHaveLength(0);
+}, 30_000);
+
+test("NEVER rotates a runtime that was deliberately stopped", async () => {
+  // The most expensive mistake available on this substrate. A stopped runtime
+  // costs nothing; re-creating one starts a sandbox nobody asked for that bills
+  // wall-clock until a human notices — and age alone would say it is due,
+  // because a stopped runtime only gets older.
+  const { id, externalId } = await createModalRuntime("stopped-for-a-reason");
+  await setRuntimeStatus(id, "stopped");
+  await ageInstanceBy(id, CEILING_MS + 60 * 60_000);
+  forgetSubstrateCalls();
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+
+  const after = await rowOf(id);
+  expect(after.status).toBe("stopped");
+  expect(after.externalId).toBe(externalId);
+  // Not "no new row" — no substrate call at all. A provision here is the bill.
+  expect(provisionsFor(id)).toHaveLength(0);
+  expect(terminalCalls.stop).not.toContain(externalId);
+}, 30_000);
+
+test("NEVER rotates asleep, error, destroyed or stopping runtimes either", async () => {
+  // Same reasoning as `stopped`, one step wider. `asleep` is a healthy un-billed
+  // state; `stopping` is an operator mid-stop, and re-creating under them is the
+  // stop silently undone; `error` and `destroyed` both need a human, and neither
+  // is made better by a sandbox appearing on the meter.
+  const states = ["asleep", "error", "destroyed", "stopping"] as const;
+  const ids: string[] = [];
+  for (const state of states) {
+    const { id } = await createModalRuntime(`state-${state}`);
+    await setRuntimeStatus(id, state);
+    await ageInstanceBy(id, CEILING_MS + 60 * 60_000);
+    ids.push(id);
+  }
+  forgetSubstrateCalls();
+
+  const rotated = await sweepExpiringRuntimes();
+  for (const id of ids) {
+    expect(rotated).not.toContain(id);
+    expect(provisionsFor(id)).toHaveLength(0);
+  }
+
+  for (let i = 0; i < ids.length; i++) {
+    expect((await rowOf(ids[i]!)).status).toBe(states[i]!);
+  }
+}, 30_000);
+
+test("rotates a runtime still in `starting`, not only an online one", async () => {
+  // A runtime whose node has not enrolled yet still has a sandbox on the
+  // substrate's kill clock, and that sandbox is just as billed and just as
+  // doomed. Excluding `starting` would leave a runtime that is briefly slow to
+  // enrol to be destroyed by the platform with nothing replacing it.
+  const { id, externalId } = await createModalRuntime("still-starting");
+  await ageInstanceBy(id, PAST_DUE_MS);
+  expect((await rowOf(id)).status).toBe("provisioning");
+  await setRuntimeStatus(id, "starting");
+
+  expect(await sweepExpiringRuntimes()).toContain(id);
+  expect((await rowOf(id)).externalId).not.toBe(externalId);
+}, 30_000);
+
+test("ignores a substrate that declares no ceiling, however old the instance", async () => {
+  // Docker and Cloudflare declare maxLifetimeMs: null — nothing destroys their
+  // container for age. Rotating one would throw away a live workspace to solve
+  // a problem that substrate does not have. The rule is the MANIFEST, so a
+  // driver added tomorrow is covered without touching this sweeper.
+  const createRes = await createRuntime(TEST_USER, "eternal");
+  const { id } = (await createRes.json()) as { id: string };
+  await setRuntimeStatus(id, "online");
+  await ageInstanceBy(id, 10 * 86_400_000);
+  const before = await rowOf(id);
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+
+  const after = await rowOf(id);
+  expect(after.status).toBe("online");
+  expect(after.externalId).toBe(before.externalId);
+  // Exactly the create — no re-create hiding behind it.
+  expect(fakeCalls.provision).toHaveLength(1);
+}, 30_000);
+
+test("judges the age of the INSTANCE, not the age of the row", async () => {
+  // After the first rotation these are different numbers, and created_at is the
+  // wrong one: it only grows, so a runtime that has been rotated once would be
+  // found expired on every tick from then on — a fresh sandbox destroyed and
+  // rebuilt every fifteen seconds, each one billed, for ever. updated_at is no
+  // better: any status write refreshes it.
+  const { id, externalId } = await createModalRuntime("old-row-new-sandbox");
+  await setRuntimeStatus(id, "online");
+  await rawSql`
+    UPDATE provisioned_runtimes
+       SET created_at = now() - interval '10 days',
+           updated_at = now() - interval '10 days'
+     WHERE id = ${id}
+  `;
+  forgetSubstrateCalls();
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+  expect((await rowOf(id)).externalId).toBe(externalId);
+  expect(provisionsFor(id)).toHaveLength(0);
+  // ...and the converse is the headline test above: a row created seconds ago
+  // whose INSTANCE clock is old does rotate.
+}, 30_000);
+
+test("skips a row with no instance clock instead of guessing its age", async () => {
+  // Every provisioned_runtimes row on the live hub predates external_started_at.
+  // There is no age to judge here, and the two ways of "handling" that are both
+  // wrong: falling back to created_at rotates a 30-day-old row immediately, and
+  // treating null as zero rotates it immediately too. It is skipped — the next
+  // provision writes a clock, and until then nothing is claimed.
+  const id = `rt_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes
+      (id, user_id, provider, external_id, status, name, resource_tier, harness, created_at, updated_at)
+    VALUES (${id}, ${TEST_USER}, 'modal', 'vol-legacy#sb-legacy', 'online', 'legacy-modal', 'small', 'none',
+            now() - interval '30 days', now() - interval '30 days')
+  `;
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+  const after = await rowOf(id);
+  expect(after.status).toBe("online");
+  expect(after.externalId).toBe("vol-legacy#sb-legacy");
+  expect(provisionsFor(id)).toHaveLength(0);
+}, 30_000);
+
+test("rotates on AGE alone — never because the substrate says the sandbox is dead", async () => {
+  // The rule that keeps a crash from becoming a paid crash-loop. A sandbox that
+  // died in its first minute will die again the same way, and a sweeper that
+  // re-created it would rebuild it every fifteen seconds with nobody watching,
+  // billing for each attempt. The node going offline already surfaces this, and
+  // Start is one click for the human who looks.
+  const { id, externalId } = await createModalRuntime("died-early");
+  await setRuntimeStatus(id, "online");
+  terminalState = "stopped";
+  forgetSubstrateCalls();
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+  expect((await rowOf(id)).externalId).toBe(externalId);
+  expect(provisionsFor(id)).toHaveLength(0);
+  // Not even asked. Rotation is a clock, not a health check — the moment it
+  // consults substrate state it acquires the power to resurrect things.
+  expect(terminalCalls.status).toHaveLength(0);
+}, 30_000);
+
+test("an operator's stop landing mid-sweep wins — the claim is compare-and-set", async () => {
+  // The window this closes: the sweep reads a batch of due runtimes, and while
+  // it is busy re-creating the first one an operator stops the second. The row
+  // in hand still says `online`, because it was read before the stop. Claiming
+  // on the id alone would then resurrect a runtime somebody just switched off —
+  // a sandbox nobody asked for, billing wall-clock until a human notices, which
+  // is the single most expensive mistake available on this substrate.
+  //
+  // Two due runtimes make the window wide and deterministic: the loop's second
+  // claim happens after the first has been fully re-created, and the stop lands
+  // inside that first re-create.
+  const first = await createModalRuntime("swept-a");
+  const second = await createModalRuntime("swept-b");
+  for (const { id } of [first, second]) {
+    await setRuntimeStatus(id, "online");
+    await ageInstanceBy(id, PAST_DUE_MS);
+  }
+  forgetSubstrateCalls();
+
+  // Whichever the sweep reaches first, the operator stops the other one.
+  terminalDuringProvision = async (spec) => {
+    const other = spec.runtimeId === first.id ? second.id : first.id;
+    await setRuntimeStatus(other, "stopped");
+  };
+
+  const rotated = await sweepExpiringRuntimes();
+
+  const stopped = rotated.includes(first.id) ? second : first;
+  expect(rotated).toEqual([rotated.includes(first.id) ? first.id : second.id]);
+  const after = await rowOf(stopped.id);
+  expect(after.status).toBe("stopped");
+  expect(after.externalId).toBe(stopped.externalId);
+  expect(provisionsFor(stopped.id)).toHaveLength(0);
+}, 30_000);
+
+test("two ticks over the same due runtime rotate it once, not twice", async () => {
+  // The sweeps run on a 15s interval that does not wait for the previous pass.
+  // Whether two passes truly interleave is up to the scheduler — the test above
+  // is the one that pins the claim — but overlapping them must never produce two
+  // instances on one anchor, which is both the corruption case and a sandbox
+  // referenced by no row, billing quietly until the month ends.
+  const { id } = await createModalRuntime("raced");
+  await setRuntimeStatus(id, "online");
+  await ageInstanceBy(id, PAST_DUE_MS);
+  forgetSubstrateCalls();
+
+  const [a, b] = await Promise.all([
+    sweepExpiringRuntimes(),
+    sweepExpiringRuntimes(),
+  ]);
+
+  expect([...a, ...b].filter((x) => x === id)).toEqual([id]);
+  expect(provisionsFor(id)).toHaveLength(1);
+  expect((await rowOf(id)).status).toBe("starting");
+}, 30_000);
+
+test("a ceiling shorter than the margin rotates at its midpoint, not on every tick", async () => {
+  // The Modal driver takes a lifetime override whose stated purpose is verifying
+  // rotation in ten minutes instead of a day. Subtract a flat 30-minute margin
+  // from a 10-minute ceiling and the threshold is NEGATIVE: every instance is
+  // born past due, and the sweeper re-creates it on every 15s tick, billing each
+  // one, for as long as the runtime exists. The margin is capped at half the
+  // ceiling so a short-lived substrate keeps the same promise at a smaller
+  // scale: replaced with time to spare, not replaced constantly.
+  const shortCeiling: RuntimeProvisioner = {
+    ...fakeTerminalProvisioner,
+    manifest: { ...fakeTerminalProvisioner.manifest, maxLifetimeMs: 10 * 60_000 },
+  };
+
+  await withProvisioner(shortCeiling, async () => {
+    const { id, externalId } = await createModalRuntime("short-ceiling");
+    await setRuntimeStatus(id, "online");
+    forgetSubstrateCalls();
+
+    // Brand new, and therefore nowhere near due.
+    expect(await sweepExpiringRuntimes()).not.toContain(id);
+    expect((await rowOf(id)).externalId).toBe(externalId);
+    expect(provisionsFor(id)).toHaveLength(0);
+
+    // ...but still rotated before the substrate takes it.
+    await ageInstanceBy(id, 6 * 60_000);
+    expect(await sweepExpiringRuntimes()).toContain(id);
+    expect((await rowOf(id)).externalId).not.toBe(externalId);
+  });
+}, 30_000);
+
+test("a rotation the substrate refuses leaves the runtime in error, naming the ceiling", async () => {
+  // The runtime is going to be destroyed by the platform within the margin and
+  // the hub could not replace it. Leaving it `online` would be the console
+  // asserting health right up to the moment it vanishes; leaving it `starting`
+  // would blame the wrong thing two minutes later ("no node enrolled").
+  const { id } = await createModalRuntime("rotation-refused");
+  await setRuntimeStatus(id, "online");
+  await ageInstanceBy(id, PAST_DUE_MS);
+  terminalProvisionFails = true;
+
+  expect(await sweepExpiringRuntimes()).not.toContain(id);
+
+  const after = await rowOf(id);
+  expect(after.status).toBe("error");
+  expect(after.statusReason).toContain("no capacity");
+  expect(after.statusReason).toMatch(/24|ceiling|lifetime/i);
 }, 30_000);
