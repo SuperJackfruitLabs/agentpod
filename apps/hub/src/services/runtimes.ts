@@ -11,10 +11,13 @@
  * that carries the workspace — so startRuntime branches on the driver's
  * declared `stopSemantics` and reprovisionRuntime handles that half.
  *
- * Status honesty: `online` means "a node for this runtime is connected" and is
- * written only by enrolment (enrollment.ts). Everything here can say at most
- * "the substrate accepted my request" — hence `provisioning` / `starting`, and
- * sweepStalledRuntimeStarts() to expire the ones that never come back.
+ * Status honesty: `online` means "a node for this runtime is connected", so it
+ * is written only where a node is observed — enrolment (enrollment.ts) and, for
+ * a resumed instance whose agent keeps its credential and never re-enrols, the
+ * gateway calling completeRuntimeStartForNode() below (#281). Everything here
+ * can say at most "the substrate accepted my request" — hence `provisioning` /
+ * `starting`, and sweepStalledRuntimeStarts() to expire the ones that never
+ * come back.
  *
  * `stopped` is the same rule at the other end: it means "the substrate says the
  * container is down", so it is written only on the substrate's own answer
@@ -557,6 +560,66 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
  * staring at the console.
  */
 export const START_TIMEOUT_MS = 2 * 60_000;
+
+/**
+ * Complete a pending start on the evidence that the runtime's node is here.
+ *
+ * Enrolment was the ONLY writer of `online`, which silently assumed every
+ * container enrols on every boot. Docker does, and Modal's stop is terminal so
+ * its start is a re-provision that enrols too — but a substrate that RESUMES an
+ * instance (Fly, and any driver with a real `start()` whose agent keeps its
+ * credential on a persistent disk) brings back an agent that logs
+ * `already enrolled: node_…` and merely reconnects. Enrolment never ran, so the
+ * runtime sat in `starting` until sweepStalledRuntimeStarts called it an error
+ * — while its node was online and heartbeating (#281).
+ *
+ * A node the hub already knows arriving on the gateway is the same evidence
+ * enrolment carries: a node for this runtime exists, right now. It is NOT the
+ * widening #254 forbade — that was a driver's `start()` promise resolving,
+ * which says only that the substrate accepted a request. Never write `online`
+ * from a driver call returning; only from a node being there.
+ *
+ * Deliberately narrow, and this is the dangerous half:
+ *   - Only `starting` is completed. Nodes reconnect after ordinary network
+ *     blips, and a `stopped`, `asleep`, `error` or `destroyed` runtime quietly
+ *     reading `online` would misreport a substrate that is still billing or
+ *     still down. The compare-and-set is in the WHERE clause, so a concurrent
+ *     stop cannot be overwritten by a racing reconnect.
+ *   - Scoped to this node's own runtime, by node_id.
+ *   - `statusReason` is cleared for the same reason enrolment clears it: any
+ *     earlier "never came back" note has just been retired.
+ *
+ * Never throws — it is called from the gateway, where nothing may break a node
+ * connection. Returns the ids it flipped (empty when there was nothing to do).
+ */
+export async function completeRuntimeStartForNode(
+  nodeId: string
+): Promise<string[]> {
+  try {
+    const flipped = await db
+      .update(provisionedRuntimes)
+      .set({ status: "online", statusReason: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(provisionedRuntimes.nodeId, nodeId),
+          eq(provisionedRuntimes.status, "starting")
+        )
+      )
+      .returning({ id: provisionedRuntimes.id });
+
+    for (const row of flipped) {
+      console.log(
+        `[runtimes] ${row.id} starting → online (node ${nodeId} reconnected)`
+      );
+    }
+    return flipped.map((r) => r.id);
+  } catch (err) {
+    console.warn(
+      `[runtimes] could not complete start for node ${nodeId}: ${(err as Error).message}`
+    );
+    return [];
+  }
+}
 
 const humanMs = (ms: number) =>
   ms >= 3_600_000
