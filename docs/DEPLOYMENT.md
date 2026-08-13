@@ -437,10 +437,45 @@ Synapse / `id.agentpod.dev` are never modified, so rollback cannot affect Matrix
 ## Re-deploy (upgrade)
 
 ```bash
-cd /opt/agentpod && git pull
+cd /opt/agentpod
+git fetch origin main -q && git merge --ff-only FETCH_HEAD
+# REQUIRED whenever dependencies changed — see below.
+export PATH=/root/.bun/bin:$PATH   # pnpm lives here; it is NOT on the SSH PATH
+pnpm install --frozen-lockfile
 # Restart hub (auto-migrates):
 systemctl restart agentpod-hub
 systemctl status agentpod-hub --no-pager
+curl -s http://127.0.0.1:3001/health
+```
+
+**Do not skip `pnpm install`.** The hub runs from source (`bun run src/index.ts`),
+so a merge that adds a dependency leaves the previous `node_modules` in place and
+the new import fails at runtime, not at deploy. The Modal driver is the first
+case: it `require("modal")` lazily, so a Modal-**disabled** hub still boots and
+only a hub with `ENABLE_MODAL_PROVISIONING=true` dies at startup — the failure
+appears when a flag is flipped, arbitrarily long after the deploy that caused it.
+
+Confirm which drivers actually came up rather than assuming the flags took:
+
+```bash
+journalctl -u agentpod-hub -n 80 --no-pager | grep "Provisioners registered"
+# e.g. "Provisioners registered: docker, cloudflare, modal, fly"
+```
+
+Before enabling a new provider on a live hub, validate its variables **without
+restarting anything** — the hub refuses to boot on a config error, so a bad value
+turns a restart into an outage:
+
+```bash
+cd /opt/agentpod/apps/hub
+env $(grep -v '^#' /etc/agentpod/hub.env | grep -v '^$' | xargs) \
+  /root/.bun/bin/bun --env-file=/dev/null -e '
+  const { collectConfigErrors } = await import("./src/utils/validate-config.ts");
+  console.log(JSON.stringify(collectConfigErrors(undefined, () => {}).map(e => e.field)));'
+# [] means the hub will boot. Anything else names the variable to fix.
+# --env-file=/dev/null matters: without it bun would also load any .env in the
+# working directory, so you would be validating a different environment than
+# systemd passes.
 ```
 
 If the console changed: rebuild locally with `PUBLIC_HUB_URL=https://hub.<your-domain> pnpm --filter @agentpod/console build` and redeploy `apps/console/build/` to Cloudflare Pages (Wrangler or push to the connected branch).
