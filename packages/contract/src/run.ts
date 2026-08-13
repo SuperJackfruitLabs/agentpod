@@ -51,8 +51,16 @@ export const isRunInterrupted = (s: RunState): boolean =>
  * §10 calls the highest-leverage ordering risk. The console must keep working
  * with no board attached at all, which is why it is optional rather than
  * required.
+ *
+ * The two external fields are **one fact and arrive together**, enforced below.
+ * An `externalRunId` with no source is unattributable — and because both repos
+ * currently claim the `run_` prefix (kaambaan mints it; `acp_runs.id` reserves
+ * it in a schema comment), a bare `run_…` does not say which system produced it.
+ * The reverse join the board needs, `acp_runs_external_idx`, would then return a
+ * row that cannot be traced back to a board. A source with no id is the mirror
+ * image: an origin nothing can be joined to.
  */
-export const Run = z.object({
+const Run_ = z.object({
   id: z.string().min(1),
   sessionId: z.string().min(1),
   stationId: z.string().min(1),
@@ -72,6 +80,15 @@ export const Run = z.object({
   startedAt: z.string(),
   endedAt: z.string().nullable().default(null),
 });
+
+export const Run = Run_.refine(
+  (r) => (r.externalRunId === undefined) === (r.externalSource === undefined),
+  {
+    message:
+      "externalRunId and externalSource must both be present or both absent — an external run id with no source cannot be joined back to the orchestrator that minted it",
+    path: ["externalSource"],
+  },
+);
 export type Run = z.infer<typeof Run>;
 
 // ─── Change ──────────────────────────────────────────────────────────────────
