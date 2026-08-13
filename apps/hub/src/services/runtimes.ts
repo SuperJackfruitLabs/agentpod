@@ -6,6 +6,11 @@
  *   destroy → driver.destroy → mark destroyed
  *   start / stop → driver.start/stop (guard on capability)
  *
+ * "start" is not one verb, though. On a substrate whose stop is terminal there
+ * is no start to call, and the honest restart is a create against the anchor
+ * that carries the workspace — so startRuntime branches on the driver's
+ * declared `stopSemantics` and reprovisionRuntime handles that half.
+ *
  * Status honesty: `online` means "a node for this runtime is connected" and is
  * written only by enrolment (enrollment.ts). Everything here can say at most
  * "the substrate accepted my request" — hence `provisioning` / `starting`, and
@@ -63,7 +68,7 @@ function imageForHarness(harness: string): string {
   return process.env.NODE_AGENT_IMAGE ?? "agentpod-node:local";
 }
 
-type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
+export type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
 
 function toContract(row: RuntimeRow): ProvisionedRuntime {
   return {
@@ -314,7 +319,141 @@ export async function destroyRuntime(userId: string, id: string): Promise<void> 
 }
 
 /**
- * Start (or wake) a runtime. Throws 400 if the driver has no start() support.
+ * The hub URL a provisioned container should dial.
+ *
+ * Request-scoped for createRuntime, which can take the origin of the call that
+ * asked for the runtime. A re-create cannot: it runs on a rotation timer with no
+ * request in sight, so there it has to come from configuration. Throwing here is
+ * the point — the alternative is a container handed a hub URL of "" or
+ * "localhost", which boots, fails to enrol, and reports nothing but a runtime
+ * that never came back.
+ */
+function provisioningHubUrl(): string {
+  const url = process.env.PROVISIONING_HUB_URL;
+  if (!url) {
+    throw Object.assign(
+      new Error(
+        "PROVISIONING_HUB_URL is not set, so a runtime cannot be re-created — " +
+          "the new container would have no hub to enrol against"
+      ),
+      { status: 502 }
+    );
+  }
+  return url;
+}
+
+/**
+ * Re-create a runtime's instance on a substrate whose stop is terminal.
+ *
+ * This is what "start" means when there is no start verb. Modal's terminate
+ * cannot be undone and every restart is a new sandbox with a new id and a fresh
+ * rootfs — so the thing that persists is the driver's anchor, and a driver
+ * anchors by `spec.runtimeId`. Provisioning again with the SAME runtimeId
+ * therefore re-attaches the same workspace. A fresh id would look like it
+ * worked: a new sandbox, a new Volume, an empty workspace, and the old Volume
+ * orphaned — still billed, still holding the only copy of the station's work.
+ *
+ * Three things happen alongside the create, and each is easy to forget:
+ *
+ *  - The old instance is terminated FIRST, best effort. Leaving it behind is a
+ *    sandbox nobody is watching and everybody is paying for, and two live
+ *    sandboxes on one Volume is the corruption case. Best effort, because the
+ *    old one is very often already gone (that is the 24h ceiling doing its job)
+ *    and refusing to create a replacement because the corpse would not die again
+ *    helps nobody — but a failure is recorded in statusReason, where the console
+ *    shows it, rather than left to a log nobody reads.
+ *  - A FRESH enrolment token is minted. The hub stores only a hash, so it cannot
+ *    re-present the original; a new runtime-bound token is durable by default
+ *    (RUNTIME_TOKEN_TTL_MS) and enrollNode resumes the existing node with a
+ *    rotated secret rather than orphaning it.
+ *  - `externalStartedAt` is rewritten. The new sandbox has its own ceiling, and
+ *    an instance clock left at the old value would have the rotation sweep find
+ *    a freshly created sandbox already expired and replace it again on the very
+ *    next tick, for ever.
+ *
+ * Leaves the runtime `starting` — never `online`. The substrate accepting a
+ * create is not a node existing, and sweepStalledRuntimeStarts walks it back to
+ * `error` if none arrives.
+ */
+export async function reprovisionRuntime(
+  row: RuntimeRow,
+  reason: string
+): Promise<void> {
+  const provisioner = getProvisionerUnguarded(row.provider);
+  if (!provisioner) {
+    throw Object.assign(new Error(`provider not available: ${row.provider}`), {
+      status: 502,
+    });
+  }
+
+  const hubUrl = provisioningHubUrl();
+
+  let terminateWarning: string | null = null;
+  if (row.externalId && provisioner.stop) {
+    try {
+      await provisioner.stop(row.externalId);
+    } catch (err) {
+      terminateWarning =
+        `the previous instance (${row.externalId}) could not be terminated: ` +
+        `${(err as Error).message} — check the substrate, it may still be billing`;
+      console.warn(`[runtimes] ${row.id}: ${terminateWarning}`);
+    }
+  }
+
+  const { token } = await mintEnrollmentToken(row.userId, {
+    provisionedRuntimeId: row.id,
+  });
+
+  try {
+    const { externalId, runtime } = await provisioner.provision({
+      runtimeId: row.id,
+      name: row.name,
+      resourceTier: row.resourceTier as "small" | "medium" | "large",
+      hubUrl,
+      enrollToken: token,
+      // One argument today; Task 12 makes image resolution provider-aware and
+      // updates this call and createRuntime's together.
+      image: imageForHarness(row.harness ?? "none"),
+    });
+
+    await db
+      .update(provisionedRuntimes)
+      .set({
+        externalId,
+        runtime: runtime ?? row.runtime ?? null,
+        externalStartedAt: new Date(),
+        status: "starting",
+        statusReason: terminateWarning ? `${reason}. ${terminateWarning}` : reason,
+        updatedAt: new Date(),
+      })
+      .where(eq(provisionedRuntimes.id, row.id));
+  } catch (err) {
+    // A re-create is a create, and a create can be refused. Leaving the row
+    // `starting` would hand the operator a spinner for something that has
+    // already failed, and the stalled-start sweeper would eventually blame the
+    // wrong thing ("no node enrolled") two minutes later.
+    await db
+      .update(provisionedRuntimes)
+      .set({
+        status: "error",
+        statusReason:
+          `the ${row.provider} driver failed to re-create it: ${(err as Error).message}` +
+          (terminateWarning ? `. ${terminateWarning}` : ""),
+        updatedAt: new Date(),
+      })
+      .where(eq(provisionedRuntimes.id, row.id));
+    throw Object.assign(err as Error, { status: 502 });
+  }
+}
+
+/**
+ * Start (or wake) a runtime.
+ *
+ * Two shapes, chosen by the driver's `stopSemantics`:
+ *   - `resumable` (docker, cloudflare) — start the instance that is already
+ *     there. Throws 400 if such a driver has no start() support.
+ *   - `terminal` (modal) — there is nothing to start, so this re-creates the
+ *     instance against the same anchor. See reprovisionRuntime.
  *
  * Leaves the runtime `starting`, never `online`: see the comment on the write.
  * A wake takes the same path, so an asleep runtime goes asleep → starting →
@@ -339,6 +478,24 @@ export async function startRuntime(userId: string, id: string): Promise<void> {
       { status: 502 }
     );
   }
+  // A driver whose stop is terminal has no start to call — Modal's terminate is
+  // irreversible — so a restart on such a substrate IS a create, against the
+  // anchor that carries the workspace. Manifest-driven rather than
+  // provider-specific: any future terminal substrate gets this for free, and the
+  // console's Start button needs no idea which kind it is talking to.
+  //
+  // The condition is the MANIFEST, not the missing method. A resumable driver
+  // that happens to lack start() keeps its 400: its instance survives a stop, so
+  // destroying it and building a replacement would throw away the disk the
+  // declaration promises. Conformance rule 3 now refuses such a driver outright.
+  if (provisioner.manifest.stopSemantics === "terminal") {
+    await reprovisionRuntime(
+      row,
+      "re-created: this substrate has no start, so a start is a new instance"
+    );
+    return;
+  }
+
   if (!provisioner.start) {
     throw Object.assign(
       new Error(`provider ${row.provider} does not support start`),

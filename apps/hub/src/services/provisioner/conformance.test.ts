@@ -451,6 +451,38 @@ describe("assertConforms — stopSemantics", () => {
     (driver as { start?: unknown }).start = async () => {};
     await expect(assertConforms(driver)).rejects.toThrow(/stopSemantics/i);
   });
+
+  it("rejects a resumable driver that implements no start()", async () => {
+    // The other direction, and the one that had no rule until startRuntime
+    // started BRANCHING on this field. "terminal" now routes a start into a
+    // re-provision; "resumable" routes it into driver.start(). A driver that
+    // declares resumable and implements no start() is therefore a runtime that
+    // can be stopped and never started again — the manifest promising the
+    // opposite of what the substrate can do, in the one place the hub now
+    // trusts it. Until this rule existed the field was inert and the lie was
+    // free.
+    const driver = fakeDriver({
+      ...base,
+      workspaceStorage: "volume",
+      stopSemantics: "resumable",
+      lifecycle: ["stop", "status"],
+    });
+    await expect(assertConforms(driver)).rejects.toThrow(
+      /stopSemantics:.*implements no start\(\)/s
+    );
+  });
+
+  it("accepts a resumable driver that implements start() — the rule is not vacuous", async () => {
+    // Same manifest but for the one field under test, so a rule that rejected
+    // everything (or that fired on the wrong field) cannot pass unnoticed.
+    const driver = fakeDriver({
+      ...base,
+      workspaceStorage: "volume",
+      stopSemantics: "resumable",
+      lifecycle: ["start", "stop", "status"],
+    });
+    await expect(assertConforms(driver)).resolves.toBeUndefined();
+  });
 });
 
 // ─── Rule 4: workspaceStorage ─────────────────────────────────────────────────

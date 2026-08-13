@@ -120,6 +120,16 @@ export const runtimeRoutes = new Hono()
       if (e.status === 400) {
         return c.json({ error: "Bad Request", message: e.message }, 400);
       }
+      // On a terminal-stop substrate a start is a create, so it can be refused
+      // by the substrate the way a create can. That is a 502, not a 500: the
+      // hub did its part and the external system said no. The runtime row
+      // already carries the reason (see reprovisionRuntime).
+      if (e.status === 502) {
+        return c.json(
+          { error: "Bad Gateway", message: "The start driver call failed" },
+          502
+        );
+      }
       throw err;
     }
   })

@@ -23,6 +23,11 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 process.env.ENABLE_DOCKER_PROVISIONING = "true";
+process.env.ENABLE_MODAL_PROVISIONING = "true";
+// reprovisionRuntime runs without a request in hand — a rotation sweep has no
+// origin to take a hub URL from — so it reads one from configuration. Unset,
+// every re-create throws rather than handing a container a hub it cannot dial.
+process.env.PROVISIONING_HUB_URL = "https://hub.test";
 
 import { test, expect, beforeAll, afterAll, afterEach } from "bun:test";
 import { Hono } from "hono";
@@ -87,6 +92,59 @@ const fakeDockerProvisioner: RuntimeProvisioner = {
   // Note: no `stop` — deliberately omitted to test the 400 unsupported path.
 };
 
+// ─── A terminal-stop fake: the shape Modal forces ─────────────────────────────
+//
+// No start(), because there is nothing to start — terminate is irreversible and
+// every restart is a new sandbox. What survives is the driver's ANCHOR, and a
+// driver anchors by spec.runtimeId, so provisioning again with the same
+// runtimeId re-attaches the same workspace. The external id below is shaped
+// like the real Modal driver's (`<volume>#<sandbox>`) so a test can see which
+// half changed.
+
+const terminalCalls: {
+  provision: ProvisionSpec[];
+  stop: string[];
+  /** Interleaved log, so "terminate BEFORE create" is checkable, not assumed. */
+  order: string[];
+} = { provision: [], stop: [], order: [] };
+
+let terminalCounter = 0;
+/** Makes the substrate refuse to terminate the instance being replaced. */
+let terminalStopFails = false;
+/** Makes the substrate refuse to create the replacement. */
+let terminalProvisionFails = false;
+
+const fakeTerminalProvisioner: RuntimeProvisioner = {
+  provider: "modal",
+  manifest: {
+    provider: "modal",
+    workspaceStorage: "volume",
+    stopSemantics: "terminal",
+    maxLifetimeMs: 86_400_000,
+    imageBinding: "per-instance",
+    supportedTiers: ["small", "medium", "large"],
+    idleBehaviour: "never",
+    lifecycle: ["stop", "status"],
+  },
+  async provision(spec) {
+    terminalCalls.provision.push(spec);
+    terminalCalls.order.push(`provision:${spec.runtimeId}`);
+    if (terminalProvisionFails) throw new Error("modal: no capacity");
+    return { externalId: `vol-${spec.runtimeId}#sb-${++terminalCounter}` };
+  },
+  async destroy() {},
+  async stop(externalId) {
+    terminalCalls.stop.push(externalId);
+    terminalCalls.order.push(`stop:${externalId}`);
+    if (terminalStopFails) throw new Error("modal: sandbox already terminated");
+  },
+  async status() {
+    return "running";
+  },
+  // Deliberately NO start(): conformance rule 3 forbids one on a terminal
+  // driver, and this is the case startRuntime has to handle without it.
+};
+
 // ─── Minimal test app ─────────────────────────────────────────────────────────
 //
 // The auth middleware in production reads Better Auth sessions / API keys.
@@ -117,19 +175,41 @@ beforeAll(async () => {
     email: "runtimes-other@example.com",
     name: "Runtimes Other User",
   });
-  // Register the fake provisioner (ENABLE_DOCKER_PROVISIONING=true set above).
-  registerProvisioner(fakeDockerProvisioner);
+  registerFakeProvisioners();
 });
+
+/**
+ * Register both fakes.
+ *
+ * A helper rather than two calls, because two tests below clear the registry on
+ * purpose and have to put it back exactly as it was — restoring only docker
+ * left every later modal test failing with "provider not registered", which
+ * reads as a broken feature rather than a broken fixture.
+ */
+function registerFakeProvisioners() {
+  registerProvisioner(fakeDockerProvisioner);
+  registerProvisioner(fakeTerminalProvisioner);
+}
 
 afterEach(() => {
   // Clear call history between tests (but keep the registration).
   fakeCalls.provision.length = 0;
   fakeCalls.destroy.length = 0;
   fakeCalls.start.length = 0;
+  terminalCalls.provision.length = 0;
+  terminalCalls.stop.length = 0;
+  terminalCalls.order.length = 0;
+  terminalStopFails = false;
+  terminalProvisionFails = false;
 });
 
 afterAll(async () => {
   resetProvisioners();
+  // These two are set on `process.env` above and `bun test` runs every file in
+  // ONE process, so leaving them set would silently enable a modal provider —
+  // and pin a hub URL — for every file that runs after this one.
+  delete process.env.ENABLE_MODAL_PROVISIONING;
+  delete process.env.PROVISIONING_HUB_URL;
   try {
     await rawSql`DELETE FROM enrollment_tokens    WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id IN (${TEST_USER}, ${OTHER_USER})`;
@@ -528,8 +608,8 @@ test("DELETE /api/runtimes/:id with unregistered provisioner → row still marke
       .where(eq(provisionedRuntimes.id, id));
     expect(row!.status).toBe("destroyed");
   } finally {
-    // Re-register the fake so later tests continue to work
-    registerProvisioner(fakeDockerProvisioner);
+    // Re-register the fakes so later tests continue to work
+    registerFakeProvisioners();
   }
 }, 30_000);
 
@@ -752,7 +832,7 @@ async function withProvisioner(
   try {
     await body();
   } finally {
-    registerProvisioner(fakeDockerProvisioner);
+    registerFakeProvisioners();
   }
 }
 
@@ -1019,4 +1099,211 @@ test("a row written without an instance start time keeps NULL — the column is 
   `;
 
   expect((await rowOf(id)).externalStartedAt).toBeNull();
+}, 30_000);
+
+// ─── Start means CREATE, on a substrate whose stop is terminal ────────────────
+//
+// Modal has no start verb: terminate cannot be undone, and every restart is a
+// new sandbox with a new id and a fresh rootfs. The honest answer is not a 400
+// forever — it is that a restart on such a substrate IS a create, against the
+// anchor that carries the workspace. The tests below pin the three things that
+// make that safe rather than merely convenient: the SAME runtime id (so the
+// Volume is re-attached instead of orphaned), a FRESH enrolment token (the hub
+// stores only a hash and cannot re-present the old one), and a NEW instance
+// clock (the 24h ceiling restarts with the sandbox).
+
+async function createModalRuntime(name: string) {
+  const res = await testApp.request("/api/runtimes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Test-User-Id": TEST_USER,
+      "Host": "localhost:3001",
+    },
+    body: JSON.stringify({ provider: "modal", name, resourceTier: "small" }),
+  });
+  expect(res.status).toBe(201);
+  return (await res.json()) as { id: string; externalId: string };
+}
+
+/**
+ * Age the current instance by two hours.
+ *
+ * Not cosmetic: without it, "did the re-create rewrite external_started_at?"
+ * would be asked of two timestamps milliseconds apart, and a `>=` assertion
+ * passes just as happily when nothing was rewritten at all. Backdating makes
+ * the question answerable with a strict comparison.
+ */
+async function ageInstanceByTwoHours(id: string) {
+  await rawSql`
+    UPDATE provisioned_runtimes
+       SET external_started_at = now() - interval '2 hours'
+     WHERE id = ${id}
+  `;
+}
+
+test("starting a terminal-stop runtime creates a NEW instance against the SAME anchor", async () => {
+  const { id } = await createModalRuntime("rolling");
+  await ageInstanceByTwoHours(id);
+  const before = await rowOf(id);
+
+  const res = await startVia(id);
+  expect(res.status).toBe(204);
+
+  const after = await rowOf(id);
+  // A new sandbox...
+  expect(after.externalId).not.toBe(before.externalId);
+  // ...on the SAME runtime id, which is what the driver anchors its Volume by.
+  // A fresh id here would silently orphan the old Volume — still billed, and
+  // holding the only copy of the station's work — and hand the new sandbox an
+  // empty workspace, with nothing anywhere saying so.
+  expect(terminalCalls.provision.at(-1)!.runtimeId).toBe(id);
+  expect(after.externalId!.startsWith(`vol-${id}#`)).toBe(true);
+  // The rest of the spec is the runtime's, not a default: a re-create that
+  // quietly resized or renamed the station is a different station.
+  expect(terminalCalls.provision.at(-1)!.name).toBe("rolling");
+  expect(terminalCalls.provision.at(-1)!.resourceTier).toBe("small");
+  // No request to take an origin from, so the hub URL comes from config.
+  expect(terminalCalls.provision.at(-1)!.hubUrl).toBe("https://hub.test");
+
+  // `starting`, never `online`: the substrate accepting a create is not a node
+  // existing. Only enrolment writes online (issue #254).
+  expect(after.status).toBe("starting");
+
+  // The new sandbox has a new 24h ceiling, so it needs a new clock. Left at the
+  // old value, the rotation sweep would find a freshly created sandbox already
+  // "expired" and re-create it again on the very next tick, for ever.
+  expect(after.externalStartedAt!.getTime()).toBeGreaterThan(
+    before.externalStartedAt!.getTime() + 60 * 60_000
+  );
+  expect(after.externalStartedAt!.getTime()).toBeLessThanOrEqual(Date.now());
+}, 30_000);
+
+test("re-creating terminates the instance it replaces, BEFORE creating its successor", async () => {
+  // Leaving the old sandbox behind is one nobody is watching and everybody is
+  // paying for. Ordering matters too: two live sandboxes writing to one Volume
+  // is the corruption case, so the terminate is not merely eventual.
+  const { id, externalId } = await createModalRuntime("no-leak");
+
+  await startVia(id);
+
+  expect(terminalCalls.stop).toEqual([externalId]);
+  expect(terminalCalls.order).toEqual([
+    `provision:${id}`, // the original create
+    `stop:${externalId}`, // the sandbox being replaced, terminated first
+    `provision:${id}`, // its successor, on the same anchor
+  ]);
+}, 30_000);
+
+test("a terminate that fails does not block the re-create, and is not swallowed either", async () => {
+  // Best effort by design: the old instance is very often already gone (that is
+  // the 24h ceiling doing its thing), and refusing to create a replacement
+  // because the corpse would not die again helps nobody. But "best effort" must
+  // not mean "unrecorded" — the one case where it matters is a sandbox that is
+  // still up, still billing, and now unreferenced by any row.
+  const { id, externalId } = await createModalRuntime("stubborn");
+  terminalStopFails = true;
+
+  const res = await startVia(id);
+  expect(res.status).toBe(204);
+
+  const after = await rowOf(id);
+  expect(after.status).toBe("starting");
+  expect(after.externalId).not.toBe(externalId);
+  // The operator has to be able to see which sandbox was left behind, in the
+  // place the console already shows (statusReason renders under the badge).
+  expect(after.statusReason).toContain(externalId);
+  expect(after.statusReason).toContain("already terminated");
+}, 30_000);
+
+test("re-creating mints a fresh enrolment token, because the old one is not in the hub", async () => {
+  // The hub stores only a hash, so it cannot re-inject the token it minted. It
+  // mints another bound to the same runtime; enrollNode resumes the same node
+  // with a rotated secret (PR #252). Nothing is kept in the Volume — the
+  // node-agent's config lives on the disposable rootfs on purpose.
+  const { id } = await createModalRuntime("tokens");
+  const firstToken = terminalCalls.provision.at(-1)!.enrollToken;
+
+  await startVia(id);
+
+  const secondToken = terminalCalls.provision.at(-1)!.enrollToken;
+  expect(secondToken).not.toBe(firstToken);
+  expect(secondToken.startsWith("enr_")).toBe(true);
+
+  const tokenRows = await db
+    .select()
+    .from(enrollmentTokens)
+    .where(eq(enrollmentTokens.provisionedRuntimeId, id));
+  expect(tokenRows.length).toBe(2);
+}, 30_000);
+
+test("a re-create the substrate refuses leaves the runtime in error, saying so", async () => {
+  // A create can fail, and this one is a create. Leaving the row `starting`
+  // after the substrate said no would hand the operator a spinner for something
+  // that already failed, and the stalled-start sweeper would eventually report
+  // the wrong reason ("no node enrolled") for it.
+  const { id } = await createModalRuntime("no-capacity");
+  terminalProvisionFails = true;
+
+  const res = await startVia(id);
+  expect(res.status).toBe(502);
+
+  const after = await rowOf(id);
+  expect(after.status).toBe("error");
+  expect(after.statusReason).toContain("no capacity");
+}, 30_000);
+
+test("a resumable driver's start is unchanged — it starts the instance it already has", async () => {
+  // The terminal branch is additive. Docker and Cloudflare keep the instance
+  // across a stop, so their start is still start(): no new instance, no new
+  // token, and no new instance clock.
+  const createRes = await createRuntime(TEST_USER, "resumable-start");
+  const { id } = (await createRes.json()) as { id: string };
+  const before = await rowOf(id);
+
+  const res = await startVia(id);
+  expect(res.status).toBe(204);
+
+  expect(fakeCalls.start).toEqual([before.externalId!]);
+  // Exactly one provision: the create. A second would mean the terminal branch
+  // fired for a substrate that never needed it.
+  expect(fakeCalls.provision).toHaveLength(1);
+
+  const after = await rowOf(id);
+  expect(after.externalId).toBe(before.externalId);
+  expect(after.status).toBe("starting");
+  expect(after.statusReason).toBeNull();
+  // Same instance, so the same instance clock. Rewriting it here would make
+  // every start reset the age of a sandbox that never restarted.
+  expect(after.externalStartedAt!.getTime()).toBe(
+    before.externalStartedAt!.getTime()
+  );
+}, 30_000);
+
+test("a resumable driver with no start() still refuses — re-creating is not a substitute", async () => {
+  // The branch is gated on the MANIFEST, not on the missing method. A resumable
+  // substrate keeps the instance, and its disk, across a stop; destroying it and
+  // building a new one to satisfy a button would throw the workspace away —
+  // exactly the loss stopSemantics exists to prevent. The honest answer for a
+  // driver that declares resumable and cannot start is the 400 (and conformance
+  // now refuses to let such a driver ship at all).
+  const noStart: RuntimeProvisioner = { ...fakeDockerProvisioner };
+  delete (noStart as { start?: unknown }).start;
+
+  await withProvisioner(noStart, async () => {
+    const createRes = await createRuntime(TEST_USER, "resumable-no-start");
+    const { id } = (await createRes.json()) as { id: string };
+    const before = await rowOf(id);
+
+    const res = await startVia(id);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toContain(
+      "does not support start"
+    );
+
+    // Nothing was re-created behind the refusal.
+    expect(fakeCalls.provision).toHaveLength(1);
+    const after = await rowOf(id);
+    expect(after.externalId).toBe(before.externalId);
+  });
 }, 30_000);
