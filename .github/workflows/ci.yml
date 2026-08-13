@@ -128,6 +128,25 @@ jobs:
       - name: Test the Modal image entrypoint wrapper
         run: sh apps/node-agent/deploy/test-modal-entrypoint.sh
 
+      # The Fly images bake in a RELEASED node-agent binary rather than
+      # compiling one, so they carry a version pin — and a pin nobody is forced
+      # to move goes stale silently (issue #290: both Fly images sat on v0.1.22
+      # while the fleet ran v0.1.24, so no node-agent fix could reach a Fly
+      # station at all). These two steps are that forcing function. They live in
+      # this job for the same reason as the ones above: it is a required check,
+      # and a job of its own would not gate.
+      - name: Test the Fly node-agent pin check
+        run: sh fly/node-image/test-version-pin.sh
+
+      # Resolves the latest release from the GitHub API and fails when either
+      # Fly Dockerfile's ARG default is behind it. Expected to turn red on the
+      # first PR after a node-agent release: bumping both ARGs is the fix, and
+      # noticing here is the entire point.
+      - name: Check the Fly images pin the current node-agent release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: sh fly/node-image/check-version-pin.sh
+
   console:
     name: console
     runs-on: ubuntu-latest

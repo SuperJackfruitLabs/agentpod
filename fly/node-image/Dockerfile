@@ -19,7 +19,14 @@
 
 FROM oven/bun:1-slim
 
-ARG AGENTPOD_VERSION=v0.1.22
+# Kept current by fly/node-image/check-version-pin.sh, which fails the
+# node-agent CI job when this default falls behind the latest release — a stale
+# pin here means a Fly station runs an agent without the fixes everyone else
+# has, and republishing the image cannot help (issue #290). The publish workflow
+# overrides this with --build-arg, so what a published image carries is the
+# release resolved at build time; this default is what a local `docker build`
+# gets.
+ARG AGENTPOD_VERSION=v0.1.24
 
 # oven/bun:1-slim leaves USER unset, i.e. root, which is what everything below
 # needs: apt, the release download, and at runtime the wrapper replacing
