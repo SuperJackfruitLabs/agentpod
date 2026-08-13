@@ -1,0 +1,120 @@
+# Build and publish the substrate node images to GHCR.
+#
+# Manual only. These images are what Fly and Modal pull to run a station, and
+# both substrates are billed — so publishing is an act, not a side effect of
+# pushing code. `workflow_dispatch` keeps the decision with a human.
+#
+# This replaces hand-building on a workstation, which had two real problems:
+# Apple Silicon needs emulation for the required linux/amd64 (slow, and the base
+# image has to be rebuilt amd64 first, clobbering the local arm64 tag the Docker
+# provisioner uses), and a hand-pushed image records nothing about which commit
+# produced it.
+#
+# NOTE: GHCR packages are created private. The first run of each image needs a
+# one-time visibility change to **public** in the GitHub UI, because Modal calls
+# `images.fromRegistry(tag)` with no Secret and cannot authenticate to a private
+# registry. Fly can use private registries but is simpler public too.
+name: publish-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to build
+        required: true
+        default: all
+        type: choice
+        options: [all, fly, modal]
+      tag:
+        description: Tag to publish (e.g. v0.1.24)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      # Independent images: one failing must not cancel the other, or a Modal
+      # build problem hides a good Fly image.
+      fail-fast: false
+      matrix:
+        include:
+          - name: fly
+            dockerfile: fly/node-image/Dockerfile
+            image: agentpod-node-opencode-fly
+          - name: modal
+            dockerfile: apps/node-agent/deploy/Dockerfile.modal
+            image: agentpod-node-modal
+    steps:
+      - name: Skip images not selected
+        id: gate
+        run: |
+          if [ "${{ inputs.image }}" = "all" ] || [ "${{ inputs.image }}" = "${{ matrix.name }}" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        if: steps.gate.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.gate.outputs.run == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Both harness images are FROM agentpod-node:base, which is not published.
+      # The runner is amd64, so this is a native build — no emulation, and no
+      # risk of clobbering a developer's local arm64 base tag.
+      - name: Build the base image
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            -f apps/node-agent/deploy/Dockerfile.base \
+            -t agentpod-node:base \
+            apps/node-agent
+
+      - name: Build and push
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
+          docker build \
+            --platform linux/amd64 \
+            -f "${{ matrix.dockerfile }}" \
+            -t "${ref}:${{ inputs.tag }}" \
+            -t "${ref}:latest" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            .
+          docker push "${ref}:${{ inputs.tag }}"
+          docker push "${ref}:latest"
+          echo "published ${ref}:${{ inputs.tag }} from ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # A pushed image nobody verified is how a broken station reaches a
+      # substrate. These are the same checks the image tasks ran locally.
+      - name: Verify what was published
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag }}"
+          docker run --rm --entrypoint /agentpod-node "$ref" version
+          if [ "${{ matrix.name }}" = "modal" ]; then
+            # Modal's runtime is Python and it takes over the entrypoint; an
+            # image missing either is accepted at push and fails at first boot.
+            docker run --rm --entrypoint python3 "$ref" --version
+            docker run --rm --entrypoint sh "$ref" -c 'python3 -m pip --version'
+            test -z "$(docker inspect -f '{{json .Config.Entrypoint}}' "$ref" | tr -d 'null')" \
+              || { echo "Modal image must have an empty ENTRYPOINT"; exit 1; }
+          fi
