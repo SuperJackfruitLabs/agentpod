@@ -12,6 +12,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
+import { tenantScope } from "../db/tenant-scope";
+import { resolveTenantForUser } from "../auth/tenant";
 import { VERB_RESULTS } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
@@ -127,10 +129,13 @@ export async function listAdopted(
   userId: string,
   nodeId: string
 ): Promise<StationRow[]> {
+  const tenantId = await resolveTenantForUser(userId);
   return db
     .select()
     .from(stations)
-    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+    .where(
+      tenantScope(stations, tenantId, eq(stations.userId, userId), eq(stations.nodeId, nodeId)),
+    );
 }
 
 // ─── getStation ───────────────────────────────────────────────────────────────
