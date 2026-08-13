@@ -20,6 +20,13 @@ func buildPiFixture(t *testing.T) (dataDir string, wsHyphen string) {
 	root := t.TempDir()
 	dataDir = filepath.Join(root, "agent")
 
+	// Point the workspace station at a path that does not exist, so these cases
+	// see session-derived stations ONLY. Without it a machine that happens to
+	// have a /workspace (any provisioned container, and some developer laptops)
+	// would report one more station than the case is about. The workspace
+	// station has its own file: pi_workspace_test.go.
+	t.Setenv(piWorkspaceEnv, filepath.Join(root, "no-workspace"))
+
 	// A real workspace whose name CONTAINS A HYPHEN. Decoding the directory
 	// name would yield ".../idea/bank", which does not exist — the station
 	// would vanish silently. This is the case that forces header parsing.
@@ -73,6 +80,9 @@ func TestPiDetectReadsWorkspaceFromSessionHeader(t *testing.T) {
 }
 
 func TestPiDetectMissingDataDirReturnsEmpty(t *testing.T) {
+	// No workspace either — a missing data dir with a workspace present is the
+	// freshly-provisioned case, and it is covered in pi_workspace_test.go.
+	t.Setenv(piWorkspaceEnv, filepath.Join(t.TempDir(), "no-workspace"))
 	stations, err := NewPi(filepath.Join(t.TempDir(), "nope")).Detect()
 	if err != nil {
 		t.Fatalf("missing data dir must not error: %v", err)
