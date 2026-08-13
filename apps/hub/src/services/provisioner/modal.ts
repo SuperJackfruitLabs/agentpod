@@ -214,6 +214,14 @@ export class ModalRuntimeProvisioner implements RuntimeProvisioner {
       // Modal pulls the registry reference per sandbox, so spec.image is real.
       imageBinding: "per-instance",
       supportedTiers: this.supportedTiers,
+      // Straight off MODAL_RESOURCE_TIERS, the same table provision() sizes the
+      // sandbox from, so the hub's "does this harness fit?" (issue #279) is
+      // asked of the sandbox that will actually be created. MiB is treated as
+      // MB throughout: the 5% difference is far inside the headroom the
+      // requirement carries, and Modal's own field is memoryMiB.
+      tierMemoryMb: Object.fromEntries(
+        Object.entries(MODAL_RESOURCE_TIERS).map(([tier, res]) => [tier, res.memoryMiB])
+      ) as Record<ResourceTier, number>,
       // idleTimeoutMs is opt-in and we never set it, so nothing here mistakes an
       // outbound-only node-agent for an idle one.
       idleBehaviour: "never",

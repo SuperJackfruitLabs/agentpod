@@ -36,6 +36,34 @@ const RUNTIME_RESOURCE_TIERS: Record<
   large:  { cpus: "2.0", memory: "4g",    pidsLimit: 512 },
 };
 
+/**
+ * "1g" → 1024. Only the two suffixes the table above uses; anything else — a
+ * typo, or no limit at all — is worth refusing at import rather than silently
+ * sizing a container wrong, or declaring a tier whose size is a guess.
+ */
+function limitToMb(limit: string | undefined): number {
+  const parsed = limit ? /^(\d+)(g|m)$/.exec(limit) : null;
+  if (!parsed) throw new Error(`docker: unparseable memory limit "${limit}"`);
+  const value = Number(parsed[1]);
+  return parsed[2] === "g" ? value * 1024 : value;
+}
+
+/**
+ * What each tier gives, in MB, read off the limits actually sent to the daemon.
+ *
+ * Derived rather than restated: the hub compares this against a harness's
+ * measured requirement (issue #279), and a second hand-maintained copy of these
+ * numbers is precisely the drift that let a harness be offered a tier it cannot
+ * live in. Docker learned the same lesson from the other end on 2026-08-09 — an
+ * opencode ACP session OOM-killed at 513 MB inside a 512m cgroup.
+ */
+const DOCKER_TIER_MEMORY_MB = Object.fromEntries(
+  Object.entries(RUNTIME_RESOURCE_TIERS).map(([tier, limits]) => [
+    tier,
+    limitToMb(limits.memory),
+  ])
+) as Record<"small" | "medium" | "large", number>;
+
 // ─── "The daemon says there is no such container" ─────────────────────────────
 
 /**
@@ -84,6 +112,9 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
     // All three map to real cpu/memory/pids limits in RUNTIME_RESOURCE_TIERS
     // above; none is refused.
     supportedTiers: ["small", "medium", "large"],
+    // And how big each one is, so "can this harness live here?" is answerable
+    // before a container exists rather than after an OOM kill.
+    tierMemoryMb: DOCKER_TIER_MEMORY_MB,
     // Nothing sleeps an idle container. Docker has no notion of inbound
     // activity to key idleness on, so the trap that ruled out Fly Sprites and
     // bit Cloudflare cannot arise here.

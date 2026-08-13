@@ -41,6 +41,12 @@ describe("FlyMachinesProvisioner — declarations", () => {
     expect(m.imageBinding).toBe("per-instance");
     // config.guest is per machine too, so all three tiers are real.
     expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
+    // What each tier actually gives, from FLY_TIERS itself rather than a second
+    // copy of the numbers. Issue #279: `small` was offered for opencode, whose
+    // measured peak is 855 MB of harness on top of ~157 MB of OS and node-agent
+    // — the whole of a 1 GB machine. The hub can only refuse that pair if the
+    // driver says how big its tiers are.
+    expect(m.tierMemoryMb).toEqual({ small: 1024, medium: 2048, large: 4096 });
     // 2026-08-12: 25 minutes idle with only outbound traffic, sampled every 5
     // minutes, `started` throughout. Autostop is Fly-Proxy-driven and only
     // touches machines with inbound `services`; this driver defines none.

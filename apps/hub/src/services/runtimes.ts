@@ -40,7 +40,8 @@ import {
   providerManifests,
   isProviderEnabled,
 } from "./provisioner/registry";
-import type { ProvisionedRuntime } from "@agentpod/contract";
+import { HARNESS_MIN_MEMORY_MB, tierFitsHarness } from "@agentpod/contract";
+import type { ProvisionedRuntime, ResourceTier } from "@agentpod/contract";
 import type { RuntimeProvisioner, RuntimeState } from "./provisioner/types";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -148,10 +149,43 @@ export async function createRuntime(
     );
   }
 
+  const harness = req.harness ?? "none";
+  const resourceTier = (req.resourceTier ?? "small") as ResourceTier;
+
+  // Guard — 400 before anything is written, for the same reason as the one
+  // above: a combination that cannot work must be refused, not created.
+  //
+  // The console filters these out of its picker, and this is deliberately not
+  // the only place they are refused (issue #279). The API is callable directly,
+  // consoles deploy separately from hubs, and the failure this prevents is the
+  // worst-shaped one we have shipped: provisioning, volume mount, enrolment and
+  // the first response ALL look healthy, and the machine then wedges partway
+  // through the first chat turn, which the user meets as "couldn't reach the
+  // hub". Refusing costs one request.
+  //
+  // Silent when the driver declares no memory for the tier: the manifest is
+  // evidence-only, and an undeclared size may not become a refusal.
+  const manifest = getProvisionerUnguarded(provider)?.manifest;
+  const tierMemoryMb = manifest?.tierMemoryMb?.[resourceTier];
+  if (!tierFitsHarness(harness, tierMemoryMb)) {
+    const needed = HARNESS_MIN_MEMORY_MB[harness as keyof typeof HARNESS_MIN_MEMORY_MB];
+    const roomier = (manifest?.supportedTiers ?? []).filter((tier) =>
+      tierFitsHarness(harness, manifest?.tierMemoryMb?.[tier])
+    );
+    throw Object.assign(
+      new Error(
+        `harness "${harness}" needs ${needed} MB but the ${provider} "${resourceTier}" ` +
+          `tier gives ${tierMemoryMb} MB. ` +
+          (roomier.length > 0
+            ? `Choose ${roomier.join(" or ")}.`
+            : `No ${provider} tier is large enough for it.`)
+      ),
+      { status: 400 }
+    );
+  }
+
   const id = prefixedId("rt");
   const now = new Date();
-
-  const harness = req.harness ?? "none";
 
   await db.insert(provisionedRuntimes).values({
     id,
@@ -159,7 +193,7 @@ export async function createRuntime(
     provider,
     status: "provisioning",
     name: req.name,
-    resourceTier: req.resourceTier ?? "small",
+    resourceTier,
     harness,
     externalId: null,
     nodeId: null,
@@ -214,7 +248,7 @@ export async function createRuntime(
     const { externalId, runtime } = await provisioner.provision({
       runtimeId: id,
       name: req.name,
-      resourceTier: (req.resourceTier ?? "small") as "small" | "medium" | "large",
+      resourceTier,
       hubUrl,
       enrollToken,
       image: imageForHarness(harness, provider),

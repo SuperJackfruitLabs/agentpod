@@ -195,4 +195,17 @@ describe("CloudflareSandboxProvisioner", () => {
     const p = new CloudflareSandboxProvisioner({ deployedTier: "small" });
     expect(p.manifest.supportedTiers).toEqual(["small"]);
   });
+
+  it("declares memory for the deployed tier only, and for no other", () => {
+    // A fixed-instance substrate is the case that makes harness-aware tiers
+    // more than a filter: a worker deployed `small` cannot run opencode AT ALL,
+    // and the manifest has to be able to say that. Declaring sizes for tiers
+    // this worker does not offer would invent an answer for a machine that does
+    // not exist.
+    const large = new CloudflareSandboxProvisioner({ deployedTier: "large" }).manifest;
+    expect(large.tierMemoryMb).toEqual({ large: 4096 });
+
+    const small = new CloudflareSandboxProvisioner({ deployedTier: "small" }).manifest;
+    expect(small.tierMemoryMb).toEqual({ small: 1024 });
+  });
 });

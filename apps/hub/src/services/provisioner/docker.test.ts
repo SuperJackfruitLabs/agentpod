@@ -112,6 +112,10 @@ describe("DockerRuntimeProvisioner", () => {
     expect(m.maxLifetimeMs).toBeNull();
     expect(m.imageBinding).toBe("per-instance");
     expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
+    // The same 1g/2g/4g the driver hands the daemon, in MB. Declared so the hub
+    // can refuse a harness that does not fit — a `small` cgroup OOM-killed an
+    // opencode ACP session once already (2026-08-09, at 512m).
+    expect(m.tierMemoryMb).toEqual({ small: 1024, medium: 2048, large: 4096 });
     expect(m.idleBehaviour).toBe("never");
     expect(m.lifecycle).toEqual(expect.arrayContaining(["start", "stop", "status"]));
   });

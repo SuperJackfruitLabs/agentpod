@@ -1,4 +1,4 @@
-import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, FleetAgent, FleetStats } from "@agentpod/contract";
+import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats } from "@agentpod/contract";
 import { goto } from "$app/navigation";
 import { clearAuthSession } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
@@ -83,23 +83,15 @@ export const listRuntimes = () => http<ProvisionedRuntime[]>("/api/runtimes");
  * What a provisioner driver declares about its substrate, as reported by the
  * hub's driver registry.
  *
- * Structurally mirrors the hub's `DriverManifest` without importing it — the
- * console shares only the contract package with the hub. Only the fields the
- * console renders from are required; the rest are declared optional so the hub
- * can add a field (or a whole new driver) without a console edit, which is the
- * point of the registry.
+ * The shape now lives in the contract — the one package the console and the hub
+ * share — rather than being mirrored structurally here. It moved there when it
+ * grew `harnessTiers`: which (harness, tier) pairs are viable is a fact the two
+ * sides have to agree on, and "two structurally similar types that happen to
+ * agree" is precisely what let the console offer fly+opencode+small (#279).
+ * Everything but `provider` and `supportedTiers` stays optional there, so a hub
+ * that predates a field cannot blank the dialog.
  */
-export type DriverManifest = {
-  provider: string;
-  /** Tiers this driver can actually satisfy — the dialog builds its tier list from this. */
-  supportedTiers: string[];
-  workspaceStorage?: "rootfs" | "volume" | "external-archive";
-  stopSemantics?: "resumable" | "terminal";
-  maxLifetimeMs?: number | null;
-  imageBinding?: "per-instance" | "fixed";
-  idleBehaviour?: "never" | "platform-inbound" | "hub-driven";
-  lifecycle?: Array<"start" | "stop" | "status">;
-};
+export type DriverManifest = RuntimeProviderManifest;
 
 export const listRuntimeProviders = () =>
   http<{
