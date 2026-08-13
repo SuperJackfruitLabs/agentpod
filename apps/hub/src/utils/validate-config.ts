@@ -6,6 +6,7 @@ import {
   isPullableFromRegistry,
   providerImageEnvVar,
 } from "../services/runtimes-image";
+import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 
 export interface ValidationError {
   field: string;
@@ -27,8 +28,12 @@ type ResolveImage = (harness: string, provider: string) => string;
 /**
  * Substrates that PULL their images, and what a missing one costs there.
  *
- * Docker is absent because its images come from the host daemon, where a local
- * tag is exactly right. Cloudflare is absent because its image is baked into
+ * Docker is absent because its images come from the daemon's own store, where a
+ * local tag is exactly right — including on a REMOTE daemon, if the operator
+ * built it there. That case is reported by the docker-daemon rule below, which
+ * is where the "is this daemon somebody else's box?" answer lives; Docker does
+ * not belong in this table because it never pulls at all. Cloudflare is absent
+ * because its image is baked into
  * the deployed worker (`imageBinding: "fixed"`) and is covered by
  * CLOUDFLARE_SANDBOX_IMAGE above — a per-harness variable would be a fiction
  * there, since the driver refuses any image but the deployed one.
@@ -333,6 +338,51 @@ export function collectConfigErrors(
         `Must be at least 1 (got ${cfg.fly.volumeSizeGb}). The workspace lives on this volume ` +
         "because the Fly rootfs does not survive a stop.",
     });
+  }
+
+  // ── Which Docker daemon, and what reaching it costs ────────────────────────
+  //
+  // Conditional on ENABLE_DOCKER_PROVISIONING for the same reason every rule
+  // above is conditional on its own flag.
+  //
+  // The refusals live in resolveDockerDaemon (services/provisioner/docker-daemon.ts)
+  // next to the transport decisions they enforce, and the DRIVER applies the
+  // identical rules when it constructs — this is the front line, not a second
+  // opinion. What is at stake is not a typo: DOCKER_HOST decides which machine
+  // receives root-equivalent container access from this hub, and a
+  // half-configured remote daemon fails by silently using the local socket,
+  // which looks exactly like success.
+  if (cfg.docker.enabled) {
+    const { connection, problems, warnings } = resolveDockerDaemon(cfg.docker);
+    errors.push(...problems);
+    for (const warning of warnings) warn(`⚠️  WARNING: ${warning}`);
+
+    // A remote daemon has its own image store, and THE HUB NEVER PULLS —
+    // createContainer runs what the daemon already holds. `agentpod-node:local`
+    // is a tag on the hub's box and nothing on anyone else's, which is issue
+    // #283's failure exactly, one substrate over: a clean boot, a full New
+    // Runtime dialog, and a 404 the first time somebody picks a harness.
+    //
+    // Reported, not refused, and the difference is real: an operator who ran
+    // `docker build -t agentpod-node:local` ON THE REMOTE HOST has a working
+    // hub, and a fatal rule would refuse to boot it. Nothing the hub can see
+    // distinguishes the two — only the remote daemon knows — so this says what
+    // is suspicious and leaves the judgement where the knowledge is.
+    if (connection?.remote) {
+      for (const harness of ADVERTISED_HARNESSES) {
+        const resolved = resolveImage(harness, "docker");
+        if (isPullableFromRegistry(resolved)) continue;
+        warn(
+          `⚠️  WARNING: ${providerImageEnvVar(harness, "docker")}: DOCKER_HOST points at ` +
+            `${connection.describe}, a daemon on another machine, and the "${harness}" ` +
+            `harness resolves to "${resolved}" — a bare tag that exists only in a local ` +
+            `image store. The hub never pulls; it creates containers from images the ` +
+            `daemon already holds. Build or \`docker pull\` this tag ON THAT HOST, or set ` +
+            `${providerImageEnvVar(harness, "docker")} to a registry reference and pull ` +
+            `it there. See docs/DEPLOYMENT.md.`
+        );
+      }
+    }
   }
 
   // ── Per-harness images on the substrates that pull them ────────────────────

@@ -128,6 +128,18 @@ ENABLE_DOCKER_PROVISIONING=true
 NODE_AGENT_IMAGE=agentpod-node:local
 NODE_AGENT_OPENCODE_IMAGE=agentpod-node-opencode:local
 
+# Which Docker daemon the hub provisions on. UNSET = /var/run/docker.sock on
+# this box, which is what every deployment has always done — and which means
+# every agent container shares this machine's CPU, RAM and kernel with the hub.
+# Setting it moves the workloads off the control plane; read "Remote Docker
+# daemon" below FIRST, because it also gives this hub a root-equivalent
+# credential for another machine.
+# DOCKER_HOST=tcp://docker-host.internal:2376
+# DOCKER_CERT_PATH=/etc/agentpod/docker-certs   # ca.pem, cert.pem, key.pem
+# Non-default socket path (rootless Docker, a socket proxy). Mutually exclusive
+# with DOCKER_HOST — setting both is refused at boot.
+# DOCKER_SOCKET=/run/user/1000/docker.sock
+
 # Hub URL reachable from inside provisioned containers (used for auto-enrollment).
 # Must be the container-reachable public URL of the hub, not 127.0.0.1.
 PROVISIONING_HUB_URL=https://hub.<your-domain>
@@ -202,6 +214,93 @@ chmod 600 /etc/agentpod/hub.env
 > - `PROVISIONING_HUB_URL` is required for Modal (not merely recommended, as it is for Docker) because Modal destroys every sandbox at 24 hours and the hub re-creates them on a timer, with no incoming request to take an origin from. It must be reachable **from inside a Modal sandbox** — a public URL or a tunnel, never `localhost`.
 > - On Modal's Starter plan an API token is **workspace-wide**; scoping a token per environment requires Modal's Team plan (~$250/month). Use a Modal workspace dedicated to AgentPod.
 > - Never commit this file to source control.
+
+### Remote Docker daemon
+
+Optional, and off by default: with none of these variables set the hub uses
+`/var/run/docker.sock` on its own box, exactly as it always has. Nothing in this
+section applies to a hub that leaves them unset.
+
+**What it is for.** Every Docker runtime the hub provisions currently runs on
+the hub's own machine — agent workloads sharing CPU, memory and a kernel with
+the control plane that manages them. `DOCKER_HOST` moves them to another
+machine, which is the cheapest way to get that separation without adopting a
+new substrate.
+
+> **What this costs, before the how.** The hub's strongest security property is
+> that it holds **no credentials** and can reach **nothing that is not already
+> dialling it** — node-agents connect outward over WSS and the hub connects
+> nowhere. A remote Docker daemon inverts that for one host. **A Docker socket is
+> root on the machine that owns it**: anyone who can talk to it can start a
+> privileged container and bind-mount `/`. So a hub configured this way holds a
+> **root-equivalent credential for the daemon's host**, in `/etc/agentpod/hub.env`
+> and `DOCKER_CERT_PATH`. Compromise the hub, and you have that machine. Use a
+> host dedicated to running agent containers, not one that does anything else.
+
+**Supported transports — and one that is deliberately not.**
+
+> - `unix:///path/to/docker.sock` — a socket on this machine. No credential, no
+>   network. Rootless Docker and socket proxies live here. Equivalent to
+>   `DOCKER_SOCKET`; set one or the other, never both (the hub refuses to boot on
+>   both, because they are two answers to "where is the daemon" and picking one
+>   silently is how containers end up on a machine nobody is looking at).
+> - `tcp://host:2376` **with `DOCKER_CERT_PATH`** — mutual TLS. `DOCKER_CERT_PATH`
+>   is a directory holding `ca.pem`, `cert.pem` and `key.pem`, the same layout the
+>   `docker` CLI uses; generate them with
+>   [Docker's own instructions](https://docs.docker.com/engine/security/protect-access/),
+>   and keep `key.pem` mode `600` owned by the hub's user. The credential is scoped
+>   to that daemon's API and is revoked by reissuing the daemon's CA.
+> - `tcp://host:2375` **without TLS** — refused unless the host is loopback. Port
+>   2375 is an *unauthenticated* root API; there is no failure to notice, because
+>   everything works right up until somebody else finds it. If the link is already
+>   encrypted and access-controlled (a WireGuard address, an `ssh -L` tunnel to a
+>   loopback port), set `DOCKER_ALLOW_INSECURE_TCP=true` to say so explicitly. The
+>   hub then warns on every boot, by design.
+> - `ssh://user@host` — **not implemented, on purpose.** dockerode can do it, but
+>   it would mean the hub holding an SSH private key or a forwarded agent socket:
+>   a shell on the target, usable for everything on it, where a Docker client
+>   certificate reaches the daemon API and nothing else. Run the tunnel yourself
+>   and point `DOCKER_HOST` at the local end of it.
+
+**What changes once the daemon is somebody else's machine.** These are not
+theoretical; each one is an assumption the local-socket setup was quietly making.
+
+> - **Images. The hub never pulls.** It creates containers from images the daemon
+>   already holds, which is invisible locally because step 3 of this guide builds
+>   them on the hub box. On a remote daemon, **step 3 has to happen on that host**
+>   — `agentpod-node:local` is a tag in one daemon's store and nothing in
+>   another's. Either build the same tags there, or point
+>   `NODE_AGENT_DOCKER_IMAGE` / `NODE_AGENT_DOCKER_OPENCODE_IMAGE` /
+>   `NODE_AGENT_DOCKER_PI_IMAGE` at registry references **and `docker pull` them on
+>   that host**. The hub reports (`⚠️ WARNING`, naming the variable) at boot when
+>   a remote daemon is configured and a harness still resolves to a bare local tag;
+>   it is a report rather than a refusal because a tag you built on the remote host
+>   is perfectly valid and the hub cannot tell from here. A container that gets
+>   this wrong fails at create with `No such image`, and the hub rewrites that
+>   error to name the daemon.
+> - **The hub URL.** Containers on the remote host dial `PROVISIONING_HUB_URL` to
+>   enrol. It must be reachable **from that machine** — a Docker-network name or a
+>   `127.0.0.1` address that worked when the container was a neighbour will not
+>   resolve from another box.
+> - **`DOCKER_NETWORK` and `DOCKER_RUNTIME` name things on the daemon's host.** The
+>   hub creates `agentpod-net` on the remote daemon, and `DOCKER_RUNTIME=runsc`
+>   requires gVisor installed *there* — `runsc` on the hub box says nothing about
+>   it. The #243 guard still applies unchanged: a sandboxed runtime needs a
+>   built-in network (`DOCKER_NETWORK=bridge`), whichever daemon it runs on.
+> - **`HOST_PATH_PREFIX` and bind mounts** resolve on the daemon's filesystem, not
+>   the hub's. The runtime driver mounts nothing today, so nothing breaks now —
+>   but any future volume is a path on the other machine.
+> - **The hub box no longer needs a Docker socket at all** once every runtime is
+>   remote, which is worth taking: it is one fewer root-equivalent handle on the
+>   control plane.
+
+**Failure modes the hub refuses to boot on** (each names the variable):
+`DOCKER_HOST` in a form it does not implement, a remote `tcp://` with no TLS
+material and no explicit opt-out, a `DOCKER_CERT_PATH` it cannot read all three
+files from, `DOCKER_CERT_PATH` set with no `DOCKER_HOST` (the certificates would
+sit unused while the hub quietly kept using the local socket), and `DOCKER_HOST`
+alongside a non-default `DOCKER_SOCKET`. All of them are conditional on
+`ENABLE_DOCKER_PROVISIONING=true`, like every other substrate's rules.
 
 ### Fly Machines settings
 

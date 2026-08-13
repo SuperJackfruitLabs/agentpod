@@ -6,7 +6,8 @@
  */
 
 import Docker from "dockerode";
-import type { Container, ContainerCreateOptions } from "dockerode";
+import type { Container, ContainerCreateOptions, DockerOptions } from "dockerode";
+import type { DockerDaemonConnection } from "./docker-daemon";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,16 @@ export interface Sandbox {
 // ─── Configuration ────────────────────────────────────────────────────────────
 
 export interface DockerOrchestratorConfig {
+  /**
+   * Which daemon to dial, already resolved and vetted by
+   * `resolveDockerDaemon` (docker-daemon.ts). Set by DockerRuntimeProvisioner
+   * from the hub's environment.
+   *
+   * Takes precedence over the three legacy fields below, and is the ONLY way to
+   * reach a remote daemon over TLS. Omitted, this class behaves exactly as it
+   * did before the field existed.
+   */
+  daemon?: DockerDaemonConnection;
   socketPath?: string;
   host?: string;
   port?: number;
@@ -89,7 +100,10 @@ export interface DockerOrchestratorConfig {
   defaultResources?: ResourceLimits;
 }
 
-const DEFAULT_CONFIG: Required<DockerOrchestratorConfig> = {
+type ResolvedConfig = Required<Omit<DockerOrchestratorConfig, "daemon">> &
+  Pick<DockerOrchestratorConfig, "daemon">;
+
+const DEFAULT_CONFIG: Required<Omit<DockerOrchestratorConfig, "daemon">> = {
   socketPath: "/var/run/docker.sock",
   host: "",
   port: 2375,
@@ -136,17 +150,49 @@ export function assertRuntimeSupportsNetwork(runtime: string, network: string): 
 
 // ─── Orchestrator ─────────────────────────────────────────────────────────────
 
+/**
+ * dockerode options for a resolved daemon.
+ *
+ * Every field is written explicitly, `undefined` included, and that is the
+ * whole point: docker-modem calls `defaultOpts()` on EVERY construction, which
+ * reads `process.env.DOCKER_HOST` / `DOCKER_CERT_PATH` and merges the result
+ * UNDERNEATH the options it is handed — and it then prefers `host` over
+ * `socketPath` whenever both survive (`if (!this.host) this.socketPath = ...`).
+ * Passing only `{socketPath}` therefore leaves an exported DOCKER_HOST in the
+ * hub's shell silently deciding which machine gets the containers. Overwriting
+ * the fields with undefined is what makes this function, rather than the
+ * ambient environment, the answer.
+ */
+function dockerOptionsFor(daemon: DockerDaemonConnection): DockerOptions {
+  return {
+    socketPath: daemon.socketPath,
+    host: daemon.host,
+    port: daemon.port,
+    protocol: daemon.protocol,
+    ca: daemon.ca,
+    cert: daemon.cert,
+    key: daemon.key,
+  };
+}
+
 export class DockerOrchestrator {
   private docker: Docker;
-  private config: Required<DockerOrchestratorConfig>;
+  private config: ResolvedConfig;
 
   constructor(config: DockerOrchestratorConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    if (this.config.host) {
+    if (this.config.daemon) {
+      this.docker = new Docker(dockerOptionsFor(this.config.daemon));
+    } else if (this.config.host) {
       this.docker = new Docker({ host: this.config.host, port: this.config.port });
     } else {
       this.docker = new Docker({ socketPath: this.config.socketPath });
     }
+  }
+
+  /** Secret-free description of the daemon this instance talks to, for logs. */
+  describeDaemon(): string {
+    return this.config.daemon?.describe ?? `unix://${this.config.socketPath}`;
   }
 
   async createSandbox(config: SandboxConfig): Promise<Sandbox> {

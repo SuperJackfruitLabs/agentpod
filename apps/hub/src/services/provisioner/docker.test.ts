@@ -496,3 +496,108 @@ describe("DockerRuntimeProvisioner network selection", () => {
     expect(cfg.defaultNetwork).toBe("agentpod-net");
   });
 });
+
+// ─── Which daemon the driver dials ────────────────────────────────────────────
+
+describe("DockerRuntimeProvisioner daemon selection", () => {
+  const VARS = [
+    "DOCKER_HOST",
+    "DOCKER_SOCKET",
+    "DOCKER_CERT_PATH",
+    "DOCKER_ALLOW_INSECURE_TCP",
+  ] as const;
+  const ORIGINAL: Record<string, string | undefined> = Object.fromEntries(
+    VARS.map((v) => [v, process.env[v]])
+  );
+
+  afterEach(() => {
+    for (const v of VARS) {
+      const was = ORIGINAL[v];
+      if (was === undefined) delete process.env[v];
+      else process.env[v] = was;
+    }
+  });
+
+  /** dockerode's own view of where it will connect — see docker-orchestrator.test.ts. */
+  const modemOf = (p: DockerRuntimeProvisioner) =>
+    (p as unknown as { orchestrator: { docker: { modem: Record<string, any> } } })
+      .orchestrator.docker.modem;
+
+  it("uses the local socket when no daemon is configured", () => {
+    // Every deployment today. This is the case that must not regress: a Docker
+    // hub with none of these variables set has to keep talking to its own
+    // /var/run/docker.sock and nothing else.
+    for (const v of VARS) delete process.env[v];
+    const modem = modemOf(new DockerRuntimeProvisioner());
+    expect(modem.socketPath).toBe("/var/run/docker.sock");
+    expect(modem.host).toBeUndefined();
+  });
+
+  it("dials the daemon DOCKER_HOST names", () => {
+    // The point of the whole exercise: agent workloads on a machine that is not
+    // the control plane.
+    for (const v of VARS) delete process.env[v];
+    process.env.DOCKER_HOST = "tcp://10.0.0.5:2375";
+    process.env.DOCKER_ALLOW_INSECURE_TCP = "true";
+    const modem = modemOf(new DockerRuntimeProvisioner());
+    expect(modem.host).toBe("10.0.0.5");
+    expect(modem.port).toBe(2375);
+    expect(modem.socketPath).toBeUndefined();
+  });
+
+  it("refuses to construct on a daemon configuration it will not use", () => {
+    // The backstop behind validate-config's boot refusal — the same rules, at
+    // the moment the driver is registered, so a code path that reaches the
+    // driver without going through boot validation cannot end up silently
+    // provisioning onto the control-plane box after the operator asked for a
+    // remote daemon.
+    for (const v of VARS) delete process.env[v];
+    process.env.DOCKER_HOST = "tcp://10.0.0.5:2375";
+    expect(() => new DockerRuntimeProvisioner()).toThrow(/DOCKER_CERT_PATH/);
+  });
+
+  it("names the daemon that lacks the image when create 404s", async () => {
+    // The #283 trap, one substrate over. The hub never pulls: it creates
+    // containers from images the daemon already holds, which is invisible on
+    // the local daemon (step 3 of DEPLOYMENT builds them there) and is the
+    // first thing to break the moment DOCKER_HOST points somewhere else —
+    // `agentpod-node:local` is a tag in one daemon's store and nothing in
+    // another's. Docker's own error names neither the daemon nor the fix.
+    const fake = new FakeDockerOrchestrator() as unknown as DockerOrchestrator & {
+      createError: Error | null;
+      describeDaemon: () => string;
+    };
+    fake.createError = new Error(
+      "(HTTP code 404) no such container - No such image: agentpod-node:local"
+    );
+    fake.describeDaemon = () => "tcp://docker-host.internal:2376 (mutual TLS)";
+
+    const err = (await new DockerRuntimeProvisioner(fake)
+      .provision({
+        runtimeId: "rt_1",
+        name: "n",
+        resourceTier: "small",
+        hubUrl: "https://hub.example",
+        enrollToken: "enr_x",
+        image: "agentpod-node:local",
+      })
+      .catch((e: Error) => e)) as Error;
+
+    expect(err.message).toContain("docker-host.internal");
+    expect(err.message).toContain("agentpod-node:local");
+    // The daemon's own words survive: a rewritten error that drops the original
+    // is a worse error.
+    expect(err.message).toMatch(/No such image/);
+  });
+
+  it("still accepts an injected orchestrator regardless of the environment", () => {
+    // Tests and callers that pass their own orchestrator must not be dragged
+    // through env resolution at all.
+    for (const v of VARS) delete process.env[v];
+    process.env.DOCKER_HOST = "not-a-url";
+    const fake = new FakeDockerOrchestrator();
+    expect(
+      () => new DockerRuntimeProvisioner(fake as unknown as DockerOrchestrator)
+    ).not.toThrow();
+  });
+});
