@@ -635,14 +635,34 @@ item here that is distribution rather than capability.*
       and today a change made on one of thirty-nine stations can only be seen by walking to
       that machine. Same theme as Doors — make the fleet useful to someone who is not sitting
       at it.
-- [ ] Open the provisioner registry — **single-tenant for now.** Dynamic names, capability
-      manifests, optional pause and resume, and a driver conformance suite in CI. Credentials
-      stay env-based *behind a resolver interface*; the per-org encrypted store lands with the
-      orgs work in Horizon 3. Per-org anything requires MT-1/MT-2, and there is no tenancy in
-      the hub at all today — eight schema files, zero `organizationId`, no Better Auth
-      organization plugin. Orgs are premature for demand and tenancy is a worse retrofit than
-      the run key, so start neither: the resolver costs one small abstraction and buys the
-      ordering freedom.
+- [x] ~~Open the provisioner registry~~ — **shipped 2026-08-12** in
+      [#265](https://github.com/rakeshgangwar/agentpod/pull/265) and
+      [#268](https://github.com/rakeshgangwar/agentpod/pull/268), then proved by two real
+      drivers the next day (below). `RuntimeProviderName` is a string, `providerEnvFlag()`
+      derives `ENABLE_<NAME>_PROVISIONING` from the name rather than switching on it, and
+      `DriverManifest` is a **required** property, so a driver cannot register without
+      declaring `workspaceStorage`, `stopSemantics`, `maxLifetimeMs`, `imageBinding`,
+      `supportedTiers` and `idleBehaviour`. Credentials go through `requireCredentials()` as
+      planned, so the per-org store still replaces one implementation in Horizon 3 without
+      touching a driver. Superseded detail: dynamic names, capability manifests, optional
+      pause and resume, and a driver conformance suite in CI.
+
+      > **The conformance suite is the part that earned its keep, and only because every rule
+      > encodes a bug that already happened.** `assertConforms` checks declarations against
+      > behaviour — a driver claiming `resumable` must implement `start()`, one claiming
+      > `rootfs` storage must not also claim a volume, and (added 2026-08-13) every tier in
+      > `supportedTiers` must have a size in `tierMemoryMb`. Rules written from imagination
+      > would have been ceremony; these came from shipped defects, so each one fails loudly
+      > the moment a driver drifts. Both new drivers hit rules during development.
+
+      > **Manifests must be measured, not read.** The Fly manifest carries a `MEASURED, not
+      > read` comment naming the probe date, because every field in it was established by
+      > driving a real account rather than by reading documentation. That discipline paid
+      > twice on 2026-08-13: Fly's `swap_size_mb` is honoured **only** inside `config.init`
+      > and is *silently dropped* at the config top level — 200 response, machine boots,
+      > `SwapTotal: 0` — and Fly's auth scheme rejects a `flyctl auth login` session token
+      > from a server while accepting the identical bytes from a laptop. Neither is
+      > discoverable by reading; both would have shipped as green tests.
 - [ ] **Windows stations.** The intent is that stations run on Linux, macOS *or* Windows, but
       today the release matrix is `linux/{amd64,arm64}` and `darwin/{amd64,arm64}`, and service
       management is systemd plus LaunchAgent. Windows needs a `windows/amd64` target, a service
@@ -676,7 +696,10 @@ item here that is distribution rather than capability.*
       > a second consumer, so the next drift gets noticed sooner.
 - [ ] Ship the first driver wave. **Re-planned 2026-08-12 after researching the substrate
       market and reading our own code; three premises in the original line were wrong.**
-      **Steps 2, 3 and 5 shipped the same day; 1, 4 and 6 remain.**
+      **Steps 2, 3 and 5 shipped the same day; step 4 shipped 2026-08-13 with two drivers
+      rather than one. Steps 1 and 6 remain** — and (c)'s premise held: Fly and Modal both
+      bill by the second with nothing charged while idle, which is why they were reachable
+      at all for a fleet of long-lived, mostly-idle stations.
 
       **(a) "The Docker and Cloudflare drivers we already have" overstates both.** Docker
       runtimes all land *on the hub box* — `DockerRuntimeProvisioner` defaults to
@@ -737,8 +760,67 @@ item here that is distribution rather than capability.*
          downstream special-cases the provider — but the substrate question came back much
          longer, and is recorded below. Incidental but worth having on the record: Cloudflare
          containers run on Firecracker, visible in the worker deploy output.
-      4. Open the registry — dynamic names, capability manifests, conformance suite — with
-         Fly or Modal as the forcing function, informed by (3).
+      4. ~~Open the registry — with Fly or Modal as the forcing function.~~ **Shipped
+         2026-08-13: both, not one.** Fly ([#271](https://github.com/rakeshgangwar/agentpod/pull/271))
+         and Modal ([#272](https://github.com/rakeshgangwar/agentpod/pull/272)), each probed
+         against a real account first, each verified live over the hub API. The registry work
+         itself is recorded in the Horizon 1 item above; what the two drivers *settled* is
+         here, because it changes what "a substrate" means to this codebase.
+
+         **They are not two instances of one shape — they are two different shapes, and the
+         manifest is what made that survivable.** Fly stops and resumes a machine; Modal's
+         terminate is irreversible, so a Modal runtime is a rolling series of sandboxes
+         anchored by a named Volume. `stopSemantics: resumable | terminal` carries the
+         difference, and `startRuntime` routes on it: resumable calls `start()`, terminal
+         calls `reprovisionRuntime`. Verified live — a Modal "start" produced a new sandbox
+         id with the **same node id**, because identity lives on the Volume. The central
+         premise of the Modal design (a workspace outliving the sandbox that hosted it) is
+         therefore measured, not assumed.
+
+         > **The split immediately found a bug that had been latent since #254.** Runtime
+         > `online` was written only by `enrollment.ts`, on the reasoning that a node
+         > enrolling is the only evidence a container exists. That holds for Docker, whose
+         > agent re-enrols on every boot — and fails for **any substrate whose node identity
+         > persists**. A resumed Fly machine finds its credential, logs `already enrolled`,
+         > and merely reconnects, so nothing ever moved its runtime out of `starting` and the
+         > sweeper called it an error two minutes later while the node sat online and
+         > heartbeating. Modal escaped it only because re-provisioning goes through enrolment.
+         > Fixed in [#287](https://github.com/rakeshgangwar/agentpod/pull/287) by treating a
+         > *known node reconnecting* as the same evidence, scoped to `starting` so a network
+         > blip can never resurrect a `stopped` runtime that is still billing. Docker's
+         > re-enrolment had been hiding a wrong general rule for as long as Docker was the
+         > only driver that stopped and started.
+
+         > **Rented substrates make tier a correctness question, not a preference.** OpenCode
+         > needs ~855 MB peak (measured: `opencode serve` at 321 MB idle, a second process at
+         > 251 MB during a turn) and Fly's `small` is 1 GB with **no swap**. The result was
+         > not a slow station but an unreachable one — the guest kernel had nowhere to page,
+         > so the whole VM stalled: broker verbs timed out at 15s, heartbeats stopped, and
+         > Fly's own `machine exec` returned `deadline_exceeded` while the machine still
+         > reported `started`. Two fixes, deliberately separate:
+         > [#280](https://github.com/rakeshgangwar/agentpod/pull/280) gives every tier swap so
+         > exhaustion kills a process instead of the machine, and
+         > [#282](https://github.com/rakeshgangwar/agentpod/pull/282) makes supported tiers
+         > **harness-aware** — the console cannot offer a pair that cannot work, and the hub
+         > refuses it with a 400 before a row exists. `supportedTiers` per *provider* was
+         > never enough; the harness is half the question.
+
+         > **A substrate is not usable until its images are, and that is a separate matrix.**
+         > Fly shipped with an OpenCode image only; Modal shipped with **no harness image at
+         > all**, so the only Modal runtime that could work was a bare node
+         > ([#283](https://github.com/rakeshgangwar/agentpod/issues/283)). Worse, Fly images
+         > download a *released* binary while Modal builds from source, so a merged node-agent
+         > fix reached Modal on a republish and **could not reach Fly at all** until a release
+         > existed ([#290](https://github.com/rakeshgangwar/agentpod/issues/290)). Publishing
+         > is now CI (`publish-images.yml`), each image is verified *after push* for the
+         > things that fail at first boot rather than at build — python3, pip, an empty
+         > `ENTRYPOINT`, and the harness binary resolving on a bare systemd `PATH`.
+
+         **Still open, and worth stating plainly:** a provisioned station has no way to
+         authenticate a harness. OpenCode works only because it ships free default models;
+         Pi asks for an API key and there is nothing to give it
+         ([#291](https://github.com/rakeshgangwar/agentpod/issues/291)). Widening *where*
+         stations run has outrun making the ones we can run useful.
       5. ~~Sleep/wake as a first-class station state.~~ **Shipped 2026-08-12** in #247: an
          `asleep` runtime status in the contract, a substrate callback
          `POST /public/runtimes/:id/state` so the substrate reports its own lifecycle instead
