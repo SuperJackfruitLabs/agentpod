@@ -23,6 +23,8 @@
  *     the same reason — the pinning is to a host in that region
  *   - a region the account's plan does not cover is refused with Fly's own
  *     wording (measured 2026-08-12: "bom" refused, "sin" accepted)
+ *   - `swap_size_mb` is honoured ONLY inside `config.init`, and SILENTLY
+ *     DROPPED anywhere else — 200, a machine that boots, and no swap in it
  *   - `wait?state=` answers 408 when the machine is not in that state
  *   - waiting for `stopped` REQUIRES instance_id
  *   - a start gives the machine a NEW instance id, as a real restart does
@@ -80,6 +82,18 @@ export interface FlyFakeSubstrate {
   fetchImpl: typeof globalThis.fetch;
   calls: Array<{ method: string; path: string; body: unknown }>;
   apps: Map<string, FakeApp>;
+}
+
+/**
+ * What Fly keeps of a machine config: everything, minus a `swap_size_mb` asked
+ * for at the top level, which it accepts and discards. See the call site.
+ */
+function dropUnhonouredSwap(
+  config: Record<string, unknown>
+): Record<string, unknown> {
+  if (!("swap_size_mb" in config)) return config;
+  const { swap_size_mb: _dropped, ...kept } = config;
+  return kept;
 }
 
 export function createFlyFakeSubstrate(
@@ -201,7 +215,16 @@ export function createFlyFakeSubstrate(
         id,
         instance_id: `inst${nextId}`,
         state: "started",
-        config,
+        // Measured 2026-08-13: `swap_size_mb` counts only inside `config.init`.
+        // Asked for at the config top level, Fly answers 200, boots the
+        // machine, and the guest reports `SwapTotal: 0 kB` — no error, at
+        // create or at update. Asked for as a sibling of `config` it never
+        // reaches the machine at all, which the `spec` destructure above
+        // already models by reading nothing else. Storing the config verbatim
+        // would make a
+        // driver that guessed wrong indistinguishable from one that got it
+        // right, which is #278's wedge waiting to be reintroduced.
+        config: dropUnhonouredSwap(config),
         region,
       });
       return json({ id, instance_id: `inst${nextId}`, state: "started" }, 200);
