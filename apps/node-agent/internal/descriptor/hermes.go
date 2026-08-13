@@ -64,6 +64,11 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 	homeCopy := h.home
 
+	// The root gateway's messaging identity. It is also the value a profile is
+	// compared against to decide whether that profile IS the root gateway
+	// (see servesRootGateway).
+	rootMxid := h.matrixIDOf(h.home)
+
 	stations := []Station{
 		{
 			Key:           "hermes",
@@ -73,6 +78,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			ParentKey:     nil,
 			WorkspacePath: &homeCopy,
 			Capabilities:  AppendChangesetCap(caps, &homeCopy),
+			MatrixId:      rootMxid,
 		},
 	}
 
@@ -92,6 +98,19 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		wsPath := filepath.Join(profilesDir, name)
 		wsCopy := wsPath
 		profileDir := wsPath
+		mxid := h.matrixIDOf(profileDir)
+
+		// A profile that shares the root's Matrix identity IS the agent the root
+		// gateway already runs; it is a VIEW onto that gateway, not a separately
+		// startable one. Its files/logs/health stay available, but "lifecycle" is
+		// withheld so the console never offers a Start that would put a second
+		// gateway on the same messaging identity (issue #273). The root "hermes"
+		// station is the control point for that agent.
+		profileCaps := caps
+		if sameMatrixIdentity(rootMxid, mxid) {
+			profileCaps = withoutCap(caps, "lifecycle")
+		}
+
 		stations = append(stations, Station{
 			Key:           key,
 			Harness:       "hermes",
@@ -99,12 +118,75 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			DisplayName:   name,
 			ParentKey:     &parentKey,
 			WorkspacePath: &wsCopy,
-			Capabilities:  AppendChangesetCap(caps, &wsCopy),
-			MatrixId:      MatrixIDFromProfile(profileDir, "id.agentpod.dev"),
+			Capabilities:  AppendChangesetCap(profileCaps, &wsCopy),
+			MatrixId:      mxid,
 		})
 	}
 
 	return stations, nil
+}
+
+// hermesMatrixDomain is the default Matrix homeserver domain hint passed to the
+// identity reader (the reader ignores it; kept for call-site readability).
+const hermesMatrixDomain = "id.agentpod.dev"
+
+// matrixIDOf resolves the Matrix user ID that a Hermes home or profile directory
+// is configured with (auth.json → config.yaml → .env), or nil when it cannot be
+// determined. It never reads an access token.
+func (h *hermesDescriptor) matrixIDOf(dir string) *string {
+	return MatrixIDFromProfile(dir, hermesMatrixDomain)
+}
+
+// sameMatrixIdentity reports whether both sides resolved to the SAME mxid.
+// An unresolved side (nil) is never a match, so a host whose identity we cannot
+// read behaves exactly as it did before this rule existed.
+func sameMatrixIdentity(a, b *string) bool {
+	return a != nil && b != nil && *a == *b
+}
+
+// withoutCap returns a copy of caps with name removed.
+func withoutCap(caps []string, name string) []string {
+	out := make([]string, 0, len(caps))
+	for _, c := range caps {
+		if c != name {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// servesRootGateway reports whether key names the profile that the ROOT Hermes
+// gateway already serves — the profile a bare `hermes gateway run` (no `-p`)
+// runs, i.e. the host's default profile.
+//
+// HOW THE DEFAULT PROFILE IS IDENTIFIED: the root gateway takes its messaging
+// identity from the Hermes home root, and the default profile's directory
+// carries a byte-identical copy of that identity. So the profile whose resolved
+// Matrix user ID equals the home root's IS the root gateway's profile. That is
+// an exact identity comparison — no name guessing, no process inspection, no
+// killing by name — and it is precisely the condition under which a second
+// gateway would double-sync ONE Matrix account and answer every message twice
+// (issue #273).
+//
+// When either side cannot be resolved the answer is false, so hosts we cannot
+// read keep today's behaviour. Profiles with their own identity — the ordinary
+// case, and the majority on the live fleet — are never matched.
+//
+// This single predicate is what BOTH the station modelling (Detect withholds
+// "lifecycle") and the lifecycle verbs (Start refuses) consult, so the two can
+// never disagree.
+func (h *hermesDescriptor) servesRootGateway(key string) bool {
+	if !strings.HasPrefix(key, "hermes:") {
+		return false // the root station itself is startable as usual
+	}
+	name := strings.TrimPrefix(key, "hermes:")
+	if name == "" {
+		return false
+	}
+	return sameMatrixIdentity(
+		h.matrixIDOf(h.home),
+		h.matrixIDOf(filepath.Join(h.home, "profiles", name)),
+	)
 }
 
 // workspaceFor maps a station key to its workspace root path.
@@ -151,18 +233,36 @@ func (h *hermesDescriptor) Health(key string) (Health, error) {
 	// Disk usage from the shared async cache — never walk on the request path.
 	health.DiskBytes = diskUsage(workspace)
 
+	// A profile that IS the root gateway's profile has no process of its own:
+	// report the ROOT gateway's liveness and metrics (it is literally the same
+	// process) and say so in the note, so the console does not show a live agent
+	// as "stopped" beside a Start button it deliberately no longer offers.
+	probeKey := key
+	rootGatewayView := h.servesRootGateway(key)
+	if rootGatewayView {
+		probeKey = "hermes"
+	}
+
 	// Best-effort process check via pgrep.
-	health.Running, _ = hermesProcessRunning(key)
+	health.Running, _ = hermesProcessRunning(probeKey)
 
 	// Live process metrics: best-effort — when the profile is running, resolve
 	// its PID and gather CPU/memory/uptime. Hermes runs a separate process per
 	// profile, so these are honest PER-AGENT numbers. Any failure leaves the
 	// metric fields nil; Health() never fails on a ps hiccup.
 	if health.Running {
-		if pid, err := hermesPID(key); err == nil {
+		if pid, err := hermesPID(probeKey); err == nil {
 			health.PID = &pid
 			health.CpuPct, health.MemBytes, health.UptimeSec = gatherPidMetrics(pid)
 		}
+	}
+
+	if rootGatewayView {
+		note := "served by the root Hermes gateway (station \"hermes\") — not separately startable"
+		if health.PID != nil {
+			note = fmt.Sprintf("served by the root Hermes gateway (station \"hermes\", PID %d) — not separately startable", *health.PID)
+		}
+		health.Note = &note
 	}
 
 	return health, nil
@@ -243,6 +343,13 @@ func hermesProcessRunning(key string) (bool, error) {
 // Stop implements Lifecycle. It prefers "systemctl --user stop <unit>" when
 // the unit is registered in the user session, falling back to the pgrep/SIGTERM
 // path for installations that do not use systemd user units.
+//
+// Stop is deliberately NOT guarded by servesRootGateway: for a profile key it can
+// only ever reach a per-profile gateway — "hermes-gateway-<name>.service", or a
+// process whose argv carries "-p <name> gateway" — and the root gateway matches
+// neither (it runs unit "hermes-gateway.service" with no profile selector). It
+// therefore cannot stop the agent it is a view onto. Reaching it at all requires
+// the "lifecycle" capability, which Detect withholds for such a profile.
 func (h *hermesDescriptor) Stop(key string) error {
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
@@ -264,6 +371,19 @@ func (h *hermesDescriptor) Stop(key string) error {
 // Configure the start command by passing it to NewHermes or by setting
 // hermesStartCmd in the node config file.
 func (h *hermesDescriptor) Start(key string) error {
+	// A profile that IS the root gateway's profile has no gateway of its own to
+	// start: every launch path below would put a SECOND gateway on the same
+	// Matrix identity, and the two would answer every incoming message
+	// independently (issue #273). Refuse before any of them — including the
+	// systemd and startCmd paths, which duplicate just as effectively as the
+	// native fallback.
+	if h.servesRootGateway(key) {
+		return fmt.Errorf(
+			"hermes: %q is the profile the root gateway already runs (same Matrix identity); "+
+				"starting it would run a second gateway on that identity — use the \"hermes\" station instead",
+			key,
+		)
+	}
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
 		return exec.Command("systemctl", "--user", "start", unit).Run()

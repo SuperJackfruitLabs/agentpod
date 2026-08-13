@@ -12,19 +12,29 @@ import (
 var mxidRe = regexp.MustCompile(`^@[^:]+:.+$`)
 
 // MatrixIDFromProfile reads the Matrix user ID (mxid) for an agent profile.
-// It tries auth.json first (reading ONLY the user_id field), then falls back
-// to config.yaml. It validates the value matches the mxid shape ^@[^:]+:.+$
-// and returns nil if not found, invalid, or on any error.
+// It tries auth.json first (reading ONLY the user_id field), then config.yaml,
+// then .env (reading ONLY MATRIX_USER_ID). It validates the value matches the
+// mxid shape ^@[^:]+:.+$ and returns nil if not found, invalid, or on any error.
 //
-// SECURITY: access_token and all other fields are never read, logged, or returned.
+// The .env source matters on the deployed fleet: there the Matrix identity of a
+// Hermes home/profile lives in its .env as MATRIX_USER_ID, while auth.json holds
+// only credential_pool/providers and config.yaml has no matrix section. Without
+// it this function returns nil on real hosts (see issue #273).
+//
+// SECURITY: access_token / MATRIX_ACCESS_TOKEN and all other fields are never
+// read, logged, or returned.
 // Missing file / bad JSON / missing field → nil, never panic.
 func MatrixIDFromProfile(profileDir, _ string) *string {
 	// Try auth.json first.
 	if mxid := mxidFromAuthJSON(profileDir); mxid != nil {
 		return mxid
 	}
-	// Fall back to config.yaml.
-	return mxidFromConfigYAML(profileDir)
+	// Then config.yaml.
+	if mxid := mxidFromConfigYAML(profileDir); mxid != nil {
+		return mxid
+	}
+	// Finally .env.
+	return mxidFromEnvFile(profileDir)
 }
 
 // mxidFromAuthJSON reads ONLY the user_id field from auth.json.
@@ -103,6 +113,36 @@ func mxidFromConfigYAML(profileDir string) *string {
 		// Strip surrounding quotes if present.
 		value = strings.Trim(value, `"'`)
 
+		if m := validateMXID(value); m != nil {
+			return m
+		}
+	}
+	return nil
+}
+
+// mxidFromEnvFile extracts MATRIX_USER_ID from a dotenv-style .env file.
+//
+// Only the MATRIX_USER_ID key is ever considered: every other line — including
+// MATRIX_ACCESS_TOKEN — is skipped before its value is even split out, which is
+// the security boundary for this source.
+func mxidFromEnvFile(profileDir string) *string {
+	data, err := os.ReadFile(filepath.Join(profileDir, ".env"))
+	if err != nil {
+		return nil
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// Allow the `export KEY=VALUE` form used by shell-sourced env files.
+		trimmed = strings.TrimPrefix(trimmed, "export ")
+		key, value, found := strings.Cut(trimmed, "=")
+		if !found || strings.TrimSpace(key) != "MATRIX_USER_ID" {
+			continue // never look at any other key's value
+		}
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
 		if m := validateMXID(value); m != nil {
 			return m
 		}
