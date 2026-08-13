@@ -186,7 +186,15 @@ describe("validateConfig — modal", () => {
     for (const [key, value] of Object.entries(process.env)) {
       if (value !== undefined) env[key] = value;
     }
-    // Every Modal variable starts UNSET, so a test that wants one says so.
+    // Every provisioner variable starts UNSET, so a test that wants one says so.
+    //
+    // This list must cover every variable validate-config.ts can report, not
+    // just Modal's. The child inherits this process's environment, and bun
+    // auto-loads apps/hub/.env — a developer whose .env enables Cloudflare
+    // without CLOUDFLARE_SANDBOX_IMAGE otherwise sees that field appear in
+    // every `fields` assertion here, while CI (which has no .env) stays green.
+    // A test whose subject is "exactly the documented variables, nothing else"
+    // is only meaningful if the ambient environment cannot contribute.
     for (const key of [
       "ENABLE_MODAL_PROVISIONING",
       "MODAL_TOKEN_ID",
@@ -195,6 +203,12 @@ describe("validateConfig — modal", () => {
       "NODE_AGENT_MODAL_IMAGE",
       "NODE_AGENT_IMAGE",
       "PROVISIONING_HUB_URL",
+      "ENABLE_CLOUDFLARE_SANDBOXES",
+      "CLOUDFLARE_SANDBOX_IMAGE",
+      "ENABLE_FLY_PROVISIONING",
+      "FLY_API_TOKEN",
+      "FLY_VOLUME_SIZE_GB",
+      "ENABLE_DOCKER_PROVISIONING",
     ]) {
       delete env[key];
     }
@@ -221,7 +235,12 @@ describe("validateConfig — modal", () => {
         fields: collectConfigErrors(undefined, () => {}).map((e) => e.field),
       }));
     `;
-    const proc = Bun.spawnSync(["bun", "-e", script], {
+    // --env-file=/dev/null stops bun auto-loading apps/hub/.env in the child.
+    // cwd is hubRoot, so without this the developer's own .env is layered on
+    // top of `env` INSIDE the child, after every delete above has happened —
+    // scrubbing the parent environment cannot reach it. CI has no .env, so
+    // this is also what makes a local run and a CI run the same run.
+    const proc = Bun.spawnSync(["bun", "--env-file=/dev/null", "-e", script], {
       cwd: hubRoot,
       env,
       stdout: "pipe",
