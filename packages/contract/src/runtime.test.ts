@@ -1,6 +1,13 @@
 import { describe, it, expect } from "bun:test";
 import { ProvisionRequest, ProvisionedRuntime, RuntimeStatus } from "./runtime";
 import { RuntimeHarness } from "./runtime";
+import {
+  HARNESS_MIN_MEMORY_MB,
+  RuntimeProviderManifest,
+  harnessTiersFor,
+  tierFitsHarness,
+  viableTiersForHarness,
+} from "./runtime";
 
 describe("ProvisionRequest", () => {
   it("applies default resourceTier=small when omitted", () => {
@@ -165,5 +172,127 @@ describe("RuntimeStatus asleep", () => {
     // `stopped` means an operator did it. Collapsing the two would lose the
     // difference between "I did that" and "it happened on its own".
     expect(RuntimeStatus.parse("stopped")).toBe("stopped");
+  });
+});
+
+// ─── Harness-aware tiers (issue #279) ────────────────────────────────────────
+
+describe("HARNESS_MIN_MEMORY_MB", () => {
+  it("states a requirement for opencode that a 1 GB tier cannot meet", () => {
+    // Measured on a Fly `small` (1024 MB, 962 usable) on 2026-08-13: idle
+    // `opencode serve` was 321 MB RSS; ONE chat turn spawned a second opencode
+    // process and the pair peaked at 855 MB, leaving 58 MB available. With the
+    // node-agent and the OS beneath it that is the whole machine.
+    expect(HARNESS_MIN_MEMORY_MB.opencode).toBeGreaterThan(1024);
+  });
+
+  it("asks nothing of a bare node", () => {
+    // `none` is a node-agent with no harness — the case a 1 GB box does run.
+    expect(HARNESS_MIN_MEMORY_MB.none).toBe(0);
+  });
+
+  it("has an entry for every harness the contract can provision", () => {
+    // A harness added to RuntimeHarness without a number here would be silently
+    // unconstrained, which is how this class of bug got shipped the first time.
+    for (const harness of RuntimeHarness.options) {
+      expect(typeof HARNESS_MIN_MEMORY_MB[harness]).toBe("number");
+    }
+  });
+});
+
+describe("tierFitsHarness", () => {
+  it("refuses opencode on a tier smaller than its requirement", () => {
+    expect(tierFitsHarness("opencode", 1024)).toBe(false);
+  });
+
+  it("allows opencode on a tier that meets it exactly", () => {
+    expect(tierFitsHarness("opencode", HARNESS_MIN_MEMORY_MB.opencode)).toBe(true);
+  });
+
+  it("allows a harness with no requirement on the smallest tier", () => {
+    expect(tierFitsHarness("none", 256)).toBe(true);
+  });
+
+  it("does not refuse when the driver declares no memory for the tier", () => {
+    // Evidence-only, like every other claim in the manifest: a driver that has
+    // not measured a tier must not have a number invented for it.
+    expect(tierFitsHarness("opencode", undefined)).toBe(true);
+  });
+
+  it("does not refuse a harness it has never heard of", () => {
+    expect(tierFitsHarness("some-future-harness", 256)).toBe(true);
+  });
+});
+
+describe("viableTiersForHarness", () => {
+  const TIERS = ["small", "medium", "large"] as const;
+  const MEMORY = { small: 1024, medium: 2048, large: 4096 };
+
+  it("drops the tiers opencode cannot run in", () => {
+    expect(viableTiersForHarness("opencode", TIERS, MEMORY)).toEqual(["medium", "large"]);
+  });
+
+  it("keeps every tier for a harness with no requirement", () => {
+    expect(viableTiersForHarness("none", TIERS, MEMORY)).toEqual(["small", "medium", "large"]);
+  });
+
+  it("can answer 'none of them' for a provider fixed at one small tier", () => {
+    // Cloudflare fixes instance_type at deploy time. A worker deployed small
+    // cannot run opencode at all, and saying so is more useful than offering it.
+    expect(viableTiersForHarness("opencode", ["small"], { small: 1024 })).toEqual([]);
+  });
+
+  it("is the identity when the driver declares no memory at all", () => {
+    expect(viableTiersForHarness("opencode", TIERS, undefined)).toEqual([
+      "small",
+      "medium",
+      "large",
+    ]);
+  });
+});
+
+describe("harnessTiersFor", () => {
+  it("answers for every harness, so the console filters rather than guesses", () => {
+    const map = harnessTiersFor(["small", "medium", "large"], {
+      small: 1024,
+      medium: 2048,
+      large: 4096,
+    });
+    expect(map.opencode).toEqual(["medium", "large"]);
+    expect(map.none).toEqual(["small", "medium", "large"]);
+    for (const harness of RuntimeHarness.options) {
+      expect(Array.isArray(map[harness])).toBe(true);
+    }
+  });
+});
+
+describe("RuntimeProviderManifest", () => {
+  const BASE = { provider: "fly", supportedTiers: ["small", "medium", "large"] };
+
+  it("carries the memory each tier gives and the tiers each harness can use", () => {
+    const parsed = RuntimeProviderManifest.parse({
+      ...BASE,
+      tierMemoryMb: { small: 1024, medium: 2048, large: 4096 },
+      harnessTiers: {
+        none: ["small", "medium", "large"],
+        opencode: ["medium", "large"],
+        pi: ["small", "medium", "large"],
+      },
+    });
+    expect(parsed.tierMemoryMb?.small).toBe(1024);
+    expect(parsed.harnessTiers?.opencode).toEqual(["medium", "large"]);
+  });
+
+  it("still parses a manifest from a hub too old to send the new fields", () => {
+    // Hub and console deploy separately; an older hub must not blank the dialog.
+    const parsed = RuntimeProviderManifest.parse(BASE);
+    expect(parsed.harnessTiers).toBeUndefined();
+    expect(parsed.supportedTiers).toEqual(["small", "medium", "large"]);
+  });
+
+  it("rejects a tier memory that is not a positive number", () => {
+    expect(() =>
+      RuntimeProviderManifest.parse({ ...BASE, tierMemoryMb: { small: 0 } })
+    ).toThrow();
   });
 });

@@ -16,6 +16,34 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+
+// bits-ui's Select opens on `pointerdown` (not `click`) and picks an item on
+// `pointerup`, and touches `hasPointerCapture`/`releasePointerCapture` along
+// the way — jsdom implements neither a `PointerEvent` constructor nor those
+// capture methods. Same polyfill as UserFilters.svelte.test.ts, scoped here.
+if (typeof window.PointerEvent === "undefined") {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error jsdom has no native PointerEvent
+  window.PointerEvent = PointerEventPolyfill;
+}
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {};
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {};
+}
+
 import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
 
 beforeEach(() => vi.restoreAllMocks());
@@ -251,4 +279,169 @@ test("defaults the tier to one the provider supports", async () => {
       expect.objectContaining({ provider: "cloudflare", resourceTier: "large" })
     )
   );
+});
+
+// ─── Harness-aware tiers (issue #279) ────────────────────────────────────────
+//
+// Fly's `small` is 1 GB. Measured on a real machine on 2026-08-13: one OpenCode
+// chat turn peaked at 855 MB of harness on top of ~157 MB of OS and node-agent,
+// leaving 58 MB — and `POST /acp/sessions` 502'd after 34s. The dialog offered
+// that combination because tiers were advertised per PROVIDER, with no regard
+// for the harness that has to fit inside one.
+
+/** What the hub now reports for a provider with all three tiers. */
+const FLY_MANIFEST: api.DriverManifest = {
+  provider: "fly",
+  supportedTiers: ["small", "medium", "large"],
+  tierMemoryMb: { small: 1024, medium: 2048, large: 4096 },
+  harnessTiers: {
+    none: ["small", "medium", "large"],
+    opencode: ["medium", "large"],
+    pi: ["small", "medium", "large"],
+  },
+  imageBinding: "per-instance",
+};
+
+/** The Select trigger for a field, by the id the dialog labels it with. */
+function trigger(id: string): HTMLElement {
+  const el = document.getElementById(id);
+  if (!el) throw new Error(`no select trigger #${id}`);
+  return el;
+}
+
+/** Opens a bits-ui Select (pointerdown) and returns its rendered options. */
+async function openSelect(id: string): Promise<HTMLElement[]> {
+  await fireEvent.pointerDown(trigger(id), { pointerId: 1, button: 0, pointerType: "mouse" });
+  return await waitFor(() => {
+    const found = [...document.querySelectorAll('[role="option"]')] as HTMLElement[];
+    expect(found.length).toBeGreaterThan(0);
+    return found;
+  });
+}
+
+/** Opens a Select and picks the option whose text matches. */
+async function pick(id: string, label: RegExp) {
+  const options = await openSelect(id);
+  const option = options.find((o) => label.test(o.textContent?.trim() ?? ""));
+  if (!option) {
+    throw new Error(
+      `no option matching ${label} in #${id} — saw ${options.map((o) => o.textContent?.trim())}`
+    );
+  }
+  await fireEvent.pointerUp(option, { pointerId: 1, button: 0, pointerType: "mouse" });
+}
+
+test("does not offer a tier the selected harness cannot run in", async () => {
+  const { getByRole, getByText, queryByText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["fly"],
+      manifests: [FLY_MANIFEST],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  // With the generic harness every tier is legitimate, `small` included.
+  expect(getByText("small")).toBeTruthy();
+
+  await pick("runtime-harness", /^opencode$/i);
+
+  // The tier picker must now narrow, and the selection must not be left on a
+  // tier that has just become impossible.
+  await waitFor(() => expect(queryByText("small")).toBeNull());
+  expect(getByText("medium")).toBeTruthy();
+
+  // And the list itself, not merely the current selection.
+  const options = await openSelect("runtime-tier");
+  expect(options.map((o) => o.textContent?.trim())).toEqual(["medium", "large"]);
+});
+
+test("provisions the corrected tier after the harness narrows the choice", async () => {
+  // The payload, not just the pixels: a dialog that renders a narrowed list but
+  // posts the stale `small` it was showing before is exactly the bug.
+  const spy = vi.spyOn(api, "provisionRuntime").mockResolvedValue({
+    ...mockRuntime,
+    provider: "fly",
+    resourceTier: "medium" as const,
+    harness: "opencode" as const,
+  });
+
+  const { getByRole, getByPlaceholderText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["fly"],
+      manifests: [FLY_MANIFEST],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  await pick("runtime-harness", /^opencode$/i);
+
+  await fireEvent.input(getByPlaceholderText("Runtime name"), {
+    target: { value: "fly-box" },
+  });
+  await fireEvent.click(getByRole("button", { name: /^create runtime$/i }));
+
+  await waitFor(() =>
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "fly", harness: "opencode", resourceTier: "medium" })
+    )
+  );
+});
+
+test("says so, and refuses to create, when no tier can run the harness", async () => {
+  // Cloudflare bakes instance_type into the worker at deploy. A worker deployed
+  // `small` cannot run OpenCode at all, and the honest answer is to say that
+  // rather than to offer the only size it has.
+  const spy = vi.spyOn(api, "provisionRuntime");
+
+  const { getByRole, getByPlaceholderText, getByText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["cloudflare"],
+      manifests: [
+        {
+          provider: "cloudflare",
+          supportedTiers: ["small"],
+          tierMemoryMb: { small: 1024 },
+          harnessTiers: { none: ["small"], opencode: [], pi: ["small"] },
+          imageBinding: "fixed",
+        },
+      ],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  await pick("runtime-harness", /^opencode$/i);
+
+  await fireEvent.input(getByPlaceholderText("Runtime name"), {
+    target: { value: "cf-box" },
+  });
+
+  await waitFor(() => expect(getByText(/no cloudflare tier can run opencode/i)).toBeTruthy());
+  const createBtn = getByRole("button", { name: /^create runtime$/i }) as HTMLButtonElement;
+  expect(createBtn.disabled).toBe(true);
+  await fireEvent.click(createBtn);
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test("falls back to the provider's tiers when the hub is too old to narrow them", async () => {
+  // Hub and console deploy separately. A hub that does not send harnessTiers
+  // must not blank the tier picker — the hub's own refusal is the backstop.
+  const { getByRole, getByText } = render(NewRuntimeDialog, {
+    props: {
+      open: true,
+      providers: ["fly"],
+      manifests: [{ provider: "fly", supportedTiers: ["small", "medium", "large"] }],
+      onClose: () => {},
+      onCreated: () => {},
+    },
+  });
+
+  await pick("runtime-harness", /^opencode$/i);
+
+  expect(getByText("small")).toBeTruthy();
 });

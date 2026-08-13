@@ -116,6 +116,9 @@ describe("ModalRuntimeProvisioner — manifest", () => {
     expect(m.maxLifetimeMs).toBe(86_400_000);
     expect(m.imageBinding).toBe("per-instance");
     expect(m.supportedTiers).toEqual(["small", "medium", "large"]);
+    // Straight from MODAL_RESOURCE_TIERS, so the sizing the sandbox is created
+    // with and the sizing the hub reasons about cannot drift apart.
+    expect(m.tierMemoryMb).toEqual({ small: 1024, medium: 2048, large: 4096 });
     // idleTimeoutMs is opt-in and we never opt in, so nothing reaps a busy
     // station for looking idle — the Cloudflare trap does not exist here.
     expect(m.idleBehaviour).toBe("never");

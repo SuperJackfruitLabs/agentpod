@@ -5,6 +5,7 @@
   import { Button } from "$lib/components/ui/button";
   import { Field } from "$lib/components/ui/field";
   import { provisionRuntime, type DriverManifest } from "$lib/api/client";
+  import type { RuntimeHarness } from "@agentpod/contract";
 
   // Select components report their value as `string | string[]`; every
   // Select.Root here uses type="single", so coerce back to a plain string
@@ -35,12 +36,6 @@
   // a tier its driver will refuse.
   const FALLBACK_TIERS = ["small"];
 
-  // Only the tiers the selected provider can satisfy. Offering one it cannot
-  // means the driver refuses the request and the user sees a backend error for
-  // a choice the form invited them to make.
-  const tiers = $derived(
-    manifests.find((m) => m.provider === provider)?.supportedTiers ?? FALLBACK_TIERS,
-  );
   const harnessOptions = [
     { value: "none", label: "Generic" },
     { value: "opencode", label: "OpenCode" },
@@ -55,6 +50,38 @@
   let isCreating = $state(false);
   let error = $state<string | null>(null);
 
+  const manifest = $derived(manifests.find((m) => m.provider === provider));
+
+  const harnessLabel = $derived(
+    harnessOptions.find((h) => h.value === harness)?.label ?? "Generic",
+  );
+
+  // Only the tiers that can actually run what is being asked for.
+  //
+  // Two narrowings, and both were learned the hard way. The PROVIDER's:
+  // Cloudflare fixes instance_type at worker deploy time, so offering it three
+  // sizes produced a guaranteed backend error. The HARNESS's: Fly's `small` is
+  // 1 GB and one OpenCode chat turn peaked at 855 MB of harness on top of the
+  // OS and the node-agent — the whole machine — so the runtime provisioned,
+  // mounted its volume, enrolled, answered once and then went unreachable
+  // (#279). The user met that as "couldn't reach the hub", long after the
+  // choice that caused it.
+  //
+  // `harnessTiers` is the hub's answer, not ours: it holds both the harness
+  // requirements and each driver's real sizing, and it deploys separately from
+  // this bundle. Falling back to `supportedTiers` keeps an older hub working —
+  // its own refusal is then the backstop.
+  const tiers = $derived<readonly string[]>(
+    manifest?.harnessTiers?.[harness as RuntimeHarness] ??
+      manifest?.supportedTiers ??
+      FALLBACK_TIERS,
+  );
+
+  // A provider can legitimately have nothing that fits — a Cloudflare worker
+  // deployed at a small instance type cannot run OpenCode at any size. Saying
+  // so beats offering the only tier it has and failing after provisioning.
+  const noViableTier = $derived(tiers.length === 0);
+
   // Reset all fields when the dialog opens so each session is clean
   $effect(() => {
     if (open) {
@@ -65,11 +92,14 @@
     }
   });
 
-  // Keep the selected tier valid: on open, and whenever the provider changes to
-  // one that does not offer the current selection.
+  // Keep the selected tier valid: on open, whenever the provider changes to one
+  // that does not offer the current selection, and whenever the HARNESS changes
+  // to one the current selection is too small for. Without the last case the
+  // form renders a narrowed list and still posts the tier it was showing
+  // before — the same doomed request, with a tidier dialog around it.
   $effect(() => {
-    if (!tiers.includes(resourceTier)) {
-      resourceTier = tiers[0] ?? "small";
+    if (tiers.length > 0 && !tiers.includes(resourceTier)) {
+      resourceTier = tiers[0]!;
     }
   });
 
@@ -79,7 +109,9 @@
 
   async function handleCreate() {
     const trimmedName = name.trim();
-    if (!trimmedName || isCreating) return;
+    // noViableTier guards here as well as on the button: there is no tier to
+    // send, so the request could only be a guess.
+    if (!trimmedName || isCreating || noViableTier) return;
     isCreating = true;
     error = null;
     try {
@@ -144,8 +176,8 @@
               resourceTier = single(v, "small");
             }}
           >
-            <Select.Trigger class="w-full" id="runtime-tier">
-              {resourceTier || "Select tier"}
+            <Select.Trigger class="w-full" id="runtime-tier" disabled={noViableTier}>
+              {noViableTier ? "—" : resourceTier || "Select tier"}
             </Select.Trigger>
             <Select.Content>
               {#each tiers as t (t)}
@@ -165,7 +197,7 @@
             }}
           >
             <Select.Trigger class="w-full" id="runtime-harness">
-              {harnessOptions.find((h) => h.value === harness)?.label ?? "Generic"}
+              {harnessLabel}
             </Select.Trigger>
             <Select.Content>
               {#each harnessOptions as opt (opt.value)}
@@ -174,6 +206,14 @@
             </Select.Content>
           </Select.Root>
         </Field>
+
+        <!-- Nothing this provider offers is big enough for the chosen harness -->
+        {#if noViableTier}
+          <p class="text-sm font-mono text-destructive" role="alert">
+            No {provider} tier can run {harnessLabel}. Pick another provider, or a harness
+            that fits.
+          </p>
+        {/if}
 
         <!-- Inline error -->
         {#if error}
@@ -185,7 +225,7 @@
         <Button variant="outline" onclick={onClose} disabled={isCreating}>Cancel</Button>
         <Button
           onclick={handleCreate}
-          disabled={!name.trim() || isCreating}
+          disabled={!name.trim() || isCreating || noViableTier}
           class="font-mono"
         >
           {isCreating ? "Creating…" : "Create runtime"}

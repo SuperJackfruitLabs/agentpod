@@ -64,6 +64,18 @@ const FLY_TIERS: Record<
   large: { cpu_kind: "shared", cpus: 4, memory_mb: 4096 },
 };
 
+/**
+ * What each tier gives, in MB — derived from FLY_TIERS rather than restated.
+ *
+ * The manifest's copy of these numbers is what the hub compares a harness's
+ * requirement against (issue #279). Two hand-maintained copies of a sizing
+ * table is exactly the drift that produced the bug: a tier list advertised
+ * without regard for what has to run inside it.
+ */
+const FLY_TIER_MEMORY_MB = Object.fromEntries(
+  Object.entries(FLY_TIERS).map(([tier, guest]) => [tier, guest.memory_mb])
+) as Record<ResourceTier, number>;
+
 /** Seconds to give Fly's `wait?state=` endpoint before it answers 408. */
 const WAIT_TIMEOUT_S = 60;
 
@@ -270,6 +282,12 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
     imageBinding: "per-instance",
     // config.guest is per machine too, so all three tiers map to real sizes.
     supportedTiers: ["small", "medium", "large"],
+    // What those sizes are. `small` is 1024 MB, which is why the hub refuses it
+    // for the opencode harness (measured peak ~1012 MB for the whole machine
+    // during ONE chat turn — issue #279). Fly's tiers are unchanged: the tier
+    // names promise the same memory on every substrate, and the fix is that the
+    // harness's requirement is now part of the question.
+    tierMemoryMb: FLY_TIER_MEMORY_MB,
     // Fly's autostop is Fly-Proxy-driven and only touches machines with inbound
     // `services` configured. This driver defines none, so the trap that ruled
     // out Fly Sprites and bit Cloudflare cannot arise. The hub drives stop and

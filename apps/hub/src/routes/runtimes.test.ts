@@ -82,6 +82,10 @@ const fakeDockerProvisioner: RuntimeProvisioner = {
     maxLifetimeMs: null,
     imageBinding: "per-instance",
     supportedTiers: ["small", "medium", "large"],
+    // The real Docker driver's limits (1g/2g/4g). Declared here because the
+    // hub refuses a harness that cannot fit the tier, and a fake with no sizing
+    // would exempt itself from the rule it is standing in for.
+    tierMemoryMb: { small: 1024, medium: 2048, large: 4096 },
     idleBehaviour: "never",
     lifecycle: ["start"],
   },
@@ -140,6 +144,7 @@ const fakeTerminalProvisioner: RuntimeProvisioner = {
     maxLifetimeMs: 86_400_000,
     imageBinding: "per-instance",
     supportedTiers: ["small", "medium", "large"],
+    tierMemoryMb: { small: 1024, medium: 2048, large: 4096 },
     idleBehaviour: "never",
     lifecycle: ["stop", "status"],
   },
@@ -412,6 +417,105 @@ test("GET /api/runtimes/providers → lists enabled providers", async () => {
   expect(docker?.supportedTiers).toEqual(["small", "medium", "large"]);
 }, 15_000);
 
+test("GET /api/runtimes/providers → says which tiers each harness can use", async () => {
+  // Issue #279: the tier list was advertised per PROVIDER and took no account
+  // of the harness that has to fit inside it, so the console offered
+  // fly+opencode+small — a combination whose first chat turn takes the whole
+  // machine. The console must be able to filter on the hub's answer rather than
+  // re-deriving one from a copy of the requirements frozen into its bundle.
+  const res = await testApp.request("/api/runtimes/providers", {
+    headers: { "X-Test-User-Id": TEST_USER },
+  });
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as {
+    manifests: {
+      provider: string;
+      tierMemoryMb?: Record<string, number>;
+      harnessTiers?: Record<string, string[]>;
+    }[];
+  };
+
+  const docker = body.manifests.find((m) => m.provider === "docker");
+  // What each tier actually gives — the driver's own number, not a guess.
+  expect(docker?.tierMemoryMb).toEqual({ small: 1024, medium: 2048, large: 4096 });
+  // Derived from it: opencode needs 2 GB, so `small` is not on offer.
+  expect(docker?.harnessTiers?.opencode).toEqual(["medium", "large"]);
+  // A bare node still fits everywhere. Narrowing must be harness-specific.
+  expect(docker?.harnessTiers?.none).toEqual(["small", "medium", "large"]);
+}, 15_000);
+
+test(
+  "POST /api/runtimes with a harness that cannot fit the tier → 400, nothing created",
+  async () => {
+    // Defence in depth for #279: the console filters this combination out, but
+    // the API is callable directly, and the failure mode it produces is an
+    // apparent hub outage AFTER provisioning, volume mount and enrolment have
+    // all looked healthy. Refusing costs one request; not refusing costs a
+    // machine that wedges mid-turn.
+    const before = fakeCalls.provision.length;
+
+    const res = await testApp.request("/api/runtimes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Test-User-Id": TEST_USER,
+        Host: "localhost:3001",
+      },
+      body: JSON.stringify({
+        provider: "docker",
+        name: "doomed-box",
+        resourceTier: "small",
+        harness: "opencode",
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { message: string };
+    // The message has to name all three things the operator needs to act:
+    // which harness, which tier, and how much it actually needs.
+    expect(body.message).toContain("opencode");
+    expect(body.message).toContain("small");
+    expect(body.message).toContain("2048");
+
+    // Refused before anything was written: no driver call, no runtime row, and
+    // therefore no enrolment token minted against a runtime that cannot work.
+    expect(fakeCalls.provision.length).toBe(before);
+    const rows = await db
+      .select()
+      .from(provisionedRuntimes)
+      .where(eq(provisionedRuntimes.name, "doomed-box"));
+    expect(rows).toHaveLength(0);
+  },
+  30_000
+);
+
+test(
+  "POST /api/runtimes with a harness that fits the tier → still created",
+  async () => {
+    // The refusal must be about the pair, not about the harness: opencode on a
+    // tier that can hold it is exactly what the fix steers people to.
+    const res = await testApp.request("/api/runtimes", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Test-User-Id": TEST_USER,
+        Host: "localhost:3001",
+      },
+      body: JSON.stringify({
+        provider: "docker",
+        name: "roomy-box",
+        resourceTier: "medium",
+        harness: "opencode",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { harness: string; resourceTier: string };
+    expect(body.harness).toBe("opencode");
+    expect(body.resourceTier).toBe("medium");
+  },
+  30_000
+);
+
 test("DELETE /api/runtimes/:id → fake destroy() called, status destroyed", async () => {
   // First create a runtime
   const createRes = await createRuntime(TEST_USER, "to-delete");
@@ -553,7 +657,16 @@ test(
         "X-Test-User-Id": TEST_USER,
         "Host": "localhost:3001",
       },
-      body: JSON.stringify({ provider: "docker", name: "opencode-box", harness: "opencode" }),
+      // `medium`, not the default `small`: opencode needs 2 GB (issue #279) and
+      // the hub now refuses the pair that cannot work. What this test is about
+      // — the harness being persisted and resolving the opencode image — is
+      // unchanged.
+      body: JSON.stringify({
+        provider: "docker",
+        name: "opencode-box",
+        resourceTier: "medium",
+        harness: "opencode",
+      }),
     });
     expect(res.status).toBe(201);
 

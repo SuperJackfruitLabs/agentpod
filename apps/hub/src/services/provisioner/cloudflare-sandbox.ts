@@ -25,6 +25,26 @@ import type {
   DriverManifest,
 } from "./types";
 
+/**
+ * What each tier NAME promises here, in MB.
+ *
+ * Cloudflare has no per-instance sizing to read: `instance_type` is baked into
+ * the worker at deploy (worker-v2 is `standard-1`, 4 GiB), and the operator
+ * tells this driver which tier that instance type corresponds to via
+ * CLOUDFLARE_INSTANCE_TIER. So the memory is whatever the named tier promises
+ * across the fleet — the same 1/2/4 GB Docker, Fly and Modal give — and the
+ * operator's job is to point the name at an instance type that matches.
+ *
+ * Only the deployed tier is ever declared (see the manifest below): inventing
+ * sizes for tiers this worker does not offer would describe a machine that does
+ * not exist.
+ */
+const CLOUDFLARE_TIER_MEMORY_MB: Record<ResourceTier, number> = {
+  small: 1024,
+  medium: 2048,
+  large: 4096,
+};
+
 export interface CloudflareSandboxOptions {
   workerUrl?: string;
   apiToken?: string;
@@ -119,6 +139,13 @@ export class CloudflareSandboxProvisioner implements RuntimeProvisioner {
       // offer a tier this driver then rejects the moment a worker is redeployed
       // at a different instance type.
       supportedTiers: this.supportedTiers,
+      // One entry, for the one tier this worker provides. A worker deployed at
+      // a tier too small for a harness therefore reports "no viable tier" for
+      // it rather than offering the only size it has — which is the case that
+      // makes harness-aware tiers more than a filter (issue #279).
+      tierMemoryMb: {
+        [this.deployedTier]: CLOUDFLARE_TIER_MEMORY_MB[this.deployedTier as ResourceTier],
+      },
       // `sleepAfter = "15m"` in the worker, and its timer counts INBOUND
       // requests only. A node-agent dials out and receives nothing, so a busy
       // station reads as idle — which is how a live station vanished

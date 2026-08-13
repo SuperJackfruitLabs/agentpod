@@ -51,6 +51,7 @@ const base: DriverManifest = {
   maxLifetimeMs: null,
   imageBinding: "per-instance",
   supportedTiers: ["small"],
+  tierMemoryMb: { small: 1024 },
   idleBehaviour: "never",
   lifecycle: ["start", "stop", "status"],
 };
@@ -410,7 +411,9 @@ describe("assertConforms — supportedTiers", () => {
     // resourceTier was dropped on the floor for months: the console offered
     // three sizes and every one of them produced the same container.
     const driver = fakeDriver(
-      { ...base, supportedTiers: ["small", "large"] },
+      // Sized, so the manifest is otherwise well-formed and the rule under test
+      // is the behavioural one below rather than the static tierMemoryMb check.
+      { ...base, supportedTiers: ["small", "large"], tierMemoryMb: { small: 1024, large: 4096 } },
       { refusesTier: "large" }
     );
     await expect(assertConforms(driver)).rejects.toThrow(/supportedTiers/i);
@@ -426,6 +429,19 @@ describe("assertConforms — supportedTiers", () => {
       },
     };
     await expect(assertConforms(permissive)).rejects.toThrow(/supportedTiers/i);
+  });
+
+  it("rejects a driver that offers a tier without saying how big it is", async () => {
+    // Issue #279: the hub decides whether a harness fits a tier by comparing the
+    // harness's measured requirement against what the tier gives. A driver that
+    // declares a tier but no size for it opts itself out of that check silently
+    // — and the combination that cannot work is offered anyway.
+    const driver = fakeDriver({
+      ...base,
+      supportedTiers: ["small", "large"],
+      tierMemoryMb: { small: 1024 },
+    });
+    await expect(assertConforms(driver)).rejects.toThrow(/tierMemoryMb/i);
   });
 });
 

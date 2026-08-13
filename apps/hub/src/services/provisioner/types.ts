@@ -5,6 +5,10 @@
  * that auto-enroll into the fleet via one-time enrollment tokens.
  */
 
+import type { TierMemoryMb } from "@agentpod/contract";
+
+export type { TierMemoryMb };
+
 /**
  * A provider name. Deliberately not a union.
  *
@@ -130,6 +134,28 @@ export interface DriverManifest {
    * rots the moment a worker is redeployed at a different instance type.
    */
   readonly supportedTiers: readonly ResourceTier[];
+
+  /**
+   * How much memory each supported tier actually gives, in MB.
+   *
+   * `supportedTiers` on its own says a size can be CREATED; it says nothing
+   * about what fits inside it. That is the gap issue #279 fell through: Fly's
+   * `small` is 1 GB, the console offered it for the `opencode` harness, and one
+   * chat turn peaked at 855 MB of harness on top of ~157 MB of OS and
+   * node-agent — the whole machine. Provisioning, volume mount, enrolment and
+   * the first response all looked healthy; the user met the defect as an
+   * apparent hub outage.
+   *
+   * With a number here the hub can compare a tier against
+   * HARNESS_MIN_MEMORY_MB and refuse the pair before anything is created, and
+   * the console can decline to offer it — see harnessTiersFor() in the
+   * contract. Partial on purpose: a driver declares the tiers it supports and
+   * invents nothing for the ones it does not (Cloudflare fixes instance_type at
+   * worker deploy time and has exactly one). Conformance rule 2 requires an
+   * entry for every tier in `supportedTiers`, so the omission cannot be a
+   * quiet exemption from the check.
+   */
+  readonly tierMemoryMb: TierMemoryMb;
 
   /**
    * Who sleeps an idle runtime, and on what signal.

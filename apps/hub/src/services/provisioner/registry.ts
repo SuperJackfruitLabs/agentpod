@@ -16,7 +16,8 @@
  *   ENABLE_<PROVIDER>_PROVISIONING    → the rule every other driver gets
  */
 
-import type { RuntimeProvisioner, RuntimeProviderName, DriverManifest } from "./types";
+import { harnessTiersFor, type RuntimeProviderManifest } from "@agentpod/contract";
+import type { RuntimeProvisioner, RuntimeProviderName } from "./types";
 
 // ─── Internal registry map ────────────────────────────────────────────────────
 
@@ -110,8 +111,22 @@ export function enabledProviders(): RuntimeProviderName[] {
  * and there is no fallback here on purpose: `manifest` is required on every
  * driver, so defaulting could only ever mask a driver that failed to declare.
  */
-export function providerManifests(): DriverManifest[] {
-  return enabledProviders().map((provider) => _registry.get(provider)!.manifest);
+export function providerManifests(): RuntimeProviderManifest[] {
+  return enabledProviders().map((provider) => {
+    const manifest = _registry.get(provider)!.manifest;
+    return {
+      ...manifest,
+      supportedTiers: [...manifest.supportedTiers],
+      lifecycle: [...manifest.lifecycle],
+      // Derived here, not in the console: which tiers a harness can live in is
+      // a function of the harness's measured requirement and what each tier
+      // gives, and the hub is the only party that has both. A console deriving
+      // it would be deriving it from the requirements table frozen into its
+      // last build — and the console deploys separately from the hub, so the
+      // two would disagree exactly when the requirement changed (issue #279).
+      harnessTiers: harnessTiersFor(manifest.supportedTiers, manifest.tierMemoryMb),
+    };
+  });
 }
 
 /**

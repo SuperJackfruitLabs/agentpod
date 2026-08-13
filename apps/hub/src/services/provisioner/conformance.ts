@@ -402,6 +402,24 @@ async function assertSupportedTiers(
   driver: RuntimeProvisioner,
   image: string
 ): Promise<void> {
+  // Static half, checked before the substrate is touched: a declared tier must
+  // also say how big it is. The hub decides whether a harness fits a tier by
+  // comparing that number against the harness's measured requirement, so a tier
+  // with no number silently exempts itself from the check — and the pair that
+  // cannot work is offered anyway (issue #279).
+  for (const declared of manifest.supportedTiers) {
+    const memoryMb = manifest.tierMemoryMb?.[declared];
+    if (typeof memoryMb !== "number" || memoryMb <= 0) {
+      violation(
+        provider,
+        "tierMemoryMb",
+        `declares the tier "${declared}" but no memory for it. A tier whose ` +
+          `size is unknown cannot be checked against a harness's requirement, ` +
+          `so the console would offer it for a harness that cannot live in it.`
+      );
+    }
+  }
+
   for (const declared of manifest.supportedTiers) {
     const outcome = await attempt(() =>
       driver.provision(probeSpec(`tier-${declared}`, image, declared))
