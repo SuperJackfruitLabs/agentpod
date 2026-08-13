@@ -91,6 +91,42 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const uuidSuffixedId = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_${UUID}$`), `expected a "${prefix}_…" id`);
 
+/**
+ * AgentPod's **local** isolation boundary — `tenants.id`, and deliberately not `tnt_`.
+ *
+ * Neither AgentPod nor kaambaan owns the organisation. Principal, Team, Role and
+ * authority belong to an Organization plane that does not exist yet, and both
+ * products have to run standalone in the meantime, so each keeps a local tenant
+ * and records an *optional* external mapping — `tenants.external_id` +
+ * `tenants.external_source` — to the same real organisation elsewhere. Minting
+ * kaambaan's `tnt_` for rows in a different database would be the `run_`
+ * collision committed on purpose rather than by accident.
+ *
+ * **Why `fleet` rather than an abbreviation of `tenant`.** `ten_`, `tn_` and
+ * `tnnt_` all mean the identical thing as `tnt_` while sitting one glance away
+ * from it; the live `acp_`/`acps_` near-miss in this codebase is evidence enough
+ * that one character is not distance. A prefix that differs from its table name
+ * is the norm here, not an exception — `rt_`/provisioned_runtimes,
+ * `etk_`/enrollment_tokens, `acps_`/acp_sessions, `attempt_`/acp_runs — so the
+ * table keeps the suite's shared word (`tenants`, column `tenant_id`, which is
+ * what an Organization plane will eventually map) while the id space says whose
+ * rows these are. `fleet` also names what an AgentPod tenant holds: the nodes,
+ * stations and runtimes of one fleet.
+ *
+ * **Why the 20-hex family and not the hyphenated one.** This is the one AgentPod
+ * id designed from the start to cross the repo seam: kaambaan's tenant row will
+ * record it as an external id, and the Organization plane will map it. kaambaan's
+ * declared alphabet is base62 with no separator, so every id in AgentPod's
+ * hyphenated family — `station_`, `acps_`, `attempt_` — is rejected by the peer's
+ * own contract on arrival, which the corpus already records as a live
+ * disagreement. `fleet_<20 hex>` parses under both repos' grammars, so the
+ * mapping is exchangeable in both directions the day it is written.
+ *
+ * Enforced in the database too (migration 0036), for the same reason `acp_runs`
+ * is: a writer can bypass the contract but not the table.
+ */
+export const TenantId = truncatedUuidId("fleet");
+
 export const NodeId = truncatedUuidId("node");
 export const RuntimeId = truncatedUuidId("rt");
 /**

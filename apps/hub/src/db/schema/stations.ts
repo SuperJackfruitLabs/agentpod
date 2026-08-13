@@ -1,9 +1,11 @@
-import { pgTable, text, timestamp, index, uniqueIndex, jsonb, AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, AnyPgColumn } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { nodes } from "./nodes";
+import { tenants } from "./tenants";
 
 export const stations = pgTable("stations", {
   id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   nodeId: text("node_id").notNull().references(() => nodes.id, { onDelete: "cascade" }),
   harness: text("harness").notNull(),
@@ -20,4 +22,14 @@ export const stations = pgTable("stations", {
   uniqueIndex("stations_node_id_station_key_idx").on(t.nodeId, t.stationKey),
   index("stations_node_id_idx").on(t.nodeId),
   index("stations_user_id_idx").on(t.userId),
+  index("stations_tenant_id_idx").on(t.tenantId),
+  // A station's tenant is not an independent fact — it is its node's, copied.
+  // A copied fact drifts, so it is a composite FK rather than a convention: the
+  // (node_id, tenant_id) pair must exist in nodes, which makes a station in one
+  // tenant on a node in another unrepresentable rather than merely unwritten.
+  foreignKey({
+    columns: [t.nodeId, t.tenantId],
+    foreignColumns: [nodes.id, nodes.tenantId],
+    name: "stations_node_tenant_fk",
+  }).onDelete("cascade"),
 ]);

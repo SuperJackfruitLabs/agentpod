@@ -261,6 +261,39 @@
     },
 
     {
+      "entity": "agentpod.tenant",
+      "owner": "agentpod",
+      "prefix": "fleet",
+      "grammar": "^fleet_[0-9a-f]{20}$",
+      "grammarSource": "agentpod packages/contract/src/ids.ts — TenantId. Also enforced in the database: tenants carries a CHECK constraint (`tenants_id_is_agentpod_fleet`) added by migration 0036.",
+      "mintedAs": "^fleet_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/db/schema/tenants.ts — BOOTSTRAP_TENANT_ID, a deterministic literal created by migration 0036. No random minter exists yet: exactly one tenant exists, and it must be the SAME id on a fresh deploy and on the live hub, which a random id cannot guarantee. When a second tenant becomes creatable the minter is prefixedId('fleet'), the helper already used for node/rt/etk.",
+      "note": "AgentPod's LOCAL isolation boundary. Deliberately NOT `tnt_`, which kaambaan mints: neither product owns the organisation — that belongs to an Organization plane that does not exist yet — so each keeps its own local tenant and records an optional external mapping (tenants.external_id + tenants.external_source) to the same real organisation elsewhere. Two products minting one prefix for rows in different databases is precisely the `run_` collision resolved on 2026-08-14, and doing it deliberately would be worse than doing it by accident.\n\nWhy `fleet` and not an abbreviation of `tenant`: `ten_`, `tn_` and `tnnt_` are all one glance from kaambaan's `tnt_` while meaning the identical thing in a different database — the `acp_`/`acps_` near-miss recorded below is already evidence that one character of distance is not distance. A prefix that differs from its table name is the norm in this repo, not an exception (`rt_`/provisioned_runtimes, `etk_`/enrollment_tokens, `acps_`/acp_sessions, `attempt_`/acp_runs), so the table keeps the suite's shared word — `tenants`, column `tenant_id`, which is what an Organization plane will map — while the id space says whose rows these are. `fleet` also names what an AgentPod tenant contains: the nodes, stations and runtimes of one fleet.\n\nWhy the 20-hex family and not the hyphenated-UUID family: this is the one AgentPod id DESIGNED to cross the repo seam — kaambaan's tenant row records it as its own external id, and the Organization plane will map it. kaambaan's declared alphabet is base62 with no separator (`^<prefix>_[A-Za-z0-9]{6,}$`), so every id in AgentPod's hyphenated family is rejected by the peer's own contract on arrival; the corpus already records that as a live disagreement for `station_`. `fleet_<20 hex>` satisfies both repos' grammars, so the mapping is exchangeable in both directions on the day it is written rather than after a migration.",
+      "accept": [
+        { "value": "fleet_00000000000000000000", "mint": true, "note": "THE BOOTSTRAP TENANT. All-zero on purpose: deterministic, so a fresh deploy and the live hub agree without coordinating, and unmistakable in a log line as the one tenant that was created by a migration rather than by a person." },
+        { "value": "fleet_9f1c2ab04d7e6b3a5c88", "mint": true, "note": "what prefixedId('fleet') will produce for the second tenant" }
+      ],
+      "reject": [
+        { "value": "tnt_5f2b8c1a9d3e4076", "reason": "other-entity", "note": "THE COLLISION THIS PREFIX EXISTS TO AVOID — a kaambaan tenant. Both name an isolation boundary, both are the natural join for the same real organisation, and they live in different databases; a shared prefix would make a value read out of context unattributable, which is the `run_` failure exactly." },
+        { "value": "tenant_00000000000000000000", "reason": "wrong-prefix", "note": "the spelled-out word" },
+        { "value": "ten_00000000000000000000", "reason": "wrong-prefix", "note": "an abbreviation of `tenant` one character from kaambaan's `tnt_`. Rejected here so a later hand cannot quietly re-introduce the near-miss the note above rules out." },
+        { "value": "fleet_9f1c2ab04d7e6b3a", "reason": "too-short", "note": "16 hex — kaambaan's length. AgentPod slices the same UUID source to 20; a kaambaan-shaped id must not pass as an AgentPod tenant." },
+        { "value": "fleet_9f1c2ab04d7e6b3a5c88a", "reason": "too-long", "note": "21 hex — catches a regex missing its trailing $" },
+        { "value": "fleet_9F1C2AB04D7E6B3A5C88", "reason": "wrong-alphabet", "note": "uppercase hex is never minted; accepting it means two spellings of one tenant can both exist as distinct primary keys, which is an isolation boundary with two names" },
+        { "value": "fleet_9f1c2ab0-4d7e-6b3a-5c88-000000000000", "reason": "wrong-alphabet", "note": "hyphenated UUID — AgentPod's OTHER family, and the one kaambaan's contract would reject on arrival. Choosing it here would have made the external mapping unusable in one direction." },
+        { "value": "node_9f1c2ab04d7e6b3a5c88", "reason": "other-entity", "note": "same family and same length — a node id and a tenant id are now one prefix apart in shape, so this case is what keeps them apart in a validator" },
+        { "value": "fleets_00000000000000000000", "reason": "prefix-not-anchored" },
+        { "value": "xfleet_00000000000000000000", "reason": "prefix-not-anchored" },
+        { "value": "fleet_", "reason": "prefix-only" },
+        { "value": "00000000000000000000", "reason": "no-prefix" },
+        { "value": "fleet00000000000000000000", "reason": "no-separator" },
+        { "value": "fleet_00000000000000000000\n", "reason": "trailing-newline" },
+        { "value": " fleet_00000000000000000000", "reason": "leading-whitespace" },
+        { "value": "", "reason": "empty" }
+      ]
+    },
+
+    {
       "entity": "agentpod.user",
       "owner": "agentpod",
       "prefix": null,
@@ -310,7 +343,8 @@
       { "prefix": "audit", "owner": "agentpod", "entity": "auditEntry", "status": "minted-never-declared", "note": "apps/hub/src/services/audit.ts:94 — `audit_${crypto.randomUUID()}`, hyphenated-UUID family" },
       { "prefix": "enr", "owner": "agentpod", "entity": "enrollmentTokenSecret", "status": "credential" },
       { "prefix": "chg", "owner": "agentpod", "entity": "change", "status": "reserved-never-minted", "note": "only appears as a test literal in packages/contract/src/run.test.ts; Change is a reserved schema with no writer" },
-      { "prefix": "attempt", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "acp_runs.id. Reserved but validated and CHECK-constrained ahead of its first writer — see the agentpod.acpRun entity, and resolvedConflicts for the `run_` prefix it replaced." }
+      { "prefix": "attempt", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "acp_runs.id. Reserved but validated and CHECK-constrained ahead of its first writer — see the agentpod.acpRun entity, and resolvedConflicts for the `run_` prefix it replaced." },
+      { "prefix": "fleet", "owner": "agentpod", "entity": "tenant", "status": "declared-and-minted", "note": "tenants.id — AgentPod's LOCAL isolation boundary, deliberately not kaambaan's `tnt_`. Exactly one value is minted today (the bootstrap tenant, created deterministically by migration 0036) and it is validated in the contract and CHECK-constrained in the database. See the agentpod.tenant entity for why the prefix is not an abbreviation of `tenant` and why it takes the 20-hex family rather than the hyphenated one." }
     ],
     "knownConflicts": [],
     "resolvedConflicts": [
@@ -329,7 +363,7 @@
     "Principal shape: kaambaan `usr_<16 hex>`; AgentPod a bare unprefixed UUID. No mapping exists in either repo.",
     "Token length: kaambaan takes 16 hex from a UUID, AgentPod takes 20. Same source, different slice, no reason recorded in either.",
     "Alphabet: AgentPod has TWO families — `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, attempt, audit). kaambaan's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
-    "Tenancy: kaambaan pins every principal to exactly one tenant at the storage layer; AgentPod has no tenant concept at all, so no AgentPod id carries tenancy. Out of scope here, flagged because it is the largest remaining modelling decision (see docs/strategy/2026-08-13-ecosystem-identity-decisions.md).",
+    "Tenancy: both repos now scope their own rows structurally, and NEITHER owns the organisation — that belongs to an Organization plane that does not exist yet, so each keeps a LOCAL boundary (kaambaan `tnt_`, AgentPod `fleet_`) plus an optional external mapping to the same real organisation elsewhere. What is still open is the mapping itself: nothing has yet written an AgentPod tenants.external_id, no kaambaan tenant points back, and per ecosystem decision 2 that link must be minted explicitly rather than inferred from a matching name. Was 'AgentPod has no tenant concept at all'; that half is closed.",
     "RESOLVED 2026-08-14 — prefix `run` was claimed by both repos; AgentPod moved acp_runs.id to `attempt_` and kaambaan keeps `run_`. See prefixRegistry.resolvedConflicts."
   ]
 }

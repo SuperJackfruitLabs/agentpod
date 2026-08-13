@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, index, pgEnum, jsonb } from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { tenants } from "./tenants";
 
 export const agentTaskStatusEnum = pgEnum("agent_task_status", [
   "pending",
@@ -26,6 +27,9 @@ export const agentTasks = pgTable(
   "agent_tasks",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -48,6 +52,7 @@ export const agentTasks = pgTable(
     index("agent_tasks_status_idx").on(table.status),
     index("agent_tasks_sandbox_id_idx").on(table.sandboxId),
     index("agent_tasks_created_at_idx").on(table.createdAt),
+    index("agent_tasks_tenant_id_idx").on(table.tenantId),
   ]
 );
 
@@ -55,6 +60,9 @@ export const cloudflareSandboxes = pgTable(
   "cloudflare_sandboxes",
   {
     id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -70,6 +78,7 @@ export const cloudflareSandboxes = pgTable(
   (table) => [
     index("cloudflare_sandboxes_user_id_idx").on(table.userId),
     index("cloudflare_sandboxes_status_idx").on(table.status),
+    index("cloudflare_sandboxes_tenant_id_idx").on(table.tenantId),
   ]
 );
 
