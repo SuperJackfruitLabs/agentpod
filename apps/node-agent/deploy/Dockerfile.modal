@@ -51,8 +51,9 @@
 # `images.fromRegistry(tag)` with no Secret, so Modal cannot authenticate to a
 # private registry. Extend the adapter first if that changes.
 #
-# There is no CI pipeline for this image, as for none of the images here — they
-# are hand-built and pushed. Don't infer one from the tag.
+# Published by .github/workflows/publish-images.yml (manual dispatch). That
+# workflow builds with context `apps/node-agent`, which is what the COPY below
+# assumes — building this file from the repo root fails.
 ARG BASE_IMAGE=agentpod-node:base
 FROM ${BASE_IMAGE}
 

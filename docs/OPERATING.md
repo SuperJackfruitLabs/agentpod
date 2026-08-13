@@ -428,7 +428,7 @@ docker buildx build --platform linux/amd64 \
 
 **The repository must be public.** The driver calls Modal's `images.fromRegistry(tag)` with no Secret, so Modal has no credential to authenticate to a private registry with. A private tag passes the hub's boot check — it looks like a registry reference — and then fails at provision time.
 
-These images are **hand-built and pushed by convention; there is no CI pipeline for any of them.** Do not infer one from the tag.
+**Prefer the CI pipeline over the hand-build above.** `.github/workflows/publish-images.yml` (Actions → publish-images → Run workflow, choose `fly`/`modal`/`all` and a tag) builds natively on an amd64 runner, pushes to GHCR, and verifies what it published — for Modal, that `python3` and `pip` exist and `ENTRYPOINT` is empty. It also stamps the source commit as an image label, which a hand-built tag records nowhere. The commands above remain accurate for building locally when iterating on a Dockerfile.
 
 To sanity-check a built image before pushing, run its entrypoint test against a bind mount standing in for the Volume:
 

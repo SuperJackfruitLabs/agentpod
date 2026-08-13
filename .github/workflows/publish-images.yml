@@ -10,10 +10,13 @@
 # provisioner uses), and a hand-pushed image records nothing about which commit
 # produced it.
 #
-# NOTE: GHCR packages are created private. The first run of each image needs a
-# one-time visibility change to **public** in the GitHub UI, because Modal calls
+# NOTE: the published package MUST end up public — Modal calls
 # `images.fromRegistry(tag)` with no Secret and cannot authenticate to a private
-# registry. Fly can use private registries but is simpler public too.
+# registry. Measured on the first Fly run: the package came out `public` with no
+# UI step needed. Re-check with
+# `gh api '/user/packages?package_type=container'` after adding a new image
+# rather than assuming, since this is an account-level default, not a guarantee
+# of this workflow.
 name: publish-images
 
 on:
@@ -43,11 +46,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # `context` is per image and is NOT cosmetic: Fly's Dockerfile COPYs
+          # repo-root-relative paths (apps/node-agent/..., fly/node-image/...),
+          # while Dockerfile.modal COPYs `deploy/...` relative to apps/node-agent.
+          # Building Modal from the repo root fails at COPY, not at push.
           - name: fly
             dockerfile: fly/node-image/Dockerfile
+            context: .
             image: agentpod-node-opencode-fly
           - name: modal
             dockerfile: apps/node-agent/deploy/Dockerfile.modal
+            context: apps/node-agent
             image: agentpod-node-modal
     steps:
       - name: Skip images not selected
@@ -98,7 +107,7 @@ jobs:
             -t "${ref}:latest" \
             --label "org.opencontainers.image.revision=${{ github.sha }}" \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
-            .
+            "${{ matrix.context }}"
           docker push "${ref}:${{ inputs.tag }}"
           docker push "${ref}:latest"
           echo "published ${ref}:${{ inputs.tag }} from ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
