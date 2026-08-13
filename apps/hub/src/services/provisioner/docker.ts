@@ -14,6 +14,7 @@ import type {
   ProvisionSpec,
   RuntimeState,
   DriverManifest,
+  LifecycleResult,
 } from "./types";
 import { DockerOrchestrator } from "./docker-orchestrator";
 import type { ResourceLimits, Sandbox } from "./docker-orchestrator";
@@ -80,6 +81,41 @@ const DOCKER_TIER_MEMORY_MB = Object.fromEntries(
  */
 function isAlreadyGone(err: unknown): boolean {
   return (err as Error)?.message?.startsWith("Sandbox not found") === true;
+}
+
+// ─── "The container is already like that" ─────────────────────────────────────
+
+/**
+ * True only for Docker's 304 on start/stop, which means the requested end state
+ * ALREADY HOLDS.
+ *
+ * The daemon answers `304 Not Modified` to `POST /containers/{id}/start` for a
+ * running container and to `POST /containers/{id}/stop` for one that is already
+ * down; dockerode names those two statuses "container already started" and
+ * "container already stopped" (dockerode/lib/container.js), and docker-modem
+ * raises them as an Error carrying `statusCode` and `reason`. Before this
+ * existed the exception travelled up untouched and `POST /api/runtimes/:id/start`
+ * answered `500 An unexpected error occurred` for a double-click, filling the
+ * error log with `Unhandled error` for a benign condition — the same noise that
+ * made a real driver failure indistinguishable from a redundant click (#284).
+ *
+ * MATCHED ON THE STATUS, not on the words. The message is English prose from a
+ * daemon we do not version-pin and would drag every other 304-shaped sentence in
+ * with it; `statusCode` is the structured field docker-modem sets from the HTTP
+ * response. The message is only a fallback for a transport that lost the field,
+ * and it is anchored to the exact `(HTTP code 304)` prefix modem builds —
+ * verbatim what the live hub logged on 2026-08-13.
+ *
+ * Scoped to start/stop and used nowhere else. 304 is not a general "fine" from
+ * Docker: it is only meaningful on the two verbs whose whole purpose is to reach
+ * a state. Every other refusal — 404 no such container, 409, 500, or a socket
+ * that will not connect — still throws, because none of them is evidence that
+ * the container is in the state anyone asked for.
+ */
+function isAlreadyInTargetState(err: unknown): boolean {
+  const e = err as { statusCode?: number; message?: string } | null;
+  if (e?.statusCode === 304) return true;
+  return e?.message?.includes("(HTTP code 304)") === true;
 }
 
 // ─── Driver ───────────────────────────────────────────────────────────────────
@@ -215,16 +251,41 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
 
   /**
    * Start a previously stopped container.
+   *
+   * A container that is already running is the state this method is asked to
+   * produce, so it reports a no-op rather than throwing — see
+   * isAlreadyInTargetState for why that is exactly one status wide.
    */
-  async start(externalId: string): Promise<void> {
-    await this.orchestrator.startSandbox(externalId);
+  async start(externalId: string): Promise<LifecycleResult> {
+    try {
+      await this.orchestrator.startSandbox(externalId);
+    } catch (err) {
+      if (!isAlreadyInTargetState(err)) throw err;
+      return {
+        alreadyInTargetState: true,
+        detail: "the daemon reports this container is already running",
+      };
+    }
   }
 
   /**
    * Stop a running container (without removing it).
+   *
+   * Symmetrical with start(): a container that is already down is the state this
+   * asks for. The hub still confirms it with status() before writing `stopped`
+   * — a driver saying "it was already stopped" is not the evidence that word
+   * needs, and stopRuntime() is deliberately built to go and look.
    */
-  async stop(externalId: string): Promise<void> {
-    await this.orchestrator.stopSandbox(externalId);
+  async stop(externalId: string): Promise<LifecycleResult> {
+    try {
+      await this.orchestrator.stopSandbox(externalId);
+    } catch (err) {
+      if (!isAlreadyInTargetState(err)) throw err;
+      return {
+        alreadyInTargetState: true,
+        detail: "the daemon reports this container is already stopped",
+      };
+    }
   }
 
   /**

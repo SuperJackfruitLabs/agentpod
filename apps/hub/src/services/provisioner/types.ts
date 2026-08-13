@@ -60,6 +60,53 @@ export interface ProvisionSpec {
 export type RuntimeState = "running" | "stopped" | "unknown";
 
 /**
+ * What a lifecycle verb has to say about itself when it did nothing.
+ *
+ * `start` and `stop` are requests for an END STATE, not for work, so "it was
+ * already like that" is a successful outcome and not a failure. Before this
+ * existed there was no way for a driver to say it, and the only channel left was
+ * an exception: Docker answers a redundant start or stop with HTTP 304, the
+ * driver forwarded it, and the route turned it into
+ * `500 {"error":"Internal Server Error"}` for two clicks on Start (issue #284).
+ *
+ * A RETURN VALUE rather than a typed error, deliberately. The bug was precisely
+ * that a non-failure travelled on the failure channel; putting it back there in
+ * a nicer costume keeps every caller one forgotten `instanceof` away from the
+ * same 500, and would make `catch` the place where success is decided. Widening
+ * the return type costs nothing at the call sites that ignore it — `void` is
+ * assignable to this union, so every existing driver and test fake still
+ * satisfies the interface unchanged.
+ */
+export interface LifecycleOutcome {
+  /**
+   * The substrate reported the instance was ALREADY in the state this verb asks
+   * for. Set it ONLY on that answer — never on a failure whose meaning is
+   * unclear, and never on a substrate that could not be reached at all, because
+   * an unreachable substrate is silence and silence is not evidence.
+   */
+  alreadyInTargetState?: boolean;
+  /** The substrate's own words, for the log. Never a promise about state. */
+  detail?: string;
+}
+
+/** What `start()`/`stop()` resolve to. `void` for a driver with nothing to add. */
+export type LifecycleResult = void | LifecycleOutcome;
+
+/**
+ * True only when a driver said, in so many words, that its instance was already
+ * in the target state.
+ *
+ * Takes `unknown` so a caller can hand it anything a driver resolved with —
+ * including the `undefined` every driver that says nothing returns — without a
+ * cast at every call site.
+ */
+export function wasAlreadyInTargetState(result: unknown): boolean {
+  return (
+    (result as LifecycleOutcome | null)?.alreadyInTargetState === true
+  );
+}
+
+/**
  * What a driver declares about its substrate, before anyone runs it.
  *
  * Every field here exists because its absence already cost something. The
@@ -215,13 +262,24 @@ export interface RuntimeProvisioner {
 
   /**
    * Start a stopped runtime (optional — not supported by ephemeral providers).
+   *
+   * Resolving means the substrate accepted the request — NOT that a node exists;
+   * see startRuntime() in ../runtimes.ts, which writes `starting`, never
+   * `online`. A driver whose substrate answers "it is already running" must
+   * resolve with `{ alreadyInTargetState: true }` rather than throw: that is the
+   * state the caller asked for, and a throw becomes a 500 for a redundant click
+   * (#284). Every OTHER failure must still throw — the point is to name the
+   * benign case exactly, not to swallow a class of errors.
    */
-  start?(externalId: string): Promise<void>;
+  start?(externalId: string): Promise<LifecycleResult>;
 
   /**
    * Stop a running runtime without destroying it (optional — Docker only).
+   *
+   * Same contract as start(), pointed the other way: "it is already stopped" is
+   * `{ alreadyInTargetState: true }`, and nothing else is.
    */
-  stop?(externalId: string): Promise<void>;
+  stop?(externalId: string): Promise<LifecycleResult>;
 
   /**
    * Ask the substrate whether this runtime's container is actually running.

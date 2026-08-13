@@ -117,6 +117,45 @@ describe("CloudflareSandboxProvisioner", () => {
     expect(stopped.calls[0]!.url).toBe("https://w.example/sandbox/rt_abc/stop");
   });
 
+  /**
+   * Issue #284's question, asked of this substrate: what does Cloudflare answer
+   * for a start on a container that is already running?
+   *
+   * ESTABLISHED FROM THE CODE, not assumed: the worker's `/start` route calls
+   * `Container.wake()` → `start()`, and `@cloudflare/containers`
+   * (dist/lib/container.js, the version this repo's worker builds against)
+   * implements that as `startContainerIfNotRunning`, whose fast path is
+   * `if (this.container.running) return 0`. `stop()` is the same shape:
+   * `if (this.container.running) this.container.signal(...)`. Neither raises.
+   *
+   * So this substrate is already idempotent one layer down: the worker answers
+   * 200 and the driver sees a plain success. There is nothing for the driver to
+   * map, and inventing a mapping here would be a claim about a response
+   * Cloudflare does not send.
+   */
+  it("has no already-in-target-state error to map: the substrate is idempotent", async () => {
+    const started = fakeFetch({ started: "rt_abc" }, 200);
+    // Repeat the call the console repeats. Nothing throws, and the driver adds
+    // no no-op flag, because the substrate never said one thing or the other.
+    await make(started.impl).start!("rt_abc");
+    const outcome = await make(started.impl).start!("rt_abc");
+    expect(outcome ?? undefined).toBeUndefined();
+
+    const stopped = fakeFetch({ stopped: "rt_abc" }, 200);
+    await make(stopped.impl).stop!("rt_abc");
+    expect((await make(stopped.impl).stop!("rt_abc")) ?? undefined).toBeUndefined();
+  });
+
+  it("still fails when the worker refuses a start or a stop", async () => {
+    // The tolerance elsewhere must not become a habit here. A worker that
+    // answers 500 has not told us the container is running or stopped, and this
+    // driver has no `status` on the error to narrow a benign case with — its
+    // call() throws one shape for every non-2xx.
+    const failed = fakeFetch({ error: "boom" }, 500);
+    await expect(make(failed.impl).start!("rt_abc")).rejects.toThrow(/500/);
+    await expect(make(failed.impl).stop!("rt_abc")).rejects.toThrow(/500/);
+  });
+
   it("touches the activity route so an in-use station does not idle out", async () => {
     const { impl, calls } = fakeFetch({ touched: "rt_abc" }, 200);
     await make(impl).touch("rt_abc");

@@ -23,6 +23,11 @@
  *   6. destroy        — the destroy/archive race returned 200 and left the
  *                       archive behind; the retry that cleans that up is only
  *                       safe if destroy tolerates a resource already gone.
+ *   7. start/stop     — Docker answers a redundant start or stop with HTTP 304
+ *                       ("the end state you asked for already holds"), the
+ *                       driver forwarded it, and the hub answered 500 for two
+ *                       clicks on Start — indistinguishable, to a caller and in
+ *                       the error log, from the hub being broken (#284).
  *
  * **Pass a driver wired to a FAKE substrate.** assertConforms provisions and
  * destroys: against a real one it would create and delete real infrastructure.
@@ -520,6 +525,9 @@ async function assertLiveLifecycle(
     await assertRootfsSurvivesAStop(provider, manifest, driver, id);
   }
 
+  // Rule 7, before the instance is destroyed — it needs one to be redundant about.
+  await assertRedundantLifecycleIsANoOp(provider, manifest, driver, id);
+
   // Rule 6.
   const first = await attempt(() => driver.destroy(id));
   if (!first.ok) {
@@ -541,6 +549,75 @@ async function assertLiveLifecycle(
         `should clean up a half-finished destroy — the one that left an archive ` +
         `behind after a 200 — wedges the runtime instead.`
     );
+  }
+}
+
+/**
+ * Rule 7: asking for a state that already holds is a no-op, not a failure.
+ *
+ * `start` and `stop` are requests for an END STATE. "It was already like that"
+ * is therefore success, and a driver that throws it hands the hub a fault to
+ * report: `POST /api/runtimes/:id/start` answered
+ * `500 An unexpected error occurred` on the live hub for a second click, and
+ * `stop` did the same for a runtime already down (#284). The costs are that a
+ * caller cannot tell a redundant request from a broken hub, and that the error
+ * log fills with `Unhandled error` for a benign condition — which is what made a
+ * genuine start failure hard to see in the first place (#281). `destroy` has had
+ * this rule since #6; the two verbs either side of it are no less entitled.
+ *
+ * The probe is deliberately shaped like the operator's mistake: start something
+ * that is already running, and stop something twice.
+ *
+ * What this rule does NOT say is that the driver must SWALLOW anything. A
+ * substrate that refuses for any other reason must still throw — the tolerance
+ * belongs to one answer, the one that says the work was already done. Each
+ * driver states that answer in its own substrate's vocabulary (Docker's 304),
+ * and a driver whose substrate has no such answer maps nothing.
+ */
+async function assertRedundantLifecycleIsANoOp(
+  provider: string,
+  manifest: DriverManifest,
+  driver: RuntimeProvisioner,
+  id: string
+): Promise<void> {
+  // The instance is running here: it was just provisioned, and rule 4's witness
+  // (when it ran) leaves it started.
+  if (manifest.lifecycle.includes("start") && driver.start) {
+    const again = await attempt(() => driver.start!(id));
+    if (!again.ok) {
+      violation(
+        provider,
+        "start",
+        `start() threw for an instance that is already running: ` +
+          `"${messageOf(again.error)}". That is the state the caller asked for, ` +
+          `so it is a no-op — the hub turns a driver throw here into a 500 and ` +
+          `the operator cannot tell a double-click from a broken hub (#284). ` +
+          `Map the substrate's own "already in that state" answer to a resolved ` +
+          `{ alreadyInTargetState: true }, and keep throwing for everything else.`
+      );
+    }
+  }
+
+  if (manifest.lifecycle.includes("stop") && driver.stop) {
+    const first = await attempt(() => driver.stop!(id));
+    if (!first.ok) {
+      violation(
+        provider,
+        "stop",
+        `stop() threw for an instance this suite had just provisioned: ` +
+          `"${messageOf(first.error)}"`
+      );
+    }
+    const second = await attempt(() => driver.stop!(id));
+    if (!second.ok) {
+      violation(
+        provider,
+        "stop",
+        `stop() is not idempotent: stopping an already-stopped instance threw ` +
+          `"${messageOf(second.error)}". A stop that has already happened is not ` +
+          `a fault, and the hub reports it to the operator as one (#284).`
+      );
+    }
   }
 }
 

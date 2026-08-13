@@ -70,6 +70,16 @@ const fakeCalls: {
   start: string[];
 } = { provision: [], destroy: [], start: [] };
 
+/**
+ * What the docker fake's start() does next.
+ *
+ *   "ok"            — the substrate started it (the ordinary path).
+ *   "already"       — the substrate reports it was ALREADY running. A no-op, and
+ *                     the shape Docker answers a redundant Start with (#284).
+ *   "fails"         — a genuine driver failure, which must never read as a no-op.
+ */
+let fakeStartBehaviour: "ok" | "already" | "fails" = "ok";
+
 const fakeDockerProvisioner: RuntimeProvisioner = {
   provider: "docker",
   // Declares what this fake actually implements: provision, destroy and start,
@@ -98,6 +108,13 @@ const fakeDockerProvisioner: RuntimeProvisioner = {
   },
   async start(externalId) {
     fakeCalls.start.push(externalId);
+    if (fakeStartBehaviour === "fails") throw new Error("docker: daemon said no");
+    if (fakeStartBehaviour === "already") {
+      return {
+        alreadyInTargetState: true,
+        detail: "the daemon reports this container is already running",
+      };
+    }
   },
   // Note: no `stop` — deliberately omitted to test the 400 unsupported path.
 };
@@ -123,6 +140,8 @@ const terminalCalls: {
 let terminalCounter = 0;
 /** Makes the substrate refuse to terminate the instance being replaced. */
 let terminalStopFails = false;
+/** Makes the substrate report the sandbox was ALREADY down — a no-op stop. */
+let terminalStopAlreadyStopped = false;
 /** Makes the substrate refuse to create the replacement. */
 let terminalProvisionFails = false;
 /** What the substrate reports about a sandbox, when it is asked at all. */
@@ -164,6 +183,12 @@ const fakeTerminalProvisioner: RuntimeProvisioner = {
     terminalCalls.stop.push(externalId);
     terminalCalls.order.push(`stop:${externalId}`);
     if (terminalStopFails) throw new Error("modal: sandbox already terminated");
+    if (terminalStopAlreadyStopped) {
+      return {
+        alreadyInTargetState: true,
+        detail: "the substrate reports this sandbox is already down",
+      };
+    }
   },
   async status(externalId) {
     terminalCalls.status.push(externalId);
@@ -228,7 +253,9 @@ afterEach(() => {
   terminalCalls.stop.length = 0;
   terminalCalls.status.length = 0;
   terminalCalls.order.length = 0;
+  fakeStartBehaviour = "ok";
   terminalStopFails = false;
+  terminalStopAlreadyStopped = false;
   terminalProvisionFails = false;
   terminalState = "running";
   terminalDuringProvision = null;
@@ -912,6 +939,88 @@ test("a created runtime whose node never arrives times out too", async () => {
   const row = await rowOf(id);
   expect(row.status).toBe("error");
   expect(row.statusReason).toContain("no node enrolled");
+}, 30_000);
+
+// ─── A redundant start/stop is a no-op, not a fault (issue #284) ──────────────
+//
+// Measured on the live hub 2026-08-13: Start on an `online` docker runtime and
+// Stop on a `stopped` one both answered
+// `500 {"error":"Internal Server Error","message":"An unexpected error occurred"}`,
+// because Docker's 304 — "the end state you asked for already holds" — arrived
+// as an exception and nothing distinguished it from a fault. The costs were a
+// caller that could not tell a redundant click from a broken hub, and an error
+// log full of `Unhandled error` for a benign condition, which is exactly what
+// made a real driver failure hard to see (#281). DELETE has always been
+// idempotent; start and stop are no less entitled to be.
+
+test("a start the substrate says is already satisfied answers 204, not 500", async () => {
+  const createRes = await createRuntime(TEST_USER, "double-start");
+  const { id } = (await createRes.json()) as { id: string };
+  await rawSql`UPDATE provisioned_runtimes SET status = 'online' WHERE id = ${id}`;
+
+  fakeStartBehaviour = "already";
+  const res = await startVia(id);
+  expect(res.status).toBe(204);
+}, 30_000);
+
+test("a no-op start does not walk an online runtime back to `starting`", async () => {
+  // The reason this is a no-op rather than "run the start path anyway": the row
+  // already says what the substrate just confirmed. Writing `starting` over
+  // `online` would hand a live runtime to sweepStalledRuntimeStarts, which flips
+  // anything still `starting` two minutes later to `error` — a double-click
+  // would take a healthy station down in the console.
+  const createRes = await createRuntime(TEST_USER, "double-start-status");
+  const { id } = (await createRes.json()) as { id: string };
+  await rawSql`UPDATE provisioned_runtimes SET status = 'online' WHERE id = ${id}`;
+
+  fakeStartBehaviour = "already";
+  await startVia(id);
+
+  expect((await rowOf(id)).status).toBe("online");
+  expect(await sweepStalledRuntimeStarts(Date.now() + START_TIMEOUT_MS + 1_000))
+    .not.toContain(id);
+}, 30_000);
+
+test("a start that genuinely failed is STILL an error, never a 204", async () => {
+  // The whole risk in this change is that "be forgiving about start" turns into
+  // "swallow start failures". A driver that throws has not told us the runtime
+  // is running, and the operator must not be shown a success.
+  const createRes = await createRuntime(TEST_USER, "start-really-fails");
+  const { id } = (await createRes.json()) as { id: string };
+
+  fakeStartBehaviour = "fails";
+  const res = await startVia(id);
+  expect(res.status).not.toBe(204);
+  expect(res.status).toBe(500);
+}, 30_000);
+
+test("a stop the substrate says is already satisfied answers 204 and is still confirmed", async () => {
+  // The stop path keeps its evidence discipline: a driver saying "it was already
+  // down" is not the same as the substrate being asked, so status() is still
+  // consulted before `stopped` is written (#260/#261).
+  const { id } = await createModalRuntime("double-stop");
+  terminalStopAlreadyStopped = true;
+  terminalState = "stopped";
+
+  const res = await stopVia(id);
+  expect(res.status).toBe(204);
+
+  const row = await rowOf(id);
+  expect(row.status).toBe("stopped");
+  expect(terminalCalls.status).toContain(row.externalId!);
+}, 30_000);
+
+test("a stop that genuinely failed is STILL an error, never a 204", async () => {
+  // Note what this fake throws: "modal: sandbox already terminated". A fix that
+  // pattern-matched on the words "already" anywhere up the stack would pass a
+  // real driver failure off as a no-op. The benign case is a driver's own
+  // structured answer, never a sentence someone reads.
+  const { id } = await createModalRuntime("stop-really-fails");
+  terminalStopFails = true;
+
+  const res = await stopVia(id);
+  expect(res.status).not.toBe(204);
+  expect(res.status).toBe(500);
 }, 30_000);
 
 // ─── "stopped without evidence" (sibling of #254) ─────────────────────────────

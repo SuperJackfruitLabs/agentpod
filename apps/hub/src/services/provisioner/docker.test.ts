@@ -37,6 +37,10 @@ class FakeDockerOrchestrator {
   createError: Error | null = null;
   /** Set to make deleteSandbox throw, as the orchestrator does for a missing container. */
   deleteError: Error | null = null;
+  /** Set to make startSandbox throw, the way dockerode does. */
+  startError: Error | null = null;
+  /** Set to make stopSandbox throw, the way dockerode does. */
+  stopError: Error | null = null;
 
   async createSandbox(config: SandboxConfig): Promise<Sandbox> {
     if (this.createError) throw this.createError;
@@ -56,10 +60,12 @@ class FakeDockerOrchestrator {
 
   async startSandbox(id: string): Promise<void> {
     this.calls.push({ method: "startSandbox", args: [id] });
+    if (this.startError) throw this.startError;
   }
 
   async stopSandbox(id: string, timeout?: number): Promise<void> {
     this.calls.push({ method: "stopSandbox", args: [id, timeout] });
+    if (this.stopError) throw this.stopError;
   }
 
   async deleteSandbox(id: string, removeVolumes: boolean): Promise<void> {
@@ -82,6 +88,23 @@ class FakeDockerOrchestrator {
 
 function makeProvisioner(fake: FakeDockerOrchestrator): DockerRuntimeProvisioner {
   return new DockerRuntimeProvisioner(fake as unknown as DockerOrchestrator);
+}
+
+/**
+ * An error shaped exactly like the one dockerode raises, because the whole fix
+ * turns on telling one status apart from every other.
+ *
+ * docker-modem builds it in `buildPayload`: the message is
+ * `"(HTTP code <n>) <reason> - <cause> "`, and it hangs `statusCode` and
+ * `reason` off the Error. dockerode's container.start/stop declare
+ * `304: "container already started" / "container already stopped"`
+ * (dockerode/lib/container.js), which is where the reason text comes from — and
+ * that message is verbatim what the live hub logged on 2026-08-13 for the two
+ * requests that answered 500 (issue #284).
+ */
+function dockerError(statusCode: number, reason: string, cause = ""): Error {
+  const err = new Error(`(HTTP code ${statusCode}) ${reason} - ${cause} `);
+  return Object.assign(err, { statusCode, reason });
 }
 
 // Use a sentinel image that differs from the NODE_AGENT_IMAGE fallback — this
@@ -259,6 +282,38 @@ describe("DockerRuntimeProvisioner", () => {
       expect(call).toBeDefined();
       expect(call!.args[0]).toBe("c1");
     });
+
+    it("reports a container that is already running as a no-op, not a failure", async () => {
+      // Issue #284, measured on the live hub 2026-08-13: a second Start on an
+      // `online` docker runtime answered 500 "An unexpected error occurred",
+      // because the daemon's 304 travelled all the way up as an exception. A 304
+      // means the end state the caller asked for ALREADY HOLDS — the definition
+      // of a no-op. Nothing unexpected happened, so nothing may be reported as
+      // unexpected.
+      const fake = new FakeDockerOrchestrator();
+      fake.startError = dockerError(304, "container already started");
+
+      const outcome = await makeProvisioner(fake).start("c1");
+      expect(outcome?.alreadyInTargetState).toBe(true);
+    });
+
+    it("still fails when the daemon refuses the start for any other reason", async () => {
+      // The tolerance is exactly one status wide. A container the daemon has no
+      // record of cannot be "already started" — nothing is running — and a
+      // runtime whose container vanished must not read as a successful start.
+      const fake = new FakeDockerOrchestrator();
+      fake.startError = dockerError(404, "no such container");
+      await expect(makeProvisioner(fake).start("c1")).rejects.toThrow(/no such container/);
+    });
+
+    it("still fails when the daemon itself cannot be reached", async () => {
+      // Silence is not an answer. A socket that will not connect says nothing
+      // about whether the container is running, and reporting a successful
+      // no-op for it would hide a hub that cannot reach its daemon at all.
+      const fake = new FakeDockerOrchestrator();
+      fake.startError = new Error("connect ENOENT /var/run/docker.sock");
+      await expect(makeProvisioner(fake).start("c1")).rejects.toThrow(/ENOENT/);
+    });
   });
 
   describe("stop", () => {
@@ -268,6 +323,28 @@ describe("DockerRuntimeProvisioner", () => {
       const call = fake.callTo("stopSandbox");
       expect(call).toBeDefined();
       expect(call!.args[0]).toBe("c1");
+    });
+
+    it("reports a container that is already stopped as a no-op, not a failure", async () => {
+      // The other half of #284: Stop on a `stopped` docker runtime answered 500.
+      // The hub logged "(HTTP code 304) container already stopped -" for it.
+      const fake = new FakeDockerOrchestrator();
+      fake.stopError = dockerError(304, "container already stopped");
+
+      const outcome = await makeProvisioner(fake).stop("c1");
+      expect(outcome?.alreadyInTargetState).toBe(true);
+    });
+
+    it("still fails when the daemon refuses the stop for any other reason", async () => {
+      const fake = new FakeDockerOrchestrator();
+      fake.stopError = dockerError(500, "server error");
+      await expect(makeProvisioner(fake).stop("c1")).rejects.toThrow(/server error/);
+    });
+
+    it("still fails when the daemon itself cannot be reached", async () => {
+      const fake = new FakeDockerOrchestrator();
+      fake.stopError = new Error("connect ENOENT /var/run/docker.sock");
+      await expect(makeProvisioner(fake).stop("c1")).rejects.toThrow(/ENOENT/);
     });
   });
 });

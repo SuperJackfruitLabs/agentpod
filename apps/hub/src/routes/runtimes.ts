@@ -15,7 +15,12 @@
  * Status codes:
  *   201 — runtime created
  *   200 — list / providers
- *   204 — destroy/start/stop success
+ *   204 — destroy/start/stop success, INCLUDING a request the substrate says was
+ *         already satisfied. start and stop ask for an end state, so "it was
+ *         already like that" is success and answering 500 for it left a caller
+ *         unable to tell a double-click from a broken hub (#284). The driver is
+ *         what recognises that answer in its own substrate's words; a failure
+ *         that is anything else still surfaces as one.
  *   400 — disabled provider OR body validation error OR unsupported operation
  *   401 — unauthenticated (enforced by authMiddleware in index.ts)
  *   404 — runtime not found / wrong owner
