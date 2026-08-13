@@ -47,8 +47,13 @@ export const KaambaanUserId = kaambaanId("usr");
 export const KaambaanMembershipId = kaambaanId("mbr");
 export const KaambaanAgentId = kaambaanId("agt");
 /**
- * The run join key. kaambaan mints the work run; AgentPod executes it and never
- * mints a rival id for the same attempt (see `Run.externalRunId` in ./run.ts).
+ * The run join key, and `run_` belongs to it alone.
+ *
+ * kaambaan mints the work run; AgentPod executes it and never mints a rival id
+ * for the same attempt (see `Run.externalRunId` in ./run.ts). AgentPod used to
+ * reserve this same prefix for `acp_runs.id`, which made the two id spaces
+ * indistinguishable strings; AgentPod's own key is now `AcpRunId` below, and
+ * the corpus asserts that neither grammar accepts the other's ids.
  */
 export const KaambaanRunId = kaambaanId("run");
 
@@ -98,6 +103,37 @@ export const EnrollmentTokenId = truncatedUuidId("etk");
 export const StationId = uuidSuffixedId("station");
 export const AcpSessionId = uuidSuffixedId("acps");
 export const AuditEntryId = uuidSuffixedId("audit");
+
+/**
+ * `acp_runs.id` — one **attempt** on a station, and deliberately not `run_`.
+ *
+ * The prefix was `run_`, colliding head-on with the id kaambaan mints for a work
+ * run: the schema file declared `"run_" + uuid-ish` six lines above the comment
+ * "We never mint a rival id", and a `run_…` in an AgentPod row could not be told
+ * from a kaambaan one without reading a second column. AgentPod moved rather
+ * than kaambaan because AgentPod is the executor: kaambaan mints these ids and
+ * has live production data, while nothing here has ever inserted an `acp_runs`
+ * row at any commit, so the rename cost nothing — and would stop being free the
+ * moment the bridge writes its first run.
+ *
+ * `attempt` is not a euphemism for `run`. A run here is a **prompt-turn** — it
+ * opens when a prompt is submitted and closes when the agent yields — while
+ * kaambaan's work run is a claimed card, which takes as many prompt-turns as the
+ * work takes. One work run is therefore executed as a series of attempts, and
+ * the counts never matched: the two were never the same entity, whatever the
+ * shared prefix implied.
+ *
+ * Hyphenated-UUID family, matching its sibling `acps_` in the same subsystem
+ * (`acp_runs.session_id` is a FK to `acp_sessions.id`). `acpr_` was considered
+ * and rejected: one character from `acps_`, and the live `acp_`/`acps_` near-miss
+ * between the node-agent and the hub is already trap enough.
+ *
+ * Unlike the grammars above, this one **is** applied — to `Run.id` in ./run.ts.
+ * The retrofit caveat in this module's header is about rejecting rows that
+ * already exist; there are none, which is exactly what makes adoption safe here
+ * and not yet safe for `NodeSummary.id` and friends.
+ */
+export const AcpRunId = uuidSuffixedId("attempt");
 
 /**
  * AgentPod's principal id: a bare UUID with no prefix at all.

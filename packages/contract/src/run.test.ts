@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { RunState, TERMINAL_RUN_STATES, isRunTerminal, Run, Change } from "./run";
+import { AcpRunId, KaambaanRunId } from "./ids";
 
 describe("RunState — A2A vocabulary, adopted verbatim", () => {
   test("is exactly the A2A task state set", () => {
@@ -39,13 +40,42 @@ describe("RunState — A2A vocabulary, adopted verbatim", () => {
 
 describe("Run — a station attempt", () => {
   const base = {
-    id: "run_01J2",
+    id: "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
     sessionId: "acps_abc",
     stationId: "station_xyz",
     state: "working" as const,
     startSeq: 4,
     startedAt: "2026-08-11T10:00:00.000Z",
   };
+
+  test("mints its own id under `attempt_`, an id space kaambaan does not claim", () => {
+    // The rename. `run_` belonged to kaambaan's work run and AgentPod reserved
+    // the same prefix for this primary key, so the two were indistinguishable
+    // strings. An AgentPod row's own key is now `attempt_<uuid>` and a kaambaan
+    // run id cannot be one.
+    expect(Run.parse(base).id).toBe("attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90");
+    expect(Run.safeParse({ ...base, id: "run_e074a2160c4b4f28" }).success).toBe(false);
+  });
+
+  test("the two id spaces are mutually exclusive, in both directions", () => {
+    // Told apart by shape, not by which column they happen to sit in.
+    expect(AcpRunId.safeParse("run_e074a2160c4b4f28").success).toBe(false);
+    expect(
+      KaambaanRunId.safeParse("attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90").success,
+    ).toBe(false);
+  });
+
+  test("refuses to record one of its own attempt ids as an external run id", () => {
+    // The mirror of "we never mint a rival id": an external id from AgentPod's
+    // own space is either a bug or a loop, and either way it is not a board's.
+    expect(
+      Run.safeParse({
+        ...base,
+        externalRunId: "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
+        externalSource: "kaambaan",
+      }).success,
+    ).toBe(false);
+  });
 
   test("accepts a local attempt with no external run id", () => {
     // The console must keep working with no board attached at all.
@@ -62,10 +92,10 @@ describe("Run — a station attempt", () => {
 
   test("rejects an external run id with no source, and a source with no id", () => {
     // Regression: both fields were independently optional, so a run could record
-    // kaambaan's id without saying it was kaambaan's. Because both repos claim
-    // the `run_` prefix, an unattributed `run_…` is indistinguishable from
-    // AgentPod's own key, and the acp_runs_external_idx reverse join returns a
-    // row that cannot be traced to a board.
+    // kaambaan's id without saying it was kaambaan's. Disjoint prefixes now say
+    // the id is not AgentPod's, but not which of several possible orchestrators
+    // it belongs to — `externalSource` is open (§7), so the reverse join through
+    // acp_runs_external_idx still needs the source to reach the right board.
     expect(Run.safeParse({ ...base, externalRunId: "run_e074a2160c4b4f28" }).success).toBe(false);
     expect(Run.safeParse({ ...base, externalSource: "kaambaan" }).success).toBe(false);
   });
@@ -107,8 +137,22 @@ describe("Change — the thing that lands", () => {
   test("accumulates many runs — runIds is a list, not a single run", () => {
     // A change outlives the run that produced it: first attempt, revision after
     // review, CI fix.
-    const c = Change.parse({ ...base, runIds: ["run_a", "run_b", "run_c"] });
+    const c = Change.parse({
+      ...base,
+      runIds: [
+        "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+        "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
+        "attempt_7b2e9a10-3c5d-4e8f-b012-0d6e2f7c1b90",
+      ],
+    });
     expect(c.runIds).toHaveLength(3);
+  });
+
+  test("runIds holds AgentPod attempts, never a board's work run", () => {
+    // A change is assembled from attempts that ran here. A `run_…` in this list
+    // would be a kaambaan work run standing in for the attempts that produced
+    // the commit — the same conflation the prefix split exists to prevent.
+    expect(Change.safeParse({ ...base, runIds: ["run_e074a2160c4b4f28"] }).success).toBe(false);
   });
 
   test("defaults to an empty run list rather than requiring one", () => {

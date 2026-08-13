@@ -1,41 +1,47 @@
 {
   "corpus": "ecosystem-identity/run-join-key",
-  "version": 1,
+  "version": 2,
   "authoredAt": "2026-08-13",
+  "revisedAt": "2026-08-14",
 
   "invariant": "Kaambaan mints the work run; AgentPod executes it; there is no competing run id for dispatched work.",
 
   "enforcement": {
-    "status": "carried-in-schema-only",
-    "summary": "AgentPod has already reserved the field, in both the database and the contract, with comments naming kaambaan explicitly. Nothing writes it, nothing reads it, and no API accepts it. The invariant is a design intent with a place to live, not a behaviour.",
+    "status": "id-spaces-disjoint-no-write-path",
+    "summary": "Half of this is now executable rather than commented. AgentPod's own attempt id lives under `attempt_`, kaambaan's work run under `run_`, and the two grammars reject each other — asserted in the contract, in the shared corpus, and by CHECK constraints on the table itself. What is still missing is a write path: nothing inserts into acp_runs, nothing reads it, and no API accepts an external run id.",
     "whatExists": [
-      "agentpod apps/hub/src/db/schema/acp.ts:75-76 — `external_run_id` and `external_source` columns on `acp_runs`, really in the database via migration 0028_outgoing_magneto.sql, with `acp_runs_external_idx` on external_run_id (:88) for the reverse join from the board's side.",
-      "agentpod packages/contract/src/run.ts:60-63 — `Run.externalRunId` and `Run.externalSource`, both optional.",
-      "agentpod packages/contract/src/run.ts:18-27 — `RunState` is A2A's TaskState verbatim, chosen so no translation table to kaambaan's state machine is needed."
+      "agentpod apps/hub/src/db/schema/acp.ts — `acp_runs.id` is `attempt_<uuid>`, disjoint from kaambaan's `run_`, with a CHECK constraint (`acp_runs_id_is_agentpod_attempt`) so the database refuses a rival id rather than a comment asking it not to.",
+      "agentpod apps/hub/src/db/schema/acp.ts — `external_run_id` and `external_source` on `acp_runs`, really in the database via migration 0028_outgoing_magneto.sql, with `acp_runs_external_idx` on external_run_id for the reverse join from the board's side, plus CHECK constraints for paired presence (`acp_runs_external_pair`) and for an external id never coming from AgentPod's own space (`acp_runs_external_is_not_agentpod`).",
+      "agentpod packages/contract/src/ids.ts — `AcpRunId` (`^attempt_<uuid>$`) and `KaambaanRunId` (`^run_[A-Za-z0-9]{6,}$`), each rejecting the other's minted ids.",
+      "agentpod packages/contract/src/run.ts — `Run.id` is validated as an `AcpRunId`, `Run.externalRunId`/`externalSource` are optional and paired, and an `externalRunId` from AgentPod's own space is refused.",
+      "agentpod packages/contract/src/run.ts — `RunState` is A2A's TaskState verbatim, chosen so no translation table to kaambaan's state machine is needed."
     ],
     "whatDoesNot": [
-      "Nothing inserts into `acp_runs`. Grepping apps/hub for `acpRuns` outside the schema file finds only a unit test asserting column shape. `acp_sessions` by contrast is live (acp-sessions.ts:641 mints `acps_<uuid>`); there is no equivalent line for runs, so AgentPod does not currently mint a run id at all.",
-      "No route accepts an external run id. `POST /api/stations/:id/acp/sessions` takes `{mode}` and nothing else (apps/hub/src/routes/station-acp.ts:112).",
+      "Nothing inserts into `acp_runs`. Grepping apps/hub for `acpRuns` outside the schema file finds only tests. `acp_sessions` by contrast is live (acp-sessions.ts mints `acps_<uuid>`); there is no equivalent mint site for runs, so AgentPod does not currently mint an attempt id at all — the grammar is reserved and enforced ahead of its first writer.",
+      "No route accepts an external run id. `POST /api/stations/:id/acp/sessions` takes `{mode}` and nothing else (apps/hub/src/routes/station-acp.ts).",
       "The ACP wire carries no run or correlation id: neither AcpClientMsg nor AcpServerMsg in packages/contract/src/acp-session.ts has one. The session id is the only identity on the wire.",
-      "The bridge spike holds kaambaan's runId (apps/bridge/spike/src/kaambaan.ts:14-20, and every call is POST /v1/boards/{board}/runs/{runId}/{action}) but never sends it to AgentPod. The kaambaan-run → AgentPod-session correlation exists as a console.log line at apps/bridge/spike/src/bridge.ts:30-31 and nowhere else. The only identity that does flow is the reverse direction and unstructured: the station and ACP session ids are written into kaambaan as free text in an activity body and as a handoff JSON blob (bridge.ts:79-93).",
+      "The bridge spike holds kaambaan's runId (apps/bridge/spike/src/kaambaan.ts, and every call is POST /v1/boards/{board}/runs/{runId}/{action}) but never sends it to AgentPod. The kaambaan-run → AgentPod-session correlation exists as a console.log line at apps/bridge/spike/src/bridge.ts and nowhere else.",
       "kaambaan has no notion of AgentPod at all — zero occurrences of the string in its source or docs — so the dispatch path this invariant governs does not exist on either side yet."
     ],
     "consequence": "Every case below is an INTENDED shape, validated against AgentPod's `Run` schema, not an observed wire capture. When the write path lands, these fixtures are what it must satisfy. Until then they hold the shape still."
   },
 
-  "openConflict": {
+  "resolvedConflict": {
     "prefix": "run",
-    "detail": "AgentPod reserves the same `run_` prefix kaambaan mints with. apps/hub/src/db/schema/acp.ts:69 comments its primary key `\"run_\" + uuid-ish`, two lines above the comment `We never mint a rival id`. Nothing mints it yet, so nothing is broken; the day something does, a bare `run_…` value no longer says which system produced it, and the reverse join through acp_runs_external_idx stops being self-describing. Resolving this needs a decision in both repos. Recorded, not fixed.",
-    "alsoRecordedIn": "id_grammar.json → prefixRegistry.knownConflicts"
+    "wasClaimedBy": ["kaambaan", "agentpod"],
+    "nowClaimedBy": "kaambaan",
+    "resolvedAt": "2026-08-14",
+    "detail": "AgentPod used to reserve the same `run_` prefix kaambaan mints with: apps/hub/src/db/schema/acp.ts commented its primary key `\"run_\" + uuid-ish` two lines above the comment `We never mint a rival id`, so the file contradicted itself and the two ids were indistinguishable strings. AgentPod moved, because AgentPod is the executor rather than the minter: kaambaan mints work runs and has live production data, while nothing in apps/hub/src ever inserted into acp_runs (no such statement exists in the repository's history) so no AgentPod row anywhere carries the old prefix. `acp_runs.id` is now `attempt_<uuid>`, which also names the right thing — a run here is a prompt-turn while kaambaan's is a claimed card, so one work run is executed as a series of attempts and the two are not the same entity at all.",
+    "alsoRecordedIn": "id_grammar.json → prefixRegistry.resolvedConflicts"
   },
 
   "cases": [
     {
       "name": "dispatched_run",
       "mustParse": true,
-      "why": "The whole point: a run that came from a kaambaan claim carries the board's id and says who minted it. AgentPod's own `id` is a separate, local key — it does not, and must not, restate kaambaan's.",
+      "why": "The whole point: a run that came from a kaambaan claim carries the board's id and says who minted it. AgentPod's own `id` is a separate, local key in a different id space — it does not, and now cannot, restate kaambaan's.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -43,16 +49,15 @@
         "state": "working",
         "startSeq": 4,
         "endSeq": null,
-        "startedAt": "2026-08-13T10:00:00.000Z",
-        "endedAt": null
+        "startedAt": "2026-08-13T10:00:00.000Z"
       }
     },
     {
       "name": "local_run_no_board_attached",
       "mustParse": true,
-      "why": "The console must keep working with no board attached at all, which is why the external pair is optional rather than required (run.ts:48-54). A regression that made externalRunId mandatory would break every hand-driven Chat session in the fleet.",
+      "why": "The console must keep working with no board attached at all, which is why the external pair is optional rather than required. A regression that made externalRunId mandatory would break every hand-driven Chat session in the fleet.",
       "value": {
-        "id": "run_3d4e5f60718293a4b5c6",
+        "id": "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "state": "submitted",
@@ -63,9 +68,9 @@
     {
       "name": "dispatched_run_from_another_orchestrator",
       "mustParse": true,
-      "why": "`externalSource` is deliberately open so AgentPod is not kaambaan-only. A validator that hard-codes the literal \"kaambaan\" would make the field a boolean with extra steps and lock the hub to one board.",
+      "why": "`externalSource` is deliberately open so AgentPod is not kaambaan-only, and an external id therefore has no single grammar — a validator that hard-coded kaambaan's would lock the hub to one board. The one thing an external id may not be is one of AgentPod's own.",
       "value": {
-        "id": "run_7b2e9a103c5d4e8fb012",
+        "id": "attempt_7b2e9a10-3c5d-4e8f-b012-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "wf-2026-08-13-0042",
@@ -80,7 +85,7 @@
       "mustParse": true,
       "why": "Closing a run must fill both the sequence and the timestamp. A run is a prompt-turn, so endSeq is the seq of the event that closed it — a permission request mid-attempt does not close it.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -94,11 +99,54 @@
     },
 
     {
+      "name": "own_id_is_a_kaambaan_work_run_id",
+      "mustParse": false,
+      "why": "THE COLLISION CASE. AgentPod's primary key used to be spelled `run_…`, exactly like kaambaan's work run, so a row could restate the board's id as its own and nothing could tell the two apart. `id` is now AgentPod's own id space and a kaambaan-shaped run id must not parse there. Reverting the prefix to `run_` makes this case pass when it must fail.",
+      "value": {
+        "id": "run_e074a2160c4b4f28",
+        "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+        "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "externalSource": "kaambaan",
+        "state": "working",
+        "startSeq": 4,
+        "startedAt": "2026-08-13T10:00:00.000Z"
+      }
+    },
+    {
+      "name": "own_id_in_the_old_prefix_even_when_locally_minted",
+      "mustParse": false,
+      "why": "The subtler half: a `run_`-prefixed id that is not kaambaan's either. The old grammar was `run_` + a uuid-ish suffix; a hub still minting that shape has not moved id spaces, it has only avoided a literal clash. The prefix itself is what must be gone.",
+      "value": {
+        "id": "run_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+        "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+        "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+        "state": "working",
+        "startSeq": 4,
+        "startedAt": "2026-08-13T10:00:00.000Z"
+      }
+    },
+    {
+      "name": "external_run_id_from_agentpods_own_space",
+      "mustParse": false,
+      "why": "The mirror of 'we never mint a rival id'. An `attempt_…` arriving as an external run id is either AgentPod's own key copied into the wrong column or a dispatch loop; in neither case is it a board's identifier, and joining on it through acp_runs_external_idx would point back at this hub.",
+      "value": {
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+        "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+        "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+        "externalRunId": "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
+        "externalSource": "kaambaan",
+        "state": "working",
+        "startSeq": 4,
+        "startedAt": "2026-08-13T10:00:00.000Z"
+      }
+    },
+    {
       "name": "external_run_id_without_a_source",
       "mustParse": false,
-      "why": "An external run id that does not say who minted it is unattributable, and — because both repos claim the `run_` prefix — indistinguishable from AgentPod's own key. The reverse join through acp_runs_external_idx would return a row that cannot be traced to a board. The two fields are one fact and must arrive together.",
+      "why": "An external run id that does not say who minted it is unattributable. Disjoint prefixes establish that the value is not AgentPod's own, but `externalSource` is deliberately open, so the shape alone cannot say WHICH orchestrator it belongs to and the reverse join through acp_runs_external_idx would return a row that cannot be traced to a board. The two fields are one fact and must arrive together.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -112,7 +160,7 @@
       "mustParse": false,
       "why": "The mirror image: naming an orchestrator with no id from it records an origin nothing can be joined back to.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalSource": "kaambaan",
@@ -126,7 +174,7 @@
       "mustParse": false,
       "why": "An empty string is not 'no external run'; absent is. Accepting it writes a falsy value into an indexed column that then joins to nothing.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "",
@@ -141,7 +189,7 @@
       "mustParse": false,
       "why": "RunState is A2A's vocabulary verbatim so the board needs no translation table. `errored` was the earlier in-house proposal and must not parse; kaambaan spells `canceled` with one l for the same reason.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -156,7 +204,7 @@
       "mustParse": false,
       "why": "The spelling trap. A2A and kaambaan both use one l; a hub that accepted both would produce runs the board cannot classify.",
       "value": {
-        "id": "run_9f1c2ab04d7e6b3a5c88",
+        "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "sessionId": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
         "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
         "state": "cancelled",
@@ -172,7 +220,7 @@
     "terminal": ["completed", "rejected", "failed", "canceled"],
     "interrupted": ["input-required", "auth-required"],
     "sources": [
-      "agentpod packages/contract/src/run.ts:18-31",
+      "agentpod packages/contract/src/run.ts — RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES",
       "kaambaan packages/contract/src/primitives.ts:7-21 — `TaskState`, verified identical member-for-member and order-for-order on 2026-08-13"
     ]
   }

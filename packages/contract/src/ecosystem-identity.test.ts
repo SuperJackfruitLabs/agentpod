@@ -33,6 +33,7 @@ import {
   EnrollmentTokenId,
   StationId,
   AcpSessionId,
+  AcpRunId,
   UserId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
@@ -60,6 +61,12 @@ type IdGrammar = {
   prefixRegistry: {
     claims: Array<{ prefix: string; owner: string; entity: string; status: string }>;
     knownConflicts: Array<{ prefix: string; claimedBy: string[] }>;
+    resolvedConflicts: Array<{
+      prefix: string;
+      wasClaimedBy: string[];
+      nowClaimedBy: string;
+      resolution: string;
+    }>;
   };
 };
 
@@ -88,6 +95,7 @@ const VALIDATORS: Record<string, ZodType> = {
   "agentpod.enrollmentToken": EnrollmentTokenId,
   "agentpod.station": StationId,
   "agentpod.acpSession": AcpSessionId,
+  "agentpod.acpRun": AcpRunId,
   "agentpod.user": UserId,
 };
 
@@ -157,29 +165,87 @@ describe("ecosystem identity corpus — id grammar", () => {
 });
 
 describe("ecosystem identity corpus — prefix registry", () => {
-  test("no prefix is claimed by two owners except the recorded conflicts", () => {
+  const contestedPrefixes = (): string[] => {
     const byPrefix = new Map<string, Set<string>>();
     for (const c of grammar.prefixRegistry.claims) {
       byPrefix.set(c.prefix, (byPrefix.get(c.prefix) ?? new Set()).add(c.owner));
     }
-    const contested = [...byPrefix.entries()]
+    return [...byPrefix.entries()]
       .filter(([, owners]) => owners.size > 1)
       .map(([prefix]) => prefix)
       .sort();
+  };
+
+  test("no prefix is claimed by two owners except the recorded conflicts", () => {
     const known = grammar.prefixRegistry.knownConflicts.map((c) => c.prefix).sort();
 
-    // A NEW collision must fail here. `run` is already recorded: kaambaan mints
-    // it, and AgentPod reserves it for acp_runs.id in a schema comment two lines
-    // above "We never mint a rival id". Nothing mints AgentPod's yet, so nothing
-    // is broken — but the day one does, a bare `run_…` stops saying which system
-    // produced it.
-    expect(contested).toEqual(known);
+    // A NEW collision must fail here, and `knownConflicts` is now empty — so any
+    // second owner appearing against any prefix fails this test outright. This
+    // is the guard that catches `run_` coming back: re-pointing acp_runs.id at
+    // `run` means re-adding an agentpod claim on a prefix kaambaan already owns.
+    expect(contestedPrefixes()).toEqual(known);
   });
 
-  test("`run` is a known, unresolved conflict rather than a resolved one", () => {
-    const conflict = grammar.prefixRegistry.knownConflicts.find((c) => c.prefix === "run");
-    expect(conflict?.claimedBy.sort()).toEqual(["agentpod", "kaambaan"]);
+  test("`run` is resolved: kaambaan alone claims it", () => {
+    // Was a knownConflict. AgentPod's acp_runs.id moved to `attempt_` — an id
+    // space kaambaan does not claim — so the prefix has exactly one owner again.
+    expect(grammar.prefixRegistry.knownConflicts.map((c) => c.prefix)).not.toContain("run");
+
+    const owners = grammar.prefixRegistry.claims
+      .filter((c) => c.prefix === "run")
+      .map((c) => c.owner);
+    expect(owners).toEqual(["kaambaan"]);
   });
+
+  test("a resolved conflict is resolved in the claims, not merely declared resolved", () => {
+    // Moving an entry from knownConflicts to resolvedConflicts without actually
+    // giving up the claim would be exactly the kind of paper fix this corpus is
+    // meant to catch. Every resolved prefix must now have one owner, and that
+    // owner must be the one the resolution names.
+    for (const r of grammar.prefixRegistry.resolvedConflicts) {
+      const owners = [
+        ...new Set(
+          grammar.prefixRegistry.claims.filter((c) => c.prefix === r.prefix).map((c) => c.owner),
+        ),
+      ];
+      expect(owners, `${r.prefix} must have exactly one owner after resolution`).toEqual([
+        r.nowClaimedBy,
+      ]);
+      expect(contestedPrefixes()).not.toContain(r.prefix);
+    }
+  });
+
+  test("AgentPod's acp run prefix collides with nothing either repo claims", () => {
+    const acpRun = grammar.entities.find((e) => e.entity === "agentpod.acpRun")!;
+    const others = grammar.prefixRegistry.claims.filter(
+      (c) => c.prefix === acpRun.prefix && c.entity !== "acpRun",
+    );
+    expect(others).toEqual([]);
+  });
+});
+
+describe("ecosystem identity corpus — id spaces are mutually exclusive", () => {
+  // The general form of the `run_` collision. A comment saying "we never mint a
+  // rival id" did not prevent it; this does: every validator is shown every
+  // other entity's canonical minted id and must reject all of them. A new
+  // collision between any two entities fails here without anyone remembering to
+  // write a test for it.
+  for (const entity of grammar.entities) {
+    const schema = VALIDATORS[entity.entity];
+    if (!schema) continue;
+
+    test(`${entity.entity} rejects every other entity's minted id`, () => {
+      const foreign = grammar.entities
+        .filter((e) => e.entity !== entity.entity)
+        .flatMap((e) => e.accept.filter((c) => c.mint).map((c) => ({ entity: e.entity, ...c })));
+
+      const wronglyAccepted = foreign.filter((c) => schema.safeParse(c.value).success);
+      expect(
+        wronglyAccepted.map((c) => `${c.entity}:${c.value}`),
+        `${entity.entity}'s validator accepts an id minted for another entity`,
+      ).toEqual([]);
+    });
+  }
 });
 
 // ─── run_join_key.json ───────────────────────────────────────────────────────
@@ -195,13 +261,15 @@ type RunJoinKey = {
 const joinKey = readCorpus<RunJoinKey>("run_join_key.json");
 
 describe("ecosystem identity corpus — run join key", () => {
-  test("records that nothing enforces the invariant yet", () => {
-    // Honest bookkeeping. `acp_runs.external_run_id` and `Run.externalRunId`
-    // exist and are indexed, but nothing inserts into acp_runs, no route accepts
-    // an external run id, and the bridge spike correlates a kaambaan run to an
-    // AgentPod session in a console.log line and nowhere else. When a write path
-    // lands, this string changes and this test is the reminder to change it.
-    expect(joinKey.enforcement.status).toBe("carried-in-schema-only");
+  test("records how far enforcement has actually got", () => {
+    // Honest bookkeeping. Half the invariant is now executable: the two id
+    // spaces are disjoint, `Run.id` is validated against AgentPod's, and
+    // acp_runs carries CHECK constraints saying the same thing in the database.
+    // The other half is still absent — nothing inserts into acp_runs, no route
+    // accepts an external run id, and the bridge spike correlates a kaambaan run
+    // to an AgentPod session in a console.log line and nowhere else. When a
+    // write path lands, this string changes and this test is the reminder.
+    expect(joinKey.enforcement.status).toBe("id-spaces-disjoint-no-write-path");
   });
 
   for (const c of joinKey.cases) {
@@ -223,6 +291,20 @@ describe("ecosystem identity corpus — run join key", () => {
     expect(parsed.externalRunId).toBe("run_e074a2160c4b4f28");
     expect(parsed.externalSource).toBe("kaambaan");
     expect(parsed.id).not.toBe(parsed.externalRunId);
+  });
+
+  test("the two ids on a dispatched run are told apart by shape, not by column", () => {
+    // What replaces the comment. Before the rename both fields held `run_…` and
+    // only the column name said which system a value came from; a row read out
+    // of context was ambiguous. Now each id parses under exactly one grammar.
+    const dispatched = joinKey.cases.find((c) => c.name === "dispatched_run")!;
+    const parsed = Run.parse(dispatched.value);
+
+    expect(AcpRunId.safeParse(parsed.id).success).toBe(true);
+    expect(KaambaanRunId.safeParse(parsed.id).success).toBe(false);
+
+    expect(KaambaanRunId.safeParse(parsed.externalRunId).success).toBe(true);
+    expect(AcpRunId.safeParse(parsed.externalRunId).success).toBe(false);
   });
 
   test("kaambaan's run id in the fixture is valid by kaambaan's own grammar", () => {
