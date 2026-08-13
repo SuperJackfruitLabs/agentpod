@@ -58,3 +58,89 @@ describe("validateConfig — CLOUDFLARE_SANDBOX_IMAGE", () => {
     ).toHaveLength(0);
   });
 });
+
+/**
+ * Fly's configuration is checked at BOOT rather than on the first provision,
+ * and that is a decision, not a habit: `FlyMachinesProvisioner`'s constructor
+ * resolves FLY_API_TOKEN through `requireCredentials`, which THROWS when it is
+ * missing. On a hub with ENABLE_FLY_PROVISIONING=true and no token the failure
+ * is therefore already fatal — `registerEnabledProvisioners()` throws uncaught
+ * out of index.ts:181. These rules add no new way to fail; they move the same
+ * failure to index.ts:57 and give it a message naming the variable and the
+ * command that mints one.
+ *
+ * Every rule below is conditional on `fly.enabled`, so a hub that never opted
+ * in — which is every deployment today, all of them docker+cloudflare — sees
+ * no change at all. That is asserted, not assumed, in the last test here.
+ */
+describe("fly provisioning config", () => {
+  const withFly = (fly: Partial<typeof config.fly>) =>
+    ({ ...config, fly: { ...config.fly, ...fly } }) as typeof config;
+
+  const flyErrors = (cfg: typeof config) =>
+    collectConfigErrors(cfg, quiet).filter((e) => e.field.startsWith("FLY_"));
+
+  it("REFUSES to boot with Fly enabled and no token", () => {
+    // A missing credential is a startup-time refusal, not a runtime failure on
+    // a user's first provisioning attempt. Without this the hub either dies on
+    // an unexplained constructor throw or — had the driver defaulted the token
+    // to "" the way Cloudflare does — booted happily and failed inside
+    // createRuntime, where the operator sees a 502 and no mention of a variable.
+    const errors = collectConfigErrors(
+      withFly({ enabled: true, apiToken: "" }),
+      quiet
+    );
+    expect(errors.map((e) => e.field)).toContain("FLY_API_TOKEN");
+    expect(
+      errors.find((e) => e.field === "FLY_API_TOKEN")!.message
+    ).toMatch(/ENABLE_FLY_PROVISIONING/);
+  });
+
+  it("says nothing about Fly when Fly is off", () => {
+    // A Docker-only hub must not be stopped from booting by a variable for a
+    // substrate it never talks to.
+    const errors = collectConfigErrors(
+      withFly({ enabled: false, apiToken: "" }),
+      quiet
+    );
+    expect(errors.map((e) => e.field)).not.toContain("FLY_API_TOKEN");
+  });
+
+  it("refuses a volume size Fly cannot create", () => {
+    // Fly's minimum is 1 GB. A zero here produces a machine with a mount that
+    // does not exist — i.e. a workspace on the rootfs, which is wiped on every
+    // stop. That is the exact data loss this substrate was chosen to avoid.
+    const errors = collectConfigErrors(
+      withFly({ enabled: true, apiToken: "fly-token", volumeSizeGb: 0 }),
+      quiet
+    );
+    expect(errors.map((e) => e.field)).toContain("FLY_VOLUME_SIZE_GB");
+  });
+
+  it("accepts a complete Fly configuration", () => {
+    const errors = collectConfigErrors(
+      withFly({ enabled: true, apiToken: "fly-token", volumeSizeGb: 3 }),
+      quiet
+    );
+    expect(errors.map((e) => e.field)).not.toContain("FLY_API_TOKEN");
+    expect(errors.map((e) => e.field)).not.toContain("FLY_VOLUME_SIZE_GB");
+  });
+
+  it("adds nothing to the live hub's docker+cloudflare configuration", () => {
+    // The deployed hub runs ENABLE_DOCKER_PROVISIONING + ENABLE_CLOUDFLARE_
+    // SANDBOXES and has never heard of Fly. Boot-time refusal is a change to
+    // hub STARTUP, so the claim that it cannot take down a healthy hub gets an
+    // assertion: with Fly off, no FLY_* error exists however broken the Fly
+    // half of the config is.
+    const live = {
+      ...config,
+      cloudflare: {
+        ...config.cloudflare,
+        enabled: true,
+        sandboxImage: "agentpod-node-opencode:local",
+      },
+      fly: { ...config.fly, enabled: false, apiToken: "", volumeSizeGb: 0 },
+    } as typeof config;
+    expect(flyErrors(live)).toEqual([]);
+  });
+});

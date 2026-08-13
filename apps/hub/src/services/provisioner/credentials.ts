@@ -55,13 +55,20 @@ export function envCredentialResolver(): CredentialResolver {
  * secret as `""`, and handing a driver a blank token only moves the failure to
  * the first API call, where it reads as an auth problem rather than a
  * configuration one.
+ *
+ * Generic over the key literals so the return type has *declared* properties.
+ * The obvious `Record<string, string>` is an index signature, and the hub
+ * compiles with `noUncheckedIndexedAccess`, so `const { FLY_API_TOKEN } =
+ * requireCredentials(...)` widened to `string | undefined` at the first real
+ * call site — a driver forced to write `!` on a value this function has already
+ * thrown over is being told to distrust the guarantee it just bought.
  */
-export function requireCredentials(
+export function requireCredentials<K extends string>(
   provider: string,
-  keys: string[],
+  keys: readonly K[],
   resolver: CredentialResolver
-): Record<string, string> {
-  const resolved: Record<string, string> = {};
+): Record<K, string> {
+  const resolved = {} as Record<K, string>;
   const missing: string[] = [];
 
   for (const key of keys) {

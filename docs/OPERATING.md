@@ -319,6 +319,149 @@ Open the runtime's detail panel → **Destroy**. This stops and removes the cont
 
 Available in the UI if `ENABLE_CLOUDFLARE_SANDBOXES=true` is set in the hub env. Status: **live-unverified in v0.1.0** — use Docker for production provisioning.
 
+### Fly Machines provisioner
+
+Rents a machine per runtime from [Fly.io](https://fly.io). Available in the UI if
+`ENABLE_FLY_PROVISIONING=true` and `FLY_API_TOKEN` are set in the hub env; the
+hub refuses to boot with the flag on and no token. Env vars and their traps are
+in [docs/DEPLOYMENT.md](./DEPLOYMENT.md#fly-machines-settings).
+
+Unlike Cloudflare, **all three resource tiers work and the harness image is
+honoured per machine** — Fly takes `config.guest` and `config.image` on each
+machine create, so nothing is frozen at deploy time.
+
+**What the hub creates per runtime**, in this order:
+
+1. A Fly **app**, named `<FLY_APP_PREFIX>-<runtime id>` with underscores
+   hyphenated — `rt_3f2a…` becomes `agentpod-rt-3f2a…`. Each gets its own 6PN
+   `network`, so one runtime's machine cannot reach another's over Fly's private
+   network.
+2. A **volume** in it, always named `agentpod_data` (Fly volume names take
+   underscores, not hyphens), sized by `FLY_VOLUME_SIZE_GB`, in `FLY_REGION`.
+3. A **machine** mounting that volume at `/data`.
+
+The order is not stylistic: a Fly volume is pinned to one physical host, and a
+machine created before its volume can be placed on a different host and fail to
+attach.
+
+**Destroy deletes the app**, which takes the machine and the volume with it in
+one call. That is the reason each runtime gets an app to itself — three ordered
+deletes would be three places to fail half-way, and the resource most likely to
+be left behind is the one that bills.
+
+#### Cost — read this before enabling
+
+**Fly has no free tier.** (Organisations still on the deprecated Hobby/Launch/
+Scale plans keep a legacy allowance — 3 shared-cpu-1x 256 MB VMs and 3 GB of
+volume. Those are the same accounts that hit the `FLY_REGION` refusal in
+Troubleshooting below.)
+
+Per runtime, for as long as its **app** exists:
+
+| Resource | Bills while |
+|---|---|
+| Machine compute (CPU + RAM) | the machine is `started` — per second |
+| Machine rootfs | the machine is `stopped` (while started it is covered by the compute rate) |
+| Volume (`FLY_VOLUME_SIZE_GB`) | the app exists, whether or not any machine runs |
+
+So **`stopped` on Fly does not mean "costing nothing".** Stopping a runtime
+stops the compute — the largest line for a running station — and nothing else.
+The volume that makes this substrate worth using is the same volume that keeps
+billing. **`destroy` is what stops the bill**, because it deletes the app.
+
+Rates from Fly's pricing page, checked 2026-08-13 (against the published page,
+not against an invoice — treat them as order-of-magnitude and confirm on your
+own bill):
+
+- `shared-cpu-1x` **started**: ~$5.70/mo at 1 GB (tier `small`), ~$10.70 at 2 GB
+  (`medium`), ~$21.40 at 4 GB (`large`), region-dependent, charged per second.
+- **Volume**: $0.15/GB/month of provisioned capacity — so the default 3 GB is
+  about **$0.45/month per runtime, running or stopped**.
+- **Stopped rootfs**: $0.15 per GB per 30 days — so it depends on how large the
+  harness image is, a dollar-fraction rather than a dollar.
+
+A stopped runtime is therefore **under a dollar a month, indefinitely**, and a
+**leaked app** — one whose hub row went away without a successful destroy —
+bills that forever with nothing in the console to say it exists. `flyctl apps
+list` is the only backstop. The driver already covers the one case it can see: a
+`provision` that fails after creating the app deletes the app itself rather than
+leaving an orphan the hub never learns the name of.
+
+#### Why a Fly station is not reaped while idle
+
+**The machine is created with no `services` block, and that is load-bearing.**
+
+Fly's autostop is driven by Fly Proxy, and the proxy only reaches machines that
+publish inbound `services`. A node-agent dials *out* to the hub and receives
+nothing inbound, so any idle timer fed by inbound traffic reads a station in
+heavy use as idle. That is not hypothetical: on 2026-08-12 a Cloudflare station
+idled out 15 minutes after start, mid-session, and destroyed a file its user had
+created four minutes earlier. Measured on Fly the same day: a machine with no
+`services`, left idle for 25 minutes with only outbound traffic and sampled every
+5 minutes, was `started` at every sample. The hub drives stop and start itself,
+as it already does for every other provider.
+
+> **Maintainers: do not add a `services` block to `fly.ts`.** It is the single
+> change that would reintroduce the Cloudflare failure on the substrate chosen to
+> avoid it, and it would look entirely reasonable in a diff — inbound HTTP to a
+> station (a preview URL, a webhook receiver) is a plausible future feature, and
+> `services` is how you get it. Adding one re-arms Fly's autostop against a
+> workload that by design receives no inbound traffic. `fly.test.ts` pins the
+> absence ("NEVER defines a services block"), so the test failure is the warning;
+> this paragraph is why deleting the test is not the fix.
+
+#### Why the workspace survives a stop
+
+The Fly **rootfs is wiped on every stop→start** — measured 2026-08-12: a sentinel
+written to `/` was gone after a stop→start, while the same sentinel on the
+mounted volume was still there, byte-identical, with the machine id and the
+volume both preserved.
+
+So nothing that must outlive a stop lives on the rootfs. The image's wrapper
+(`fly/node-image/volume-workspace.sh`) symlinks `/workspace` onto the volume and
+points `$HOME` there before the harness entrypoint runs, so a restarted station
+comes back with its files, its opencode session history **and its node identity**
+(`agentpod-node` keeps `nodeId`/`nodeSecret` under `$HOME`). Fly's
+`persist_rootfs` is deliberately not used — Fly's own docs disclaim it for
+critical data. See `fly/node-image/README.md`.
+
+If the volume fails to mount, the wrapper **exits non-zero rather than running**,
+which with Fly's `restart.policy = "always"` is a visible crash loop. That is
+deliberate: the alternative is a station that looks healthy while writing the
+user's work to a filesystem that is about to be erased.
+
+#### Known wrong number: workspace size on the Health panel
+
+**A Fly station's Health panel reports a workspace of a few bytes.** The number
+is wrong; nothing is missing.
+
+The node-agent's disk-usage probe walks the station's workspace with Go's
+`filepath.WalkDir`, which does not follow symlinks — and on Fly the workspace
+root *is* the symlink `/workspace → /data/workspace`, so the walk measures the
+link itself and stops. Every other workspace operation (Files, Terminal, `cd`,
+Cleanup) follows the link normally, and the bytes are on the volume where they
+belong.
+
+It is not fixed because fixing it means changing node-agent Go — teaching
+`refreshDiskUsage` to resolve its root through `filepath.EvalSymlinks` — which is
+a fleet-wide binary change and a release, to correct one cosmetic figure on one
+substrate. Worth doing eventually; not worth coupling to the Fly driver shipping.
+
+#### Cross-checking against Fly directly
+
+```bash
+flyctl apps list                              # one app per runtime, prefixed agentpod-
+flyctl machines list -a agentpod-rt-<id>      # state, region, image, machine id
+flyctl volumes list -a agentpod-rt-<id>       # the volume holding the workspace
+flyctl logs -a agentpod-rt-<id>               # the machine's console
+```
+
+A healthy boot logs `[fly] workspace and home anchored on /data`.
+
+The money audit is `flyctl apps list`: **anything prefixed `agentpod-` that the
+console does not show as a runtime is leaking.** Destroy it with
+`flyctl apps destroy <app> --yes`.
+
 ---
 
 ## 5. Cmd-K palette
@@ -359,6 +502,29 @@ Hermes stations that have a Matrix identity configured display the **Matrix ID**
 - Confirm `PROVISIONING_HUB_URL` is set to the container-reachable hub URL (not `127.0.0.1`).
 - Check `ENABLE_DOCKER_PROVISIONING=true` in `/etc/agentpod/hub.env`.
 - Check hub log for `"Provisioners registered: docker…"` on startup.
+
+**Hub refuses to boot naming `FLY_API_TOKEN`:**
+- `❌ CONFIGURATION VALIDATION FAILED` with `FLY_API_TOKEN` means `ENABLE_FLY_PROVISIONING=true` with no token. That is deliberate, not a bug — the alternative is a hub that boots, offers Fly in the New Runtime dialog, and fails on a user's first provision.
+- The token must be **org-scoped** (`flyctl tokens create org <org> --expiry 720h`). App-scoped deploy tokens cannot create apps, and this driver creates one per runtime.
+- Strip the `FlyV1 ` prefix flyctl prints. Fly was measured on 2026-08-13 to accept the doubled prefix, so this will not fail loudly — it is just wrong.
+
+**A Fly runtime never comes online:**
+- `flyctl logs -a agentpod-rt-<id>`. `[fly] FATAL: /data is not mounted.` means the volume did not attach — check `flyctl volumes list -a <app>`. The wrapper refuses to run rather than write the workspace to a rootfs Fly wipes on the next stop.
+- `exec format error` means an arm64 image. Rebuild with `--platform linux/amd64` (see `fly/node-image/README.md`).
+- A pull failure means `NODE_AGENT_OPENCODE_IMAGE` is a bare local tag such as `agentpod-node-opencode:local`, or the registry package is private. Fly pulls anonymously from a registry and has no access to your Docker host.
+- The machine can be `started` and the runtime still not online: the node-agent has to reach the hub *from Fly*, so `PROVISIONING_HUB_URL` must be a public URL, never `127.0.0.1`.
+
+**Provisioning fails with "legacy or non-paid plan":**
+- `FLY_REGION` names a region this account's plan does not cover. Measured 2026-08-12: `bom` refused, `sin` accepted, same account, same token. Set `FLY_REGION` to a region the plan allows or upgrade the Fly organisation.
+
+**Provisioning fails with an app-creation error:**
+- The token is app-scoped. This driver creates one app per runtime, which needs an org-scoped token: `flyctl tokens create org <org>`.
+
+**A Fly station's Health panel shows a near-empty workspace:**
+- Expected, and the files are fine — see [Known wrong number](#known-wrong-number-workspace-size-on-the-health-panel) above. Confirm with the Files tab or `ls -la /workspace` in the Terminal.
+
+**A Fly runtime is `stopped` but still billing:**
+- Also expected. A stopped Fly machine still bills its rootfs, and the volume bills for as long as the **app** exists. Only **Destroy** ends the charge. `flyctl apps list` shows what is still there.
 
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.

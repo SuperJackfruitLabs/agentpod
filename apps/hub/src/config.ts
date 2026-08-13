@@ -11,16 +11,40 @@ function getEnv(key: string, defaultValue?: string): string {
   return value;
 }
 
-function getEnvInt(key: string, defaultValue: number): number {
-  const value = process.env[key];
-  if (value === undefined) {
+/**
+ * Read an integer setting, falling back to `defaultValue`.
+ *
+ * A PRESENT BUT EMPTY variable counts as unset. This is not leniency for its
+ * own sake: every deployment surface — a docker-compose `environment:` entry,
+ * a `.env` line, a systemd `Environment=`, a copied block from
+ * docs/DEPLOYMENT.md with the comment removed but the value not filled in —
+ * turns "I did not set this" into "" rather than into absent. Treating "" as a
+ * parse failure meant a blank line in an operator's env file threw HERE, at
+ * module scope, before `validateConfig()` exists to say anything useful, and it
+ * did so for every hub regardless of which substrates it had enabled: a
+ * docker-only hub could be stopped from booting by a blank FLY_VOLUME_SIZE_GB.
+ * A value nobody supplied is a value nobody supplied.
+ *
+ * A non-empty value that is not an integer is still a refusal — that is an
+ * operator saying something the hub cannot honour, not an operator saying
+ * nothing — and the refusal is now WHOLE-STRING. `parseInt` read "3.5" as 3 and
+ * "12gb" as 12 without a word, which is how FLY_VOLUME_SIZE_GB came to mean two
+ * different numbers at once: 3 to the boot check that validated it and 3.5 to
+ * the driver that sent it to Fly. These settings are counts of whole things —
+ * ports, gigabytes — so a value that is not a whole number is a mistake worth
+ * hearing about, not a value worth guessing at.
+ */
+const INTEGER_RE = /^[+-]?\d+$/;
+
+export function getEnvInt(key: string, defaultValue: number): number {
+  const value = process.env[key]?.trim();
+  if (value === undefined || value === '') {
     return defaultValue;
   }
-  const parsed = parseInt(value, 10);
-  if (isNaN(parsed)) {
+  if (!INTEGER_RE.test(value)) {
     throw new Error(`Invalid integer for environment variable: ${key}`);
   }
-  return parsed;
+  return Number(value);
 }
 
 function getEnvBool(key: string, defaultValue: boolean): boolean {
@@ -151,6 +175,25 @@ export const config = {
     r2Bucket: getEnv('CLOUDFLARE_R2_BUCKET', 'agentpod-workspaces'),
     defaultProvider: getEnv('DEFAULT_SANDBOX_PROVIDER', 'docker') as 'docker' | 'cloudflare',
     autoSelect: getEnvBool('AUTO_SELECT_PROVIDER', false),
+  },
+
+  fly: {
+    enabled: getEnvBool('ENABLE_FLY_PROVISIONING', false),
+    // Read here ONLY so validate-config can refuse the boot with a message
+    // naming the variable. The DRIVER resolves this through
+    // requireCredentials(), which is the seam the per-org encrypted store
+    // (Horizon 3) replaces — do not make the driver read config.fly.apiToken.
+    apiToken: getEnv('FLY_API_TOKEN', ''),
+    // App creation requires an ORG-scoped token; Fly's app-scoped deploy tokens
+    // can do everything else but not that.
+    orgSlug: getEnv('FLY_ORG_SLUG', 'personal'),
+    // Measured 2026-08-12: "bom" is refused on a non-paid plan ("legacy or
+    // non-paid plan"), "sin" works.
+    region: getEnv('FLY_REGION', 'sin'),
+    appPrefix: getEnv('FLY_APP_PREFIX', 'agentpod'),
+    // The workspace lives here, because the Fly rootfs is wiped on every
+    // stop→start.
+    volumeSizeGb: getEnvInt('FLY_VOLUME_SIZE_GB', 3),
   },
 
   metamcp: {

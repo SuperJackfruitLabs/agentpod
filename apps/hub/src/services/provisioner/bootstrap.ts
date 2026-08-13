@@ -13,6 +13,7 @@ import { provisionedRuntimes } from "../../db/schema/nodes";
 import { registerProvisioner, isProviderEnabled } from "./registry";
 import { DockerRuntimeProvisioner } from "./docker";
 import { CloudflareSandboxProvisioner } from "./cloudflare-sandbox";
+import { FlyMachinesProvisioner } from "./fly";
 import { createActivityToucher } from "../runtime-activity";
 import { setActivityHook } from "../broker";
 
@@ -53,5 +54,16 @@ export function registerEnabledProvisioners(): void {
     // Fire-and-forget: touch() never throws, and a renewal must never delay or
     // fail the user's actual verb.
     setActivityHook((nodeId) => void toucher.touch(nodeId));
+  }
+
+  if (isProviderEnabled("fly")) {
+    // Constructing it resolves FLY_API_TOKEN through requireCredentials, which
+    // throws if it is missing — a startup-time refusal to register, by design.
+    // validate-config has already refused the boot with a better message by
+    // this point, so this throw is the backstop rather than the front line.
+    //
+    // No activity toucher, unlike Cloudflare: a Fly machine with no `services`
+    // block is never reaped for idleness, so there is no deadline to push out.
+    registerProvisioner(new FlyMachinesProvisioner());
   }
 }
