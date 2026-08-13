@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -36,7 +37,10 @@ import (
 // Project path discovery: opencode.db is the preferred source (table "project",
 // column "worktree", skip row where id="global"). If the DB is absent or the
 // sqlite3 binary is unavailable, Detect falls back to enumerating
-// <dataDir>/project/ dirs and decoding the sanitised names.
+// <dataDir>/project/ dirs and decoding the sanitised names. On hosts where the
+// DB is permanently unreadable — provisioned opencode containers ship no
+// sqlite3 on purpose — that fallback IS the normal path, so it is logged on
+// change of condition only, never per detect cycle (see noteDBUnreadable).
 //
 // Decode ambiguity (fallback only): OpenCode sanitises project paths by
 // stripping the leading '/' and replacing remaining '/' with '-'. When
@@ -46,6 +50,15 @@ import (
 // scheme; non-existent decoded paths are silently filtered out.
 type openCodeDescriptor struct {
 	dataDir string // absolute path to ~/.local/share/opencode
+
+	// mu guards dbFailureReason. Detect runs on the periodic detect loop and
+	// again on every capability call that resolves a key.
+	mu sync.Mutex
+	// dbFailureReason is the last reported reason opencode.db could not be
+	// read, or "" when the DB last read fine (the initial state). It exists so
+	// the fallback is logged on a *change* of condition rather than once per
+	// detect cycle — see noteDBUnreadable.
+	dbFailureReason string
 }
 
 // NewOpenCode returns a Descriptor for the OpenCode harness.
@@ -167,13 +180,57 @@ func (o *openCodeDescriptor) loadProjectPaths() ([]string, error) {
 
 	paths, err := o.projectPathsFromDB(dbPath)
 	if err == nil {
+		o.noteDBReadable(dbPath)
 		return paths, nil
 	}
 
+	o.noteDBUnreadable(dbPath, err)
+	return o.projectPathsFromDirs()
+}
+
+// noteDBUnreadable logs that the descriptor is using the directory-enumeration
+// fallback — but only when that is *news*: the first failure, or a failure
+// whose reason differs from the one last reported.
+//
+// Detect runs every 10-60s, and on a host where the DB is permanently
+// unreadable (deploy/Dockerfile.opencode deliberately ships no sqlite3, making
+// directory enumeration the primary path there) the unchanged condition
+// previously produced one line per cycle — 83% of a real node's log volume,
+// which buried the gateway events an operator actually needs (#231).
+//
+// Suppression is per reason string, so a genuine transition (e.g. "db not
+// found" → "sqlite3 not in PATH", observed changing on a live host within a
+// minute) still logs.
+func (o *openCodeDescriptor) noteDBUnreadable(dbPath string, cause error) {
+	reason := cause.Error()
+
+	o.mu.Lock()
+	repeat := o.dbFailureReason == reason
+	o.dbFailureReason = reason
+	o.mu.Unlock()
+
+	if repeat {
+		return
+	}
 	log.Printf("opencode: could not read %s (%v); "+
 		"falling back to project/ directory enumeration "+
-		"(note: decoded paths may be ambiguous when project names contain '-')", dbPath, err)
-	return o.projectPathsFromDirs()
+		"(note: decoded paths may be ambiguous when project names contain '-'; "+
+		"repeats of this same reason are suppressed)", dbPath, cause)
+}
+
+// noteDBReadable logs recovery — the DB became readable after a fallback — so
+// the log never leaves an operator believing a node is still degraded. Silent
+// when the DB was already readable, which is the steady-state case.
+func (o *openCodeDescriptor) noteDBReadable(dbPath string) {
+	o.mu.Lock()
+	recovered := o.dbFailureReason != ""
+	o.dbFailureReason = ""
+	o.mu.Unlock()
+
+	if !recovered {
+		return
+	}
+	log.Printf("opencode: %s is readable again; resuming db-backed project discovery", dbPath)
 }
 
 // projectPathsFromDB reads project worktree paths from opencode.db via the
