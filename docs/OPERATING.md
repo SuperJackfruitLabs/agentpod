@@ -503,6 +503,11 @@ own bill):
 
 - `shared-cpu-1x` **started**: ~$5.70/mo at 1 GB (tier `small`), ~$10.70 at 2 GB
   (`medium`), ~$21.40 at 4 GB (`large`), region-dependent, charged per second.
+  **The `opencode` harness needs `medium` or larger** — measured 2026-08-13, one
+  chat turn peaks at 855 MB of harness on top of ~157 MB of OS and node-agent,
+  which is the whole of a 1 GB machine (#279). The console no longer offers that
+  combination and the hub refuses it with a 400; `small` stays right for a bare
+  node (`harness: none`).
 - **Volume**: $0.15/GB/month of provisioned capacity — so the default 3 GB is
   about **$0.45/month per runtime, running or stopped**.
 - **Stopped rootfs**: $0.15 per GB per 30 days — so it depends on how large the
