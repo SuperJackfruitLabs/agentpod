@@ -429,6 +429,101 @@ describe("FlyMachinesProvisioner — provision", () => {
   });
 });
 
+/**
+ * Swap. #278: a machine with none does not OOM-kill a process when memory
+ * spikes — it WEDGES. Measured 2026-08-13 on a live `small` runtime: two
+ * opencode processes reached 855 MB on a 962 MB machine, and from that moment
+ * every broker verb 502'd on the 15s timeout, heartbeats stopped, Fly's own
+ * `machine exec` answered `deadline_exceeded`, and Fly still reported
+ * `state: started` — so `restart: always` never fired, because nothing had
+ * exited. Only `flyctl machine restart` recovered it, and the console blamed
+ * the hub, which was healthy throughout.
+ */
+describe("FlyMachinesProvisioner — swap", () => {
+  it("asks for swap INSIDE config.init, the ONE place Fly honours it", async () => {
+    // THE NESTING IS THE ASSERTION. Do not "simplify" this to
+    // `config.swap_size_mb` — that is the bug this test exists to prevent, not
+    // a tidier spelling of it.
+    //
+    // Measured against a real Fly account on 2026-08-13: `swap_size_mb` at the
+    // config top level, and as a top-level sibling of `config`, is SILENTLY
+    // DROPPED. Fly answers 200, the machine boots, and the guest reports
+    // `SwapTotal: 0 kB`. No error is returned, at create or at update. Nested
+    // inside `init` it is honoured and echoed back: 512 → SwapTotal 524284 kB
+    // as a real partition (/dev/vdc in /proc/swaps), 256 → 262140 kB, unset →
+    // 0 kB.
+    //
+    // So a test asserting the field at the config top level would go green
+    // while every machine this driver creates shipped with no swap at all, and
+    // the only symptom would be the next wedged VM.
+    const { driver, fake } = flyDriver();
+    await driver.provision(SPEC);
+
+    const create = fake.calls.find((c) => c.path.endsWith("/machines"))!;
+    const body = create.body as {
+      config: { init?: Record<string, unknown> } & Record<string, unknown>;
+    } & Record<string, unknown>;
+
+    expect(body.config.init).toMatchObject({ swap_size_mb: 512 });
+    // ...and nowhere else, because "nowhere else" is where Fly ignores it.
+    expect(body.config).not.toHaveProperty("swap_size_mb");
+    expect(body).not.toHaveProperty("swap_size_mb");
+  });
+
+  it("sizes swap per tier, as a fraction of that tier's RAM", async () => {
+    // Sizes are read back off the SAME request body, so this pins the
+    // relationship (swap is a fraction of RAM, never larger than it) rather
+    // than restating the guest table — the tier→memory mapping is #279's to
+    // change.
+    const expected = { small: 512, medium: 1024, large: 2048 } as const;
+
+    for (const tier of ["small", "medium", "large"] as const) {
+      const { driver, fake } = flyDriver();
+      await driver.provision({ ...SPEC, runtimeId: `rt_swap_${tier}`, resourceTier: tier });
+
+      const create = fake.calls.find((c) => c.path.endsWith("/machines"))!;
+      const config = (create.body as {
+        config: { init: { swap_size_mb: number }; guest: { memory_mb: number } };
+      }).config;
+
+      expect(config.init.swap_size_mb).toBe(expected[tier]);
+      // Every tier gets some. A tier with none is a tier that can wedge.
+      expect(config.init.swap_size_mb).toBeGreaterThan(0);
+      // Never MORE than RAM: on a 1-CPU shared machine, swap bigger than
+      // memory trades a wedge for hours of unusable thrashing.
+      expect(config.init.swap_size_mb).toBeLessThanOrEqual(config.guest.memory_mb);
+    }
+  });
+
+  it("leaves the swap on the machine Fly kept, not just on the request", async () => {
+    // The fake models Fly's silent drop, so this only passes if the driver put
+    // the field where Fly actually reads it. It is the unit-test stand-in for
+    // the live check — reading SwapTotal out of the guest — that the fix's
+    // fleet verification does for real.
+    const { driver, fake } = flyDriver();
+    const { externalId } = await driver.provision(SPEC);
+    const { app, machineId } = parseFlyExternalId(externalId);
+
+    const kept = fake.apps.get(app)!.machines.get(machineId)!.config as {
+      init?: { swap_size_mb?: number };
+    };
+    expect(kept.init?.swap_size_mb).toBe(512);
+  });
+
+  it("does not disturb the rest of the machine config", async () => {
+    // `init` is a new block in this request; the fields that were already
+    // load-bearing (no services, restart always, the mount) stay put.
+    const { driver, fake } = flyDriver();
+    await driver.provision(SPEC);
+
+    const create = fake.calls.find((c) => c.path.endsWith("/machines"))!;
+    const config = (create.body as { config: Record<string, unknown> }).config;
+    expect(config).not.toHaveProperty("services");
+    expect(config.restart).toEqual({ policy: "always" });
+    expect(config.mounts).toHaveLength(1);
+  });
+});
+
 describe("FlyMachinesProvisioner — start", () => {
   it("starts the machine and waits for it to be started", async () => {
     const { driver, fake } = flyDriver();
@@ -1039,6 +1134,33 @@ describe("the Fly fake substrate is unfriendly where Fly is", () => {
       `/v1/apps/a/machines/${machine.id}/wait?state=stopped`
     );
     expect(without.status).toBe(400);
+  });
+
+  it("SILENTLY DROPS swap_size_mb asked for anywhere but inside `init`", async () => {
+    // Measured 2026-08-13. This is the unfriendliest thing the fake does, and
+    // the most valuable: real Fly answers 200 and boots a machine with
+    // `SwapTotal: 0 kB` when the field is at the config top level or a sibling
+    // of `config`. There is no error to notice. A fake that stored the config
+    // verbatim would let a driver ship swapless machines with a green suite,
+    // which is exactly how #278's wedge would come back.
+    const fake = createFlyFakeSubstrate();
+    await newApp(fake);
+    const res = await call(fake, "POST", "/v1/apps/a/machines", {
+      region: "sin",
+      swap_size_mb: 256,
+      config: { swap_size_mb: 512, init: { swap_size_mb: 1024 } },
+    });
+    expect(res.status).toBe(200);
+
+    const id = ((await res.json()) as { id: string }).id;
+    const kept = (await (
+      await call(fake, "GET", `/v1/apps/a/machines/${id}`)
+    ).json()) as { config: { swap_size_mb?: number; init?: { swap_size_mb?: number } } };
+
+    expect(kept.config).not.toHaveProperty("swap_size_mb");
+    // Nested in `init` it survives — and is echoed back, which is how the live
+    // probe read the value off a machine flyctl had created.
+    expect(kept.config.init?.swap_size_mb).toBe(1024);
   });
 
   it("404s everything about an app it has deleted", async () => {
