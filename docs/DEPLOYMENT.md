@@ -165,6 +165,25 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # and not validated at boot — see "Modal provisioner" in docs/OPERATING.md
 # before setting it.
 # MODAL_MAX_LIFETIME_MS=86400000
+
+# Fly Machines provisioner: leave off unless you have a Fly account with a
+# payment method. Fly's free tier is gone, and a Fly runtime keeps billing for
+# its volume while it is stopped — see docs/OPERATING.md for the shape of the
+# bill before you turn this on.
+# The hub REFUSES TO BOOT with ENABLE_FLY_PROVISIONING=true and no FLY_API_TOKEN.
+# ENABLE_FLY_PROVISIONING=false
+# Org-scoped, and the BARE macaroon: flyctl prints a "FlyV1 " prefix that must
+# be stripped. See "Fly Machines settings" below — this one has a trap.
+# FLY_API_TOKEN=<flyctl tokens create org <org> --expiry 720h | sed 's/^FlyV1 //'>
+# FLY_ORG_SLUG=personal
+# FLY_REGION=sin
+# FLY_APP_PREFIX=agentpod
+# FLY_VOLUME_SIZE_GB=3
+# Fly pulls from a registry, so the local Docker tags above are meaningless to
+# it. Provider-scoped names win over the un-scoped ones, which lets one hub run
+# Docker and Fly on different images. See "Fly Machines settings" below.
+# NODE_AGENT_FLY_IMAGE=ghcr.io/<owner>/agentpod-node-fly:v0.1.0
+# NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:v0.1.0
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -179,6 +198,29 @@ chmod 600 /etc/agentpod/hub.env
 > - `PROVISIONING_HUB_URL` is required for Modal (not merely recommended, as it is for Docker) because Modal destroys every sandbox at 24 hours and the hub re-creates them on a timer, with no incoming request to take an origin from. It must be reachable **from inside a Modal sandbox** — a public URL or a tunnel, never `localhost`.
 > - On Modal's Starter plan an API token is **workspace-wide**; scoping a token per environment requires Modal's Team plan (~$250/month). Use a Modal workspace dedicated to AgentPod.
 > - Never commit this file to source control.
+
+### Fly Machines settings
+
+Only relevant with `ENABLE_FLY_PROVISIONING=true`; a hub that never talks to Fly
+is not stopped from booting by any of them. Operating a Fly runtime — what it
+costs, how to cross-check it with `flyctl` — is in
+[docs/OPERATING.md](./OPERATING.md#fly-machines-provisioner).
+
+If you have not used Fly before: install `flyctl` on your **workstation**
+(`brew install flyctl`, or `curl -L https://fly.io/install.sh | sh`), run
+`flyctl auth login`, and add a payment method to the organisation. `flyctl` is
+how you mint the token below and how you audit what is running; the hub itself
+never shells out to it — it talks to `https://api.machines.dev` directly, so the
+hub box needs no `flyctl` install and no Fly login.
+
+> - `FLY_API_TOKEN`: **required** whenever `ENABLE_FLY_PROVISIONING=true`. The hub refuses to boot without it — `❌ CONFIGURATION VALIDATION FAILED` naming `FLY_API_TOKEN` — rather than accepting the flag and failing on a user's first provision. The token must be **org-scoped**: `flyctl tokens create org <org> --name agentpod --expiry 720h`. Fly's app-scoped deploy tokens can do everything except *create* an app, and this driver creates one app per runtime. Pass `--expiry` explicitly; Fly defaults it to twenty years.
+> - **The token trap — measured 2026-08-13.** `flyctl tokens create org` prints the macaroon **already prefixed with `FlyV1 `**. `FLY_API_TOKEN` should hold the **bare macaroon, with that prefix stripped**. Pasting the flyctl output verbatim produces the literal header `Authorization: Bearer FlyV1 <macaroon>` — which Fly was measured to accept (200) on that date, so a doubled prefix does not fail visibly today and will sit in your env file being quietly load-bearing until the day Fly stops tolerating it. Strip it: `flyctl tokens create org personal --expiry 720h | sed 's/^FlyV1 //'`.
+> - **Auth scheme — measured 2026-08-13.** The driver sends `Authorization: Bearer <token>`. Fly's own documentation gives both `Bearer` and `FlyV1`, on different pages, with no indication that either is deprecated, so it was settled by probing `GET https://api.machines.dev/v1/apps?org_slug=personal`: `Bearer` → 200, `FlyV1` → 200, **no** `Authorization` header → 401, `Bearer garbage` → 401. Both schemes work; the two 401 controls are what rule out an endpoint that ignores auth altogether. `Bearer` is the one in `fly-api.ts`, because it is the standard scheme and needs no explanation to any HTTP tool.
+> - `FLY_REGION` (default `sin`): **measured 2026-08-12 on a real account** — `bom` is refused with `region ... is not available to legacy or non-paid plan accounts`, and `sin` is accepted, on the same account with the same token. The plan an organisation is on, not the token, decides which regions it may use. The driver rewrites that refusal into a sentence naming `FLY_REGION` and suggesting `sin`, so it does not read as a Fly outage.
+> - `FLY_VOLUME_SIZE_GB` (default `3`): the size of the volume each runtime gets. **The workspace lives on this volume**, because the Fly rootfs is wiped on every stop→start (measured 2026-08-12). Minimum 1; the hub refuses to boot below that. A **blank** value (`FLY_VOLUME_SIZE_GB=`) means the default, exactly as leaving the line out does — an unfilled variable is not a configured one. Anything else that is not a whole number — `3.5`, `12gb`, `three` — is an error: the hub throws `Invalid integer for environment variable: FLY_VOLUME_SIZE_GB` at startup rather than truncating it, and it does that whether or not Fly is enabled, because config is parsed before anything knows which substrates you use. Fly sizes volumes in whole gigabytes.
+> - `FLY_ORG_SLUG` (default `personal`) and `FLY_APP_PREFIX` (default `agentpod`): the organisation apps are created in, and the app-name prefix. A runtime `rt_3f2a…` becomes the Fly app `agentpod-rt-3f2a…` — that prefix is what makes `flyctl apps list` legible and what the cost audit in OPERATING greps for, so change it only if you must.
+> - **The Fly image must be registry-qualified** — e.g. `ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22`. Fly pulls from a registry, so the default bare tag `agentpod-node-opencode:local` exists only on your Docker host and the machine create fails on the pull. `imageForHarness()` resolves it provider-first: `NODE_AGENT_FLY_OPENCODE_IMAGE`, then the un-scoped `NODE_AGENT_OPENCODE_IMAGE`, then the local default. Setting the **provider-scoped** name is the safe choice on a hub that also runs Docker, because it leaves the Docker tag alone. Setting the un-scoped `NODE_AGENT_OPENCODE_IMAGE` also works — a registry-qualified tag is fine for Docker too, since the daemon pulls it — and is what lets one variable serve both providers.
+> - **The image is built by hand, and there is no CI pipeline for it — by convention, like every other node-agent image in this repo.** `fly/node-image/README.md` has the `docker buildx … --push` line. Two things it will not let you skip: `--platform linux/amd64` (Fly Machines are amd64; an arm64 image built on an Apple laptop dies at boot with `exec format error`) and making the registry package **public** (Fly pulls anonymously). The tag in `NODE_AGENT_FLY_OPENCODE_IMAGE` / `NODE_AGENT_OPENCODE_IMAGE` is the only record of which build the fleet is running.
 
 ---
 

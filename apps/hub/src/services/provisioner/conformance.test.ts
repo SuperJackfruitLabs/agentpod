@@ -26,6 +26,9 @@ import { CloudflareSandboxProvisioner } from "./cloudflare-sandbox";
 import { ModalRuntimeProvisioner } from "./modal";
 import { ModalNotFoundError } from "./modal-api";
 import type { ModalApi } from "./modal-api";
+import { FlyMachinesProvisioner } from "./fly";
+import { createFlyFakeSubstrate } from "./fly-fake-substrate";
+import { noPacer } from "./fly-api";
 import type {
   DockerOrchestrator,
   Sandbox,
@@ -663,5 +666,53 @@ describe("assertConforms — the real drivers", () => {
     await expect(assertConforms(grown)).rejects.toThrow(
       /stopSemantics:.*implements start\(\)/s
     );
+  });
+
+  /**
+   * The Fly driver against a faithful in-memory Fly API.
+   *
+   * `noPacer` is not an optimisation: the real pacer allows one request per
+   * second past a burst of three, assertConforms provisions five times, and a
+   * provision is four calls. Paced, this one test would add roughly twenty
+   * seconds to every CI run and prove nothing about the driver.
+   */
+  const flyDriver = () =>
+    new FlyMachinesProvisioner({
+      credentials: { get: () => "fly-token" },
+      orgSlug: "conformance",
+      region: "sin",
+      fetchImpl: createFlyFakeSubstrate().fetchImpl,
+      pacer: noPacer,
+    });
+
+  it("holds the real Fly driver to every declaration", async () => {
+    // No probe.image and no probe.tier: the manifest declares imageBinding
+    // "per-instance" and all three tiers, so the suite builds its own spec and
+    // the driver must honour it — the opposite of Cloudflare, whose fixed image
+    // is a deployment fact no manifest can carry and so must be passed in.
+    await expect(assertConforms(flyDriver())).resolves.toBeUndefined();
+  });
+
+  it("would catch a Fly driver whose destroy stopped being idempotent", async () => {
+    // The suite is only worth having if it fails when the behaviour regresses.
+    // Docker's destroy was non-idempotent for real, and fixing it was a
+    // 2026-08-12 bug fix — this pins that the same regression on Fly is caught.
+    const driver = flyDriver();
+    const strict: RuntimeProvisioner = {
+      ...driver,
+      manifest: driver.manifest,
+      provision: (spec) => driver.provision(spec),
+      start: (id) => driver.start(id),
+      stop: (id) => driver.stop(id),
+      status: (id) => driver.status(id),
+      destroy: async (id: string) => {
+        const state = await driver.status(id);
+        if (state === "stopped") {
+          throw new Error(`fly: no such app for ${id}`);
+        }
+        await driver.destroy(id);
+      },
+    };
+    await expect(assertConforms(strict)).rejects.toThrow(/destroy/i);
   });
 });

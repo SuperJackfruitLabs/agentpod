@@ -114,6 +114,13 @@ jobs:
         working-directory: apps/node-agent
         run: go test ./... -race
 
+      # Here rather than in a job of its own: it is about the node-agent's
+      # runtime layout, and this job is a required check — a new job would not
+      # gate. Runs as a user who can write to /, so the /workspace assertions
+      # execute rather than skipping the way they do on a macOS dev box.
+      - name: Test the Fly image workspace wrapper
+        run: sh fly/node-image/test-volume-workspace.sh
+
   console:
     name: console
     runs-on: ubuntu-latest

@@ -191,6 +191,37 @@ export function collectConfigErrors(
     }
   }
 
+  // Conditional for the same reason as CLOUDFLARE_SANDBOX_IMAGE above: required
+  // only where the Fly driver is actually registered.
+  //
+  // This is the FRONT LINE of a refusal that already exists. bootstrap.ts
+  // constructs FlyMachinesProvisioner when the flag is on, and that constructor
+  // resolves FLY_API_TOKEN through requireCredentials, which throws. So a
+  // tokenless Fly deployment cannot boot either way; the only question is
+  // whether the operator gets a stack trace out of registerEnabledProvisioners
+  // or this. A hub with the flag off — every deployment today — reaches neither.
+  if (cfg.fly.enabled && !cfg.fly.apiToken) {
+    errors.push({
+      field: "FLY_API_TOKEN",
+      message:
+        "Required when ENABLE_FLY_PROVISIONING=true. Generate with `flyctl tokens create org <org>` " +
+        "(app-scoped deploy tokens cannot CREATE apps, and this driver creates one per runtime). " +
+        "Set the expiry explicitly — Fly defaults it to twenty years.",
+    });
+  }
+
+  // Fly's minimum volume is 1 GB, and the volume is where the workspace lives:
+  // this substrate wipes the rootfs on every stop→start, so a machine whose
+  // mount failed loses a user's work exactly the way Cloudflare did.
+  if (cfg.fly.enabled && cfg.fly.volumeSizeGb < 1) {
+    errors.push({
+      field: "FLY_VOLUME_SIZE_GB",
+      message:
+        `Must be at least 1 (got ${cfg.fly.volumeSizeGb}). The workspace lives on this volume ` +
+        "because the Fly rootfs does not survive a stop.",
+    });
+  }
+
   return errors;
 }
 

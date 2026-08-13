@@ -16,6 +16,7 @@ import { CloudflareSandboxProvisioner } from "./cloudflare-sandbox";
 import { ModalRuntimeProvisioner } from "./modal";
 import { createModalApi } from "./modal-api";
 import type { CreateModalApiOptions } from "./modal-api";
+import { FlyMachinesProvisioner } from "./fly";
 import { createActivityToucher } from "../runtime-activity";
 import { setActivityHook } from "../broker";
 
@@ -92,5 +93,16 @@ export function registerEnabledProvisioners({
         api: createModalApi({ clientFactory: modalClientFactory }),
       })
     );
+  }
+
+  if (isProviderEnabled("fly")) {
+    // Constructing it resolves FLY_API_TOKEN through requireCredentials, which
+    // throws if it is missing — a startup-time refusal to register, by design.
+    // validate-config has already refused the boot with a better message by
+    // this point, so this throw is the backstop rather than the front line.
+    //
+    // No activity toucher, unlike Cloudflare: a Fly machine with no `services`
+    // block is never reaped for idleness, so there is no deadline to push out.
+    registerProvisioner(new FlyMachinesProvisioner());
   }
 }
