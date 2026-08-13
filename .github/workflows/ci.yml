@@ -5,6 +5,13 @@ on:
     branches: [main, develop, redesign/fleet-console]
   pull_request:
     branches: [main, develop, redesign/fleet-console]
+  # Run CI against an arbitrary ref on demand. This is not a convenience: the
+  # Fly-pin PR that release-node-agent.yml opens is created with GITHUB_TOKEN,
+  # and a PR opened by that token cannot trigger `pull_request` workflows, so
+  # its required checks would sit at "Expected" forever and the PR could never
+  # merge. `workflow_dispatch` is the documented exception to that rule, and the
+  # check runs it produces attach to the head commit the PR is asking to merge.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
