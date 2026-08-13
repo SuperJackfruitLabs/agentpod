@@ -118,6 +118,27 @@ check "runs the inner command with the workspace as its working directory" \
   "$OUT" "PWD=$(cd "$TMP/mount" && pwd -P)$"
 check "passes the inner command its arguments" "$OUT" "ARGS=hello there$"
 
+# ── The image chooses its own inner entrypoint ───────────────────────────────
+# Every Modal image is started with the same argv, so the harness layer declares
+# its inner script as an ENV instead. Without this the OpenCode image would run
+# the generic entrypoint and never start the supervised `opencode serve` the
+# station's health check and lifecycle verbs are built around.
+cat >"$TMP/declared.sh" <<'DECLARED'
+#!/bin/sh
+echo "RAN=declared"
+DECLARED
+chmod +x "$TMP/declared.sh"
+
+OUT="$(AGENTPOD_INNER_ENTRYPOINT="$TMP/declared.sh" AGENTPOD_WORKSPACE_PATH="$TMP/mount" \
+  sh "$WRAPPER" 2>/dev/null || true)"
+check "execs the inner entrypoint the image declared" "$OUT" "RAN=declared$"
+
+# An explicit argument still wins, so the test and operator paths are unchanged.
+OUT="$(AGENTPOD_INNER_ENTRYPOINT="$TMP/declared.sh" AGENTPOD_WORKSPACE_PATH="$TMP/mount" \
+  sh "$WRAPPER" "$TMP/inner.sh" hello 2>/dev/null || true)"
+check "an explicit argument still overrides the declared inner entrypoint" \
+  "$OUT" "ARGS=hello$"
+
 # ── HOME never lands on the Volume ───────────────────────────────────────────
 # os.UserConfigDir() with no HOME returns an error the node-agent discards,
 # leaving a RELATIVE config path that resolves against the working directory —

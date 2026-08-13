@@ -403,9 +403,19 @@ Modal has no reversible stop, so these verbs do not mean quite what they mean on
 
 These tokens create infrastructure in a Modal workspace. They cannot reach an enrolled node — enrolment is outbound-dialled and SSH runs from your own machine.
 
-#### The image
+#### The images — one per harness
 
-Modal pulls from a registry, runs **linux/amd64 only**, and requires **python and pip** in the image. Build it from `apps/node-agent/deploy/Dockerfile.modal` and set `NODE_AGENT_MODAL_IMAGE` to the pushed tag.
+Modal pulls from a registry, runs **linux/amd64 only**, and requires **python and pip** in the image. There are **three**, because the console offers three harnesses for every provider and each needs its own image:
+
+| Harness | Dockerfile (context `apps/node-agent`) | Published image | Hub variable |
+|---|---|---|---|
+| Generic | `deploy/Dockerfile.modal` | `agentpod-node-modal` | `NODE_AGENT_MODAL_IMAGE` |
+| OpenCode | `deploy/Dockerfile.modal.opencode` | `agentpod-node-modal-opencode` | `NODE_AGENT_MODAL_OPENCODE_IMAGE` |
+| Pi | `deploy/Dockerfile.modal.pi` | `agentpod-node-modal-pi` | `NODE_AGENT_MODAL_PI_IMAGE` |
+
+**The hub refuses to boot if any of the three is missing** (issue #283 — before that check, a Modal hub booted clean and answered 502 the first time anyone picked OpenCode or Pi). The harness images are built `FROM` the ordinary harness images, so the opencode/pi version pins live in `Dockerfile.opencode` / `Dockerfile.pi` only.
+
+The OpenCode image sets `AGENTPOD_INNER_ENTRYPOINT=/node-opencode-entrypoint.sh`: Modal starts every image with the same command, so an image whose harness needs a supervision loop has to say so itself. **Known cost:** on Modal, `$HOME` stays on the disposable rootfs (the Volume must never hold node credentials), so an OpenCode station on Modal keeps its *files* across the 24-hour rotation and loses its *conversation history*. Fly, whose `$HOME` is on the volume, keeps both.
 
 Three things are non-negotiable, each fatal on its own and each failing quietly:
 
@@ -428,7 +438,14 @@ docker buildx build --platform linux/amd64 \
 
 **The repository must be public.** The driver calls Modal's `images.fromRegistry(tag)` with no Secret, so Modal has no credential to authenticate to a private registry with. A private tag passes the hub's boot check — it looks like a registry reference — and then fails at provision time.
 
-**Prefer the CI pipeline over the hand-build above.** `.github/workflows/publish-images.yml` (Actions → publish-images → Run workflow, choose `fly`/`modal`/`all` and a tag) builds natively on an amd64 runner, pushes to GHCR, and verifies what it published — for Modal, that `python3` and `pip` exist and `ENTRYPOINT` is empty. It also stamps the source commit as an image label, which a hand-built tag records nowhere. The commands above remain accurate for building locally when iterating on a Dockerfile.
+**Prefer the CI pipeline over the hand-build above.** `.github/workflows/publish-images.yml` (Actions → publish-images → Run workflow, choose `all` or one of `fly`, `fly-pi`, `modal`, `modal-opencode`, `modal-pi`, and a tag) builds natively on an amd64 runner, pushes to GHCR, and verifies what it published:
+
+- every image — `agentpod-node version` runs;
+- Modal images — `python3` and `pip` exist and `ENTRYPOINT` is empty;
+- harness images — the harness binary is resolvable **from a minimal service PATH** with the image's own `ENV` discarded (`env -i PATH=/usr/local/sbin:…:/bin`), which is the shape of the environment the node-agent spawns an ACP adapter in;
+- the harness-less image — no harness binary is present, so a "Generic" runtime does not quietly detect stations nobody asked for.
+
+It also stamps the source commit as an image label, which a hand-built tag records nowhere. The commands above remain accurate for building locally when iterating on a Dockerfile.
 
 To sanity-check a built image before pushing, run its entrypoint test against a bind mount standing in for the Volume:
 
@@ -442,7 +459,7 @@ docker run --rm --platform linux/amd64 \
 #### When a Modal runtime does not come up
 
 - **Hub exits at startup naming a `MODAL_*` variable** — working as designed. Set the variable it names; the check is in `apps/hub/src/utils/validate-config.ts`.
-- **Provision fails with "not a registry reference Modal can pull"** — the resolved image had no registry host. Most often this is a runtime created with the OpenCode or Pi harness while only `NODE_AGENT_MODAL_IMAGE` was set; set `NODE_AGENT_MODAL_OPENCODE_IMAGE` / `NODE_AGENT_MODAL_PI_IMAGE` too.
+- **Provision fails with "not a registry reference Modal can pull"** — the resolved image had no registry host. This used to be the OpenCode/Pi case, and the hub now refuses to boot rather than letting a user find it; reaching it today means an image variable holds a registry-shaped tag that Modal still cannot pull (a private repository, or a typo in the host).
 - **Stuck in `provisioning`, then `error` after two minutes** — the sandbox booted but never enrolled. Read the sandbox's logs in the Modal dashboard. The usual causes are an image without python, an arm64 image, and a `PROVISIONING_HUB_URL` the sandbox cannot reach.
 - **`[modal] WARNING: /workspace does not look like a mounted Volume`** in the sandbox log — work written there will be lost at the next rotation. Do not use that station.
 - **Every Modal runtime reports trouble at once** — suspect the credentials, not the fleet. An expired `MODAL_TOKEN_SECRET` fails every call. The driver deliberately refuses to translate an unreachable substrate into `stopped`, so this surfaces as `error`, loudly, rather than as a fleet that has quietly gone quiet.
@@ -457,6 +474,21 @@ in [docs/DEPLOYMENT.md](./DEPLOYMENT.md#fly-machines-settings).
 Unlike Cloudflare, **all three resource tiers work and the harness image is
 honoured per machine** — Fly takes `config.guest` and `config.image` on each
 machine create, so nothing is frozen at deploy time.
+
+**Which harnesses Fly can actually run**, and it is not all of them:
+
+| Harness | Dockerfile (context = repo root) | Published image | Hub variable |
+|---|---|---|---|
+| OpenCode | `fly/node-image/Dockerfile` | `agentpod-node-opencode-fly` | `NODE_AGENT_FLY_OPENCODE_IMAGE` |
+| Pi | `fly/node-image/Dockerfile.pi` | `agentpod-node-pi-fly` | `NODE_AGENT_FLY_PI_IMAGE` |
+| Generic | — none published — | — | `NODE_AGENT_FLY_IMAGE` |
+
+The console offers **Generic** for Fly anyway, and it cannot work: there is no
+image to pull. The hub reports that at boot — `⚠️ WARNING` naming
+`NODE_AGENT_FLY_IMAGE` — rather than refusing to start, because refusing would
+make Fly unbootable for the two harnesses that *do* work. Both Fly images take
+the node-agent binary from a **release** (verified against `SHA256SUMS`) rather
+than compiling it, and both are pinned to the same version on purpose.
 
 **What the hub creates per runtime**, in this order:
 
@@ -644,7 +676,8 @@ Hermes stations that have a Matrix identity configured display the **Matrix ID**
 **A Fly runtime never comes online:**
 - `flyctl logs -a agentpod-rt-<id>`. `[fly] FATAL: /data is not mounted.` means the volume did not attach — check `flyctl volumes list -a <app>`. The wrapper refuses to run rather than write the workspace to a rootfs Fly wipes on the next stop.
 - `exec format error` means an arm64 image. Rebuild with `--platform linux/amd64` (see `fly/node-image/README.md`).
-- A pull failure means `NODE_AGENT_OPENCODE_IMAGE` is a bare local tag such as `agentpod-node-opencode:local`, or the registry package is private. Fly pulls anonymously from a registry and has no access to your Docker host.
+- A pull failure means the resolved image (`NODE_AGENT_FLY_OPENCODE_IMAGE` / `NODE_AGENT_FLY_PI_IMAGE`, else the un-scoped `NODE_AGENT_OPENCODE_IMAGE` / `NODE_AGENT_PI_IMAGE`) is a bare local tag such as `agentpod-node-opencode:local`, or the registry package is private. Fly pulls anonymously from a registry and has no access to your Docker host. The hub prints a `⚠️ WARNING` at boot for exactly this, per harness — check the startup log before assuming Fly is at fault.
+- A runtime created with the **Generic** harness cannot come up at all: no harness-less Fly image is published. Create it as OpenCode or Pi.
 - The machine can be `started` and the runtime still not online: the node-agent has to reach the hub *from Fly*, so `PROVISIONING_HUB_URL` must be a public URL, never `127.0.0.1`.
 
 **Provisioning fails with "legacy or non-paid plan":**

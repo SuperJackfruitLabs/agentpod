@@ -1,0 +1,106 @@
+# syntax=docker/dockerfile:1
+
+# Fly Machines runtime image: node-agent + the Pi harness.
+#
+# The sibling of fly/node-image/Dockerfile (node-agent + OpenCode). Before this
+# image, Pi could not run on ANY provisioned substrate — the fleet had a Pi
+# descriptor and a Pi Docker image, and neither Fly nor Modal had one to pull
+# (issue #283).
+#
+# BUILD CONTEXT IS THE REPOSITORY ROOT:
+#   docker buildx build --platform linux/amd64 \
+#     -f fly/node-image/Dockerfile.pi \
+#     -t ghcr.io/<owner>/agentpod-node-pi-fly:<version> --push .
+#
+# WHY THIS IS NOT `FROM agentpod-node-pi` the way the Modal Pi image is. The Fly
+# images take the node-agent binary from a RELEASE rather than compiling it, so
+# a Fly station runs exactly the binary the rest of the fleet runs, verified
+# against SHA256SUMS the same way install.sh and self-update do. That is a
+# property of this substrate's images, kept deliberately across both of them —
+# the cost is that the Pi install below is a second copy of Dockerfile.pi's, and
+# the version pins are what must be kept in step (see the pin comment there).
+
+FROM debian:trixie-slim
+
+# The same released binary the OpenCode Fly image bakes in. The two Fly images
+# are pinned together ON PURPOSE: a fleet where two stations on one substrate
+# run different node-agent builds is a fleet where "it works on the other one"
+# means nothing. Bump both, or neither.
+ARG AGENTPOD_VERSION=v0.1.22
+
+# Debian trixie: the same userland the fleet's own base image uses, so the
+# harness install below behaves identically to the Docker Pi image.
+#
+# root is what everything here needs: apt, the release download, and at runtime
+# the wrapper replacing /workspace on the rootfs.
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git procps ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+# procps provides `pgrep`, used by the Pi descriptor's running-process health
+# check; without it the station Health panel shows "process check unavailable".
+# ripgrep is here because --ignore-scripts (below) skips the postinstall that
+# would otherwise fetch Pi's own ~/.pi/agent/bin/rg; Pi's file search falls back
+# to whatever `rg` is on PATH.
+
+# Node 24 from NodeSource: Pi requires Node >= 22.19 and Debian trixie's own
+# nodejs package is older. The setup script runs its own apt-get update.
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+ && apt-get install -y --no-install-recommends nodejs \
+ && rm -rf /var/lib/apt/lists/*
+
+# --ignore-scripts matches Pi's own installer. Both pins are deliberate and must
+# match apps/node-agent/deploy/Dockerfile.pi: a floating tag would make two
+# builds of the same image behave differently, and pi-acp@0.0.33 is the version
+# the descriptor's ACP path is written against.
+#
+# WHERE THESE BINARIES LAND, and why it is the whole ballgame. When the
+# node-agent opens an ACP session it spawns pi-acp itself, and that child gets
+# the node-agent's PATH — a non-login, non-interactive service PATH, not an
+# operator's. On 2026-08-12 a live macOS node spawned the adapter with env=nil,
+# pi-acp could not see /opt/homebrew/bin/pi, and every session died in ~500ms;
+# 21 unit tests, a container gate and four green CI checks missed it because
+# they all ran with a developer's PATH. The NodeSource nodejs package uses /usr
+# as its npm prefix, so these two `npm install -g` shims are linked into
+# /usr/bin — on every default PATH there is, and in the well-known directories
+# internal/descriptor/pi.go probes when PATH misses them. Anything that moved
+# the prefix (--prefix, NPM_CONFIG_PREFIX, a user-local install) would hide them
+# from exactly the process that has to find them, which is why the publish
+# workflow resolves `pi` under an explicit minimal PATH instead of trusting this
+# comment.
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1 \
+ && npm install -g --ignore-scripts pi-acp@0.0.33
+
+# Installed at /agentpod-node so the fleet entrypoint works unmodified.
+RUN set -eux; \
+    base="https://github.com/rakeshgangwar/agentpod/releases/download/${AGENTPOD_VERSION}"; \
+    curl -fsSL -o /agentpod-node "${base}/agentpod-node-linux-amd64"; \
+    curl -fsSL -o /tmp/SHA256SUMS "${base}/SHA256SUMS"; \
+    cp /agentpod-node /tmp/agentpod-node-linux-amd64; \
+    (cd /tmp && grep ' agentpod-node-linux-amd64$' SHA256SUMS | sha256sum -c -); \
+    rm -f /tmp/agentpod-node-linux-amd64 /tmp/SHA256SUMS; \
+    chmod +x /agentpod-node; \
+    /agentpod-node version
+
+# The fleet's GENERIC entrypoint — enrol, then run — copied from where it lives.
+# Unlike the OpenCode image there is no supervision loop: Pi has no daemon, it
+# is invoked per command, so there is no process to keep alive and no stop
+# sentinel to coordinate with.
+COPY apps/node-agent/deploy/node-entrypoint.sh /node-entrypoint.sh
+RUN chmod +x /node-entrypoint.sh
+
+# Workspace and identity persistence: the Fly rootfs is wiped on every
+# stop→start (measured 2026-08-12), so the wrapper points /workspace and HOME at
+# the mounted volume before handing off. HOME matters twice as much here as it
+# does for OpenCode: Pi keeps BOTH its credentials (~/.pi/agent/auth.json) and
+# the session files the descriptor enumerates to find stations under $HOME, so a
+# station whose HOME landed on the rootfs would come back from a stop having
+# forgotten every project it had.
+COPY fly/node-image/volume-workspace.sh /volume-workspace.sh
+RUN chmod +x /volume-workspace.sh
+
+# /workspace is created by the wrapper as a symlink into the volume; nothing in
+# the image should create a real directory there.
+
+ENTRYPOINT ["/volume-workspace.sh", "/node-entrypoint.sh"]

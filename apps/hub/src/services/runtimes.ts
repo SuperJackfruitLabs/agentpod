@@ -40,6 +40,7 @@ import {
   providerManifests,
   isProviderEnabled,
 } from "./provisioner/registry";
+import { imageForHarness } from "./runtimes-image";
 import { HARNESS_MIN_MEMORY_MB, tierFitsHarness } from "@agentpod/contract";
 import type { ProvisionedRuntime, ResourceTier } from "@agentpod/contract";
 import type { RuntimeProvisioner, RuntimeState } from "./provisioner/types";
@@ -50,49 +51,12 @@ const prefixedId = (prefix: string) =>
   `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 
 /**
- * Resolve the container image for a harness on a given provider.
- *
- * Image resolution lives in the service layer so drivers stay image-agnostic —
- * they always receive the resolved image via ProvisionSpec.image and never read
- * env themselves.
- *
- * It is provider-scoped because two enabled substrates need different
- * references for the same harness: Docker runs `agentpod-node-opencode:local`
- * from the host daemon, while Modal pulls from a registry and runs linux/amd64
- * only. One variable cannot serve both, and the failure mode when it tries is
- * silent — a sandbox that never boots, a runtime stuck in `provisioning`, and a
- * sweeper message two minutes later that names nothing.
- *
- * Resolution order, first non-empty hit wins:
- *   NODE_AGENT_<PROVIDER>_<HARNESS>_IMAGE   e.g. NODE_AGENT_MODAL_OPENCODE_IMAGE
- *   NODE_AGENT_<HARNESS>_IMAGE              e.g. NODE_AGENT_OPENCODE_IMAGE
- *   the built-in local default
- *
- * With no provider-scoped variable set, this resolves exactly what it resolved
- * before — Docker and Cloudflare are unchanged, which is checked against the
- * documented variable names in runtimes-image.test.ts.
- *
- * The provider-scoped name is not free-form: `NODE_AGENT_MODAL_IMAGE` is the
- * same variable `config.ts` reads and `validate-config.ts` refuses to boot
- * without. The two must stay in step, or an operator satisfies the boot check
- * and Modal is still handed a tag it cannot pull.
+ * Image resolution now lives in ./runtimes-image.ts, so that boot-time config
+ * validation can ask the same question without importing this module and, with
+ * it, the database layer. Re-exported because every caller and both test files
+ * reach it through here.
  */
-export function imageForHarness(harness: string, provider: string): string {
-  const suffix = harness === "opencode" ? "_OPENCODE" : harness === "pi" ? "_PI" : "";
-  const scope = provider.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-  const fallback =
-    suffix === "_OPENCODE"
-      ? "agentpod-node-opencode:local"
-      : suffix === "_PI"
-        ? "agentpod-node-pi:local"
-        : "agentpod-node:local";
-
-  return (
-    process.env[`NODE_AGENT_${scope}${suffix}_IMAGE`] ||
-    process.env[`NODE_AGENT${suffix}_IMAGE`] ||
-    fallback
-  );
-}
+export { imageForHarness };
 
 export type RuntimeRow = typeof provisionedRuntimes.$inferSelect;
 
