@@ -63,6 +63,95 @@ describe("DockerOrchestrator container options", () => {
   });
 });
 
+// ─── Which daemon it dials ────────────────────────────────────────────────────
+
+/**
+ * dockerode keeps its connection settings on `docker.modem`, which is the only
+ * place the answer actually lives: the alternative is asserting on the options
+ * WE passed, which proves nothing about what the library did with them. It
+ * matters here — docker-modem prefers `host` over `socketPath` whenever both
+ * are present (lib/modem.js: `if (!this.host) this.socketPath = ...`), so
+ * "we passed a socket path" and "it will use the socket" are different claims.
+ */
+function modemOf(orch: DockerOrchestrator) {
+  return (orch as unknown as { docker: { modem: Record<string, any> } }).docker.modem;
+}
+
+describe("DockerOrchestrator daemon endpoint", () => {
+  it("dials the local socket when no daemon is configured", () => {
+    // The case every deployment today runs on. Nothing about a remote daemon
+    // may reach this path.
+    const modem = modemOf(new DockerOrchestrator());
+    expect(modem.socketPath).toBe("/var/run/docker.sock");
+    expect(modem.host).toBeUndefined();
+  });
+
+  it("dials the resolved socket when one is given", () => {
+    const modem = modemOf(
+      new DockerOrchestrator({
+        daemon: {
+          socketPath: "/run/user/1000/docker.sock",
+          remote: false,
+          describe: "unix:///run/user/1000/docker.sock",
+        },
+      })
+    );
+    expect(modem.socketPath).toBe("/run/user/1000/docker.sock");
+    expect(modem.host).toBeUndefined();
+  });
+
+  it("dials a remote daemon over TLS with the client certificate", () => {
+    const modem = modemOf(
+      new DockerOrchestrator({
+        daemon: {
+          host: "docker-host.internal",
+          port: 2376,
+          protocol: "https",
+          ca: ["-----BEGIN CERTIFICATE-----ca-----END CERTIFICATE-----"],
+          cert: "-----BEGIN CERTIFICATE-----client-----END CERTIFICATE-----",
+          key: "-----BEGIN PRIVATE KEY-----k-----END PRIVATE KEY-----",
+          remote: true,
+          describe: "tcp://docker-host.internal:2376 (mutual TLS)",
+        },
+      })
+    );
+    expect(modem.host).toBe("docker-host.internal");
+    expect(modem.port).toBe(2376);
+    expect(modem.protocol).toBe("https");
+    expect(modem.ca).toHaveLength(1);
+    expect(modem.cert).toContain("client");
+    expect(modem.key).toContain("PRIVATE KEY");
+    // Not merely absent from the options we passed — absent from the modem,
+    // which is what decides.
+    expect(modem.socketPath).toBeUndefined();
+  });
+
+  it("cannot be redirected by a stray DOCKER_HOST in the process env", () => {
+    // docker-modem reads process.env.DOCKER_HOST on EVERY construction and
+    // merges it underneath the options it is given, so a socket connection has
+    // to overwrite the host explicitly or an exported DOCKER_HOST silently wins
+    // — the hub would then provision onto a daemon nothing in its config names.
+    const original = process.env.DOCKER_HOST;
+    process.env.DOCKER_HOST = "tcp://10.9.9.9:2375";
+    try {
+      const modem = modemOf(
+        new DockerOrchestrator({
+          daemon: {
+            socketPath: "/var/run/docker.sock",
+            remote: false,
+            describe: "unix:///var/run/docker.sock",
+          },
+        })
+      );
+      expect(modem.host).toBeUndefined();
+      expect(modem.socketPath).toBe("/var/run/docker.sock");
+    } finally {
+      if (original === undefined) delete process.env.DOCKER_HOST;
+      else process.env.DOCKER_HOST = original;
+    }
+  });
+});
+
 describe("DockerOrchestrator.inspectSandbox", () => {
   it("resolves the container by sandbox name and reports the daemon's state", async () => {
     // Reuses the same lookup the lifecycle methods use, so "is it running?" is

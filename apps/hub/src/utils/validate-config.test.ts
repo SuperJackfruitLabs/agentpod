@@ -598,3 +598,108 @@ describe("validateConfig — per-harness images on registry-pulling providers", 
     expect(warningsWith(live, {}).join("\n")).not.toMatch(/NODE_AGENT_/);
   });
 });
+
+// ─── Which Docker daemon, and what it costs ───────────────────────────────────
+
+/**
+ * `DockerRuntimeProvisioner` has always used `/var/run/docker.sock`, so every
+ * agent workload the hub creates shares a kernel, a CPU and a page cache with
+ * the control plane that manages it. Moving it off-box is one variable — and
+ * that variable decides which machine receives root-equivalent container
+ * access, which is why it is checked here rather than discovered on a user's
+ * first provision.
+ *
+ * Every rule below is conditional on ENABLE_DOCKER_PROVISIONING, for the same
+ * reason the Cloudflare, Modal and Fly rules are conditional on theirs.
+ */
+describe("validateConfig — docker daemon", () => {
+  const dockerHub = (over: Partial<typeof config.docker> = {}) =>
+    ({
+      ...config,
+      docker: { ...config.docker, enabled: true, host: "", certPath: "", ...over },
+      // Substrates this hub does not use, pinned off so their rules cannot
+      // colour the assertions below.
+      cloudflare: { ...config.cloudflare, enabled: false },
+      modal: { ...config.modal, enabled: false },
+      fly: { ...config.fly, enabled: false },
+    }) as typeof config;
+
+  const dockerFields = (cfg: typeof config) =>
+    collectConfigErrors(cfg, quiet).filter((e) => e.field.startsWith("DOCKER_"));
+
+  const dockerWarnings = (cfg: typeof config) => {
+    const warnings: string[] = [];
+    collectConfigErrors(cfg, (m) => warnings.push(m));
+    return warnings.join("\n");
+  };
+
+  it("says nothing about a hub that never configured a daemon", () => {
+    // THE CASE THAT MUST NOT REGRESS. Every deployment today sets none of these
+    // and boots on the local socket; a boot check that has an opinion about
+    // that is a boot check that takes the fleet down.
+    expect(dockerFields(dockerHub())).toEqual([]);
+    expect(dockerWarnings(dockerHub())).not.toMatch(/DOCKER_/);
+  });
+
+  it("refuses a remote daemon with no TLS material, naming the variable", () => {
+    const errors = dockerFields(dockerHub({ host: "tcp://10.0.0.5:2375" }));
+    expect(errors.map((e) => e.field)).toEqual(["DOCKER_CERT_PATH"]);
+    expect(errors[0]!.message).toMatch(/DOCKER_ALLOW_INSECURE_TCP/);
+  });
+
+  it("refuses a DOCKER_HOST it cannot parse", () => {
+    expect(
+      dockerFields(dockerHub({ host: "10.0.0.5:2375" })).map((e) => e.field)
+    ).toEqual(["DOCKER_HOST"]);
+  });
+
+  it("refuses a certificate directory that is not there", () => {
+    const errors = dockerFields(
+      dockerHub({
+        host: "tcp://docker-host.internal:2376",
+        certPath: "/nonexistent/agentpod-docker-certs",
+      })
+    );
+    expect(errors.map((e) => e.field)).toEqual(["DOCKER_CERT_PATH"]);
+    expect(errors[0]!.message).toMatch(/ca\.pem/);
+  });
+
+  it("leaves a hub that does not provision Docker alone", () => {
+    // Symmetry with every other substrate: a Cloudflare-only hub must not be
+    // stopped from booting by a Docker variable it never acts on.
+    expect(
+      dockerFields(dockerHub({ enabled: false, host: "tcp://10.0.0.5:2375" }))
+    ).toEqual([]);
+  });
+
+  it("warns every boot when the daemon is reached without TLS", () => {
+    const cfg = dockerHub({ host: "tcp://10.0.0.5:2375", allowInsecureTcp: true });
+    expect(dockerFields(cfg)).toEqual([]);
+    expect(dockerWarnings(cfg)).toMatch(/DOCKER_ALLOW_INSECURE_TCP/);
+  });
+
+  it("reports local image tags once the daemon is somebody else's", () => {
+    // A remote daemon has its own image store. `agentpod-node:local` is a tag
+    // in the hub box's store and means nothing in the remote one — the same
+    // class of failure as issue #283, and invisible until someone clicks
+    // Create. Reported rather than refused, because an operator who ran
+    // `docker build -t agentpod-node:local` ON THAT HOST has a working hub and
+    // must not be refused a boot for it.
+    const warnings = dockerWarnings(
+      dockerHub({ host: "tcp://10.0.0.5:2375", allowInsecureTcp: true })
+    );
+    expect(warnings).toMatch(/NODE_AGENT_DOCKER_IMAGE/);
+    expect(warnings).toMatch(/agentpod-node:local/);
+    expect(
+      dockerFields(dockerHub({ host: "tcp://10.0.0.5:2375", allowInsecureTcp: true }))
+    ).toEqual([]);
+  });
+
+  it("says nothing about images while the daemon is this machine's own", () => {
+    // The local socket is where a local tag is exactly right.
+    expect(dockerWarnings(dockerHub())).not.toMatch(/NODE_AGENT_DOCKER/);
+    expect(dockerWarnings(dockerHub({ host: "unix:///run/docker-proxy.sock" }))).not.toMatch(
+      /NODE_AGENT_DOCKER/
+    );
+  });
+});

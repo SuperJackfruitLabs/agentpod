@@ -18,6 +18,7 @@ import type {
 } from "./types";
 import { DockerOrchestrator } from "./docker-orchestrator";
 import type { ResourceLimits, Sandbox } from "./docker-orchestrator";
+import { dockerDaemonSettingsFromEnv, resolveDockerDaemon } from "./docker-daemon";
 
 // ─── Resource tier mapping ────────────────────────────────────────────────────
 
@@ -118,6 +119,82 @@ function isAlreadyInTargetState(err: unknown): boolean {
   return e?.message?.includes("(HTTP code 304)") === true;
 }
 
+// ─── "That image is not on this daemon" ───────────────────────────────────────
+
+/**
+ * Docker's 404 at create, rewritten to name the machine that lacks the image.
+ *
+ * THE HUB NEVER PULLS. `createContainer` runs whatever the daemon already has
+ * and 404s otherwise, which on the local daemon is nearly invisible — the image
+ * is there because someone ran `docker build` on that box, per
+ * docs/DEPLOYMENT.md step 3. Point DOCKER_HOST at another machine and the same
+ * build has to have happened THERE; `agentpod-node:local` is a tag in one
+ * daemon's store and means nothing in another's. That is the same trap as
+ * issue #283 on Modal, one substrate over, and the raw daemon error names
+ * neither the daemon nor the fix.
+ */
+function describeMissingImage(
+  err: unknown,
+  image: string,
+  daemon: string
+): Error | null {
+  const message = (err as Error)?.message ?? "";
+  if (!/no such image/i.test(message)) return null;
+  return new Error(
+    `docker: image "${image}" is not present on the daemon at ${daemon}. The hub never ` +
+      `pulls — it creates containers from images the daemon already holds — so build or ` +
+      `\`docker pull\` this image ON THAT HOST, or point NODE_AGENT_*_IMAGE at a ` +
+      `reference that is present there. Original error: ${message}`
+  );
+}
+
+// ─── Where the daemon is ──────────────────────────────────────────────────────
+
+/**
+ * The orchestrator this driver uses when nobody injects one, built from the
+ * hub's environment.
+ *
+ * Throws rather than degrading. It is the backstop behind validate-config's
+ * boot refusal, in the shape FlyMachinesProvisioner already uses: an operator
+ * who asked for a remote daemon and mis-set it must not get a hub that quietly
+ * provisions onto the control-plane box instead — that failure is invisible
+ * precisely because everything works.
+ */
+function orchestratorFromEnv(
+  env: Partial<Record<string, string>> = process.env
+): DockerOrchestrator {
+  const { connection, problems, warnings } = resolveDockerDaemon(
+    dockerDaemonSettingsFromEnv(env)
+  );
+  if (!connection) {
+    throw new Error(
+      "docker: refusing to start with this daemon configuration — " +
+        problems.map((p) => `${p.field}: ${p.message}`).join(" ")
+    );
+  }
+  for (const warning of warnings) console.warn(`⚠️  ${warning}`);
+  if (connection.remote) {
+    // Worth a line in the log on every boot: which machine the fleet's
+    // containers are actually on is not otherwise visible from the hub.
+    console.log(`Docker provisioner → remote daemon ${connection.describe}`);
+  }
+  return new DockerOrchestrator({
+    daemon: connection,
+    // Set by the operator to harden the host, e.g. DOCKER_RUNTIME=runsc for
+    // gVisor. Unset keeps Docker's default and today's exact behaviour.
+    // NOTE: this names a runtime installed on THE DAEMON'S host, which with a
+    // remote daemon is not this machine — `runsc` being present here says
+    // nothing about there.
+    runtime: env.DOCKER_RUNTIME || "",
+    // config.ts has exposed DOCKER_NETWORK for a long time but nothing ever
+    // passed it here, so the orchestrator always used its own default. That
+    // matters now: a sandboxed runtime REQUIRES a built-in network, because
+    // Docker's embedded resolver is unreachable from one (#243). The network
+    // likewise lives on the daemon's host; the orchestrator creates it there.
+    defaultNetwork: env.DOCKER_NETWORK || "agentpod-net",
+  });
+}
+
 // ─── Driver ───────────────────────────────────────────────────────────────────
 
 export class DockerRuntimeProvisioner implements RuntimeProvisioner {
@@ -161,20 +238,12 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
   };
 
   /**
-   * @param orchestrator Injected for testing; defaults to a real DockerOrchestrator
-   *   (no-arg constructor uses socket defaults from DockerOrchestratorConfig).
+   * @param orchestrator Injected for testing; defaults to one built from the
+   *   hub's environment by `orchestratorFromEnv` — the local socket unless
+   *   DOCKER_HOST says otherwise.
    */
   constructor(
-    private readonly orchestrator: DockerOrchestrator = new DockerOrchestrator({
-      // Set by the operator to harden the host, e.g. DOCKER_RUNTIME=runsc for
-      // gVisor. Unset keeps Docker's default and today's exact behaviour.
-      runtime: process.env.DOCKER_RUNTIME || "",
-      // config.ts has exposed DOCKER_NETWORK for a long time but nothing ever
-      // passed it here, so the orchestrator always used its own default. That
-      // matters now: a sandboxed runtime REQUIRES a built-in network, because
-      // Docker's embedded resolver is unreachable from one (#243).
-      defaultNetwork: process.env.DOCKER_NETWORK || "agentpod-net",
-    })
+    private readonly orchestrator: DockerOrchestrator = orchestratorFromEnv()
   ) {}
 
   /**
@@ -198,24 +267,7 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
     const image = spec.image;
     const resources = RUNTIME_RESOURCE_TIERS[spec.resourceTier];
 
-    const sandbox = await this.orchestrator.createSandbox({
-      id: spec.runtimeId,
-      name: spec.name,
-      image,
-      env: {
-        AGENTPOD_HUB_URL: spec.hubUrl,
-        // NOTE: enrollToken is injected here but never logged anywhere in
-        // this module.  Do not add log statements that reference spec.enrollToken.
-        AGENTPOD_ENROLL_TOKEN: spec.enrollToken,
-      },
-      volumes: [],
-      ports: [],
-      labels: {
-        "agentpod.runtime.id": spec.runtimeId,
-        "agentpod.managed": "true",
-      },
-      resources,
-    });
+    const sandbox = await this.createSandbox(spec, image, resources);
 
     // Use runtimeId (= config.id) so that destroy/start/stop can pass it
     // directly to deleteSandbox/startSandbox/stopSandbox, which look up the
@@ -224,6 +276,39 @@ export class DockerRuntimeProvisioner implements RuntimeProvisioner {
     // runtime the daemon reports for the container is worth carrying back:
     // it is the observed value, not the one we asked for.
     return { externalId: spec.runtimeId, runtime: sandbox.runtime };
+  }
+
+  /** createSandbox, with Docker's "no such image" 404 made actionable. */
+  private async createSandbox(
+    spec: ProvisionSpec,
+    image: string,
+    resources: ResourceLimits
+  ): Promise<Sandbox> {
+    try {
+      return await this.orchestrator.createSandbox({
+        id: spec.runtimeId,
+        name: spec.name,
+        image,
+        env: {
+          AGENTPOD_HUB_URL: spec.hubUrl,
+          // NOTE: enrollToken is injected here but never logged anywhere in
+          // this module.  Do not add log statements that reference spec.enrollToken.
+          AGENTPOD_ENROLL_TOKEN: spec.enrollToken,
+        },
+        volumes: [],
+        ports: [],
+        labels: {
+          "agentpod.runtime.id": spec.runtimeId,
+          "agentpod.managed": "true",
+        },
+        resources,
+      });
+    } catch (err) {
+      throw (
+        describeMissingImage(err, image, this.orchestrator.describeDaemon?.() ?? "the daemon") ??
+        err
+      );
+    }
   }
 
   /**

@@ -3,6 +3,8 @@
  * Loads environment variables with sensible defaults
  */
 
+import { dockerDaemonSettingsFromEnv } from './services/provisioner/docker-daemon';
+
 function getEnv(key: string, defaultValue?: string): string {
   const value = process.env[key] ?? defaultValue;
   if (value === undefined) {
@@ -76,12 +78,19 @@ export const config = {
   // Docker Orchestrator Configuration
   // ==========================================================================
   docker: {
-    // Docker socket path (default: /var/run/docker.sock)
-    socketPath: getEnv('DOCKER_SOCKET', '/var/run/docker.sock'),
-    // Docker host for TCP connection (if not using socket)
-    host: getEnv('DOCKER_HOST', ''),
-    // Docker port for TCP connection
-    port: getEnvInt('DOCKER_PORT', 2375),
+    // Whether the Docker provisioner is registered at all. The registry
+    // (services/provisioner/registry.ts) remains the authority on that at
+    // runtime; this copy exists so validate-config can scope its Docker rules
+    // the way it scopes the Cloudflare, Modal and Fly ones — a hub that never
+    // provisions Docker must not be stopped from booting by a Docker variable.
+    enabled: getEnvBool('ENABLE_DOCKER_PROVISIONING', false),
+    // DOCKER_HOST / DOCKER_SOCKET / DOCKER_PORT / DOCKER_CERT_PATH /
+    // DOCKER_ALLOW_INSECURE_TCP. Read through the same function the driver
+    // uses, so boot validation and the driver cannot end up looking at
+    // different variables — a hub that validates one daemon and then talks to
+    // another is the failure this whole seam exists to prevent.
+    // Unset, this is `/var/run/docker.sock`, exactly as it has always been.
+    ...dockerDaemonSettingsFromEnv(process.env),
     // Container name prefix
     containerPrefix: getEnv('DOCKER_CONTAINER_PREFIX', 'agentpod'),
     // Default Docker network for containers
