@@ -67,6 +67,44 @@ const FLY_TIERS: Record<
 /** Seconds to give Fly's `wait?state=` endpoint before it answers 408. */
 const WAIT_TIMEOUT_S = 60;
 
+/**
+ * Swap per tier: HALF the tier's RAM. #278.
+ *
+ * A Fly machine gets no swap unless it is asked for, and a guest with none does
+ * not degrade under memory pressure — it WEDGES. Measured 2026-08-13 on a live
+ * `small` runtime: two opencode processes reached 855 MB on a 962 MB machine,
+ * and from that moment every broker verb 502'd on the 15s timeout, heartbeats
+ * stopped, Fly's own `machine exec` answered `deadline_exceeded`, and Fly still
+ * reported `state: started` — so `restart: always` never fired, because nothing
+ * had exited. Only `flyctl machine restart` recovered it, and the console
+ * blamed the hub, which had been healthy the whole time. With swap the same
+ * spike either finishes slowly or the kernel kills ONE process, and a policy of
+ * always-restart brings that back.
+ *
+ * Why a fraction of RAM and not more. Swap is here to convert a hard ceiling
+ * into a soft one, not to pretend the machine is bigger than it is. These are
+ * 1–4 shared vCPUs on network-attached storage: a working set that genuinely
+ * exceeds RAM by a large margin does not run slowly on swap, it thrashes, and a
+ * station thrashing for an hour is worse for the operator than one that OOM-
+ * killed a process and restarted — the wedge this issue is about, wearing a
+ * different hat. Half of RAM is the conventional sizing for a machine of this
+ * shape, it is enough to absorb the measured spike (855 MB on a 962 MB guest
+ * overshoots by well under 512 MB), and it keeps the kernel's OOM killer as the
+ * backstop rather than something swap defers indefinitely.
+ *
+ * Sized against tier RAM, so it is a table rather than a ratio computed from
+ * FLY_TIERS: the guest sizes are the subject of a separate change (#279), and a
+ * swap number should be a decision someone made, not a multiplication that
+ * silently follows a memory bump.
+ *
+ * WHERE this lands in the request is not a detail — see createMachine.
+ */
+const FLY_TIER_SWAP_MB: Record<ResourceTier, number> = {
+  small: 512,
+  medium: 1024,
+  large: 2048,
+};
+
 // ─── External id ──────────────────────────────────────────────────────────────
 
 /**
@@ -423,6 +461,20 @@ export class FlyMachinesProvisioner implements RuntimeProvisioner {
         // Honoured per machine — the input Cloudflare had to refuse.
         image: spec.image,
         guest,
+        // SWAP GOES INSIDE `init`, AND NOWHERE ELSE. Measured 2026-08-13
+        // against a real account: `swap_size_mb` at the config top level — the
+        // obvious guess — is SILENTLY DROPPED. Fly answers 200, the machine
+        // boots, and the guest reports `SwapTotal: 0 kB`; same for passing it
+        // as a sibling of `config`, on create or on update. There is no error
+        // to notice, so the only symptom of getting this wrong is the next
+        // wedged VM (#278). Nested here it is honoured and echoed back: 512 →
+        // SwapTotal 524284 kB, arriving as a real partition (/dev/vdc in
+        // /proc/swaps), 256 → 262140 kB, unset → 0 kB.
+        //
+        // No `cmd`/`entrypoint` alongside it: the image's own are what should
+        // run, and naming them here would freeze the node image's entrypoint
+        // into the hub.
+        init: { swap_size_mb: FLY_TIER_SWAP_MB[spec.resourceTier] },
         env: {
           AGENTPOD_HUB_URL: spec.hubUrl,
           // NOTE: never logged from this module. Do not add a log statement
