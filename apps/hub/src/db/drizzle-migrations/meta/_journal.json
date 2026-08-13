@@ -253,6 +253,13 @@
       "when": 1786646893273,
       "tag": "0035_acp_runs_id_space",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786650945434,
+      "tag": "0036_tenant_isolation_boundary",
+      "breakpoints": true
     }
   ]
 }
