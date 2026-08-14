@@ -168,9 +168,9 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # every provider — a missing one is a 502 the first time somebody picks it.
 # Built by .github/workflows/publish-images.yml from Dockerfile.modal,
 # Dockerfile.modal.opencode and Dockerfile.modal.pi.
-# NODE_AGENT_MODAL_IMAGE=ghcr.io/<owner>/agentpod-node-modal:v0.1.24
-# NODE_AGENT_MODAL_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-modal-opencode:v0.1.24
-# NODE_AGENT_MODAL_PI_IMAGE=ghcr.io/<owner>/agentpod-node-modal-pi:v0.1.24
+# NODE_AGENT_MODAL_IMAGE=ghcr.io/<owner>/agentpod-node-modal:<release>
+# NODE_AGENT_MODAL_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-modal-opencode:<release>
+# NODE_AGENT_MODAL_PI_IMAGE=ghcr.io/<owner>/agentpod-node-modal-pi:<release>
 # Modal App the sandboxes are grouped under. Grouping only; carries no state.
 # MODAL_APP_NAME=agentpod
 # Shortens the lifetime ceiling for a rotation drill. Optional, clamped to 24h,
@@ -198,8 +198,8 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # variable) rather than refused, because no generic Fly image is published —
 # a hub that serves only OpenCode and Pi on Fly is a working hub.
 # NODE_AGENT_FLY_IMAGE=<no image published yet: a Generic Fly runtime cannot work>
-# NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:v0.1.24
-# NODE_AGENT_FLY_PI_IMAGE=ghcr.io/<owner>/agentpod-node-pi-fly:v0.1.24
+# NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:<release>
+# NODE_AGENT_FLY_PI_IMAGE=ghcr.io/<owner>/agentpod-node-pi-fly:<release>
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -322,7 +322,7 @@ hub box needs no `flyctl` install and no Fly login.
 > - `FLY_REGION` (default `sin`): **measured 2026-08-12 on a real account** — `bom` is refused with `region ... is not available to legacy or non-paid plan accounts`, and `sin` is accepted, on the same account with the same token. The plan an organisation is on, not the token, decides which regions it may use. The driver rewrites that refusal into a sentence naming `FLY_REGION` and suggesting `sin`, so it does not read as a Fly outage.
 > - `FLY_VOLUME_SIZE_GB` (default `3`): the size of the volume each runtime gets. **The workspace lives on this volume**, because the Fly rootfs is wiped on every stop→start (measured 2026-08-12). Minimum 1; the hub refuses to boot below that. A **blank** value (`FLY_VOLUME_SIZE_GB=`) means the default, exactly as leaving the line out does — an unfilled variable is not a configured one. Anything else that is not a whole number — `3.5`, `12gb`, `three` — is an error: the hub throws `Invalid integer for environment variable: FLY_VOLUME_SIZE_GB` at startup rather than truncating it, and it does that whether or not Fly is enabled, because config is parsed before anything knows which substrates you use. Fly sizes volumes in whole gigabytes.
 > - `FLY_ORG_SLUG` (default `personal`) and `FLY_APP_PREFIX` (default `agentpod`): the organisation apps are created in, and the app-name prefix. A runtime `rt_3f2a…` becomes the Fly app `agentpod-rt-3f2a…` — that prefix is what makes `flyctl apps list` legible and what the cost audit in OPERATING greps for, so change it only if you must.
-> - **The Fly image must be registry-qualified** — e.g. `ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22`. Fly pulls from a registry, so the default bare tag `agentpod-node-opencode:local` exists only on your Docker host and the machine create fails on the pull. `imageForHarness()` resolves it provider-first: `NODE_AGENT_FLY_OPENCODE_IMAGE`, then the un-scoped `NODE_AGENT_OPENCODE_IMAGE`, then the local default. Setting the **provider-scoped** name is the safe choice on a hub that also runs Docker, because it leaves the Docker tag alone. Setting the un-scoped `NODE_AGENT_OPENCODE_IMAGE` also works — a registry-qualified tag is fine for Docker too, since the daemon pulls it — and is what lets one variable serve both providers.
+> - **The Fly image must be registry-qualified** — e.g. `ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:<release>`. Fly pulls from a registry, so the default bare tag `agentpod-node-opencode:local` exists only on your Docker host and the machine create fails on the pull. `imageForHarness()` resolves it provider-first: `NODE_AGENT_FLY_OPENCODE_IMAGE`, then the un-scoped `NODE_AGENT_OPENCODE_IMAGE`, then the local default. Setting the **provider-scoped** name is the safe choice on a hub that also runs Docker, because it leaves the Docker tag alone. Setting the un-scoped `NODE_AGENT_OPENCODE_IMAGE` also works — a registry-qualified tag is fine for Docker too, since the daemon pulls it — and is what lets one variable serve both providers.
 > - **Which Fly images exist.** `agentpod-node-opencode-fly` (`fly/node-image/Dockerfile`) and `agentpod-node-pi-fly` (`fly/node-image/Dockerfile.pi`) — OpenCode and Pi. There is **no generic (harness-less) Fly image**, so a Fly runtime created with the **Generic** harness cannot work; the hub says so at boot with a `⚠️ WARNING` naming `NODE_AGENT_FLY_IMAGE`, and reports the same for any other harness whose resolved image is a local Docker tag. It is a report rather than a refusal precisely because of that gap: a fatal rule would make `ENABLE_FLY_PROVISIONING=true` unbootable no matter what you set, taking down a substrate that serves OpenCode and Pi perfectly well.
 > - **The images are published by CI, not by hand:** `.github/workflows/publish-images.yml` (manual dispatch — pick the image and the tag). It builds `linux/amd64` on an amd64 runner and then verifies the image it pushed: the `agentpod-node` binary runs, and the harness binary is resolvable from a *minimal service PATH*. Building by hand still works (`fly/node-image/README.md` has the `docker buildx … --push` line) and the same two things will not let you skip them: `--platform linux/amd64` (Fly Machines are amd64; an arm64 image built on an Apple laptop dies at boot with `exec format error`) and making the registry package **public** (Fly pulls anonymously). The tag in `NODE_AGENT_FLY_OPENCODE_IMAGE` / `NODE_AGENT_FLY_PI_IMAGE` is the record of which build the fleet is running.
 

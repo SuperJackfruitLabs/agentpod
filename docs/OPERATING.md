@@ -2,7 +2,7 @@
 
 Day-2 operations: enrolling nodes, adopting stations, driving capability panels, and provisioning runtimes.
 
-> **Single-operator note.** v0.1.0 targets one admin account. The first user to sign up becomes admin; signup is automatically disabled after that.
+> **Single-operator note.** AgentPod targets one admin account. The first user to sign up becomes admin; signup is automatically disabled after that (`system_settings`).
 
 ---
 
@@ -84,14 +84,18 @@ apn run
 ```bash
 apn status
 apn logs -f
-# Expected: "connected to hub" — the node appears online in the console, labelled "no tunnel"
+# Expected: "connecting to https://hub.<your-domain> as <nodeId>"
+#   (cmd/agentpod-node/run.go — this is the only line the agent prints at connect time)
 ```
 
 In the console, navigate to **Nodes** — the enrolled host should appear with status **online**.
 
 ### Generating enrollment tokens
 
-In the console: **Settings → Nodes → New token**. Tokens are single-use and scoped to the operator account.
+On the console's **Fleet** page (`/`), the header carries **Create enrollment token**; the
+Cmd-K palette reaches the same thing via `/nodes?action=create-token`. Tokens are
+single-use (`enrollment_tokens.used_at`) and scoped to the operator account
+(`enrollment_tokens.user_id`).
 
 ---
 
@@ -114,16 +118,26 @@ Stations are discovered per harness:
 | **Claude Code** | Project paths read from `~/.claude.json` (fallback: `~/.claude/projects/` enumeration) |
 | **Codex** | Project paths read from the `[projects."<path>"]` tables in `~/.codex/config.toml` |
 | **OpenCode** | Worktree paths read from `opencode.db` (fallback: project dir enumeration) |
+| **Pi** | Workspace dirs under `~/.pi/agent/sessions/`, plus `/workspace` when it exists (the path Fly and Modal images mount) |
+
+Every descriptor lives in `apps/node-agent/internal/descriptor/` and each one's discovery
+paths are in its file header. That is the place to check when this table and a host disagree.
 
 ---
 
 ## 3. Drive a station
 
-Click a station to open its capability panels. Available panels depend on which capabilities the harness descriptor advertises for that station.
+Click a station to open its capability panels. Available panels depend on which capabilities the harness descriptor advertises for that station. The capability vocabulary is
+`Capability` in `packages/contract/src/station.ts`: `inventory`, `health`, `logs`,
+`fs.read`, `fs.write`, `terminal`, `lifecycle`, `cleanup`, `acp`, `changeset`. Which of
+those a given harness advertises is the `caps := []string{…}` literal in its descriptor —
+`lifecycle` only for Hermes and OpenClaw, `acp` only when the whole chat chain resolves.
 
 ### Health
 
-Shows: running/stopped/crashed status · CPU, RAM, disk usage · uptime · restart count · last activity timestamp. Refreshes automatically; click the refresh icon to force a poll.
+Shows the fields of `StationHealth` (`packages/contract/src/station.ts`): running · pid ·
+CPU % · memory bytes · disk bytes · uptime · last activity · a free-text note. Refreshes
+automatically; click the refresh icon to force a poll.
 
 ### Logs
 
@@ -135,36 +149,51 @@ Live-tailing log stream from the runtime. The descriptor uses the harness's nati
 
 ### Terminal
 
-An interactive PTY shell scoped to the station's workspace root. Backed by the node-agent's durable PTY keepalive (or tmux/dtach when available on the host), so the session survives console/network disconnects.
+An interactive PTY shell **started in** the station's workspace root. The node-agent keeps
+the session alive across console/network disconnects (`internal/terminal`) — reconnecting
+re-attaches the existing session with its running command and scrollback intact.
 
-- Reconnecting to the console re-attaches the existing session; the running command and scrollback are preserved.
-- The shell is **path-jailed** to the cubicle root — it cannot traverse to sibling workspaces.
+> **The shell is not confined.** It is the host user's `$SHELL` with `cmd.Dir` set to the
+> workspace (`internal/terminal/session.go`); the `safeJoin` containment used by the
+> filesystem verbs is not applied to the PTY, and `cd ..` works. Anyone you give a Terminal
+> tab has that node-agent user's full access to the host. This paragraph used to promise a
+> path jail that has never existed — treat the Terminal capability as shell access, and
+> scope who can reach a station accordingly.
 
 ### Files
 
-A file browser for the station's workspace. Supports: list · read · write · rename · delete · upload · download.
+A file browser for the station's workspace. The write verbs are exactly the four routes in
+`apps/hub/src/routes/station-writes.ts`: `fs/write`, `fs/mkdir`, `fs/move`, `fs/delete`
+(plus read/list over the read path). **There is no upload and no download.**
 
-All write operations are **audited** (recorded in the hub's activity log).
+Every write is recorded in the station's audit log (`station_audit`), which the console
+shows as the station's Activity tab — not the fleet-wide `/activity` feed.
 
 ### Config
 
-Read and edit the station's known config files (e.g. `~/.hermes/config.yaml`, `~/.openclaw/openclaw.json`, `.claude/settings.json`). Before any write, the hub:
+Read and edit the station's known config files (e.g. `~/.hermes/config.yaml`,
+`~/.openclaw/openclaw.json`, `.claude/settings.json`). A write goes through the ordinary
+`fs/write` verb with `backup: true`, so the node keeps a timestamped copy beside the file
+and the console shows a diff before you commit the change.
 
-1. Takes a **backup** of the current file (timestamped, kept on the node).
-2. Shows a **diff** of the proposed change.
-3. Detects if the file was modified externally since last read (**clobber detection**).
-
-Use **Restore** to revert to the most recent backup.
+> Two things this panel does **not** do, despite having claimed both for a long time: there
+> is no clobber detection (a file changed on the host since you opened it is overwritten
+> without a word), and there is no Restore button — the backup path is printed as text and
+> restoring it is a manual step on the node. No descriptor advertises a `config` capability
+> either; the panel is gated on `fs.read`/`fs.write` like the file browser.
 
 ### Lifecycle
 
 Start / stop / restart the station's runtime. Behaviour is harness-specific:
 
+Only Hermes and OpenClaw advertise `lifecycle`; on every other harness the panel does not
+appear at all.
+
 | Harness | Lifecycle mechanism |
 |---------|-------------------|
-| Hermes | Per-profile process (`hermes -p <name> gateway run`) supervised by the main gateway |
+| Hermes | Per-profile process, started **detached** as `hermes -p <name> gateway run --replace` — via `systemd-run --collect --quiet` where available, precisely so it escapes the node-agent's own cgroup and survives `apn restart` (`internal/descriptor/hermes.go`) |
 | OpenClaw | User systemd unit (`openclaw-gateway.service`) |
-| Claude Code / Codex | Ephemeral CLI (no persistent process; lifecycle not applicable) |
+| Claude Code / Codex / OpenCode / Pi | No persistent process — `lifecycle` is never advertised, so there is no panel |
 
 ### OpenClaw agent sessions (ACP)
 
@@ -317,7 +346,7 @@ Open the runtime's detail panel → **Destroy**. This stops and removes the cont
 
 ### Cloudflare provisioner
 
-Available in the UI if `ENABLE_CLOUDFLARE_SANDBOXES=true` is set in the hub env. Status: **live-unverified in v0.1.0** — use Docker for production provisioning.
+Available in the UI if `ENABLE_CLOUDFLARE_SANDBOXES=true` is set in the hub env. Status: **live-unverified** — use Docker for production provisioning.
 
 ### Modal provisioner
 
@@ -333,7 +362,7 @@ A mostly-idle fleet is therefore Modal's worst case, and AgentPod fleets are mos
 
 #### What a Modal runtime actually is
 
-**A rolling series of disposable sandboxes anchored by one named Volume.** The Volume is named `agentpod-<runtime id>`, holds the workspace at `/workspace`, and outlives every sandbox. The sandbox is disposable and always will be.
+**A rolling series of disposable sandboxes anchored by one named Volume.** The Volume is named `agentpod-<slugged runtime id>` — `volumeNameFor` lowercases the id, replaces every character outside `[a-z0-9-]` with `-` and truncates to 50 characters, so `rt_3f2a…` becomes `agentpod-rt-3f2a…`, **not** `agentpod-rt_3f2a…`. It holds the workspace at `/workspace` and outlives every sandbox. The sandbox is disposable and always will be.
 
 That shape is not an optimisation. Probed against a real Modal account on **2026-08-13**:
 
@@ -393,7 +422,7 @@ Modal has no reversible stop, so these verbs do not mean quite what they mean on
 
 **Where the buttons are.** For a Modal runtime, use the **Runtimes** page (`/runtimes`). **Start** appears when the runtime is `stopped` or `error`; **Stop** appears when it is `online`; **Destroy** appears in every state but `provisioning` and `destroyed`. The Stop/Start buttons on a *node's* detail panel are Docker-only — a provisioned Modal node shows just **Destroy** there.
 
-**A leaked Volume bills forever and the console cannot show it.** Destroy terminates the sandbox first and deletes the Volume second, and tolerates "already gone" on both — the 24-hour ceiling means the sandbox really is often gone already. Any *other* failure leaves the runtime un-destroyed with its external id intact, on purpose, so that retrying **Destroy** converges. If a destroy ever reports an error, retry it, and then check the Modal dashboard for a Volume named `agentpod-<runtime id>`. Once the runtime row is gone, nothing in AgentPod knows that Volume exists.
+**A leaked Volume bills forever and the console cannot show it.** Destroy terminates the sandbox first and deletes the Volume second, and tolerates "already gone" on both — the 24-hour ceiling means the sandbox really is often gone already. Any *other* failure leaves the runtime un-destroyed with its external id intact, on purpose, so that retrying **Destroy** converges. If a destroy ever reports an error, retry it, and then check the Modal dashboard for a Volume named `agentpod-<slugged runtime id>` — the underscore in `rt_…` is a hyphen in the Volume name, so search for `agentpod-rt-`. Once the runtime row is gone, nothing in AgentPod knows that Volume exists.
 
 #### Credentials and RBAC
 
@@ -433,7 +462,7 @@ docker buildx build --platform linux/amd64 \
 docker buildx build --platform linux/amd64 \
   --build-arg BASE_IMAGE=agentpod-node:base-amd64 \
   -f apps/node-agent/deploy/Dockerfile.modal \
-  -t ghcr.io/<owner>/agentpod-node-modal:v0.1.0 --push apps/node-agent
+  -t ghcr.io/<owner>/agentpod-node-modal:<release> --push apps/node-agent
 ```
 
 **The repository must be public.** The driver calls Modal's `images.fromRegistry(tag)` with no Secret, so Modal has no credential to authenticate to a private registry with. A private tag passes the hub's boot check — it looks like a registry reference — and then fails at provision time.
@@ -537,8 +566,12 @@ Rates from Fly's pricing page, checked 2026-08-13 (against the published page,
 not against an invoice — treat them as order-of-magnitude and confirm on your
 own bill):
 
-- `shared-cpu-1x` **started**: ~$5.70/mo at 1 GB (tier `small`), ~$10.70 at 2 GB
-  (`medium`), ~$21.40 at 4 GB (`large`), region-dependent, charged per second.
+- **Started machine**, region-dependent and charged per second. The tiers are not all
+  `shared-cpu-1x` — `FLY_TIERS` in `services/provisioner/fly.ts` is
+  `small` = 1 cpu / 1024 MB, `medium` = **2 cpus** / 2048 MB, `large` = **4 cpus** / 4096 MB,
+  so the vCPU half of the bill doubles and quadruples with the tier. Roughly ~$5.70/mo for
+  `small`; take `medium` and `large` from Fly's calculator with 2 and 4 shared vCPUs rather
+  than from a `shared-cpu-1x` row.
   **The `opencode` harness needs `medium` or larger** — measured 2026-08-13, one
   chat turn peaks at 855 MB of harness on top of ~157 MB of OS and node-agent,
   which is the whole of a 1 GB machine (#279). The console no longer offers that
@@ -635,18 +668,26 @@ console does not show as a runtime is leaking.** Destroy it with
 
 ## 5. Cmd-K palette
 
-The command palette (keyboard shortcut: `Cmd-K` / `Ctrl-K`) provides quick access to:
+The command palette (`Cmd-K` / `Ctrl-K`) offers exactly four actions plus node navigation
+— the full list is the `Command.Item` set in `apps/console/src/lib/components/command-palette.svelte`:
 
-- Navigate to a node or station by name
-- Start / stop / restart a station
-- New runtime (provision)
-- Activity log
+- **New runtime** → `/nodes?action=new-runtime`
+- **Create enrollment token** → `/nodes?action=create-token`
+- **Fleet** → `/`
+- **Settings** → `/settings`
+- a **Nodes** group: jump to a node by hostname
+
+There are no station entries and no lifecycle verbs in the palette.
 
 ---
 
-## 6. Activity ticker
+## 6. Activity feed
 
-The activity ticker (bottom of the console) shows a live feed of recent operations across the fleet: file writes, terminal sessions opened, lifecycle events, config edits. Click any entry to jump to the relevant station.
+Fleet-wide activity lives on its own **`/activity`** page (`GET /api/activity`): file writes,
+terminal sessions opened, lifecycle events, config edits. A single station's own audit trail
+is on that station's Activity tab (`GET /api/stations/:id/activity`). There is no
+always-visible ticker; the strip at the bottom of the console on narrow viewports is the
+mobile navigation bar.
 
 ---
 
@@ -656,7 +697,83 @@ Hermes stations that have a Matrix identity configured display the **Matrix ID**
 
 ---
 
-## 8. Troubleshooting
+## 8. The kaambaan bridge
+
+The bridge lets this hub **claim work from a kaambaan board** and run it on a station. It is
+outbound-only: it adds no HTTP route, opens no port, and nothing about a hub with it off is
+different from a hub built before it existed. See
+[DEPLOYMENT.md → kaambaan bridge](./DEPLOYMENT.md#kaambaan-bridge) for the three variables
+and how the hub refuses a bad roster at boot.
+
+### Is it on?
+
+The hub prints one line at boot, always, on or off:
+
+```bash
+journalctl -u agentpod-hub | grep 'kaambaan bridge:'
+# kaambaan bridge: claiming as codex-mac, pi-vps
+# kaambaan bridge: (disabled)
+```
+
+Then one `claiming` line per roster entry with its board, station, mode and base URL.
+
+> **`ENABLE_KAAMBAAN_BRIDGE=1` does not turn it on.** `isBridgeEnabled()` compares against
+> the literal lowercase string `"true"` — `1`, `TRUE` and `yes` all read as off. Boot
+> validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation
+> *and* starts nothing; the boot line above is what tells you which happened.
+
+### What the loop does, and how fast
+
+None of these are configurable — they are constants in `services/bridge/`:
+
+| Interval | Value | When |
+|---|---|---|
+| poll | 5s | after a cycle that found nothing to claim |
+| backoff | 30s | after a thrown cycle, and after `not-ready` or `released` — claim/release/claim is not a fix |
+| heartbeat | 60s | while a card is being worked (kaambaan reclaims an unheartbeated run at 15 min) |
+| turn timeout | 30 min | one prompt turn; on expiry the run is failed on the board and the session ended |
+
+**One status halts a loop permanently: `foreign-run`** (kaambaan answered 403 `NOT_RUN_OWNER`).
+The agent stops claiming and only a hub restart resumes it — there is no route or metric that
+reports this, so `grep 'halting: a run belonged to another agent'` in the hub log is the only
+signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the loop claims again.
+
+### Reading `bridge_dispatches`
+
+There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
+`(external_source, external_run_id)`; `external_source` is always `kaambaan`.
+
+| `outcome` | Means |
+|---|---|
+| `working` | claimed, nothing concluded yet. A re-claim of the same run updates the lease in place rather than adding a row |
+| `produced` | **the work finished and the handoff is recorded, but the board has not been told.** This is the replayable state: the next claim of the same card reports the stored output without re-running the harness |
+| `reported` | the board knows; nothing left to replay |
+| `released` | the claim was handed back **before any ACP session opened**, so the workspace cannot have been touched. Unpenalised |
+| `abandoned` | the run stopped *after* it started — permission needed, turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
+
+`released` vs `abandoned` is the distinction worth keeping straight: it is the only record of
+whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written
+once the first ACP event arrives).
+
+Two id spaces meet in this table and must never be confused: `external_run_id` is kaambaan's
+`run_…`, and `acp_run_id` is AgentPod's own `attempt_<uuid>` — one prompt-turn on a station,
+minted locally. A claimed card takes as many attempts as the work takes. Both directions are
+enforced in the database, not just in code: `acp_runs.id` must start `attempt_`, and both
+tables refuse an `external_run_id` that starts `attempt_`.
+
+Every row carries `tenant_id`, and every ledger read and write is built through
+`tenantScope()`, which binds the tenant as the *first* predicate and refuses a tenant id that
+is not AgentPod's own `fleet_<20 hex>` grammar — a kaambaan `tnt_…` cannot become a predicate
+here. Today `resolveTenantForUser` returns the bootstrap tenant `fleet_00000000000000000000`
+for everyone; the boundary is in place ahead of the mapping.
+
+The two coalescing counters on each row, `events_received` and `activities_posted`, answer
+"is the transcript being projected, and by how much" — the query and how to read a `NULL`
+are under [Troubleshooting](#is-the-kaambaan-bridges-coalescing-working-and-by-how-much).
+
+---
+
+## 9. Troubleshooting
 
 **Node not appearing online after enroll:**
 - Check `apn logs -f` on the host for connection errors.
