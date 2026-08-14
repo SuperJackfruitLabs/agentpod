@@ -716,6 +716,15 @@ LIMIT 20;
 
 The same two numbers appear once per worked card in the hub log — `journalctl -u agentpod-hub | grep 'coalesced the transcript'` — with the run, card, station and attempt ids. One line per card, never per event, and it carries no card content, prompt or harness output.
 
+**A card on the board is sitting in `input-required`:**
+
+The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in kaambaan moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
+
+- **Only a human can answer it.** kaambaan refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
+- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `KAAMBAAN_BRIDGE_AGENTS` (default 30 minutes) — *not* by kaambaan's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips kaambaan's circuit breaker and parks for a human.
+- **What gets asked depends on the mode.** `full-auto` never asks. `accept-edits` — the supervised setting — auto-approves file writes and asks about anything that executes. `ask` asks about every tool call, which is a great deal of asking; it is a mode for a board somebody is watching, not a default.
+- `journalctl -u agentpod-hub | grep -E 'permission request'` shows both ends: `a human answered a permission request` with the option that was chosen, and `a permission request went unanswered` with the reason.
+
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.

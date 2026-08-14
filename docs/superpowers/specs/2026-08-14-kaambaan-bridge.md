@@ -207,15 +207,46 @@ state.
 
 ---
 
+## Mid-run permission answering — built 2026-08-14
+
+RQ2 found an elicitation was a dead end: `input-required → working` existed in
+kaambaan's state machine and nothing invoked it, no gate was created, and
+nothing constructed a `prompt` activity. So `ask` was refused at config load
+and a permission request that did arrive blocked the card.
+
+That was wrong within a day. The second real card ran under `accept-edits`,
+wrote two files, asked permission to run the tests, and the run ended
+`abandoned` with "the agent asked for permission, which the board cannot
+answer" — partial work in the workspace, card parked. `accept-edits`
+auto-approves file writes and **not** command execution, so every card whose
+work involved running something died there.
+
+kaambaan PR #36 built the return path, and the bridge now uses it:
+
+- **Asking.** The request becomes an `elicitation` activity with its options in
+  `parameter` — never `signalMetadata`, which kaambaan has since removed from
+  its contract because nothing ever read it. The options are translated, not
+  forwarded: kaambaan echoes the chosen option's `name` back, so `name` carries
+  ACP's `optionId` and `title` carries the human's label. Backwards, and the
+  answer would match no option at all.
+- **Waiting.** The lease is held throughout — asking does not end the run, so
+  the agent resumes as itself rather than re-claiming — and the heartbeat keeps
+  beating, so kaambaan's 15-minute reclaim never fires. The bound is therefore
+  policy, not the lease: `permissionWaitMs`, per agent, 30 minutes by default.
+- **Answering.** The option is delivered to the parked harness verbatim, allow
+  or reject alike. Nothing interprets which is which.
+- **Not answering.** Nobody in time, a cancelled or superseded question, an
+  answer naming no offered option, or a question the board never recorded: all
+  end the run `unanswered` and `fail` the card. Never a guessed option — the
+  reason a question was asked is that something needed a person. Never
+  `release` — a session started and the workspace may hold partial work. Never
+  `block` — that cancels the very question a human could still answer.
+- **The default is still `full-auto`.** A default is what an unattended board
+  gets. `accept-edits` is the supervised setting; `ask` asks about every tool
+  call and is for a board somebody is watching.
+
 ## What is still not built
 
-- **Mid-run permission answering.** RQ2: an elicitation is a dead end in
-  kaambaan — `input-required → working` exists in the state machine and nothing
-  invokes it, no gate is created, and nothing constructs a `prompt` activity.
-  So `ask` mode is refused at config load with that reason, and a permission
-  request that does arrive (an `accept-edits` session hitting a non-edit tool)
-  blocks the card for a human rather than holding the harness until the
-  15-minute reclaim.
 - **Cost.** RQ5 found zero token or cost fields across 1,108 events on both
   harnesses. `usage_update` is context-window occupancy and is deliberately
   *not* mapped onto kaambaan's `usage` field, which means tokens and money and
