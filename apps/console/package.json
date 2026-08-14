@@ -34,7 +34,7 @@
   "devDependencies": {
     "@agentpod/tsconfig": "workspace:*",
     "@internationalized/date": "^3.12.3",
-    "@lucide/svelte": "^1.30.0",
+    "@lucide/svelte": "^1.31.0",
     "@sveltejs/adapter-static": "^3.0.6",
     "@sveltejs/kit": "^2.70.2",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
