@@ -28,7 +28,7 @@ import { acpRuns, acpSessions } from "../../src/db/schema/acp";
 import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { BridgeAgentConfig } from "../../src/services/bridge/config";
-import { runOnce, type AcpPort } from "../../src/services/bridge/dispatch";
+import { runOnce, type AcpPort, type DispatchDeps } from "../../src/services/bridge/dispatch";
 import { KaambaanClient } from "../../src/services/bridge/kaambaan";
 import { dispatchOutcome, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
@@ -100,12 +100,24 @@ interface FakeAcpOpts {
   failCreate?: string;
   /** Fail the first prompt — a session that opened and then lost its wire. */
   failPrompt?: string;
+  /**
+   * What the harness does once a permission answer reaches it. A real one
+   * resumes the turn; the option it was given decides what it resumes doing.
+   */
+  onAnswer?: (optionId: string) => AcpEvent[];
 }
 
 /** An ACP port that scripts a turn instead of talking to a station. */
 function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
   const subs = new Set<(e: AcpEvent) => void>();
-  const state = { created: 0, readyChecks: 0, prompts: [] as string[], ended: [] as string[] };
+  const state = {
+    created: 0,
+    readyChecks: 0,
+    prompts: [] as string[],
+    ended: [] as string[],
+    answers: [] as Array<{ requestSeq: number; optionId: string }>,
+  };
+  const emit = (e: AcpEvent) => subs.forEach((fn) => fn(e));
   const port: AcpPort = {
     async stationReady() {
       state.readyChecks++;
@@ -121,7 +133,7 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
       state.prompts.push(text);
       // Events arrive after the prompt returns, as they do from a real station.
       queueMicrotask(() => {
-        for (const e of script()) for (const fn of subs) fn(e);
+        for (const e of script()) emit(e);
       });
     },
     subscribe(_sessionId, fn) {
@@ -131,9 +143,82 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
     async endSession(_u, _s, reason) {
       state.ended.push(reason);
     },
+    async answerPermission(_u, _s, requestSeq, optionId) {
+      state.answers.push({ requestSeq, optionId });
+      queueMicrotask(() => {
+        for (const e of opts.onAnswer?.(optionId) ?? []) emit(e);
+      });
+    },
   };
-  return { port, state, emit: (e: AcpEvent) => subs.forEach((fn) => fn(e)) };
+  return { port, state, emit };
 }
+
+// ─── a board that can be asked a question ────────────────────────────────────
+
+/** One row of kaambaan's `elicitations`, as the run read surface returns it. */
+interface Question {
+  id: string;
+  question: string;
+  options: Array<{ name: string; title: string }>;
+  status: "pending" | "answered" | "cancelled";
+  answer: { option: string | null; text: string | null; answeredBy: string; answeredAt: string } | null;
+  createdAt: string;
+}
+
+/**
+ * A board that stores elicitations, supersedes the pending one when a new
+ * question arrives (kaambaan's `openElicitation` does exactly that), and lets
+ * the test decide what happens to the pending question on each read.
+ */
+function askingBoard(
+  onRead: (q: Question, reads: number) => void = () => {},
+  override?: (path: string, body: unknown) => { status: number; body: unknown } | null,
+) {
+  const elicitations: Question[] = [];
+  let reads = 0;
+  const handler: Handler = (path, body) => {
+    const forced = override?.(path, body);
+    if (forced) return forced;
+    if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+    if (path.endsWith(`/runs/${RUN_ID}`)) {
+      const pending = elicitations.find((q) => q.status === "pending");
+      if (pending) onRead(pending, ++reads);
+      return { status: 200, body: { ...contextBody, elicitations: elicitations.map((q) => ({ ...q })) } };
+    }
+    if (path.endsWith("/activities")) {
+      const a = body as { type?: string; body?: string; parameter?: { options?: Question["options"] } };
+      if (a.type === "elicitation") {
+        for (const q of elicitations) if (q.status === "pending") q.status = "cancelled";
+        elicitations.push({
+          id: `elc_${elicitations.length + 1}`,
+          question: a.body ?? "",
+          options: a.parameter?.options ?? [],
+          status: "pending",
+          answer: null,
+          createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, elicitations.length)).toISOString(),
+        });
+      }
+      return { status: 200, body: { activity: { accepted: true } } };
+    }
+    return { status: 200, body: { ok: true } };
+  };
+  return { handler, elicitations };
+}
+
+/** A human picking one of the offered options. */
+const answers = (option: string | null, text: string | null = null) => (q: Question) => {
+  q.status = "answered";
+  q.answer = { option, text, answeredBy: "usr_the_human", answeredAt: "2026-01-01T00:00:00.000Z" };
+};
+
+/** The ACP options a harness offers before running a command. */
+const RUN_TESTS_OPTIONS = [
+  { optionId: "allow_once", name: "Yes, run it", kind: "allow_once" },
+  { optionId: "reject_once", name: "No, don't", kind: "reject_once" },
+];
+
+const permissionRequest = (options = RUN_TESTS_OPTIONS, extra: Record<string, unknown> = {}): AcpEvent =>
+  ev("permission-request", { toolCall: { title: "Run `bun test`", kind: "execute" }, options, ...extra });
 
 // ─── board responses ─────────────────────────────────────────────────────────
 
@@ -174,7 +259,8 @@ const deps = (
   client: KaambaanClient,
   acp: AcpPort,
   log?: (message: string, meta?: Record<string, unknown>) => void,
-) => ({
+  over: Partial<DispatchDeps> = {},
+): DispatchDeps => ({
   client,
   acp,
   agent,
@@ -183,7 +269,11 @@ const deps = (
   // Long enough never to fire inside a test; the turn ends on an idle event.
   heartbeatMs: 60_000,
   turnTimeoutMs: 5_000,
+  // A human answers in milliseconds here. The shipped defaults are minutes.
+  permissionPollMs: 1,
+  permissionWaitMs: 2_000,
   log,
+  ...over,
 });
 
 beforeAll(async () => {
@@ -534,21 +624,333 @@ describe("a failure after the session started is not released", () => {
   });
 });
 
-describe("a permission request has nowhere to go", () => {
-  test("the card is blocked for a human and the session is closed", async () => {
-    // RQ2: an elicitation is a dead end in kaambaan — the transition exists and
-    // nothing invokes it. Parking the harness until the 15-minute reclaim is
-    // the alternative, and it is worse.
-    const board = fakeBoard(happyBoard);
-    const acp = fakeAcp(() => [
-      ev("permission-request", { toolCall: { title: "Delete ./data" }, options: [{ optionId: "allow_once" }] }),
-    ]);
+/**
+ * A permission request, asked of a human and waited for.
+ *
+ * The failure this replaces happened in production on 2026-08-14: an agent
+ * wrote two files, asked permission to run the tests, and the bridge failed the
+ * run with "the agent asked for permission, which the board cannot answer" —
+ * leaving the partial work in the workspace and the card parked. Since
+ * `accept-edits` auto-approves file writes but not command execution, EVERY
+ * card whose work involves running something died that way.
+ *
+ * kaambaan PR #36 built the return path, so the question now goes to a human
+ * and the answer comes back on the same lease.
+ */
+describe("a permission request is asked of a human", () => {
+  test("it becomes an elicitation, with its options intact", async () => {
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], {
+      onAnswer: () => [chunk("412 tests passed."), idle()],
+    });
+
+    await runOnce(deps(board.client, acp.port));
+
+    const posted = board.calls
+      .filter((c) => c.path.endsWith("/activities"))
+      .map((c) => c.body as { type?: string; signal?: string; body?: string; parameter?: unknown })
+      .find((a) => a.type === "elicitation")!;
+
+    expect(posted).toBeDefined();
+    expect(posted.signal).toBe("select");
+    expect(posted.body).toContain("Run `bun test`");
+    // In `parameter`, which kaambaan stores — not `signalMetadata`, which it
+    // removed from its contract entirely because nothing ever read it.
+    expect(posted.parameter).toMatchObject({
+      options: [
+        { name: "allow_once", title: "Yes, run it" },
+        { name: "reject_once", title: "No, don't" },
+      ],
+    });
+    expect(asked.elicitations[0]!.options).toHaveLength(2);
+  });
+
+  test("the lease is held throughout — the run is never handed back to ask", async () => {
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], {
+      onAnswer: () => [chunk("412 tests passed."), idle()],
+    });
+
+    await runOnce(deps(board.client, acp.port));
+
+    // Asking is not blocking, releasing or failing: the same run finishes the
+    // work, so the agent resumes as itself rather than re-claiming.
+    expect(board.verbs()).not.toContain("block");
+    expect(board.verbs()).not.toContain("release");
+    expect(board.verbs()).not.toContain("fail");
+    expect(board.calls.filter((c) => c.path.endsWith("/claims"))).toHaveLength(1);
+  });
+
+  test("the answer resumes the harness, and the work finishes", async () => {
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], {
+      onAnswer: (optionId) =>
+        optionId === "allow_once" ? [chunk("412 tests passed."), idle()] : [chunk("Skipped."), idle()],
+    });
 
     const result = await runOnce(deps(board.client, acp.port));
 
-    expect(result.status).toBe("blocked");
-    expect(board.verbs()).toContain("block");
+    expect(result.status).toBe("reported");
+    expect(acp.state.answers).toHaveLength(1);
+    expect(acp.state.answers[0]!.optionId).toBe("allow_once");
+    expect(board.verbs()).toContain("complete");
+
+    const complete = board.calls.find((c) => c.path.endsWith("/complete"))!;
+    expect(JSON.stringify((complete.body as { handoff: unknown }).handoff)).toContain("412 tests passed.");
     expect(acp.state.ended).toHaveLength(1);
+  });
+
+  test("a DENIAL is delivered as the human gave it", async () => {
+    // The mutation this kills: an answer path that approves regardless of what
+    // came back. The board says `reject_once`; the harness must be told
+    // `reject_once`, and must not be told any allow option.
+    const asked = askingBoard(answers("reject_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], {
+      onAnswer: (optionId) =>
+        optionId === "reject_once"
+          ? [chunk("Understood — I did not run the tests."), idle()]
+          : [chunk("Ran the tests anyway."), idle()],
+    });
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.answers[0]!.optionId).toBe("reject_once");
+    expect(acp.state.answers[0]!.optionId).not.toBe("allow_once");
+    expect(result.status).toBe("reported");
+    // And the harness's own account of the denial is what reached the board.
+    const complete = board.calls.find((c) => c.path.endsWith("/complete"))!;
+    const handoff = JSON.stringify((complete.body as { handoff: unknown }).handoff);
+    expect(handoff).toContain("did not run the tests");
+    expect(handoff).not.toContain("anyway");
+  });
+
+  test("the answer is matched to the request the harness is blocked on", async () => {
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const request = permissionRequest();
+    const acp = fakeAcp(() => [request], { onAnswer: () => [idle()] });
+
+    await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.answers[0]!.requestSeq).toBe(request.seq);
+  });
+
+  test("a second question in the same turn is asked and answered too", async () => {
+    let pending: AcpEvent | null = null;
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()], {
+      onAnswer: () => {
+        if (pending) return [chunk("Both done."), idle()];
+        pending = permissionRequest([{ optionId: "allow_once", name: "Yes, deploy" }]);
+        return [pending];
+      },
+    });
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("reported");
+    expect(acp.state.answers).toHaveLength(2);
+    expect(asked.elicitations).toHaveLength(2);
+  });
+});
+
+describe("a question nobody answers", () => {
+  test("the wait is bounded, and the run fails rather than holding the harness", async () => {
+    const asked = askingBoard(() => {
+      /* the question stays pending: nobody is at the keyboard */
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { permissionWaitMs: 25, permissionPollMs: 1 }),
+    );
+
+    expect(result.status).toBe("unanswered");
+    expect(result.reason).toMatch(/answer/i);
+    // Nothing was decided on the human's behalf.
+    expect(acp.state.answers).toHaveLength(0);
+    expect(acp.state.ended).toHaveLength(1);
+  });
+
+  test("it FAILS, not releases — a session started and the workspace may hold partial work", async () => {
+    const asked = askingBoard(() => {});
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    await runOnce(deps(board.client, acp.port, undefined, { permissionWaitMs: 25, permissionPollMs: 1 }));
+
+    expect(board.verbs()).toContain("fail");
+    expect(board.verbs()).not.toContain("release");
+    expect(board.verbs()).not.toContain("complete");
+
+    const outcome = await dispatchOutcome(key());
+    expect(outcome!.outcome).toBe("abandoned");
+    expect(outcome!.reason!.toLowerCase()).toContain("permission");
+  });
+
+  test("the harness is still heartbeating while it waits — the lease is not silent", async () => {
+    const asked = askingBoard(() => {});
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    await runOnce(
+      deps(board.client, acp.port, undefined, {
+        permissionWaitMs: 60,
+        permissionPollMs: 1,
+        heartbeatMs: 5,
+      }),
+    );
+
+    // kaambaan reclaims a lease that goes quiet for 15 minutes. Waiting for a
+    // human is not going quiet, so the bound on the wait is policy, not the
+    // lease — and that only holds if the beat carries on through it.
+    expect(board.verbs().filter((v) => v === "heartbeat").length).toBeGreaterThan(0);
+  });
+});
+
+describe("a question that will never be answered", () => {
+  test("a cancelled question stops the wait instead of running it out", async () => {
+    // kaambaan cancels a pending question when its run ends or is reclaimed,
+    // when the card is moved, or when a newer question supersedes it. All three
+    // arrive as `cancelled`, and all three mean: stop waiting.
+    const asked = askingBoard((q) => {
+      q.status = "cancelled";
+    });
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const started = Date.now();
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { permissionWaitMs: 30_000, permissionPollMs: 1 }),
+    );
+
+    expect(result.status).toBe("unanswered");
+    expect(result.reason!.toLowerCase()).toContain("cancel");
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(acp.state.answers).toHaveLength(0);
+    expect(board.verbs()).toContain("fail");
+  });
+
+  test("an answer with no option in it is not a decision", async () => {
+    // A human who typed free text and chose nothing has not selected an option.
+    // Picking one for them is the mis-mapping this whole seam exists to avoid.
+    const asked = askingBoard(answers(null, "do whatever you think is best"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.answers).toHaveLength(0);
+    expect(result.status).toBe("unanswered");
+    expect(result.reason!.toLowerCase()).toContain("option");
+  });
+
+  test("an answer naming an option that was never offered is not a decision either", async () => {
+    const asked = askingBoard(answers("rm_rf"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.answers).toHaveLength(0);
+    expect(result.status).toBe("unanswered");
+  });
+
+  test("a question the board never recorded is not waited on", async () => {
+    // The elicitation post failed; waiting for an answer to a question nobody
+    // can see would burn the whole wait and tell the human nothing.
+    const asked = askingBoard(answers("allow_once"), (path) =>
+      path.endsWith("/activities") ? { status: 502, body: "gateway" } : null,
+    );
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { permissionWaitMs: 30_000, permissionPollMs: 1 }),
+    );
+
+    expect(result.status).toBe("unanswered");
+    expect(result.reason!.toLowerCase()).toContain("board");
+    expect(acp.state.answers).toHaveLength(0);
+  });
+
+  test("a lease lost while waiting stops the harness and touches nothing", async () => {
+    const asked = askingBoard(() => {}, (path) =>
+      path.endsWith("/heartbeat") ? { status: 409, body: boardError("STALE_LEASE") } : null,
+    );
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [permissionRequest()]);
+
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, {
+        permissionWaitMs: 30_000,
+        permissionPollMs: 1,
+        heartbeatMs: 1,
+      }),
+    );
+
+    expect(result.status).toBe("lease-superseded");
+    expect(acp.state.ended).toHaveLength(1);
+    expect(board.verbs()).not.toContain("fail");
+    expect(board.verbs()).not.toContain("release");
+  });
+});
+
+describe("a permission the hub answers itself is not a question", () => {
+  test("accept-edits still auto-approves an edit, with no human involved", async () => {
+    // Unchanged by any of this. `handlePermissionRequest` answers it inside the
+    // hub and persists the request event marked `auto` — so the bridge must not
+    // read one as a question. A card parked in `input-required` on a decision
+    // already made is a card nobody can un-park.
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(() => [
+      permissionRequest([{ optionId: "allow_once", name: "Allow" }], { auto: true }),
+      ev("permission-answer", { requestSeq: 1, optionId: "allow_once", auto: true }),
+      chunk("Wrote a.ts."),
+      idle(),
+    ]);
+
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { agent: { ...agent, mode: "accept-edits" } }),
+    );
+
+    expect(result.status).toBe("reported");
+    expect(asked.elicitations).toHaveLength(0);
+    expect(acp.state.answers).toHaveLength(0);
+    expect(board.calls.filter((c) => c.path.endsWith("/activities")).map((c) => c.body)).not.toContainEqual(
+      expect.objectContaining({ type: "elicitation" }),
+    );
+  });
+
+  test("accept-edits DOES ask about a command — the production failure, fixed", async () => {
+    // The 2026-08-14 card: two files written (auto-approved), then permission to
+    // run the tests (not an edit, so parked), which used to end the run.
+    const asked = askingBoard(answers("allow_once"));
+    const board = fakeBoard(asked.handler);
+    const acp = fakeAcp(
+      () => [
+        permissionRequest([{ optionId: "allow_once", name: "Allow" }], { auto: true }),
+        chunk("Wrote two files."),
+        permissionRequest(),
+      ],
+      { onAnswer: () => [chunk("412 tests passed."), idle()] },
+    );
+
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { agent: { ...agent, mode: "accept-edits" } }),
+    );
+
+    expect(result.status).toBe("reported");
+    expect(result.status).not.toBe("blocked");
+    expect(asked.elicitations).toHaveLength(1);
+    expect(acp.state.answers[0]!.optionId).toBe("allow_once");
   });
 });
 
