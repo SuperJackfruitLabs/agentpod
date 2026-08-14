@@ -1,6 +1,14 @@
 # Contributing
 
-AgentPod lives on GitHub: https://github.com/rakeshgangwar/agentpod
+AgentPod lives on GitHub: https://github.com/SuperJackfruitLabs/agentpod
+
+> The repository moved owner on 2026-08-14. Roughly forty
+> `github.com/rakeshgangwar/agentpod` URLs remain in the docs, the console, the landing site
+> and — load-bearingly — the node-agent's self-update and install paths. They all still
+> resolve today (GitHub redirects a transfer permanently; the release-asset download was
+> verified at HTTP 200 on 2026-08-14), so nothing is broken. Sweeping them is its own change:
+> the self-update path verifies downloads against `SHA256SUMS`, so it must be re-verified on
+> a real host, not just find-and-replaced.
 
 ## Branch flow
 
