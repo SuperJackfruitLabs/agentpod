@@ -32,8 +32,20 @@ import { pgTable, text, integer, timestamp, jsonb, primaryKey, index, check } fr
 import { acpRuns } from "./acp";
 import { tenants } from "./tenants";
 
-/** What the bridge knows about a dispatched run, in the order it learns it. */
-export const DISPATCH_OUTCOMES = ["working", "produced", "reported", "abandoned"] as const;
+/**
+ * What the bridge knows about a dispatched run, in the order it learns it.
+ *
+ * `released` is its own outcome rather than a flavour of `abandoned` because the
+ * two answer different questions for whoever reads the row next. `released`
+ * means **no session was ever opened**: the claim was handed straight back to
+ * the board, unpenalised, and nothing can have touched the workspace.
+ * `abandoned` means the run stopped after it had started — a lost lease, a
+ * foreign run, or a harness that died mid-turn — and the workspace may hold
+ * partial work. `acp_run_id` cannot carry that distinction on its own: it is
+ * written on the first ACP event, so a session that opened and failed before
+ * emitting one leaves it null too.
+ */
+export const DISPATCH_OUTCOMES = ["working", "produced", "reported", "released", "abandoned"] as const;
 export type DispatchOutcome = (typeof DISPATCH_OUTCOMES)[number];
 
 export const bridgeDispatches = pgTable(
@@ -88,7 +100,7 @@ export const bridgeDispatches = pgTable(
     check("bridge_dispatches_external_is_not_agentpod", sql`${t.externalRunId} NOT LIKE 'attempt\\_%'`),
     check(
       "bridge_dispatches_outcome",
-      sql`${t.outcome} IN ('working', 'produced', 'reported', 'abandoned')`,
+      sql`${t.outcome} IN ('working', 'produced', 'reported', 'released', 'abandoned')`,
     ),
   ],
 );

@@ -158,6 +158,19 @@ export async function markReported(key: DispatchKey): Promise<void> {
 }
 
 /**
+ * The claim was handed back to the board before any session opened.
+ *
+ * Its own outcome, not a flavour of `abandoned`: this row says the workspace
+ * cannot have been touched, which is the fact that makes handing the card
+ * straight back safe. `acp_run_id` cannot say it — that column is written on the
+ * first ACP event, so a session that opened and died before emitting one leaves
+ * it null as well.
+ */
+export async function markReleased(key: DispatchKey, reason: string): Promise<void> {
+  await setOutcome(key, "released", reason);
+}
+
+/**
  * No report will be made for this run — the lease was superseded, or the run
  * turned out to be another agent's. Deliberately NOT `produced`: replaying a
  * half-finished handoff onto whoever holds the card now would report work this
