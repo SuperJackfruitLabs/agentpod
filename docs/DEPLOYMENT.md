@@ -572,15 +572,37 @@ turns a restart into an outage:
 
 ```bash
 cd /opt/agentpod/apps/hub
-env $(grep -v '^#' /etc/agentpod/hub.env | grep -v '^$' | xargs) \
-  /root/.bun/bin/bun --env-file=/dev/null -e '
+python3 - <<'PY'
+import os, subprocess
+env = dict(os.environ)
+for line in open("/etc/agentpod/hub.env"):
+    line = line.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    env[k.strip()] = v          # literal, exactly as systemd EnvironmentFile does
+script = '''
   const { collectConfigErrors } = await import("./src/utils/validate-config.ts");
-  console.log(JSON.stringify(collectConfigErrors(undefined, () => {}).map(e => e.field)));'
+  console.log(JSON.stringify(collectConfigErrors(undefined, () => {}).map(e => e.field)));
+'''
+r = subprocess.run(["/root/.bun/bin/bun", "--env-file=/dev/null", "-e", script],
+                   env=env, capture_output=True, text=True)
+print(r.stdout.strip() or r.stderr.strip()[-500:])
+PY
 # [] means the hub will boot. Anything else names the variable to fix.
-# --env-file=/dev/null matters: without it bun would also load any .env in the
-# working directory, so you would be validating a different environment than
-# systemd passes.
 ```
+
+Two things about that snippet are load-bearing, and both were learned the hard way:
+
+- **`--env-file=/dev/null`.** Without it bun also loads any `.env` in the working
+  directory, so you would validate a different environment than systemd passes.
+- **Parse the file literally; do not pipe it through `xargs`.** The obvious form —
+  `env $(grep -v '^#' /etc/agentpod/hub.env | xargs) bun …` — was in this runbook
+  until 2026-08-14 and is **wrong**: `xargs` strips quotes, so any value containing
+  them arrives mangled. Enabling the kaambaan bridge, whose roster is a JSON array,
+  produced `KAAMBAAN_BRIDGE_AGENTS is not valid JSON` from a config file that was
+  perfectly valid — a pre-flight failing on a fault it invented, which is worse than
+  no pre-flight at all, because it sends you to debug the wrong thing.
 
 `() => {}` swallows the WARNINGS, and Fly's per-harness image gaps are warnings
 (see the Fly notes above). Pass `console.warn` instead of the empty function to
