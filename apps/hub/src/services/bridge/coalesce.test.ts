@@ -189,11 +189,43 @@ describe("ActivityCoalescer — projection", () => {
     // The spike put them in `signalMetadata`, which the REST handler does not
     // read (kaambaan index.ts:390-403 destructures parameter/result/signal and
     // no metadata field), so the options were silently dropped on the wire.
-    const options = [{ optionId: "allow_once", name: "Allow once" }];
-    const [a] = drain([ev("permission-request", { toolCall: { title: "Write a.ts" }, options })]);
+    //
+    // And they are translated on the way: kaambaan's option is `{name, title}`
+    // and it echoes `name` back as the answer, so `name` has to be the ACP
+    // optionId. Sending the ACP option verbatim would make the human's LABEL
+    // the identity, and the answer would map to no option at all.
+    const options = [
+      { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+      { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+    ];
+    const request = ev("permission-request", { toolCall: { title: "Write a.ts" }, options });
+    const [a] = drain([request]);
     expect(a!.type).toBe("elicitation");
     expect(a!.signal).toBe("select");
-    expect(a!.parameter).toMatchObject({ options });
+    expect(a!.parameter).toMatchObject({
+      requestSeq: request.seq,
+      options: [
+        { name: "allow_once", title: "Allow once" },
+        { name: "reject_once", title: "Reject" },
+      ],
+    });
+    expect(a!.body).toContain("Write a.ts");
+  });
+
+  test("a permission request the hub already answered is NOT an elicitation", () => {
+    // full-auto answers every request, and accept-edits answers the edit ones —
+    // and both still persist a `permission-request` event, marked `auto`.
+    // Projecting one as an elicitation moves the card to `input-required` and
+    // waits for a human to decide something that was decided microseconds ago.
+    const [a] = drain([
+      ev("permission-request", {
+        toolCall: { title: "Write a.ts" },
+        options: [{ optionId: "allow_once", name: "Allow once" }],
+        auto: true,
+      }),
+    ]);
+    expect(a!.type).not.toBe("elicitation");
+    expect(a!.signal).toBeUndefined();
   });
 
   test("an error projects durably", () => {

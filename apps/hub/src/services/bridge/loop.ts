@@ -120,6 +120,8 @@ const hubAcpPort: AcpPort = {
   promptSession: (userId, sessionId, text) => acpSessions.promptSession(userId, sessionId, text),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),
   endSession: (userId, sessionId, reason) => acpSessions.endSession(userId, sessionId, reason),
+  answerPermission: (userId, sessionId, requestSeq, optionId) =>
+    acpSessions.answerPermission(userId, sessionId, requestSeq, optionId),
 };
 
 export interface BridgeHandle {

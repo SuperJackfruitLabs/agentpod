@@ -389,6 +389,7 @@ board and station — "the bridge's credential" is not a thing that exists:
     "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
     "hubUserId": "usr-local-1",
     "mode": "full-auto",
+    "permissionWaitMs": 1800000,
     "maxConcurrency": 1,
     "profileKey": "reviewer"
   }
@@ -402,14 +403,29 @@ board and station — "the bridge's credential" is not a thing that exists:
 | `token` | yes | This agent's own kaambaan credential, minted under "Connect an agent". Must start `kbn_`. |
 | `stationId` | yes | The station its work runs on. |
 | `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
-| `mode` | no (default `full-auto`) | `full-auto` or `accept-edits`. **`ask` is refused at load**: a permission request becomes a kaambaan elicitation, and kaambaan has no return path for one, so the card would park until the 15-minute reclaim with the harness blocked. |
+| `mode` | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call, which is a great deal of asking; it suits a board somebody is watching, which is why it is not the default. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers — see `permissionWaitMs`. |
+| `permissionWaitMs` | no (default **30 minutes**) | How long a human has to answer before the run gives up. Must be a positive integer. |
 | `maxConcurrency` | no | How many of this agent's runs may be in flight. kaambaan defaults to 1. |
 | `profileKey` | no | Claim under a profile, when the board routes by profile. |
+
+**What `permissionWaitMs` actually buys you.** When an agent asks for permission, the run keeps
+the card and keeps heartbeating, so kaambaan's 15-minute reclaim never fires — the wait is
+bounded by *this setting*, not by the lease. If it expires, the run is **`fail`ed and the card is
+re-queued** with the reason and a failure count. It is not silently dropped, and it is not
+`release`d either: a session had started, so the workspace may hold partial work, and `fail` is
+the verb that records that. The next attempt asks the question again, and a card nobody ever
+answers eventually trips kaambaan's own circuit breaker and parks for a human. Nothing is ever
+approved or declined on a human's behalf when the wait runs out.
+
+Set it per agent, because attendance is a property of a deployment: a board watched during
+office hours wants minutes, and one that runs unattended overnight wants the harness released
+quickly rather than a station pinned until morning.
 
 **A roster that fails to parse refuses the boot**, naming `KAAMBAAN_BRIDGE_AGENTS`. That is
 deliberate: a bridge that silently claimed nothing because its roster was malformed looks
 exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
-array, a token that does not start `kbn_`, `mode: "ask"`, and a duplicate `key`.
+array, a token that does not start `kbn_`, a `permissionWaitMs` of zero or less, and a
+duplicate `key`.
 
 > **Quoting.** The roster is JSON on one line, which makes it the value most likely to be
 > quoted in an env file, and the value quoting most often breaks. systemd's

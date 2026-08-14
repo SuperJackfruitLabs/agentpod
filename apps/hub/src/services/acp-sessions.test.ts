@@ -185,6 +185,55 @@ async function pollForEvent(
   }
 }
 
+/**
+ * `acp_sessions.last_seq`, once it has caught up with `acp_events`.
+ *
+ * `persistEvent` writes the event row and THEN the session row, as two
+ * statements — deliberately, and in that order. `last_seq` is a **summary**,
+ * not a resume cursor: `listSessions` sizes a session's transcript from it and
+ * the console renders "12 events" out of it, while a reattaching client resumes
+ * from the highest seq it has actually received (`subscribe {sinceSeq}`), and
+ * the WS's `replay-done` reports what it really replayed. So a `last_seq` that
+ * lagged the transcript is right a few milliseconds later, and one that ran
+ * AHEAD would name a seq no reader can fetch. Lagging is the safe direction and
+ * the write order is what guarantees it.
+ *
+ * Which makes sampling both sources at one instant a race — `pollForEvent`
+ * returns the moment the event row is visible, and the row update is a separate
+ * statement still in flight. This waits for the convergence the assertion
+ * actually means.
+ *
+ * The row is read BEFORE the events so that the unsafe direction can never be
+ * mistaken for a sampling artefact: an event landing between the two reads can
+ * only make the comparison more forgiving, so `last_seq > maxSeq` is a real
+ * inversion whenever it is seen. That is opportunistic, not a guarantee — this
+ * looks once the turn has settled, by which time an inverted write order would
+ * usually have converged again — but it costs nothing and names the fault
+ * precisely instead of timing out.
+ */
+async function lastSeqCaughtUp(
+  sessionId: string,
+  timeoutMs = 4000
+): Promise<{ lastSeq: number; maxSeq: number }> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const lastSeq = (await getSession(TEST_USER, sessionId))?.lastSeq ?? 0;
+    const maxSeq = Math.max(...(await eventsFor(sessionId)).map((e) => e.seq));
+    if (lastSeq > maxSeq) {
+      throw new Error(
+        `acp_sessions.last_seq (${lastSeq}) is AHEAD of the highest persisted event (${maxSeq}) — a summary pointing at a seq nobody can read`
+      );
+    }
+    if (lastSeq === maxSeq) return { lastSeq, maxSeq };
+    if (Date.now() > deadline) {
+      throw new Error(
+        `acp_sessions.last_seq stalled at ${lastSeq}; the transcript reached ${maxSeq}`
+      );
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
 const stateWith =
   (status: string) => (e: { type: string; payload?: unknown }) =>
     e.type === "state" && (e.payload as { status?: string }).status === status;
@@ -1697,13 +1746,17 @@ test(
       expect((await getSession(TEST_USER, row.id))?.title).toBe(titled!.title);
 
       // lastSeq === the highest persisted seq across prompts, agent updates and
-      // state events.
-      const evts = await eventsFor(row.id);
-      const maxSeq = Math.max(...evts.map((e) => e.seq));
+      // state events — once the row has caught up. See `lastSeqCaughtUp`: the
+      // event and the row are two statements, and the transcript is the one
+      // that lands first, on purpose.
+      const { lastSeq: settled, maxSeq } = await lastSeqCaughtUp(row.id);
       expect(maxSeq).toBeGreaterThan(1);
-      expect((await getSession(TEST_USER, row.id))?.lastSeq).toBe(maxSeq);
+      expect(settled).toBe(maxSeq);
 
       // … and it still reflects the FINAL event once the session has ended.
+      // No convergence poll here, deliberately: `finalizeEnd` awaits the ended
+      // event's own write before it resolves, so a caller that saw `endSession`
+      // return is guaranteed the row. A poll would hide that if it regressed.
       await endSession(TEST_USER, row.id, "cleanup");
       const ended = await getSession(TEST_USER, row.id);
       const finalMax = Math.max(

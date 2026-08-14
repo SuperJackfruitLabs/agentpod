@@ -48,13 +48,35 @@
  *    it could have been completely broken in production with nothing to show
  *    it. Two integers on the ledger row and one log line per worked card — see
  *    `summarise`, which is also where the bound on that lives.
+ *
+ * A sixth arrived the same way, on the next real card. The agent wrote two
+ * files, asked permission to run the tests, and the run ended `abandoned` with
+ * "the agent asked for permission, which the board cannot answer" — partial work
+ * left in the workspace, card parked. `accept-edits` auto-approves file writes
+ * and NOT command execution, so every card whose work involved running
+ * something died exactly there.
+ *
+ * 6. **A permission request is a question, and the bridge waits for the
+ *    answer.** kaambaan PR #36 built the return path, so the request becomes an
+ *    elicitation carrying its options, the bridge heartbeats while a human
+ *    decides, and the answer is delivered to the harness on the same lease —
+ *    the run never lets go of the card to ask. The wait is bounded by policy
+ *    (`permissionWaitMs`), not by the lease, because a heartbeating lease is
+ *    never reclaimed. See `askTheHuman`.
  */
 
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
-import type { BridgeAgentConfig } from "./config";
-import { isForeignRun, isLeaseSuperseded, KaambaanClient, type ClaimedWork } from "./kaambaan";
+import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
+import { isAutoAnswered, selectedOptionId } from "./permission";
+import {
+  isForeignRun,
+  isLeaseSuperseded,
+  KaambaanClient,
+  type ClaimedWork,
+  type RunElicitation,
+} from "./kaambaan";
 import {
   endAttempt,
   findUnreportedOutput,
@@ -85,6 +107,15 @@ export interface AcpPort {
   promptSession(userId: string, sessionId: string, text: string): Promise<void>;
   subscribe(sessionId: string, fn: (e: AcpEvent) => void): () => void;
   endSession(userId: string, sessionId: string, reason: string): Promise<void>;
+  /**
+   * Deliver a decision to the harness parked on `requestSeq`.
+   *
+   * `optionId` is ACP's own identifier for the option, and it is delivered
+   * verbatim: an allow option allows, a reject option rejects. Nothing here
+   * interprets which is which, because a bridge that decided what a human's
+   * choice "really meant" is the failure this whole path exists to avoid.
+   */
+  answerPermission(userId: string, sessionId: string, requestSeq: number, optionId: string): Promise<void>;
 }
 
 export interface DispatchDeps {
@@ -95,6 +126,10 @@ export interface DispatchDeps {
   source: string;
   heartbeatMs?: number;
   turnTimeoutMs?: number;
+  /** Overrides the agent's own `permissionWaitMs`. A test seam. */
+  permissionWaitMs?: number;
+  /** How often the run is re-read while a question is outstanding. */
+  permissionPollMs?: number;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -115,8 +150,14 @@ export type DispatchStatus =
   | "lease-superseded"
   /** The run belongs to another agent. A bug: the loop must not continue. */
   | "foreign-run"
-  /** Parked for a human — a permission request with no return path. */
-  | "blocked"
+  /**
+   * A question was asked and no answer came back that could be delivered —
+   * nobody answered in time, the question was cancelled, or what came back
+   * named no option the harness had offered. Its own status rather than a
+   * flavour of `failed`, because "a human did not answer" is an operational
+   * fact about the board and "the harness broke" is not.
+   */
+  | "unanswered"
   /** The harness or the session failed. */
   | "failed";
 
@@ -131,6 +172,8 @@ export interface DispatchResult {
 const DEFAULT_HEARTBEAT_MS = 60_000;
 /** A harness that never yields still has to end somewhere. */
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
+/** How often a run with a question outstanding is re-read. */
+const DEFAULT_PERMISSION_POLL_MS = 10_000;
 /** How much of what the agent said rides in the handoff. */
 const SUMMARY_LIMIT = 4_000;
 
@@ -140,8 +183,49 @@ type TurnEnd =
   | { kind: "session-ended"; reason: string }
   | { kind: "lease-superseded" }
   | { kind: "foreign-run" }
-  | { kind: "permission-required" }
+  /** The harness is parked on a decision. `event` is the request it is parked on. */
+  | { kind: "permission-required"; event: AcpEvent }
+  /** A question was asked and no deliverable answer came back. */
+  | { kind: "unanswered"; reason: string }
   | { kind: "timeout" };
+
+/** How a question ended. Only `answered` resumes the harness. */
+type PermissionResolution =
+  | { kind: "answered"; optionId: string }
+  /** kaambaan cancelled it: the run ended, the card moved, or it was superseded. */
+  | { kind: "cancelled" }
+  /** Answered, but with nothing that maps to an option the harness offered. */
+  | { kind: "unmappable" }
+  /** The board has no record of the question, so nobody can be asked it. */
+  | { kind: "unrecorded" }
+  | { kind: "timeout"; waitMs: number }
+  /** The lease went while we waited. The abort path owns the outcome. */
+  | { kind: "aborted" };
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Why the harness was never given a decision, in words that go to the board,
+ * the ledger and the log alike.
+ *
+ * Every one of them ends the run rather than guessing. An unanswered question
+ * is not a reason to pick an option on a human's behalf: the whole point of
+ * asking was that something in this run needed a person.
+ */
+function whyNoAnswer(resolution: PermissionResolution): string {
+  switch (resolution.kind) {
+    case "timeout":
+      return `the agent asked for permission and nobody answered within ${Math.round(resolution.waitMs / 1000)}s`;
+    case "cancelled":
+      return "the agent asked for permission and the question was cancelled before it was answered — its run ended, its card moved, or a newer question superseded it";
+    case "unmappable":
+      return "the agent asked for permission and the answer named no option the harness had offered, so there was no decision to deliver";
+    case "unrecorded":
+      return "the agent asked for permission and the board has no record of the question, so nobody could answer it";
+    default:
+      return "the agent asked for permission and no answer could be delivered";
+  }
+}
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent, tenantId, source } = deps;
@@ -219,15 +303,29 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   // may already have edited the workspace, so the claim is NOT handed back. See
   // `failStarted`.
   try {
+    // ─── the turn, in segments ───────────────────────────────────────────────
+    // A permission request splits a turn in two: the harness stops, a human
+    // decides, and the harness carries on. Each stretch of agent work is its own
+    // segment with its own deadline, because the minutes a human spends deciding
+    // are not minutes the harness spent working and must not be charged against
+    // its time limit — a person who answers promptly should not lose the run to
+    // a budget the waiting itself consumed.
     let settle: (end: TurnEnd) => void = () => {};
-    const turn = new Promise<TurnEnd>((resolve) => {
+    let turn!: Promise<TurnEnd>;
+    const openSegment = (): void => {
       let done = false;
-      settle = (end) => {
-        if (done) return;
-        done = true;
-        resolve(end);
-      };
-    });
+      turn = new Promise<TurnEnd>((resolve) => {
+        settle = (end) => {
+          if (done) return;
+          done = true;
+          resolve(end);
+        };
+      });
+    };
+    openSegment();
+
+    /** Questions this run has already asked. Keeps a poll off an older one. */
+    const asked = new Set<string>();
 
     /**
      * A lost lease learned late still ends the run.
@@ -292,9 +390,13 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
         });
       }
 
-      if (event.type === "permission-request") {
+      // A request the hub answered itself — `full-auto` on anything,
+      // `accept-edits` on an edit — is not a question. Nothing is parked on it,
+      // so stopping the turn for one would wait for an answer that can never
+      // arrive. It falls through and projects as an ordinary activity.
+      if (event.type === "permission-request" && !isAutoAnswered(event.payload)) {
         post(coalescer.push(event));
-        return settle({ kind: "permission-required" });
+        return settle({ kind: "permission-required", event });
       }
 
       if (event.type === "state") {
@@ -311,20 +413,103 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     });
     let attemptStarted = false;
 
+    // Started before the turn and stopped only when every segment is over —
+    // including the stretches spent waiting on a person. kaambaan reclaims a
+    // lease that goes quiet for 15 minutes; a waiting lease is not quiet, which
+    // is exactly why the wait can be bounded by policy instead of by the lease.
     beat = setInterval(() => {
       queue(async () => {
         await client.heartbeat(work);
       });
     }, deps.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
 
-    const timeout = new Promise<TurnEnd>((resolve) => {
-      timer = setTimeout(() => resolve({ kind: "timeout" }), deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
-    });
+    /**
+     * Ask a human, and wait.
+     *
+     * The question itself is already on its way: the subscriber pushed the
+     * request through the coalescer and into the same ordered queue as every
+     * other activity, so it reaches the board after everything the agent said
+     * before it stopped to ask. This drains that queue, then reads the run back
+     * until the question is settled — the read surface is authorized by the run
+     * this agent already owns, so no second credential and no re-claim.
+     */
+    const askTheHuman = async (request: AcpEvent): Promise<PermissionResolution> => {
+      await chain;
+      if (abortCause) return { kind: "aborted" };
+
+      const waitMs = deps.permissionWaitMs ?? agent.permissionWaitMs ?? DEFAULT_PERMISSION_WAIT_MS;
+      const pollMs = deps.permissionPollMs ?? DEFAULT_PERMISSION_POLL_MS;
+      const deadline = Date.now() + waitMs;
+      const offered = (request.payload as { options?: unknown } | null)?.options;
+      let questionId: string | null = null;
+
+      for (;;) {
+        const elicitations = (await client.context(work.runId)).elicitations ?? [];
+        // Identified by id from the first read on, not by "the last one": this
+        // run may have asked before, and a question that is answered is not
+        // re-answerable. Nothing is inferred from position after that.
+        const question: RunElicitation | undefined = questionId
+          ? elicitations.find((e) => e.id === questionId)
+          : elicitations.filter((e) => !asked.has(e.id)).at(-1);
+        if (!question) return { kind: "unrecorded" };
+        questionId = question.id;
+        asked.add(question.id);
+
+        if (question.status === "cancelled") return { kind: "cancelled" };
+        if (question.status === "answered") {
+          const optionId = selectedOptionId(offered, question.answer);
+          // Null means the answer selected nothing the harness offered — free
+          // text, or an option from somewhere else. Not a decision, and not a
+          // reason to pick one.
+          return optionId === null ? { kind: "unmappable" } : { kind: "answered", optionId };
+        }
+
+        if (abortCause) return { kind: "aborted" };
+        if (Date.now() >= deadline) return { kind: "timeout", waitMs };
+        await sleep(pollMs);
+      }
+    };
 
     let end: TurnEnd;
     try {
       await acp.promptSession(agent.hubUserId, session.id, text);
-      end = await Promise.race([turn, timeout]);
+      for (;;) {
+        const segment = turn;
+        const timeout = new Promise<TurnEnd>((resolve) => {
+          timer = setTimeout(() => resolve({ kind: "timeout" }), deps.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS);
+        });
+        end = await Promise.race([segment, timeout]);
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (end.kind !== "permission-required") break;
+        const request = end.event;
+
+        // Opened BEFORE the wait so the harness is not deaf while a human
+        // thinks: an event that arrives now — a session that died, above all —
+        // settles the next segment instead of being dropped into a settled one.
+        openSegment();
+        const outcome = await Promise.race([
+          askTheHuman(request).then((resolution) => ({ resolution })),
+          turn.then((interrupted) => ({ interrupted })),
+        ]);
+
+        if ("interrupted" in outcome) {
+          end = outcome.interrupted;
+          break;
+        }
+        if (outcome.resolution.kind !== "answered") {
+          end = { kind: "unanswered", reason: whyNoAnswer(outcome.resolution) };
+          break;
+        }
+        log("a human answered a permission request", {
+          run: work.runId,
+          card: key.externalCardId,
+          option: outcome.resolution.optionId,
+        });
+        await acp.answerPermission(agent.hubUserId, session.id, request.seq, outcome.resolution.optionId);
+      }
     } finally {
       if (timer) clearTimeout(timer);
       if (beat) clearInterval(beat);
@@ -343,16 +528,32 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       return await abort(deps, key, work, attemptId, aborted, session.id);
     }
 
-    if (end.kind === "permission-required") {
-      // RQ2: an elicitation is a dead end — kaambaan's input-required → working
-      // transition exists and nothing invokes it. Park the card for a human
-      // rather than hold the harness until the reclaim.
-      await acp.endSession(agent.hubUserId, session.id, "A permission request has no return path through the board.").catch(() => {});
-      if (attemptId) await endAttempt(attemptId, "input-required", lastSeq);
-      const reason = "the agent asked for permission, which the board cannot answer";
-      await client.block(work, reason).catch(() => {});
-      await afterTheBoardWasTold(deps, "the card was blocked", () => markAbandoned(key, reason));
-      return { status: "blocked", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
+    if (end.kind === "unanswered") {
+      // **Failed, not blocked and not released.** A session started, so the
+      // workspace may hold partial work — the same reasoning as `failStarted`.
+      // `release` would hand a half-edited workspace to the next claimer with
+      // nothing recording it; `block` would park the card AND cancel the
+      // question, so the one thing a human could still usefully do disappears.
+      // `fail` re-queues the card with the reason and a failure count, so the
+      // question is asked again on the next attempt and kaambaan's circuit
+      // breaker parks it for a human if nobody ever answers.
+      //
+      // Ending the session first also resolves the parked ACP request as
+      // `cancelled`, which is the honest delivery of "no decision was made".
+      const { reason } = end;
+      await acp.endSession(agent.hubUserId, session.id, reason).catch(() => {});
+      if (attemptId) await endAttempt(attemptId, "failed", lastSeq || null);
+      try {
+        await client.fail(work, reason);
+      } catch (err) {
+        if (isLeaseSuperseded(err) || isForeignRun(err)) {
+          return await abort(deps, key, work, attemptId, err);
+        }
+        log("the board could not be told the question went unanswered", { run: work.runId, error: String(err) });
+      }
+      await afterTheBoardWasTold(deps, "the card was failed", () => markAbandoned(key, reason));
+      log("a permission request went unanswered", { run: work.runId, card: key.externalCardId, reason });
+      return { status: "unanswered", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
     }
 
     const contextPeak = coalescer.contextPeak();

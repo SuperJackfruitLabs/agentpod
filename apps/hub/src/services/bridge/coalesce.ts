@@ -22,6 +22,8 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 
+import { isAutoAnswered, permissionQuestion, toBoardOptions } from "./permission";
+
 /**
  * One kaambaan activity, in the shape its REST handler actually reads.
  *
@@ -134,16 +136,26 @@ export class ActivityCoalescer {
         return this.durable({ type: "error", body: String(payload.message ?? "agent error") });
 
       case "permission-request":
+        // A request the hub answered itself is not a question. `full-auto`
+        // auto-allows everything and `accept-edits` auto-allows edits, and both
+        // still persist this event — projecting one as an elicitation would put
+        // the card in `input-required` waiting on a decision already made, with
+        // nothing parked to receive an answer.
+        if (isAutoAnswered(payload)) {
+          return this.durable({
+            type: "thought",
+            ephemeral: true,
+            body: `${permissionQuestion(payload)} (answered by the hub's permission mode)`,
+          });
+        }
         return this.durable({
           type: "elicitation",
-          body: String(
-            payload.title ??
-              (payload.toolCall as Record<string, unknown> | undefined)?.title ??
-              "The agent needs permission to continue.",
-          ),
+          body: permissionQuestion(payload),
           signal: "select",
-          // `parameter`, not `signalMetadata`: see BoardActivity.
-          parameter: { requestSeq: event.seq, options: payload.options ?? [] },
+          // `parameter`, not `signalMetadata`: see BoardActivity. And the
+          // options are TRANSLATED, not forwarded — kaambaan echoes the chosen
+          // option's `name` back, so `name` has to be the ACP `optionId`.
+          parameter: { requestSeq: event.seq, options: toBoardOptions(payload.options) },
         });
 
       case "permission-answer":

@@ -84,7 +84,36 @@ export interface RunReference {
   sourceType: string;
 }
 
-/** `GET /v1/boards/:boardId/runs/:runId` — re-readable, no lease required. */
+/**
+ * One question this run asked a human, as the run read surface returns it.
+ *
+ * `answer.option` is the **`name`** of the option that was chosen — kaambaan's
+ * own spelling, which is why the bridge sends ACP's `optionId` as `name` when
+ * it asks (see `permission.ts`).
+ *
+ * `cancelled` covers every way a question dies: the run ended or was reclaimed,
+ * a human moved the card, or a newer question superseded it. kaambaan has no
+ * separate "superseded" status, so all of them mean the same thing to a waiting
+ * agent — stop waiting, nobody is going to answer this.
+ */
+export interface RunElicitation {
+  id: string;
+  question: string;
+  signal?: string | null;
+  options?: Array<{ name: string; title: string }>;
+  status: "pending" | "answered" | "cancelled";
+  answer: { option?: string | null; text?: string | null; answeredBy: string; answeredAt: string } | null;
+  createdAt: string;
+}
+
+/**
+ * `GET /v1/boards/:boardId/runs/:runId` — re-readable, no lease required.
+ *
+ * Authorized by "the run belongs to the agent that claimed it", so a waiting
+ * agent reads its own answer with the credential it already holds. Deliberately
+ * not lease-gated, which is also why a run whose lease lapsed can still see
+ * that its question was cancelled.
+ */
 export interface RunContext {
   run: {
     runId: string;
@@ -100,6 +129,8 @@ export interface RunContext {
   stage: { key: string; name: string } | null;
   handoff: unknown;
   references: RunReference[];
+  /** Every question this run asked, oldest first. Absent on older deployments. */
+  elicitations?: RunElicitation[];
 }
 
 /** The lease a run verb is authorized by. */

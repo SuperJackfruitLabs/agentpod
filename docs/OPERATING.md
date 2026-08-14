@@ -749,7 +749,7 @@ There is no API for the ledger — Postgres is the read path. One row per claime
 | `produced` | **the work finished and the handoff is recorded, but the board has not been told.** This is the replayable state: the next claim of the same card reports the stored output without re-running the harness |
 | `reported` | the board knows; nothing left to replay |
 | `released` | the claim was handed back **before any ACP session opened**, so the workspace cannot have been touched. Unpenalised |
-| `abandoned` | the run stopped *after* it started — permission needed, turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
+| `abandoned` | the run stopped *after* it started — a permission question that went unanswered, a turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
 
 `released` vs `abandoned` is the distinction worth keeping straight: it is the only record of
 whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written
@@ -832,6 +832,15 @@ LIMIT 20;
 - **Both columns `NULL`** is not zero: nobody counted. The run never opened a session (a claim handed straight back, or a replay of a prior run's recorded output), or it predates this being measured at all.
 
 The same two numbers appear once per worked card in the hub log — `journalctl -u agentpod-hub | grep 'coalesced the transcript'` — with the run, card, station and attempt ids. One line per card, never per event, and it carries no card content, prompt or harness output.
+
+**A card on the board is sitting in `input-required`:**
+
+The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in kaambaan moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
+
+- **Only a human can answer it.** kaambaan refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
+- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `KAAMBAAN_BRIDGE_AGENTS` (default 30 minutes) — *not* by kaambaan's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips kaambaan's circuit breaker and parks for a human.
+- **What gets asked depends on the mode.** `full-auto` never asks. `accept-edits` — the supervised setting — auto-approves file writes and asks about anything that executes. `ask` asks about every tool call, which is a great deal of asking; it is a mode for a board somebody is watching, not a default.
+- `journalctl -u agentpod-hub | grep -E 'permission request'` shows both ends: `a human answered a permission request` with the option that was chosen, and `a permission request went unanswered` with the reason.
 
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
