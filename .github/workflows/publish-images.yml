@@ -218,7 +218,13 @@ jobs:
           # nobody reads), so the argument is only added when there is one.
           AGENT_VERSION: ${{ steps.agent.outputs.version }}
         run: |
-          ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}"
+          # GHCR refs must be lowercase; `github.repository_owner` is not — it is the
+          # account name verbatim, and this repository moved to an owner with capitals
+          # in it on 2026-08-14, which failed every build with "repository name must
+          # be lowercase". Lowercasing here rather than hardcoding keeps a fork or a
+          # future move working without another edit.
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          ref="ghcr.io/${owner}/${{ matrix.image }}"
           args=(
             --platform linux/amd64
             -f "${{ matrix.dockerfile }}"
@@ -243,7 +249,8 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: |
           set -eux
-          ref="ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}:${{ inputs.tag }}"
+          owner=$(printf '%s' "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          ref="ghcr.io/${owner}/${{ matrix.image }}:${{ inputs.tag }}"
 
           # Every image: the node-agent binary is there and runs.
           agent_version_out="$(docker run --rm --entrypoint /agentpod-node "$ref" version)"
