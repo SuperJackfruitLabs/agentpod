@@ -769,7 +769,7 @@ for everyone; the boundary is in place ahead of the mapping.
 
 The two coalescing counters on each row, `events_received` and `activities_posted`, answer
 "is the transcript being projected, and by how much" — the query and how to read a `NULL`
-are under [Troubleshooting](#is-the-kaambaan-bridges-coalescing-working-and-by-how-much).
+are under [Troubleshooting](#9-troubleshooting).
 
 ---
 

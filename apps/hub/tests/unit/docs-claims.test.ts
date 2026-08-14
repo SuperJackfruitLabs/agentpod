@@ -192,6 +192,92 @@ describe("environment variables the hub names in a boot message", () => {
   });
 });
 
+describe("internal links in the live documentation", () => {
+  /**
+   * Not vanity. `validate-config.ts` sent a failed boot to
+   * `docs/production-readiness/phase-1-security.md`, and the landing page sent
+   * a reader to the same path — both dead since the pivot moved that directory
+   * into the archive. A dead link in a runbook is the reader's dead end at the
+   * exact moment they needed the next page.
+   *
+   * `docs/archive/` and `docs/superpowers/` are excluded on purpose: both are
+   * dated records, and a record that has to keep its links working against a
+   * moving codebase would have to be edited, which would stop it being a
+   * record. Everything else is live and must resolve.
+   */
+  const LIVE_DOCS = [
+    "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
+    "CONTRIBUTING.md",
+    "TESTING.md",
+    "docs/README.md",
+    "docs/DEPLOYMENT.md",
+    "docs/OPERATING.md",
+    "docs/archive/README.md",
+    "apps/hub/README.md",
+    "apps/hub/CLAUDE.md",
+    "apps/landing/README.md",
+    "fixtures/ecosystem-identity/README.md",
+    "fly/node-image/README.md",
+    "cloudflare/worker-v2/README.md",
+  ] as const;
+
+  /** GitHub's heading-anchor rule, near enough: lowercase, punctuation out, spaces to dashes. */
+  const slug = (heading: string): string =>
+    heading
+      .replace(/`/g, "")
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-");
+
+  const headingAnchors = (abs: string): Set<string> => {
+    const anchors = new Set<string>();
+    for (const line of readFileSync(abs, "utf8").split("\n")) {
+      const heading = /^#{1,6}\s+(.*)$/.exec(line);
+      if (heading) anchors.add(slug(heading[1]!));
+    }
+    return anchors;
+  };
+
+  test("all resolve — both the file and the #anchor", async () => {
+    const { existsSync } = await import("node:fs");
+    const { dirname, resolve } = await import("node:path");
+    const broken: string[] = [];
+
+    for (const rel of LIVE_DOCS) {
+      const abs = join(REPO_ROOT, rel);
+      for (const link of read(rel).matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
+        const target = link[1]!;
+        if (/^(https?:|mailto:|#!)/.test(target)) continue;
+        const [pathPart, anchor] = target.split("#");
+
+        let targetAbs = abs;
+        if (pathPart) {
+          targetAbs = resolve(dirname(abs), pathPart);
+          if (!existsSync(targetAbs)) {
+            broken.push(`${rel} → ${target} (no such file)`);
+            continue;
+          }
+        }
+        if (anchor && targetAbs.endsWith(".md") && !headingAnchors(targetAbs).has(anchor)) {
+          broken.push(`${rel} → ${target} (no such heading)`);
+        }
+      }
+    }
+
+    expect(broken).toEqual([]);
+  });
+
+  test("the scan actually reads links", () => {
+    // Guard the guard: a link regex that stopped matching would make the
+    // assertion above pass on a document full of dead ends.
+    const links = [...read("docs/README.md").matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)];
+    expect(links.length).toBeGreaterThan(10);
+  });
+});
+
 describe("the required CI checks", () => {
   /** Job names from ci.yml — `  jobname:` at two-space indent under `jobs:`. */
   const ciJobs = (): string[] => {
