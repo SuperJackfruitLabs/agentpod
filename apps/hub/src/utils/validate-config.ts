@@ -212,7 +212,10 @@ export function collectConfigErrors(
   }
 
   if (isProduction) {
-    if (cfg.database.path.includes("agentpod-dev-password")) {
+    // DATABASE_URL, not the legacy DATABASE_PATH this used to read: the hub
+    // connects with the URL, nothing sets the path, and so this refusal had
+    // never once fired (#321).
+    if (cfg.database.url.includes("agentpod-dev-password")) {
       errors.push({
         field: "DATABASE_URL",
         message: "Production database cannot use default dev password.",
