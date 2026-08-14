@@ -104,6 +104,66 @@ describe("a run that belonged to another agent halts the loop", () => {
   });
 });
 
+describe("a station that is down does not become a claim storm", () => {
+  test("a station that is not ready backs off — it does not poll every 5s", async () => {
+    const s = scripted({ status: "not-ready", reason: "Node is offline." });
+    const slept: number[] = [];
+    const loop = startAgentLoop({
+      run: s.run,
+      pollMs: 5_000,
+      backoffMs: 30_000,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    while (s.calls.length < 2) await Promise.resolve();
+    await loop.stop();
+
+    expect(slept[0]).toBe(30_000);
+    expect(slept[0]).not.toBe(5_000);
+  });
+
+  test("a claim handed straight back backs off too — claim/release/claim is not a fix", async () => {
+    // The card is back on the board the moment we release it, so an immediate
+    // re-claim would take it again, fail again and churn the board.
+    const s = scripted(
+      { status: "released", externalRunId: "run_1" },
+      { status: "released", externalRunId: "run_2" },
+    );
+    const slept: number[] = [];
+    const loop = startAgentLoop({
+      run: s.run,
+      pollMs: 5_000,
+      backoffMs: 30_000,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    while (s.calls.length < 2) await Promise.resolve();
+    await loop.stop();
+
+    expect(slept.slice(0, 2)).toEqual([30_000, 30_000]);
+  });
+
+  test("a reported run claims again immediately — the backoff is for faults only", async () => {
+    const s = scripted({ status: "reported", externalRunId: "run_1" });
+    const slept: number[] = [];
+    const loop = startAgentLoop({
+      run: s.run,
+      pollMs: 5_000,
+      backoffMs: 30_000,
+      sleep: async (ms) => {
+        slept.push(ms);
+      },
+    });
+    while (s.calls.length < 2) await Promise.resolve();
+    await loop.stop();
+
+    // Nothing after the reported cycle; the next cycle idles and polls.
+    expect(slept).not.toContain(30_000);
+  });
+});
+
 describe("off by default", () => {
   test("an unconfigured hub starts no bridge and touches nothing", async () => {
     delete process.env[BRIDGE_ENV_FLAG];
