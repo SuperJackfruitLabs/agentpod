@@ -26,9 +26,10 @@ AgentPod is a **fleet/facilities console for agent runtimes** — a single place
 | **hub** | Bun + Hono, Drizzle + Postgres | Registry, connection broker, enrollment, auth (Better Auth), audit, provisioning drivers. Self-hostable. |
 | **console** | SvelteKit (adapter-static SPA) | Fleet-first UI: node list → station tree → capability panels (filesystem, logs, terminal, config, health, lifecycle, cleanup). |
 
-## Harnesses detected (v0.1.0)
+## Harnesses detected
 
-AgentPod ships descriptors for: **Hermes**, **OpenClaw**, **Claude Code**, **Codex**, **OpenCode**.
+AgentPod ships descriptors for: **Hermes**, **OpenClaw**, **Claude Code**, **Codex**, **OpenCode**, **Pi**.
+The list is `registerDescriptors` in `apps/node-agent/cmd/agentpod-node/registry.go`.
 
 Each descriptor wraps the harness's native CLI/API to enumerate runtimes, locate config/logs/workspace, and implement lifecycle — without reinventing each harness's introspection.
 
@@ -74,7 +75,15 @@ See [docs/OPERATING.md](./docs/OPERATING.md) for enrolling nodes, adopting stati
 
 ## Status
 
-**v0.1.0** — single-operator (one admin account; signup closes after the first user). Multi-tenancy (orgs, tenant isolation, billing) is a deliberate post-release effort targeting v0.2.0.
+**Single-operator** — one admin account; signup closes after the first user. Releases are
+tagged `v0.1.x`; see [CHANGELOG.md](./CHANGELOG.md) and `git tag` for where that has got to
+(this line used to name a version and was 26 releases stale).
+
+The **tenant-isolation boundary has landed** — a `tenants` table, a `tenant_id` on every
+scoped table, and a `tenantScope()` helper that refuses to build a query without one
+(`apps/hub/src/db/tenant-scope.ts`, pinned by `tests/unit/tenant-scope.test.ts`). Everything
+today runs under the single bootstrap tenant `fleet_00000000000000000000`. What is still
+ahead is what *uses* the boundary: orgs, principals, billing.
 
 ## Legacy / OpenCode era
 

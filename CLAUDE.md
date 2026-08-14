@@ -2,9 +2,9 @@
 
 Fleet/facilities console for agent runtimes. Three tiers:
 
-- `apps/node-agent` — Go daemon on each host; detects harnesses (hermes, openclaw, claude-code, codex, opencode), dials the hub over WSS, serves station capabilities (health/logs/fs/terminal/lifecycle/cleanup), self-updates from GitHub releases.
+- `apps/node-agent` — Go daemon on each host; detects harnesses (hermes, openclaw, claude-code, codex, opencode, pi — `cmd/agentpod-node/registry.go` is the list), dials the hub over WSS, serves station capabilities (health/logs/fs/terminal/lifecycle/cleanup/acp/changeset), self-updates from GitHub releases.
 - `apps/hub` — Bun + Hono + Drizzle/Postgres backend; node gateway, broker, station registry, Better Auth. See `apps/hub/CLAUDE.md`.
-- `apps/console` — Svelte 5 SPA (vite, bits-ui, Tailwind); deployed to Cloudflare Pages.
+- `apps/console` — SvelteKit with `adapter-static` (Svelte 5 runes, vite, bits-ui, Tailwind); a client-routed SPA deployed to Cloudflare Pages. It IS SvelteKit — `pnpm check` runs `svelte-kit sync`.
 - `packages/contract` — zod schemas shared by hub ↔ agent ↔ console. Change here first when a frame/API shape changes.
 
 ## Commands
@@ -23,7 +23,7 @@ On an enrolled node, `apn status|stop|start|restart|logs [-f]` and `apn service 
 ## Workflow
 
 - TDD: failing test first, including a regression test for every bug fix.
-- Branches: work on `develop`; release via PR → `main` (required checks: `contract`, `hub`, `node-agent`, `console`, `worker`; `strict`, so a branch must be up to date before it merges — and nothing, including a workflow, can push straight to `main`).
+- Branches: trunk-based on `main` — short-lived branch → PR → `main`. **`develop` is dead** (419 commits behind, last touched 2026-08-08); do not branch from it. Required checks: `contract`, `hub`, `node-agent`, `console`, `worker`; `strict`, so a branch must be up to date before it merges — and nothing, including a workflow, can push straight to `main`. Full flow: `CONTRIBUTING.md`.
 - Releases: tag `v*` on `main` → `release-node-agent.yml` publishes binaries + `install.sh` + `SHA256SUMS` (self-update verifies against SHA256SUMS — an incomplete release bricks fleet updates), then opens a `chore/fly-pin-<tag>` PR moving the Fly images' `ARG AGENTPOD_VERSION` onto it. Merge that PR before publishing Fly images; `fly/node-image/check-version-pin.sh` fails CI until you do.
 - Console production builds need `PUBLIC_HUB_URL=https://hub.agentpod.dev` baked in at build time (a plain build points the deployed console at localhost).
 
