@@ -19,7 +19,8 @@ On the target box:
 | **Docker** | Required for the Docker provisioner and image builds |
 | **Postgres + pgvector** | Hub's database. See step 2. |
 | **bun** | Runs the hub (`curl -fsSL https://bun.sh/install \| bash`) |
-| **pnpm** | Builds the console (`corepack enable && corepack prepare pnpm@latest --activate`) |
+| **Node.js 20+** | pnpm is a Node program and the console build is `vite build`; a box with only bun cannot run step 5's `pnpm install`. CI uses Node 20. |
+| **pnpm** | Builds the console. `corepack enable` is enough — the repo pins `packageManager: pnpm@10.18.2` in the root `package.json` and corepack honours the pin, so do **not** `corepack prepare pnpm@latest`: it can install a different major than the lockfile was written with. |
 | **Go** | Only required when building the node-agent from source. The curl installer downloads prebuilt binaries — no Go needed on target hosts. |
 | **nginx + certbot** | Existing reverse proxy; certbot for TLS |
 
@@ -103,22 +104,48 @@ cat > /etc/agentpod/hub.env <<'EOF'
 # ── Database ──────────────────────────────────────────────────────────────────
 DATABASE_URL=postgres://agentpod:<STRONG_PASSWORD>@localhost:5432/agentpod
 
+# NODE_ENV: `production` turns the boot checks below from warnings into
+# refusals (dev secrets, weak entropy). The systemd unit also sets it; set it
+# here too so the hub behaves the same when run by hand.
+NODE_ENV=production
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
-# BETTER_AUTH_SECRET: ≥32 chars, random. Better Auth auto-reads this env var.
+# BETTER_AUTH_SECRET: read by config.ts and passed explicitly to betterAuth().
+# In production it must be ≥32 chars AND mix at least two character classes —
+# 32 lowercase letters is refused (validate-config.ts: hasMinimumEntropy).
 BETTER_AUTH_SECRET=<run: openssl rand -hex 32>
 
-# ENCRYPTION_KEY: exactly 32 bytes (AES-256-GCM for stored credentials).
-ENCRYPTION_KEY=<run: openssl rand -hex 16>  # 16 hex-pairs = 32 bytes
+# ENCRYPTION_KEY: exactly 32 characters (AES-256-GCM for stored credentials).
+# `openssl rand -hex 16` gives 32 hex characters. Keep the value alone on its
+# line: the pre-flight below (and bun's own .env parser) do not strip trailing
+# comments, so `KEY=abc  # note` makes the key 32+len(note) and fails a check
+# that is not really failing.
+ENCRYPTION_KEY=<run: openssl rand -hex 16>
 
-# API_TOKEN: bearer token for server-to-server calls (enrollment, health probes).
+# API_TOKEN: NOT just a server-to-server convenience. Presented as
+# `Authorization: Bearer`, it authenticates as DEFAULT_USER_ID on every /api/*
+# route (auth/middleware.ts) — a full console-equivalent credential. Treat it
+# like a root password; enrollment and /health do not use it.
 API_TOKEN=<run: openssl rand -hex 24>
+
+# ── Browser origins and the session cookie ────────────────────────────────────
+# REQUIRED on any domain other than agentpod.dev. The built-in origin allowlist
+# is only http://localhost:5173, https://console.agentpod.dev and
+# https://app.agentpod.dev (config.ts); ALLOWED_ORIGINS ADDS to it. Without
+# your console's origin here, every mutating /api/* request is rejected by the
+# CSRF middleware and the terminal WebSocket fails its CSWSH check — the
+# console loads and cannot log in.
+ALLOWED_ORIGINS=https://console.<your-domain>
+
+# Session cookie attributes (config.ts: sessionCookieOptions). Unset, the
+# cookie is host-only and not Secure, which is right for http://localhost and
+# wrong for a TLS deployment — and the smoke test in §9 cannot pass.
+COOKIE_DOMAIN=.<your-domain>
+COOKIE_SECURE=true
 
 # ── Feature flags ─────────────────────────────────────────────────────────────
 # Disable MetaMCP integration (not part of fleet console).
 METAMCP_ENABLED=false
-
-# Activity archival: set false to disable background archival job (optional).
-# ENABLE_ACTIVITY_ARCHIVAL=false
 
 # ── Provisioning ──────────────────────────────────────────────────────────────
 # Enable the Docker provisioner.
@@ -200,12 +227,20 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # NODE_AGENT_FLY_IMAGE=<no image published yet: a Generic Fly runtime cannot work>
 # NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:<release>
 # NODE_AGENT_FLY_PI_IMAGE=ghcr.io/<owner>/agentpod-node-pi-fly:<release>
+
+# ── kaambaan bridge ───────────────────────────────────────────────────────────
+# See "kaambaan bridge" below before enabling. OFF unless this is the literal
+# lowercase string "true" — `1` and `TRUE` read as off.
+# ENABLE_KAAMBAAN_BRIDGE=false
+# KAAMBAAN_BASE_URL=https://kaambaan.dev
+# KAAMBAAN_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"kbn_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
 
 > **Key constraints**
-> - `BETTER_AUTH_SECRET`: ≥ 32 characters.
+> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173`, `console.agentpod.dev` and `app.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
+> - `BETTER_AUTH_SECRET`: ≥ 32 characters **and** at least two character classes when `NODE_ENV=production`.
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
 > - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
 > - Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `NODE_AGENT_MODAL_IMAGE`, `NODE_AGENT_MODAL_OPENCODE_IMAGE`, `NODE_AGENT_MODAL_PI_IMAGE` and `PROVISIONING_HUB_URL` are **all** required whenever `ENABLE_MODAL_PROVISIONING=true`, and the hub exits at startup without them, naming each one. That is deliberate: most of them would otherwise fail silently, later, on somebody else's runtime.
@@ -326,6 +361,63 @@ hub box needs no `flyctl` install and no Fly login.
 > - **Which Fly images exist.** `agentpod-node-opencode-fly` (`fly/node-image/Dockerfile`) and `agentpod-node-pi-fly` (`fly/node-image/Dockerfile.pi`) — OpenCode and Pi. There is **no generic (harness-less) Fly image**, so a Fly runtime created with the **Generic** harness cannot work; the hub says so at boot with a `⚠️ WARNING` naming `NODE_AGENT_FLY_IMAGE`, and reports the same for any other harness whose resolved image is a local Docker tag. It is a report rather than a refusal precisely because of that gap: a fatal rule would make `ENABLE_FLY_PROVISIONING=true` unbootable no matter what you set, taking down a substrate that serves OpenCode and Pi perfectly well.
 > - **The images are published by CI, not by hand:** `.github/workflows/publish-images.yml` (manual dispatch — pick the image and the tag). It builds `linux/amd64` on an amd64 runner and then verifies the image it pushed: the `agentpod-node` binary runs, and the harness binary is resolvable from a *minimal service PATH*. Building by hand still works (`fly/node-image/README.md` has the `docker buildx … --push` line) and the same two things will not let you skip them: `--platform linux/amd64` (Fly Machines are amd64; an arm64 image built on an Apple laptop dies at boot with `exec format error`) and making the registry package **public** (Fly pulls anonymously). The tag in `NODE_AGENT_FLY_OPENCODE_IMAGE` / `NODE_AGENT_FLY_PI_IMAGE` is the record of which build the fleet is running.
 
+### kaambaan bridge
+
+Off by default, and **nothing is inferred from a credential being present** — a `kbn_` token
+sitting in an env file is not a decision to start claiming work on someone's board. A hub
+that has not opted in constructs nothing, opens no session and makes no request. Day-2
+operation — reading the ledger, spotting a halted loop — is
+[docs/OPERATING.md → The kaambaan bridge](./OPERATING.md#8-the-kaambaan-bridge).
+
+Three variables, all required together:
+
+| Variable | Meaning |
+|---|---|
+| `ENABLE_KAAMBAAN_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
+| `KAAMBAAN_BASE_URL` | Origin of the kaambaan deployment, e.g. `https://kaambaan.dev`. Trailing slashes are stripped. |
+| `KAAMBAAN_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
+
+One process, many identities. Each roster entry is a separate principal with its own token,
+board and station — "the bridge's credential" is not a thing that exists:
+
+```json
+[
+  {
+    "key": "codex-mac",
+    "boardId": "brd_9c1d4e5f6a7b8c9d",
+    "token": "kbn_…",
+    "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+    "hubUserId": "usr-local-1",
+    "mode": "full-auto",
+    "maxConcurrency": 1,
+    "profileKey": "reviewer"
+  }
+]
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `key` | yes | Stable name. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique — a duplicate is refused at boot. |
+| `boardId` | yes | The kaambaan board to claim from. |
+| `token` | yes | This agent's own kaambaan credential, minted under "Connect an agent". Must start `kbn_`. |
+| `stationId` | yes | The station its work runs on. |
+| `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
+| `mode` | no (default `full-auto`) | `full-auto` or `accept-edits`. **`ask` is refused at load**: a permission request becomes a kaambaan elicitation, and kaambaan has no return path for one, so the card would park until the 15-minute reclaim with the harness blocked. |
+| `maxConcurrency` | no | How many of this agent's runs may be in flight. kaambaan defaults to 1. |
+| `profileKey` | no | Claim under a profile, when the board routes by profile. |
+
+**A roster that fails to parse refuses the boot**, naming `KAAMBAAN_BRIDGE_AGENTS`. That is
+deliberate: a bridge that silently claimed nothing because its roster was malformed looks
+exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
+array, a token that does not start `kbn_`, `mode: "ask"`, and a duplicate `key`.
+
+> **Quoting.** The roster is JSON on one line, which makes it the value most likely to be
+> quoted in an env file, and the value quoting most often breaks. systemd's
+> `EnvironmentFile=` strips one surrounding layer, so both `KAAMBAAN_BRIDGE_AGENTS=[{…}]`
+> and `KAAMBAAN_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
+> parses the file differently will disagree with the hub about which one works. See the
+> pre-flight notes under [Re-deploy](#re-deploy-upgrade); this variable is why they exist.
+
 ---
 
 ## 5. Hub — build + deploy
@@ -349,6 +441,22 @@ cp /opt/agentpod/deploy/agentpod-hub.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now agentpod-hub
 ```
+
+> **The unit hardcodes `agentpod.dev`.** Three `Environment=` lines in the shipped file name
+> that domain — `COOKIE_DOMAIN=.agentpod.dev`, `ALLOWED_ORIGINS=https://app.agentpod.dev`,
+> and `PUBLIC_URL=https://hub.agentpod.dev`. On any other domain, **edit them** (or delete
+> them and keep the values in `hub.env`, which the same unit loads via `EnvironmentFile=`).
+> Note `PUBLIC_URL` is read by nothing in the hub — the config field is
+> `MANAGEMENT_API_PUBLIC_URL` — so it is inert either way.
+>
+> **The unit's comment says the hub is "bound to 127.0.0.1:3001". It is not.** `src/index.ts`
+> exports `{port, fetch, websocket}` with no `hostname`, so Bun binds `0.0.0.0` and
+> `http://<VPS-IP>:3001` serves the API without TLS alongside nginx. Firewall the port:
+>
+> ```bash
+> ufw allow 22/tcp && ufw allow 80,443/tcp && ufw deny 3001/tcp && ufw enable
+> curl -s --max-time 5 http://<VPS-IP>:3001/health   # expect a timeout, not {"status":"ok"}
+> ```
 
 The hub auto-runs Drizzle migrations on startup. Watch the log:
 
@@ -449,7 +557,7 @@ PUBLIC_HUB_URL=https://hub.<your-domain> pnpm --filter @agentpod/console build
   wrangler pages deploy apps/console/build --project-name agentpod-console
   ```
 
-**SPA fallback:** adapter-static requires a catch-all redirect so client-side routing works. Add a `_redirects` file to `apps/console/static/` (committed to the repo):
+**SPA fallback:** adapter-static requires a catch-all redirect so client-side routing works. `apps/console/static/_redirects` is already committed with exactly this — confirm it is there rather than adding it:
 ```
 /* /index.html 200
 ```
@@ -463,7 +571,15 @@ Cloudflare Pages picks this up automatically. Alternatively, enable the "SPA" se
 
 ## 7. nginx vhosts (hub only)
 
-The console is hosted on Cloudflare Pages and does **not** require an nginx vhost on the VPS. Only the hub vhost is configured here.
+The console is hosted on Cloudflare Pages and does **not** require an nginx vhost on the VPS. Only the hub vhost is wanted here.
+
+> **The repo's vhost file contains two server blocks, not one.** `deploy/nginx/hub.agentpod.dev.conf`
+> carries `hub.agentpod.dev` **and** an `app.agentpod.dev` block serving
+> `/opt/agentpod/apps/console/build` from disk — a leftover from the pre-Pages deploy.
+> Copying it as-is installs a vhost for a hostname this guide never creates. `nginx -t`
+> passes either way (a missing `root` directory is not a config error), so nothing tells you.
+> **Delete the second `server { … }` block after copying**, or serve the console from it
+> instead of Cloudflare Pages — but pick one.
 
 **7a. WebSocket upgrade map** (add once to the `http{}` context):
 
@@ -544,7 +660,9 @@ Synapse / `id.agentpod.dev` are never modified, so rollback cannot affect Matrix
 cd /opt/agentpod
 git fetch origin main -q && git merge --ff-only FETCH_HEAD
 # REQUIRED whenever dependencies changed — see below.
-export PATH=/root/.bun/bin:$PATH   # pnpm lives here; it is NOT on the SSH PATH
+export PATH=/root/.bun/bin:$PATH   # bun is here and is NOT on the SSH PATH.
+                                   # If pnpm came from corepack it is on Node's
+                                   # shim path instead — check `which pnpm` once.
 pnpm install --frozen-lockfile
 # Restart hub (auto-migrates):
 systemctl restart agentpod-hub
@@ -580,7 +698,12 @@ for line in open("/etc/agentpod/hub.env"):
     if not line or line.startswith("#") or "=" not in line:
         continue
     k, v = line.split("=", 1)
-    env[k.strip()] = v          # literal, exactly as systemd EnvironmentFile does
+    v = v.strip()
+    # systemd's EnvironmentFile removes ONE layer of surrounding quotes and
+    # nothing else. Match it exactly: no xargs, no comment stripping.
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\"'":
+        v = v[1:-1]
+    env[k.strip()] = v
 script = '''
   const { collectConfigErrors } = await import("./src/utils/validate-config.ts");
   console.log(JSON.stringify(collectConfigErrors(undefined, () => {}).map(e => e.field)));
@@ -596,13 +719,21 @@ Two things about that snippet are load-bearing, and both were learned the hard w
 
 - **`--env-file=/dev/null`.** Without it bun also loads any `.env` in the working
   directory, so you would validate a different environment than systemd passes.
-- **Parse the file literally; do not pipe it through `xargs`.** The obvious form —
+- **Do not pipe the file through `xargs`.** The obvious form —
   `env $(grep -v '^#' /etc/agentpod/hub.env | xargs) bun …` — was in this runbook
-  until 2026-08-14 and is **wrong**: `xargs` strips quotes, so any value containing
-  them arrives mangled. Enabling the kaambaan bridge, whose roster is a JSON array,
-  produced `KAAMBAAN_BRIDGE_AGENTS is not valid JSON` from a config file that was
-  perfectly valid — a pre-flight failing on a fault it invented, which is worse than
-  no pre-flight at all, because it sends you to debug the wrong thing.
+  until 2026-08-14 and is **wrong**: `xargs` re-tokenises and strips quotes wherever
+  they appear, so a value containing them arrives mangled. Enabling the kaambaan
+  bridge, whose roster is a JSON array, produced `KAAMBAAN_BRIDGE_AGENTS is not
+  valid JSON` from a config file that was perfectly valid — a pre-flight failing on
+  a fault it invented, which is worse than no pre-flight at all.
+- **Strip exactly one layer of surrounding quotes, and nothing else** — that is what
+  systemd's `EnvironmentFile=` does. The replacement snippet was, briefly, *fully*
+  literal, which recreated the same class of bug from the other side: an operator who
+  quoted the roster (`KAAMBAAN_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
+  `JSON.parse` and the same invented failure. Note systemd does **not** strip trailing
+  comments — `KEY=value  # note` really is a value with a comment in it, on the live
+  hub as well as here, which is why the `ENCRYPTION_KEY` line in §4 keeps its comment
+  on a line of its own.
 
 `() => {}` swallows the WARNINGS, and Fly's per-harness image gaps are warnings
 (see the Fly notes above). Pass `console.warn` instead of the empty function to
