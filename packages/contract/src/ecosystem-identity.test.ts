@@ -38,6 +38,7 @@ import {
   UserId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
+import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt } from "./card-prompt";
 
 const CORPUS_DIR = join(import.meta.dir, "../../../fixtures/ecosystem-identity");
 
@@ -264,14 +265,13 @@ const joinKey = readCorpus<RunJoinKey>("run_join_key.json");
 
 describe("ecosystem identity corpus — run join key", () => {
   test("records how far enforcement has actually got", () => {
-    // Honest bookkeeping. Half the invariant is now executable: the two id
-    // spaces are disjoint, `Run.id` is validated against AgentPod's, and
-    // acp_runs carries CHECK constraints saying the same thing in the database.
-    // The other half is still absent — nothing inserts into acp_runs, no route
-    // accepts an external run id, and the bridge spike correlates a kaambaan run
-    // to an AgentPod session in a console.log line and nowhere else. When a
-    // write path lands, this string changes and this test is the reminder.
-    expect(joinKey.enforcement.status).toBe("id-spaces-disjoint-no-write-path");
+    // Honest bookkeeping. Both halves are now executable: the two id spaces are
+    // disjoint (asserted here, in the contract, and by CHECK constraints in the
+    // database), and acp_runs finally has a writer — the kaambaan bridge, which
+    // creates the row when it opens the session that executes a claimed card.
+    // What is still absent is a READ path: the reverse index exists and no
+    // query uses it. When that lands, this string changes again.
+    expect(joinKey.enforcement.status).toBe("id-spaces-disjoint-and-written");
   });
 
   for (const c of joinKey.cases) {
@@ -323,5 +323,70 @@ describe("ecosystem identity corpus — run join key", () => {
     expect(RunState.options).toEqual(joinKey.runStates.all as never);
     expect([...TERMINAL_RUN_STATES]).toEqual(joinKey.runStates.terminal as never);
     expect([...INTERRUPTED_RUN_STATES]).toEqual(joinKey.runStates.interrupted as never);
+  });
+});
+
+// ─── card_prompt.json ────────────────────────────────────────────────────────
+
+type PromptCase = {
+  name: string;
+  mustParse: boolean;
+  why: string;
+  value: unknown;
+  rendered?: string;
+};
+type CardPromptCorpus = {
+  contract: string;
+  invariant: string;
+  renderingRules: string[];
+  cases: PromptCase[];
+};
+
+const prompts = readCorpus<CardPromptCorpus>("card_prompt.json");
+
+describe("ecosystem identity corpus — card prompt", () => {
+  test("the corpus pins the version this repo renders", () => {
+    // A renderer and a corpus that disagree about the version are two
+    // contracts, which is the thing having a version was supposed to prevent.
+    expect(prompts.contract).toBe(CARD_PROMPT_VERSION);
+  });
+
+  for (const c of prompts.cases) {
+    test(`${c.mustParse ? "accepts" : "rejects"}: ${c.name}`, () => {
+      expect(CardPrompt.safeParse(c.value).success, c.why).toBe(c.mustParse);
+    });
+  }
+
+  for (const c of prompts.cases.filter((x) => x.rendered !== undefined)) {
+    test(`renders: ${c.name}`, () => {
+      // The rendered text IS the contract. A repo that assembles a card
+      // differently fails here rather than in an agent's behaviour, which is
+      // where the difference would otherwise surface — confidently, and late.
+      expect(renderCardPrompt(CardPrompt.parse(c.value))).toBe(c.rendered!);
+    });
+  }
+
+  test("every accepted case pins its rendered text", () => {
+    // A shape cannot enter the corpus without saying what it reads like.
+    for (const c of prompts.cases.filter((x) => x.mustParse)) {
+      expect(typeof c.rendered, `${c.name} parses but pins no rendered text`).toBe("string");
+    }
+  });
+
+  test("the corpus carries both directions", () => {
+    expect(prompts.cases.some((c) => c.mustParse)).toBe(true);
+    expect(prompts.cases.some((c) => !c.mustParse)).toBe(true);
+  });
+
+  test("no rendered prompt leaks a credential, a lease epoch or an AgentPod id", () => {
+    // The prompt crosses into a harness process. Everything in this list is
+    // either a secret or an id the harness cannot act on and could echo back
+    // into a transcript the board then renders.
+    for (const c of prompts.cases.filter((x) => x.rendered !== undefined)) {
+      expect(c.rendered!).not.toContain("kbn_");
+      expect(c.rendered!).not.toContain("attempt_");
+      expect(c.rendered!).not.toContain("acps_");
+      expect(c.rendered!.toLowerCase()).not.toContain("leaseepoch");
+    }
   });
 });

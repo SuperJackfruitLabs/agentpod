@@ -19,8 +19,9 @@ repo boundary instead of a language boundary.
 |---|---|
 | `id_grammar.json` | What each repo mints and validates for every entity id, plus the full prefix registry and the collisions in it — open (`knownConflicts`) and settled (`resolvedConflicts`). |
 | `run_join_key.json` | The run join key: *kaambaan mints the work run; AgentPod executes it; no competing run id for dispatched work.* |
+| `card_prompt.json` | The prompt contract: what a card becomes when it is handed to a harness, assembled from the card, the previous stage's handoff and the card's references. Pins the **rendered text**, not only the shape. |
 
-Both are plain JSON and depend on no type from any repo. That is deliberate — a corpus that
+All three are plain JSON and depend on no type from any repo. That is deliberate — a corpus that
 needed AgentPod's schemas to be readable could not be checked into kaambaan.
 
 ## The negative cases are the point

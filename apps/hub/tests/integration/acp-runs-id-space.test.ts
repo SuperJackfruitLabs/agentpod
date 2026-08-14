@@ -98,10 +98,11 @@ afterAll(async () => {
 
 describe("acp_runs — AgentPod's own id space, enforced by the database", () => {
   test("no row anywhere carries the old `run_` prefix", async () => {
-    // The evidence behind "no data migration is needed". Nothing in apps/hub/src
-    // inserts into acp_runs and no such statement exists at any commit, so the
-    // table has never held a row — which is what made the rename free. If this
-    // ever fails, the constraints below could not have been added without one.
+    // The evidence behind "no data migration is needed". When migration 0035
+    // landed, no statement inserting into acp_runs existed at any commit, so the
+    // table had never held a row — which is what made the rename free. The table
+    // has a writer now (services/bridge/ledger.ts), and it mints `attempt_`, so
+    // this must stay true for a different reason: the writer respects the split.
     const [{ count }] = await rawSql<
       { count: string }[]
     >`SELECT count(*)::text AS count FROM acp_runs WHERE id LIKE 'run\\_%'`;

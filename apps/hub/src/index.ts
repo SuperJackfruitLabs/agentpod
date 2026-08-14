@@ -51,6 +51,7 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
+import { startKaambaanBridge } from './services/bridge/loop.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
@@ -184,6 +185,15 @@ console.log('Provisioners registered:', enabledProviders().join(', ') || '(none 
 // Expire silent nodes whose TCP close never fired (killed VM, dropped network).
 startNodeSweeper();
 console.log('Node heartbeat sweeper started (45s threshold)');
+
+// Claim work from a kaambaan board, if this hub has been told to.
+// Off unless ENABLE_KAAMBAAN_BRIDGE=true — a hub that has not opted in
+// constructs nothing here, exactly like an unregistered provisioner driver.
+const bridge = await startKaambaanBridge();
+console.log(
+  'kaambaan bridge:',
+  bridge ? `claiming as ${bridge.agents.join(', ')}` : '(disabled)',
+);
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {

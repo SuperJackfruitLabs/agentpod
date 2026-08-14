@@ -34,6 +34,7 @@ import { TenantId } from "@agentpod/contract";
 
 import { db } from "./drizzle";
 import { acpEvents, acpRuns, acpSessions } from "./schema/acp";
+import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification } from "./schema/auth";
@@ -96,6 +97,7 @@ export const TENANT_SCOPED_TABLES = {
   acpSessions,
   acpEvents,
   acpRuns,
+  bridgeDispatches,
   agentTasks,
   cloudflareSandboxes,
 } as const satisfies Record<string, TenantScopedTable>;

@@ -29,3 +29,6 @@ export * from "./audit";
 
 // ACP sessions + event log (fleet console)
 export * from "./acp";
+
+// Work claimed from an external orchestrator (the kaambaan bridge)
+export * from "./bridge";

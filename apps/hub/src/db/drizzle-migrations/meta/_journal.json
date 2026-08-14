@@ -260,6 +260,13 @@
       "when": 1786650945434,
       "tag": "0036_tenant_isolation_boundary",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786675941921,
+      "tag": "0037_bridge_dispatch_ledger",
+      "breakpoints": true
     }
   ]
 }

@@ -7,9 +7,11 @@
   "invariant": "Kaambaan mints the work run; AgentPod executes it; there is no competing run id for dispatched work.",
 
   "enforcement": {
-    "status": "id-spaces-disjoint-no-write-path",
-    "summary": "Half of this is now executable rather than commented. AgentPod's own attempt id lives under `attempt_`, kaambaan's work run under `run_`, and the two grammars reject each other — asserted in the contract, in the shared corpus, and by CHECK constraints on the table itself. What is still missing is a write path: nothing inserts into acp_runs, nothing reads it, and no API accepts an external run id.",
+    "status": "id-spaces-disjoint-and-written",
+    "summary": "Both halves are now executable. AgentPod's own attempt id lives under `attempt_`, kaambaan's work run under `run_`, the two grammars reject each other — asserted in the contract, in this corpus, and by CHECK constraints on the table itself — and there is a writer: the kaambaan bridge creates the acp_runs row when it opens the ACP session that executes a claimed card, carrying the external pair. What is still absent is a READ path: nothing surfaces the join to a caller, and no API accepts an external run id from outside.",
     "whatExists": [
+      "agentpod apps/hub/src/services/bridge/ledger.ts — `startAttempt` inserts the acp_runs row with `external_run_id` = kaambaan's runId and `external_source` = 'kaambaan', minting `attempt_<uuid>` for its own key. The table's first writer, since 2026-08-14.",
+      "agentpod apps/hub/src/db/schema/bridge.ts — `bridge_dispatches`, keyed on `(external_source, external_run_id)`, holds the bridge's claim bookkeeping and points at the attempt that executed it. No id is minted there either.",
       "agentpod apps/hub/src/db/schema/acp.ts — `acp_runs.id` is `attempt_<uuid>`, disjoint from kaambaan's `run_`, with a CHECK constraint (`acp_runs_id_is_agentpod_attempt`) so the database refuses a rival id rather than a comment asking it not to.",
       "agentpod apps/hub/src/db/schema/acp.ts — `external_run_id` and `external_source` on `acp_runs`, really in the database via migration 0028_outgoing_magneto.sql, with `acp_runs_external_idx` on external_run_id for the reverse join from the board's side, plus CHECK constraints for paired presence (`acp_runs_external_pair`) and for an external id never coming from AgentPod's own space (`acp_runs_external_is_not_agentpod`).",
       "agentpod packages/contract/src/ids.ts — `AcpRunId` (`^attempt_<uuid>$`) and `KaambaanRunId` (`^run_[A-Za-z0-9]{6,}$`), each rejecting the other's minted ids.",
@@ -17,13 +19,12 @@
       "agentpod packages/contract/src/run.ts — `RunState` is A2A's TaskState verbatim, chosen so no translation table to kaambaan's state machine is needed."
     ],
     "whatDoesNot": [
-      "Nothing inserts into `acp_runs`. Grepping apps/hub for `acpRuns` outside the schema file finds only tests. `acp_sessions` by contrast is live (acp-sessions.ts mints `acps_<uuid>`); there is no equivalent mint site for runs, so AgentPod does not currently mint an attempt id at all — the grammar is reserved and enforced ahead of its first writer.",
-      "No route accepts an external run id. `POST /api/stations/:id/acp/sessions` takes `{mode}` and nothing else (apps/hub/src/routes/station-acp.ts).",
-      "The ACP wire carries no run or correlation id: neither AcpClientMsg nor AcpServerMsg in packages/contract/src/acp-session.ts has one. The session id is the only identity on the wire.",
-      "The bridge spike holds kaambaan's runId (apps/bridge/spike/src/kaambaan.ts, and every call is POST /v1/boards/{board}/runs/{runId}/{action}) but never sends it to AgentPod. The kaambaan-run → AgentPod-session correlation exists as a console.log line at apps/bridge/spike/src/bridge.ts and nowhere else.",
-      "kaambaan has no notion of AgentPod at all — zero occurrences of the string in its source or docs — so the dispatch path this invariant governs does not exist on either side yet."
+      "No route accepts an external run id from outside. `POST /api/stations/:id/acp/sessions` takes `{mode}` and nothing else (apps/hub/src/routes/station-acp.ts) — the join is written only by the bridge, which learns the run id by claiming it rather than by being handed it.",
+      "Nothing reads the join back out. `acp_runs_external_idx` exists for the reverse lookup and no query uses it; a board cannot yet ask AgentPod what executed one of its runs.",
+      "The ACP wire still carries no run or correlation id: neither AcpClientMsg nor AcpServerMsg in packages/contract/src/acp-session.ts has one. The session id is the only identity on the wire, and the bridge correlates in its own tables rather than on the wire.",
+      "kaambaan still has no notion of AgentPod — the dispatch path is one-directional, driven entirely by an agent token claiming work."
     ],
-    "consequence": "Every case below is an INTENDED shape, validated against AgentPod's `Run` schema, not an observed wire capture. When the write path lands, these fixtures are what it must satisfy. Until then they hold the shape still."
+    "consequence": "The accepted cases below are shapes the writer must satisfy, and it does: `startAttempt` writes exactly `dispatched_run` and `endAttempt` closes it into `completed_dispatched_run`. The rejected cases are what the contract and the table's CHECK constraints refuse."
   },
 
   "resolvedConflict": {
@@ -31,7 +32,7 @@
     "wasClaimedBy": ["kaambaan", "agentpod"],
     "nowClaimedBy": "kaambaan",
     "resolvedAt": "2026-08-14",
-    "detail": "AgentPod used to reserve the same `run_` prefix kaambaan mints with: apps/hub/src/db/schema/acp.ts commented its primary key `\"run_\" + uuid-ish` two lines above the comment `We never mint a rival id`, so the file contradicted itself and the two ids were indistinguishable strings. AgentPod moved, because AgentPod is the executor rather than the minter: kaambaan mints work runs and has live production data, while nothing in apps/hub/src ever inserted into acp_runs (no such statement exists in the repository's history) so no AgentPod row anywhere carries the old prefix. `acp_runs.id` is now `attempt_<uuid>`, which also names the right thing — a run here is a prompt-turn while kaambaan's is a claimed card, so one work run is executed as a series of attempts and the two are not the same entity at all.",
+    "detail": "AgentPod used to reserve the same `run_` prefix kaambaan mints with: apps/hub/src/db/schema/acp.ts commented its primary key `\"run_\" + uuid-ish` two lines above the comment `We never mint a rival id`, so the file contradicted itself and the two ids were indistinguishable strings. AgentPod moved, because AgentPod is the executor rather than the minter: kaambaan mints work runs and has live production data, while at the time of the rename nothing in apps/hub/src had ever inserted into acp_runs (no such statement existed at any commit) so no AgentPod row anywhere carried the old prefix — the rename was free precisely because it happened before the first writer, which landed on 2026-08-14. `acp_runs.id` is now `attempt_<uuid>`, which also names the right thing — a run here is a prompt-turn while kaambaan's is a claimed card, so one work run is executed as a series of attempts and the two are not the same entity at all.",
     "alsoRecordedIn": "id_grammar.json → prefixRegistry.resolvedConflicts"
   },
 

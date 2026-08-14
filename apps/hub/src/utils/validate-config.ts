@@ -7,6 +7,7 @@ import {
   providerImageEnvVar,
 } from "../services/runtimes-image";
 import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
+import { loadBridgeConfig } from "../services/bridge/config";
 
 export interface ValidationError {
   field: string;
@@ -403,6 +404,23 @@ export function collectConfigErrors(
       for (const problem of problems) {
         warn(`⚠️  WARNING: ${problem.field}: ${problem.message}`);
       }
+    }
+  }
+
+  // The kaambaan bridge, scoped by its flag for the same reason every rule
+  // above is: a hub that never claims board work must not be stopped from
+  // booting by a bridge variable, and unset must stay indistinguishable from
+  // off. When it IS on, a roster that fails to parse would otherwise produce a
+  // hub that claims nothing and looks exactly like a quiet board — so the
+  // loader's own error is surfaced here, at boot, naming the variable.
+  if (cfg.bridge.enabled) {
+    try {
+      loadBridgeConfig();
+    } catch (err) {
+      errors.push({
+        field: "KAAMBAAN_BRIDGE_AGENTS",
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

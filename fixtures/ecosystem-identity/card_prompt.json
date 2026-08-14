@@ -1,0 +1,233 @@
+{
+  "corpus": "ecosystem-identity/card-prompt",
+  "contract": "card-prompt/1",
+  "version": 1,
+  "authoredAt": "2026-08-14",
+
+  "invariant": "A card handed to a harness becomes exactly one prompt, assembled from the card, the previous stage's handoff and the card's references — deterministically, from a versioned shape, so the two planes can disagree in a test rather than in an agent's behaviour.",
+
+  "why": [
+    "Nothing wrote this down before. The bridge spike sent `work.card.title` as the whole prompt (apps/bridge/spike/src/bridge.ts) — the spec, the handoff and every reference were dropped on the floor, and an agent given only a title does the wrong work confidently. That is invisible in every test that asserts the seam 'carries the work'.",
+    "The three inputs are exactly what an agent token can read: `GET /v1/boards/:boardId/runs/:runId` returns `{run, card, stage, handoff, references}` and nothing else. So the prompt contract is the whole agent-visible surface, projected into text.",
+    "It is versioned because changing how a card reads changes what agents do. A renderer that silently gains a section changes every run on every board; a version in the shape makes that a decision."
+  ],
+
+  "grammarSource": [
+    "kaambaan apps/api/src/board/board-do.ts:145-161 — RunContext {run, card, stage, handoff, references}",
+    "kaambaan apps/api/src/board/board-do.ts:68-84 — CardView {id, title, spec, currentStageKey, state, attemptCount, ...}",
+    "kaambaan apps/api/src/board/board-do.ts:30-40 — StageDef {key, name, order, ownerKind, owner, gate, wipLimit, routing}",
+    "kaambaan apps/api/src/board/board-do.ts:227-242 — ReferenceView {id, cardId, url, title, subtitle, provider, sourceType, ...}",
+    "kaambaan apps/api/src/board/board-do.ts:1505-1512 — a `request_changes` gate decision merges `{feedback}` into the card's existing handoff, which is why `feedback` is the one handoff key this contract renders specially",
+    "agentpod packages/contract/src/card-prompt.ts — CardPrompt + renderCardPrompt, the validator and renderer this corpus drives"
+  ],
+
+  "renderingRules": [
+    "Section order is fixed and never depends on the data: title, provenance line, Task, Review feedback, Handoff, References, Completing this card.",
+    "An absent section is omitted entirely rather than rendered empty — a heading with nothing under it reads to a harness as 'there was nothing to do here', which is a different claim from 'this was not provided'.",
+    "A string `spec` or `handoff` is rendered verbatim (trimmed); anything else is pretty-printed JSON in a fenced block. A harness must never be shown `[object Object]`.",
+    "`feedback` on a handoff is lifted out and rendered above the rest of the handoff, because it is a human telling the agent what to change and is the reason the card came back.",
+    "The provenance line always states the attempt number. Attempt 2 of a card is not the same instruction as attempt 1, and a harness that cannot tell them apart cannot behave differently on a retry.",
+    "The prompt never contains a credential, a lease epoch or an AgentPod id: it crosses into a harness process, and the harness has no use for any of them."
+  ],
+
+  "cases": [
+    {
+      "name": "full_card",
+      "mustParse": true,
+      "why": "Every input present. This is the shape a second-stage card has: a spec from the human, a handoff from the stage before it, and references the first agent attached.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": {
+          "id": "crd_1a2b3c4d5e6f7a8b",
+          "title": "Add a retry to the webhook sender",
+          "spec": "Deliveries fail permanently on a 502. Retry with backoff, five attempts, then dead-letter."
+        },
+        "stage": { "key": "review", "name": "Review" },
+        "handoff": {
+          "summary": "Implemented in src/push/deliver.ts; tests added.",
+          "branch": "feat/webhook-retry"
+        },
+        "references": [
+          {
+            "url": "https://github.com/acme/api/pull/412",
+            "title": "feat: retry webhook delivery",
+            "provider": "github",
+            "sourceType": "pull_request"
+          }
+        ],
+        "attempt": { "number": 2 }
+      },
+      "rendered": "# Add a retry to the webhook sender\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Review (review) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502. Retry with backoff, five attempts, then dead-letter.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\",\n  \"branch\": \"feat/webhook-retry\"\n}\n```\n\n## References\n\n- feat: retry webhook delivery — https://github.com/acme/api/pull/412 (github/pull_request)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+    {
+      "name": "bare_card_first_attempt",
+      "mustParse": true,
+      "why": "The minimum a board can hand over: a title and nothing else. Every optional section must vanish rather than render empty, or the harness is told there was no spec, no handoff and no references when it was only told a title.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "List the files in this directory, then stop." },
+        "stage": { "key": "work", "name": "Work" },
+        "references": [],
+        "attempt": { "number": 1 }
+      },
+      "rendered": "# List the files in this directory, then stop.\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+    {
+      "name": "rework_after_request_changes",
+      "mustParse": true,
+      "why": "THE CASE THAT EARNS THE CONTRACT. A `request_changes` gate decision merges `{feedback}` into the handoff the agent itself produced and re-queues the card. Rendered as an undifferentiated JSON blob, a reviewer's instruction sits below the agent's own summary of what it already did — so the most important sentence on the card is the least prominent. It is lifted out.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_a1b2c3d4e5f60718",
+        "card": {
+          "id": "crd_1a2b3c4d5e6f7a8b",
+          "title": "Add a retry to the webhook sender",
+          "spec": "Deliveries fail permanently on a 502."
+        },
+        "stage": { "key": "work", "name": "Work" },
+        "handoff": {
+          "summary": "Implemented in src/push/deliver.ts; tests added.",
+          "feedback": "Backoff is linear — make it exponential and cap it at 60s."
+        },
+        "references": [],
+        "attempt": { "number": 2 }
+      },
+      "rendered": "# Add a retry to the webhook sender\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502.\n\n## Review feedback\n\nBackoff is linear — make it exponential and cap it at 60s.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\"\n}\n```\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+    {
+      "name": "structured_spec_and_untitled_reference",
+      "mustParse": true,
+      "why": "`spec` is `JsonValue` on kaambaan's side, so it is routinely an object, and a reference's `title` is nullable. Both are the paths where a naive renderer prints `[object Object]` or the word `null` into a harness's instruction.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": {
+          "id": "crd_1a2b3c4d5e6f7a8b",
+          "title": "Upgrade the pinned Go toolchain",
+          "spec": { "from": "1.22", "to": "1.23", "files": ["go.mod", ".github/workflows/ci.yml"] }
+        },
+        "stage": { "key": "work", "name": "Work" },
+        "references": [
+          { "url": "https://go.dev/doc/go1.23", "title": null, "provider": "web", "sourceType": "document" }
+        ],
+        "attempt": { "number": 1 }
+      },
+      "rendered": "# Upgrade the pinned Go toolchain\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Task\n\n```json\n{\n  \"from\": \"1.22\",\n  \"to\": \"1.23\",\n  \"files\": [\n    \"go.mod\",\n    \".github/workflows/ci.yml\"\n  ]\n}\n```\n\n## References\n\n- https://go.dev/doc/go1.23 (web/document)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+    {
+      "name": "no_stage",
+      "mustParse": true,
+      "why": "kaambaan returns `stage: null` when the board's stage list no longer contains the card's stage (board-do.ts:157). The prompt must still render — a board edited mid-run must not strand a harness.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      },
+      "rendered": "# Rebuild the index\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+
+    {
+      "name": "unversioned",
+      "mustParse": false,
+      "why": "A prompt with no version cannot be told from a prompt built by a renderer that predates a section. The version is the whole point of writing the contract down.",
+      "value": {
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      }
+    },
+    {
+      "name": "future_version",
+      "mustParse": false,
+      "why": "A hub must refuse a version it cannot render rather than render it as though it were v1. Accepting an unknown version is how a section silently goes missing on one side of the seam.",
+      "value": {
+        "version": "card-prompt/2",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      }
+    },
+    {
+      "name": "empty_title",
+      "mustParse": false,
+      "why": "The title is the one field always rendered and is the harness's whole instruction when there is no spec. An empty one produces a prompt that asks for nothing and gets a confident answer anyway.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      }
+    },
+    {
+      "name": "attempt_zero",
+      "mustParse": false,
+      "why": "kaambaan's `attemptCount` increments on claim, so the agent working a card is always on attempt 1 or later (spike finding RQ4). A zero means the count was read from the wrong field, and 'attempt 0' invites a harness to treat a retry as a first run.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 0 }
+      }
+    },
+    {
+      "name": "external_run_id_from_agentpods_own_space",
+      "mustParse": false,
+      "why": "The same rule `Run.externalRunId` carries, applied where the id enters rather than where it is stored. An `attempt_…` here means AgentPod's own key was passed off as the board's work run, and the prompt would be built for a run no board has.",
+      "value": {
+        "version": "card-prompt/1",
+        "source": "kaambaan",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      }
+    },
+    {
+      "name": "no_source",
+      "mustParse": false,
+      "why": "Mirrors the `externalRunId`/`externalSource` pairing on acp_runs: a prompt built from work whose orchestrator is unnamed cannot be traced back to the board that asked for it, and `externalSource` is deliberately open so the id's shape cannot supply the answer.",
+      "value": {
+        "version": "card-prompt/1",
+        "boardId": "brd_9c1d4e5f6a7b8c9d",
+        "externalRunId": "run_e074a2160c4b4f28",
+        "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
+        "stage": null,
+        "references": [],
+        "attempt": { "number": 1 }
+      }
+    }
+  ]
+}
