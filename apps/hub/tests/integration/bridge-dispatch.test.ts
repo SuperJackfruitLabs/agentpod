@@ -25,6 +25,7 @@ import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../../src/db/drizzle";
 import { acpRuns, acpSessions } from "../../src/db/schema/acp";
+import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { BridgeAgentConfig } from "../../src/services/bridge/config";
 import { runOnce, type AcpPort } from "../../src/services/bridge/dispatch";
@@ -84,6 +85,13 @@ const chunk = (text: string): AcpEvent =>
   ev("agent-update", { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
 
 const idle = (): AcpEvent => ev("state", { status: "idle" });
+
+/** A durable event: one in, exactly one activity out. The 1:1 shape. */
+const toolCall = (title: string): AcpEvent =>
+  ev("agent-update", { sessionUpdate: "tool_call", title, rawInput: { path: "./data" } });
+
+/** A kind with no board representation at all: N in, zero activities out. */
+const droppedKind = (): AcpEvent => ev("agent-update", { sessionUpdate: "available_commands_update" });
 
 interface FakeAcpOpts {
   /** What the readiness probe answers. Ready unless a test says otherwise. */
@@ -162,7 +170,11 @@ const key = (externalRunId = RUN_ID) => ({
   externalRunId,
 });
 
-const deps = (client: KaambaanClient, acp: AcpPort) => ({
+const deps = (
+  client: KaambaanClient,
+  acp: AcpPort,
+  log?: (message: string, meta?: Record<string, unknown>) => void,
+) => ({
   client,
   acp,
   agent,
@@ -171,6 +183,7 @@ const deps = (client: KaambaanClient, acp: AcpPort) => ({
   // Long enough never to fire inside a test; the turn ends on an idle event.
   heartbeatMs: 60_000,
   turnTimeoutMs: 5_000,
+  log,
 });
 
 beforeAll(async () => {
@@ -536,5 +549,179 @@ describe("a permission request has nowhere to go", () => {
     expect(result.status).toBe("blocked");
     expect(board.verbs()).toContain("block");
     expect(acp.state.ended).toHaveLength(1);
+  });
+});
+
+/**
+ * The bridge ran a real card on a real harness and the hub could count the
+ * events *arriving* — 142 rows in `acp_events`, 135 of them `agent-update` —
+ * but had no way at all to count the activities it posted *out*. Coalescing
+ * could have been completely broken and nothing would have shown it: its unit
+ * tests passed, and that is not the same as knowing.
+ *
+ * These tests are what stop the number becoming decorative. Every one of them
+ * ties the count written to the ledger to something independently observed —
+ * the activities the fake board actually received — so a counter that reports
+ * a constant, and a counter that reports the event count, both fail here.
+ */
+describe("coalescing is countable from the hub alone", () => {
+  const counts = async (externalRunId = RUN_ID) => {
+    const [row] = await db
+      .select({
+        eventsReceived: bridgeDispatches.eventsReceived,
+        activitiesPosted: bridgeDispatches.activitiesPosted,
+      })
+      .from(bridgeDispatches)
+      .where(eq(bridgeDispatches.externalRunId, externalRunId));
+    return row!;
+  };
+
+  const activityCalls = (board: ReturnType<typeof fakeBoard>) =>
+    board.calls.filter((c) => c.path.endsWith("/activities")).length;
+
+  test("a chunk storm is recorded as many events in and few activities out", async () => {
+    // The Hermes shape in miniature: 1,051 events for one trivial prompt. If
+    // coalescing works, one ledger row says so; if it has silently become 1:1,
+    // this is the row that shows it.
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [...Array.from({ length: 300 }, (_, i) => chunk(`${i} `)), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    const row = await counts();
+    // 300 chunks plus the `state: idle` that ended the turn — every event the
+    // dispatch saw, which is what `acp_events` counts too.
+    expect(row.eventsReceived).toBe(301);
+    // Tied to what the board actually received, not to an internal opinion.
+    expect(row.activitiesPosted).toBe(activityCalls(board));
+    expect(row.activitiesPosted).toBeLessThan(10);
+    expect(row.activitiesPosted).toBeGreaterThan(0);
+  });
+
+  test("a 1:1 transcript is recorded as 1:1 — the ratio is not assumed", async () => {
+    // The counter must report what happened, not what coalescing is supposed
+    // to achieve. Five durable events project to five activities, and a
+    // counter hard-wired to look impressive gets this wrong.
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [
+      toolCall("read a"),
+      toolCall("read b"),
+      toolCall("read c"),
+      toolCall("read d"),
+      toolCall("read e"),
+      idle(),
+    ]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    const row = await counts();
+    expect(row.eventsReceived).toBe(6);
+    expect(row.activitiesPosted).toBe(5);
+    expect(row.activitiesPosted).toBe(activityCalls(board));
+  });
+
+  test("a flush that produced nothing is recorded as zero, not as missing", async () => {
+    // Worth seeing on its own: a run whose whole transcript projected to
+    // nothing looks identical to a healthy quiet run unless zero is written
+    // down as zero.
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [droppedKind(), droppedKind(), droppedKind(), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    const row = await counts();
+    expect(row.eventsReceived).toBe(4);
+    expect(row.activitiesPosted).toBe(0);
+    expect(row.activitiesPosted).not.toBeNull();
+    expect(activityCalls(board)).toBe(0);
+  });
+
+  test("a run that never opened a session is not measured, and says so", async () => {
+    // Null is not zero. A replay starts no harness, so there is no transcript
+    // to have coalesced — and recording 0/0 for it would drop a fake data
+    // point into every ratio an operator computes.
+    await openDispatch({ ...key("run_a1b2c3d4e5f60718"), agentKey: "codex-mac", stationId: STATION_ID, leaseEpoch: 1 });
+    await recordProduced(key("run_a1b2c3d4e5f60718"), { summary: "wrote three files" });
+
+    const board = fakeBoard(happyBoard);
+    const result = await runOnce(deps(board.client, fakeAcp(() => [chunk("never runs"), idle()]).port));
+
+    expect(result.status).toBe("replayed");
+    const row = await counts();
+    expect(row.eventsReceived).toBeNull();
+    expect(row.activitiesPosted).toBeNull();
+  });
+
+  test("the counts survive a run that ended badly", async () => {
+    // A lost lease is where an operator most wants the number: it says how far
+    // the run got before the board took the card away.
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`)) return { status: 200, body: contextBody };
+      if (path.endsWith("/activities")) return { status: 409, body: boardError("STALE_LEASE") };
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => [toolCall("read a"), chunk("thinking"), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("lease-superseded");
+    const row = await counts();
+    expect(row.eventsReceived).toBeGreaterThan(0);
+    expect(row.activitiesPosted).toBeGreaterThan(0);
+  });
+});
+
+describe("the one log line a dispatch is allowed to spend on this", () => {
+  const lines: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  const capture = (message: string, meta?: Record<string, unknown>) => lines.push({ message, meta });
+  const summaries = () => lines.filter((l) => l.message.includes("coalesced"));
+
+  beforeEach(() => {
+    lines.length = 0;
+  });
+
+  test("one line per dispatch carries the counts and the ratio", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [...Array.from({ length: 200 }, () => chunk("x")), idle()]);
+
+    await runOnce(deps(board.client, acp.port, capture));
+
+    // ONE. Not one per event — that is the volume problem coalescing exists to
+    // solve, and issue #231 is a live example of a per-cycle line making
+    // `apn logs` unusable.
+    expect(summaries()).toHaveLength(1);
+    const meta = summaries()[0]!.meta!;
+    expect(meta.events).toBe(201);
+    expect(meta.activities).toBe(1);
+    expect(meta.eventsPerActivity).toBe(201);
+    expect(meta.run).toBe(RUN_ID);
+  });
+
+  test("nothing that ran through the coalescer appears in the line", async () => {
+    // The bridge deliberately never logs its token; work content is treated
+    // the same way. Counts and ids, not payloads.
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("the secret contents of the workspace"), toolCall("Delete ./data"), idle()]);
+
+    await runOnce(deps(board.client, acp.port, capture));
+
+    const line = JSON.stringify(summaries()[0]);
+    expect(line).not.toContain("the secret contents of the workspace");
+    expect(line).not.toContain("Delete ./data");
+    // Nor the card's own spec, its title, or the agent's credential.
+    expect(line).not.toContain("Reindex everything under ./data.");
+    expect(line).not.toContain("Rebuild the index");
+    expect(line).not.toContain(TOKEN);
+  });
+
+  test("a cycle that claimed nothing spends no line at all", async () => {
+    // The loop polls every 5 seconds forever. A summary on an idle cycle is
+    // 17,000 lines a day saying nothing happened.
+    const board = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
+
+    await runOnce(deps(board.client, fakeAcp(() => []).port, capture));
+
+    expect(summaries()).toHaveLength(0);
   });
 });

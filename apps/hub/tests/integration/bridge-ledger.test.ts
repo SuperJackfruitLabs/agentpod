@@ -34,6 +34,7 @@ import {
   markAbandoned,
   markReported,
   openDispatch,
+  recordCoalescing,
   recordProduced,
   startAttempt,
   endAttempt,
@@ -216,5 +217,125 @@ describe("the ledger — at-least-once reclaim", () => {
     await open();
     const [row] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
     expect(row!.tenantId).toBe(BOOTSTRAP_TENANT_ID);
+  });
+});
+
+describe("the coalescing summary — one row per dispatch, not one per event", () => {
+  test("a claim starts unmeasured, and unmeasured is not zero", async () => {
+    // The distinction the whole column pair rests on: a run that produced no
+    // activities and a run nobody counted must not read the same.
+    await open();
+    const [row] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
+    expect(row!.eventsReceived).toBeNull();
+    expect(row!.activitiesPosted).toBeNull();
+  });
+
+  test("the counts are written where the ratio can be computed from them", async () => {
+    await open();
+    await recordCoalescing(key(), { eventsReceived: 1051, activitiesPosted: 7 });
+
+    const [row] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
+    expect(row!.eventsReceived).toBe(1051);
+    expect(row!.activitiesPosted).toBe(7);
+  });
+
+  test("zero activities is stored as zero", async () => {
+    await open();
+    await recordCoalescing(key(), { eventsReceived: 12, activitiesPosted: 0 });
+
+    const [row] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
+    expect(row!.activitiesPosted).toBe(0);
+    expect(row!.activitiesPosted).not.toBeNull();
+  });
+
+  test("the write does not disturb the outcome it lands next to", async () => {
+    // It runs on every exit a session had, including the failures — and a
+    // measurement that overwrote `abandoned` with `working` would make the
+    // ledger lie about something that matters far more than a count.
+    await open();
+    await markAbandoned(key(), "the lease was superseded");
+    await recordCoalescing(key(), { eventsReceived: 40, activitiesPosted: 2 });
+
+    const [row] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
+    expect(row!.outcome).toBe("abandoned");
+    expect(row!.reason).toBe("the lease was superseded");
+    expect(row!.eventsReceived).toBe(40);
+  });
+
+  test("the counts are scoped to one run, and one tenant", async () => {
+    await open(RUN_ID);
+    await open(RUN_ID_2);
+    await recordCoalescing(key(RUN_ID), { eventsReceived: 9, activitiesPosted: 1 });
+
+    const [other] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID_2));
+    expect(other!.eventsReceived).toBeNull();
+
+    await recordCoalescing({ ...key(RUN_ID), tenantId: "fleet_ffffffffffffffffffff" }, {
+      eventsReceived: 999,
+      activitiesPosted: 999,
+    });
+    const [mine] = await db.select().from(bridgeDispatches).where(eq(bridgeDispatches.externalRunId, RUN_ID));
+    expect(mine!.eventsReceived).toBe(9);
+  });
+});
+
+/**
+ * A migration tested only on an empty database has not been tested.
+ *
+ * `bridge_dispatches` holds live rows in production, and Drizzle's own first
+ * instinct for a new column is `ADD COLUMN … NOT NULL`, which fails outright
+ * against a table that already has any. This replays the shipped SQL — read
+ * from the file that will actually run, not a copy of it — against a table
+ * with a row in it, inside a transaction that rolls back so the suite's schema
+ * is exactly as it found it.
+ */
+describe("migration 0039, against a table that already has rows", () => {
+  class Rollback extends Error {}
+
+  test("an existing row survives and reads as not-measured", async () => {
+    const path = new URL(
+      "../../src/db/drizzle-migrations/0039_bridge_dispatch_coalescing.sql",
+      import.meta.url,
+    ).pathname;
+    const sql = await Bun.file(path).text();
+    const statements = sql
+      .split("--> statement-breakpoint")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    expect(statements.length).toBeGreaterThan(0);
+
+    let observed: { events_received: number | null; activities_posted: number | null } | undefined;
+    try {
+      await rawSql.begin(async (tx) => {
+        // Rewind to the pre-migration shape, then put a row in it — the state
+        // production is in, which an empty test database never reproduces.
+        await tx`ALTER TABLE bridge_dispatches DROP COLUMN events_received, DROP COLUMN activities_posted`;
+        await tx`
+          INSERT INTO bridge_dispatches
+            (external_source, external_run_id, tenant_id, board_id, external_card_id,
+             agent_key, station_id, lease_epoch, outcome, started_at, updated_at)
+          VALUES
+            ('kaambaan', ${RUN_ID_2}, ${BOOTSTRAP_TENANT_ID}, ${BOARD_ID}, ${CARD_ID},
+             'codex-mac', ${STATION_ID}, 1, 'reported', now(), now())
+        `;
+
+        for (const statement of statements) await tx.unsafe(statement);
+
+        const rows = await tx<Array<{ events_received: number | null; activities_posted: number | null }>>`
+          SELECT events_received, activities_posted
+          FROM bridge_dispatches WHERE external_run_id = ${RUN_ID_2}
+        `;
+        observed = rows[0];
+        throw new Rollback();
+      });
+    } catch (err) {
+      if (!(err instanceof Rollback)) throw err;
+    }
+
+    // The row is still there — the migration did not need to be told what a
+    // dispatch from before it was counted had counted.
+    expect(observed).toBeDefined();
+    expect(observed!.events_received).toBeNull();
+    expect(observed!.activities_posted).toBeNull();
   });
 });
