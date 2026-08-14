@@ -222,6 +222,16 @@ export const config = {
     volumeSizeGb: getEnvInt('FLY_VOLUME_SIZE_GB', 3),
   },
 
+  bridge: {
+    // Whether this hub claims work from a kaambaan board at all. The bridge's
+    // own `isBridgeEnabled()` remains the authority at runtime (it requires the
+    // literal string "true", like isProviderEnabled); this copy exists so
+    // validate-config can scope its rule the way it scopes the provisioner
+    // ones — a hub that never claims must not be stopped from booting by a
+    // bridge variable. Off, and never inferred from a token being present.
+    enabled: getEnvBool('ENABLE_KAAMBAAN_BRIDGE', false),
+  },
+
   metamcp: {
     // Internal URL for MetaMCP (used for tRPC/auth calls from API container)
     // Port 12008 is the Next.js frontend which proxies auth + tRPC
