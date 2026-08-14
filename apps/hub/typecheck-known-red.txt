@@ -1,0 +1,22 @@
+# Known-red `tsc --noEmit` files, and how many errors each carries.
+#
+# `bun run typecheck` has never been green in this app. That is a decision, not
+# an accident: the errors are pre-existing and none of them fail `bun test`, so
+# fixing them in passing is a change nobody asked for in a diff about something
+# else. What was NOT a decision was leaving the fact written down in prose —
+# apps/hub/CLAUDE.md claimed for months that the errors were "in stations.ts
+# files", when only one of the fifteen is, and an agent that believed it went
+# looking in the wrong file.
+#
+# So the claim lives here, as data, and tests/unit/typecheck-baseline.test.ts
+# runs the compiler and holds this file to it. Fix an error and this file must
+# shrink; introduce one and it must not grow silently.
+#
+# Format: <path relative to apps/hub> <TAB> <error count>
+src/db/schema/stations.ts	1
+src/routes/cloudflare-webhook.ts	1
+src/routes/station-acp.test.ts	1
+src/routes/station-acp.ts	9
+src/routes/station-terminal.ts	1
+src/routes/stations.ts	1
+src/services/acp-agent.ts	1

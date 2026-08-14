@@ -7,8 +7,13 @@ Fleet-console backend: Bun + Hono (chained routes, `AppType` export) + Drizzle/P
 ```bash
 DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
 bun run dev          # :3001
-bun run typecheck    # KNOWN RED: pre-existing tsc errors in stations.ts files; they do not fail bun test — don't "fix" in passing
+bun run typecheck    # KNOWN RED — see typecheck-known-red.txt; they do not fail bun test, don't "fix" in passing
 ```
+
+The known-red files and their error counts are in `typecheck-known-red.txt`, and
+`tests/unit/typecheck-baseline.test.ts` runs the compiler and holds the file to it.
+That is not ceremony: this line used to say the errors were "in stations.ts files"
+when nine of the fifteen are in `routes/station-acp.ts`, and nothing could tell anyone.
 
 Test DB requirements (pgvector image + env override): see root `CLAUDE.md` / `TESTING.md`.
 
