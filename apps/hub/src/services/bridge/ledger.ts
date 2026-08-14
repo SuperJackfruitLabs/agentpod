@@ -170,6 +170,33 @@ export async function markReleased(key: DispatchKey, reason: string): Promise<vo
   await setOutcome(key, "released", reason);
 }
 
+/** What the transcript weighed, and what the board was sent. */
+export interface CoalescingCounts {
+  /** Every ACP event this dispatch observed — the `acp_events` number. */
+  eventsReceived: number;
+  /** Every activity it posted to the board. The coalescer's output volume. */
+  activitiesPosted: number;
+}
+
+/**
+ * Write the run's coalescing summary: one row, two numbers, no payloads.
+ *
+ * A separate write from the outcome, and it touches only these two columns, so
+ * it can run on **every** exit a session had — reported, unreported, blocked,
+ * abandoned — without any of them having to remember to carry it, and without
+ * a measurement ever overwriting the fact of how the run ended.
+ *
+ * `updated_at` is deliberately left alone: it is the ordering key
+ * `findUnreportedOutput` reads to pick the most recent produced output, and a
+ * bookkeeping write is not news about the work.
+ */
+export async function recordCoalescing(key: DispatchKey, counts: CoalescingCounts): Promise<void> {
+  await db
+    .update(bridgeDispatches)
+    .set({ eventsReceived: counts.eventsReceived, activitiesPosted: counts.activitiesPosted })
+    .where(scope(key));
+}
+
 /**
  * No report will be made for this run — the lease was superseded, or the run
  * turned out to be another agent's. Deliberately NOT `produced`: replaying a

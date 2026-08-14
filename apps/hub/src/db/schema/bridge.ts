@@ -82,6 +82,34 @@ export const bridgeDispatches = pgTable(
     /** The handoff produced by the work, held so a lost report can be replayed. */
     result: jsonb("result"),
 
+    /**
+     * **What coalescing actually did on this run**, as two numbers.
+     *
+     * Coalescing exists because one trivial prompt produced 57 ACP events from
+     * Codex and 1,051 from Hermes — an 18x spread that no fixed rate limit
+     * fits. But the first real card run through the bridge could be measured
+     * only on the way IN: 142 rows in `acp_events`, and no way whatsoever to
+     * learn how many activities went out. Coalescing could have been completely
+     * broken in production and nothing would have shown it.
+     *
+     * These live here rather than on `acp_runs` for the same reason the table
+     * exists: this is bookkeeping about a *claim*, and a hand-driven console
+     * session has no activities to post to anybody. They are two raw counts and
+     * not a ratio, because a ratio is `events_received / activities_posted` in
+     * whatever query asks — and storing a derived number is how you end up with
+     * a row whose parts disagree with its whole.
+     *
+     * **Nullable on purpose, and `0` is not `NULL`.** Null means *nobody
+     * counted*: a row written before this shipped, a claim handed straight back,
+     * a replay that started no harness. Zero means *counted, and the transcript
+     * projected to nothing* — a real and alarming state that a `NOT NULL
+     * DEFAULT 0` would make indistinguishable from every unmeasured row in the
+     * table. It also makes the migration safe against live rows by
+     * construction, which `ADD COLUMN … NOT NULL` is not.
+     */
+    eventsReceived: integer("events_received"),
+    activitiesPosted: integer("activities_posted"),
+
     startedAt: timestamp("started_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },

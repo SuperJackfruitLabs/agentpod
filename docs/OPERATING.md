@@ -696,6 +696,26 @@ Hermes stations that have a Matrix identity configured display the **Matrix ID**
 **A Fly runtime is `stopped` but still billing:**
 - Also expected. A stopped Fly machine still bills its rootfs, and the volume bills for as long as the **app** exists. Only **Destroy** ends the charge. `flyctl apps list` shows what is still there.
 
+**Is the kaambaan bridge's coalescing working, and by how much?**
+
+The bridge projects a harness's ACP transcript into board activities, and it must not do so 1:1 — one trivial prompt was measured at 57 events from Codex and 1,051 from Hermes, so a harness that streams token by token would otherwise fire a thousand POSTs at a board for one instruction. Every dispatch records both ends of its own transcript, so the question is answerable from the hub alone:
+
+```sql
+SELECT external_run_id, external_card_id, outcome,
+       events_received, activities_posted,
+       round(events_received::numeric / nullif(activities_posted, 0), 1) AS events_per_activity
+FROM bridge_dispatches
+WHERE events_received IS NOT NULL
+ORDER BY started_at DESC
+LIMIT 20;
+```
+
+- **`events_per_activity` near 1** on a chatty harness means coalescing is not happening — the board is being posted to once per chunk.
+- **`activities_posted = 0`** with a non-zero `events_received` means the whole transcript projected to nothing and the board saw silence. The hub log line for that run lists the event kinds that had no projection.
+- **Both columns `NULL`** is not zero: nobody counted. The run never opened a session (a claim handed straight back, or a replay of a prior run's recorded output), or it predates this being measured at all.
+
+The same two numbers appear once per worked card in the hub log — `journalctl -u agentpod-hub | grep 'coalesced the transcript'` — with the run, card, station and attempt ids. One line per card, never per event, and it carries no card content, prompt or harness output.
+
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.

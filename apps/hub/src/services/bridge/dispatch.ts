@@ -38,6 +38,16 @@
  *    "Never started" is exact: no ACP session was opened, so nothing can have
  *    touched the workspace and `release` is unambiguously safe. Once a session
  *    exists the answer changes — see `failStarted`.
+ *
+ * A fifth came from running a real card and then being unable to say what had
+ * happened. The hub could count what arrived — 142 rows in `acp_events`, 135 of
+ * them `agent-update` — and had no way at all to count what it posted out.
+ *
+ * 5. **A dispatch counts both ends of its own transcript.** Coalescing is the
+ *    reason 1,051 Hermes events do not become 1,051 HTTP POSTs, and until this
+ *    it could have been completely broken in production with nothing to show
+ *    it. Two integers on the ledger row and one log line per worked card — see
+ *    `summarise`, which is also where the bound on that lives.
  */
 
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpSessionMode } from "@agentpod/contract";
@@ -52,8 +62,10 @@ import {
   markReleased,
   markReported,
   openDispatch,
+  recordCoalescing,
   recordProduced,
   startAttempt,
+  type CoalescingCounts,
   type DispatchKey,
 } from "./ledger";
 
@@ -187,6 +199,14 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   let attemptId: string | null = null;
   let lastSeq = 0;
   const said: string[] = [];
+  /**
+   * Requirement 5's two numbers (see the header). Counted here rather than
+   * inside the coalescer because the pair only means anything together, and one
+   * of them — what left for the board — is this function's business, not the
+   * projection's. Both are plain integers held for the length of one dispatch;
+   * nothing accumulates per event.
+   */
+  const counts: CoalescingCounts = { eventsReceived: 0, activitiesPosted: 0 };
   // Hoisted so the failure exit below can tear them down: a throw here must not
   // leave a live subscription and a heartbeat still beating for a run that is
   // over. Both are idempotent, so the happy path's own cleanup still stands.
@@ -242,6 +262,11 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     const post = (activities: BoardActivity[]): void => {
       for (const a of activities) {
         if (a.type === "response" && a.body) said.push(a.body);
+        // Counted where the activity is sent, not where the board acknowledges
+        // it: this number answers "how much did the transcript collapse to",
+        // and a 502 on the wire is a delivery question. The queue logs those
+        // separately, and coalescing is what bounds how many there can be.
+        counts.activitiesPosted++;
         queue(async () => {
           await client.activity(work, a);
         });
@@ -250,6 +275,9 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
 
     unsubscribe = acp.subscribe(session.id, (event) => {
       lastSeq = Math.max(lastSeq, event.seq);
+      // Every event, before any branch drops one — this is the number an
+      // operator can cross-check against `SELECT count(*) FROM acp_events`.
+      counts.eventsReceived++;
 
       if (attemptId === null && !attemptStarted) {
         attemptStarted = true;
@@ -375,7 +403,74 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     if (timer) clearTimeout(timer);
     if (beat) clearInterval(beat);
     unsubscribe();
+    // In the `finally`, so the summary is written once for every exit a session
+    // had — including the one that threw. Reachable only from here, which is
+    // also why a claim that never opened a session leaves both columns null
+    // rather than claiming it counted zero of everything.
+    //
+    // Swallowed whole: a throw in a `finally` REPLACES the value the try block
+    // returned, so an unlucky measurement could discard the `foreign-run` that
+    // is supposed to halt the loop. A note about the work never outranks it.
+    await summarise(deps, key, work, attemptId, counts, coalescer.unmapped()).catch(() => {});
   }
+}
+
+/**
+ * The whole observability surface for one dispatch: two integers on its ledger
+ * row, and one line in the hub log.
+ *
+ * **One line, at the end.** Not one per event — that is precisely the volume
+ * coalescing exists to prevent, and issue #231 is a live example of a per-cycle
+ * log line making `apn logs` unusable at 83% of total volume. Not one per claim
+ * cycle either: the bridge polls every five seconds forever, and a cycle that
+ * claimed nothing has nothing to say. One line per card actually worked, which
+ * is minutes of harness time apiece.
+ *
+ * **Counts and ids, no payloads.** The bridge deliberately never logs its
+ * token; card content, prompts and harness output are treated the same. What
+ * appears here is arithmetic and identifiers that are already in the ledger.
+ * `unmapped` is the exception that proves it — event *kind* names, a closed set
+ * of ACP vocabulary, and the reason a surprising zero is legible instead of
+ * merely alarming.
+ *
+ * A failure to record this must never change the run's outcome: the work is
+ * real and the count is a note about it.
+ */
+async function summarise(
+  deps: DispatchDeps,
+  key: DispatchKey,
+  work: ClaimedWork,
+  attemptId: string | null,
+  counts: CoalescingCounts,
+  unmapped: string[],
+): Promise<void> {
+  const log = deps.log ?? (() => {});
+  try {
+    await recordCoalescing(key, counts);
+  } catch (err) {
+    log("the coalescing summary could not be recorded", { run: work.runId, error: String(err) });
+  }
+
+  log("coalesced the transcript", {
+    run: work.runId,
+    card: key.externalCardId,
+    station: deps.agent.stationId,
+    attempt: attemptId,
+    events: counts.eventsReceived,
+    activities: counts.activitiesPosted,
+    // The number the 18x spread made necessary: how many events collapsed into
+    // each activity. Null when nothing was posted — a ratio over zero is not a
+    // large number, it is an absent one, and rounding it to Infinity in a log
+    // reads as a bug rather than as the finding it is.
+    eventsPerActivity: eventsPerActivity(counts),
+    ...(unmapped.length ? { unmapped } : {}),
+  });
+}
+
+/** Events per activity, to one decimal place. Null when nothing was posted. */
+function eventsPerActivity(counts: CoalescingCounts): number | null {
+  if (counts.activitiesPosted === 0) return null;
+  return Math.round((counts.eventsReceived / counts.activitiesPosted) * 10) / 10;
 }
 
 /**
