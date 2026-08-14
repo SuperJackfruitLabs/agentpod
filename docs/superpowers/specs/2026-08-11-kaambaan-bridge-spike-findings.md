@@ -174,7 +174,7 @@ Its `AgentActivity` exposes only `{type, body, action, ephemeral, signal}` — n
 
 ### Four kaambaan doc-versus-code drifts
 
-Recorded in full in `apps/bridge/spike/findings/verified-surface.md`: no `requestInput` verb exists (post an `elicitation` activity instead); a `response` activity does not advance a card despite doc 04 §4 saying so; there is no card-read endpoint (the board snapshot is the only read surface); and `pnpm dev:setup` with tenant `tnt_dev` is a prerequisite that fails with an opaque `D1_ERROR` otherwise.
+Recorded in full in `docs/superpowers/specs/2026-08-11-kaambaan-verified-surface.md`: no `requestInput` verb exists (post an `elicitation` activity instead); a `response` activity does not advance a card despite doc 04 §4 saying so; there is no card-read endpoint (the board snapshot is the only read surface); and `pnpm dev:setup` with tenant `tnt_dev` is a prerequisite that fails with an opaque `D1_ERROR` otherwise.
 
 ---
 
