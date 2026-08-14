@@ -265,14 +265,13 @@ const joinKey = readCorpus<RunJoinKey>("run_join_key.json");
 
 describe("ecosystem identity corpus — run join key", () => {
   test("records how far enforcement has actually got", () => {
-    // Honest bookkeeping. Half the invariant is now executable: the two id
-    // spaces are disjoint, `Run.id` is validated against AgentPod's, and
-    // acp_runs carries CHECK constraints saying the same thing in the database.
-    // The other half is still absent — nothing inserts into acp_runs, no route
-    // accepts an external run id, and the bridge spike correlates a kaambaan run
-    // to an AgentPod session in a console.log line and nowhere else. When a
-    // write path lands, this string changes and this test is the reminder.
-    expect(joinKey.enforcement.status).toBe("id-spaces-disjoint-no-write-path");
+    // Honest bookkeeping. Both halves are now executable: the two id spaces are
+    // disjoint (asserted here, in the contract, and by CHECK constraints in the
+    // database), and acp_runs finally has a writer — the kaambaan bridge, which
+    // creates the row when it opens the session that executes a claimed card.
+    // What is still absent is a READ path: the reverse index exists and no
+    // query uses it. When that lands, this string changes again.
+    expect(joinKey.enforcement.status).toBe("id-spaces-disjoint-and-written");
   });
 
   for (const c of joinKey.cases) {
