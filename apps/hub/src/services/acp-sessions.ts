@@ -597,6 +597,41 @@ function withStationOpenLock<T>(
   return run;
 }
 
+/** Whether a session could be opened here right now, and if not, why not. */
+export interface StationReadiness {
+  ready: boolean;
+  /** The sentence `createSession` would have thrown. Absent when ready. */
+  reason?: string;
+}
+
+/**
+ * Can a session be opened on this station at all?
+ *
+ * The same three gates `createSession` fails fast on, asked without opening
+ * anything — for callers that want to know *before* they take on an obligation
+ * they would then have to unwind. The kaambaan bridge is the first: it claims a
+ * card from a board and a claim it cannot execute strands that card until the
+ * board's 15-minute reclaim, so it asks here first.
+ *
+ * Deliberately no stricter than the open it stands in front of. A probe that
+ * refused a station `createSession` would have accepted turns every start into
+ * an outage with no error anywhere — the caller simply never acts.
+ */
+export async function stationReadiness(
+  userId: string,
+  stationId: string
+): Promise<StationReadiness> {
+  const station = await getStation(userId, stationId);
+  if (!station) return { ready: false, reason: "Station not found." };
+  if (!gateCapability(station, "acp")) {
+    return { ready: false, reason: "This station does not support agent sessions." };
+  }
+  if (!connectionManager.isOnline(station.nodeId)) {
+    return { ready: false, reason: "Node is offline." };
+  }
+  return { ready: true };
+}
+
 export async function createSession(
   input: CreateSessionInput
 ): Promise<AcpSessionRow> {
@@ -604,14 +639,8 @@ export async function createSession(
 
   // Fail fast on the obvious gates before queueing (openSession re-checks them
   // under the lock, where the answers are current).
-  const station = await getStation(userId, stationId);
-  if (!station) throw new Error("Station not found.");
-  if (!gateCapability(station, "acp")) {
-    throw new Error("This station does not support agent sessions.");
-  }
-  if (!connectionManager.isOnline(station.nodeId)) {
-    throw new Error("Node is offline.");
-  }
+  const readiness = await stationReadiness(userId, stationId);
+  if (!readiness.ready) throw new Error(readiness.reason);
 
   return withStationOpenLock(stationId, () => openSession(input));
 }

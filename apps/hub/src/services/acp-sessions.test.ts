@@ -72,6 +72,7 @@ import {
   endSession,
   subscribe,
   reconcileOnBoot,
+  stationReadiness,
   closeOrphanedProcesses,
   clampSessionLimit,
   deriveSessionTitle,
@@ -1934,6 +1935,56 @@ test(
 
       fake.close();
       await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Readiness: can a session be opened on this station at all? ──────────────
+//
+// The bridge asks this BEFORE it claims work from a board. It exists because a
+// hub restart put a claim loop in front of node-agents that had not reconnected
+// yet: the claim succeeded, the session open threw "Node is offline.", and the
+// card sat held by a run that never ran. The probe must be exactly as strict as
+// createSession's fail-fast gates and no stricter — a healthy station that reads
+// as not-ready claims nothing at all, which is the same outage with no logs.
+test(
+  "stationReadiness answers the same three gates createSession fails fast on",
+  async () => {
+    const { server, nodeId, fake, station } = await setupRig(
+      "acpsess-readiness-host",
+      { stationKey: "acp-readiness-station" }
+    );
+    try {
+      // A healthy, online, acp-capable station: ready, with nothing to explain.
+      expect(await stationReadiness(TEST_USER, station.id)).toEqual({
+        ready: true,
+      });
+
+      expect(await stationReadiness(TEST_USER, "stn_nope")).toEqual({
+        ready: false,
+        reason: "Station not found.",
+      });
+      // Another user's station is not visible, so it is not ready either.
+      expect(await stationReadiness(OTHER_USER, station.id)).toEqual({
+        ready: false,
+        reason: "Station not found.",
+      });
+
+      fake.close();
+      await waitForNodeUnregistered(nodeId);
+      expect(await stationReadiness(TEST_USER, station.id)).toEqual({
+        ready: false,
+        reason: "Node is offline.",
+      });
+
+      // And the gate is load-bearing: the open it stands in front of throws the
+      // same sentence.
+      await expect(
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" })
+      ).rejects.toThrow("Node is offline.");
     } finally {
       server.stop(true);
     }
