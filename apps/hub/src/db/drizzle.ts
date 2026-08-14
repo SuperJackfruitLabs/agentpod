@@ -103,10 +103,17 @@ export async function runMigrations(): Promise<void> {
 
 /**
  * Initialize database (run on startup)
+ * - Checks the connection
+ * - Enables the pgvector extension
  * - Runs pending migrations
- * - Enables pgvector extension
- * - Creates vector indexes
- * - Seeds reference data
+ *
+ * It listed vector indexes and seed data too, and did neither; it also claimed
+ * the pgvector line without ever calling it (#322). The extension is not
+ * optional — migration 0000 declares `"embedding" vector(1536)` and no
+ * migration runs CREATE EXTENSION — so enabling it here is what makes the
+ * claim true AND makes a fresh database work. Order matters: after
+ * runMigrations() it would be enabling the extension for the migration that
+ * already failed.
  */
 export async function initDatabase(): Promise<void> {
   log.info("Initializing PostgreSQL database...");
@@ -116,6 +123,9 @@ export async function initDatabase(): Promise<void> {
   if (!healthy) {
     throw new Error("Database connection failed");
   }
+
+  // Before migrations, which declare a vector column.
+  await enableVectorExtension();
 
   // Run pending migrations automatically
   await runMigrations();

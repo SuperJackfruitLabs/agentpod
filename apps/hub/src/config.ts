@@ -248,6 +248,18 @@ export const config = {
 
   // Database
   database: {
+    /**
+     * The connection string the hub actually runs on. Everything that talks to
+     * Postgres reads DATABASE_URL; this is here so the rules in
+     * validate-config.ts can inspect the same value rather than a neighbour.
+     */
+    url: getEnv('DATABASE_URL', ''),
+    /**
+     * @deprecated Pre-pivot SQLite path. Read only by `src/db/index.ts`, which
+     * is itself deprecated and imported by nothing. Do not add readers, and do
+     * not write a rule against it: a production guard that inspected this
+     * instead of `url` is issue #321, and it silently never fired.
+     */
     path: getEnv('DATABASE_PATH', './data/database.sqlite'),
   },
   

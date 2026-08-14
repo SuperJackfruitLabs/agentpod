@@ -33,6 +33,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
+import { scanEnvNames } from "../helpers/scan-env-names";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -170,8 +171,14 @@ describe("environment variables the hub names in a boot message", () => {
     ]) {
       // A SCREAMING_SNAKE name inside a string literal in these files is,
       // without exception today, a variable being named to an operator.
-      for (const match of read(rel).matchAll(/["'`]([A-Z][A-Z0-9_]{3,})["'`]/g)) {
-        named.add(match[1]!);
+      //
+      // Comments are stripped first (#323): this could not tell a backticked
+      // name in a JSDoc line from a string literal, so a comment about an
+      // exported constant read as an undocumented variable. The obvious way to
+      // green that was to document a setting that does nothing — a check whose
+      // failure is fixed by writing something false.
+      for (const name of scanEnvNames(read(rel))) {
+        named.add(name);
       }
     }
     return [...named].sort();

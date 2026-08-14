@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
+import { describeDatabase } from './utils/describe-database.ts';
 import { initDatabase } from './db/drizzle.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
@@ -215,7 +216,7 @@ console.log(`
 ╠═══════════════════════════════════════════════════════════════╣
 ║  Port:        ${String(port).padEnd(46)}║
 ║  Environment: ${config.nodeEnv.padEnd(46)}║
-║  Database:    ${config.database.path.padEnd(46)}║
+║  Database:    ${describeDatabase(config.database.url).padEnd(46)}║
 ╠═══════════════════════════════════════════════════════════════╣
 ║  Auth Endpoints (Better Auth):                                ║
 ║  - POST /api/auth/sign-in/email       Email/password sign-in  ║
