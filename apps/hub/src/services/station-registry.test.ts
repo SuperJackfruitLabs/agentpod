@@ -332,3 +332,91 @@ test("refresh survives a broker that throws", async () => {
   });
   expect(updated).toBe(0);
 });
+
+// ─── refreshAdoptedCapabilities: matrixId ─────────────────────────────────────
+//
+// The same bug as capabilities, one column over, and it survived the fix that
+// found it. `stations.matrix_id` was written ONLY by adoptStations, so a station
+// adopted before the mxid reader worked could never gain one. In production on
+// 2026-08-15 that was every station: 32 adopted, 0 with a matrix_id, while
+// `agentpod-node detect` on the same hosts reported
+// "@buddhimaan:id.agentpod.dev" correctly and the contract carried it with
+// tests. The node said it, the wire allowed it, and nothing wrote it down.
+//
+// It is on the critical path for the Matrix bridge: routing a room message to a
+// station requires knowing which identity belongs to which station.
+
+test("refresh writes a matrixId onto a station adopted without one", async () => {
+  await adoptStations(TEST_USER, testNodeId, ["refresh-mxid"], [
+    {
+      key: "refresh-mxid", harness: "hermes", kind: "leaf", displayName: "olivia",
+      parentKey: null, workspacePath: "/root/.hermes", capabilities: ["health"],
+      adopted: false,
+    },
+  ]);
+
+  await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: detectReturning([
+      {
+        key: "refresh-mxid", harness: "hermes", kind: "leaf", displayName: "olivia",
+        parentKey: null, workspacePath: "/root/.hermes", capabilities: ["health"],
+        matrixId: "@onboarding-olivia:id.agentpod.dev",
+      },
+    ]),
+  });
+
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+    .find((r) => r.stationKey === "refresh-mxid")!.id);
+  expect(row!.matrixId).toBe("@onboarding-olivia:id.agentpod.dev");
+});
+
+test("refresh clears a matrixId the node no longer reports", async () => {
+  // An agent whose Matrix identity was removed must not keep a stale one: the
+  // bridge would route to an mxid nobody answers on.
+  await adoptStations(TEST_USER, testNodeId, ["refresh-mxid-gone"], [
+    {
+      key: "refresh-mxid-gone", harness: "hermes", kind: "leaf", displayName: "gone",
+      parentKey: null, workspacePath: null, capabilities: ["health"],
+      matrixId: "@stale:id.agentpod.dev", adopted: false,
+    },
+  ]);
+
+  await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: detectReturning([
+      {
+        key: "refresh-mxid-gone", harness: "hermes", kind: "leaf", displayName: "gone",
+        parentKey: null, workspacePath: null, capabilities: ["health"], matrixId: null,
+      },
+    ]),
+  });
+
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+    .find((r) => r.stationKey === "refresh-mxid-gone")!.id);
+  expect(row!.matrixId).toBeNull();
+});
+
+test("refresh leaves matrixId alone for a harness that reports none", async () => {
+  // codex, opencode and pi have no Matrix identity at all — they are the
+  // stations a bridge would mint a virtual user FOR. Absent must read as null,
+  // never as an error.
+  await adoptStations(TEST_USER, testNodeId, ["refresh-mxid-absent"], [
+    {
+      key: "refresh-mxid-absent", harness: "codex", kind: "leaf", displayName: "codex",
+      parentKey: null, workspacePath: null, capabilities: ["health"], adopted: false,
+    },
+  ]);
+
+  const updated = await refreshAdoptedCapabilities(testNodeId, {
+    brokerRequest: detectReturning([
+      {
+        key: "refresh-mxid-absent", harness: "codex", kind: "leaf", displayName: "codex",
+        parentKey: null, workspacePath: null, capabilities: ["health"],
+      },
+    ]),
+  });
+
+  expect(updated).toBeGreaterThanOrEqual(1);
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+    .find((r) => r.stationKey === "refresh-mxid-absent")!.id);
+  expect(row!.matrixId).toBeNull();
+});
