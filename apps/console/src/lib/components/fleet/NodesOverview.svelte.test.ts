@@ -413,3 +413,91 @@ test("?action= the same value re-appearing WITHOUT an intervening action-less st
   expect(api.createEnrollmentToken).toHaveBeenCalledOnce();
   expect(nav.replaceState).toHaveBeenCalledTimes(1);
 });
+
+// ─── Fleet rollout button (#295) ───────────────────────────────────────────────
+//
+// Nodes never update themselves — there is no timer anywhere in the agent or
+// the hub — so after a release the fleet stays where it is until somebody rolls
+// it. These cover the button that does the rolling, and specifically that it
+// tells the truth afterwards: a rollout reporting success while machines sat on
+// the old binary is the defect issue #296 fixed on the single-node path.
+
+const behindNode = {
+  ...mockNodes[0],
+  id: "node_behind",
+  name: "molt-bot",
+  hostname: "molt-bot.example.com",
+  agentVersion: "v0.1.22",
+  latestVersion: "v0.1.26",
+  updateAvailable: true,
+};
+
+test("offers no fleet-update button when nothing is behind", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue(mockNodes);
+
+  const { queryByRole } = render(NodesOverview);
+
+  await waitFor(() => {
+    expect(queryByRole("button", { name: /update \d+ node/i })).toBeNull();
+  });
+});
+
+test("offers to update exactly the nodes that are behind", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([behindNode, mockNodes[1]!]);
+
+  const { getByRole } = render(NodesOverview);
+
+  await waitFor(() => {
+    expect(getByRole("button", { name: /update 1 node/i })).toBeTruthy();
+  });
+});
+
+test("rolling out calls the hub once and reports what happened", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([behindNode]);
+  const updateAll = vi.spyOn(api, "updateAllNodes").mockResolvedValue({
+    ok: true,
+    summary: { updated: 1, "no-op": 0, skipped: 2, failed: 0 },
+    results: [
+      { nodeId: "node_behind", name: "molt-bot", outcome: "updated", tag: "v0.1.26" },
+    ],
+  });
+
+  const { getByRole } = render(NodesOverview);
+  const button = await waitFor(() => getByRole("button", { name: /update 1 node/i }));
+
+  await fireEvent.click(button);
+  await tick();
+
+  await waitFor(() => expect(updateAll).toHaveBeenCalledTimes(1));
+
+  const { toast } = await import("svelte-sonner");
+  expect(toast.success).toHaveBeenCalled();
+});
+
+test("a node that failed is reported as a failure, never as success", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([behindNode]);
+  vi.spyOn(api, "updateAllNodes").mockResolvedValue({
+    ok: true,
+    summary: { updated: 0, "no-op": 0, skipped: 0, failed: 1 },
+    results: [
+      {
+        nodeId: "node_behind",
+        name: "molt-bot",
+        outcome: "failed",
+        error: "checksum mismatch",
+      },
+    ],
+  });
+
+  const { getByRole } = render(NodesOverview);
+  const button = await waitFor(() => getByRole("button", { name: /update 1 node/i }));
+
+  await fireEvent.click(button);
+  await tick();
+
+  const { toast } = await import("svelte-sonner");
+  // The hub answered 200 — the request succeeded and the update did not. An
+  // operator must not read that as a fleet that moved.
+  await waitFor(() => expect(toast.error).toHaveBeenCalled());
+  expect(toast.success).not.toHaveBeenCalled();
+});

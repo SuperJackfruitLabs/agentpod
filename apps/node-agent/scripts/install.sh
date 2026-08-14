@@ -2,11 +2,11 @@
 # install.sh — curl-based installer for the AgentPod node-agent.
 #
 # System-wide (needs root; installs a systemd service on Linux):
-#   curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
+#   curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
 #     | sudo bash -s -- <HUB_URL> <TOKEN>
 #
 # Rootless (no sudo; installs into ~/.local/bin — for key-only hosts with no sudo password):
-#   curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
+#   curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
 #     | bash -s -- --user <HUB_URL> <TOKEN>
 #
 #   HUB_URL   e.g. https://hub.agentpod.dev
@@ -52,7 +52,7 @@ TOKEN="${ARGS[1]:-}"
 # Release URL base (needed early: the re-exec helper below re-fetches this
 # script from here whenever $0 isn't a real file on disk).
 # ---------------------------------------------------------------------------
-REPO="rakeshgangwar/agentpod"
+REPO="SuperJackfruitLabs/agentpod"
 BASE_URL="https://github.com/${REPO}/releases"
 
 # ---------------------------------------------------------------------------

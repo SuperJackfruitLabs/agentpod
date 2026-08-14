@@ -3,7 +3,7 @@
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { replaceState } from "$app/navigation";
-  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, getFleet, type DriverManifest } from "$lib/api/client";
+  import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, updateAllNodes, getFleet, type DriverManifest } from "$lib/api/client";
   import { toast } from "svelte-sonner";
   import type { NodeSummary, ProvisionedRuntime, FleetAgent } from "@agentpod/contract";
   import * as Table from "$lib/components/ui/table";
@@ -17,6 +17,7 @@
   import EnrollmentCommand from "./EnrollmentCommand.svelte";
   import { Metric } from "$lib/components/ui/metric";
   import PlusIcon from "@lucide/svelte/icons/plus";
+  import ArrowUpCircleIcon from "@lucide/svelte/icons/arrow-up-circle";
   import Loader2Icon from "@lucide/svelte/icons/loader-2";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
@@ -214,6 +215,60 @@
   let copied = $state(false);
   let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
+
+  // ─── Fleet rollout (#295) ───────────────────────────────────────────────────
+
+  /**
+   * Nodes the hub can see are behind. Drives both the button's presence and its
+   * count, so an operator is never offered an action with nothing to do.
+   */
+  const nodesBehind = $derived(nodes.filter((n) => n.updateAvailable));
+
+  let isRollingOut = $state(false);
+
+  /**
+   * Roll the fleet. The hub goes one node at a time and always answers with a
+   * row per node, so this reports what actually happened rather than "sent" —
+   * a rollout claiming success while machines stayed on the old binary is the
+   * exact defect #296 fixed on the single-node path.
+   */
+  async function handleUpdateAll() {
+    isRollingOut = true;
+    try {
+      const result = await updateAllNodes();
+      const { updated = 0, failed = 0, skipped = 0 } = result.summary ?? {};
+
+      if (failed > 0) {
+        const names = result.results
+          .filter((r) => r.outcome === "failed")
+          .map((r) => r.name)
+          .join(", ");
+        toast.error(`${failed} node${failed === 1 ? "" : "s"} didn’t update`, {
+          description: `${names}. ${updated} updated, ${skipped} skipped.`,
+        });
+      } else if (updated > 0) {
+        toast.success(`Updating ${updated} node${updated === 1 ? "" : "s"}`, {
+          description:
+            "Each will blip offline and come back on the new version. Skipped: " +
+            `${skipped}.`,
+        });
+      } else {
+        toast.success("Nothing to update", {
+          description: "Every reachable node is already on the latest release.",
+        });
+      }
+
+      // The updated nodes restart; the next refresh reflects their new version.
+      await loadData();
+    } catch (e) {
+      toast.error("Couldn’t roll out the update", {
+        description: e instanceof Error ? e.message : "The hub didn’t respond.",
+      });
+    } finally {
+      isRollingOut = false;
+    }
+  }
+
   function handleCopyEnrollCmd() {
     const cmd = enrollmentCommand(resolvedHubUrl(), lastToken ?? "");
     navigator.clipboard.writeText(cmd).then(() => {
@@ -231,6 +286,19 @@
   {#snippet actions()}
     <div class="flex flex-col items-end gap-1.5">
       <div class="flex gap-2 flex-wrap justify-end">
+        <!--
+          Only offered when there is drift to clear (#295). Nodes never update
+          themselves — there is no timer anywhere — so after a release the fleet
+          sits where it is until someone rolls it. This is that someone's button.
+        -->
+        {#if nodesBehind.length > 0}
+          <Button onclick={handleUpdateAll} disabled={isRollingOut} variant="outline">
+            <ArrowUpCircleIcon class="h-4 w-4 mr-2" />
+            {isRollingOut
+              ? "Updating fleet…"
+              : `Update ${nodesBehind.length} node${nodesBehind.length === 1 ? "" : "s"}`}
+          </Button>
+        {/if}
         <Button onclick={() => (showNewRuntimeDialog = true)} variant="outline">
           <PlusIcon class="h-4 w-4 mr-2" />
           New runtime

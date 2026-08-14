@@ -5,8 +5,8 @@ one harness, with its workspace anchored on a mounted Fly Volume.
 
 | Dockerfile | Harness | Published as | Hub variable |
 |---|---|---|---|
-| `Dockerfile` | OpenCode | `ghcr.io/rakeshgangwar/agentpod-node-opencode-fly` | `NODE_AGENT_FLY_OPENCODE_IMAGE` |
-| `Dockerfile.pi` | Pi | `ghcr.io/rakeshgangwar/agentpod-node-pi-fly` | `NODE_AGENT_FLY_PI_IMAGE` |
+| `Dockerfile` | OpenCode | `ghcr.io/superjackfruitlabs/agentpod-node-opencode-fly` | `NODE_AGENT_FLY_OPENCODE_IMAGE` |
+| `Dockerfile.pi` | Pi | `ghcr.io/superjackfruitlabs/agentpod-node-pi-fly` | `NODE_AGENT_FLY_PI_IMAGE` |
 
 There is no generic (harness-less) Fly image, so a **Generic** Fly runtime cannot
 work; the hub warns about it at boot naming `NODE_AGENT_FLY_IMAGE`.
@@ -63,11 +63,11 @@ By hand, with the build context at the **repository root**:
 ```bash
 docker buildx build --platform linux/amd64 \
   -f fly/node-image/Dockerfile \
-  -t ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22 --push .
+  -t ghcr.io/superjackfruitlabs/agentpod-node-opencode-fly:v0.1.22 --push .
 
 docker buildx build --platform linux/amd64 \
   -f fly/node-image/Dockerfile.pi \
-  -t ghcr.io/rakeshgangwar/agentpod-node-pi-fly:v0.1.22 --push .
+  -t ghcr.io/superjackfruitlabs/agentpod-node-pi-fly:v0.1.22 --push .
 ```
 
 `--platform linux/amd64` is required: Fly Machines are amd64, and an arm64 image
@@ -121,8 +121,8 @@ precedes `v0.1.24`.
 the hub's env:
 
 ```
-NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/rakeshgangwar/agentpod-node-opencode-fly:v0.1.22
-NODE_AGENT_FLY_PI_IMAGE=ghcr.io/rakeshgangwar/agentpod-node-pi-fly:v0.1.22
+NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/superjackfruitlabs/agentpod-node-opencode-fly:v0.1.22
+NODE_AGENT_FLY_PI_IMAGE=ghcr.io/superjackfruitlabs/agentpod-node-pi-fly:v0.1.22
 ```
 
 The provider-scoped names are the safe choice on a hub that also runs Docker,

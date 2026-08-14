@@ -71,7 +71,7 @@ func TestAssetName(t *testing.T) {
 
 func TestLatestTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/repos/rakeshgangwar/agentpod/releases/latest" {
+		if r.URL.Path == "/repos/SuperJackfruitLabs/agentpod/releases/latest" {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`{"tag_name":"v0.1.2"}`))
 			return
@@ -119,8 +119,8 @@ func TestDownloadAndVerify(t *testing.T) {
 
 	// Server with correct SHA256SUMS
 	goodSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assetPath := "/rakeshgangwar/agentpod/releases/download/" + tag + "/" + asset
-		sumsPath := "/rakeshgangwar/agentpod/releases/download/" + tag + "/SHA256SUMS"
+		assetPath := "/SuperJackfruitLabs/agentpod/releases/download/" + tag + "/" + asset
+		sumsPath := "/SuperJackfruitLabs/agentpod/releases/download/" + tag + "/SHA256SUMS"
 		switch r.URL.Path {
 		case assetPath:
 			w.Write(content)
@@ -150,8 +150,8 @@ func TestDownloadAndVerify(t *testing.T) {
 	t.Run("mismatch_leaves_no_file", func(t *testing.T) {
 		// Server with wrong hash in SHA256SUMS
 		badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assetPath := "/rakeshgangwar/agentpod/releases/download/" + tag + "/" + asset
-			sumsPath := "/rakeshgangwar/agentpod/releases/download/" + tag + "/SHA256SUMS"
+			assetPath := "/SuperJackfruitLabs/agentpod/releases/download/" + tag + "/" + asset
+			sumsPath := "/SuperJackfruitLabs/agentpod/releases/download/" + tag + "/SHA256SUMS"
 			switch r.URL.Path {
 			case assetPath:
 				w.Write(content)
@@ -415,13 +415,13 @@ func makeUpdateServer(tag string, content []byte, hash string) *httptest.Server 
 	asset := assetName(runtime.GOOS, runtime.GOARCH)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/repos/rakeshgangwar/agentpod/releases/latest":
+		case "/repos/SuperJackfruitLabs/agentpod/releases/latest":
 			json.NewEncoder(w).Encode(struct {
 				TagName string `json:"tag_name"`
 			}{tag})
-		case fmt.Sprintf("/rakeshgangwar/agentpod/releases/download/%s/%s", tag, asset):
+		case fmt.Sprintf("/SuperJackfruitLabs/agentpod/releases/download/%s/%s", tag, asset):
 			w.Write(content)
-		case fmt.Sprintf("/rakeshgangwar/agentpod/releases/download/%s/SHA256SUMS", tag):
+		case fmt.Sprintf("/SuperJackfruitLabs/agentpod/releases/download/%s/SHA256SUMS", tag):
 			fmt.Fprintf(w, "%s  %s\n", hash, asset)
 		default:
 			http.NotFound(w, r)

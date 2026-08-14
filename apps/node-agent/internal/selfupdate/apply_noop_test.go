@@ -25,14 +25,14 @@ func countingUpdateServer(tag string, content []byte, hash string, downloads *in
 	asset := assetName(runtime.GOOS, runtime.GOARCH)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/repos/rakeshgangwar/agentpod/releases/latest":
+		case "/repos/SuperJackfruitLabs/agentpod/releases/latest":
 			json.NewEncoder(w).Encode(struct {
 				TagName string `json:"tag_name"`
 			}{tag})
-		case fmt.Sprintf("/rakeshgangwar/agentpod/releases/download/%s/%s", tag, asset):
+		case fmt.Sprintf("/SuperJackfruitLabs/agentpod/releases/download/%s/%s", tag, asset):
 			*downloads++
 			w.Write(content)
-		case fmt.Sprintf("/rakeshgangwar/agentpod/releases/download/%s/SHA256SUMS", tag):
+		case fmt.Sprintf("/SuperJackfruitLabs/agentpod/releases/download/%s/SHA256SUMS", tag):
 			fmt.Fprintf(w, "%s  %s\n", hash, asset)
 		default:
 			http.NotFound(w, r)

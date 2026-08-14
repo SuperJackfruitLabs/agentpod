@@ -55,7 +55,7 @@ RUN bun add -g opencode-ai@1.18.15
 
 # Installed at /agentpod-node so the fleet entrypoint works unmodified.
 RUN set -eux; \
-    base="https://github.com/rakeshgangwar/agentpod/releases/download/${AGENTPOD_VERSION}"; \
+    base="https://github.com/SuperJackfruitLabs/agentpod/releases/download/${AGENTPOD_VERSION}"; \
     curl -fsSL -o /agentpod-node "${base}/agentpod-node-linux-amd64"; \
     curl -fsSL -o /tmp/SHA256SUMS "${base}/SHA256SUMS"; \
     cp /agentpod-node /tmp/agentpod-node-linux-amd64; \

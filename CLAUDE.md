@@ -2,7 +2,7 @@
 
 Fleet/facilities console for agent runtimes. Three tiers:
 
-- `apps/node-agent` — Go daemon on each host; detects harnesses (hermes, openclaw, claude-code, codex, opencode, pi — `cmd/agentpod-node/registry.go` is the list), dials the hub over WSS, serves station capabilities (health/logs/fs/terminal/lifecycle/cleanup/acp/changeset), self-updates from GitHub releases.
+- `apps/node-agent` — Go daemon on each host; detects harnesses (hermes, openclaw, claude-code, codex, opencode, pi — `cmd/agentpod-node/registry.go` is the list), dials the hub over WSS, serves station capabilities (health/logs/fs/terminal/lifecycle/cleanup/acp/changeset), and updates itself from GitHub releases **when asked to** — there is no timer on the node. The trigger is `apn update` on the host, or the hub: one node from the console, or the whole fleet via `POST /api/nodes/update-all`. Nodes do not drift forward on their own, so after a release the fleet stays where it is until someone rolls it (issue #295).
 - `apps/hub` — Bun + Hono + Drizzle/Postgres backend; node gateway, broker, station registry, Better Auth. See `apps/hub/CLAUDE.md`.
 - `apps/console` — SvelteKit with `adapter-static` (Svelte 5 runes, vite, bits-ui, Tailwind); a client-routed SPA deployed to Cloudflare Pages. It IS SvelteKit — `pnpm check` runs `svelte-kit sync`.
 - `packages/contract` — zod schemas shared by hub ↔ agent ↔ console. Change here first when a frame/API shape changes.

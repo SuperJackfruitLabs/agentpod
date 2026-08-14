@@ -68,6 +68,32 @@ export const listNodes = () => http<NodeSummary[]>("/api/nodes");
  * `force` re-applies the current release — the escape hatch for a node whose
  * binary is corrupt but whose reported version is current.
  */
+/**
+ * Update the whole fleet, one node at a time, from the hub (issue #295).
+ *
+ * Always resolves on a reachable hub: the response carries a row per node,
+ * including the ones it declined to touch and why. A node that failed is a row
+ * with `outcome: "failed"`, not a thrown error — one unreachable machine must
+ * not read as "the rollout failed".
+ */
+export const updateAllNodes = (opts?: { force?: boolean; only?: string[] }) =>
+  http<{
+    ok: boolean;
+    summary: Record<string, number>;
+    results: Array<{
+      nodeId: string;
+      name: string;
+      outcome: "updated" | "no-op" | "skipped" | "failed";
+      tag?: string;
+      reason?: string;
+      error?: string;
+    }>;
+  }>("/api/nodes/update-all", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ force: opts?.force ?? false, ...(opts?.only ? { only: opts.only } : {}) }),
+  });
+
 export const updateNode = (id: string, opts?: { force?: boolean }) =>
   http<{
     ok: boolean;

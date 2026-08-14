@@ -3,6 +3,12 @@ import { zValidator } from "@hono/zod-validator";
 import { EnrollRequest } from "@agentpod/contract";
 import { enrollNode, verifyNodeCredential } from "../services/enrollment";
 import { listNodes } from "../services/node-registry";
+import {
+  executeRollout,
+  planRollout,
+  summarise,
+  type RolloutNode,
+} from "../services/rollout";
 import { request as brokerRequest } from "../services/broker";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -66,8 +72,13 @@ async function readForce(c: {
  * An optional `deps.request` override replaces the real broker so tests can
  * assert the RPC call without needing a live WebSocket connection.
  */
-export function createNodeRoutes(deps?: { request?: RequestFn }) {
+export function createNodeRoutes(deps?: {
+  request?: RequestFn;
+  /** Replaces the database-backed node list so the rollout is unit-testable. */
+  listNodesFn?: (userId: string) => Promise<RolloutNode[]>;
+}) {
   const _request: RequestFn = deps?.request ?? brokerRequest;
+  const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string) => Promise<RolloutNode[]>);
 
   return (
     new Hono()
@@ -75,6 +86,41 @@ export function createNodeRoutes(deps?: { request?: RequestFn }) {
        * GET /api/nodes → list nodes belonging to the current user.
        */
       .get("/", async (c) => c.json(await listNodes(c.get("user").id)))
+      /**
+       * POST /api/nodes/update-all  [body {"force"?:bool, "only"?:string[]}]
+       *
+       * Update the fleet, one node at a time, in name order (issue #295).
+       *
+       * Registered before `/:id/update` for readability only — the two cannot
+       * collide, one is a single segment and the other is two.
+       *
+       * Always 200 with a row per node, including the ones it chose not to
+       * touch. A rollout that reported only its successes would be the same
+       * defect as the single-node route's old envelope: an operator reading
+       * "ok" while machines sat on the old binary. `failed` here means a node
+       * was asked and did not update; `skipped` means it was never asked, and
+       * says why.
+       */
+      .post("/update-all", async (c) => {
+        const body = (await c.req.json().catch(() => null)) as {
+          force?: unknown;
+          only?: unknown;
+        } | null;
+        const force = body?.force === true;
+        const only = Array.isArray(body?.only)
+          ? (body.only as unknown[]).filter((x): x is string => typeof x === "string")
+          : undefined;
+
+        const nodes = await _listNodes(c.get("user").id);
+        const plan = planRollout(nodes, { force, only });
+        const results = await executeRollout(plan, { request: _request, force });
+
+        return c.json({
+          ok: true as const,
+          summary: summarise(results),
+          results,
+        });
+      })
       /**
        * POST /api/nodes/:id/update  [?force=1  |  body {"force":true}]
        *
