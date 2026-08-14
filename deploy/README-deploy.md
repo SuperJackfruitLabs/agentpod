@@ -1,5 +1,20 @@
 # P3 — Hub Deploy Runbook (production, operator-gated)
 
+> ## Historical record — superseded. Do not follow this.
+>
+> This is the runbook for the **first** hub deploy, written against the
+> `redesign/fleet-console` branch, with the console served from the VPS at
+> `app.agentpod.dev`. It is kept because it records what was actually done to the live box,
+> not because it is current. **The deployment guide is
+> [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).**
+>
+> Three things in here are known-wrong today and are left as written rather than patched:
+> `SESSION_SECRET` (step 4) is read by nothing — the hub uses `BETTER_AUTH_SECRET`;
+> `PUBLIC_URL` (step 4) is read by nothing; and `redesign/fleet-console` no longer exists —
+> production deploys from `main`. Step 4's `COOKIE_DOMAIN` / `COOKIE_SECURE` /
+> `ALLOWED_ORIGINS`, on the other hand, were right, and were missing from DEPLOYMENT.md
+> until 2026-08-14.
+
 Deploys the AgentPod hub + console onto the existing Matrix box
 (`<HUB_HOST>`, Ubuntu 24.04, nginx + Synapse). **Every step is additive.**
 
