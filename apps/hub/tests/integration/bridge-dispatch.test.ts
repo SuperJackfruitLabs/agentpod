@@ -715,6 +715,27 @@ describe("the one log line a dispatch is allowed to spend on this", () => {
     expect(line).not.toContain(TOKEN);
   });
 
+  test("a summary that cannot be written does not change what the run returned", async () => {
+    // It is emitted from a `finally`, and a throw there REPLACES the returned
+    // value — so a broken logger could swallow the `foreign-run` that is meant
+    // to halt the loop. The measurement never outranks the work.
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`)) return { status: 200, body: contextBody };
+      if (path.endsWith("/activities")) return { status: 403, body: boardError("NOT_RUN_OWNER") };
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => [chunk("working"), idle()]);
+
+    const result = await runOnce(
+      deps(board.client, acp.port, () => {
+        throw new Error("the log sink is gone");
+      }),
+    );
+
+    expect(result.status).toBe("foreign-run");
+  });
+
   test("a cycle that claimed nothing spends no line at all", async () => {
     // The loop polls every 5 seconds forever. A summary on an idle cycle is
     // 17,000 lines a day saying nothing happened.

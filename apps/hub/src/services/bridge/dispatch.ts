@@ -407,7 +407,11 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     // had — including the one that threw. Reachable only from here, which is
     // also why a claim that never opened a session leaves both columns null
     // rather than claiming it counted zero of everything.
-    await summarise(deps, key, work, attemptId, counts, coalescer.unmapped());
+    //
+    // Swallowed whole: a throw in a `finally` REPLACES the value the try block
+    // returned, so an unlucky measurement could discard the `foreign-run` that
+    // is supposed to halt the loop. A note about the work never outranks it.
+    await summarise(deps, key, work, attemptId, counts, coalescer.unmapped()).catch(() => {});
   }
 }
 
