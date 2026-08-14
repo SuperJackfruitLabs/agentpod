@@ -74,7 +74,28 @@ func assetName(goos, goarch string) string {
 	return fmt.Sprintf("agentpod-node-%s-%s", goos, goarch)
 }
 
-// LatestTag fetches the latest GitHub release tag for agentpod/agentpod.
+// releaseRepo is the GitHub repository every release URL is built from.
+//
+// AgentPod moved to the SuperJackfruitLabs organisation on 2026-08-14. These
+// URLs named the old owner until then and worked only because GitHub redirects
+// a transferred repository — which is not a contract, and stops the day that
+// name is reclaimed. What breaks then is the fleet's ability to take a new
+// binary, discovered months later by noticing the drift (issue #295).
+const releaseRepo = "SuperJackfruitLabs/agentpod"
+
+func latestTagURL(apiBase string) string {
+	return apiBase + "/repos/" + releaseRepo + "/releases/latest"
+}
+
+func assetDownloadURL(dlBase, tag, asset string) string {
+	return fmt.Sprintf("%s/%s/releases/download/%s/%s", dlBase, releaseRepo, tag, asset)
+}
+
+func checksumsURL(dlBase, tag string) string {
+	return fmt.Sprintf("%s/%s/releases/download/%s/SHA256SUMS", dlBase, releaseRepo, tag)
+}
+
+// LatestTag fetches the latest GitHub release tag for the release repository.
 // apiBase defaults to "https://api.github.com" when empty.
 func LatestTag(ctx context.Context, client *http.Client, apiBase string) (string, error) {
 	if client == nil {
@@ -83,7 +104,7 @@ func LatestTag(ctx context.Context, client *http.Client, apiBase string) (string
 	if apiBase == "" {
 		apiBase = "https://api.github.com"
 	}
-	url := apiBase + "/repos/rakeshgangwar/agentpod/releases/latest"
+	url := latestTagURL(apiBase)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -134,7 +155,7 @@ func downloadAndVerify(ctx context.Context, client *http.Client, dlBase, tag, as
 	}
 
 	// Download the binary and compute its SHA-256 in one pass.
-	assetURL := fmt.Sprintf("%s/rakeshgangwar/agentpod/releases/download/%s/%s", dlBase, tag, asset)
+	assetURL := assetDownloadURL(dlBase, tag, asset)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
 	if err != nil {
 		cleanup()
@@ -163,7 +184,7 @@ func downloadAndVerify(ctx context.Context, client *http.Client, dlBase, tag, as
 	gotHex := hex.EncodeToString(h.Sum(nil))
 
 	// Download SHA256SUMS.
-	sumsURL := fmt.Sprintf("%s/rakeshgangwar/agentpod/releases/download/%s/SHA256SUMS", dlBase, tag)
+	sumsURL := checksumsURL(dlBase, tag)
 	req2, err := http.NewRequestWithContext(ctx, http.MethodGet, sumsURL, nil)
 	if err != nil {
 		os.Remove(tmpPath)

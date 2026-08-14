@@ -22,6 +22,17 @@ export interface GetLatestVersionOptions {
 
 // ─── Module-level cache ───────────────────────────────────────────────────────
 
+/**
+ * The repository releases are published to.
+ *
+ * Named the pre-transfer owner until 2026-08-14 and worked only through
+ * GitHub's redirect for a moved repository — which is not a contract. The node
+ * agent holds the same constant in `internal/selfupdate`; both must name the
+ * repository that actually publishes releases, or a fleet update depends on a
+ * redirection nobody controls (issue #295).
+ */
+const RELEASE_REPO = "SuperJackfruitLabs/agentpod";
+
 let _cache: { value: string | null; at: number } = { value: null, at: 0 };
 
 const TTL_MS = 3_600_000; // 1 hour
@@ -56,7 +67,7 @@ export async function getLatestAgentVersion(
 
   try {
     const res = await fetchFn(
-      `${baseUrl}/repos/rakeshgangwar/agentpod/releases/latest`,
+      `${baseUrl}/repos/${RELEASE_REPO}/releases/latest`,
       { headers: { Accept: "application/vnd.github.v3+json" } }
     );
     const data = (await res.json()) as { tag_name?: string };

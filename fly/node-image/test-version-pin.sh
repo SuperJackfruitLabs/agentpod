@@ -65,7 +65,7 @@ write_dockerfile() {
   cat >"$TMP/$1" <<EOF
 FROM debian:trixie-slim
 ARG AGENTPOD_VERSION=$2
-RUN curl -fsSL -o /agentpod-node "https://github.com/rakeshgangwar/agentpod/releases/download/\${AGENTPOD_VERSION}/agentpod-node-linux-amd64"
+RUN curl -fsSL -o /agentpod-node "https://github.com/SuperJackfruitLabs/agentpod/releases/download/\${AGENTPOD_VERSION}/agentpod-node-linux-amd64"
 EOF
 }
 
