@@ -29,7 +29,7 @@ FROM debian:trixie-slim
 # fails CI on either half of that (a pin behind the latest release, or the two
 # files disagreeing). The publish workflow overrides this with --build-arg, so
 # this default is what a local `docker build` gets.
-ARG AGENTPOD_VERSION=v0.1.26
+ARG AGENTPOD_VERSION=v0.1.27
 
 # Debian trixie: the same userland the fleet's own base image uses, so the
 # harness install below behaves identically to the Docker Pi image.
