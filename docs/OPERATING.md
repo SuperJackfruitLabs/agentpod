@@ -749,7 +749,7 @@ There is no API for the ledger — Postgres is the read path. One row per claime
 | `produced` | **the work finished and the handoff is recorded, but the board has not been told.** This is the replayable state: the next claim of the same card reports the stored output without re-running the harness |
 | `reported` | the board knows; nothing left to replay |
 | `released` | the claim was handed back **before any ACP session opened**, so the workspace cannot have been touched. Unpenalised |
-| `abandoned` | the run stopped *after* it started — permission needed, turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
+| `abandoned` | the run stopped *after* it started — a permission question that went unanswered, a turn timeout, a failure, or a release the board refused. The workspace may hold partial work, so nothing is replayed |
 
 `released` vs `abandoned` is the distinction worth keeping straight: it is the only record of
 whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written

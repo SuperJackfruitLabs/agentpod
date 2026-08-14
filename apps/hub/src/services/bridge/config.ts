@@ -77,8 +77,13 @@ export const BridgeAgentConfig = z.object({
    * Per-agent, because attendance is a property of a deployment, not of the
    * bridge: a board somebody watches during office hours wants minutes, and one
    * that runs unattended overnight wants the harness released quickly rather
-   * than a station pinned until morning. Unset means
-   * `DEFAULT_PERMISSION_WAIT_MS`.
+   * than a station pinned until morning. Unset means the default declared
+   * above — thirty minutes.
+   *
+   * Named in prose rather than as a backticked constant on purpose: the docs
+   * audit scans this file for a SCREAMING_SNAKE name in quotes and reads every
+   * one as an environment variable being named to an operator. That premise is
+   * worth keeping true, and the duration is what a reader wants anyway.
    *
    * Not bounded by the lease: the bridge heartbeats throughout, so kaambaan's
    * 15-minute reclaim never fires on a waiting run. The bound is policy.
