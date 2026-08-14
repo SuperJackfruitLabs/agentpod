@@ -976,9 +976,9 @@ Track via AgentPod Management API:
 
 ## Related Documents
 
-- [Autonomous Startup Blueprint](../vision/autonomous-startup-blueprint.md) - Vision document
-- [Workflow Builder Plan](./workflow-builder-plan.md) - Technical architecture
-- [Cloudflare Implementation Guide](./cloudflare-implementation-guide.md) - Cloudflare services
+- Autonomous Startup Blueprint, Workflow Builder Plan, Cloudflare Implementation Guide —
+  all three were pre-pivot documents and none of them survived into this repo. The links
+  that used to be here pointed at `docs/vision/` and sibling files that no longer exist.
 
 ---
 

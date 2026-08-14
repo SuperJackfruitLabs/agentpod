@@ -1,86 +1,53 @@
-# Management API
+# Hub
 
-Backend service for the Portable Command Center that orchestrates project lifecycle, container management, and credential handling.
+The AgentPod fleet-console backend. Nodes dial *in* to it over WSS; the console talks to it
+over HTTPS; it owns the node/station registry, the connection broker, enrollment, auth, the
+audit log, and the provisioning drivers.
 
-## Features
-
-- **Project Management**: Create, delete, start, stop projects
-- **Container Orchestration**: Manage OpenCode containers via Coolify API
-- **Repository Management**: Create and manage repos via Forgejo API
-- **Credential Management**: Store and inject LLM credentials into containers
-- **GitHub Sync**: Import from and sync with GitHub repositories
-
-## Tech Stack
+Until 2026-08-14 this file described the pre-pivot "Management API": projects, Coolify,
+Forgejo, GitHub sync, and a `/api/projects` surface. None of that exists. The routes are
+mounted in `src/index.ts` and that file is the list.
 
 - **Runtime**: [Bun](https://bun.sh)
-- **Framework**: [Hono](https://hono.dev) (SST team's choice)
-- **Validation**: [Zod](https://zod.dev) with @hono/zod-validator
-- **Database**: PostgreSQL via Drizzle ORM
+- **Framework**: [Hono](https://hono.dev) — chained routes, `AppType` export
+- **Validation**: [Zod](https://zod.dev) via `@hono/zod-validator`, sharing `@agentpod/contract`
+- **Database**: PostgreSQL (pgvector) via Drizzle ORM; migrations auto-apply on boot
 
-## Quick Start
+## Quick start
 
 ```bash
-# Install dependencies
 bun install
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your values
-
-# Start development server (with hot reload)
-bun run dev
-
-# Or start production server
-bun run start
+cp .env.example .env    # local development values; production is docs/DEPLOYMENT.md
+bun run dev             # :3001, hot reload
+bun run start           # no reload
 ```
 
-## API Endpoints
+## Commands
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/health` | Health check | No |
-| GET | `/api/info` | API information | No |
-| GET | `/api/projects` | List all projects | Yes |
-| POST | `/api/projects` | Create new project | Yes |
-| GET | `/api/projects/:id` | Get project details | Yes |
-| DELETE | `/api/projects/:id` | Delete project | Yes |
-| POST | `/api/projects/:id/start` | Start container | Yes |
-| POST | `/api/projects/:id/stop` | Stop container | Yes |
-| GET | `/api/providers` | List LLM providers | Yes |
-| POST | `/api/providers/:id/configure` | Configure provider | Yes |
+```bash
+DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
+bun run typecheck       # KNOWN RED — see typecheck-known-red.txt
+bun run db:migrate      # migrations also run automatically at boot
+```
+
+The test database is **pgvector** on `:5434` with the `DATABASE_URL` override — see
+[`TESTING.md`](../../TESTING.md).
+
+## Where to look
+
+| For | Read |
+|---|---|
+| Architecture facts that bite (gateway, sweeper, lifecycle-write rules, bridge) | [`CLAUDE.md`](./CLAUDE.md) |
+| The endpoint list | `src/index.ts` — it prints the routes at boot, and mounts them right above |
+| Deploying this | [`docs/DEPLOYMENT.md`](../../docs/DEPLOYMENT.md) |
+| Operating it | [`docs/OPERATING.md`](../../docs/OPERATING.md) |
 
 ## Authentication
 
-Protected endpoints require Bearer token authentication:
+Two mechanisms, and they are not interchangeable:
 
-```bash
-curl -H "Authorization: Bearer your-token" http://localhost:3001/api/projects
-```
+- **Console** — Better Auth **session cookies**. First signup becomes admin, then signup closes.
+- **Nodes** — `Authorization: Bearer <nodeId>:<nodeSecret>` on the gateway WebSocket only.
 
-## Development
-
-```bash
-# Run with hot reload
-bun run dev
-
-# Type checking
-bun run typecheck
-
-# Run tests
-bun test
-```
-
-## Docker
-
-```bash
-# Build image
-docker build -t management-api .
-
-# Run container
-docker run -p 3001:3001 --env-file .env management-api
-```
-
-## Related Documentation
-
-- [Phase 2 Implementation Guide](../docs/archive/implementation/phase-2-management-api/)
-- [Technical Architecture](../docs/technical-architecture.md)
+`API_TOKEN` also works as a bearer on `/api/*`, authenticating as `DEFAULT_USER_ID`. It is a
+full console-equivalent credential, not a read-only probe token — treat it accordingly.

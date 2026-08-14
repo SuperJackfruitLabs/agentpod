@@ -1,8 +1,9 @@
 # Testing Guide
 
-How to run and write tests for AgentPod's three tiers. CI runs four required
-jobs on every PR: `contract`, `hub`, `node-agent`, `console`
-(`.github/workflows/ci.yml`).
+How to run and write tests for AgentPod's three tiers. CI runs five required
+jobs on every PR: `contract`, `hub`, `node-agent`, `console`, `worker`
+(`.github/workflows/ci.yml`). That list is checked, not remembered —
+`apps/hub/tests/unit/docs-claims.test.ts` fails when a CI job is not named here.
 
 ## Quick start
 
@@ -65,9 +66,10 @@ points the suite at the test database** — the preamble is a no-op fallback.
   than importing `src/index.ts` (which starts the sweeper and boot hooks).
 - **Hub — never sleep for a barrier.** `bun test` runs every hub test file
   sequentially inside **one process with one module registry**: the
-  `connectionManager`, the broker and the Postgres pool are shared by all 55
-  files, so a file that passes alone runs under much more load in the full
-  suite. Waiting a fixed number of milliseconds for something to become true is
+  `connectionManager`, the broker and the Postgres pool are shared by every one
+  of them, so a file that passes alone runs under much more load in the full
+  suite. (This used to say "all 55 files"; it is 75 and climbing, which is
+  exactly why the number is gone rather than corrected.) Waiting a fixed number of milliseconds for something to become true is
   therefore a coin toss — the gateway's `onOpen` verifies an argon2id hash
   (~105 ms idle, more under load) before it registers the node, which is what
   turned a 150 ms sleep into issue #64's random reds. Wait on the condition

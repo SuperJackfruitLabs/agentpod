@@ -549,7 +549,7 @@ export class AgentPodAgent extends Agent {
 
 - [AWS Agents](./aws-agents.md) - AWS agent offerings
 - [Docker MCP](../infrastructure/docker-mcp.md) - MCP server catalog
-- [Cloudflare Integration](../../../architecture/cloudflare-integration.md) - AgentPod's Cloudflare setup
+- [Cloudflare Integration](../../../archive/architecture/cloudflare-integration.md) - AgentPod's **pre-pivot** Cloudflare setup (archived; today's is `cloudflare/worker-v2/`)
 
 ---
 

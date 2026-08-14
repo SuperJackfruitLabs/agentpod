@@ -1,11 +1,21 @@
 # Contributing
 
-AgentPod lives on GitHub: https://github.com/rakeshgangwar/agentpod
+AgentPod lives on GitHub: https://github.com/SuperJackfruitLabs/agentpod
+
+> The repository moved owner on 2026-08-14. Roughly forty
+> `github.com/rakeshgangwar/agentpod` URLs remain in the docs, the console, the landing site
+> and — load-bearingly — the node-agent's self-update and install paths. They all still
+> resolve today (GitHub redirects a transfer permanently; the release-asset download was
+> verified at HTTP 200 on 2026-08-14), so nothing is broken. Sweeping them is its own change:
+> the self-update path verifies downloads against `SHA256SUMS`, so it must be re-verified on
+> a real host, not just find-and-replaced.
 
 ## Branch flow
 
-Single maintainer, trunk-based. Work lands on **`main`**, gated by the four required checks
-(`contract`, `hub`, `node-agent`, `console`) rather than by review.
+Single maintainer, trunk-based. Work lands on **`main`**, gated by the required checks
+(`contract`, `hub`, `node-agent`, `console`, `worker`) rather than by review — one per job in
+`.github/workflows/ci.yml`, and `apps/hub/tests/unit/docs-claims.test.ts` fails if a job here
+is missing from that list.
 
 - Self-contained changes go straight to `main` once the suites for whatever you touched pass locally.
 - Anything you want CI to prove *before* it lands — or that deserves a second look — goes on a short-lived branch and a PR. Dependabot updates land this way by default. Branch protection requires the head to be up to date with `main`, so rebase before merging.
