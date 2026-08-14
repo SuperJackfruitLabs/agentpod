@@ -1,5 +1,16 @@
 # AgentPod Sandbox Worker
 
+> ## Dead as of 2026-08-12 — see [DEAD.md](./DEAD.md).
+>
+> This worker is not deployed and is not the Cloudflare substrate. The live one is
+> [`cloudflare/worker-v2`](../worker-v2/). Nothing below is maintained: the route table is
+> already wrong (`POST /execute` is really `POST /workflow/execute`, `GET /sandbox/:id/status`
+> is really `GET /sandbox/:id`), the test inventory lists 5 of 17 files with one wrong count,
+> and the closing "Kept (not OpenCode legacy)" section is the claim DEAD.md retracts.
+> Left as a record rather than corrected — correcting a dead worker's docs is the work this
+> repo is trying to stop doing.
+
+
 Cloudflare Worker providing isolated sandbox environments for workflow execution using Cloudflare Containers and Durable Objects.
 
 ## Architecture

@@ -441,7 +441,7 @@ export function validateConfig(): void {
     console.error("\n");
     console.error("Environment: " + config.nodeEnv);
     console.error("\nFor production deployment, ensure all secrets are properly configured.");
-    console.error("See: docs/production-readiness/phase-1-security.md\n");
+    console.error("See: docs/DEPLOYMENT.md\n");
     
     process.exit(1);
   }

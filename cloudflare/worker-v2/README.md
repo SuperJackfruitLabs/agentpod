@@ -47,13 +47,13 @@ stopped heartbeating and cannot tell "idled out" from "died".
 
 ## Routes
 
-All except `/health` require `Authorization: Bearer $AGENTPOD_WORKER_TOKEN`.
+All except `/health` **and the snapshot routes** require `Authorization: Bearer $AGENTPOD_WORKER_TOKEN` (the snapshot routes use a per-sandbox token instead — see below).
 
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. Unauthenticated so the driver can fail fast on a bad URL without holding a credential. |
 | `POST /sandbox` | Start a station. Body: `id`, `hubUrl`, `enrollToken`, `callbackToken`. |
-| `GET /sandbox/:id` | Existence check. |
+| `GET /sandbox/:id` | **Container state**, from `container.containerState()`. The hub calls it to confirm a stop — `stopped` is written only on this answer, never because `stop()` resolved. An older deployment that does not report state reads as `unknown`. |
 | `DELETE /sandbox/:id` | Destroy. |
 | `POST /sandbox/:id/start` | Start — **also the wake path**. |
 | `POST /sandbox/:id/stop` | Stop. |

@@ -1,7 +1,7 @@
 {
   "name": "agentpod",
   "version": "0.1.0",
-  "description": "Portable Command Center for AI Coding Agents",
+  "description": "Fleet/facilities console for agent runtimes",
   "private": true,
   "type": "module",
   "scripts": {

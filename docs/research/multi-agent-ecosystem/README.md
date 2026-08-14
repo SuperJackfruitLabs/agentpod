@@ -99,7 +99,7 @@ Supporting infrastructure for agent systems.
 | Component | Purpose | Documentation |
 |-----------|---------|---------------|
 | **Docker MCP** | MCP server catalog and containerization | [Docker MCP](./infrastructure/docker-mcp.md) |
-| **Durable Workflows** | Long-running agent execution | [Workflows](./infrastructure/durable-workflows.md) |
+| **Durable Workflows** | Long-running agent execution | _(never written — the link here pointed at a file that has never existed)_ |
 
 ---
 
