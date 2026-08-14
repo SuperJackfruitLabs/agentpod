@@ -85,6 +85,21 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
       if (result.status === "idle") {
         await sleep(opts.pollMs ?? DEFAULT_POLL_MS, controller.signal);
+        continue;
+      }
+
+      // **The anti-storm rule.** Both of these mean the work could not start,
+      // and both leave the card claimable — so the next cycle would claim it
+      // straight back. At the poll interval that is a claim/release every five
+      // seconds for as long as the station is down: a stuck card traded for a
+      // busy one and a board full of churn. They wait out the error backoff
+      // instead, which is also long enough for a node-agent to reconnect.
+      if (result.status === "not-ready" || result.status === "released") {
+        log(result.status === "not-ready" ? "the station is not ready; backing off" : "the claim was handed back; backing off", {
+          run: result.externalRunId,
+          reason: result.reason,
+        });
+        await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
       }
     }
   })();
@@ -100,6 +115,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
 
 /** The hub's real ACP machinery, behind the port a dispatch talks to. */
 const hubAcpPort: AcpPort = {
+  stationReady: ({ stationId, userId }) => acpSessions.stationReadiness(userId, stationId),
   createSession: (input) => acpSessions.createSession(input),
   promptSession: (userId, sessionId, text) => acpSessions.promptSession(userId, sessionId, text),
   subscribe: (sessionId, fn) => acpSessions.subscribe(sessionId, fn),

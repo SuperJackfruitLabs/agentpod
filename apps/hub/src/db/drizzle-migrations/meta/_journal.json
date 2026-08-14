@@ -267,6 +267,13 @@
       "when": 1786675941921,
       "tag": "0037_bridge_dispatch_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786679565310,
+      "tag": "0038_bridge_dispatch_released",
+      "breakpoints": true
     }
   ]
 }

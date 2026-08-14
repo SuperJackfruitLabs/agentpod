@@ -85,16 +85,31 @@ const chunk = (text: string): AcpEvent =>
 
 const idle = (): AcpEvent => ev("state", { status: "idle" });
 
+interface FakeAcpOpts {
+  /** What the readiness probe answers. Ready unless a test says otherwise. */
+  ready?: { ready: boolean; reason?: string };
+  /** Fail the session open — a node that went offline between the two. */
+  failCreate?: string;
+  /** Fail the first prompt — a session that opened and then lost its wire. */
+  failPrompt?: string;
+}
+
 /** An ACP port that scripts a turn instead of talking to a station. */
-function fakeAcp(script: () => AcpEvent[]) {
+function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
   const subs = new Set<(e: AcpEvent) => void>();
-  const state = { created: 0, prompts: [] as string[], ended: [] as string[] };
+  const state = { created: 0, readyChecks: 0, prompts: [] as string[], ended: [] as string[] };
   const port: AcpPort = {
+    async stationReady() {
+      state.readyChecks++;
+      return opts.ready ?? { ready: true };
+    },
     async createSession() {
+      if (opts.failCreate) throw new Error(opts.failCreate);
       state.created++;
       return { id: SESSION_ID };
     },
     async promptSession(_u, _s, text) {
+      if (opts.failPrompt) throw new Error(opts.failPrompt);
       state.prompts.push(text);
       // Events arrive after the prompt returns, as they do from a real station.
       queueMicrotask(() => {
@@ -388,6 +403,121 @@ describe("at-least-once — a finished-but-unreported run comes back", () => {
 
     expect(await dispatchOutcome(key("run_a1b2c3d4e5f60718"))).toMatchObject({ outcome: "reported" });
     expect(await dispatchOutcome(key())).toMatchObject({ outcome: "reported" });
+  });
+});
+
+describe("a station with nowhere to run the work is never claimed", () => {
+  // The live failure: the bridge's first cycle ran ~2s after a hub restart,
+  // before the node-agents had reconnected. It claimed a card, could not open a
+  // session, and left the card held by a run that never did anything.
+  test("no claim is made at all", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [], { ready: { ready: false, reason: "Node is offline." } });
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("not-ready");
+    expect(result.reason).toContain("Node is offline.");
+    // Not "claimed and released" — never claimed. The board saw no request at all.
+    expect(board.calls).toHaveLength(0);
+    expect(acp.state.created).toBe(0);
+    expect(await dispatchOutcome(key())).toBeNull();
+  });
+
+  test("a ready station still claims — the check gates the race, not the work", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("Reindexed 412 documents."), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.readyChecks).toBe(1);
+    expect(result.status).toBe("reported");
+  });
+});
+
+describe("a claim that never started is handed straight back", () => {
+  test("the session open failing releases the run, and the ledger says nothing ran", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [], { failCreate: "Node is offline." });
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("released");
+    // Released, not failed and not left to the 15-minute reclaim: no session
+    // opened, so nothing can have touched the workspace.
+    expect(board.verbs()).toContain("release");
+    expect(board.verbs()).not.toContain("fail");
+    expect(board.verbs()).not.toContain("block");
+
+    const outcome = await dispatchOutcome(key());
+    expect(outcome!.outcome).toBe("released");
+    expect(outcome!.reason!.toLowerCase()).toContain("no session");
+    expect(await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID))).toHaveLength(0);
+  });
+
+  test("a prompt that cannot be assembled releases the same way", async () => {
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`)) return { status: 500, body: "boom" };
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => []);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("released");
+    expect(board.verbs()).toContain("release");
+    expect(acp.state.created).toBe(0);
+    expect((await dispatchOutcome(key()))!.outcome).toBe("released");
+  });
+
+  test("a run we no longer hold is not released — a 409 is not ours to hand back", async () => {
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`)) return { status: 409, body: boardError("STALE_LEASE") };
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => []);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("lease-superseded");
+    expect(board.verbs()).not.toContain("release");
+    expect((await dispatchOutcome(key()))!.outcome).toBe("abandoned");
+  });
+});
+
+describe("a failure after the session started is not released", () => {
+  // Releasing here would hand a card whose workspace may already be half-edited
+  // to the next claimer, with nothing recording that. kaambaan's `fail` re-queues
+  // it with a reason and a failure count, and the circuit breaker parks it for a
+  // human if it keeps happening.
+  test("the board is told it failed, and the reason says a session had started", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [], { failPrompt: "the wire dropped" });
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("failed");
+    expect(board.verbs()).toContain("fail");
+    expect(board.verbs()).not.toContain("release");
+
+    const failCall = board.calls.find((c) => c.path.endsWith("/fail"))!;
+    expect(String((failCall.body as { reason: string }).reason).toLowerCase()).toContain("session had started");
+
+    const outcome = await dispatchOutcome(key());
+    expect(outcome!.outcome).toBe("abandoned");
+    expect(outcome!.outcome).not.toBe("released");
+    expect(outcome!.reason!.toLowerCase()).toContain("session had started");
+  });
+
+  test("the harness is stopped — nothing else fences the machine", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [], { failPrompt: "the wire dropped" });
+
+    await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.ended).toHaveLength(1);
   });
 });
 

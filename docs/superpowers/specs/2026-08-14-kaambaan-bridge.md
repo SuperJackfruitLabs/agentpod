@@ -224,4 +224,21 @@ state.
 - **Reading the join back.** `acp_runs_external_idx` exists for the reverse
   lookup and nothing queries it. A board still cannot ask AgentPod what
   executed one of its runs.
-- **Live verification.** Nothing here has been run against a real board.
+- **Live verification.** First real run: 2026-08-14, 03:40 UTC. The happy path
+  worked (claim → session → activities → `complete`, 40s) and so did recovery
+  after a hand-release. The first cycle did not: it ran ~2s after a hub restart,
+  before the node-agents had reconnected, claimed a card and then threw "Node is
+  offline." opening the session — leaving `run_12e6594bf8de4b37` in `working`
+  with `acp_run_id` empty, holding the board's only claimable card until the
+  15-minute reclaim.
+
+  Two rules came out of it, and they are now the fourth entry in `dispatch.ts`'s
+  header: **nothing is claimed until the station is ready** (`stationReadiness`,
+  asked before `claim`), and **a claim that never started is handed back**
+  (`release`, the unpenalised verb — safe precisely because no session opened).
+  A failure *after* a session opened is NOT released: the workspace may hold
+  partial work, so it gets `fail`, which re-queues the card with the reason and
+  a failure count that trips kaambaan's circuit breaker if it keeps happening.
+  The ledger tells the two apart with `released` vs `abandoned`; `acp_run_id`
+  cannot, because it is written on the first ACP event. Both results wait out
+  the loop's error backoff, or claim/release becomes its own storm.
