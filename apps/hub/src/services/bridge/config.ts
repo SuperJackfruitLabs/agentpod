@@ -29,17 +29,32 @@ export const BRIDGE_ENV_FLAG = "ENABLE_KAAMBAAN_BRIDGE";
 export const BRIDGE_SOURCE = "kaambaan";
 
 /**
- * Modes that do not block on a human.
+ * Why `ask` is a mode again.
  *
- * Spike RQ2 found the return path does not exist: kaambaan defines the
- * `input-required → working` transition in its state machine and **nothing in
- * `apps/api/src` invokes it**, no gate is created by an elicitation, and no code
- * anywhere constructs the `prompt` activity that would carry an answer back. In
- * `ask` mode every permission request would therefore park the card until the
- * 15-minute heartbeat reclaim, with the harness blocked the whole time. Refused
- * at load, where the operator can read why.
+ * It used to be refused here. The reason was real: spike RQ2 found that
+ * kaambaan defined the `input-required → working` transition and **nothing
+ * invoked it** — an elicitation created no gate, and no code anywhere
+ * constructed the `prompt` activity that would carry an answer back. A
+ * permission request was a question nothing could answer, so every one of them
+ * parked the card until the 15-minute reclaim with the harness blocked.
+ *
+ * kaambaan PR #36 built that return path: a human answers through
+ * `POST /v1/boards/:boardId/elicitations/:elicitationId/answer`, the state
+ * machine's `human_reply` moves the card back to `working`, and the answer
+ * appears on the run read surface the asking agent already polls — on the same
+ * lease, so the agent resumes as itself. The refusal above is now a record of
+ * something fixed, kept because the reason it was right is the reason the fix
+ * had to be built somewhere.
+ *
+ * The default is deliberately NOT `ask`. A default is what an unattended board
+ * gets, `ask` asks about every tool call, and a hub upgraded into it would
+ * start parking cards on questions nobody is awake to answer. `accept-edits` is
+ * the supervised setting an operator should reach for: file writes proceed,
+ * anything that executes waits for a human.
  */
-const NON_BLOCKING_MODES = ["accept-edits", "full-auto"] as const;
+
+/** The wait, when an agent does not set its own. See `permissionWaitMs`. */
+export const DEFAULT_PERMISSION_WAIT_MS = 30 * 60_000;
 
 export const BridgeAgentConfig = z.object({
   /** Stable name for logs and `bridge_dispatches.agent_key`. Must be unique. */
@@ -55,13 +70,20 @@ export const BridgeAgentConfig = z.object({
    * background worker needs a real owning principal — it cannot invent one.
    */
   hubUserId: z.string().min(1),
-  mode: AcpSessionMode.default("full-auto").refine(
-    (m) => (NON_BLOCKING_MODES as readonly string[]).includes(m),
-    {
-      message:
-        'mode "ask" is refused: a permission request becomes a kaambaan elicitation, and kaambaan has no return path for one — the input-required → working transition exists in its state machine and nothing invokes it, so the card would park until the 15-minute reclaim with the harness blocked (spike RQ2). Use "accept-edits" or "full-auto".',
-    },
-  ),
+  mode: AcpSessionMode.default("full-auto"),
+  /**
+   * How long a human has to answer a permission request before the run fails.
+   *
+   * Per-agent, because attendance is a property of a deployment, not of the
+   * bridge: a board somebody watches during office hours wants minutes, and one
+   * that runs unattended overnight wants the harness released quickly rather
+   * than a station pinned until morning. Unset means
+   * `DEFAULT_PERMISSION_WAIT_MS`.
+   *
+   * Not bounded by the lease: the bridge heartbeats throughout, so kaambaan's
+   * 15-minute reclaim never fires on a waiting run. The bound is policy.
+   */
+  permissionWaitMs: z.number().int().positive().optional(),
   /** How many of this agent's runs may be in flight. kaambaan defaults to 1. */
   maxConcurrency: z.number().int().positive().optional(),
   /** kaambaan profile to claim under, when the board routes by profile. */
@@ -102,7 +124,7 @@ export function loadBridgeConfig(): BridgeConfig | null {
     parsed = JSON.parse(raw || "[]");
   } catch {
     throw new Error(
-      `KAAMBAAN_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, maxConcurrency?, profileKey?}`,
+      `KAAMBAAN_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?}`,
     );
   }
 

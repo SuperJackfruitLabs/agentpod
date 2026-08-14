@@ -104,11 +104,11 @@ describe("an enabled bridge refuses to start half-configured", () => {
 });
 
 describe("permission mode", () => {
-  test("defaults to a mode that does not block", () => {
-    // Spike RQ2: an elicitation is a dead end. kaambaan defines the
-    // `input-required → working` transition and NOTHING invokes it, no gate is
-    // created, and no code anywhere constructs a `prompt` activity. A blocking
-    // mode would park every permission request until the 15-minute reclaim.
+  test("the default is still the mode that needs nobody", () => {
+    // Deliberately NOT changed when `ask` became answerable. A default is what
+    // an unattended board gets, and `ask` asks about every tool call: a hub
+    // upgraded into it would start parking cards on questions at 3am and
+    // failing them when the wait ran out.
     enabled();
     expect(loadBridgeConfig()!.agents[0]!.mode).toBe("full-auto");
   });
@@ -118,8 +118,30 @@ describe("permission mode", () => {
     expect(loadBridgeConfig()!.agents[0]!.mode).toBe("accept-edits");
   });
 
-  test("ask is refused, and the refusal says why", () => {
+  test("ask is allowed — kaambaan can answer a question now", () => {
+    // The refusal this replaces was correct when it was written: the
+    // `input-required → working` transition existed and nothing invoked it.
+    // kaambaan PR #36 built the return path, so the reason is gone.
     enabled({ mode: "ask" });
-    expect(() => loadBridgeConfig()).toThrow(/no return path/i);
+    expect(loadBridgeConfig()!.agents[0]!.mode).toBe("ask");
+  });
+});
+
+describe("how long a human has to answer", () => {
+  test("unset means the built-in wait, not an unbounded one", () => {
+    enabled();
+    expect(loadBridgeConfig()!.agents[0]!.permissionWaitMs).toBeUndefined();
+  });
+
+  test("a board with someone watching it can be given a different wait", () => {
+    enabled({ permissionWaitMs: 5 * 60_000 });
+    expect(loadBridgeConfig()!.agents[0]!.permissionWaitMs).toBe(300_000);
+  });
+
+  test("a wait of zero or less is refused — it is not a policy, it is a bug", () => {
+    enabled({ permissionWaitMs: 0 });
+    expect(() => loadBridgeConfig()).toThrow();
+    enabled({ permissionWaitMs: -1 });
+    expect(() => loadBridgeConfig()).toThrow();
   });
 });
