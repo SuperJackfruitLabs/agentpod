@@ -221,6 +221,16 @@ export async function refreshAdoptedCapabilities(
           capabilities: s.capabilities as string[],
           displayName: s.displayName,
           workspacePath: s.workspacePath ?? null,
+          // The same defect as capabilities, one column over. `matrix_id` was
+          // written only at adoption, so a station adopted before the mxid
+          // reader worked could never gain one — in production that was every
+          // station: 32 adopted, 0 with an identity, while `detect` on the same
+          // hosts reported them correctly all along.
+          //
+          // `?? null` rather than a skip-if-absent: an agent whose Matrix
+          // identity was removed must lose it here too, or a bridge routes a
+          // room message to an mxid nobody answers on.
+          matrixId: s.matrixId ?? null,
         })
         .where(and(eq(stations.nodeId, nodeId), eq(stations.stationKey, s.key)));
       updated++;
