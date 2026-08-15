@@ -393,8 +393,26 @@ every dispatch is refused — which is correct, and is also an outage.
 
 | Field | Meaning |
 |---|---|
-| `mayDispatch` | Namespaced agent patterns. `agentpod:<stationKey>` is matched here; `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. One trailing `*` is a prefix wildcard that may not cross the `:` it was written inside, so `agentpod:hermes:*` never reaches an OpenClaw station. An **unprefixed** value (the retired format) matches nothing. `[]` denies — it is what you write to suspend someone without deleting their grant. |
+| `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. |
 | `mayGrantReach` | Whether this principal may grant an agent its reach. Required. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
+
+```sh
+agentpod:molt-bot/hermes:analyst-echo   # exactly one agent, on one host
+agentpod:molt-bot/hermes:*              # every Hermes agent on molt-bot
+agentpod:*/hermes:*                     # every Hermes agent, anywhere
+```
+
+**Why a node, not just a station.** Station keys are **not unique across the
+fleet** — uniqueness is `(node, key)`, and `opencode:c52ddf65` exists on two
+nodes right now. A grant naming only the key would let a permission written for
+a staging box silently cover production. Node **names** are unique within a
+tenant by construction: enrolment suffixes a hostname collision (`molt-bot`,
+`molt-bot-2`) and a unique index enforces it.
+
+**Two retired forms match nothing**, deliberately: an unprefixed `hermes:*` (the
+old `CONTROL_PAIR_GRANTS` format) and a two-part `agentpod:hermes:*`, which
+cannot say which node it meant. `[]` denies — it is what you write to suspend
+someone without deleting their grant.
 
 Why values are namespaced, and where that ends:
 `charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`.

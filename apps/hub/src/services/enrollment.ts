@@ -71,6 +71,45 @@ export async function mintEnrollmentToken(
   return { token, expiresAt };
 }
 
+
+/**
+ * A node name nothing else in the tenant is using.
+ *
+ * Names come straight from `hostname`, which is not unique in any meaningful
+ * sense — two Fly machines, two laptops called `localhost`, two containers from
+ * one image. That was harmless while a name was only a label. It stopped being
+ * harmless when a grant started naming one: `agentpod:molt-bot/hermes:*` has to
+ * identify ONE host, or a permission written for a staging box silently covers
+ * production.
+ *
+ * So a collision gets a numeric suffix — `molt-bot`, then `molt-bot-2` — chosen
+ * over a hash because the person reading a grant has to recognise the machine.
+ *
+ * The unique index is the real guarantee; this loop is what makes the common
+ * case produce a readable name rather than an error. A race that slips past it
+ * fails on the constraint, which is the correct outcome and not a silent one.
+ */
+async function uniqueNodeName(tenantId: string, hostname: string): Promise<string> {
+  const base = hostname.trim() === "" ? "node" : hostname.trim();
+
+  const taken = new Set(
+    (
+      await db
+        .select({ name: nodes.name })
+        .from(nodes)
+        .where(eq(nodes.tenantId, tenantId))
+    ).map((r) => r.name)
+  );
+
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  // A thousand machines sharing one hostname is not a naming problem any more.
+  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 /**
  * Enroll a node using a valid enrollment token.
  *
@@ -199,7 +238,10 @@ export async function enrollNode(
     // which stays true once tokens can be minted for more than one.
     tenantId: row.tenantId,
     userId: row.userId,
-    name: hostInfo.hostname,
+    // Unique within the tenant, because a grant names a node by this
+    // (`agentpod:<node>/<stationKey>`) and an ambiguous name is an ambiguous
+    // permission. `hostname` below keeps the machine's own answer, unaltered.
+    name: await uniqueNodeName(row.tenantId, hostInfo.hostname),
     hostname: hostInfo.hostname,
     os: hostInfo.os,
     arch: hostInfo.arch,
