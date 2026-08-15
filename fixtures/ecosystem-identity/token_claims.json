@@ -1,0 +1,96 @@
+{
+  "corpus": "ecosystem-identity/token-claims",
+  "version": 1,
+  "authoredAt": "2026-08-15",
+  "authoredFrom": "code and a spike that was run — every claim below was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331)",
+  "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
+
+  "howToRead": {
+    "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token.",
+    "standard": "Registered JWT claims the issuer sets. Consumers MUST validate iss, aud and exp.",
+    "reserved": "Names that are SPOKEN FOR and not yet issued. A token must not use them to mean anything else, and a consumer must not infer permission from their absence.",
+    "reject": "Tokens a consumer MUST refuse. These are the point of the corpus — a fixture of only-valid examples proves almost nothing."
+  },
+
+  "algorithm": {
+    "alg": "EdDSA",
+    "crv": "Ed25519",
+    "source": "observed in agentpod#331; better-auth's jwt plugin default",
+    "note": "Consumers MUST pin the algorithm rather than trusting the token header, or a token signed with `alg: none` — or with a key of the consumer's choosing — is accepted."
+  },
+
+  "issued": [
+    {
+      "claim": "sub",
+      "type": "string",
+      "meaning": "The principal acting. Today this is the Better Auth user id in AgentPod's hub; when the Organization plane mints principals it becomes that id, and this corpus changes with it.",
+      "required": true
+    },
+    {
+      "claim": "principalKind",
+      "type": "string",
+      "enum": ["human", "agent", "service"],
+      "meaning": "What kind of principal `sub` names. Present because this suite exists to make humans and agents both first-class — a consumer that cannot tell them apart cannot enforce separation of duties, which is what charter decisions/2026-08-14-approvals-cross-planes-as-events.md turns on.",
+      "required": true
+    },
+    {
+      "claim": "tenant",
+      "type": "string",
+      "grammar": "^fleet_[0-9a-f]{20}$",
+      "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, kaambaan migration 0002).",
+      "required": true,
+      "crossRef": "id_grammar.json → agentpod.tenant"
+    }
+  ],
+
+  "standard": [
+    { "claim": "iss", "meaning": "The issuer's base URL. Consumers MUST validate it.", "required": true },
+    { "claim": "aud", "meaning": "Audience. Consumers MUST validate it.", "required": true },
+    { "claim": "exp", "meaning": "Expiry. THE REVOCATION SLA: agentpod#331 proved a token issued before a session is revoked keeps verifying until it expires, because verification is offline by design.", "required": true },
+    { "claim": "iat", "meaning": "Issued at.", "required": true }
+  ],
+
+  "reserved": [
+    {
+      "claim": "mayDispatch",
+      "type": "string[]",
+      "meaning": "First half of the control pair — who may dispatch which agent (charter decisions/2026-08-13-ecosystem-identity.md, Decision 4).",
+      "issuedToday": false,
+      "note": "Reserved so the eventual claim has the same shape as the static configuration each plane carries in the interim. A consumer MUST NOT treat its absence as permission: absent means unknown, and the decision requires failing closed."
+    },
+    {
+      "claim": "mayGrantReach",
+      "type": "boolean",
+      "meaning": "Second half of the control pair — who may grant an agent its reach. Both halves are required; dispatch control alone is decorative, because anyone who can grant an agent production credentials does not need permission to dispatch it.",
+      "issuedToday": false,
+      "note": "Same rule: absence is not permission."
+    }
+  ],
+
+  "reject": [
+    {
+      "case": "alg-none",
+      "why": "A token with `alg: none` carries no signature. Pin the algorithm; never take it from the header."
+    },
+    {
+      "case": "expired",
+      "why": "exp in the past. This is the whole revocation story — a consumer that ignores exp has no revocation at all."
+    },
+    {
+      "case": "wrong-issuer",
+      "why": "A validly signed token from another issuer is still not ours."
+    },
+    {
+      "case": "wrong-audience",
+      "why": "A token minted for a different audience must not be replayable here."
+    },
+    {
+      "case": "unknown-kid",
+      "why": "Signed by a key not in the JWKS — including a key that WAS in it and has been retired. agentpod#331 found retirement propagates only as fast as each consumer's JWKS cache, so this case is reachable in normal operation, not only under attack."
+    },
+    {
+      "case": "missing-tenant",
+      "why": "A token that verifies but names no tenant is not a weaker caller, it is an unresolvable one. Refuse it rather than falling back to a default boundary."
+    }
+  ]
+}

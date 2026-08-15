@@ -47,6 +47,7 @@ import type {
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
+import { mayDispatch } from "./control-pair";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
@@ -636,6 +637,31 @@ export async function createSession(
   input: CreateSessionInput
 ): Promise<AcpSessionRow> {
   const { stationId, userId } = input;
+
+  // ── The control pair, first half: may this principal dispatch this agent? ──
+  //
+  // Decision 4 of charter decisions/2026-08-13-ecosystem-identity.md, enforced
+  // HERE because this is the one choke point both dispatch paths pass through:
+  // the console/API route and the kaambaan bridge. A check in kaambaan alone
+  // would cover board-driven work while provisioning straight at AgentPod — the
+  // most common path today — went unguarded, and "a control with a hole that
+  // shape is not a control".
+  //
+  // Unconfigured is off; configured is fail-closed. Before the readiness gates
+  // on purpose: whether a caller is ALLOWED to reach a station does not depend
+  // on whether that station happens to be online, and answering "node offline"
+  // to someone who was never permitted leaks which stations exist.
+  const station = await getStation(userId, stationId);
+  if (station && !mayDispatch(process.env.CONTROL_PAIR_GRANTS, userId, station.stationKey)) {
+    log.warn("dispatch refused by the control pair", {
+      principalId: userId,
+      stationKey: station.stationKey,
+      stationId,
+    });
+    throw new Error(
+      "You do not have permission to dispatch this agent."
+    );
+  }
 
   // Fail fast on the obvious gates before queueing (openSession re-checks them
   // under the lock, where the answers are current).

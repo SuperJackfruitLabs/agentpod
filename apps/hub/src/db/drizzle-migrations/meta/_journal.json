@@ -281,6 +281,20 @@
       "when": 1786687158202,
       "tag": "0039_bridge_dispatch_coalescing",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786687159202,
+      "tag": "0040_auth_jwks",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786687160202,
+      "tag": "0041_principal_identities",
+      "breakpoints": true
     }
   ]
 }
