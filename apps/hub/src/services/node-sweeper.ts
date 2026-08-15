@@ -17,6 +17,7 @@ import {
   sweepStalledRuntimeStarts,
   sweepStalledRuntimeStops,
   sweepExpiringRuntimes,
+  sweepUnobservedRuntimes,
 } from "./runtimes";
 
 export const SWEEP_INTERVAL_MS = 15_000;
@@ -48,12 +49,14 @@ export async function sweepStaleNodes(now: number = Date.now()): Promise<string[
 /**
  * Start the periodic sweeper. Returns a stop function.
  *
- * Four expiries share the tick because they are the same idea at four levels: a
+ * Five sweeps share the tick because they are the same idea at five levels: a
  * node that stopped talking, a runtime that was asked to run and never produced
  * a node at all (sweepStalledRuntimeStarts), a runtime that was asked to stop
- * and has not been seen to (sweepStalledRuntimeStops), and the one nobody asked
- * for — a runtime the SUBSTRATE is about to destroy for age while it is working
- * perfectly (sweepExpiringRuntimes).
+ * and has not been seen to (sweepStalledRuntimeStops), the one nobody asked for
+ * — a runtime the SUBSTRATE is about to destroy for age while it is working
+ * perfectly (sweepExpiringRuntimes) — and the one nobody was told about: a
+ * runtime whose container stopped without any of these paths hearing about it
+ * (sweepUnobservedRuntimes).
  */
 export function startNodeSweeper(): () => void {
   const timer = setInterval(() => {
@@ -76,6 +79,14 @@ export function startNodeSweeper(): () => void {
     // cost nothing here.
     void sweepExpiringRuntimes().catch((err) =>
       console.error("[sweeper] runtime rotation sweep failed:", err)
+    );
+    // And the one nobody was TOLD about. A substrate reports a stop only on the
+    // paths it knows to report — Cloudflare tells us when it idles a container
+    // out, and says nothing when one crashes, is evicted, or predates the
+    // callback feature. Absence of a node is still not evidence of a stop, so
+    // this asks the driver rather than assuming (#347).
+    void sweepUnobservedRuntimes().catch((err) =>
+      console.error("[sweeper] unobserved runtime sweep failed:", err)
     );
   }, SWEEP_INTERVAL_MS);
   return () => clearInterval(timer);
