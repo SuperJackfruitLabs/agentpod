@@ -47,6 +47,7 @@ import { acpEvents } from "../db/schema/acp";
 import { isAllowedOrigin } from "../config";
 import { getStation } from "../services/station-registry";
 import * as acp from "../services/acp-sessions";
+import { isControlPairDenied } from "../services/control-pair";
 import type { AuthUser } from "../auth/middleware";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
@@ -124,6 +125,13 @@ export const stationAcpRoutes = new Hono()
         const row = await acp.createSession({ stationId, userId: user.id, mode });
         return c.json(row, 201);
       } catch (err) {
+        // A refusal by the control pair is 403, not the 502 the generic mapper
+        // gives it. 502 says the node failed, which is a different thing to a
+        // caller: it invites a retry that can never succeed, and it hides an
+        // authorization decision behind an infrastructure one.
+        if (isControlPairDenied(err)) {
+          return c.json({ error: err.message }, 403);
+        }
         const message = err instanceof Error ? err.message : String(err);
         return c.json({ error: message }, createErrorStatus(message));
       }
