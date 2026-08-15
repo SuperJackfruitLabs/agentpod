@@ -38,6 +38,7 @@ import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
+import { principalIdentities } from "./schema/identities";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
@@ -134,6 +135,19 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
   // What a user is *allowed to reach* is therefore not answered here. It is
   // answered today by the bootstrap constant in the auth middleware, and later
   // by a membership lookup at the same layer — see `resolveTenantId`.
+  principal_identities: {
+    table: principalIdentities,
+    reason:
+      "Hangs off `user`, which is exempt for the same reason: a principal is not INSIDE a fleet, " +
+      "it reaches one. The mapping says a person here is the same person on Matrix or kaambaan, " +
+      "which is true regardless of which fleet they reach — a tenant column would imply an " +
+      "identity could differ per fleet, and it cannot. " +
+      "REVISIT IF THIS BECOMES REACHABLE OVER AN API: nothing today lists these rows, and every " +
+      "lookup is by principal id or by an external id the caller already holds. A route that " +
+      "listed them would leak one tenant's people to another, and that route would need scoping " +
+      "this table does not have.",
+  },
+
   user: {
     table: user,
     reason:

@@ -32,3 +32,5 @@ export * from "./acp";
 
 // Work claimed from an external orchestrator (the kaambaan bridge)
 export * from "./bridge";
+
+export * from "./identities";
