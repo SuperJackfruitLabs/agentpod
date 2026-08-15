@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 2,
+  "version": 3,
   "authoredAt": "2026-08-15",
   "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants)",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
@@ -45,14 +45,16 @@
     {
       "claim": "mayDispatch",
       "type": "string[]",
-      "meaning": "First half of the control pair \u2014 which agents this principal may dispatch. Values are NAMESPACED by the plane whose id space they belong to: `agentpod:<stationKey>` is matched by AgentPod, `kaambaan:<agentId>` by kaambaan.",
+      "meaning": "First half of the control pair \u2014 which agents this principal may dispatch. Values are NAMESPACED by plane, and AgentPod's also name a node: `agentpod:<nodeName>/<stationKey>`, `kaambaan:<agentId>`.",
       "required": true,
       "grammar": "^[a-z][a-z0-9-]*:.+$",
       "valueRules": {
         "namespaced": "Every value carries a plane prefix. An UNPREFIXED value matches nothing anywhere \u2014 that was the retired CONTROL_PAIR_GRANTS format, and letting it keep working would mean a half-migrated deployment enforcing two different rules depending on which reader ran.",
         "unknownNamespaceIsIgnored": "A consumer IGNORES a namespace it does not recognise; it must never deny on one. A plane that refused what it did not understand would break the day a third plane appeared, and a claim is read by more planes over time, not fewer.",
-        "wildcard": "One trailing `*` is a prefix wildcard that may not cross the `:` it was written inside: `agentpod:hermes:*` reaches every Hermes station and no OpenClaw one.",
-        "emptyDenies": "`[]` is a decision, and the decision is no. It is what an operator writes to suspend someone without deleting their grant."
+        "wildcard": "One trailing `*` per segment. In the station half it may not cross the `:` it was written inside, so `hermes:*` never reaches an OpenClaw station.",
+        "emptyDenies": "`[]` is a decision, and the decision is no. It is what an operator writes to suspend someone without deleting their grant.",
+        "agentpodNamesANode": "A station key is NOT unique across the fleet \u2014 uniqueness is (node, key), and `opencode:c52ddf65` exists on two nodes in production. So an agentpod value names both: `agentpod:molt-bot/hermes:*` is Hermes stations on molt-bot, `agentpod:*/hermes:*` is Hermes stations anywhere. A two-part value (`agentpod:hermes:*`) cannot say which node it meant and MATCHES NOTHING \u2014 reading it as 'any node' is the over-grant this shape removes.",
+        "nodeNamesAreUnique": "Within a tenant, by construction: enrolment suffixes a hostname collision (`molt-bot`, `molt-bot-2`) and a unique index enforces it. Names rather than ids because a grant must be readable by whoever writes it."
       },
       "source": "charter decisions/2026-08-15-a-grant-names-an-agent-per-plane.md"
     },
@@ -119,6 +121,10 @@
     {
       "case": "mayDispatch-absent",
       "why": "A token from an issuer that predates the control pair. A consumer must not treat absence as an empty grant, nor as an unrestricted one \u2014 it means the issuer cannot answer, and the consumer decides its own posture."
+    },
+    {
+      "case": "agentpod-value-without-a-node",
+      "why": "`agentpod:hermes:*` \u2014 the two-part form. It names no node, and station keys repeat across nodes, so it must match nothing rather than be read as fleet-wide."
     }
   ]
 }

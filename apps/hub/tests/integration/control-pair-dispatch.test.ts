@@ -25,6 +25,7 @@ import { setGrant, deleteGrant } from "../../src/services/grants";
 
 const USER = "test-user-controlpair";
 let nodeId = "";
+let nodeName = "";
 let stationKey = "";
 let stationId = "";
 
@@ -40,6 +41,9 @@ beforeAll(async () => {
     cpuCount: 2,
   });
   nodeId = enrolled.nodeId;
+  // The grant names the node, so the test has to know what this fleet ended up
+  // calling it — enrolment suffixes a hostname collision.
+  nodeName = (await rawSql`SELECT name FROM nodes WHERE id = ${nodeId}`)[0]!.name as string;
 
   stationKey = "hermes:cp-agent";
   await adoptStations(USER, nodeId, [stationKey], [
@@ -89,7 +93,7 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
   test("refuses a grant that does not cover this station", async () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
     await setGrant(USER, {
-      mayDispatch: ["agentpod:hermes:some-other-agent"],
+      mayDispatch: [`agentpod:${nodeName}/hermes:some-other-agent`],
       mayGrantReach: false,
     });
 
@@ -110,12 +114,17 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     ).rejects.toThrow(/permission/i);
   });
 
-  test("refuses the retired unprefixed format rather than honouring it", async () => {
-    // `hermes:*` was valid in CONTROL_PAIR_GRANTS. If it still matched here, a
-    // half-migrated deployment would enforce two different rules depending on
-    // which reader ran.
+  test("refuses the retired formats rather than honouring them", async () => {
+    // `hermes:*` was valid in CONTROL_PAIR_GRANTS, and `agentpod:hermes:*` was
+    // valid before a grant named a node. Neither may still match: the first
+    // would let a half-migrated deployment enforce two rules at once, and the
+    // second cannot say WHICH node it meant, which is the over-grant that shape
+    // exists to remove.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, { mayDispatch: ["hermes:*"], mayGrantReach: false });
+    await setGrant(USER, {
+      mayDispatch: ["hermes:*", "agentpod:hermes:*"],
+      mayGrantReach: false,
+    });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
@@ -135,7 +144,31 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     // With a grant, the SAME call gets past the control and fails on readiness
     // instead — which is what proves the refusal above came from the control
     // and not from the node being unreachable.
-    await setGrant(USER, { mayDispatch: ["agentpod:hermes:*"], mayGrantReach: false });
+    await setGrant(USER, { mayDispatch: [`agentpod:${nodeName}/hermes:*`], mayGrantReach: false });
+
+    await expect(
+      createSession({ stationId, userId: USER, mode: "default" })
+    ).rejects.toThrow(/offline|not ready|does not support/i);
+  });
+
+  test("a grant for the same station key on another node does not reach this one", async () => {
+    // The defect that produced the node-qualified shape: station keys repeat
+    // across nodes — `opencode:c52ddf65` exists on two in production — so a
+    // permission for one host must not silently cover another.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await setGrant(USER, {
+      mayDispatch: [`agentpod:some-other-host/${stationKey}`],
+      mayGrantReach: false,
+    });
+
+    await expect(
+      createSession({ stationId, userId: USER, mode: "default" })
+    ).rejects.toThrow(/permission/i);
+  });
+
+  test("a node wildcard reaches it, because that says every node out loud", async () => {
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })

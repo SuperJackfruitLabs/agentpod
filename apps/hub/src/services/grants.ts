@@ -108,32 +108,78 @@ export async function listGrants(): Promise<Array<{ principalId: string } & Gran
 }
 
 /**
- * Does a namespaced pattern match a station key?
+ * What a grant value has to identify, and why a station key alone will not do.
  *
- * Only `agentpod:` patterns are considered. Anything else belongs to another
- * plane and is **ignored rather than denied** — refusing what we do not
- * understand would break this check the day a third plane appears, and a claim
- * is read by more planes over time, not fewer.
+ * Station keys are **not unique across the fleet**: uniqueness is
+ * `(node_id, station_key)`, and in production `opencode:c52ddf65` exists on two
+ * different nodes today. Matching on the key alone would mean a grant for an
+ * agent on a staging box silently authorising the identically-named agent in
+ * production — different host, different workspace, different credentials.
+ *
+ * So a value names a node and a station:
+ *
+ *     agentpod:<nodePattern>/<stationKeyPattern>
+ *
+ *     agentpod:*&#47;hermes:*                 every Hermes station, anywhere
+ *     agentpod:molt-bot/hermes:*          every Hermes station on molt-bot
+ *     agentpod:molt-bot/hermes:analyst-echo   exactly one
+ *
+ * `/` separates them because station keys already contain `:`.
+ *
+ * Node NAMES rather than ids, because a grant has to be readable by the person
+ * who writes it, and ids are opaque and change when a runtime is reprovisioned.
+ *
+ * That only works because names are now unique within a tenant, by construction:
+ * enrollment suffixes a collision (`molt-bot`, `molt-bot-2`) and migration 0043
+ * enforces it. Before that they were merely usually distinct — which is the same
+ * assumed-uniqueness that made station keys unsafe to grant on in the first
+ * place.
  */
-export function patternMatchesStation(pattern: string, stationKey: string): boolean {
-  if (!pattern.startsWith(AGENTPOD_NS)) return false; // another plane's business
-  const target = pattern.slice(AGENTPOD_NS.length);
+export interface StationRef {
+  /** The node's display name — unique within the tenant. */
+  nodeName: string;
+  stationKey: string;
+}
 
-  if (target === stationKey) return true;
-  if (!target.endsWith("*")) return false;
+/** `hermes:*` matches `hermes:x`, but never crosses the `:` it was written inside. */
+function segmentMatches(pattern: string, value: string): boolean {
+  if (pattern === "*") return true;
+  if (pattern === value) return true;
+  if (!pattern.endsWith("*")) return false;
 
-  const prefix = target.slice(0, -1);
-  if (!stationKey.startsWith(prefix)) return false;
-
-  // A wildcard may not cross the separator it was written inside: `hermes:*` is
-  // about Hermes stations, and reading it as "anything starting with hermes:"
-  // stays the same until somebody writes `her*`.
-  const rest = stationKey.slice(prefix.length);
+  const prefix = pattern.slice(0, -1);
+  if (!value.startsWith(prefix)) return false;
+  const rest = value.slice(prefix.length);
   return !prefix.includes(":") || !rest.includes(":");
 }
 
+/**
+ * Does one namespaced value permit dispatching this station?
+ *
+ * Only `agentpod:` values are considered; anything else belongs to another plane
+ * and is ignored rather than denied.
+ *
+ * A value without a `/` is the earlier two-part form (`agentpod:hermes:*`). It
+ * matches NOTHING — deliberately, because it cannot say which node it meant, and
+ * silently reading it as "any node" is exactly the over-grant this shape exists
+ * to remove.
+ */
+export function patternMatchesStation(pattern: string, station: StationRef): boolean {
+  if (!pattern.startsWith(AGENTPOD_NS)) return false; // another plane's business
+
+  const target = pattern.slice(AGENTPOD_NS.length);
+  const slash = target.indexOf("/");
+  if (slash === -1) return false; // the retired two-part form names no node
+
+  const nodePattern = target.slice(0, slash);
+  const keyPattern = target.slice(slash + 1);
+  if (!nodePattern || !keyPattern) return false;
+
+  return segmentMatches(nodePattern, station.nodeName) && segmentMatches(keyPattern, station.stationKey);
+}
+
 /** May this principal dispatch this station, given their grant? */
-export function grantAllowsStation(grant: Grant | null, stationKey: string): boolean {
+export function grantAllowsStation(grant: Grant | null, station: StationRef): boolean {
   if (!grant) return false; // no grant is not an unrestricted grant
-  return grant.mayDispatch.some((p) => patternMatchesStation(p, stationKey));
+  return grant.mayDispatch.some((p) => patternMatchesStation(p, station));
 }

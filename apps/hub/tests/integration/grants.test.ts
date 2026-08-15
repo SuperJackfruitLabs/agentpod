@@ -106,36 +106,57 @@ describe("the grant store", () => {
   });
 });
 
-describe("namespaced matching", () => {
-  test("matches this plane's namespace exactly", () => {
-    expect(patternMatchesStation("agentpod:hermes:analyst-echo", "hermes:analyst-echo")).toBe(true);
-    expect(patternMatchesStation("agentpod:hermes:analyst-echo", "hermes:coder-kai")).toBe(false);
+describe("a grant names a node and a station", () => {
+  const on = (nodeName: string, stationKey: string) => ({ nodeName, stationKey });
+
+  test("matches an exact node and station", () => {
+    expect(patternMatchesStation("agentpod:molt-bot/hermes:analyst-echo", on("molt-bot", "hermes:analyst-echo"))).toBe(true);
+    expect(patternMatchesStation("agentpod:molt-bot/hermes:analyst-echo", on("superchotu", "hermes:analyst-echo"))).toBe(false);
   });
 
-  test("a trailing wildcard does not cross the separator", () => {
-    expect(patternMatchesStation("agentpod:hermes:*", "hermes:anything")).toBe(true);
-    expect(patternMatchesStation("agentpod:hermes:*", "openclaw:anything")).toBe(false);
+  test("distinguishes the same station key on different nodes", () => {
+    // The defect that produced this shape. `opencode:c52ddf65` exists on two
+    // nodes in production; a grant for one must not authorise the other, which
+    // is a different host with different credentials and a different workspace.
+    const pattern = "agentpod:9247e5a88cfa/opencode:c52ddf65";
+    expect(patternMatchesStation(pattern, on("9247e5a88cfa", "opencode:c52ddf65"))).toBe(true);
+    expect(patternMatchesStation(pattern, on("cloudchamber", "opencode:c52ddf65"))).toBe(false);
+  });
+
+  test("a node wildcard means every node, said out loud", () => {
+    // Fleet-wide permission is still expressible — it just has to be written
+    // rather than obtained by accident, which is what the old two-part form gave.
+    expect(patternMatchesStation("agentpod:*/hermes:*", on("molt-bot", "hermes:x"))).toBe(true);
+    expect(patternMatchesStation("agentpod:*/hermes:*", on("superchotu", "hermes:y"))).toBe(true);
+    expect(patternMatchesStation("agentpod:*/hermes:*", on("molt-bot", "openclaw:z"))).toBe(false);
+  });
+
+  test("a station wildcard is scoped to its node", () => {
+    expect(patternMatchesStation("agentpod:molt-bot/hermes:*", on("molt-bot", "hermes:anything"))).toBe(true);
+    expect(patternMatchesStation("agentpod:molt-bot/hermes:*", on("superchotu", "hermes:anything"))).toBe(false);
+  });
+
+  test("a station wildcard still does not cross the colon", () => {
+    expect(patternMatchesStation("agentpod:molt-bot/hermes:*", on("molt-bot", "openclaw:x"))).toBe(false);
+  });
+
+  test("the retired two-part form matches nothing", () => {
+    // `agentpod:hermes:*` cannot say which node it meant. Reading it as "any
+    // node" is precisely the over-grant this shape removes, so it is refused
+    // rather than generously interpreted.
+    expect(patternMatchesStation("agentpod:hermes:*", on("molt-bot", "hermes:x"))).toBe(false);
+    expect(patternMatchesStation("agentpod:hermes:analyst-echo", on("molt-bot", "hermes:analyst-echo"))).toBe(false);
   });
 
   test("ignores another plane's namespace rather than denying on it", () => {
-    // The rule from the decision. A plane that refused values it did not
-    // understand would break the day a third plane appeared — and a claim is
-    // read by MORE planes over time, not fewer.
-    expect(patternMatchesStation("kaambaan:agt_7abfe2d7b3c64880", "hermes:analyst-echo")).toBe(false);
-    expect(patternMatchesStation("org-plane:agent:xyz", "hermes:analyst-echo")).toBe(false);
-
-    // And a grant holding only other planes' values permits nothing here, while
-    // still being a perfectly valid grant over there.
+    expect(patternMatchesStation("kaambaan:agt_x", on("molt-bot", "hermes:x"))).toBe(false);
+    expect(patternMatchesStation("org-plane:agent:xyz", on("molt-bot", "hermes:x"))).toBe(false);
     expect(
-      grantAllowsStation({ mayDispatch: ["kaambaan:agt_x"], mayGrantReach: false }, "hermes:analyst-echo")
+      grantAllowsStation({ mayDispatch: ["kaambaan:agt_x"], mayGrantReach: false }, on("molt-bot", "hermes:x"))
     ).toBe(false);
   });
 
   test("an unnamespaced value matches nothing", () => {
-    // The old `CONTROL_PAIR_GRANTS` format. It must not silently keep working
-    // against the new store, or a half-migrated deployment would enforce two
-    // different rules depending on which reader ran.
-    expect(patternMatchesStation("hermes:analyst-echo", "hermes:analyst-echo")).toBe(false);
-    expect(patternMatchesStation("hermes:*", "hermes:analyst-echo")).toBe(false);
+    expect(patternMatchesStation("molt-bot/hermes:*", on("molt-bot", "hermes:x"))).toBe(false);
   });
 });

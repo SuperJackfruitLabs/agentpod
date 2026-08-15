@@ -50,6 +50,7 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
 import { getGrant, grantAllowsStation } from "./grants";
 import { acpSessions, acpEvents } from "../db/schema/acp";
+import { nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
 import { getStation } from "./station-registry";
@@ -653,13 +654,31 @@ export async function createSession(
   // on whether that station happens to be online, and answering "node offline"
   // to someone who was never permitted leaks which stations exist.
   const station = await getStation(userId, stationId);
-  if (station && isControlPairEnforced() && !grantAllowsStation(await getGrant(userId), station.stationKey)) {
-    log.warn("dispatch refused by the control pair", {
-      principalId: userId,
-      stationKey: station.stationKey,
-      stationId,
-    });
-    throw new ControlPairDenied(userId, station.stationKey);
+  if (station && isControlPairEnforced()) {
+    // The grant names a node as well as a station, because station keys repeat
+    // across nodes — `opencode:c52ddf65` exists on two of them in production.
+    const [node] = await db
+      .select({ name: nodes.name })
+      .from(nodes)
+      .where(eq(nodes.id, station.nodeId))
+      .limit(1);
+
+    const allowed =
+      node !== undefined &&
+      grantAllowsStation(await getGrant(userId), {
+        nodeName: node.name,
+        stationKey: station.stationKey,
+      });
+
+    if (!allowed) {
+      log.warn("dispatch refused by the control pair", {
+        principalId: userId,
+        node: node?.name,
+        stationKey: station.stationKey,
+        stationId,
+      });
+      throw new ControlPairDenied(userId, station.stationKey);
+    }
   }
 
   // Fail fast on the obvious gates before queueing (openSession re-checks them
