@@ -32,6 +32,8 @@ import { upgradeWebSocket } from "../ws";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { gateCapability } from "./station-writes";
+import { requireGrantReach } from "../services/grant-reach";
+import { isGrantReachDenied } from "../services/control-pair";
 import { connectionManager } from "../services/connection-manager";
 import { recordAudit } from "../services/audit";
 import { db } from "../db/drizzle";
@@ -94,6 +96,29 @@ export const stationTerminalRoutes = new Hono().get(
         if (!gateCapability(station, "terminal")) {
           ws.send(JSON.stringify({ t: "exit" }));
           ws.close(1008, "Forbidden: terminal capability");
+          return;
+        }
+
+        // ── 2c. Reach gate (#345) ─────────────────────────────────────────
+        // A shell is the most complete way to change what an agent is, which
+        // makes it the clearest case for the second half of the control pair:
+        // permission to dispatch an agent is not permission to rewrite it
+        // (charter Decision 4). Refused here rather than at the PTY, so no
+        // process is ever started.
+        try {
+          await requireGrantReach(user.id, station, "terminal", "mutate");
+        } catch (e) {
+          if (!isGrantReachDenied(e)) throw e;
+          const denied = await recordAudit(db, {
+            userId: user.id,
+            nodeId: station.nodeId,
+            stationKey: station.stationKey,
+            verb: "terminal",
+            params: { refused: "grant-reach" },
+          });
+          await denied.done("error", "refused by the control pair");
+          ws.send(JSON.stringify({ t: "exit" }));
+          ws.close(1008, "Forbidden: you may not change this agent");
           return;
         }
 

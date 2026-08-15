@@ -26,6 +26,7 @@ import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
+import { setGrant } from "../services/grants";
 import { gatewayRoutes } from "./gateway";
 import { stationTerminalRoutes } from "./station-terminal";
 import { stationRoutes } from "./stations";
@@ -584,4 +585,137 @@ test(
     }
   },
   20_000
+);
+
+// ─── The reach half of the control pair (#345) ────────────────────────────────
+
+test(
+  "a principal who may dispatch but not change is refused — no shell opens, and it is recorded",
+  async () => {
+    // A terminal is the most complete way to change what an agent is; the route
+    // itself calls it "the most powerful mutation". So it is the clearest case
+    // for the second half of the pair: dispatch permission is not permission to
+    // rewrite (charter Decision 4).
+    //
+    // Asserted on what is unambiguous — the shell never opened and the refusal
+    // was recorded — rather than on the close code, which Bun surfaces
+    // inconsistently for policy violations (see the unauthenticated test above).
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "sterm-reach-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 2,
+      });
+
+      const nodeReceivedMsgs: string[] = [];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        capturedNodeMsgs: nodeReceivedMsgs,
+      });
+      const station = await adoptStation(baseUrl, nodeId);
+
+      // Dispatch as wide as it goes, and no reach.
+      await setGrant(TEST_USER, { mayDispatch: ["agentpod:*/sterm-station"], mayGrantReach: false });
+      await rawSql`DELETE FROM station_audit WHERE user_id = ${TEST_USER} AND verb = 'terminal'`;
+
+      await new Promise<void>((resolve) => {
+        const clientWs = new WebSocket(
+          `ws://localhost:${server.port}/api/stations/${station.id}/terminal`,
+          { headers: { "X-Test-User-Id": TEST_USER } } as RequestInit & {
+            headers: Record<string, string>;
+          }
+        );
+        clientWs.onclose = () => resolve();
+        clientWs.onerror = () => resolve();
+      });
+
+      await new Promise((r) => setTimeout(r, 200));
+
+      const termOpenSent = nodeReceivedMsgs.some((raw) => {
+        try {
+          const m = JSON.parse(raw);
+          return m?.type === "req" && m?.verb === "term.open";
+        } catch {
+          return false;
+        }
+      });
+      expect(termOpenSent).toBe(false);
+
+      // Refused and recorded. An attempt refused and recorded nowhere is
+      // indistinguishable from an attempt nobody made.
+      const rows = await rawSql`
+        SELECT result FROM station_audit WHERE user_id = ${TEST_USER} AND verb = 'terminal'`;
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.result).toBe("error");
+
+      fakeNode.close();
+    } finally {
+      delete process.env.ENFORCE_CONTROL_PAIR;
+      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${TEST_USER}`;
+      server.stop(true);
+    }
+  },
+  20000
+);
+
+test(
+  "a principal holding reach in scope opens the shell as before",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "sterm-reach-ok-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 2,
+      });
+
+      const nodeReceivedMsgs: string[] = [];
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        capturedNodeMsgs: nodeReceivedMsgs,
+      });
+      const station = await adoptStation(baseUrl, nodeId);
+
+      await setGrant(TEST_USER, { mayDispatch: ["agentpod:*/sterm-station"], mayGrantReach: true });
+
+      const clientWs = new WebSocket(
+        `ws://localhost:${server.port}/api/stations/${station.id}/terminal`,
+        { headers: { "X-Test-User-Id": TEST_USER } } as RequestInit & {
+          headers: Record<string, string>;
+        }
+      );
+      await new Promise<void>((resolve) => {
+        clientWs.onopen = () => resolve();
+        clientWs.onerror = () => resolve();
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      const termOpenSent = nodeReceivedMsgs.some((raw) => {
+        try {
+          const m = JSON.parse(raw);
+          return m?.type === "req" && m?.verb === "term.open";
+        } catch {
+          return false;
+        }
+      });
+      expect(termOpenSent).toBe(true);
+
+      clientWs.close();
+      fakeNode.close();
+    } finally {
+      delete process.env.ENFORCE_CONTROL_PAIR;
+      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${TEST_USER}`;
+      server.stop(true);
+    }
+  },
+  20000
 );
