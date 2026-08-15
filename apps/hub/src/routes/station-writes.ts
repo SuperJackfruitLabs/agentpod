@@ -24,9 +24,13 @@
  */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
+import type { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
+import { requireGrantReach } from "../services/grant-reach";
+import { isGrantReachDenied } from "../services/control-pair";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
@@ -43,6 +47,45 @@ import type { StationRow } from "../services/station-registry";
  */
 export function gateCapability(station: StationRow, cap: string): boolean {
   return Array.isArray(station.capabilities) && station.capabilities.includes(cap);
+}
+
+// ─── Reach gate ───────────────────────────────────────────────────────────────
+
+/**
+ * Refuse a mutation the principal may not make, or return null to continue.
+ *
+ * A sibling of `gateCapability` rather than part of it: that function is called
+ * for reads too (`changeset/status`, `cleanup/plan`), and a check inside it
+ * would refuse someone permission to look at a diff, which is nobody's idea of
+ * granting reach.
+ *
+ * The refusal is audited as well as logged. An attempt refused and recorded
+ * nowhere is indistinguishable from an attempt nobody made, which is precisely
+ * what an operator reading the activity trail is trying to tell apart.
+ */
+export async function refuseWithoutReach(
+  c: Context,
+  userId: string,
+  station: StationRow,
+  cap: Capability
+): Promise<Response | null> {
+  try {
+    await requireGrantReach(userId, station, cap, "mutate");
+    return null;
+  } catch (e) {
+    if (!isGrantReachDenied(e)) throw e;
+
+    const audit = await recordAudit(db, {
+      userId,
+      nodeId: station.nodeId,
+      stationKey: station.stationKey,
+      verb: cap,
+      params: { refused: "grant-reach" },
+    });
+    await audit.done("error", "refused by the control pair");
+
+    return c.json({ error: e.message }, 403);
+  }
 }
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
@@ -122,6 +165,16 @@ export const stationWriteRoutes = new Hono()
         );
       }
 
+      // ── 3b. Reach gate ──────────────────────────────────────────────────────
+      // Writing into a workspace is how an agent acquires credentials it did
+      // not have, so this is the second half of the control pair, not a repeat
+      // of the first: dispatch permission is not permission to rewrite.
+      //
+      // After the capability gate on purpose — "this station cannot" and "you
+      // may not" send an operator to different places.
+      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      if (denial) return denial;
+
       const body = c.req.valid("json");
 
       // ── 4. Audit (safe params only — no content) ────────────────────────────
@@ -192,6 +245,16 @@ export const stationWriteRoutes = new Hono()
         );
       }
 
+      // ── 3b. Reach gate ──────────────────────────────────────────────────────
+      // Writing into a workspace is how an agent acquires credentials it did
+      // not have, so this is the second half of the control pair, not a repeat
+      // of the first: dispatch permission is not permission to rewrite.
+      //
+      // After the capability gate on purpose — "this station cannot" and "you
+      // may not" send an operator to different places.
+      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      if (denial) return denial;
+
       const body = c.req.valid("json");
 
       // ── 4. Audit ────────────────────────────────────────────────────────────
@@ -254,6 +317,16 @@ export const stationWriteRoutes = new Hono()
           403
         );
       }
+
+      // ── 3b. Reach gate ──────────────────────────────────────────────────────
+      // Writing into a workspace is how an agent acquires credentials it did
+      // not have, so this is the second half of the control pair, not a repeat
+      // of the first: dispatch permission is not permission to rewrite.
+      //
+      // After the capability gate on purpose — "this station cannot" and "you
+      // may not" send an operator to different places.
+      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      if (denial) return denial;
 
       const body = c.req.valid("json");
 
@@ -319,6 +392,16 @@ export const stationWriteRoutes = new Hono()
           403
         );
       }
+
+      // ── 3b. Reach gate ──────────────────────────────────────────────────────
+      // Writing into a workspace is how an agent acquires credentials it did
+      // not have, so this is the second half of the control pair, not a repeat
+      // of the first: dispatch permission is not permission to rewrite.
+      //
+      // After the capability gate on purpose — "this station cannot" and "you
+      // may not" send an operator to different places.
+      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      if (denial) return denial;
 
       const body = c.req.valid("json");
 

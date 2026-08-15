@@ -394,7 +394,31 @@ every dispatch is refused — which is correct, and is also an outage.
 | Field | Meaning |
 |---|---|
 | `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. |
-| `mayGrantReach` | Whether this principal may grant an agent its reach. Required. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
+| `mayGrantReach` | Whether this principal may **change what an agent is**. Required, and enforced — see the table below. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
+
+**What `mayGrantReach` gates**, as of #345. `mayDispatch` asks whether you may
+ask an agent to work; this asks whether you may rewrite it:
+
+| Act | Guarded |
+|---|---|
+| `fs/write`, `fs/mkdir`, `fs/move`, `fs/delete` | **yes** — one request writes a credential file |
+| Terminal attach | **yes** — arbitrary shell as the agent's user |
+| `cleanup/apply` | **yes** — deletes workspace files (`cleanup/plan` is a read, and is not) |
+| `POST /api/enrollment-tokens` | **yes**, and additionally requires a fleet-wide (`agentpod:*/…`) dispatch value |
+| `changeset/status`, `changeset/diff`, `lifecycle`, every read | no |
+
+A station-scoped act needs `mayGrantReach` **and** a `mayDispatch` value matching
+that station — one scope, shared with dispatch, so narrowing what someone may
+dispatch narrows what they may rewrite. Growing the fleet names no station, so it
+asks the narrower question instead: your authority must already span the fleet.
+
+Refusals are `403` on HTTP and a `1008` close on the terminal socket, and each is
+written to the station's activity trail as well as the hub log — an attempt
+refused and recorded nowhere is indistinguishable from an attempt nobody made.
+
+**If you lock yourself out**, `/api/admin/grants` is guarded by *admin*, not by
+the control pair: an admin can always restore their own grant from **Admin →
+Grants**. The control cannot lock you out of the control.
 
 ```sh
 agentpod:molt-bot/hermes:analyst-echo   # exactly one agent, on one host

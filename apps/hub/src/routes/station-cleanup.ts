@@ -25,7 +25,7 @@ import { db } from "../db/drizzle";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { recordAudit } from "../services/audit";
-import { gateCapability } from "./station-writes";
+import { gateCapability, refuseWithoutReach } from "./station-writes";
 import type { AuthUser } from "../auth/middleware";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
@@ -132,6 +132,14 @@ export const stationCleanupRoutes = new Hono()
           403
         );
       }
+
+      // ── 3b. Reach gate (#345) ──────────────────────────────────────────────
+      // `plan` above shares this capability and is a read; deleting an agent's
+      // files is not. So the split is on the route's effect, not the capability
+      // word — guarding the word would refuse someone permission to find out
+      // what a cleanup would remove.
+      const denial = await refuseWithoutReach(c, user.id, station, "cleanup");
+      if (denial) return denial;
 
       const { paths } = c.req.valid("json");
 

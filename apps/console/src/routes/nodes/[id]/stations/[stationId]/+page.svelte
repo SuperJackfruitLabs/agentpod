@@ -14,6 +14,7 @@
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
   import { listStations } from "$lib/api/client";
+  import { myReach } from "$lib/api/my-grant";
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import { Button } from "$lib/components/ui/button";
@@ -107,8 +108,20 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("terminal")
   );
 
+  /**
+   * Whether this principal may change what this agent *is* — the reach half of
+   * the control pair (#345).
+   *
+   * Advisory: the hub refuses regardless. It is read so a control that would be
+   * refused can say so rather than 403 on click, and it defaults to true so a
+   * hub that cannot be asked never hides a control the operator holds.
+   */
+  let mayGrantReach = $state(true);
+
   const canWrite = $derived(
-    Array.isArray(station?.capabilities) && station!.capabilities.includes("fs.write")
+    Array.isArray(station?.capabilities) &&
+      station!.capabilities.includes("fs.write") &&
+      mayGrantReach
   );
 
   const canLifecycle = $derived(
@@ -140,6 +153,7 @@
 
   onMount(() => {
     void loadStation();
+    void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
   });
 
   const tabs = $derived.by(() => [
@@ -147,7 +161,20 @@
     { id: "health", label: "Health", icon: HeartPulseIcon },
     { id: "logs", label: "Logs", icon: ScrollTextIcon },
     { id: "files", label: "Files", icon: FolderIcon },
-    ...(hasTerminal ? [{ id: "terminal", label: "Terminal", icon: TerminalIcon }] : []),
+    ...(hasTerminal
+      ? [
+          {
+            id: "terminal",
+            label: "Terminal",
+            icon: TerminalIcon,
+            // A shell changes what an agent is, so it sits behind mayGrantReach.
+            // Shown-and-locked rather than hidden: a missing tab reads as "this
+            // agent has no terminal", which is a different and wrong answer.
+            disabled: !mayGrantReach,
+            disabledReason: "You may dispatch this agent but not change it",
+          },
+        ]
+      : []),
     ...(hasChangeset ? [{ id: "changes", label: "Changes", icon: GitCompareIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup", label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity", label: "Activity", icon: ActivityIcon },
