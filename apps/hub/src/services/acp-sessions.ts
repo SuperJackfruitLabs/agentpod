@@ -47,7 +47,7 @@ import type {
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
-import { mayDispatch } from "./control-pair";
+import { mayDispatch, ControlPairDenied } from "./control-pair";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
@@ -658,9 +658,7 @@ export async function createSession(
       stationKey: station.stationKey,
       stationId,
     });
-    throw new Error(
-      "You do not have permission to dispatch this agent."
-    );
+    throw new ControlPairDenied(userId, station.stationKey);
   }
 
   // Fail fast on the obvious gates before queueing (openSession re-checks them
