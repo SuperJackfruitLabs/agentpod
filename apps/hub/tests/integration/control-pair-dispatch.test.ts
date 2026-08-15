@@ -4,7 +4,9 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations, listAdopted } from "../../src/services/station-registry";
+import { Hono } from "hono";
 import { createSession } from "../../src/services/acp-sessions";
+import { stationAcpRoutes } from "../../src/routes/station-acp";
 import { setGrant, deleteGrant } from "../../src/services/grants";
 
 /**
@@ -184,5 +186,32 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
+  });
+});
+
+describe("the route reports a denial as a refusal, not a gateway failure", () => {
+  test("403, because 502 says the node failed and invites a retry", async () => {
+    // Observed in production before this: a permission refusal came back as
+    // 502. A caller cannot tell "you may not" from "the upstream broke", and
+    // will retry something that can never succeed — an authorization decision
+    // hidden behind an infrastructure one.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await deleteGrant(USER).catch(() => {});
+
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: USER });
+      await next();
+    });
+    app.route("/api", stationAcpRoutes); // mounted at /api, as in index.ts
+
+    const res = await app.request(`/api/stations/${stationId}/acp/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mode: "ask" }),
+    });
+
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toMatch(/permission/i);
   });
 });
