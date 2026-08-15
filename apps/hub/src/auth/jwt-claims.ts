@@ -14,6 +14,7 @@
  */
 
 import { resolveTenantForUser } from "./tenant";
+import { getGrant } from "../services/grants";
 
 /** The kinds of principal this suite has. Humans and agents are both first-class. */
 export type PrincipalKind = "human" | "agent" | "service";
@@ -22,12 +23,17 @@ export interface TokenPayload extends Record<string, unknown> {
   sub: string;
   principalKind: PrincipalKind;
   tenant: string;
+  /** The control pair. Namespaced values; see the grant decision. */
+  mayDispatch: string[];
+  mayGrantReach: boolean;
 }
 
 export interface BuildPayloadInput {
   user: { id: string };
   /** Injectable so the claim shape is testable without a database. */
   resolveTenant?: (userId: string) => Promise<string>;
+  /** Injectable for the same reason. */
+  loadGrant?: (userId: string) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
 }
 
 /**
@@ -38,11 +44,16 @@ export interface BuildPayloadInput {
  * it is an unresolvable one, and the fixture requires a consumer to refuse it —
  * so it should never be minted in the first place.
  *
- * The control pair (`mayDispatch`, `mayGrantReach`) is deliberately NOT emitted.
- * Those names are reserved in the fixture and unissued until the Organization
- * plane can answer them; issuing them empty would let a consumer read an empty
- * grant as a real one, and the governing decision requires that absence never
- * mean permission.
+ * The control pair IS emitted now that grants are data the issuer can read
+ * (`principal_grants`). It was reserved-and-unissued while the answer lived in
+ * each deployment's environment, because a claim nobody could answer would have
+ * been a claim consumers had to ignore.
+ *
+ * A principal with **no grant row** gets the claims present and EMPTY —
+ * `[]` and `false` — rather than absent. The difference matters to a consumer:
+ * absent means "this issuer does not speak the control pair", empty means "this
+ * principal is permitted nothing". Reading the first as the second would let an
+ * old issuer silently authorise everything.
  */
 export async function buildTokenPayload(input: BuildPayloadInput): Promise<TokenPayload> {
   const resolve = input.resolveTenant ?? resolveTenantForUser;
@@ -54,6 +65,9 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     );
   }
 
+  const loadGrant = input.loadGrant ?? getGrant;
+  const grant = await loadGrant(input.user.id);
+
   return {
     sub: input.user.id,
     // Every principal the hub can issue a token for today is a human with a
@@ -61,6 +75,8 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     // separate path and will set this to "agent".
     principalKind: "human",
     tenant,
+    mayDispatch: grant?.mayDispatch ?? [],
+    mayGrantReach: grant?.mayGrantReach ?? false,
   };
 }
 

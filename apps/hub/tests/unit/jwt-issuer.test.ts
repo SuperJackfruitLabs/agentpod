@@ -37,6 +37,7 @@ describe("the token claim contract (#332)", () => {
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
     });
 
     for (const { claim, required } of fixture.issued) {
@@ -53,6 +54,7 @@ describe("the token claim contract (#332)", () => {
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
     });
 
     const described = new Set([
@@ -65,21 +67,37 @@ describe("the token claim contract (#332)", () => {
     expect(undescribed).toEqual([]);
   });
 
-  test("does not issue a reserved claim", async () => {
-    // `mayDispatch` and `mayGrantReach` are spoken for and not yet issued.
-    // Issuing them empty would be worse than omitting them: a consumer could
-    // read an empty grant as a real one, and the decision requires that absence
-    // never means permission.
+  test("issues the control pair from the grant store", async () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => ({
+        mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
+        mayGrantReach: true,
+      }),
     });
 
-    for (const { claim, issuedToday } of fixture.reserved) {
-      if (issuedToday) continue;
-      expect(payload, `"${claim}" is reserved, not issued`).not.toHaveProperty(claim);
-    }
+    expect(payload.mayDispatch).toEqual(["agentpod:hermes:*", "kaambaan:agt_x"]);
+    expect(payload.mayGrantReach).toBe(true);
+  });
+
+  test("a principal with no grant gets the claims EMPTY, never absent", async () => {
+    // The distinction a consumer depends on: absent means "this issuer does not
+    // speak the control pair", empty means "this principal is permitted
+    // nothing". Reading the first as the second would let an old issuer silently
+    // authorise everything.
+    const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
+    const payload = await buildTokenPayload({
+      user: { id: "user_abc123" },
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
+    });
+
+    expect(payload).toHaveProperty("mayDispatch");
+    expect(payload).toHaveProperty("mayGrantReach");
+    expect(payload.mayDispatch).toEqual([]);
+    expect(payload.mayGrantReach).toBe(false);
   });
 
   test("principalKind is one the fixture allows", async () => {
@@ -87,6 +105,7 @@ describe("the token claim contract (#332)", () => {
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
     });
 
     const allowed = fixture.issued.find((c) => c.claim === "principalKind")?.enum ?? [];
@@ -98,6 +117,7 @@ describe("the token claim contract (#332)", () => {
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
     });
 
     const grammar = fixture.issued.find((c) => c.claim === "tenant")!;
@@ -114,6 +134,7 @@ describe("the token claim contract (#332)", () => {
       buildTokenPayload({
         user: { id: "user_abc123" },
         resolveTenant: async () => null as unknown as string,
+        loadGrant: async () => null,
       })
     ).rejects.toThrow(/tenant/i);
   });

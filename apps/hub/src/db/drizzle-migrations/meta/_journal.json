@@ -295,6 +295,13 @@
       "when": 1786687160202,
       "tag": "0041_principal_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786687161202,
+      "tag": "0042_principal_grants",
+      "breakpoints": true
     }
   ]
 }
