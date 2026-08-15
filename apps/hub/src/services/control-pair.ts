@@ -59,3 +59,32 @@ export class ControlPairDenied extends Error {
 export function isControlPairDenied(e: unknown): e is ControlPairDenied {
   return e instanceof ControlPairDenied || (e as { name?: string })?.name === "ControlPairDenied";
 }
+
+/**
+ * An act refused by the second half of the pair.
+ *
+ * A separate type rather than a subclass of `ControlPairDenied`, deliberately:
+ * the kaambaan bridge treats a `ControlPairDenied` as a **permanent** dispatch
+ * refusal and stops retrying that card. A refusal to *write into* an agent must
+ * never be mistaken for one, or a workspace-permission problem would be
+ * diagnosed — and given up on — as a dispatch grant problem.
+ */
+export class GrantReachDenied extends Error {
+  readonly principalId: string;
+  /** The station key, or "fleet" for acts that name no station. */
+  readonly target: string;
+  readonly capability: string | null;
+
+  constructor(principalId: string, target: string, capability: string | null) {
+    super("You do not have permission to change this agent.");
+    this.name = "GrantReachDenied";
+    this.principalId = principalId;
+    this.target = target;
+    this.capability = capability;
+  }
+}
+
+/** Is this the reach half refusing, rather than something transient? */
+export function isGrantReachDenied(e: unknown): e is GrantReachDenied {
+  return e instanceof GrantReachDenied || (e as { name?: string })?.name === "GrantReachDenied";
+}
