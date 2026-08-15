@@ -1,9 +1,42 @@
 # Building the Organization layer
 
-**Status:** Plan, 2026-08-15. Nothing here is built.
+**Status:** Written 2026-08-15 as a plan; **most of it was then built the same
+day**, which is why this header exists. The phase bodies below are left as
+written — they are the reasoning, and rewriting them to match the outcome would
+destroy the only record of what was expected versus what happened.
 **Spans:** AgentPod, kaambaan, supermessage, charter.
 **Governed by:** `charter/decisions/2026-08-13-ecosystem-identity.md`, which this
 plan implements rather than revisits.
+
+## Where it actually got to, 2026-08-15
+
+| Phase | State | Landed in |
+|---|---|---|
+| **0** — record what shipped, re-scope what didn't | **done** | `charter` tenancy decision; #145/#146 annotated as superseded |
+| **1** — principal model as a contract | **done** | `fixtures/ecosystem-identity/token_claims.json` (#332) |
+| **2** — the mappings that unblock other work | **done, live** | #335, #336 — and linked in production |
+| **3** — the control pair, from static config | **half done** | #337 (AgentPod). kaambaan's half is open |
+| **4** — the issuer, and a real plane | **issuer done** | #331 spike → #332 issuer → kaambaan#39 consumer |
+
+**Phase 4 arrived before Phases 2 and 3, and that was not the plan.** It was the
+right accident: the issuer is what everything else attaches to, so the control
+pair now has a real token to ride in rather than a hypothetical one. The plan
+said "deliberately last, and gated on a decision nobody has made" — the decision
+got made (`charter/decisions/2026-08-15-one-issuer-and-offline-verification.md`),
+gated on a spike that ran, so the reasoning held even though the order did not.
+
+**What the plan got wrong, worth keeping:** it assumed Phase 4 would be blocked
+on the supermessage/MAS coupling. That coupling is real and unchanged, but it
+only binds **matrix-authentication-service**, not issuance in general — the hub
+could become the issuer without touching supermessage at all. The plan treated
+one dependency as if it gated the whole phase.
+
+**Still open from Phase 3:** kaambaan checks the claim before routing a claim,
+and a denial is reported as structured work activity rather than an exception.
+Neither belongs in the change that introduced the check.
+
+**Phase 4's remaining half** — whether the issuer moves out of the hub, and who
+it becomes — is untouched and still gated as written.
 
 ## Start from what already exists
 
