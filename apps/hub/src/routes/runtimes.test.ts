@@ -53,6 +53,7 @@ import {
   STOP_TIMEOUT_MS,
   sweepExpiringRuntimes,
   ROTATION_MARGIN_MS,
+  sweepUnobservedRuntimes,
 } from "../services/runtimes";
 import { enrollNode } from "../services/enrollment";
 import type { AuthUser } from "../auth/middleware";
@@ -1976,4 +1977,162 @@ test("a rotation the substrate refuses leaves the runtime in error, naming the c
   expect(after.status).toBe("error");
   expect(after.statusReason).toContain("no capacity");
   expect(after.statusReason).toMatch(/24|ceiling|lifetime/i);
+}, 30_000);
+
+// ─── The runtime nobody asked about (#347) ────────────────────────────────────
+
+/**
+ * A driver that answers about its container, and declares whether a stop can be
+ * undone. `stopSemantics` is the difference between "asleep" and "stopped" for
+ * an operator: on Cloudflare a stopped container wakes with its workspace
+ * restored from R2, and calling that `stopped` reads as "gone".
+ */
+function fakeObservableProvisioner(
+  answers: () => "running" | "stopped" | "unknown",
+  stopSemantics: "resumable" | "terminal" = "resumable",
+  opts: { withStatus?: boolean } = {}
+) {
+  const calls = { status: [] as string[] };
+  const driver: Record<string, unknown> = {
+    provider: "docker",
+    manifest: { provider: "docker", stopSemantics },
+    async provision(spec: ProvisionSpec) {
+      return { externalId: `fake-container-${spec.runtimeId}` };
+    },
+    async destroy() {},
+    async start() {},
+    async stop() {},
+  };
+  if (opts.withStatus !== false) {
+    driver.status = async (externalId: string) => {
+      calls.status.push(externalId);
+      return answers();
+    };
+  }
+  return { driver: driver as unknown as RuntimeProvisioner, calls };
+}
+
+/** An `online` runtime whose node stopped heartbeating `agoMs` ago. */
+async function seedUnobserved(id: string, agoMs = 10 * 60_000) {
+  const nodeId = `node_unobs_${id}`;
+  // Every seeded row is a candidate for every other test's sweep, so each test
+  // starts from a clean slate rather than counting probes it did not cause.
+  await rawSql`DELETE FROM provisioned_runtimes WHERE id LIKE 'rt_unobs_%'`;
+  await rawSql`DELETE FROM nodes WHERE id LIKE 'node_unobs_%'`;
+  await rawSql`
+    INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, last_seen_at, created_at)
+    VALUES (${nodeId}, (SELECT tenant_id FROM provisioned_runtimes LIMIT 1), ${TEST_USER},
+            ${id}, ${id}, 'linux', 'amd64', 2, 'offline', 'x',
+            now() - (${agoMs} || ' milliseconds')::interval, now())`;
+  await rawSql`
+    INSERT INTO provisioned_runtimes (id, tenant_id, user_id, provider, external_id, status, node_id, name, harness, created_at, updated_at)
+    VALUES (${id}, (SELECT tenant_id FROM nodes WHERE id = ${nodeId}), ${TEST_USER}, 'docker',
+            ${`fake-container-${id}`}, 'online', ${nodeId}, ${id}, 'none',
+            now() - (${agoMs} || ' milliseconds')::interval,
+            now() - (${agoMs} || ' milliseconds')::interval)`;
+  return { nodeId };
+}
+
+test("a runtime whose container the substrate says is gone stops claiming to be online", async () => {
+  // The live bug: cf-opencode read `online` for two days while its container was
+  // stopped. The substrate knew; nobody asked.
+  const { driver, calls } = fakeObservableProvisioner(() => "stopped", "resumable");
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_gone");
+
+    const swept = await sweepUnobservedRuntimes(Date.now());
+    expect(swept.reconciled).toContain("rt_unobs_gone");
+    expect(calls.status).toHaveLength(1);
+
+    const row = await rowOf("rt_unobs_gone");
+    // `asleep`, not `stopped`: this substrate's stop is resumable, and the
+    // difference is whether an operator thinks their work is gone.
+    expect(row.status).toBe("asleep");
+  });
+}, 30_000);
+
+test("a terminal substrate's stop is recorded as stopped, not asleep", async () => {
+  const { driver } = fakeObservableProvisioner(() => "stopped", "terminal");
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_terminal");
+
+    await sweepUnobservedRuntimes(Date.now());
+
+    expect((await rowOf("rt_unobs_terminal")).status).toBe("stopped");
+  });
+}, 30_000);
+
+test("a runtime the substrate still reports running is left alone", async () => {
+  // The case the evidence rule exists for: nodes drop off the network while
+  // their container runs, and bills. Absence of a node is not a stop.
+  const { driver } = fakeObservableProvisioner(() => "running");
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_running");
+
+    const swept = await sweepUnobservedRuntimes(Date.now());
+    expect(swept.reconciled).not.toContain("rt_unobs_running");
+
+    const row = await rowOf("rt_unobs_running");
+    expect(row.status).toBe("online");
+    expect(row.statusReason).toBeNull();
+  });
+}, 30_000);
+
+test("a substrate that cannot answer changes nothing, but says so", async () => {
+  // Never manufacture a state. An operator reading `online` with no explanation
+  // believes the hub checked; this tells them it could not.
+  const { driver } = fakeObservableProvisioner(() => "unknown");
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_unknown");
+
+    await sweepUnobservedRuntimes(Date.now());
+
+    const row = await rowOf("rt_unobs_unknown");
+    expect(row.status).toBe("online");
+    // Says which fact is missing, not just that something is wrong.
+    expect(row.statusReason).toMatch(/unseen/i);
+    expect(row.statusReason).toMatch(/did not answer|cannot report|no driver/i);
+  });
+}, 30_000);
+
+test("a driver with no status() is not guessed about either", async () => {
+  const { driver } = fakeObservableProvisioner(() => "stopped", "resumable", {
+    withStatus: false,
+  });
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_nostatus");
+
+    await sweepUnobservedRuntimes(Date.now());
+
+    const row = await rowOf("rt_unobs_nostatus");
+    expect(row.status).toBe("online");
+    expect(row.statusReason).toBeTruthy();
+  });
+}, 30_000);
+
+test("a node offline only briefly is inside the grace window and is not probed", async () => {
+  // A hub restart, a redeploy, a flaky minute — probing every one of those would
+  // turn a substrate API into a heartbeat.
+  const { driver, calls } = fakeObservableProvisioner(() => "stopped");
+  await withProvisioner(driver, async () => {
+    await seedUnobserved("rt_unobs_recent", 30_000);
+
+    await sweepUnobservedRuntimes(Date.now());
+
+    expect(calls.status).not.toContain("fake-container-rt_unobs_recent");
+    expect((await rowOf("rt_unobs_recent")).status).toBe("online");
+  });
+}, 30_000);
+
+test("runtimes whose node is online are never probed", async () => {
+  const { driver, calls } = fakeObservableProvisioner(() => "stopped");
+  await withProvisioner(driver, async () => {
+    const { nodeId } = await seedUnobserved("rt_unobs_healthy");
+    await rawSql`UPDATE nodes SET status = 'online', last_seen_at = now() WHERE id = ${nodeId}`;
+
+    await sweepUnobservedRuntimes(Date.now());
+
+    expect(calls.status).not.toContain("fake-container-rt_unobs_healthy");
+    expect((await rowOf("rt_unobs_healthy")).status).toBe("online");
+  });
 }, 30_000);
