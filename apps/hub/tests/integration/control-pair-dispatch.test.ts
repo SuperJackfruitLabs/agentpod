@@ -5,6 +5,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations, listAdopted } from "../../src/services/station-registry";
 import { createSession } from "../../src/services/acp-sessions";
+import { setGrant, deleteGrant } from "../../src/services/grants";
 
 /**
  * The control pair, enforced where dispatch actually happens.
@@ -56,13 +57,15 @@ beforeAll(async () => {
   stationId = (await listAdopted(USER, nodeId)).find((s) => s.stationKey === stationKey)!.id;
 });
 
-afterEach(() => {
-  delete process.env.CONTROL_PAIR_GRANTS;
+afterEach(async () => {
+  delete process.env.ENFORCE_CONTROL_PAIR;
+  await deleteGrant(USER).catch(() => {});
 });
 
 afterAll(async () => {
-  delete process.env.CONTROL_PAIR_GRANTS;
+  delete process.env.ENFORCE_CONTROL_PAIR;
   try {
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER}`;
     await rawSql`DELETE FROM stations WHERE node_id = ${nodeId}`;
     await rawSql`DELETE FROM nodes WHERE id = ${nodeId}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
@@ -73,10 +76,10 @@ afterAll(async () => {
 });
 
 describe("dispatch consults the control pair (#Phase 3)", () => {
-  test("refuses a principal with no grant, when grants are configured", async () => {
-    process.env.CONTROL_PAIR_GRANTS = JSON.stringify({
-      someone_else: { mayDispatch: ["hermes:*"], mayGrantReach: false },
-    });
+  test("refuses a principal with no grant at all", async () => {
+    // Absence is not permission. A principal nobody has granted anything is
+    // refused, not waved through because no rule mentions them.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
@@ -84,9 +87,35 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
   });
 
   test("refuses a grant that does not cover this station", async () => {
-    process.env.CONTROL_PAIR_GRANTS = JSON.stringify({
-      [USER]: { mayDispatch: ["hermes:some-other-agent"], mayGrantReach: false },
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await setGrant(USER, {
+      mayDispatch: ["agentpod:hermes:some-other-agent"],
+      mayGrantReach: false,
     });
+
+    await expect(
+      createSession({ stationId, userId: USER, mode: "default" })
+    ).rejects.toThrow(/permission/i);
+  });
+
+  test("refuses a grant written in another plane's namespace", async () => {
+    // The decision's rule from this side: a kaambaan value is not this plane's
+    // business, so it grants nothing here — while remaining a perfectly valid
+    // grant over there.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await setGrant(USER, { mayDispatch: ["kaambaan:agt_anything"], mayGrantReach: false });
+
+    await expect(
+      createSession({ stationId, userId: USER, mode: "default" })
+    ).rejects.toThrow(/permission/i);
+  });
+
+  test("refuses the retired unprefixed format rather than honouring it", async () => {
+    // `hermes:*` was valid in CONTROL_PAIR_GRANTS. If it still matched here, a
+    // half-migrated deployment would enforce two different rules depending on
+    // which reader ran.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
+    await setGrant(USER, { mayDispatch: ["hermes:*"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
@@ -96,44 +125,31 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
   test("refuses BEFORE reporting on the station's readiness", async () => {
     // Ordering is the assertion. This node is offline, so an unguarded call
     // fails with "Node is offline." — a caller who was never permitted must not
-    // learn that, because the difference between "offline" and "no permission"
-    // tells them the station exists.
-    process.env.CONTROL_PAIR_GRANTS = JSON.stringify({
-      someone_else: { mayDispatch: ["hermes:*"], mayGrantReach: false },
-    });
+    // learn that, because the difference tells them the station exists.
+    process.env.ENFORCE_CONTROL_PAIR = "true";
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
 
-    // And with a grant, the SAME call gets past the control and fails on
-    // readiness instead — which is what proves the refusal above came from the
-    // control pair and not from the station being unreachable.
-    process.env.CONTROL_PAIR_GRANTS = JSON.stringify({
-      [USER]: { mayDispatch: ["hermes:*"], mayGrantReach: false },
-    });
+    // With a grant, the SAME call gets past the control and fails on readiness
+    // instead — which is what proves the refusal above came from the control
+    // and not from the node being unreachable.
+    await setGrant(USER, { mayDispatch: ["agentpod:hermes:*"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 
-  test("is not enforced when nothing is configured", async () => {
-    // Unconfigured is off. The same call reaches the readiness gates, so a
-    // standalone hub with no grants anywhere keeps working exactly as before.
-    delete process.env.CONTROL_PAIR_GRANTS;
+  test("is not enforced when the switch is off, whatever the grants say", async () => {
+    // An explicit switch rather than "are there any grants": those differ in
+    // exactly the dangerous case, where a deployment MEANT to enforce and whose
+    // grants failed to load would silently enforce nothing.
+    delete process.env.ENFORCE_CONTROL_PAIR;
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
-  });
-
-  test("a broken configuration denies rather than disabling the control", async () => {
-    // Losing the rules must never be the same thing as having none.
-    process.env.CONTROL_PAIR_GRANTS = "{not json";
-
-    await expect(
-      createSession({ stationId, userId: USER, mode: "default" })
-    ).rejects.toThrow(/permission/i);
   });
 });

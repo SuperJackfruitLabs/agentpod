@@ -229,9 +229,18 @@ export function collectConfigErrors(
     // The control pair is opt-in, and an operator should not have to read the
     // source to learn whether the first real authorization check in this suite
     // is switched on. Silence here would be indistinguishable from enforcement.
-    if (!process.env.CONTROL_PAIR_GRANTS) {
+    if (process.env.ENFORCE_CONTROL_PAIR !== "true") {
       warn(
-        "⚠️  WARNING: CONTROL_PAIR_GRANTS is not set — any principal may dispatch any agent."
+        "⚠️  WARNING: ENFORCE_CONTROL_PAIR is not \"true\" — any principal may dispatch any agent."
+      );
+    }
+
+    // The retired interim. Loud rather than silent: a deployment still carrying
+    // it is one where somebody believes grants live in the environment, and the
+    // gap between that belief and the truth is an authorization gap.
+    if (process.env.CONTROL_PAIR_GRANTS) {
+      warn(
+        "⚠️  WARNING: CONTROL_PAIR_GRANTS is set and is NO LONGER READ — grants now live in the principal_grants table. Remove it."
       );
     }
 

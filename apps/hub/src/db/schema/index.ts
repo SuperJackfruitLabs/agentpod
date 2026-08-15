@@ -34,3 +34,5 @@ export * from "./acp";
 export * from "./bridge";
 
 export * from "./identities";
+
+export * from "./grants";

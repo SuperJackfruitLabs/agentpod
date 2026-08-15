@@ -39,6 +39,7 @@ import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
 import { principalIdentities } from "./schema/identities";
+import { principalGrants } from "./schema/grants";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
@@ -135,6 +136,18 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
   // What a user is *allowed to reach* is therefore not answered here. It is
   // answered today by the bootstrap constant in the auth middleware, and later
   // by a membership lookup at the same layer — see `resolveTenantId`.
+  principal_grants: {
+    table: principalGrants,
+    reason:
+      "Authority attaches to the PRINCIPAL, which is exempt for the same reason `user` is — a " +
+      "principal is not inside a fleet, it reaches one. A tenant column here would imply a person " +
+      "could hold different authority in different fleets, which is a question the Organization " +
+      "plane will answer, not a column this table should pre-empt. " +
+      "Isolation is not weakened by the exemption: enforcement resolves the station through " +
+      "getStation(userId, …) FIRST, so a grant naming a station the caller cannot see can never " +
+      "match one. The grant is the second gate, never the first.",
+  },
+
   principal_identities: {
     table: principalIdentities,
     reason:

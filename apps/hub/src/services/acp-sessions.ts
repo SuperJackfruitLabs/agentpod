@@ -47,7 +47,8 @@ import type {
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
-import { mayDispatch, ControlPairDenied } from "./control-pair";
+import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
+import { getGrant, grantAllowsStation } from "./grants";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
@@ -652,7 +653,7 @@ export async function createSession(
   // on whether that station happens to be online, and answering "node offline"
   // to someone who was never permitted leaks which stations exist.
   const station = await getStation(userId, stationId);
-  if (station && !mayDispatch(process.env.CONTROL_PAIR_GRANTS, userId, station.stationKey)) {
+  if (station && isControlPairEnforced() && !grantAllowsStation(await getGrant(userId), station.stationKey)) {
     log.warn("dispatch refused by the control pair", {
       principalId: userId,
       stationKey: station.stationKey,

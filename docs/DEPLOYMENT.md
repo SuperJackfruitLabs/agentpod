@@ -361,52 +361,47 @@ hub box needs no `flyctl` install and no Fly login.
 > - **Which Fly images exist.** `agentpod-node-opencode-fly` (`fly/node-image/Dockerfile`) and `agentpod-node-pi-fly` (`fly/node-image/Dockerfile.pi`) — OpenCode and Pi. There is **no generic (harness-less) Fly image**, so a Fly runtime created with the **Generic** harness cannot work; the hub says so at boot with a `⚠️ WARNING` naming `NODE_AGENT_FLY_IMAGE`, and reports the same for any other harness whose resolved image is a local Docker tag. It is a report rather than a refusal precisely because of that gap: a fatal rule would make `ENABLE_FLY_PROVISIONING=true` unbootable no matter what you set, taking down a substrate that serves OpenCode and Pi perfectly well.
 > - **The images are published by CI, not by hand:** `.github/workflows/publish-images.yml` (manual dispatch — pick the image and the tag). It builds `linux/amd64` on an amd64 runner and then verifies the image it pushed: the `agentpod-node` binary runs, and the harness binary is resolvable from a *minimal service PATH*. Building by hand still works (`fly/node-image/README.md` has the `docker buildx … --push` line) and the same two things will not let you skip them: `--platform linux/amd64` (Fly Machines are amd64; an arm64 image built on an Apple laptop dies at boot with `exec format error`) and making the registry package **public** (Fly pulls anonymously). The tag in `NODE_AGENT_FLY_OPENCODE_IMAGE` / `NODE_AGENT_FLY_PI_IMAGE` is the record of which build the fleet is running.
 
-### Who may dispatch which agent — `CONTROL_PAIR_GRANTS`
+### Who may dispatch which agent — the control pair
 
-The first real authorization check in this suite, and it is **opt-in**. Unset
-means the check does not run and any principal may dispatch any agent; the hub
-says so at boot rather than leaving you to infer it:
+The first real authorization check in this suite. Two switches and a table.
 
-```
-⚠️  WARNING: CONTROL_PAIR_GRANTS is not set — any principal may dispatch any agent.
-```
+**Grants live in the database**, in `principal_grants`, and the hub puts them
+into every token it issues as the `mayDispatch` / `mayGrantReach` claims. They
+are no longer environment configuration: `CONTROL_PAIR_GRANTS` was the interim
+and is **no longer read**. A deployment still carrying it gets a boot warning,
+because somebody believing grants live in the environment is an authorization
+gap.
 
-Set it to a JSON object keyed by principal id:
+**Enforcement is off until you turn it on:**
 
 ```sh
-CONTROL_PAIR_GRANTS='{
-  "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA": { "mayDispatch": ["hermes:*"], "mayGrantReach": true },
-  "usr_contractor":                   { "mayDispatch": ["hermes:analyst-echo"], "mayGrantReach": false }
-}'
+ENFORCE_CONTROL_PAIR=true      # literal lowercase "true"; anything else is off
 ```
+
+Off is the default and the hub says so at boot:
+
+```
+⚠️  WARNING: ENFORCE_CONTROL_PAIR is not "true" — any principal may dispatch any agent.
+```
+
+An explicit switch rather than "are there any grants", because those two differ
+in exactly the dangerous case: a deployment that *meant* to enforce and whose
+grants failed to load would silently enforce nothing.
+
+**Populate grants before switching it on.** With enforcement on and no grants,
+every dispatch is refused — which is correct, and is also an outage.
 
 | Field | Meaning |
 |---|---|
-| `mayDispatch` | Station keys this principal may start work on. Exact (`hermes:analyst-echo`) or one trailing `*` as a prefix (`hermes:*`). A wildcard does **not** cross the `:` it was written inside, so `hermes:*` never reaches an OpenClaw station. |
-| `mayGrantReach` | Whether this principal may grant an agent its reach. Both fields are required — a grant missing either is a configuration error and refuses to parse. |
+| `mayDispatch` | Namespaced agent patterns. `agentpod:<stationKey>` is matched here; `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. One trailing `*` is a prefix wildcard that may not cross the `:` it was written inside, so `agentpod:hermes:*` never reaches an OpenClaw station. An **unprefixed** value (the retired format) matches nothing. `[]` denies — it is what you write to suspend someone without deleting their grant. |
+| `mayGrantReach` | Whether this principal may grant an agent its reach. Required. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
 
-**Once it is set, it fails closed.** A principal with no entry is refused, and an
-empty `mayDispatch: []` denies rather than permits — that is what you write to
-suspend someone without deleting their grant.
+Why values are namespaced, and where that ends:
+`charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`.
 
-**A malformed value denies everything** rather than disabling the check. Losing
-the rules must never be the same thing as having none; the parse failure is
-logged at error level naming the variable.
-
-**Both halves are required and that is deliberate.** Dispatch control alone is
-decorative: anyone who can register an agent and grant it production credentials
-does not need permission to dispatch anything, because they build the agent they
-want (`charter` → `decisions/2026-08-13-ecosystem-identity.md`, Decision 4).
-
-**Why the shape looks like a token claim.** It is one. The Organization plane
-will answer this eventually, and the grant is written in the shape of the
-eventual claim — the names `mayDispatch` and `mayGrantReach` are already reserved
-in `fixtures/ecosystem-identity/token_claims.json` — so adopting a real issuer is
-a data move rather than a redesign.
-
-Enforced at `acp.createSession`, which is the one choke point both the console
-and the kaambaan bridge pass through. A check that lived only in the bridge would
-leave provisioning straight at this API unguarded.
+Enforced at `acp.createSession`, the one choke point both the console and the
+kaambaan bridge pass through — a check living only in the bridge would leave
+provisioning straight at this API unguarded.
 
 ### kaambaan bridge
 
