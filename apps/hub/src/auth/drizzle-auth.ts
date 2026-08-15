@@ -12,7 +12,8 @@
  */
 
 import { betterAuth } from "better-auth";
-import { bearer, admin, customSession } from "better-auth/plugins";
+import { bearer, admin, customSession, jwt } from "better-auth/plugins";
+import { buildTokenPayload, TOKEN_TTL } from "./jwt-claims";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db } from "../db/drizzle";
 import { user as userTable } from "../db/schema";
@@ -117,7 +118,40 @@ export const auth = betterAuth({
       defaultRole: "user",
       adminRoles: ["admin"],
     }),
-    
+
+    /**
+     * The suite's token issuer
+     * (charter decisions/2026-08-15-one-issuer-and-offline-verification.md).
+     *
+     * Purely additive. Every credential this hub already accepts — Better Auth
+     * sessions, bearer tokens, the static API_TOKEN — keeps working untouched.
+     * Retiring any of them is separate, later and time-boxed, because that
+     * decision is explicit that running two auth systems at once is where auth
+     * bugs live.
+     *
+     * Adds two endpoints:
+     *   GET /api/auth/token  — a short-lived signed token for the caller's session
+     *   GET /api/auth/jwks   — the public key set peers verify against, offline
+     *
+     * "Offline" is the load-bearing word, and it was established by running it
+     * rather than by reading documentation: a Cloudflare Worker verified a token
+     * from this plugin with the issuer process killed (#331). That is what lets
+     * kaambaan check a caller at the edge with no network hop, which
+     * decisions/2026-08-13-ecosystem-identity.md requires — enforcement local,
+     * the token as carrier, and explicitly not a policy-service call in the hot
+     * path.
+     *
+     * The claims live in ./jwt-claims.ts rather than inline here, because their
+     * NAMES are a contract the moment kaambaan reads one, and a contract inside
+     * a plugin's options object cannot be checked against the shared fixture.
+     */
+    jwt({
+      jwt: {
+        definePayload: ({ user }) => buildTokenPayload({ user }),
+        expirationTime: TOKEN_TTL,
+      },
+    }),
+
     // Custom session plugin - includes additional user fields in session response
     // This ensures the frontend can access role, banned etc. from getSession()
     customSession(async ({ user, session }) => {
