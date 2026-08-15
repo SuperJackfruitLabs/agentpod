@@ -193,8 +193,9 @@
           <div class="space-y-0.5">
             <Label for="may-grant-reach">May grant reach</Label>
             <p class="text-xs text-muted-foreground">
-              The second half of the pair: whether this principal may widen what an agent can
-              reach. Not yet enforced anywhere — recorded so it is decided before it is needed.
+              The second half of the pair: whether this principal may change what an agent
+              <em>is</em> — write into its workspace, open a terminal on it, delete its files, or
+              add a machine to the fleet. Dispatching an agent needs only the values above.
             </p>
           </div>
           <Switch id="may-grant-reach" bind:checked={mayGrantReach} />
