@@ -42,6 +42,32 @@
 
 import { createLogger } from "../utils/logger";
 
+/**
+ * A dispatch refused by the control pair.
+ *
+ * A distinct type because a denial is **permanent** and every other failure at
+ * that point is transient. Callers that retry — the kaambaan bridge hands a
+ * claim back and lets the board reissue it — must be able to tell the
+ * difference, or a refusal becomes a hot loop: claim, refuse, release, claim
+ * again, forever.
+ */
+export class ControlPairDenied extends Error {
+  readonly principalId: string;
+  readonly stationKey: string;
+
+  constructor(principalId: string, stationKey: string) {
+    super("You do not have permission to dispatch this agent.");
+    this.name = "ControlPairDenied";
+    this.principalId = principalId;
+    this.stationKey = stationKey;
+  }
+}
+
+/** Is this the control pair refusing, rather than something transient? */
+export function isControlPairDenied(e: unknown): e is ControlPairDenied {
+  return e instanceof ControlPairDenied || (e as { name?: string })?.name === "ControlPairDenied";
+}
+
 const log = createLogger("control-pair");
 
 /** One principal's grant, in the shape the eventual token claim will carry. */

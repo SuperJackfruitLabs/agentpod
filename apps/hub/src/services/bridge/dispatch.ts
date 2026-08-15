@@ -68,6 +68,7 @@
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
+import { isControlPairDenied } from "../control-pair";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -746,6 +747,46 @@ async function handBack(
   const log = deps.log ?? (() => {});
   if (isLeaseSuperseded(cause) || isForeignRun(cause)) {
     return await abort(deps, key, work, null, cause);
+  }
+
+  // A refusal by the control pair is PERMANENT, and handing the claim back
+  // would be a hot loop: the board reissues the card, the same agent claims it,
+  // the same principal is refused, forever — bounded only by a circuit breaker
+  // that a release may never trip.
+  //
+  // So it fails the card instead, and says why as structured work activity
+  // rather than as a stringified exception. charter
+  // decisions/2026-08-13-ecosystem-identity.md requires exactly that: "a denial
+  // must be reported back as structured work activity, never silently dropped."
+  // An operator reading the board should see that permission was missing, not
+  // that something went wrong.
+  if (isControlPairDenied(cause)) {
+    const reason = `dispatch refused: ${cause.principalId} may not dispatch ${cause.stationKey}`;
+    try {
+      await deps.client.activity(work, {
+        type: "error",
+        body: "This agent was not dispatched: the operator who queued it does not have permission to dispatch this station.",
+        action: "control-pair.denied",
+        parameter: { principalId: cause.principalId, stationKey: cause.stationKey },
+      });
+    } catch (err) {
+      // The board may be unreachable; the fail below still carries the reason.
+      log("the denial could not be posted as activity", { run: work.runId, error: String(err) });
+    }
+    try {
+      await deps.client.fail(work, reason);
+    } catch (err) {
+      log("the denial could not be failed onto the board", { run: work.runId, error: String(err) });
+      await markAbandoned(key, `${reason} — and the fail was refused: ${String(err)}`).catch(() => {});
+      return { status: "failed", externalRunId: work.runId, reason };
+    }
+    log("dispatch refused by the control pair", {
+      run: work.runId,
+      principalId: cause.principalId,
+      stationKey: cause.stationKey,
+    });
+    await markAbandoned(key, reason).catch(() => {});
+    return { status: "failed", externalRunId: work.runId, reason };
   }
 
   const reason = `no session was opened, so the claim was handed back: ${String(cause)}`;
