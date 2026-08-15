@@ -17,6 +17,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { createLogger } from "../utils/logger";
 import { getGrant, setGrant, deleteGrant, listGrants, NO_GRANT } from "../services/grants";
+import { isControlPairEnforced } from "../services/control-pair";
 
 const log = createLogger("admin-grants");
 
@@ -45,6 +46,21 @@ const grantValue = z
   .refine(
     (v) => KNOWN_PLANES.some((p) => v.startsWith(`${p}:`) && v.length > p.length + 1),
     `a grant value must name a known plane: ${KNOWN_PLANES.map((p) => `${p}:…`).join(", ")}`
+  )
+  /**
+   * An AgentPod value names a node as well as a station.
+   *
+   * `agentpod:hermes:*` is the shape everyone writes first and it matches no
+   * station on any node, because uniqueness is `(node, stationKey)`
+   * (`charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`,
+   * amended). The reader already ignores it; refusing it here is the difference
+   * between a typo answered in a form and a grant that looks live and permits
+   * nothing. Fleet-wide is still available — it just has to be said out loud,
+   * with an explicit wildcard in the node half.
+   */
+  .refine(
+    (v) => !v.startsWith("agentpod:") || v.slice("agentpod:".length).includes("/"),
+    "an agentpod value must name a node too: agentpod:<node>/<stationKey>, e.g. agentpod:*/hermes:*"
   );
 
 const grantBody = z.object({
@@ -53,9 +69,17 @@ const grantBody = z.object({
 });
 
 export const adminGrantsRouter = new Hono()
-  /** Every grant. The answer to "who may dispatch what", which nothing else answers. */
+  /**
+   * Every grant, and whether anything is enforcing them.
+   *
+   * `enforced` is not decoration. With `ENFORCE_CONTROL_PAIR` unset these rows
+   * are recorded and nothing checks them, and a console that showed a narrow
+   * grant without saying so would tell an operator the fleet was locked down
+   * while it was wide open. That is the one wrong belief this surface must never
+   * create, so the switch travels with the data.
+   */
   .get("/", async (c) => {
-    return c.json({ grants: await listGrants() });
+    return c.json({ grants: await listGrants(), enforced: isControlPairEnforced() });
   })
 
   /**

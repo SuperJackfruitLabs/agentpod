@@ -409,10 +409,20 @@ a staging box silently cover production. Node **names** are unique within a
 tenant by construction: enrolment suffixes a hostname collision (`molt-bot`,
 `molt-bot-2`) and a unique index enforces it.
 
-**Two retired forms match nothing**, deliberately: an unprefixed `hermes:*` (the
+**Two retired forms are refused when written**: an unprefixed `hermes:*` (the
 old `CONTROL_PAIR_GRANTS` format) and a two-part `agentpod:hermes:*`, which
-cannot say which node it meant. `[]` denies — it is what you write to suspend
-someone without deleting their grant.
+cannot say which node it meant. Both used to store happily and match nothing,
+which reads exactly like a working grant — the writer now answers `400` instead,
+while a *reader* still ignores anything it does not recognise. `[]` denies — it
+is what you write to suspend someone without deleting their grant.
+
+**Manage them in the console: Admin → Grants.** It lists every principal with
+their values, marks grants whose principal is no longer a user here, and — read
+this before trusting a narrow grant — says at the top whether
+`ENFORCE_CONTROL_PAIR` is actually on. With it off the page is a plan, not a
+control. `GET|PUT|DELETE /api/admin/grants[/:principalId]` is the same surface
+for scripts; `PUT` replaces the whole grant rather than merging, so narrowing is
+never harder than widening.
 
 Why values are namespaced, and where that ends:
 `charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`.

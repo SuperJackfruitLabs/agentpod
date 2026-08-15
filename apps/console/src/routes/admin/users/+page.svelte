@@ -21,6 +21,7 @@
   import { Badge, badgeVariants } from "$lib/components/ui/badge";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import PageHeader from "$lib/components/page-header.svelte";
+  import AdminTabs from "$lib/components/admin/AdminTabs.svelte";
   import AdminStats from "$lib/components/admin/AdminStats.svelte";
   import AdminSettingsBar from "$lib/components/admin/AdminSettingsBar.svelte";
   import UserFilters from "$lib/components/admin/UserFilters.svelte";
@@ -241,6 +242,8 @@
 <PageHeader title="Admin" subtitle="User management" />
 
 <div class="container mx-auto max-w-6xl space-y-6 px-4 py-6">
+  <AdminTabs active="users" />
+
   {#if stats}
     <AdminStats {stats} />
   {/if}

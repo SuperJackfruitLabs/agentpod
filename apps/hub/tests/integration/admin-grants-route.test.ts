@@ -62,14 +62,14 @@ describe("/api/admin/grants", () => {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
+        mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
         mayGrantReach: true,
       }),
     });
     expect(res.status).toBe(200);
 
     expect(await getGrant(SUBJECT)).toEqual({
-      mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
+      mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
       mayGrantReach: true,
     });
   });
@@ -94,28 +94,28 @@ describe("/api/admin/grants", () => {
     const res = await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:hermes:*"] }),
+      body: JSON.stringify({ mayDispatch: ["agentpod:molt-bot/hermes:*"] }),
     });
     expect(res.status).toBe(400);
   });
 
   test("replaces rather than merges, so narrowing is as easy as widening", async () => {
     await setGrant(SUBJECT, {
-      mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
+      mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
       mayGrantReach: true,
     });
 
     await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:hermes:analyst-echo"], mayGrantReach: false }),
+      body: JSON.stringify({ mayDispatch: ["agentpod:molt-bot/hermes:analyst-echo"], mayGrantReach: false }),
     });
 
     // A PATCH that merged arrays would make removing a permission harder than
     // adding one, and an authorization surface must never be easier to widen
     // than to narrow.
     expect(await getGrant(SUBJECT)).toEqual({
-      mayDispatch: ["agentpod:hermes:analyst-echo"],
+      mayDispatch: ["agentpod:molt-bot/hermes:analyst-echo"],
       mayGrantReach: false,
     });
   });
@@ -124,6 +124,50 @@ describe("/api/admin/grants", () => {
     const res = await app().request("/grants");
     const body = (await res.json()) as { grants: Array<{ principalId: string }> };
     expect(body.grants.some((g) => g.principalId === SUBJECT)).toBe(true);
+  });
+
+  test("says whether anything is actually enforcing these grants", async () => {
+    // A console that showed grants without this would be showing a control that
+    // may or may not be connected to anything: with `ENFORCE_CONTROL_PAIR`
+    // unset, every grant here is recorded and nothing checks it. An operator
+    // reading a narrow grant would believe the fleet was locked down when it was
+    // wide open, which is the one wrong belief this page must never create.
+    const before = process.env.ENFORCE_CONTROL_PAIR;
+    try {
+      process.env.ENFORCE_CONTROL_PAIR = "false";
+      const off = (await (await app().request("/grants")).json()) as { enforced: boolean };
+      expect(off.enforced).toBe(false);
+
+      process.env.ENFORCE_CONTROL_PAIR = "true";
+      const on = (await (await app().request("/grants")).json()) as { enforced: boolean };
+      expect(on.enforced).toBe(true);
+    } finally {
+      if (before === undefined) delete process.env.ENFORCE_CONTROL_PAIR;
+      else process.env.ENFORCE_CONTROL_PAIR = before;
+    }
+  });
+
+  test("refuses an AgentPod value that names no node, because it matches nothing", async () => {
+    // `agentpod:hermes:*` is the shape everyone writes first, and since the
+    // amendment it matches no station on any node — uniqueness is (node, key).
+    // Stored, it reads as a working grant and permits nothing, which is the
+    // failure this writer exists to prevent. Fleet-wide has to be said out loud.
+    const res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mayDispatch: ["agentpod:hermes:*"], mayGrantReach: false }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/node/i);
+  });
+
+  test("accepts fleet-wide only when it is written out", async () => {
+    const res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false }),
+    });
+    expect(res.status).toBe(200);
   });
 
   test("removing a grant is not the same as emptying it", async () => {
