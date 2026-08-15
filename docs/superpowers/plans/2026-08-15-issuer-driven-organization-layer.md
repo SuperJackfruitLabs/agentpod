@@ -49,31 +49,39 @@ dispatchable — because nobody with authority ever asked for it to run.
 
 ### 1. Grants become data — `principal_grants` (hub)
 
-- [ ] Table: `principal_id`, `may_dispatch text[]`, `may_grant_reach boolean`,
+- [x] Table: `principal_id`, `may_dispatch text[]`, `may_grant_reach boolean`,
       timestamps. One row per principal; absence means no grant.
-- [ ] Values are namespaced per the decision (`agentpod:…`, `kaambaan:…`).
-- [ ] Service: read, upsert, delete. Read is the hot path — cache is not needed
+- [x] Values are namespaced per the decision (`agentpod:…`, `kaambaan:…`).
+- [x] Service: read, upsert, delete. Read is the hot path — cache is not needed
       at this size, and a stale grant is worse than a query.
-- [ ] **`CONTROL_PAIR_GRANTS` becomes a seed, not the source.** Kept only to
-      bootstrap the first grant into an empty table, and refused thereafter, so a
-      deployment cannot end up with two disagreeing sources of authority.
+- [x] **`CONTROL_PAIR_GRANTS` becomes a seed, not the source.** ~~Kept only to
+      bootstrap the first grant into an empty table, and refused thereafter~~ —
+      **changed in the doing: it is not read at all.** A seeding path would be a
+      second source of authority that exists only on the day nobody is watching
+      (an empty table is the state a fresh deployment and a failed migration
+      share). The var now draws a boot warning saying it is ignored, which is the
+      whole of its remaining job.
 
 ### 2. The issuer emits the pair (hub)
 
-- [ ] `buildTokenPayload` reads `principal_grants` and emits `mayDispatch` /
+- [x] `buildTokenPayload` reads `principal_grants` and emits `mayDispatch` /
       `mayGrantReach` — the names already reserved in the fixture.
-- [ ] The fixture moves them from `reserved` to `issued`, with the namespace
+- [x] The fixture moves them from `reserved` to `issued`, with the namespace
       grammar and the "unknown namespace is ignored" rule pinned, plus reject
       cases.
-- [ ] A principal with **no grant row** gets the claims present and empty
+- [x] A principal with **no grant row** gets the claims present and empty
       (`[]`, `false`) rather than absent: a consumer must be able to tell "no
       permissions" from "an issuer that does not speak this yet".
 
 ### 3. AgentPod enforces from the store (hub)
 
-- [ ] `mayDispatch` reads `principal_grants`, not the environment.
-- [ ] Values matched with the `agentpod:` prefix; other namespaces ignored.
-- [ ] **`mayGrantReach` is enforced somewhere**, which it is not today. It needs
+- [x] `mayDispatch` reads `principal_grants`, not the environment.
+- [x] Values matched with the `agentpod:` prefix; other namespaces ignored.
+- [ ] **STILL OPEN — the only item of this plan that is.** `mayGrantReach` is
+      issued in every token, stored, and editable in the console, and it is
+      **enforced nowhere**. That makes the dispatch half decorative in the way
+      this plan itself warned about: anyone who can hand an agent production
+      credentials does not need permission to dispatch it. It needs
       an answer to a question this plan cannot assume: *what is "granting an agent
       its reach" in AgentPod?* Candidates, to be decided in the PR that does it:
       minting an enrollment token, provisioning a runtime with credentials, and
@@ -82,37 +90,40 @@ dispatchable — because nobody with authority ever asked for it to run.
 
 ### 4. kaambaan accepts an authorising token on the routes that queue (api)
 
-- [ ] Card **create** and **move** accept a hub JWT, in addition to the session
+- [x] Card **create** and **move** accept a hub JWT, in addition to the session
       cookie they take today (extends kaambaan#39, which reached one read route).
-- [ ] The verified claim's `mayDispatch` is recorded on the card next to
+- [x] The verified claim's `mayDispatch` is recorded on the card next to
       `queued_by` — `cards.queued_grant`.
-- [ ] Recorded **as granted at that moment**. A later change to the grant does
+- [x] Recorded **as granted at that moment**. A later change to the grant does
       not retroactively authorise or deauthorise work already queued, which is
       what "authority at the time of the act" means.
 
 ### 5. kaambaan enforces at claim (board DO)
 
-- [ ] At claim, the claiming agent must match the card's recorded
+- [x] At claim, the claiming agent must match the card's recorded
       `queued_grant`, on the `kaambaan:` namespace.
-- [ ] A card with **no recorded grant** is not claimable under enforcement.
-- [ ] The refusal is **structured work activity**, never a silent skip — the same
+- [x] A card with **no recorded grant** is not claimable under enforcement.
+- [x] The refusal is **structured work activity**, never a silent skip — the same
       requirement AgentPod's side already meets (#338). A card nobody may run
       must say so, or it looks like an idle board.
-- [ ] Enforcement is opt-in per deployment while grants are being populated, and
+- [x] Enforcement is opt-in per deployment while grants are being populated, and
       the flag's absence is visible at boot.
 
 ### 6. Grants are manageable (hub + console)
 
-- [ ] Admin API: read and write a principal's grant.
-- [ ] Console: see who may dispatch what, and change it. Without this the layer
+- [x] Admin API: read and write a principal's grant.
+- [x] Console: see who may dispatch what, and change it. Without this the layer
       is operable only by someone with database access, which is not a control
       an organisation can actually use.
 
 ### 7. Retire the interim
 
-- [ ] `CONTROL_PAIR_GRANTS` refuses to boot when `principal_grants` is populated,
-      naming the conflict.
-- [ ] `docs/DEPLOYMENT.md` and kaambaan's docs describe the store, not the env
+- [x] ~~`CONTROL_PAIR_GRANTS` refuses to boot when `principal_grants` is
+      populated, naming the conflict.~~ **Warns instead, deliberately.** Refusing
+      to boot makes a stale line in an env file an outage of the whole hub, on a
+      variable nothing reads any more — the cure would be worse than the disease
+      it treats. The warning names the variable and says it is ignored.
+- [x] `docs/DEPLOYMENT.md` and kaambaan's docs describe the store, not the env
       var.
 
 ---
@@ -122,13 +133,13 @@ dispatchable — because nobody with authority ever asked for it to run.
 Production is the test environment for this work, by the operator's decision.
 That raises rather than lowers the bar for what counts as verified:
 
-- [ ] A token minted by the live hub carries a real grant.
-- [ ] A dispatch the grant permits succeeds; one it does not is **refused, and
+- [x] A token minted by the live hub carries a real grant.
+- [x] A dispatch the grant permits succeeds; one it does not is **refused, and
       the refusal is visible on the board** rather than inferred from silence.
-- [ ] A card queued with a token runs; a card queued without one does not, and
+- [x] A card queued with a token runs; a card queued without one does not, and
       says why.
-- [ ] Changing a grant changes the next decision and **not** one already queued.
-- [ ] The 14 Hermes stations keep working throughout — enforcement is switched on
+- [x] Changing a grant changes the next decision and **not** one already queued.
+- [x] The 14 Hermes stations keep working throughout — enforcement is switched on
       after grants exist, never before.
 
 ## What this plan will not do
