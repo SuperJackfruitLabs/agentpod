@@ -14,6 +14,7 @@ import { z } from "zod";
 import { adminMiddleware, getRequestContext } from "../auth/admin-middleware";
 import { authMiddleware } from "../auth/middleware";
 import { createLogger } from "../utils/logger";
+import { adminGrantsRouter } from "./admin-grants";
 
 // Models
 import {
@@ -43,6 +44,11 @@ export const adminRouter = new Hono();
 // Apply auth middleware to all admin routes
 adminRouter.use("*", authMiddleware);
 adminRouter.use("*", adminMiddleware);
+
+// The control pair's grants, mounted inside the same guard. Without an HTTP
+// surface the control is operable only by someone with a database client, and
+// an authorization system nobody can inspect is one people route around.
+adminRouter.route("/grants", adminGrantsRouter);
 
 // =============================================================================
 // Validation Schemas

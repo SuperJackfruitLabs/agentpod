@@ -1,0 +1,124 @@
+{
+  "corpus": "ecosystem-identity/token-claims",
+  "version": 2,
+  "authoredAt": "2026-08-15",
+  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants)",
+  "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
+  "howToRead": {
+    "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
+    "standard": "Registered JWT claims the issuer sets. Consumers MUST validate iss, aud and exp.",
+    "reserved": "Names that are SPOKEN FOR and not yet issued. A token must not use them to mean anything else, and a consumer must not infer permission from their absence.",
+    "reject": "Tokens a consumer MUST refuse. These are the point of the corpus \u2014 a fixture of only-valid examples proves almost nothing."
+  },
+  "algorithm": {
+    "alg": "EdDSA",
+    "crv": "Ed25519",
+    "source": "observed in agentpod#331; better-auth's jwt plugin default",
+    "note": "Consumers MUST pin the algorithm rather than trusting the token header, or a token signed with `alg: none` \u2014 or with a key of the consumer's choosing \u2014 is accepted."
+  },
+  "issued": [
+    {
+      "claim": "sub",
+      "type": "string",
+      "meaning": "The principal acting. Today this is the Better Auth user id in AgentPod's hub; when the Organization plane mints principals it becomes that id, and this corpus changes with it.",
+      "required": true
+    },
+    {
+      "claim": "principalKind",
+      "type": "string",
+      "enum": [
+        "human",
+        "agent",
+        "service"
+      ],
+      "meaning": "What kind of principal `sub` names. Present because this suite exists to make humans and agents both first-class \u2014 a consumer that cannot tell them apart cannot enforce separation of duties, which is what charter decisions/2026-08-14-approvals-cross-planes-as-events.md turns on.",
+      "required": true
+    },
+    {
+      "claim": "tenant",
+      "type": "string",
+      "grammar": "^fleet_[0-9a-f]{20}$",
+      "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, kaambaan migration 0002).",
+      "required": true,
+      "crossRef": "id_grammar.json \u2192 agentpod.tenant"
+    },
+    {
+      "claim": "mayDispatch",
+      "type": "string[]",
+      "meaning": "First half of the control pair \u2014 which agents this principal may dispatch. Values are NAMESPACED by the plane whose id space they belong to: `agentpod:<stationKey>` is matched by AgentPod, `kaambaan:<agentId>` by kaambaan.",
+      "required": true,
+      "grammar": "^[a-z][a-z0-9-]*:.+$",
+      "valueRules": {
+        "namespaced": "Every value carries a plane prefix. An UNPREFIXED value matches nothing anywhere \u2014 that was the retired CONTROL_PAIR_GRANTS format, and letting it keep working would mean a half-migrated deployment enforcing two different rules depending on which reader ran.",
+        "unknownNamespaceIsIgnored": "A consumer IGNORES a namespace it does not recognise; it must never deny on one. A plane that refused what it did not understand would break the day a third plane appeared, and a claim is read by more planes over time, not fewer.",
+        "wildcard": "One trailing `*` is a prefix wildcard that may not cross the `:` it was written inside: `agentpod:hermes:*` reaches every Hermes station and no OpenClaw one.",
+        "emptyDenies": "`[]` is a decision, and the decision is no. It is what an operator writes to suspend someone without deleting their grant."
+      },
+      "source": "charter decisions/2026-08-15-a-grant-names-an-agent-per-plane.md"
+    },
+    {
+      "claim": "mayGrantReach",
+      "type": "boolean",
+      "meaning": "Second half of the control pair \u2014 whether this principal may grant an agent its reach. Both halves are required: dispatch control alone is decorative, because anyone who can grant an agent production credentials does not need permission to dispatch it.",
+      "required": true,
+      "source": "charter decisions/2026-08-13-ecosystem-identity.md, Decision 4"
+    }
+  ],
+  "standard": [
+    {
+      "claim": "iss",
+      "meaning": "The issuer's base URL. Consumers MUST validate it.",
+      "required": true
+    },
+    {
+      "claim": "aud",
+      "meaning": "Audience. Consumers MUST validate it.",
+      "required": true
+    },
+    {
+      "claim": "exp",
+      "meaning": "Expiry. THE REVOCATION SLA: agentpod#331 proved a token issued before a session is revoked keeps verifying until it expires, because verification is offline by design.",
+      "required": true
+    },
+    {
+      "claim": "iat",
+      "meaning": "Issued at.",
+      "required": true
+    }
+  ],
+  "reserved": [],
+  "reject": [
+    {
+      "case": "alg-none",
+      "why": "A token with `alg: none` carries no signature. Pin the algorithm; never take it from the header."
+    },
+    {
+      "case": "expired",
+      "why": "exp in the past. This is the whole revocation story \u2014 a consumer that ignores exp has no revocation at all."
+    },
+    {
+      "case": "wrong-issuer",
+      "why": "A validly signed token from another issuer is still not ours."
+    },
+    {
+      "case": "wrong-audience",
+      "why": "A token minted for a different audience must not be replayable here."
+    },
+    {
+      "case": "unknown-kid",
+      "why": "Signed by a key not in the JWKS \u2014 including a key that WAS in it and has been retired. agentpod#331 found retirement propagates only as fast as each consumer's JWKS cache, so this case is reachable in normal operation, not only under attack."
+    },
+    {
+      "case": "missing-tenant",
+      "why": "A token that verifies but names no tenant is not a weaker caller, it is an unresolvable one. Refuse it rather than falling back to a default boundary."
+    },
+    {
+      "case": "unprefixed-mayDispatch-value",
+      "why": "`hermes:*` with no plane prefix. The retired format; it must match nothing rather than be read as this plane's."
+    },
+    {
+      "case": "mayDispatch-absent",
+      "why": "A token from an issuer that predates the control pair. A consumer must not treat absence as an empty grant, nor as an unrestricted one \u2014 it means the issuer cannot answer, and the consumer decides its own posture."
+    }
+  ]
+}
