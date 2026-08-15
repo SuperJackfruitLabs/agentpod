@@ -77,16 +77,13 @@ dispatchable — because nobody with authority ever asked for it to run.
 
 - [x] `mayDispatch` reads `principal_grants`, not the environment.
 - [x] Values matched with the `agentpod:` prefix; other namespaces ignored.
-- [ ] **STILL OPEN — the only item of this plan that is.** `mayGrantReach` is
-      issued in every token, stored, and editable in the console, and it is
-      **enforced nowhere**. That makes the dispatch half decorative in the way
-      this plan itself warned about: anyone who can hand an agent production
-      credentials does not need permission to dispatch it. It needs
-      an answer to a question this plan cannot assume: *what is "granting an agent
-      its reach" in AgentPod?* Candidates, to be decided in the PR that does it:
-      minting an enrollment token, provisioning a runtime with credentials, and
-      editing node config (#237/#238). Whichever it is, the check goes at the
-      choke point those share.
+- [x] **`mayGrantReach` is enforced**, as of #345 — the acts that change what an
+      agent *is*: workspace writes, the terminal, `cleanup/apply`, and minting an
+      enrollment token (which additionally requires fleet-wide authority, since
+      it names no station). Design:
+      `docs/superpowers/specs/2026-08-15-granting-reach-design.md`; decision:
+      `charter/decisions/2026-08-15-granting-reach-is-changing-an-agent.md`.
+      Reads stay open, and `lifecycle` was judged operating rather than widening.
 
 ### 4. kaambaan accepts an authorising token on the routes that queue (api)
 
