@@ -37,7 +37,7 @@ import { acpEvents, acpRuns, acpSessions } from "./schema/acp";
 import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
-import { account, session, user, verification } from "./schema/auth";
+import { account, session, user, verification, jwks } from "./schema/auth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
@@ -153,6 +153,17 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "OAuth provider linkage, written by Better Auth. A GitHub identity is a property of a " +
       "principal, not of a fleet.",
   },
+  jwks: {
+    table: jwks,
+    reason:
+      "The issuer's signing keys. Deliberately instance-wide, not per-tenant: the hub signs " +
+      "every token with one key set, and peers verify against ONE published JWKS — a per-tenant " +
+      "key would mean a verifier had to know which tenant a token belonged to before it could " +
+      "check the signature that tells it, which is backwards. The tenant a token names travels " +
+      "INSIDE it, as the `tenant` claim " +
+      "(fixtures/ecosystem-identity/token_claims.json).",
+  },
+
   verification: {
     table: verification,
     reason:
