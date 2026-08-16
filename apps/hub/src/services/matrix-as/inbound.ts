@@ -19,6 +19,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { matrixRooms } from "../../db/schema/matrix";
+import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { resolveMatrixId } from "../matrix-identity";
@@ -71,10 +72,12 @@ async function roomContext(roomId: string) {
       stationKey: stations.stationKey,
       identityMode: stations.matrixIdentityMode,
       nodeName: nodes.name,
+      sessionStatus: acpSessions.status,
     })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
+    .leftJoin(acpSessions, eq(acpSessions.id, matrixRooms.acpSessionId))
     .where(eq(matrixRooms.roomId, roomId));
   return row ?? null;
 }
@@ -143,7 +146,12 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
 
   // ── Say it to the agent ───────────────────────────────────────────────────
   try {
-    let sessionId = room.sessionId;
+    // A session the hub has already ended is not a session. Boot reconciliation
+    // ends every live one with "hub restarted", so without this check a room
+    // prompts a corpse forever and every bridged room dies permanently at the
+    // first restart — with "Session not found or not active" as the only clue.
+    const sessionUsable = room.sessionId !== null && room.sessionStatus !== null && room.sessionStatus !== "ended";
+    let sessionId = sessionUsable ? room.sessionId : null;
 
     if (!sessionId) {
       // One session per room, not per message: a conversation is a

@@ -118,7 +118,7 @@ describe("PUT /_matrix/app/v1/transactions/:txnId", () => {
   test("drops events sent by our own users before anything else looks at them", async () => {
     // An Application Service is sent what its own users send. Answering those
     // is the loop that fills a database overnight.
-    await deliver("test-txn-loop", [message("@agent_box__pi_x:id.agentpod.dev", "output")]);
+    await deliver("test-txn-loop", [message("@agent_box_pi-x:id.agentpod.dev", "output")]);
 
     expect(handled).toHaveLength(0);
   });
@@ -132,7 +132,7 @@ describe("PUT /_matrix/app/v1/transactions/:txnId", () => {
     // The loop cut is per event, not per transaction — otherwise one echo would
     // silence a real message that arrived beside it.
     await deliver("test-txn-mixed", [
-      message("@agent_box__pi_x:id.agentpod.dev", "echo"),
+      message("@agent_box_pi-x:id.agentpod.dev", "echo"),
       message("@rakesh:id.agentpod.dev", "status?"),
     ]);
 

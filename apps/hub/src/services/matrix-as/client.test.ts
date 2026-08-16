@@ -11,7 +11,7 @@ import { createMatrixClient } from "./client";
 
 const AS_TOKEN = "test-as-token-client";
 const HS = "http://homeserver.test";
-const USER = "@agent_box__pi_x:id.agentpod.dev";
+const USER = "@agent_box_pi-x:id.agentpod.dev";
 const ROOM = "!room:id.agentpod.dev";
 
 interface Call {
@@ -77,7 +77,7 @@ describe("acting as a station", () => {
     // a no-op, not an error that stops an agent existing.
     replies = [{ status: 400, body: { errcode: "M_USER_IN_USE" } }];
 
-    await client().ensureUser("agent_box__pi_x", "x (pi @ box)");
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
   });
 
   test("sets the display name even when the user already existed", async () => {
@@ -86,7 +86,7 @@ describe("acting as a station", () => {
     // because the user is created exactly once and provisioning runs forever.
     replies = [{ status: 400, body: { errcode: "M_USER_IN_USE" } }];
 
-    await client().ensureUser("agent_box__pi_x", "renamed (pi @ box)");
+    await client().ensureUser("agent_box_pi-x", "renamed (pi @ box)");
 
     const profile = calls.find((c) => c.url.includes("/displayname"));
     expect(profile).toBeTruthy();
@@ -96,7 +96,7 @@ describe("acting as a station", () => {
   test("treats M_ROOM_IN_USE on create as success", async () => {
     replies = [{ status: 400, body: { errcode: "M_ROOM_IN_USE" } }];
 
-    const roomId = await client().ensureRoom("#agentpod_box__pi_x:id.agentpod.dev", {
+    const roomId = await client().ensureRoom("#agentpod_box_pi-x:id.agentpod.dev", {
       creator: USER,
       name: "x",
       topic: "pi @ box",

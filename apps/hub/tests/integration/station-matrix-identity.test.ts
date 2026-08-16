@@ -116,8 +116,8 @@ describe("POST /api/stations/:id/matrix/identity", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { mxid: string; alias: string; mode: string };
-    expect(body.mxid).toBe("@agent_sm-box__hermes_analyst-echo:id.agentpod.dev");
-    expect(body.alias).toBe("#agentpod_sm-box__hermes_analyst-echo:id.agentpod.dev");
+    expect(body.mxid).toBe("@agent_sm-box_hermes-analyst-echo:id.agentpod.dev");
+    expect(body.alias).toBe("#agentpod_sm-box_hermes-analyst-echo:id.agentpod.dev");
     expect(body.mode).toBe("bridge");
     expect(provisioned).toEqual([STATION]);
     // Issuing an identity is the appservice acting in its own namespace. No

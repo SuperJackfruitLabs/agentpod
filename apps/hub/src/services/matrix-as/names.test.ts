@@ -26,31 +26,39 @@ describe("bridge names", () => {
     // agents.yaml claims `@agent_.*` and `#agentpod_.*` exclusive. A name
     // outside them cannot be acted as, and the failure arrives late — a 403
     // from the homeserver at send time, long after provisioning "worked".
-    // `__` separates the node half from the station half; a single `_` would
-    // make node `a_b` + station `c` collide with node `a` + station `b_c`.
+    // One `_`, and it is unambiguous because `_` cannot survive cleaning:
+    // every underscore in a station key or node name becomes `-`.
     expect(bridgeUserId("molt-bot", "hermes:analyst-echo", D)).toBe(
-      "@agent_molt-bot__hermes_analyst-echo:id.agentpod.dev"
+      "@agent_molt-bot_hermes-analyst-echo:id.agentpod.dev"
     );
     expect(bridgeAlias("molt-bot", "hermes:analyst-echo", D)).toBe(
-      "#agentpod_molt-bot__hermes_analyst-echo:id.agentpod.dev"
+      "#agentpod_molt-bot_hermes-analyst-echo:id.agentpod.dev"
     );
   });
 
   test("replace characters an mxid localpart may not contain", () => {
     // `:` is the mxid separator, and a station key is full of them.
     expect(bridgeUserId("box", "claude-code:48c62ea7", D)).toBe(
-      "@agent_box__claude-code_48c62ea7:id.agentpod.dev"
+      "@agent_box_claude-code-48c62ea7:id.agentpod.dev"
     );
   });
 
   test("lowercase, because Matrix localparts are", () => {
-    expect(bridgeUserId("BOX", "Pi:59099BF1", D)).toBe("@agent_box__pi_59099bf1:id.agentpod.dev");
+    expect(bridgeUserId("BOX", "Pi:59099BF1", D)).toBe("@agent_box_pi-59099bf1:id.agentpod.dev");
   });
 
   test("keep the node and the station distinguishable", () => {
     // A separator that could also appear inside either half would make
     // `a_b`/`c` and `a`/`b_c` the same name. They must not collide.
     expect(localpartFor("a_b", "c")).not.toBe(localpartFor("a", "b_c"));
+  });
+
+  test("never emit the separator from a name's own characters", () => {
+    // This is what makes one underscore enough. Two illegal characters in a row
+    // used to produce `__` inside a half, which is how the doubled separator
+    // was safe in practice and not in principle.
+    expect(localpartFor("a::b", "c")).not.toContain("__");
+    expect(localpartFor("a_b", "c").split("_")).toHaveLength(2);
   });
 
   test("the registered username is exactly the user id's localpart", () => {
@@ -76,7 +84,7 @@ describe("isBridgeUser", () => {
     // An Application Service receives what its own users send. Answering those
     // is an infinite loop that fills a database overnight, so this predicate
     // runs before anything else looks at an event.
-    expect(isBridgeUser("@agent_box__pi_59099bf1:id.agentpod.dev", D)).toBe(true);
+    expect(isBridgeUser("@agent_box_pi-59099bf1:id.agentpod.dev", D)).toBe(true);
   });
 
   test("recognises the appservice's own bot", () => {
