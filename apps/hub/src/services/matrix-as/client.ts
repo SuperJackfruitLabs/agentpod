@@ -71,6 +71,10 @@ export interface MatrixClient {
   ): Promise<string | null>;
   /** Remove an event we sent, which is how a reaction is taken back off. */
   redact(userId: string, roomId: string, eventId: string): Promise<void>;
+  /** Create a space — a room whose type groups other rooms. */
+  ensureSpace(alias: string, opts: { creator: string; name: string }): Promise<string | null>;
+  /** Hang a room under a space, which is what makes a hierarchy. */
+  addSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
   /** Set a user's avatar. Optional for an agent; uniform across harnesses. */
   setAvatar(userId: string, mxcUrl: string): Promise<void>;
   /** Upload an image and return its mxc:// URL. */
@@ -233,6 +237,37 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         { method: "PUT", userId, body: { displayname: displayName } }
       );
       assertOkOrAlready("displayname", res);
+    },
+
+    async ensureSpace(alias, opts) {
+      const aliasLocalpart = alias.replace(/^#/, "").replace(/:.*$/, "");
+      const res = await call("/_matrix/client/v3/createRoom", {
+        method: "POST",
+        userId: opts.creator,
+        body: {
+          room_alias_name: aliasLocalpart,
+          name: opts.name,
+          preset: "private_chat",
+          // What makes a room a space rather than a conversation.
+          creation_content: { type: "m.space" },
+        },
+      });
+      if (!assertOkOrAlready(`createSpace ${alias}`, res)) return null;
+      return String(res.body.room_id ?? "") || null;
+    },
+
+    async addSpaceChild(creator, spaceRoomId, childRoomId) {
+      // The child event lives on the SPACE, which is what makes a space's claim
+      // about its children authoritative — a room claiming a parent is not.
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(spaceRoomId)}/state/m.space.child/${encodeURIComponent(childRoomId)}`,
+        {
+          method: "PUT",
+          userId: creator,
+          body: { via: [deps.domain ?? ""] },
+        }
+      );
+      assertOkOrAlready("space child", res);
     },
 
     async sendReaction(userId, roomId, targetEventId, key) {
