@@ -26,6 +26,7 @@ import {
   ensurePurposeSpace,
   ensureSpaceRecord,
   GENERAL_MISSIONS_KEY,
+  type Space,
 } from "../services/matrix-as/purpose-spaces";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
@@ -57,7 +58,7 @@ async function missionsSpace(
   speaker: string,
   owner: string | null,
   deps: MissionDeps
-): Promise<string | null> {
+): Promise<Space | null> {
   return ensureSpaceRecord(
     tenantId,
     GENERAL_MISSIONS_KEY,
@@ -178,7 +179,7 @@ export function createMissionRoutes(deps: MissionDeps) {
     const shared =
       purposes.size === 1 && members[0]!.purpose !== null ? members[0]!.purpose : null;
 
-    const spaceRoomId = shared
+    const space = shared
       ? await ensurePurposeSpace(
           tenantId,
           shared,
@@ -187,8 +188,13 @@ export function createMissionRoutes(deps: MissionDeps) {
           deps
         )
       : await missionsSpace(tenantId, speaker, identity?.externalId ?? null, deps);
-    if (spaceRoomId) {
-      await deps.client.addSpaceChild(speaker, spaceRoomId, roomId).catch(() => {});
+
+    // As the SPACE's creator, never as this mission's speaker: `m.space.child`
+    // state lives on the space, and a user who merely made one of its rooms is
+    // not in it. Doing this as the speaker is what shipped for agent rooms and
+    // had the homeserver refuse every edge but the first.
+    if (space?.creator) {
+      await deps.client.addSpaceChild(space.creator, space.roomId, roomId).catch(() => {});
     }
 
     const id = `msn_${crypto.randomUUID()}`;
@@ -199,7 +205,7 @@ export function createMissionRoutes(deps: MissionDeps) {
       name,
       roomId,
       alias,
-      spaceRoomId: spaceRoomId ?? null,
+      spaceRoomId: space?.roomId ?? null,
     });
     await db.insert(matrixMissionMembers).values(
       members.map((m) => ({ missionId: id, stationId: m.id, tenantId: m.tenantId }))
@@ -215,6 +221,6 @@ export function createMissionRoutes(deps: MissionDeps) {
 
     log.info("mission created", { id, name, members: members.length });
 
-    return c.json({ id, roomId, alias, spaceRoomId });
+    return c.json({ id, roomId, alias, spaceRoomId: space?.roomId ?? null });
   });
 }

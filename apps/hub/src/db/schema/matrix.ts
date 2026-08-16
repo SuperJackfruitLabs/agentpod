@@ -87,6 +87,14 @@ export const matrixPurposeSpaces = pgTable(
       .references(() => tenants.id, { onDelete: "restrict" }),
     purpose: text("purpose").notNull(),
     roomId: text("room_id").notNull(),
+    /**
+     * The agent that created the space, and therefore the only one that can
+     * write its `m.space.child` state — child edges live on the space, and a
+     * room's own agent is a member of its room and of nothing else.
+     *
+     * Null only for rows written before this was recorded.
+     */
+    creator: text("creator"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.purpose] })]

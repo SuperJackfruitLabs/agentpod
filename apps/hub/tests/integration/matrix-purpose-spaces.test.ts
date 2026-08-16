@@ -27,9 +27,11 @@ const DOMAIN = "id.agentpod.dev";
 interface Edge {
   space: string;
   child: string;
+  creator?: string;
 }
 
 let created: Array<{ name: string; creator: string }> = [];
+let addFails = false;
 let added: Edge[] = [];
 let removed: Edge[] = [];
 let invited: Array<{ roomId: string; invitee: string }> = [];
@@ -49,8 +51,9 @@ function deps() {
         nextSpace += 1;
         return `!space${nextSpace}:${DOMAIN}`;
       },
-      addSpaceChild: async (_creator: string, space: string, child: string) => {
-        added.push({ space, child });
+      addSpaceChild: async (creator: string, space: string, child: string) => {
+        if (addFails) throw new Error("M_FORBIDDEN: not a member of the space");
+        added.push({ space, child, creator });
       },
       removeSpaceChild: async (_creator: string, space: string, child: string) => {
         removed.push({ space, child });
@@ -99,6 +102,7 @@ beforeEach(async () => {
   removed = [];
   invited = [];
   nextSpace = 0;
+  addFails = false;
   const tenant = await resolveTenantForUser(OWNER);
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
   await rawSql`DELETE FROM matrix_purpose_spaces WHERE tenant_id = ${tenant}`;
@@ -202,5 +206,49 @@ describe("filing a station's room by purpose", () => {
     expect(created).toEqual([]);
     expect(added).toEqual([]);
     expect(removed).toEqual([]);
+  });
+});
+
+describe("who writes the child edge", () => {
+  test("the space's creator, not the room's own agent", async () => {
+    // Found in production: `m.space.child` state lives ON THE SPACE, and an
+    // agent that merely owns one of the rooms is not a member of the space, so
+    // the homeserver refused every edge after the first. Ten rooms were
+    // recorded as filed and one of them was.
+    await setPurpose(A, "personal");
+    await provisionStation(A, deps());
+    const creatorOfSpace = created[0]!.creator;
+
+    await setPurpose(B, "personal");
+    await provisionStation(B, deps());
+
+    expect(added).toHaveLength(2);
+    expect(added[1]!.creator).toBe(creatorOfSpace);
+    // …which is emphatically not B's own agent, the actor that used to be used.
+    expect(added[1]!.creator).not.toBe(added[1]!.child);
+  });
+
+  test("a refused edge is not recorded as a filing", async () => {
+    // The other half of the same bug: the failure was caught and the room was
+    // marked as filed anyway, so the next run saw nothing to do and the room
+    // stayed outside the space forever.
+    await setPurpose(A, "personal");
+    addFails = true;
+
+    await provisionStation(A, deps());
+
+    expect(await spaceOf(A)).toBeNull();
+  });
+
+  test("and the next run tries again", async () => {
+    await setPurpose(A, "personal");
+    addFails = true;
+    await provisionStation(A, deps());
+
+    addFails = false;
+    await provisionStation(A, deps());
+
+    expect(added).toHaveLength(1);
+    expect(await spaceOf(A)).toBe(added[0]!.space);
   });
 });
