@@ -265,3 +265,35 @@ export async function refreshAdoptedCapabilities(
     return 0;
   }
 }
+
+/**
+ * Tell the Matrix bridge to look at this node's stations again.
+ *
+ * Provisioning runs at hub boot, and at boot **no node is connected yet** —
+ * the hub resets every node to offline and the agents dial back in seconds
+ * later. Everything provisioning does against the homeserver works anyway;
+ * the one part that needs the node does not, because it reads a file from the
+ * station's workspace. That is why 32 agents had rooms and none had a face:
+ * the read was attempted while every node was offline, and a failed read is
+ * silent by design — an agent's picture is never worth failing provisioning
+ * over.
+ *
+ * So the bridge is told again when the node is actually reachable. Everything
+ * downstream is idempotent: a station that has its room, its space and its
+ * face costs one profile GET and nothing else.
+ *
+ * Never throws: it runs from the gateway's connect path.
+ */
+export async function announceStationsForNode(nodeId: string): Promise<number> {
+  try {
+    const rows = await db
+      .select({ id: stations.id })
+      .from(stations)
+      .where(eq(stations.nodeId, nodeId));
+    if (rows.length === 0) return 0;
+    notifyStationsAdopted(rows.map((r) => r.id));
+    return rows.length;
+  } catch {
+    return 0;
+  }
+}
