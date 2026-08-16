@@ -189,21 +189,30 @@ export async function fileRoomUnderSpace(
       .where(eq(matrixSpaces.roomId, currentSpaceRoomId));
 
     if (!current?.creator) {
-      log.warn("cannot unfile a room from a space with no known creator", {
+      // The space this room hangs under is no longer one we have a record of —
+      // which is what a change of grouping looks like from here (migration 0052
+      // dropped the purpose spaces). The edge cannot be removed without knowing
+      // who may write it, but refusing to continue strands the room in a space
+      // nothing will ever move it out of: in production this left 24 of 32
+      // rooms filed nowhere the reader could see.
+      //
+      // So the new edge is added anyway. A room briefly listed under an
+      // abandoned space is a cosmetic wrong; a room in no space at all is the
+      // feature not working.
+      log.warn("filing into the new space without unfiling from a forgotten one", {
         roomId,
-        spaceRoomId: currentSpaceRoomId,
+        forgottenSpace: currentSpaceRoomId,
       });
-      return;
-    }
-
-    try {
-      await deps.client.removeSpaceChild(current.creator, currentSpaceRoomId, roomId);
-    } catch (err) {
-      log.warn("could not take a room out of its space; leaving it where it is", {
-        roomId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return;
+    } else {
+      try {
+        await deps.client.removeSpaceChild(current.creator, currentSpaceRoomId, roomId);
+      } catch (err) {
+        log.warn("could not take a room out of its space; leaving it where it is", {
+          roomId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
     }
   }
 
