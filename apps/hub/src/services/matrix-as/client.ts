@@ -90,6 +90,13 @@ export interface MatrixClient {
   removeSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
   /** Set a user's avatar. Optional for an agent; uniform across harnesses. */
   setAvatar(userId: string, mxcUrl: string): Promise<void>;
+  /**
+   * What the identity's avatar is now, or null when it has none.
+   *
+   * The homeserver is asked rather than a local flag consulted, so an avatar
+   * that was never uploaded is retried and one that exists is left alone.
+   */
+  getAvatar(userId: string): Promise<string | null>;
   /** Upload an image and return its mxc:// URL. */
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
 }
@@ -329,6 +336,19 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       if (!res.ok) return null;
       const body = (await res.json()) as { content_uri?: string };
       return body.content_uri ?? null;
+    },
+
+    async getAvatar(userId) {
+      const res = await call(
+        `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+        { method: "GET", userId }
+      );
+      // A profile with no avatar answers 404 M_NOT_FOUND on some homeservers and
+      // an empty body on others; both mean the same thing and neither is an
+      // error worth throwing over.
+      if (res.status === 404) return null;
+      const url = res.body.avatar_url;
+      return typeof url === "string" && url !== "" ? url : null;
     },
 
     async setAvatar(userId, mxcUrl) {
