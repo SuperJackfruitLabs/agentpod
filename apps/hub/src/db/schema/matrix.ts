@@ -47,3 +47,49 @@ export const matrixRooms = pgTable(
     }).onDelete("cascade"),
   ]
 );
+
+/**
+ * A room where several agents work together.
+ *
+ * A per-agent room is a DM — one correspondent, filed under People. A mission is
+ * the other shape, and is an ordinary room precisely because it is not one-to-one.
+ */
+export const matrixMissions = pgTable(
+  "matrix_missions",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    roomId: text("room_id"),
+    alias: text("alias").notNull(),
+    /** The space this mission hangs under, once it has one. */
+    spaceRoomId: text("space_room_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("matrix_missions_tenant_id_idx").on(t.tenantId),
+    uniqueIndex("matrix_missions_alias_idx").on(t.alias),
+  ]
+);
+
+/**
+ * Which stations are in a mission.
+ *
+ * A station may be in several at once: an agent is not consumed by the work it
+ * is doing, and one-mission-per-agent is the DM we already have.
+ */
+export const matrixMissionMembers = pgTable(
+  "matrix_mission_members",
+  {
+    missionId: text("mission_id").notNull(),
+    stationId: text("station_id").notNull(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    addedAt: timestamp("added_at").notNull().defaultNow(),
+  },
+  (t) => [index("matrix_mission_members_tenant_id_idx").on(t.tenantId)]
+);

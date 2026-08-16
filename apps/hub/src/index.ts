@@ -57,6 +57,7 @@ import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/inde
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
+import { createMissionRoutes } from './routes/missions.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
@@ -184,6 +185,17 @@ if (matrixBridge) {
   app.route(
     '/api',
     createStationSayRoutes({
+      domain: matrixBridge.config.domain,
+      client: matrixBridge.client,
+    }),
+  );
+
+  // Rooms where several agents work together. A per-agent room is a DM; a
+  // mission has several correspondents, so it is an ordinary room — and
+  // ordinary rooms are what a space can group.
+  app.route(
+    '/api',
+    createMissionRoutes({
       domain: matrixBridge.config.domain,
       client: matrixBridge.client,
     }),
