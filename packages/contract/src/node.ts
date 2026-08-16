@@ -24,6 +24,11 @@ export const NodeSummary = z.object({
   updateAvailable: z.boolean(),
   /** Node-level capabilities from the hello frame. Null on older nodes. */
   capabilities: z.array(z.string()).nullable().optional(),
+  /**
+   * The purpose an agent adopted here inherits when it has none of its own — a
+   * default, not the truth. What an agent IS for lives on the station.
+   */
+  purpose: z.string().nullable().optional(),
   provisioned: z.object({ runtimeId: z.string(), provider: z.string() }).nullable().optional(),
 });
 export type NodeSummary = z.infer<typeof NodeSummary>;

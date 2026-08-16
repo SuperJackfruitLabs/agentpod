@@ -21,15 +21,16 @@ import { principalIdentities } from "../db/schema/identities";
 import { getGrant, grantAllowsStation } from "../services/grants";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
-import { missionAlias, spaceAlias } from "../services/matrix-as/missions";
+import { missionAlias } from "../services/matrix-as/missions";
+import {
+  ensurePurposeSpace,
+  ensureSpaceRecord,
+  GENERAL_MISSIONS_KEY,
+} from "../services/matrix-as/purpose-spaces";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 
 const log = createLogger("missions");
-
-/** One space holds every mission. Per-node spaces would group the wrong axis:
- *  a mission spans nodes by design, so filing it under one of them would lie. */
-const MISSIONS_SPACE = "missions";
 
 export interface MissionDeps {
   domain: string;
@@ -38,10 +39,33 @@ export interface MissionDeps {
       alias: string,
       opts: { creator: string; name: string; topic: string; invite?: string; isDirect?: boolean }
     ): Promise<string | null>;
-    ensureSpace(alias: string, opts: { creator: string; name: string }): Promise<string | null>;
+    createSpace(opts: { creator: string; name: string }): Promise<string | null>;
     addSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
     invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   };
+}
+
+/**
+ * The one space every cross-purpose mission hangs under.
+ *
+ * A mission that spans purposes belongs to both and to neither, which is what
+ * a single shared space is for. Not per-node: a mission spans nodes by design,
+ * so filing it under one of them would lie about where the work is.
+ */
+async function missionsSpace(
+  tenantId: string,
+  speaker: string,
+  owner: string | null,
+  deps: MissionDeps
+): Promise<string | null> {
+  return ensureSpaceRecord(
+    tenantId,
+    GENERAL_MISSIONS_KEY,
+    "Missions",
+    speaker,
+    owner,
+    deps
+  );
 }
 
 export function createMissionRoutes(deps: MissionDeps) {
@@ -68,6 +92,7 @@ export function createMissionRoutes(deps: MissionDeps) {
         id: stations.id,
         tenantId: stations.tenantId,
         stationKey: stations.stationKey,
+        purpose: stations.purpose,
         nodeName: nodes.name,
       })
       .from(stations)
@@ -133,26 +158,35 @@ export function createMissionRoutes(deps: MissionDeps) {
     });
     if (!roomId) return c.json({ error: "Could not create the mission's room." }, 502);
 
-    // One space for every mission. A space per NODE would group the wrong axis —
-    // a mission spans nodes by design, so filing it under one would lie about
-    // where the work is.
-    //
-    // The id is remembered from the last mission rather than re-created:
-    // `ensureSpace` answers null for a space that already exists, which is
-    // correct for "did I create one" and would have meant every mission after
-    // the first was never hung in the space at all.
-    const [withSpace] = await db
-      .select({ spaceRoomId: matrixMissions.spaceRoomId })
-      .from(matrixMissions)
-      .where(eq(matrixMissions.tenantId, tenantId))
-      .limit(1);
+    const [identity] = await db
+      .select({ externalId: principalIdentities.externalId })
+      .from(principalIdentities)
+      .where(
+        and(
+          eq(principalIdentities.principalId, user.id),
+          eq(principalIdentities.system, "matrix")
+        )
+      );
 
-    const spaceRoomId =
-      withSpace?.spaceRoomId ??
-      (await deps.client.ensureSpace(spaceAlias(MISSIONS_SPACE, deps.domain), {
-        creator: speaker,
-        name: "Missions",
-      }));
+    // A mission of work agents is a work mission, and belongs where the
+    // operator is already looking. That only holds when the members AGREE: one
+    // labelled member does not make a purpose, and a cross-purpose mission
+    // belongs to both and to neither — which is exactly the case the one shared
+    // Missions space is right for. Inferring from a majority would file it
+    // somewhere nobody chose.
+    const purposes = new Set(members.map((m) => m.purpose));
+    const shared =
+      purposes.size === 1 && members[0]!.purpose !== null ? members[0]!.purpose : null;
+
+    const spaceRoomId = shared
+      ? await ensurePurposeSpace(
+          tenantId,
+          shared,
+          speaker,
+          identity?.externalId ?? null,
+          deps
+        )
+      : await missionsSpace(tenantId, speaker, identity?.externalId ?? null, deps);
     if (spaceRoomId) {
       await deps.client.addSpaceChild(speaker, spaceRoomId, roomId).catch(() => {});
     }
@@ -177,15 +211,6 @@ export function createMissionRoutes(deps: MissionDeps) {
       await deps.client.invite(speaker, roomId, agent).catch(() => {});
     }
 
-    const [identity] = await db
-      .select({ externalId: principalIdentities.externalId })
-      .from(principalIdentities)
-      .where(
-        and(
-          eq(principalIdentities.principalId, user.id),
-          eq(principalIdentities.system, "matrix")
-        )
-      );
     if (identity) await deps.client.invite(speaker, roomId, identity.externalId).catch(() => {});
 
     log.info("mission created", { id, name, members: members.length });

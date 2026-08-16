@@ -27,6 +27,17 @@ export const stations = pgTable("stations", {
    * speaks for it) or `harness` (it runs its own Matrix client). Never both.
    */
   matrixIdentityMode: text("matrix_identity_mode").notNull().default("bridge"),
+  /**
+   * What this station is FOR — `personal`, `work`, an ad-hoc name of the
+   * operator's choosing. Not where it runs: a node's name carries its purpose
+   * only by accident of how this fleet was built, and coming use cases span
+   * harnesses and runtimes.
+   *
+   * The station's is the one anything reads; `nodes.purpose` is only the
+   * default applied at adoption to a station that has none. Null means nobody
+   * has said, and an unlabelled station is filed under no Matrix space at all.
+   */
+  purpose: text("purpose"),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

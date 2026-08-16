@@ -18,6 +18,7 @@ import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
+import { ensurePurposeSpace, fileRoomUnderSpace } from "./purpose-spaces";
 import { pickAvatar } from "./avatar";
 import { createLogger } from "../../utils/logger";
 
@@ -38,6 +39,14 @@ export interface ProvisionDeps {
       }
     ): Promise<string | null>;
     invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+    /** Spaces — see `purpose-spaces.ts`. Absent in tests that assert on rooms only. */
+    createSpace?(opts: { creator: string; name: string }): Promise<string | null>;
+    addSpaceChild?(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
+    removeSpaceChild?(
+      creator: string,
+      spaceRoomId: string,
+      childRoomId: string
+    ): Promise<void>;
     uploadImage?(
       userId: string,
       bytes: Uint8Array,
@@ -69,8 +78,10 @@ async function context(stationId: string) {
       displayName: stations.displayName,
       identityMode: stations.matrixIdentityMode,
       harnessMxid: stations.matrixId,
+      purpose: stations.purpose,
       nodeName: nodes.name,
       roomId: matrixRooms.roomId,
+      spaceRoomId: matrixRooms.spaceRoomId,
     })
     .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -181,6 +192,52 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
       .set({ bridgeMatrixId: speaker })
       .where(eq(stations.id, s.stationId));
   }
+
+  await fileByPurpose(s, speaker, deps);
+}
+
+/**
+ * Hang the station's room under the space its purpose calls for.
+ *
+ * Runs on every provision, which is what makes a purpose change take effect:
+ * setting one announces the station, and the announcement is this same
+ * reconciler. Skipped entirely when the deployment's client cannot do spaces —
+ * a test client asserting on rooms, mainly — because an agent you can talk to
+ * matters more than where it is filed.
+ */
+async function fileByPurpose(
+  s: NonNullable<Awaited<ReturnType<typeof context>>>,
+  speaker: string,
+  deps: ProvisionDeps
+): Promise<void> {
+  const { createSpace, addSpaceChild, removeSpaceChild } = deps.client;
+  if (!createSpace || !addSpaceChild || !removeSpaceChild) return;
+
+  // Re-read: the room may have been created moments ago, above.
+  const [room] = await db
+    .select({ roomId: matrixRooms.roomId, spaceRoomId: matrixRooms.spaceRoomId })
+    .from(matrixRooms)
+    .where(eq(matrixRooms.stationId, s.stationId));
+  if (!room) return;
+
+  const spaceDeps = {
+    client: { createSpace, addSpaceChild, removeSpaceChild, invite: deps.client.invite },
+  };
+
+  // An unlabelled station belongs under nothing — not under an invented
+  // `Unsorted` space. It still shows up in All rooms, which is where a fresh
+  // ad-hoc runtime belongs until somebody says otherwise.
+  const desired = s.purpose
+    ? await ensurePurposeSpace(
+        s.tenantId,
+        s.purpose,
+        speaker,
+        await ownerMxid(s.userId),
+        spaceDeps
+      )
+    : null;
+
+  await fileRoomUnderSpace(room.roomId, desired, room.spaceRoomId, speaker, spaceDeps);
 }
 
 /**

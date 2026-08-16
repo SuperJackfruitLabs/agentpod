@@ -851,7 +851,50 @@ so everything it can do is something the control pair already governs.
 Matrix account first and the agent second; now the station must exist before it
 can have an identity.
 
-### 7f. What happened to the Synapse history
+### 7f. Purpose: what an agent is FOR
+
+A flat roster is fine at 32 agents and unreadable at 200. The axis to group by
+is **purpose** — personal, work, ad hoc, whatever you type — and deliberately
+**not** the node: this fleet's nodes line up with use cases today by accident of
+how it was built, and coming use cases span harnesses and runtimes.
+
+Purpose lives on the **station**. A node has one too, but only as the default a
+station inherits when it is adopted — the station's is what anything reads.
+
+```sh
+# what one agent is for
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"purpose":"work"}' https://hub.agentpod.dev/api/stations/<id>/purpose
+
+# the default for a node — ALSO labels the agents on it that have none,
+# and the response says how many that was
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"purpose":"personal"}' https://hub.agentpod.dev/api/nodes/<id>/purpose
+```
+
+Both are in the console: a **Purpose of agents here** field on the node page,
+and a **Purpose** field on each agent's page that overrides it.
+
+**What it does on Matrix.** Each purpose gets one space, and every labelled
+agent's room is hung under it (`m.space.child`). Clients that read the hierarchy
+group the roster by it for free — supermessage's space rail already scopes its
+list this way, and Element reads the same edges. You are invited to each space as
+it is created; **accept the invite or you will not see it**.
+
+- Changing a purpose **moves** the room: the old edge is removed and the new one
+  added, so a room never hangs under two purposes at once.
+- Clearing a purpose takes the room out of its space. It is then filed nowhere
+  and appears only in All rooms, which is where a fresh ad-hoc runtime belongs
+  until somebody says otherwise. There is no `Unsorted` space — an invented
+  group is a claim nobody made.
+- A **mission** hangs under the purpose its members agree on. When they do not
+  agree, or any member is unlabelled, it stays in the general **Missions**
+  space — a cross-purpose mission belongs to both and to neither.
+
+Filing happens during provisioning, so it is idempotent and self-healing: set a
+purpose and the room moves; restart the hub and nothing moves twice.
+
+### 7g. What happened to the Synapse history
 
 The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
 import path from Synapse into the Conduit lineage, and Matrix here carries a

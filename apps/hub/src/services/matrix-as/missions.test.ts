@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { missionAlias, spaceAlias, missionLocalpart } from "./missions";
+import { missionAlias, missionLocalpart } from "./missions";
 
 /**
  * Names for rooms where several agents work together.
@@ -18,9 +18,6 @@ describe("mission names", () => {
     expect(missionAlias("Q3 migration", D)).toBe("#agentpod_mission_q3-migration:id.agentpod.dev");
   });
 
-  test("a space is named for what it groups", () => {
-    expect(spaceAlias("molt-bot", D)).toBe("#agentpod_space_molt-bot:id.agentpod.dev");
-  });
 
   test("two missions that clean to the same name are the same mission", () => {
     // Not a collision to guard against — a mission is named by a person, and

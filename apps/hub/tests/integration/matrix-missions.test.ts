@@ -23,7 +23,7 @@ const B = "station_mission_b";
 const OWNER_MXID = "@owner-mission:id.agentpod.dev";
 
 let rooms: Array<{ alias: string; name: string; invite?: string }> = [];
-let spaces: Array<{ alias: string; name: string }> = [];
+let spaces: Array<{ name: string }> = [];
 let children: Array<{ space: string; child: string }> = [];
 let invited: Array<{ roomId: string; invitee: string }> = [];
 
@@ -35,8 +35,8 @@ function app() {
         rooms.push({ alias, name: opts.name, invite: opts.invite });
         return `!mission${rooms.length}:id.agentpod.dev`;
       },
-      ensureSpace: async (alias: string, opts: any) => {
-        spaces.push({ alias, name: opts.name });
+      createSpace: async (opts: any) => {
+        spaces.push({ name: opts.name });
         return `!space${spaces.length}:id.agentpod.dev`;
       },
       addSpaceChild: async (_creator: string, space: string, child: string) => {
@@ -93,6 +93,8 @@ beforeEach(async () => {
   invited = [];
   await rawSql`DELETE FROM matrix_mission_members`;
   await rawSql`DELETE FROM matrix_missions`;
+  await rawSql`DELETE FROM matrix_purpose_spaces`;
+  await rawSql`UPDATE stations SET purpose = NULL WHERE node_id = ${NODE}`;
   await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*", "agentpod:*/openclaw:*"], mayGrantReach: false });
 });
 
@@ -101,6 +103,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM matrix_mission_members`;
     await rawSql`DELETE FROM matrix_missions`;
+    await rawSql`DELETE FROM matrix_purpose_spaces`;
     await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE id IN (${A}, ${B})`;
@@ -151,8 +154,7 @@ describe("POST /api/missions", () => {
   test("hangs the room under a space, which is what groups missions", async () => {
     await post("/missions", { name: "Q3 migration", stationIds: [A] });
 
-    expect(spaces).toHaveLength(1);
-    expect(spaces[0]!.alias).toBe("#agentpod_space_missions:id.agentpod.dev");
+    expect(spaces).toEqual([{ name: "Missions" }]);
     expect(children).toHaveLength(1);
     expect(children[0]!.child).toBe("!mission1:id.agentpod.dev");
   });
@@ -191,5 +193,42 @@ describe("POST /api/missions", () => {
 
     expect((second as any).id).toBe((first as any).id);
     expect(rooms).toHaveLength(0);
+  });
+});
+
+describe("a mission and the purpose of its members", () => {
+  test("hangs under the purpose its members agree on", async () => {
+    // A mission of work agents is a work mission. Filing it under the general
+    // missions space instead would put it somewhere the operator does not look
+    // for the thing they were just doing.
+    await rawSql`UPDATE stations SET purpose = 'work' WHERE id IN (${A}, ${B})`;
+
+    await post("/missions", { name: "Q4 rollout", stationIds: [A, B] });
+
+    expect(spaces).toEqual([{ name: "Work" }]);
+    expect(children).toHaveLength(1);
+    expect(children[0]!.space).toBe("!space1:id.agentpod.dev");
+  });
+
+  test("falls back to the general missions space when they disagree", async () => {
+    // A cross-purpose mission is exactly the case one shared space is right
+    // for: it belongs to both and to neither, and picking one member's purpose
+    // would be picking a member.
+    await rawSql`UPDATE stations SET purpose = 'work' WHERE id = ${A}`;
+    await rawSql`UPDATE stations SET purpose = 'personal' WHERE id = ${B}`;
+
+    await post("/missions", { name: "Cross thing", stationIds: [A, B] });
+
+    expect(spaces).toEqual([{ name: "Missions" }]);
+  });
+
+  test("falls back when a member is unlabelled, rather than guessing from the rest", async () => {
+    // One labelled member does not make a mission's purpose. Inferring from a
+    // majority would file it somewhere nobody chose.
+    await rawSql`UPDATE stations SET purpose = 'work' WHERE id = ${A}`;
+
+    await post("/missions", { name: "Half known", stationIds: [A, B] });
+
+    expect(spaces).toEqual([{ name: "Missions" }]);
   });
 });

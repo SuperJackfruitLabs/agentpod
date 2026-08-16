@@ -71,10 +71,23 @@ export interface MatrixClient {
   ): Promise<string | null>;
   /** Remove an event we sent, which is how a reaction is taken back off. */
   redact(userId: string, roomId: string, eventId: string): Promise<void>;
-  /** Create a space — a room whose type groups other rooms. */
-  ensureSpace(alias: string, opts: { creator: string; name: string }): Promise<string | null>;
+  /**
+   * Create a space — a room whose type groups other rooms.
+   *
+   * Deliberately **without an alias**: a space is a container, not a
+   * destination, and nobody types its address. An alias is global to the
+   * homeserver, so one derived from an everyday word — "personal" — would have
+   * one tenant's space swallow another's.
+   */
+  createSpace(opts: { creator: string; name: string }): Promise<string | null>;
   /** Hang a room under a space, which is what makes a hierarchy. */
   addSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
+  /**
+   * Take a room back out of a space. An `m.space.child` with no `via` is how
+   * Matrix spells "no longer a child" — the state event cannot be deleted, only
+   * emptied, and a client reading a `via`-less edge skips it.
+   */
+  removeSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
   /** Set a user's avatar. Optional for an agent; uniform across harnesses. */
   setAvatar(userId: string, mxcUrl: string): Promise<void>;
   /** Upload an image and return its mxc:// URL. */
@@ -239,20 +252,17 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       assertOkOrAlready("displayname", res);
     },
 
-    async ensureSpace(alias, opts) {
-      const aliasLocalpart = alias.replace(/^#/, "").replace(/:.*$/, "");
+    async createSpace(opts) {
       const res = await call("/_matrix/client/v3/createRoom", {
         method: "POST",
         userId: opts.creator,
         body: {
-          room_alias_name: aliasLocalpart,
           name: opts.name,
           preset: "private_chat",
-          // What makes a room a space rather than a conversation.
           creation_content: { type: "m.space" },
         },
       });
-      if (!assertOkOrAlready(`createSpace ${alias}`, res)) return null;
+      if (!assertOkOrAlready(`createSpace ${opts.name}`, res)) return null;
       return String(res.body.room_id ?? "") || null;
     },
 
@@ -268,6 +278,17 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         }
       );
       assertOkOrAlready("space child", res);
+    },
+
+    async removeSpaceChild(creator, spaceRoomId, childRoomId) {
+      // Empty content, not a delete: Matrix has no way to remove a state event,
+      // and an `m.space.child` without `via` is the spelling every client reads
+      // as "not a child any more".
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(spaceRoomId)}/state/m.space.child/${encodeURIComponent(childRoomId)}`,
+        { method: "PUT", userId: creator, body: {} }
+      );
+      assertOkOrAlready("space child removal", res);
     },
 
     async sendReaction(userId, roomId, targetEventId, key) {

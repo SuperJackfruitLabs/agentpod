@@ -16,6 +16,9 @@
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
+  import PurposeField from "$lib/components/purpose/PurposeField.svelte";
+  import { nodePurposeConsequence } from "$lib/components/purpose/purpose";
+  import { setNodePurpose } from "$lib/api/client";
 
   // params.id is always defined for this route
   const id = $derived(page.params.id as string);
@@ -143,6 +146,32 @@
 
   {#if hasPosture}
     <PosturePanel nodeId={id} />
+  {/if}
+
+  <!--
+    What the agents on this node are FOR. The node's own field is only the
+    default a future adoption inherits — an agent's purpose lives on the agent —
+    but setting it also labels the ones here that have none, which is what makes
+    an existing fleet filable without visiting every agent in turn. The hint
+    says how many that is before the click, not after.
+  -->
+  {#if node}
+    <Card.Root>
+      <Card.Content class="p-4">
+        <PurposeField
+          id="node-purpose"
+          label="Purpose of agents here"
+          value={node.purpose ?? null}
+          hint={nodePurposeConsequence(
+            stations.adopted.filter((s) => s.purpose === null).length
+          )}
+          onSave={async (purpose) => {
+            await setNodePurpose(id, purpose);
+            await Promise.all([loadNode(), loadAdopted(id)]);
+          }}
+        />
+      </Card.Content>
+    </Card.Root>
   {/if}
 
   {#if stations.error}
