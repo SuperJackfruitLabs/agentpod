@@ -3,7 +3,9 @@
 **Date:** 2026-08-16
 **Status:** Design. Unbuilt.
 **Phase:** charter → `strategy/2026-08-12-layer-reference.md` **P2 (Communication)**.
-**Depends on:** #329 (Synapse on Postgres), which ships first and separately.
+**Homeserver:** **tuwunel** (Apache-2.0), replacing Synapse (AGPLv3) — proven
+against this design in `2026-08-16-tuwunel-appservice-spike-findings.md`.
+**Replaces:** #329 (Synapse on Postgres), which this makes unnecessary.
 **Follows:** `charter/decisions/2026-08-14-supermessage-positioning.md`,
 `2026-08-13-ecosystem-identity.md` (Decision 4), `2026-08-15-granting-reach-is-changing-an-agent.md`.
 
@@ -31,19 +33,36 @@ The console is not a substitute. It is a facilities console — the place you go
 to see a fleet, provision a runtime, read a log. Conversation belongs where
 conversation already happens, next to the people also in the room.
 
-## What already exists, and it is more than expected
+## The homeserver changes underneath this
 
-**The Application Service is registered.** `/etc/matrix-synapse/agents.yaml`
-declares an AS `ai-agents` with:
+The operator requires an Apache- or MIT-licensed server. Synapse is AGPLv3;
+Dendrite followed it and is in maintenance mode. **tuwunel** (Apache-2.0, the
+official conduwuit successor) is the choice, and a spike proved every
+Application Service feature this design needs — masquerading via `?user_id=`,
+exclusive namespaces, `receive_ephemeral`, transaction push, and the room-alias
+query. Findings: `2026-08-16-tuwunel-appservice-spike-findings.md`.
 
-- users `@agent_.*` — **exclusive**
-- aliases `#agentpod_.*` — **exclusive**
-- `de.sorunome.msc2409.push_ephemeral: true`
-- **`url: null`**
+Three consequences shape everything below.
 
-`url: null` is the whole gap. The homeserver holds the namespaces and the
-tokens and pushes nothing, because there is nothing to push to. This design
-fills that hole; it does not invent the registration.
+**There is no migration from Synapse.** The new homeserver starts empty. That is
+affordable only because of what Matrix is here: `acp_events` holds the
+authoritative transcript, and Matrix carries a projection. What is lost is
+~19,400 events of history and the room ids; what survives is every **address**,
+because an mxid is localpart + domain and both are ours to recreate.
+
+**Every identity is created by the bridge, from nothing.** This removes the
+riskiest part of the original design. On Synapse the 14 hermes agents already
+held their own accounts and would have had to be *adopted* — a window in which
+the bridge and hermes's own Matrix loop could both answer one address. On a new
+server that window does not exist: the bridge registers all 32 identities before
+anything else logs in, and hermes's native Matrix integration is simply not
+given credentials.
+
+**The registration is a file, and it barely changes.** tuwunel reads Synapse-shaped
+YAML from `appservice_dir`; the spike ran the existing namespaces verbatim. Only
+one key differs — `receive_ephemeral: true` in place of the vendored
+`de.sorunome.msc2409.push_ephemeral`. The namespaces `@agent_.*` and
+`#agentpod_.*` carry over exactly.
 
 **The authorization is built.** `resolveMatrixId(mxid)` already answers
 *principal*, *station*, *ambiguous* or *null* — and fails closed on ambiguity,
@@ -86,27 +105,33 @@ exists on two nodes right now. A Matrix identity that named only the station key
 would merge two different agents on two different machines into one, which is
 the collision this suite has already undone once.
 
-### The 14 hermes agents keep their mxids and change owner
+### The 14 hermes agents keep their addresses, and the bridge creates them
 
-They are `@analyst-echo:id.agentpod.dev` — **outside** `@agent_.*`, real
-accounts with their own logins, because hermes is a Matrix client.
+They are `@analyst-echo:id.agentpod.dev` — outside `@agent_.*`, because hermes
+registered them itself on the old server.
 
-Renaming them to `@agent_molt-bot_hermes_analyst-echo` would be uniform and
-wrong: those addresses are in people's rooms, in their history, and in their
-muscle memory. **The registration gains a second, non-exclusive namespace
-listing those 14 localparts explicitly**, which is what lets the AS act as them.
-The mxid an operator knows does not change; what changes is who answers.
+Those addresses are in people's rooms and in their muscle memory, so they are
+**recreated verbatim on the new homeserver by the bridge**. The registration
+carries a second exclusive namespace listing those 14 localparts explicitly —
+explicitly rather than by pattern, because a broad regex here would claim human
+accounts on the same homeserver.
 
-The cost is real and is the riskiest part of this design: **hermes's own Matrix
-loop and the bridge would both answer the same address**. So the cutover is per
-agent, and it is a stop-then-start, never a dual-run in a room anyone uses:
-disable that agent's native Matrix loop on the host, then mark the station
-bridge-owned. Rollback is the same two steps reversed, and it is one row.
+**hermes's own Matrix loop is not given credentials on the new server.** This is
+the part to say out loud: hermes stops being a Matrix client and becomes an
+agent you reach the same way as every other — a room, the bridge, an ACP
+session. Conversation gains the control pair, an `acp_events` transcript, and
+one code path for all 32. What it loses is whatever hermes did with Matrix
+natively that never went through ACP.
 
-### Ownership is recorded, because two things write that column
+The reward for doing this on a fresh homeserver is that **no address is ever
+served by two answerers**. On Synapse this was an adoption dance per agent with a
+day of soak between; here it is the initial state.
 
-`stations.matrix_id` is written by the node agent from a harness profile. The
-bridge must not fight it. A new column `stations.matrix_id_source`
+### Ownership is still recorded, because the node agent still writes that column
+
+`stations.matrix_id` is written by the node agent from a harness profile — it
+reads hermes's configured mxid off the host and will keep doing so. The bridge
+must not fight it. A new column `stations.matrix_id_source`
 (`harness` | `bridge`, default `harness`) says who owns the address, and the
 node agent's refresh leaves `bridge` rows alone. `resolveMatrixId` is unchanged
 — it answers about an mxid, not about its provenance.
@@ -117,7 +142,7 @@ node agent's refresh leaves `bridge` rows alone. `resolveMatrixId` is unchanged
 Matrix room  #agentpod_molt-bot_hermes_analyst-echo
    │ m.room.message from @rakesh:id.agentpod.dev
    ▼
-AS transaction  POST /_matrix/app/v1/transactions/:txnId   (hs_token)
+AS transaction  PUT /_matrix/app/v1/transactions/:txnId    (hs_token)
    │ resolveMatrixId(sender) → principal
    │ control pair: may this principal dispatch this station?
    ▼
@@ -144,6 +169,8 @@ would conclude the agent was down.
   encrypted rooms today, so encryption would make the fleet *less* reachable,
   and MSC3202 device masquerading is a second project.
 - **No federation.** The homeserver is private and stays so.
+- **No history migration.** There is no supported path from Synapse, and
+  inventing one would mean writing another server's internals into RocksDB.
 - **No new harness work.** The node agent is untouched: everything happens
   between the homeserver and the hub.
 

@@ -4,92 +4,174 @@
 
 **Goal:** Every station in the fleet is reachable from any Matrix client — the 18 whose harness has never spoken Matrix, and the 14 whose harness does, through one mechanism.
 
-**Architecture:** Synapse moves to Postgres first, on its own. Then an Application Service inside the hub receives transactions at `/_matrix/app/v1/*`, owns a virtual `@agent_*` user and a room per station, maps inbound messages onto ACP sessions after checking the control pair, and streams the agent's output back by subscribing to the same in-process fan-out the console's WebSocket uses.
+**Architecture:** The homeserver is replaced first — **tuwunel** (Apache-2.0) in place of Synapse (AGPLv3), starting empty. Then an Application Service inside the hub receives transactions at `/_matrix/app/v1/*`, owns a virtual user and a room per station, maps inbound messages onto ACP sessions after checking the control pair, and streams the agent's output back by subscribing to the same in-process fan-out the console's WebSocket uses.
 
-**Tech Stack:** Synapse 1.x + Postgres 16 (`LC_COLLATE=C`), Bun + Hono + Drizzle (hub), the Matrix Application Service API r0/v1, MSC2409 ephemeral events.
+**Tech Stack:** tuwunel 1.8.3 (RocksDB, embedded), Bun + Hono + Drizzle (hub), the Matrix Application Service API v1.
 
 **Spec:** `docs/superpowers/specs/2026-08-16-matrix-application-service-design.md`
+**Spike:** `docs/superpowers/specs/2026-08-16-tuwunel-appservice-spike-findings.md` — every AS feature below was verified against a running tuwunel before this plan was written.
 
 ## Global Constraints
 
-- **Homeserver:** `id.agentpod.dev` on `178.105.68.68`, private, federation disabled, nginx proxying `/_matrix` and `/_synapse` to `127.0.0.1:8008`.
-- **Registration file:** `/etc/matrix-synapse/agents.yaml`, AS id `ai-agents`, `sender_localpart: ai-bridge`, users `@agent_.*` exclusive, aliases `#agentpod_.*` exclusive, `de.sorunome.msc2409.push_ephemeral: true`, `url: null` **until Task 9**.
+- **Homeserver:** `id.agentpod.dev` on `178.105.68.68`, private, federation disabled, nginx proxying `/_matrix` to the homeserver's port. **tuwunel serves 6167 by default, not 8008** — the vhost changes with it.
+- **Registration file:** a YAML file in tuwunel's `appservice_dir`, Synapse-shaped (the spike confirmed the existing file's namespaces load unchanged): AS id `ai-agents`, `sender_localpart: ai-bridge`, users `@agent_.*` exclusive, aliases `#agentpod_.*` exclusive, **`receive_ephemeral: true`** (tuwunel's name for what Synapse spelled `de.sorunome.msc2409.push_ephemeral`), and `url` **left unset until Task 9**.
 - **Name derivation is a pure function** of `(nodeName, stationKey)`: lowercase, every character outside `[a-z0-9._=/-]` becomes `_`. User `@agent_<node>_<station>`, alias `#agentpod_<node>_<station>`. Never stored as a second source of truth.
-- **`hs_token` authenticates every AS route**; a request without it is 403 and is never processed. The `as_token` is what the bridge sends *to* Synapse.
+- **`hs_token` authenticates every AS route**; a request without it is 403 and is never processed. The `as_token` is what the bridge sends *to* the homeserver. The two point in opposite directions and swapping them fails as a 403 that reads like a permissions bug.
 - **Drop every event sent by our own namespace** before any other handling.
 - **Transactions are idempotent by `txnId`.**
 - **Refusals are messages in the room**, never silence.
-- Hub tests need `DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod"` and pgvector Postgres on :5434. Console tests need Node 22.
+- Hub tests need `DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod"` and pgvector Postgres on :5434 — that is the **hub's** database and is unrelated to the homeserver, which has none. Console tests need Node 22.
+- **A rejected registration is `M_EXCLUSIVE` with HTTP 400**, not 403 — the spec's code, and tuwunel's. Assert 400.
 - **TDD:** failing test first, every task. Regression test for every bug fixed.
 
 ### Secrets, and where they are not
 
-`as_token` and `hs_token` live in `/etc/matrix-synapse/agents.yaml` and in the hub's environment as `MATRIX_AS_TOKEN` / `MATRIX_HS_TOKEN`. **Neither goes in the repository, in a test fixture, or in a log line.** The bridge logs mxids and room ids, never tokens.
+`as_token` and `hs_token` live in `/etc/tuwunel/appservices/agentpod.yaml` and in the hub's environment as `MATRIX_AS_TOKEN` / `MATRIX_HS_TOKEN`. **Neither goes in the repository, in a test fixture, or in a log line.** The bridge logs mxids and room ids, never tokens.
 
 ---
 
-## Phase A — Synapse on Postgres (#329)
+## Phase A — Replace the homeserver
 
-The migration plan is already written: `docs/superpowers/plans/2026-08-15-synapse-postgres-migration.md` on branch `docs/synapse-postgres-plan` (PR #329). Execute it as written. It is not restated here; these are the only additions this program makes to it.
+**#329 is closed, not executed.** It existed because Synapse on SQLite has one
+writer, no safe hot backup, and a migration that only gets harder. tuwunel is
+RocksDB — embedded, concurrent, no separate database process — so every reason
+for that plan is answered by not running SQLite at all.
 
-### Task A1: Execute the migration, with the AS in mind
+**There is no migration path from Synapse.** The new homeserver starts empty.
+What survives is every address, because an mxid is localpart + domain and both
+are ours to recreate; what is lost is ~19,400 events of history, the room ids
+and any media. Accepted deliberately: `acp_events` is the authoritative
+transcript, Matrix carries a projection, and the bridge recreates every room.
+
+### Task A1: Stand tuwunel up beside Synapse
 
 **Files:**
-- Follow: `docs/superpowers/plans/2026-08-15-synapse-postgres-migration.md`
-- Modify: `/etc/matrix-synapse/conf.d/database.yaml` (on the host)
+- Create: `/etc/tuwunel/tuwunel.toml` (host)
+- Create: `/etc/tuwunel/appservices/agentpod.yaml` (host)
+- Create: `deploy/tuwunel/tuwunel.service` (repo — the unit, so it is not hand-rolled on the box)
 
-- [ ] **Step 1: Take the backups the plan requires**
+- [ ] **Step 1: Take the backups anyway**
 
-`sqlite3 .backup` of `homeserver.db`, plus `homeserver.signing.key` and `agents.yaml`, copied **off the box** and restored once into a scratch path to prove they open. The signing key cannot be regenerated: losing it loses the server's identity permanently.
+Synapse's `homeserver.db`, `homeserver.signing.key` and `agents.yaml`, copied off
+the box. Not for the migration — there isn't one — but because Task A4 turns the
+old server off, and a decision to discard history should be reversible for a
+month.
 
-> The host has **no `sqlite3` CLI** (checked 2026-08-16). Install it first — `apt-get install -y sqlite3` — or the plan's very first command fails.
+> The host has **no `sqlite3` CLI** (checked 2026-08-16). `apt-get install -y sqlite3` first, or use `VACUUM INTO`.
 
-- [ ] **Step 2: Create the database with C collation**
+- [ ] **Step 2: Write the config**
 
-```sql
-CREATE ROLE synapse_user LOGIN PASSWORD '<generated>';
-CREATE DATABASE synapse ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C'
-  template=template0 OWNER synapse_user;
+```toml
+[global]
+server_name = "id.agentpod.dev"
+database_path = "/var/lib/tuwunel"
+port = 6167
+address = "127.0.0.1"
+allow_registration = false          # the bridge registers agents; humans are made deliberately
+allow_federation = false
+appservice_dir = "/etc/tuwunel/appservices"
 ```
 
-`synapse_port_db` refuses to run without `C` collation, and fixing it afterwards means doing the migration again.
+`allow_registration = false` from the first boot: the spike used open
+registration and tuwunel warned about it on every start, correctly.
 
-- [ ] **Step 3: Run the port with Synapse stopped**
-
-Per the plan. 82 MB, ~19,400 events — minutes, not hours.
-
-- [ ] **Step 4: Raise `cp_max` for the bridge**
-
-The migration plan flags this as a follow-up; do it now rather than discovering it under load. In the Postgres stanza:
+- [ ] **Step 3: Write the registration, and leave `url` out**
 
 ```yaml
-database:
-  name: psycopg2
-  args:
-    cp_min: 5
-    cp_max: 15
+id: ai-agents
+as_token: <generate>
+hs_token: <generate>
+sender_localpart: ai-bridge
+receive_ephemeral: true
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@agent_.*"
+    # The 14 hermes addresses people already use, recreated on the new server by
+    # the bridge. Listed explicitly rather than by pattern: a broad regex here
+    # would claim human accounts on this homeserver.
+    - exclusive: true
+      regex: "@(analyst-echo|artistic-lyra|buddhimaan|cleaner-cody|coder-kai|controller-casey|onboarding-olivia|optimizer-ollie|predictor-paul|project-manager-pete|research-ray|strategy-sam|threat-hunter-theo|writer-quill):id\\.agentpod\\.dev"
+  aliases:
+    - exclusive: true
+      regex: "#agentpod_.*"
+  rooms: []
 ```
 
-An AS multiplies both connection demand and background work — the reason to leave SQLite in the first place.
+**New tokens, not Synapse's.** The old ones were valid for a server that is
+about to be switched off, and reusing a credential across a trust boundary
+change is how a stale token outlives the thing it authenticated.
 
-- [ ] **Step 5: Verify, then keep the SQLite file**
+- [ ] **Step 4: Run it on a port nothing points at yet**
 
-`/health` on the hub is unrelated; verify Synapse itself: log in as an existing agent, read a room, send a message, and confirm `SELECT count(*) FROM events` in Postgres matches the SQLite count recorded in Step 1. Keep `homeserver.db` on disk, renamed `.migrated`, until Phase B is finished.
+`systemctl enable --now tuwunel`, then confirm from the box:
+`curl -s localhost:6167/_matrix/client/versions`. Synapse is still serving
+`id.agentpod.dev`; nothing has moved.
 
-- [ ] **Step 6: Write the backup schedule that has never existed**
-
-A nightly `pg_dump` of **both** databases (`agentpod`, `synapse`) plus the signing key, to somewhere off the box. The migration plan names this as the gap it does not close. Close it here — a homeserver with no backup is one disk away from every agent identity being unrecoverable.
-
-- [ ] **Step 7: Document it**
-
-`docs/OPERATING.md` has no homeserver section at all. Add one: where it runs, which database, how to restart it, where the registration lives, how to take and restore a backup.
-
-- [ ] **Step 8: Commit**
+- [ ] **Step 5: Commit the unit and the config shape**
 
 ```bash
-git add docs/OPERATING.md
-git commit -m "docs(ops): the homeserver, its database, and its backups"
+git add deploy/tuwunel/
+git commit -m "deploy: the tuwunel unit and its configuration"
 ```
+
+### Task A2: Recreate the humans
+
+- [ ] **Step 1: Register your own account on the new server**
+
+With `allow_registration = false`, use tuwunel's admin command or a one-shot
+registration token. Same localpart as before, so `@rakesh:id.agentpod.dev` is
+still you.
+
+- [ ] **Step 2: Confirm the old client works against the new server**
+
+supermessage, logged in against `id.agentpod.dev` — it will need a fresh login,
+because the access token belonged to the other server.
+
+### Task A3: Cut the domain over
+
+- [ ] **Step 1: Stop Synapse**
+
+`systemctl stop matrix-synapse && systemctl disable matrix-synapse`. Leave the
+database on disk.
+
+- [ ] **Step 2: Point nginx at 6167**
+
+`deploy/nginx/agentpod.dev.conf`: `/\_matrix` → `127.0.0.1:6167`. The
+`/_synapse` location is Synapse-specific and goes away. Keep the
+`.well-known/matrix/*` files exactly as they are — the domain has not changed,
+only what serves it.
+
+- [ ] **Step 3: `nginx -t`, reload, and verify from off the box**
+
+`curl https://id.agentpod.dev/_matrix/client/versions` should now be tuwunel's.
+
+- [ ] **Step 4: Back up what there is to back up**
+
+A nightly copy of `/var/lib/tuwunel` (stop-copy-start, or a RocksDB checkpoint)
+plus `/etc/tuwunel/`, off the box. Synapse had **no backup schedule at all**;
+this is the gap #329 named and never closed.
+
+- [ ] **Step 5: Write the operator section**
+
+`docs/OPERATING.md` has no homeserver section. Add one: what runs, where its data
+is, how to restart it, where the registration lives, how to back it up and
+restore it, and that `allow_registration` is off by design.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add deploy/nginx/ docs/OPERATING.md
+git commit -m "deploy: serve id.agentpod.dev from tuwunel"
+```
+
+### Task A4: Close #329
+
+- [ ] **Step 1: Close it with the reason**
+
+The Postgres migration is unnecessary: the homeserver it applied to is no longer
+running. Link the spike findings so the reasoning survives.
 
 ---
 
@@ -131,7 +213,7 @@ describe("bridge names", () => {
 
   test("land inside the namespace the homeserver reserved", () => {
     // agents.yaml claims `@agent_.*` exclusive. A name outside it cannot be
-    // acted as, and the failure is a 403 from Synapse at send time.
+    // acted as, and the failure is a 403 from the homeserver at send time.
     expect(bridgeUserId("molt-bot", "hermes:analyst-echo", D)).toBe(
       "@agent_molt-bot_hermes_analyst-echo:id.agentpod.dev"
     );
@@ -318,7 +400,7 @@ git commit -m "feat(hub): record whether a station's mxid comes from its harness
 - Consumes: `isBridgeUser` (Task 1).
 - Produces: `PUT /_matrix/app/v1/transactions/:txnId` → `{}`; `applyTransaction(txnId, events)`.
 
-> The spec's routes are `PUT`, not `POST` — Synapse sends `PUT`. Mount **outside** the `/api/*` auth middleware: the caller is a homeserver with an `hs_token`, not a session.
+> The spec's routes are `PUT`, not `POST` — the homeserver sends `PUT`, as the spike observed. Mount **outside** the `/api/*` auth middleware: the caller is a homeserver with an `hs_token`, not a session.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -763,10 +845,10 @@ MATRIX_HS_TOKEN=<hs_token from agents.yaml>
 - [ ] **Step 2: Point the registration at the hub**
 
 ```yaml
-url: "http://127.0.0.1:3001"    # was null
+url: "http://127.0.0.1:3001"    # previously absent
 ```
 
-Then `systemctl restart matrix-synapse`. **This is the moment the bridge starts receiving traffic**; everything before it was inert.
+Then `systemctl restart tuwunel`. **This is the moment the bridge starts receiving traffic**; everything before it was inert. tuwunel also accepts registrations by admin-room command without a restart — use the file, so the configuration is on disk where an operator can find it.
 
 - [ ] **Step 3: Verify with one station before the rest**
 
@@ -776,7 +858,7 @@ Pick `openclaw:krishna`. Join `#agentpod_superchotu_openclaw_krishna`, say hello
 
 - [ ] **Step 5: Document**
 
-`docs/DEPLOYMENT.md` gains a Matrix bridge section: the five variables, the `url` flip, how to tell whether Synapse is delivering (its `appservice` logs), and the fact that `url: null` disables the whole thing without touching the hub.
+`docs/DEPLOYMENT.md` gains a Matrix bridge section: the five variables, the `url` flip, how to tell whether tuwunel is delivering (its appservice log lines), and the fact that removing `url` disables the whole thing without touching the hub.
 
 - [ ] **Step 6: Commit**
 
@@ -786,72 +868,48 @@ git commit -m "docs(deploy): running the Matrix bridge"
 
 ---
 
-### Task 10: Migrate the 14 hermes agents, one at a time
+### Task 10: Turn off hermes's native Matrix client
+
+On a fresh homeserver there is no adoption dance: the bridge already registered
+all 32 identities in Task 8, including the 14 hermes addresses, and hermes was
+never given credentials on the new server. This task is the cleanup that makes
+that true rather than accidental — and the honest conversation about what hermes
+loses.
 
 **Files:**
-- Modify: `/etc/matrix-synapse/agents.yaml` (host — second user namespace)
-- Create: `apps/hub/src/services/matrix-as/adopt-harness-mxid.ts`
-- Test: `apps/hub/tests/integration/matrix-as-adopt.test.ts`
+- Modify: hermes's own configuration on `molt-bot` (host, outside this repo)
+- Modify: `docs/OPERATING.md`
 
-This is the riskiest task in the plan and the only one that touches something already working. **Nothing here is done in bulk.**
+- [ ] **Step 1: Confirm no hermes agent can log in**
 
-- [ ] **Step 1: Widen the namespace**
+Its Matrix credentials point at a server that no longer exists, and its
+localparts are inside an exclusive namespace the bridge owns. Verify rather than
+assume: attempt a login as one of them with hermes's stored password and
+confirm it fails.
 
-```yaml
-  users:
-    - regex: "@agent_.*"
-      exclusive: true
-    # The 14 hermes agents keep the addresses people already use. Listed
-    # explicitly rather than by pattern: a broad regex here would claim human
-    # accounts on this homeserver, and `exclusive: false` because these users
-    # already exist and were not registered by us.
-    - regex: "@(analyst-echo|artistic-lyra|buddhimaan|cleaner-cody|coder-kai|controller-casey|onboarding-olivia|optimizer-ollie|predictor-paul|project-manager-pete|research-ray|strategy-sam|threat-hunter-theo|writer-quill):id\\.agentpod\\.dev"
-      exclusive: false
-```
+- [ ] **Step 2: Disable the Matrix loop in hermes's config**
 
-Restart Synapse. The bridge can now act as them; nothing yet does.
+Leaving it enabled means every agent retries a login it can never complete,
+forever, and fills a log with it.
 
-- [ ] **Step 2: Write the failing test for adoption**
+- [ ] **Step 3: Confirm each of the 14 answers through the bridge**
 
-```ts
-test("adopting a harness mxid keeps the address and changes the owner", async () => {
-  await adoptHarnessMxid(ANALYST_ECHO);
+Message `#agentpod_molt-bot_hermes_analyst-echo` and get a reply whose transcript
+lands in `acp_events`. That is the proof the identity moved rather than merely
+stopped.
 
-  const row = await stationRow(ANALYST_ECHO);
-  expect(row.matrixId).toBe("@analyst-echo:id.agentpod.dev");   // unchanged
-  expect(row.matrixIdSource).toBe("bridge");                     // changed
-});
+- [ ] **Step 4: Write down what hermes lost**
 
-test("refuses to adopt while the harness's own Matrix loop is running", async () => {
-  // Two answerers on one address is the failure this ordering exists to
-  // prevent: the operator sees duplicate replies and cannot tell which is real.
-  await hermesLoopIsRunning(ANALYST_ECHO);
-  await expect(adoptHarnessMxid(ANALYST_ECHO)).rejects.toThrow(/still running|stop/i);
-});
+In `docs/OPERATING.md`: hermes agents no longer speak Matrix natively; anything
+they did over Matrix that never went through ACP — agent-to-agent chatter, rooms
+they joined themselves — is gone with the old server, and comes back only as ACP
+conversation through the bridge.
 
-test("reverting is one row", async () => {
-  await adoptHarnessMxid(ANALYST_ECHO);
-  await revertHarnessMxid(ANALYST_ECHO);
-  expect((await stationRow(ANALYST_ECHO)).matrixIdSource).toBe("harness");
-});
-```
-
-- [ ] **Step 3: Implement, including the running-loop check**
-
-How "is hermes's Matrix loop running for this agent" is determined is a host question — read it through the node agent's health/config surface. If it cannot be determined, **refuse**: an unverifiable precondition on the one task that can produce two answerers is not a precondition worth having.
-
-- [ ] **Step 4: Cut over one agent**
-
-`hermes:analyst-echo` first — it is the least critical. Stop its Matrix loop on molt-bot, adopt, send a message in its existing room, confirm exactly one answer arrives and it came through ACP (check `acp_events`).
-
-- [ ] **Step 5: Wait a day, then do the remaining 13**
-
-Not ceremony: the failure mode here is *a duplicate answer nobody notices*, and it needs a day of ordinary use to surface.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git commit -m "feat(hub): adopt a harness-owned Matrix identity into the bridge"
+git add docs/OPERATING.md
+git commit -m "docs(ops): hermes reaches Matrix through the bridge, like everything else"
 ```
 
 ---
@@ -894,10 +952,10 @@ git commit -m "docs(ops): the Matrix bridge, and how to tell it is working"
 
 ## Self-review
 
-**Spec coverage.** Derived names (T1), ownership column (T2), transactions with auth/idempotency/loop-cut (T3), user and room queries (T4), acting as a station (T5), inbound with the control pair (T6), outbound streaming, typing and permissions (T7), provisioning all stations (T8), enabling for the 18 (T9), migrating the 14 (T10), operability (T11). The Postgres migration is Phase A and defers to the existing #329 plan.
+**Spec coverage.** Derived names (T1), ownership column (T2), transactions with auth/idempotency/loop-cut (T3), user and room queries (T4), acting as a station (T5), inbound with the control pair (T6), outbound streaming, typing and permissions (T7), provisioning all stations (T8), going live (T9), retiring hermes's native client (T10), operability (T11). Phase A replaces the homeserver rather than migrating its database, and closes #329.
 
 **Deliberately not covered**, and named in the spec: kaambaan card/run/gate events (kaambaan#34 owns those schemas), E2EE, federation, and any node-agent change.
 
 **Type consistency.** `bridgeUserId`/`bridgeAlias`/`isBridgeUser` (T1) are used with those signatures in T4, T5, T7 and T8; `matrixIdSource` is `"harness" | "bridge"` in T2, T8 and T10; `attachRoomToSession(sessionId, roomId, userId)` matches between T7's test and T8's provisioning.
 
-**The two riskiest steps, both flagged in place:** flipping `url` (T9 Step 2), which is when a quiet system becomes a live one, and adopting hermes identities (T10), which is the only task that can produce two answerers on one address — hence one agent at a time, a day of real use, and a one-row rollback.
+**The riskiest steps, flagged in place:** cutting nginx over (A3), after which the old server is unreachable and its history is only in a backup; and flipping `url` (T9 Step 2), when a quiet system becomes a live one. The original plan's most dangerous task — adopting hermes's identities while its own Matrix loop could still answer — **no longer exists**, because a fresh homeserver never has two answerers for one address.
