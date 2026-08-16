@@ -15,7 +15,7 @@
 
 - **Homeserver:** `id.agentpod.dev` on `178.105.68.68`, private, federation disabled, nginx proxying `/_matrix` to the homeserver's port. **tuwunel serves 6167 by default, not 8008** — the vhost changes with it.
 - **Registration file:** a YAML file in tuwunel's `appservice_dir`, Synapse-shaped (the spike confirmed the existing file's namespaces load unchanged): AS id `ai-agents`, `sender_localpart: ai-bridge`, users `@agent_.*` exclusive, aliases `#agentpod_.*` exclusive, **`receive_ephemeral: true`** (tuwunel's name for what Synapse spelled `de.sorunome.msc2409.push_ephemeral`), and `url` **left unset until Task 9**.
-- **Name derivation is a pure function** of `(nodeName, stationKey)`: lowercase, every character outside `[a-z0-9._=/-]` becomes `_`. User `@agent_<node>_<station>`, alias `#agentpod_<node>_<station>`. Never stored as a second source of truth. **All 32 stations, hermes included** — there is no exception list, because a name that omits the node breaks the rule the whole scheme rests on.
+- **Name derivation is a pure function** of `(nodeName, stationKey)`: lowercase, every character outside `[a-z0-9._=/-]` becomes `_`. User `@agent_<node>__<station>`, alias `#agentpod_<node>__<station>` — **two** underscores between the halves: with one, node `a_b` + station `c` collides with node `a` + station `b_c`. Never stored as a second source of truth. **All 32 stations, hermes included** — there is no exception list, because a name that omits the node breaks the rule the whole scheme rests on.
 - **A station's identity has a mode**: `bridge` (the AS answers) or `harness` (the harness runs its own client). Exactly one answerer per address, always.
 - **`hs_token` authenticates every AS route**; a request without it is 403 and is never processed. The `as_token` is what the bridge sends *to* the homeserver. The two point in opposite directions and swapping them fails as a 403 that reads like a permissions bug.
 - **Drop every event sent by our own namespace** before any other handling.
@@ -233,17 +233,17 @@ describe("bridge names", () => {
     // agents.yaml claims `@agent_.*` exclusive. A name outside it cannot be
     // acted as, and the failure is a 403 from the homeserver at send time.
     expect(bridgeUserId("molt-bot", "hermes:analyst-echo", D)).toBe(
-      "@agent_molt-bot_hermes_analyst-echo:id.agentpod.dev"
+      "@agent_molt-bot__hermes_analyst-echo:id.agentpod.dev"
     );
     expect(bridgeAlias("molt-bot", "hermes:analyst-echo", D)).toBe(
-      "#agentpod_molt-bot_hermes_analyst-echo:id.agentpod.dev"
+      "#agentpod_molt-bot__hermes_analyst-echo:id.agentpod.dev"
     );
   });
 
   test("replace characters an mxid localpart may not contain", () => {
     // `:` is the mxid separator; a station key is full of them.
     expect(bridgeUserId("box", "claude-code:48c62ea7", D)).toBe(
-      "@agent_box_claude-code_48c62ea7:id.agentpod.dev"
+      "@agent_box__claude-code_48c62ea7:id.agentpod.dev"
     );
     expect(bridgeUserId("BOX", "Pi:59099BF1", D)).toBe(
       "@agent_box_pi_59099bf1:id.agentpod.dev"
@@ -351,13 +351,13 @@ git commit -m "feat(hub): derive a station's Matrix names from its node and key"
  * answering in a room, with nothing anywhere saying why.
  */
 test("a station refresh leaves a bridge-owned mxid alone", async () => {
-  await setMatrixIdentity(STATION, "@agent_box_pi_x:id.agentpod.dev", "bridge");
+  await setMatrixIdentity(STATION, "@agent_box__pi_x:id.agentpod.dev", "bridge");
 
   // What the node agent does on every detect.
   await refreshStationFromDetect(STATION, { matrixId: null });
 
   const row = await stationRow(STATION);
-  expect(row.matrixId).toBe("@agent_box_pi_x:id.agentpod.dev");
+  expect(row.matrixId).toBe("@agent_box__pi_x:id.agentpod.dev");
   expect(row.matrixIdentityMode).toBe("bridge");
 });
 
@@ -457,7 +457,7 @@ describe("PUT /_matrix/app/v1/transactions/:txnId", () => {
   test("drops events sent by our own users before anything else looks at them", async () => {
     // An AS receives what its own users send. This is the loop that fills a
     // database overnight.
-    await deliver("txn-2", [message("@agent_box_pi_x:id.agentpod.dev", "output")]);
+    await deliver("txn-2", [message("@agent_box__pi_x:id.agentpod.dev", "output")]);
     expect(handled).toHaveLength(0);
   });
 
@@ -568,7 +568,7 @@ git commit -m "feat(hub): answer which of our users and rooms exist"
 test("acts as the station's user, not as the bridge", async () => {
   // ?user_id= is the whole mechanism. Without it every agent's message arrives
   // from @ai-bridge and the room becomes one voice pretending to be many.
-  await sendText("@agent_box_pi_x:id.agentpod.dev", "!room:id.agentpod.dev", "hello");
+  await sendText("@agent_box__pi_x:id.agentpod.dev", "!room:id.agentpod.dev", "hello");
   expect(lastUrl).toContain("user_id=%40agent_box_pi_x%3Aid.agentpod.dev");
 });
 
@@ -791,9 +791,9 @@ git commit -m "feat(hub): the agent's answer arrives in the room, as the agent"
 test("gives a station a user, a room and a readable name", async () => {
   await provisionStation(KRISHNA);
 
-  expect(created.users).toContain("@agent_superchotu_openclaw_krishna:id.agentpod.dev");
+  expect(created.users).toContain("@agent_superchotu__openclaw_krishna:id.agentpod.dev");
   expect(created.rooms.at(-1)).toMatchObject({
-    alias: "#agentpod_superchotu_openclaw_krishna:id.agentpod.dev",
+    alias: "#agentpod_superchotu__openclaw_krishna:id.agentpod.dev",
   });
   // The display name is what a human sees in a member list — the station's
   // display name, not its mangled localpart.
@@ -809,7 +809,7 @@ test("is idempotent, because it runs on every adoption and every boot", async ()
 test("records the station's mxid, in bridge mode", async () => {
   await provisionStation(KRISHNA);
   const row = await stationRow(KRISHNA);
-  expect(row.matrixId).toBe("@agent_superchotu_openclaw_krishna:id.agentpod.dev");
+  expect(row.matrixId).toBe("@agent_superchotu__openclaw_krishna:id.agentpod.dev");
   expect(row.matrixIdentityMode).toBe("bridge");
 });
 
@@ -818,7 +818,7 @@ test("provisions a hermes station exactly like every other", async () => {
   // display name carries the readability its old address used to.
   await provisionStation(ANALYST_ECHO);
   const row = await stationRow(ANALYST_ECHO);
-  expect(row.matrixId).toBe("@agent_molt-bot_hermes_analyst-echo:id.agentpod.dev");
+  expect(row.matrixId).toBe("@agent_molt-bot__hermes_analyst-echo:id.agentpod.dev");
   expect(created.displayNames.at(-1)).toBe("analyst-echo (hermes @ molt-bot)");
 });
 
@@ -880,7 +880,7 @@ describe("POST /api/stations/:id/matrix/identity", () => {
     const res = await post(`/api/stations/${KRISHNA}/matrix/identity`);
 
     expect(res.status).toBe(200);
-    expect((await res.json()).mxid).toBe("@agent_superchotu_openclaw_krishna:id.agentpod.dev");
+    expect((await res.json()).mxid).toBe("@agent_superchotu__openclaw_krishna:id.agentpod.dev");
     expect(adminCommandsRun).toHaveLength(0);
   });
 
@@ -1028,7 +1028,7 @@ Then `systemctl restart tuwunel`. **This is the moment the bridge starts receivi
 
 - [ ] **Step 3: Verify with one station before the rest**
 
-Pick `openclaw:krishna`. Join `#agentpod_superchotu_openclaw_krishna`, say hello, get an answer. Then check the refusal path: narrow your own grant to exclude openclaw, send again, and read the refusal **in the room**. Restore the grant.
+Pick `openclaw:krishna`. Join `#agentpod_superchotu__openclaw_krishna`, say hello, get an answer. Then check the refusal path: narrow your own grant to exclude openclaw, send again, and read the refusal **in the room**. Restore the grant.
 
 - [ ] **Step 4: Provision the remaining 31**
 
