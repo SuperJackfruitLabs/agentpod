@@ -41,7 +41,10 @@ const fleet: RolloutNode[] = [
 ];
 
 /** Mounts the routes behind a stub that supplies the authenticated user. */
-function appWith(request: Parameters<typeof createNodeRoutes>[0]["request"]) {
+function appWith(
+  request: Parameters<typeof createNodeRoutes>[0]["request"],
+  fixedImage: Set<string> = new Set()
+) {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("user", { id: "user_1" });
@@ -49,7 +52,14 @@ function appWith(request: Parameters<typeof createNodeRoutes>[0]["request"]) {
   });
   app.route(
     "/api/nodes",
-    createNodeRoutes({ request, listNodesFn: async () => fleet })
+    // fixedImageNodesFn is injected like listNodesFn: without it the route asks
+    // the database which nodes boot from an image, and this file is a unit test
+    // of the wiring, with no schema behind it.
+    createNodeRoutes({
+      request,
+      listNodesFn: async () => fleet,
+      fixedImageNodesFn: async () => fixedImage,
+    })
   );
   return app;
 }
@@ -152,4 +162,31 @@ describe("POST /api/nodes/update-all (#295)", () => {
     const res = await app.request("/api/nodes/update-all", { method: "POST" });
     expect(res.status).toBe(200);
   });
+});
+
+/**
+ * A fleet rollout must not stop the stations it cannot update (#349).
+ *
+ * A node whose binary comes from the substrate's image cannot be moved forward
+ * by RPC — the agent swaps the binary, exits for a supervisor a container does
+ * not have, and the swap dies with the ephemeral disk. Asking it is not a failed
+ * update, it is an outage, and doing that to every container station at once is
+ * the worst outcome this route can produce.
+ */
+test("a node whose binary comes from an image is skipped, not asked", async () => {
+  const asked: string[] = [];
+  const app = appWith(async (nodeId) => {
+    asked.push(nodeId);
+    return { ok: true, data: { ok: true, updating: true, tag: "v0.1.27" } };
+  }, new Set(["n_behind"]));
+
+  const res = await post(app);
+  expect(res.status).toBe(200);
+  const body = (await res.json()) as {
+    results: Array<{ nodeId: string; action?: string; status?: string; reason?: string }>;
+  };
+
+  expect(asked).not.toContain("n_behind");
+  const row = body.results.find((r) => r.nodeId === "n_behind")!;
+  expect(JSON.stringify(row)).toMatch(/image/i);
 });
