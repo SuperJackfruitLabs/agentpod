@@ -22,6 +22,7 @@ import {
   localpartFromUserId,
   localpartFromAlias,
 } from "../services/matrix-as/stations";
+import { recordTransaction } from "../services/matrix-as/health";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("matrix-as");
@@ -112,6 +113,11 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
           log.warn("appservice transaction rejected: bad or missing hs_token");
           return c.json({ errcode: "M_FORBIDDEN" }, 403);
         }
+
+        // Recorded before anything else: the fact worth knowing is that the
+        // homeserver can reach us, which is true whether or not the events
+        // inside are ones we act on.
+        recordTransaction();
 
         const txnId = c.req.param("txnId");
 
