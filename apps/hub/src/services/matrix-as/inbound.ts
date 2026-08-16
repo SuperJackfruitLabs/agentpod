@@ -50,6 +50,15 @@ export interface InboundDeps {
     }): Promise<{ id: string }>;
     promptSession(userId: string, sessionId: string, text: string): Promise<void>;
   };
+  /**
+   * Start streaming this session into this room.
+   *
+   * Called on every message, not only when a session is created: attachments
+   * live in memory, so after a hub restart the session row survives and the
+   * listener does not — and a room whose session predates the restart would go
+   * permanently quiet. Attaching is idempotent.
+   */
+  attach(sessionId: string, roomId: string, agentUser: string): void;
 }
 
 /** The room, its station, and the node name that station's identity is built from. */
@@ -151,6 +160,10 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
         .set({ acpSessionId: sessionId })
         .where(eq(matrixRooms.roomId, room.roomId));
     }
+
+    // Before prompting, so the first words of the answer are not produced into
+    // a stream nobody is listening to.
+    deps.attach(sessionId, room.roomId, agentUser);
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
