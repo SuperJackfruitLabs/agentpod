@@ -43,6 +43,7 @@ import {
   matrixRooms,
   matrixMissions,
   matrixMissionMembers,
+  matrixPurposeSpaces,
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
@@ -111,6 +112,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixRooms,
   matrixMissions,
   matrixMissionMembers,
+  matrixPurposeSpaces,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**

@@ -168,6 +168,12 @@ export type StationRow = {
   workspacePath: string | null;
   capabilities: string[] | null;
   matrixId: string | null;
+  /**
+   * What this agent is FOR — the operator's word, not where it runs. Null when
+   * nobody has said, which files it under no Matrix space at all and leaves it
+   * in All rooms.
+   */
+  purpose: string | null;
   adoptedAt: string | Date;
   createdAt: string | Date;
 };
@@ -186,6 +192,34 @@ export const adoptStations = (nodeId: string, keys: string[]) =>
 
 export const listStations = (nodeId: string) =>
   http<StationRow[]>(`/api/nodes/${nodeId}/stations`);
+
+/**
+ * Set what an agent is for. `null` unlabels it.
+ *
+ * The room moves to match: the hub re-files it under that purpose's Matrix
+ * space, which is how a roster of a hundred agents stays readable.
+ */
+export const setStationPurpose = (stationId: string, purpose: string | null) =>
+  http<{ id: string; purpose: string | null }>(`/api/stations/${stationId}/purpose`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ purpose }),
+  });
+
+/**
+ * Set the purpose a node's future adoptions inherit, and label the agents
+ * already on it that have none. `stationsLabelled` says how many that was —
+ * this endpoint touches rows the caller did not name.
+ */
+export const setNodePurpose = (nodeId: string, purpose: string | null) =>
+  http<{ id: string; purpose: string | null; stationsLabelled: number }>(
+    `/api/nodes/${nodeId}/purpose`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ purpose }),
+    }
+  );
 
 export const stationHealth = (stationId: string) =>
   http<StationHealth>(`/api/stations/${stationId}/health`);

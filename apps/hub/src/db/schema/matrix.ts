@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, index, uniqueIndex, foreignKey } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  index,
+  uniqueIndex,
+  foreignKey,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
 
@@ -35,6 +43,15 @@ export const matrixRooms = pgTable(
     alias: text("alias").notNull(),
     /** The ACP session this room is talking to, if one is open. */
     acpSessionId: text("acp_session_id"),
+    /**
+     * The purpose space this room currently hangs under, if any.
+     *
+     * Remembered rather than recomputed because a purpose can change, and
+     * re-filing means removing the OLD `m.space.child` edge as well as adding
+     * the new one — a room that only ever gained parents would show up under
+     * every purpose it had ever been given.
+     */
+    spaceRoomId: text("space_room_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
@@ -54,6 +71,27 @@ export const matrixRooms = pgTable(
  * A per-agent room is a DM — one correspondent, filed under People. A mission is
  * the other shape, and is an ordinary room precisely because it is not one-to-one.
  */
+/**
+ * One space per purpose — personal, work, whatever the operator types.
+ *
+ * Keyed by (tenant, purpose) rather than by an alias: an alias is a global
+ * address on the homeserver, and "personal" is exactly the kind of everyday
+ * word two tenants would both use. Nobody types this room's address anyway;
+ * it is a container, not a destination.
+ */
+export const matrixPurposeSpaces = pgTable(
+  "matrix_purpose_spaces",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    purpose: text("purpose").notNull(),
+    roomId: text("room_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.purpose] })]
+);
+
 export const matrixMissions = pgTable(
   "matrix_missions",
   {

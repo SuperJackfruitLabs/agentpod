@@ -46,7 +46,3 @@ export function missionAlias(name: string, domain: string): string {
   return `#agentpod_mission_${missionLocalpart(name)}:${domain}`;
 }
 
-/** `#agentpod_space_<name>` — the space that groups missions. */
-export function spaceAlias(name: string, domain: string): string {
-  return `#agentpod_space_${missionLocalpart(name)}:${domain}`;
-}

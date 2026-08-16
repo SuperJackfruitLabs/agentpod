@@ -52,11 +52,14 @@ export async function adoptStations(
   // station into a tenant its node is not in, so asking the node is the only
   // answer that can succeed.
   const [nodeRow] = await db
-    .select({ tenantId: nodes.tenantId })
+    .select({ tenantId: nodes.tenantId, purpose: nodes.purpose })
     .from(nodes)
     .where(eq(nodes.id, nodeId));
   if (!nodeRow) throw new Error(`cannot adopt stations on unknown node ${nodeId}`);
   const tenantId = nodeRow.tenantId;
+  // The node's purpose is a DEFAULT, not the truth — see `stations.purpose`.
+  // It is applied below only to a station that has none of its own.
+  const nodePurpose = nodeRow.purpose;
 
   // ── First pass: upsert all rows without parent links ─────────────────────
   for (const station of toAdopt) {
@@ -74,6 +77,7 @@ export async function adoptStations(
         workspacePath: station.workspacePath ?? null,
         capabilities: station.capabilities as string[],
         matrixId: station.matrixId ?? null,
+        purpose: nodePurpose,
         parentStationId: null,
         adoptedAt: new Date(),
         createdAt: new Date(),
@@ -87,6 +91,14 @@ export async function adoptStations(
           workspacePath: station.workspacePath ?? null,
           capabilities: station.capabilities as string[],
           matrixId: station.matrixId ?? null,
+          // Per column, not for the row, and only when the station has none.
+          // Re-adoption is routine — it is how capabilities refresh — so a node
+          // default that overwrote here would silently undo every deliberate
+          // labelling on a schedule. The other direction has to work too: a
+          // station adopted before anyone labelled its node must still be able
+          // to gain the default, or the stations that already exist could never
+          // join a space without being deleted and re-adopted.
+          purpose: sql`COALESCE(${stations.purpose}, EXCLUDED.purpose)`,
           adoptedAt: new Date(),
         },
       });

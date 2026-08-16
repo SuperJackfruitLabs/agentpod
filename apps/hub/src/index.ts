@@ -31,6 +31,7 @@ import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 import { runtimeRoutes } from './routes/runtimes.ts';
 // Station routes (detect, adopt, list, unadopt)
 import { stationRoutes } from './routes/stations.ts';
+import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
 // Station activity endpoint (audit log, fleet console)
@@ -130,6 +131,7 @@ const app = new Hono()
   .route('/api/runtimes', runtimeRoutes)                   // CRUD /api/runtimes
   // Station routes (detect, adopt, list, unadopt)
   .route('/api', stationRoutes)                            // GET/POST/DELETE /api/nodes/:id/... and /api/stations/:id
+  .route('/api', purposeRoutes)                            // PUT /api/stations/:id/purpose, /api/nodes/:id/purpose
   // Station terminal WebSocket bridge (fleet console ↔ node PTY)
   .route('/api', stationTerminalRoutes)                    // WS /api/stations/:id/terminal
   // Station activity log (audit rows, fleet console)
