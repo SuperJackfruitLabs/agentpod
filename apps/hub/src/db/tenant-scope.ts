@@ -38,7 +38,7 @@ import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
-import { matrixAsTransactions } from "./schema/matrix";
+import { matrixAsTransactions, matrixRooms } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
@@ -103,6 +103,7 @@ export const TENANT_SCOPED_TABLES = {
   bridgeDispatches,
   agentTasks,
   cloudflareSandboxes,
+  matrixRooms,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**

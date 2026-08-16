@@ -1,0 +1,167 @@
+/**
+ * Where a Matrix message becomes work.
+ *
+ * This is what the identity work was for. An inbound message is an
+ * authorization question the suite can already answer: `resolveMatrixId` gives a
+ * principal, and the control pair says whether that principal may dispatch this
+ * agent (`charter` → decisions/2026-08-13-ecosystem-identity.md, Decision 4).
+ *
+ * **A room is not a console session.** It is a shared space several people can
+ * type into, so the grant is checked on every message rather than once when the
+ * session was opened — otherwise the first permitted person to speak would open
+ * a conversation everyone else in the room could then drive.
+ *
+ * **A refusal is a message, never silence.** A bridge that ignored what it would
+ * not do looks like a broken agent, and sends an operator to the console, the
+ * node and the harness — everywhere except the grant that actually refused.
+ */
+
+import { eq } from "drizzle-orm";
+import { db } from "../../db/drizzle";
+import { matrixRooms } from "../../db/schema/matrix";
+import { stations } from "../../db/schema/stations";
+import { nodes } from "../../db/schema/nodes";
+import { resolveMatrixId } from "../matrix-identity";
+import { getGrant, grantAllowsStation } from "../grants";
+import { isControlPairEnforced } from "../control-pair";
+import { bridgeUserId } from "./names";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("matrix-inbound");
+
+export interface InboundEvent {
+  type: string;
+  sender: string;
+  room_id?: string;
+  event_id?: string;
+  content?: Record<string, unknown>;
+}
+
+export interface InboundDeps {
+  domain: string;
+  client: {
+    sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  };
+  acp: {
+    createSession(input: {
+      stationId: string;
+      userId: string;
+      mode: string;
+    }): Promise<{ id: string }>;
+    promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+  };
+}
+
+/** The room, its station, and the node name that station's identity is built from. */
+async function roomContext(roomId: string) {
+  const [row] = await db
+    .select({
+      roomId: matrixRooms.roomId,
+      sessionId: matrixRooms.acpSessionId,
+      stationId: stations.id,
+      stationKey: stations.stationKey,
+      identityMode: stations.matrixIdentityMode,
+      nodeName: nodes.name,
+    })
+    .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .innerJoin(nodes, eq(nodes.id, stations.nodeId))
+    .where(eq(matrixRooms.roomId, roomId));
+  return row ?? null;
+}
+
+export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps): Promise<void> {
+  if (event.type !== "m.room.message") return;
+  if (!event.room_id) return;
+
+  const text = typeof event.content?.body === "string" ? event.content.body : "";
+  // Whitespace is not a prompt. Sending one would start a turn with nothing in
+  // it and cost an agent a round trip to say so.
+  if (text.trim() === "") return;
+
+  const room = await roomContext(event.room_id);
+  // A room we do not own is not ours to answer in — anyone can invite the bot
+  // anywhere.
+  if (!room) return;
+
+  // A harness-mode station answers for itself. Two answerers on one address is
+  // the failure the mode exists to prevent.
+  if (room.identityMode !== "bridge") return;
+
+  const agentUser = bridgeUserId(room.nodeName, room.stationKey, deps.domain);
+  const say = (body: string) => deps.client.sendText(agentUser, room.roomId, body);
+
+  // ── Who is this? ──────────────────────────────────────────────────────────
+  const identity = await resolveMatrixId(event.sender);
+  if (identity?.kind !== "principal") {
+    // Ambiguous is refused as firmly as unknown: `resolveMatrixId` fails closed
+    // when one mxid is claimed by both a station and a principal, and guessing
+    // would attribute a human's words to an agent.
+    log.warn("matrix message from an unresolvable sender", {
+      sender: event.sender,
+      kind: identity?.kind ?? "none",
+      room: room.roomId,
+    });
+    await say(
+      "I do not recognise you. This hub has no principal linked to " +
+        `${event.sender}, so I cannot act on your behalf.`
+    );
+    return;
+  }
+  const principalId = identity.principalId;
+
+  // ── May they dispatch THIS agent? ─────────────────────────────────────────
+  if (isControlPairEnforced()) {
+    const grant = await getGrant(principalId);
+    const allowed = grantAllowsStation(grant, {
+      nodeName: room.nodeName,
+      stationKey: room.stationKey,
+    });
+
+    if (!allowed) {
+      log.warn("matrix message refused by the control pair", {
+        principalId,
+        node: room.nodeName,
+        stationKey: room.stationKey,
+      });
+      await say(
+        "You are not permitted to dispatch this agent. Your grant does not " +
+          `cover ${room.nodeName}/${room.stationKey}.`
+      );
+      return;
+    }
+  }
+
+  // ── Say it to the agent ───────────────────────────────────────────────────
+  try {
+    let sessionId = room.sessionId;
+
+    if (!sessionId) {
+      // One session per room, not per message: a conversation is a
+      // conversation, and a session per message would throw away the agent's
+      // context between two consecutive sentences.
+      const session = await deps.acp.createSession({
+        stationId: room.stationId,
+        userId: principalId,
+        mode: "default",
+      });
+      sessionId = session.id;
+      await db
+        .update(matrixRooms)
+        .set({ acpSessionId: sessionId })
+        .where(eq(matrixRooms.roomId, room.roomId));
+    }
+
+    // The user's words, unchanged. Trimming or decorating them would put the
+    // bridge's voice into the agent's input.
+    await deps.acp.promptSession(principalId, sessionId, text);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    log.error("matrix message could not reach the station", {
+      room: room.roomId,
+      stationKey: room.stationKey,
+      error: reason,
+    });
+    await say(`I could not reach this agent: ${reason}`);
+  }
+}

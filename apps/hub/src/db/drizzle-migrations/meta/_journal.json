@@ -323,6 +323,13 @@
       "when": 1786687164202,
       "tag": "0045_matrix_as_txns",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786687165202,
+      "tag": "0046_matrix_rooms",
+      "breakpoints": true
     }
   ]
 }
