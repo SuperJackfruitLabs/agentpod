@@ -33,6 +33,8 @@ let invites: Array<{ roomId: string; invitee: string }> = [];
 let roomCounter = 0;
 let uploaded: Array<{ bytes: number; contentType: string }> = [];
 let avatars: Array<{ userId: string; mxcUrl: string }> = [];
+/** The homeserver's side of it: which identity has a face right now. */
+let faces: Record<string, string> = {};
 let workspaceFiles: Record<string, { bytes: Uint8Array; contentType: string } | null> = {};
 
 function deps() {
@@ -58,7 +60,9 @@ function deps() {
       },
       setAvatar: async (userId: string, mxcUrl: string) => {
         avatars.push({ userId, mxcUrl });
+        faces[userId] = mxcUrl;
       },
+      getAvatar: async (userId: string) => faces[userId] ?? null,
     },
     readWorkspaceFile: async (_stationId: string, path: string) =>
       workspaceFiles[path] ?? null,
@@ -109,6 +113,7 @@ beforeEach(async () => {
   invites = [];
   uploaded = [];
   avatars = [];
+  faces = {};
   workspaceFiles = {};
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${OPENCLAW}, ${HERMES})`;
   await rawSql`
@@ -343,6 +348,8 @@ describe("an agent's face, if it has one", () => {
   test("does not re-upload an agent's face on every boot", async () => {
     // Provisioning runs at every restart. Reading and uploading an image per
     // station per boot is a cost with no benefit — the picture has not changed.
+    // The gate is "does this identity already have a face", asked of the
+    // homeserver.
     workspaceFiles["pfp.png"] = {
       bytes: new Uint8Array([137, 80, 78, 71]),
       contentType: "image/png",
@@ -354,5 +361,25 @@ describe("an agent's face, if it has one", () => {
     await provisionStation(OPENCLAW, deps());
 
     expect(uploaded).toHaveLength(0);
+  });
+});
+
+describe("an agent that has not got its face yet", () => {
+  test("gets one at the next provision, not only at its first", async () => {
+    // 0 of 32 agents had a face after #359 shipped: the read was gated on the
+    // station's FIRST provision, and every room already existed by the time
+    // that code deployed, so it never ran once. Nothing short of deleting a
+    // room could make it run. The gate is now the identity's own avatar, so an
+    // agent that gains a `pfp.png` later gets its face at the next restart.
+    await provisionStation(OPENCLAW, deps()); // no image in the workspace yet
+    expect(avatars).toHaveLength(0);
+
+    workspaceFiles["pfp.png"] = {
+      bytes: new Uint8Array([137, 80, 78, 71]),
+      contentType: "image/png",
+    };
+    await provisionStation(OPENCLAW, deps());
+
+    expect(avatars).toHaveLength(1);
   });
 });

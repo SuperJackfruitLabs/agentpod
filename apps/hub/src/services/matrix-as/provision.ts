@@ -53,6 +53,8 @@ export interface ProvisionDeps {
       contentType: string
     ): Promise<string | null>;
     setAvatar?(userId: string, mxcUrl: string): Promise<void>;
+    /** The identity's current avatar, or null. Absent in tests that don't care. */
+    getAvatar?(userId: string): Promise<string | null>;
   };
   /**
    * Read a file from the station's workspace, or null when it is not there.
@@ -134,13 +136,20 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
     await deps.client.ensureUser(bridgeLocalpart(s.nodeName, s.stationKey), displayName);
   }
 
-  // An agent's face, if it has one — read once, when the station is first
-  // provisioned. Provisioning runs at every boot, and re-reading and re-uploading
-  // an image per station per restart is a cost with no benefit: the picture has
-  // not changed. A face added later lands the next time the identity is
-  // explicitly re-provisioned.
-  const firstProvision = !s.roomId;
-  if (bridged && firstProvision && deps.readWorkspaceFile && deps.client.uploadImage) {
+  // An agent's face, if it has one.
+  //
+  // Gated on the identity NOT ALREADY HAVING ONE, asked of the homeserver,
+  // rather than on this being the station's first provision. The first-provision
+  // gate shipped in #359 and gave 0 of 32 agents a face: every room already
+  // existed by the time that code deployed, so the read never ran for a single
+  // one of them, and nothing short of deleting a room could make it run. Asking
+  // costs one profile GET per station per boot and makes this self-healing — an
+  // agent that gains a `pfp.png` next month gets its face at the next restart,
+  // and one that already has a face is never re-read or re-uploaded.
+  const hasFace = deps.client.getAvatar
+    ? await deps.client.getAvatar(speaker).catch(() => null)
+    : s.roomId; // no way to ask: fall back to "only on first provision"
+  if (bridged && !hasFace && deps.readWorkspaceFile && deps.client.uploadImage) {
     const found = await pickAvatar({
       read: (path) => deps.readWorkspaceFile!(s.stationId, path),
     }).catch(() => null);
