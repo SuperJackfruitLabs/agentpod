@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bridgeUserId, bridgeAlias, localpartFor, isBridgeUser } from "./names";
+import { bridgeUserId, bridgeAlias, bridgeLocalpart, localpartFor, isBridgeUser } from "./names";
 
 /**
  * A Matrix name for a station.
@@ -51,6 +51,15 @@ describe("bridge names", () => {
     // A separator that could also appear inside either half would make
     // `a_b`/`c` and `a`/`b_c` the same name. They must not collide.
     expect(localpartFor("a_b", "c")).not.toBe(localpartFor("a", "b_c"));
+  });
+
+  test("the registered username is exactly the user id's localpart", () => {
+    // Registering the bare name creates a user OUTSIDE the exclusive namespace,
+    // where the appservice may not act — and the failure surfaces later and
+    // elsewhere, as a 403 at send time.
+    const userId = bridgeUserId("molt-bot", "hermes:coder-kai", D);
+    expect(userId).toBe(`@${bridgeLocalpart("molt-bot", "hermes:coder-kai")}:${D}`);
+    expect(bridgeLocalpart("molt-bot", "hermes:coder-kai").startsWith("agent_")).toBe(true);
   });
 
   test("are stable — the same station always gets the same name", () => {

@@ -31,8 +31,21 @@ export function localpartFor(nodeName: string, stationKey: string): string {
   return `${clean(nodeName)}__${clean(stationKey)}`;
 }
 
+/**
+ * The username to register, which is the mxid's localpart INCLUDING the
+ * `agent_` prefix.
+ *
+ * Separate from `localpartFor` because registering the bare name creates
+ * `@prov-box__openclaw_krishna` — outside the exclusive namespace the homeserver
+ * reserved, where the appservice may not act. The failure arrives later and
+ * elsewhere, as a 403 at send time.
+ */
+export function bridgeLocalpart(nodeName: string, stationKey: string): string {
+  return `agent_${localpartFor(nodeName, stationKey)}`;
+}
+
 export function bridgeUserId(nodeName: string, stationKey: string, domain: string): string {
-  return `@agent_${localpartFor(nodeName, stationKey)}:${domain}`;
+  return `@${bridgeLocalpart(nodeName, stationKey)}:${domain}`;
 }
 
 export function bridgeAlias(nodeName: string, stationKey: string, domain: string): string {
