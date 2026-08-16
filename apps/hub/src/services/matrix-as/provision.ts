@@ -18,6 +18,7 @@ import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
+import { pickAvatar } from "./avatar";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-provision");
@@ -37,7 +38,23 @@ export interface ProvisionDeps {
       }
     ): Promise<string | null>;
     invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+    uploadImage?(
+      userId: string,
+      bytes: Uint8Array,
+      contentType: string
+    ): Promise<string | null>;
+    setAvatar?(userId: string, mxcUrl: string): Promise<void>;
   };
+  /**
+   * Read a file from the station's workspace, or null when it is not there.
+   *
+   * Absent in deployments that cannot reach the node — an agent's face is never
+   * worth failing provisioning over.
+   */
+  readWorkspaceFile?(
+    stationId: string,
+    path: string
+  ): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }
 
 /** The station, its node's name, and whether a room already exists for it. */
@@ -104,6 +121,28 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
 
   if (bridged) {
     await deps.client.ensureUser(bridgeLocalpart(s.nodeName, s.stationKey), displayName);
+  }
+
+  // An agent's face, if it has one — read once, when the station is first
+  // provisioned. Provisioning runs at every boot, and re-reading and re-uploading
+  // an image per station per restart is a cost with no benefit: the picture has
+  // not changed. A face added later lands the next time the identity is
+  // explicitly re-provisioned.
+  const firstProvision = !s.roomId;
+  if (bridged && firstProvision && deps.readWorkspaceFile && deps.client.uploadImage) {
+    const found = await pickAvatar({
+      read: (path) => deps.readWorkspaceFile!(s.stationId, path),
+    }).catch(() => null);
+
+    if (found) {
+      const mxc = await deps.client
+        .uploadImage(speaker, found.bytes, found.contentType)
+        .catch(() => null);
+      if (mxc && deps.client.setAvatar) {
+        await deps.client.setAvatar(speaker, mxc).catch(() => {});
+        log.info("gave an agent its face", { stationId, path: found.path });
+      }
+    }
   }
 
   // The room is created once. A second one for the same station would split its

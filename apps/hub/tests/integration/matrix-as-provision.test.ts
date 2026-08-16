@@ -31,6 +31,9 @@ let rooms: Array<{
 }> = [];
 let invites: Array<{ roomId: string; invitee: string }> = [];
 let roomCounter = 0;
+let uploaded: Array<{ bytes: number; contentType: string }> = [];
+let avatars: Array<{ userId: string; mxcUrl: string }> = [];
+let workspaceFiles: Record<string, { bytes: Uint8Array; contentType: string } | null> = {};
 
 function deps() {
   return {
@@ -49,7 +52,16 @@ function deps() {
       invite: async (_asUserId: string, roomId: string, invitee: string) => {
         invites.push({ roomId, invitee });
       },
+      uploadImage: async (_userId: string, bytes: Uint8Array, contentType: string) => {
+        uploaded.push({ bytes: bytes.length, contentType });
+        return "mxc://id.agentpod.dev/abc123";
+      },
+      setAvatar: async (userId: string, mxcUrl: string) => {
+        avatars.push({ userId, mxcUrl });
+      },
     },
+    readWorkspaceFile: async (_stationId: string, path: string) =>
+      workspaceFiles[path] ?? null,
   };
 }
 
@@ -95,6 +107,9 @@ beforeEach(async () => {
   registered = [];
   rooms = [];
   invites = [];
+  uploaded = [];
+  avatars = [];
+  workspaceFiles = {};
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${OPENCLAW}, ${HERMES})`;
   await rawSql`
     UPDATE stations SET bridge_matrix_id = NULL, matrix_identity_mode = 'bridge', matrix_id = NULL
@@ -276,5 +291,68 @@ describe("provisioning the whole fleet", () => {
 
     expect(result.failed).toBeGreaterThanOrEqual(1);
     expect(result.provisioned).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("an agent's face, if it has one", () => {
+  test("uploads the image it finds and puts it on the agent", async () => {
+    // hermes profiles carry a pfp.png and hermes's tooling uploaded it, which is
+    // why those agents had faces and everything else had a letter. The bridge
+    // looks in the same places whatever the harness is.
+    workspaceFiles["pfp.png"] = {
+      bytes: new Uint8Array([137, 80, 78, 71]),
+      contentType: "image/png",
+    };
+
+    await provisionStation(OPENCLAW, deps());
+
+    expect(uploaded).toHaveLength(1);
+    expect(avatars.at(-1)).toMatchObject({
+      userId: "@agent_prov-box_openclaw-krishna:id.agentpod.dev",
+      mxcUrl: "mxc://id.agentpod.dev/abc123",
+    });
+  });
+
+  test("provisions exactly as far for an agent with no image", async () => {
+    // Optional means optional: no face is not a failure, and the room, the
+    // identity and the display name all still land.
+    await provisionStation(OPENCLAW, deps());
+
+    expect(avatars).toHaveLength(0);
+    expect(rooms).toHaveLength(1);
+    expect(registered).toHaveLength(1);
+  });
+
+  test("a node that will not answer costs the agent a face, not a room", async () => {
+    // The image lives on another machine, which may be offline. Provisioning
+    // must not depend on it.
+    const d = deps();
+    const failing = {
+      ...d,
+      readWorkspaceFile: async () => {
+        throw new Error("node offline");
+      },
+    };
+
+    await provisionStation(OPENCLAW, failing);
+
+    expect(avatars).toHaveLength(0);
+    expect(rooms).toHaveLength(1);
+  });
+
+  test("does not re-upload an agent's face on every boot", async () => {
+    // Provisioning runs at every restart. Reading and uploading an image per
+    // station per boot is a cost with no benefit — the picture has not changed.
+    workspaceFiles["pfp.png"] = {
+      bytes: new Uint8Array([137, 80, 78, 71]),
+      contentType: "image/png",
+    };
+    await provisionStation(OPENCLAW, deps());
+    uploaded = [];
+    avatars = [];
+
+    await provisionStation(OPENCLAW, deps());
+
+    expect(uploaded).toHaveLength(0);
   });
 });

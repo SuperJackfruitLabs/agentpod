@@ -12,6 +12,10 @@
  * nothing.
  */
 
+import { eq } from "drizzle-orm";
+import { db } from "../../db/drizzle";
+import { stations } from "../../db/schema/stations";
+import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll } from "./provision";
 import { handleRoomMessage } from "./inbound";
@@ -20,6 +24,15 @@ import { createSession, promptSession } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-bridge");
+
+/** The image types `avatar.ts` accepts, by extension. Anything else is declined there. */
+function contentTypeFor(path: string): string {
+  if (path.endsWith(".png")) return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".gif")) return "image/gif";
+  if (path.endsWith(".webp")) return "image/webp";
+  return "application/octet-stream";
+}
 
 export interface MatrixBridgeConfig {
   enabled: boolean;
@@ -58,6 +71,8 @@ export function matrixBridgeProblems(cfg: MatrixBridgeConfig): string[] {
 export interface MatrixBridge {
   client: MatrixClient;
   config: MatrixBridgeConfig;
+  /** Everything provisioning needs, so boot and the API use the same deps. */
+  provisionDeps: Parameters<typeof provisionAll>[0];
   /** Give a station its identity and room. Safe to call repeatedly. */
   provision(stationId: string): Promise<void>;
   /** Handle one event the homeserver pushed. */
@@ -89,7 +104,43 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     domain: cfg.domain,
   });
 
-  const provisionDeps = { domain: cfg.domain, client };
+  /**
+   * Read a file from a station's workspace, through its node.
+   *
+   * Used for one thing — an agent's avatar — so it is deliberately small: a
+   * short timeout, a size cap, and null for everything that is not a plain
+   * successful read. The image lives on whichever machine the station does, and
+   * that machine may be offline, busy, or simply not have the file.
+   */
+  const readWorkspaceFile = async (
+    stationId: string,
+    path: string
+  ): Promise<{ bytes: Uint8Array; contentType: string } | null> => {
+    const [station] = await db
+      .select({ nodeId: stations.nodeId, stationKey: stations.stationKey })
+      .from(stations)
+      .where(eq(stations.id, stationId));
+    if (!station) return null;
+
+    const res = await broker.request(
+      station.nodeId,
+      "fs.read",
+      { key: station.stationKey, path, maxBytes: 2 * 1024 * 1024 },
+      { timeoutMs: 5_000 }
+    );
+    if (!res.ok) return null;
+
+    const data = res.data as { content?: string; encoding?: string; truncated?: boolean };
+    // A truncated image is a corrupt image. Better no face than a broken one.
+    if (!data?.content || data.encoding !== "base64" || data.truncated) return null;
+
+    return {
+      bytes: Uint8Array.from(Buffer.from(data.content, "base64")),
+      contentType: contentTypeFor(path),
+    };
+  };
+
+  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
 
   const inboundDeps = {
     domain: cfg.domain,
@@ -116,6 +167,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   return {
     client,
     config: cfg,
+    provisionDeps,
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);
@@ -144,7 +196,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
  * immediately finds somewhere to push to.
  */
 export async function startMatrixBridge(bridge: MatrixBridge): Promise<void> {
-  const result = await provisionAll({ domain: bridge.config.domain, client: bridge.client });
+  const result = await provisionAll(bridge.provisionDeps);
   log.info("matrix bridge ready", {
     domain: bridge.config.domain,
     provisioned: result.provisioned,
