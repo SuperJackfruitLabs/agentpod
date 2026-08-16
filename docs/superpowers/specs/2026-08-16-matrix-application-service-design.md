@@ -90,8 +90,8 @@ is the control pair, unchanged.
 
 ```
 station  molt-bot / hermes:analyst-echo
-user     @agent_molt-bot_hermes_analyst-echo:id.agentpod.dev
-alias    #agentpod_molt-bot_hermes_analyst-echo:id.agentpod.dev
+user     @agent_molt-bot__hermes_analyst-echo:id.agentpod.dev
+alias    #agentpod_molt-bot__hermes_analyst-echo:id.agentpod.dev
 ```
 
 `:` and any character outside the mxid localpart grammar becomes `_`, lowercased.
@@ -119,7 +119,7 @@ the node**, because station keys repeat across the fleet. `@analyst-echo` names
 no node. Fourteen exceptions to the invariant, hardcoded as a regex alternation
 in a registration file, would have rotted the first time an agent was renamed.
 
-So every station, on every harness, is `@agent_<node>_<station>`. One namespace,
+So every station, on every harness, is `@agent_<node>__<station>`. One namespace,
 one rule, nothing to maintain by hand.
 
 **Readability is a display-name problem, and is solved there.** The member list
@@ -188,7 +188,7 @@ that reverting is one write.
 ## How a message becomes work
 
 ```
-Matrix room  #agentpod_molt-bot_hermes_analyst-echo
+Matrix room  #agentpod_molt-bot__hermes_analyst-echo
    │ m.room.message from @rakesh:id.agentpod.dev
    ▼
 AS transaction  PUT /_matrix/app/v1/transactions/:txnId    (hs_token)
@@ -254,6 +254,6 @@ process becomes the bottleneck; the seam is the routes, and it moves.
 ## What "done" looks like
 
 An operator opens supermessage on their phone, types in
-`#agentpod_superchotu_openclaw_krishna`, and an agent that has never spoken
+`#agentpod_superchotu__openclaw_krishna`, and an agent that has never spoken
 Matrix in its life answers — with the message refused, in the room, if their
 grant does not cover it.

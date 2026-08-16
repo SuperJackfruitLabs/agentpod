@@ -16,6 +16,17 @@ export const stations = pgTable("stations", {
   workspacePath: text("workspace_path"),
   capabilities: jsonb("capabilities").$type<string[]>(),
   matrixId: text("matrix_id"),
+  /**
+   * The identity the Application Service minted for this station. Distinct from
+   * `matrixId`, which is what the harness reports and the node agent owns —
+   * nobody on the host can report this one, so nothing on the host can erase it.
+   */
+  bridgeMatrixId: text("bridge_matrix_id"),
+  /**
+   * Who answers for this station on Matrix — `bridge` (the Application Service
+   * speaks for it) or `harness` (it runs its own Matrix client). Never both.
+   */
+  matrixIdentityMode: text("matrix_identity_mode").notNull().default("bridge"),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [

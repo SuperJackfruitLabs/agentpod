@@ -36,3 +36,6 @@ export * from "./bridge";
 export * from "./identities";
 
 export * from "./grants";
+
+// Matrix Application Service bookkeeping (#351)
+export * from "./matrix";

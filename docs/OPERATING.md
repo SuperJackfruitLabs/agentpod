@@ -782,7 +782,49 @@ thing it protects. The Synapse-era archive was copied off manually
 (`~/agentpod-backups/matrix-backup-2026-08-16.tar.gz`); nothing does that on a
 schedule yet.
 
-### 7d. What happened to the Synapse history
+### 7d. The Matrix bridge
+
+Every station gets a Matrix identity and a room, so an agent whose harness has
+never spoken Matrix can be talked to from a phone. Design:
+`docs/superpowers/specs/2026-08-16-matrix-application-service-design.md`.
+
+| | |
+|---|---|
+| switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
+| config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
+| a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
+| its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
+
+**Finding an agent's room.** The names are derived from the node and the station
+key, so `openclaw:krishna` on `superchotu` is
+`#agentpod_superchotu__openclaw_krishna`. The member list shows the readable
+form — `krishna (openclaw @ superchotu)`.
+
+**Who may talk to an agent** is the control pair, unchanged. A refusal arrives
+**in the room**, saying which of the three things happened: the hub does not
+recognise the sender, the sender's grant does not cover that agent, or the
+station could not be reached.
+
+**Turning it off** is one field in the homeserver's registration file:
+
+```yaml
+url: null          # was http://127.0.0.1:3001
+```
+
+then `systemctl restart tuwunel`. The hub keeps running; the homeserver simply
+stops pushing. This is also the state the bridge shipped in, which is why the
+health check treats "no transaction has ever arrived" as **silent**, not healthy:
+a registration with no `url` is a perfectly healthy Application Service
+connected to nothing, and that went unnoticed for months.
+
+**Two modes, and only ever one answerer.** A station is `bridge` (the
+Application Service speaks for it — the default, and no credential exists
+anywhere) or `harness` (it runs its own Matrix client). `POST
+/api/stations/:id/matrix/credentials` issues a token and flips the mode in the
+same write; it needs `mayGrantReach`, because handing an agent a credential is
+granting it reach.
+
+### 7e. What happened to the Synapse history
 
 The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
 import path from Synapse into the Conduit lineage, and Matrix here carries a
