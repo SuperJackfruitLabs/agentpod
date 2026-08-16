@@ -5,6 +5,11 @@ import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant, deleteGrant } from "../../src/services/grants";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
+import {
+  clearPendingPermission,
+  notePendingPermission,
+  pendingPermissionFor,
+} from "../../src/services/matrix-as/permissions";
 
 /**
  * Where a Matrix message becomes work.
@@ -70,6 +75,34 @@ function deps() {
   };
 }
 
+/** `deps()` plus the ability to answer a parked permission request. */
+function depsWithPermissions() {
+  const base = deps();
+  return {
+    ...base,
+    acp: {
+      ...base.acp,
+      answerPermission: async (
+        userId: string,
+        sessionId: string,
+        requestSeq: number,
+        optionId: string
+      ) => {
+        if (answerFails) throw answerFails;
+        answered.push({ userId, sessionId, requestSeq, optionId });
+      },
+    },
+  };
+}
+
+let answered: Array<{
+  userId: string;
+  sessionId: string;
+  requestSeq: number;
+  optionId: string;
+}> = [];
+let answerFails: Error | null = null;
+
 function message(sender: string, body: string, roomId = ROOM) {
   return {
     type: "m.room.message",
@@ -109,6 +142,9 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  answered = [];
+  answerFails = null;
+  clearPendingPermission(ROOM);
   sent = [];
   created = [];
   prompts = [];
@@ -316,5 +352,88 @@ describe("an inbound room message", () => {
     await handleRoomMessage(message(OTHER_MXID, "hello"), deps());
 
     expect(created[0]!.userId).toBe(OTHER);
+  });
+});
+
+describe("answering a permission request from the room", () => {
+  const OPTIONS = [
+    { optionId: "allow_once", name: "Allow once" },
+    { optionId: "reject", name: "Reject" },
+  ];
+
+  const parkOn = (sessionId = "acps_parked") =>
+    notePendingPermission(ROOM, { sessionId, requestSeq: 7, options: OPTIONS });
+
+  test("a number answers it, and nothing is prompted", async () => {
+    // While a permission is pending the session is PARKED — it cannot take a
+    // prompt. Treating the answer as a message would lose the answer and fail
+    // the prompt in the same breath.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    parkOn();
+
+    await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
+
+    expect(answered).toEqual([
+      { userId: OWNER, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
+    ]);
+    expect(created).toHaveLength(0);
+    expect(prompts).toHaveLength(0);
+  });
+
+  test("the option's name answers it too", async () => {
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    parkOn();
+
+    await handleRoomMessage(message(OWNER_MXID, "Reject"), depsWithPermissions());
+
+    expect(answered[0]!.optionId).toBe("reject");
+  });
+
+  test("a reply that is not an option approves nothing and says so", async () => {
+    // "yes" against options named "Allow once" and "Allow always" does not say
+    // which. Resolving it to the nearest-looking one is the failure this must
+    // never have.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    parkOn();
+
+    await handleRoomMessage(message(OWNER_MXID, "yes go ahead"), depsWithPermissions());
+
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)!.body).toMatch(/nothing has been approved/i);
+    // …and the question still stands, so the next reply can answer it.
+    expect(pendingPermissionFor(ROOM)).toBeDefined();
+  });
+
+  test("someone who may not dispatch the agent may not approve for it either", async () => {
+    // Approving an action IS dispatching the agent, by another name.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:other/*"], mayGrantReach: false });
+    parkOn();
+
+    await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
+
+    expect(answered).toEqual([]);
+    expect(sent.at(-1)!.body).toMatch(/not permitted/i);
+  });
+
+  test("a refused answer leaves the question standing", async () => {
+    // A cleared question plus a failed answer would park the agent forever
+    // with nothing able to release it.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    parkOn();
+    answerFails = new Error("No pending permission request.");
+
+    await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
+
+    expect(pendingPermissionFor(ROOM)).toBeDefined();
+    expect(sent.at(-1)!.body).toMatch(/could not record that answer/i);
+  });
+
+  test("an ordinary message is still an ordinary message when nothing is pending", async () => {
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+
+    await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
+
+    expect(answered).toEqual([]);
+    expect(prompts.at(-1)!.text).toBe("1");
   });
 });
