@@ -47,6 +47,19 @@ export interface MatrixClient {
   sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /** Mark another event — 👀 while working, ✅ done, ❌ failed. */
+  sendReaction(
+    userId: string,
+    roomId: string,
+    targetEventId: string,
+    key: string
+  ): Promise<string | null>;
+  /** Remove an event we sent, which is how a reaction is taken back off. */
+  redact(userId: string, roomId: string, eventId: string): Promise<void>;
+  /** Set a user's avatar. Optional for an agent; uniform across harnesses. */
+  setAvatar(userId: string, mxcUrl: string): Promise<void>;
+  /** Upload an image and return its mxc:// URL. */
+  uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
 }
 
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
@@ -203,6 +216,54 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         { method: "PUT", userId, body: { displayname: displayName } }
       );
       assertOkOrAlready("displayname", res);
+    },
+
+    async sendReaction(userId, roomId, targetEventId, key) {
+      const txn = `apr-${crypto.randomUUID()}`;
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.reaction/${txn}`,
+        {
+          method: "PUT",
+          userId,
+          body: {
+            "m.relates_to": { rel_type: "m.annotation", event_id: targetEventId, key },
+          },
+        }
+      );
+      assertOkOrAlready("reaction", res);
+      return String(res.body.event_id ?? "") || null;
+    },
+
+    async redact(userId, roomId, eventId) {
+      const txn = `apx-${crypto.randomUUID()}`;
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${txn}`,
+        { method: "PUT", userId, body: {} }
+      );
+      assertOkOrAlready("redact", res);
+    },
+
+    async uploadImage(userId, bytes, contentType) {
+      // Media upload is not JSON, so it bypasses `call`.
+      const url = `${deps.homeserverUrl}/_matrix/media/v3/upload?user_id=${encodeURIComponent(userId)}`;
+      const res = await doFetch(url, {
+        method: "POST",
+        headers: { "Content-Type": contentType, Authorization: `Bearer ${deps.asToken}` },
+        // Cast through unknown: this is the one call that sends bytes rather
+        // than JSON, and the DOM's BodyInit is not in this project's lib set.
+        body: bytes as unknown as never,
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { content_uri?: string };
+      return body.content_uri ?? null;
+    },
+
+    async setAvatar(userId, mxcUrl) {
+      const res = await call(
+        `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
+        { method: "PUT", userId, body: { avatar_url: mxcUrl } }
+      );
+      assertOkOrAlready("avatar", res);
     },
 
     async invite(asUserId, roomId, invitee) {

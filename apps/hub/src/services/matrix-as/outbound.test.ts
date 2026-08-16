@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { attachRoomToSession, detachRoom, _attachedCountForTest } from "./outbound";
+import {
+  attachRoomToSession,
+  detachRoom,
+  noteTurnTrigger,
+  _attachedCountForTest,
+} from "./outbound";
 
 /**
  * The agent's answer, arriving in the room.
@@ -17,6 +22,8 @@ const SESSION = "acps_outbound_test";
 let sent: Array<{ userId: string; roomId: string; body: string }> = [];
 let typing: Array<{ roomId: string; on: boolean }> = [];
 let listeners: Array<(e: any) => void> = [];
+let reactions: Array<{ targetId: string; key: string }> = [];
+let redacted: string[] = [];
 let unsubscribed = 0;
 
 function deps() {
@@ -28,6 +35,13 @@ function deps() {
       },
       sendTyping: async (_userId: string, roomId: string, on: boolean) => {
         typing.push({ roomId, on });
+      },
+      sendReaction: async (_userId: string, _roomId: string, targetId: string, key: string) => {
+        reactions.push({ targetId, key });
+        return `$reaction-${reactions.length}`;
+      },
+      redact: async (_userId: string, _roomId: string, eventId: string) => {
+        redacted.push(eventId);
       },
     },
     subscribe: (_sessionId: string, fn: (e: any) => void) => {
@@ -92,6 +106,8 @@ beforeEach(() => {
   sent = [];
   typing = [];
   listeners = [];
+  reactions = [];
+  redacted = [];
   unsubscribed = 0;
   // The attachment map is module state — one per session, deliberately, so a
   // reconnect cannot double every message. Left attached, it would make the
@@ -303,5 +319,115 @@ describe("streaming an answer into a room", () => {
     expect(sent.map((s) => s.body)).toEqual(["second"]);
     expect(_attachedCountForTest()).toBe(1);
     detachRoom(SESSION);
+  });
+});
+
+describe("live feedback, so a room is not a black box", () => {
+  test("stops typing when the agent is waiting on a permission answer", async () => {
+    // The bug an operator saw: typing stayed on long after the answer arrived.
+    // `waiting` is not `idle`, and a permission request the room cannot answer
+    // could sit there for hours with the agent apparently still typing.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    await settle();
+    expect(typing.at(-1)!.on).toBe(true);
+
+    emit(state("waiting"));
+    await settle();
+
+    expect(typing.at(-1)!.on).toBe(false);
+  });
+
+  test("keeps typing alive through a turn longer than the homeserver's timeout", async () => {
+    // A typing notice expires after ~30s. A three-minute turn would show typing
+    // for the first thirty seconds and then look abandoned.
+    attachRoomToSession(SESSION, ROOM, AGENT, { ...deps(), typingRefreshMs: 30 });
+
+    emit(state("working"));
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(typing.filter((t) => t.on).length).toBeGreaterThan(1);
+
+    emit(state("idle"));
+    await settle();
+    expect(typing.at(-1)!.on).toBe(false);
+  }, 10_000);
+
+  test("stops refreshing typing once the turn ends", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, { ...deps(), typingRefreshMs: 30 });
+    emit(state("working"));
+    await new Promise((r) => setTimeout(r, 80));
+
+    emit(state("idle"));
+    await settle();
+    const after = typing.length;
+    await new Promise((r) => setTimeout(r, 120));
+
+    expect(typing).toHaveLength(after);
+  }, 10_000);
+
+  test("marks the message it is working on, and clears the mark when done", async () => {
+    // The vocabulary hermes's own Matrix plugin used: 👀 while working, ✅ when
+    // finished. It answers "did it even hear me" without a message.
+    noteTurnTrigger(SESSION, "$user-msg-1");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    await settle();
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-1", key: "👀" });
+
+    emit(chunk("4."));
+    emit(state("idle"));
+    await settle();
+
+    // The eyes are redacted rather than left beside the tick: two marks on one
+    // message reads as two states at once.
+    expect(redacted).toContain("$reaction-1");
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-1", key: "✅" });
+  });
+
+  test("marks a failed turn with a cross, not a tick", async () => {
+    noteTurnTrigger(SESSION, "$user-msg-2");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    await settle();
+    emit({
+      sessionId: SESSION,
+      seq: 4,
+      type: "error",
+      payload: { message: "harness exited" },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-2", key: "❌" });
+  });
+
+  test("reacts to the message that started THIS turn, not the previous one", async () => {
+    // A room is a conversation. Marking the wrong message would tell somebody
+    // their old question was being worked on.
+    noteTurnTrigger(SESSION, "$first");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+    emit(state("working"));
+    emit(state("idle"));
+    await settle();
+
+    noteTurnTrigger(SESSION, "$second");
+    emit(state("working"));
+    await settle();
+
+    expect(reactions.at(-1)!.targetId).toBe("$second");
+  });
+
+  test("says nothing with reactions when there is no message to mark", async () => {
+    // An unprompted turn — a cron job speaking — has no user message to react to.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    await settle();
+
+    expect(reactions).toHaveLength(0);
   });
 });

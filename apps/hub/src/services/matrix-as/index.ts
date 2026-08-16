@@ -15,7 +15,7 @@
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll } from "./provision";
 import { handleRoomMessage } from "./inbound";
-import { attachRoomToSession } from "./outbound";
+import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
 
@@ -110,6 +110,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     // exactly what happened the first time this ran against the real fleet.
     attach: (sessionId: string, roomId: string, agentUser: string) =>
       attachRoomToSession(sessionId, roomId, agentUser, { client }),
+    noteTrigger: noteTurnTrigger,
   };
 
   return {

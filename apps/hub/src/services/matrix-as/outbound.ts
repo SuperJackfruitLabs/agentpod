@@ -21,6 +21,13 @@ export interface OutboundDeps {
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
     sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
+    sendReaction?(
+      userId: string,
+      roomId: string,
+      targetEventId: string,
+      key: string
+    ): Promise<string | null>;
+    redact?(userId: string, roomId: string, eventId: string): Promise<void>;
   };
   subscribe?: (sessionId: string, fn: (e: AcpEvent) => void) => () => void;
   /**
@@ -28,6 +35,8 @@ export interface OutboundDeps {
    * that assert on flush timing directly.
    */
   flushDelayMs?: number;
+  /** How often to re-send a typing notice while a turn runs. See TYPING_REFRESH_MS. */
+  typingRefreshMs?: number;
 }
 
 interface Attachment {
@@ -35,8 +44,13 @@ interface Attachment {
   agentUser: string;
   buffer: string[];
   timer: ReturnType<typeof setTimeout> | null;
+  typingTimer: ReturnType<typeof setInterval> | null;
   unsubscribe: () => void;
   ended: boolean;
+  /** The message that started the current turn, if a person started it. */
+  triggerEventId: string | null;
+  /** The 👀 we put on it, so it can be taken off again. */
+  workingReactionId: string | null;
 }
 
 /**
@@ -62,6 +76,38 @@ const attached = new Map<string, Attachment>();
  * treating it as one cuts sentences in half.
  */
 export const FLUSH_SAFETY_MS = 20_000;
+
+/**
+ * How often a typing notice is renewed while a turn is running.
+ *
+ * A Matrix typing notice expires on its own — ours carries a 30s timeout — so a
+ * three-minute turn would show typing for the first thirty seconds and then look
+ * abandoned. Renewing at 20s keeps the room honest for as long as the agent is
+ * actually working, and stops the moment it is not.
+ */
+export const TYPING_REFRESH_MS = 20_000;
+
+/**
+ * What a mark on a message means.
+ *
+ * The vocabulary hermes's own Matrix plugin used, kept deliberately: 👀 while
+ * the agent is working, ✅ when the turn finished, ❌ when it failed. It answers
+ * "did it even hear me" without costing a message.
+ */
+const REACTION = { working: "👀", done: "✅", failed: "❌" } as const;
+
+/**
+ * The message that started the turn about to run, per session.
+ *
+ * Set by the inbound path before it prompts. Kept outside the attachment because
+ * a turn can be noted before the room is attached — and cleared with it.
+ */
+const triggers = new Map<string, string>();
+
+/** Note which message started the next turn on this session. */
+export function noteTurnTrigger(sessionId: string, eventId: string): void {
+  triggers.set(sessionId, eventId);
+}
 
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
 export function _attachedCountForTest(): number {
@@ -116,8 +162,11 @@ export function attachRoomToSession(
     agentUser,
     buffer: [],
     timer: null,
+    typingTimer: null,
     unsubscribe: () => {},
     ended: false,
+    triggerEventId: null,
+    workingReactionId: null,
   };
 
   const say = async (body: string) => {
@@ -151,10 +200,50 @@ export function attachRoomToSession(
     state.timer = setTimeout(() => void flush(), flushDelayMs);
   };
 
+  const typingRefreshMs = deps.typingRefreshMs ?? TYPING_REFRESH_MS;
+
+  const stopTyping = async () => {
+    if (state.typingTimer) {
+      clearInterval(state.typingTimer);
+      state.typingTimer = null;
+    }
+    await deps.client.sendTyping(agentUser, roomId, false).catch(() => {});
+  };
+
+  const startTyping = async () => {
+    await deps.client.sendTyping(agentUser, roomId, true).catch(() => {});
+    if (state.typingTimer) clearInterval(state.typingTimer);
+    // Renewed rather than set once: the notice expires on its own, and a long
+    // turn would otherwise look abandoned halfway through.
+    state.typingTimer = setInterval(() => {
+      void deps.client.sendTyping(agentUser, roomId, true).catch(() => {});
+    }, typingRefreshMs);
+  };
+
+  /** Put a mark on the message that started this turn, replacing any earlier one. */
+  const mark = async (key: string) => {
+    const target = state.triggerEventId;
+    if (!target || !deps.client.sendReaction) return;
+
+    // Two marks on one message would read as two states at once, so the
+    // previous one is taken off before the next goes on.
+    if (state.workingReactionId && deps.client.redact) {
+      await deps.client.redact(agentUser, roomId, state.workingReactionId).catch(() => {});
+      state.workingReactionId = null;
+    }
+
+    const id = await deps.client
+      .sendReaction(agentUser, roomId, target, key)
+      .catch(() => null);
+    if (key === REACTION.working) state.workingReactionId = id ?? null;
+  };
+
   const detach = () => {
     if (state.ended) return;
     state.ended = true;
     if (state.timer) clearTimeout(state.timer);
+    if (state.typingTimer) clearInterval(state.typingTimer);
+    triggers.delete(sessionId);
     state.unsubscribe();
     attached.delete(sessionId);
   };
@@ -178,20 +267,28 @@ export function attachRoomToSession(
 
           if (status === "working") {
             // Without this the room looks dead for the ten seconds an agent
-            // spends thinking.
-            await deps.client
-              .sendTyping(agentUser, roomId, true)
-              .catch(() => {});
+            // spends thinking. The trigger is picked up here rather than at
+            // attach time, because a room outlives any one turn.
+            state.triggerEventId = triggers.get(sessionId) ?? null;
+            await startTyping();
+            await mark(REACTION.working);
             return;
           }
 
-          if (status === "idle" || status === "ended") {
-            await flush();
-            await deps.client.sendTyping(agentUser, roomId, false).catch(() => {});
+          // Anything that is not `working` means the agent is not typing —
+          // including `waiting`, which is a permission request this room cannot
+          // yet answer and could sit there for hours. Enumerating only idle and
+          // ended left typing on for exactly that case.
+          await flush();
+          await stopTyping();
+
+          if (status === "idle" || status === "ended") await mark(REACTION.done);
+
+          if (status === "ended") {
             // A session that ended takes its attachment with it — an
             // unsubscribed listener is the leak `_subscriberCountForTest`
             // exists to catch.
-            if (status === "ended") detach();
+            detach();
           }
           return;
         }
@@ -204,6 +301,8 @@ export function attachRoomToSession(
 
         case "error": {
           const message = isRecord(event.payload) ? event.payload.message : undefined;
+          await stopTyping();
+          await mark(REACTION.failed);
           await say(`This agent reported an error: ${String(message ?? "unknown")}`);
           return;
         }
@@ -223,9 +322,11 @@ export function attachRoomToSession(
 /** Stop streaming a session into its room. Idempotent. */
 export function detachRoom(sessionId: string): void {
   const state = attached.get(sessionId);
+  triggers.delete(sessionId);
   if (!state) return;
   state.ended = true;
   if (state.timer) clearTimeout(state.timer);
+  if (state.typingTimer) clearInterval(state.typingTimer);
   state.unsubscribe();
   attached.delete(sessionId);
 }
