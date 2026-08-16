@@ -38,6 +38,7 @@ import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
+import { matrixAsTransactions } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
@@ -180,6 +181,17 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "OAuth provider linkage, written by Better Auth. A GitHub identity is a property of a " +
       "principal, not of a fleet.",
   },
+  matrix_as_transactions: {
+    table: matrixAsTransactions,
+    reason:
+      "Applied Application Service transaction ids, so a homeserver's retry is a no-op rather " +
+      "than a second conversation. A transaction id is the HOMESERVER's counter, not a fact " +
+      "about any tenant — it names an envelope, and the events inside it belong to whichever " +
+      "tenants their rooms do. Scoping this would mean asking which tenant a retry belongs to " +
+      "before reading what is in it, which is backwards, and would let one tenant's replay " +
+      "re-deliver another's.",
+  },
+
   jwks: {
     table: jwks,
     reason:
