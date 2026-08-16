@@ -25,6 +25,16 @@ export interface RolloutNode {
   agentVersion: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
+  /**
+   * True when this node's binary comes from an image rather than from disk —
+   * the driver declares `imageBinding: "fixed"` (#349).
+   *
+   * Such a node cannot be moved forward by self-update **by construction**:
+   * the swap does not survive a restart from the image, and the exit that
+   * self-update performs to hand over to a supervisor is, on a container
+   * substrate with no supervisor, simply the station stopping.
+   */
+  imageFixed?: boolean;
 }
 
 export interface PlanItem {
@@ -78,6 +88,17 @@ export function planRollout(nodes: RolloutNode[], opts: PlanOptions): PlanItem[]
       // RPC. Calling this a failure would make every rollout report failures
       // for machines that are merely switched off.
       if (n.status !== "online") return skip(`the node is ${n.status || "offline"}`);
+
+      // Also not a policy choice, and checked BEFORE force for that reason:
+      // sending this node an update does not update it, it stops it. The
+      // binary is swapped into an ephemeral disk and the process exits looking
+      // for a supervisor that a container does not have.
+      if (n.imageFixed) {
+        return skip(
+          "its binary comes from the substrate's image — update it by bumping " +
+            "AGENTPOD_VERSION in that image, redeploying, and restarting the runtime"
+        );
+      }
 
       if (opts.force) return { nodeId: n.id, name: n.name, action: "update" };
 

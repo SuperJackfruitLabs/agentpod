@@ -233,3 +233,85 @@ test("POST /api/nodes/:id/update → a successful update is still a 200", async 
     expect(res.status).toBe(200);
   }
 });
+
+// ─── A node whose binary comes from an image (#349) ───────────────────────────
+
+/**
+ * `cf-opencode` was updated from the console and went offline, still on
+ * v0.1.22. Self-update swaps the binary and exits so a supervisor can restart
+ * it; a Cloudflare container has no supervisor, so the exit IS the stop — and
+ * the swap would not have survived the restart it never got, because the next
+ * start comes up from the image.
+ *
+ * So the refusal must happen BEFORE the RPC. A route that sent the verb and
+ * reported the failure afterwards would have already stopped the station.
+ */
+function appWithFixedImageNode(mockRequest: RequestFn) {
+  const routes = createNodeRoutes({
+    request: mockRequest,
+    fixedImageNodesFn: async () => new Set([TEST_NODE_ID]),
+  });
+  return new Hono()
+    .use("/api/nodes/*", async (c, next) => {
+      c.set("user", {
+        id: TEST_USER_ID,
+        authType: "api_key",
+        tenantId: "fleet_00000000000000000000",
+      } satisfies AuthUser);
+      return next();
+    })
+    .route("/api/nodes", routes);
+}
+
+test("a node that boots from an image is refused, and the RPC is never sent", async () => {
+  const { request, calls } = stubBroker({ ok: true, data: { ok: true, updating: true } });
+
+  const res = await appWithFixedImageNode(request).request(
+    `/api/nodes/${TEST_NODE_ID}/update`,
+    { method: "POST", headers: { "Content-Type": "application/json" } }
+  );
+
+  expect(res.status).toBe(409);
+  // Not sending it is the whole point: the send is what stops the station.
+  expect(calls).toHaveLength(0);
+});
+
+test("the refusal says how to update the node instead", async () => {
+  // A bare "unsupported" leaves an operator with a stale station and no next
+  // step, which is how people end up destroying a runtime to fix a version.
+  const { request } = stubBroker({ ok: true, data: { ok: true, updating: true } });
+
+  const res = await appWithFixedImageNode(request).request(
+    `/api/nodes/${TEST_NODE_ID}/update`,
+    { method: "POST", headers: { "Content-Type": "application/json" } }
+  );
+  const body = (await res.json()) as { ok: boolean; error: string };
+
+  expect(body.ok).toBe(false);
+  expect(body.error).toMatch(/image/i);
+  expect(body.error).toMatch(/AGENTPOD_VERSION|redeploy/i);
+});
+
+test("force does not override it, because force cannot make this work", async () => {
+  const { request, calls } = stubBroker({ ok: true, data: { ok: true, updating: true } });
+
+  const res = await appWithFixedImageNode(request).request(
+    `/api/nodes/${TEST_NODE_ID}/update?force=1`,
+    { method: "POST", headers: { "Content-Type": "application/json" } }
+  );
+
+  expect(res.status).toBe(409);
+  expect(calls).toHaveLength(0);
+});
+
+test("an ordinary node is unaffected", async () => {
+  const { request, calls } = stubBroker({
+    ok: true,
+    data: { ok: true, updating: true, tag: "v0.1.27" },
+  });
+
+  const res = await postUpdate(request);
+
+  expect(res.status).toBe(200);
+  expect(calls).toHaveLength(1);
+});

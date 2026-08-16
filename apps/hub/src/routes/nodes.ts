@@ -3,6 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { EnrollRequest } from "@agentpod/contract";
 import { enrollNode, verifyNodeCredential } from "../services/enrollment";
 import { listNodes } from "../services/node-registry";
+import { nodesWithFixedImage } from "../services/runtimes";
 import {
   executeRollout,
   planRollout,
@@ -76,9 +77,12 @@ export function createNodeRoutes(deps?: {
   request?: RequestFn;
   /** Replaces the database-backed node list so the rollout is unit-testable. */
   listNodesFn?: (userId: string) => Promise<RolloutNode[]>;
+  /** Replaces the runtime lookup that answers which nodes boot from an image. */
+  fixedImageNodesFn?: (userId: string) => Promise<Set<string>>;
 }) {
   const _request: RequestFn = deps?.request ?? brokerRequest;
   const _listNodes = deps?.listNodesFn ?? (listNodes as (u: string) => Promise<RolloutNode[]>);
+  const _fixedImageNodes = deps?.fixedImageNodesFn ?? nodesWithFixedImage;
 
   return (
     new Hono()
@@ -111,8 +115,17 @@ export function createNodeRoutes(deps?: {
           ? (body.only as unknown[]).filter((x): x is string => typeof x === "string")
           : undefined;
 
-        const nodes = await _listNodes(c.get("user").id);
-        const plan = planRollout(nodes, { force, only });
+        const userId = c.get("user").id;
+        const nodes = await _listNodes(userId);
+
+        // A node whose binary comes from an image is not updatable by RPC, and
+        // asking stops it. A rollout that did that to every container station
+        // would be far worse than one that updates nothing (#349).
+        const fixed = await _fixedImageNodes(userId);
+        const plan = planRollout(
+          nodes.map((n) => ({ ...n, imageFixed: fixed.has(n.id) })),
+          { force, only }
+        );
         const results = await executeRollout(plan, { request: _request, force });
 
         return c.json({
@@ -151,6 +164,25 @@ export function createNodeRoutes(deps?: {
       .post("/:id/update", async (c) => {
         const nodeId = c.req.param("id");
         const force = await readForce(c);
+
+        // Refused BEFORE the RPC, because sending it is what stops the station:
+        // the agent swaps its binary and exits for a supervisor that a
+        // container substrate does not have, onto a disk that will not keep the
+        // swap (#349). `force` does not apply — it cannot make this work.
+        if ((await _fixedImageNodes(c.get("user").id)).has(nodeId)) {
+          return c.json(
+            {
+              ok: false as const,
+              error:
+                "This node's binary comes from the substrate's image, so it cannot " +
+                "self-update — the attempt would stop the station and change nothing. " +
+                "Bump AGENTPOD_VERSION in that image, redeploy it, then restart the " +
+                "runtime; the workspace is restored from its archive.",
+            },
+            409
+          );
+        }
+
         const r = await _request(nodeId, "update", { force });
 
         // The RPC never reached the node, or the node rejected the frame.

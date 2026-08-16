@@ -157,7 +157,11 @@ done
 # Both Fly images by default. They are pinned together ON PURPOSE — two
 # stations on one substrate running different node-agent builds makes "it works
 # on the other one" mean nothing — so both are checked, and against each other.
-[ -n "$FILES" ] || FILES="$HERE/Dockerfile $HERE/Dockerfile.pi"
+# The Cloudflare worker image is checked too. It is not a Fly file, but it
+# pins the node-agent the same way and is a deployment artifact its nodes
+# cannot self-update away from (#349) — while nothing checked it, it sat on
+# v0.1.22 for five releases and a station could not be moved forward at all.
+[ -n "$FILES" ] || FILES="$HERE/Dockerfile $HERE/Dockerfile.pi $HERE/../../cloudflare/worker-v2/Dockerfile"
 
 if [ -z "$LATEST" ]; then
   # shellcheck disable=SC2086 # deliberate word splitting of the file list
