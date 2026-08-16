@@ -23,11 +23,10 @@ import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { missionAlias } from "../services/matrix-as/missions";
 import {
-  ensurePurposeSpace,
   ensureSpaceRecord,
   GENERAL_MISSIONS_KEY,
   type Space,
-} from "../services/matrix-as/purpose-spaces";
+} from "../services/matrix-as/spaces";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 
@@ -93,7 +92,6 @@ export function createMissionRoutes(deps: MissionDeps) {
         id: stations.id,
         tenantId: stations.tenantId,
         stationKey: stations.stationKey,
-        purpose: stations.purpose,
         nodeName: nodes.name,
       })
       .from(stations)
@@ -169,25 +167,16 @@ export function createMissionRoutes(deps: MissionDeps) {
         )
       );
 
-    // A mission of work agents is a work mission, and belongs where the
-    // operator is already looking. That only holds when the members AGREE: one
-    // labelled member does not make a purpose, and a cross-purpose mission
-    // belongs to both and to neither — which is exactly the case the one shared
-    // Missions space is right for. Inferring from a majority would file it
-    // somewhere nobody chose.
-    const purposes = new Set(members.map((m) => m.purpose));
-    const shared =
-      purposes.size === 1 && members[0]!.purpose !== null ? members[0]!.purpose : null;
-
-    const space = shared
-      ? await ensurePurposeSpace(
-          tenantId,
-          shared,
-          speaker,
-          identity?.externalId ?? null,
-          deps
-        )
-      : await missionsSpace(tenantId, speaker, identity?.externalId ?? null, deps);
+    // Every mission goes in the one Missions space. Grouping is by NODE now,
+    // and a mission that spans machines — which is most of them, since that is
+    // the point of a mission — belongs to all of them and to none. Filing it
+    // under one member's node would be picking a member.
+    const space = await missionsSpace(
+      tenantId,
+      speaker,
+      identity?.externalId ?? null,
+      deps
+    );
 
     // As the SPACE's creator, never as this mission's speaker: `m.space.child`
     // state lives on the space, and a user who merely made one of its rooms is

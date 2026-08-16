@@ -18,7 +18,7 @@ import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
-import { ensurePurposeSpace, fileRoomUnderSpace } from "./purpose-spaces";
+import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { createLogger } from "../../utils/logger";
 
@@ -210,19 +210,19 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
       .where(eq(stations.id, s.stationId));
   }
 
-  await fileByPurpose(s, speaker, deps);
+  await fileByNode(s, speaker, deps);
 }
 
 /**
- * Hang the station's room under the space its purpose calls for.
+ * Hang the station's room under its node's space.
  *
- * Runs on every provision, which is what makes a purpose change take effect:
- * setting one announces the station, and the announcement is this same
- * reconciler. Skipped entirely when the deployment's client cannot do spaces —
+ * Runs on every provision, which is what makes a move take effect: an agent
+ * that turns up on a different machine is re-filed the next time its station is
+ * announced. Skipped entirely when the deployment's client cannot do spaces —
  * a test client asserting on rooms, mainly — because an agent you can talk to
  * matters more than where it is filed.
  */
-async function fileByPurpose(
+async function fileByNode(
   s: NonNullable<Awaited<ReturnType<typeof context>>>,
   speaker: string,
   deps: ProvisionDeps
@@ -241,18 +241,17 @@ async function fileByPurpose(
     client: { createSpace, addSpaceChild, removeSpaceChild, invite: deps.client.invite },
   };
 
-  // An unlabelled station belongs under nothing — not under an invented
-  // `Unsorted` space. It still shows up in All rooms, which is where a fresh
-  // ad-hoc runtime belongs until somebody says otherwise.
-  const desired = s.purpose
-    ? await ensurePurposeSpace(
-        s.tenantId,
-        s.purpose,
-        speaker,
-        await ownerMxid(s.userId),
-        spaceDeps
-      )
-    : null;
+  // Every station has a node, so every station has a space — no labelling step
+  // stands between a new agent and a sensible place in the roster. A space that
+  // could not be made leaves the room in All rooms rather than under an
+  // invented `Unsorted`.
+  const desired = await ensureNodeSpace(
+    s.tenantId,
+    s.nodeName,
+    speaker,
+    await ownerMxid(s.userId),
+    spaceDeps
+  );
 
   await fileRoomUnderSpace(room.roomId, desired, room.spaceRoomId, spaceDeps);
 }

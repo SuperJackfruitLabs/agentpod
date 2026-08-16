@@ -93,7 +93,7 @@ beforeEach(async () => {
   invited = [];
   await rawSql`DELETE FROM matrix_mission_members`;
   await rawSql`DELETE FROM matrix_missions`;
-  await rawSql`DELETE FROM matrix_purpose_spaces`;
+  await rawSql`DELETE FROM matrix_spaces`;
   await rawSql`UPDATE stations SET purpose = NULL WHERE node_id = ${NODE}`;
   await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*", "agentpod:*/openclaw:*"], mayGrantReach: false });
 });
@@ -103,7 +103,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM matrix_mission_members`;
     await rawSql`DELETE FROM matrix_missions`;
-    await rawSql`DELETE FROM matrix_purpose_spaces`;
+    await rawSql`DELETE FROM matrix_spaces`;
     await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE id IN (${A}, ${B})`;
@@ -196,38 +196,27 @@ describe("POST /api/missions", () => {
   });
 });
 
-describe("a mission and the purpose of its members", () => {
-  test("hangs under the purpose its members agree on", async () => {
-    // A mission of work agents is a work mission. Filing it under the general
-    // missions space instead would put it somewhere the operator does not look
-    // for the thing they were just doing.
+describe("where a mission hangs", () => {
+  test("always in the one Missions space, whatever nodes its members are on", async () => {
+    // Grouping is by node now, and a mission that spans machines — which is
+    // most of them, since that is the point of a mission — belongs to all of
+    // them and to none. Filing it under one member's node would be picking a
+    // member.
     await rawSql`UPDATE stations SET purpose = 'work' WHERE id IN (${A}, ${B})`;
 
     await post("/missions", { name: "Q4 rollout", stationIds: [A, B] });
 
-    expect(spaces).toEqual([{ name: "Work" }]);
+    expect(spaces).toEqual([{ name: "Missions" }]);
     expect(children).toHaveLength(1);
-    expect(children[0]!.space).toBe("!space1:id.agentpod.dev");
   });
 
-  test("falls back to the general missions space when they disagree", async () => {
-    // A cross-purpose mission is exactly the case one shared space is right
-    // for: it belongs to both and to neither, and picking one member's purpose
-    // would be picking a member.
+  test("a purpose on its members changes nothing", async () => {
+    // `purpose` is still recorded — it is what an agent is FOR — but nothing
+    // groups by it any more.
     await rawSql`UPDATE stations SET purpose = 'work' WHERE id = ${A}`;
     await rawSql`UPDATE stations SET purpose = 'personal' WHERE id = ${B}`;
 
     await post("/missions", { name: "Cross thing", stationIds: [A, B] });
-
-    expect(spaces).toEqual([{ name: "Missions" }]);
-  });
-
-  test("falls back when a member is unlabelled, rather than guessing from the rest", async () => {
-    // One labelled member does not make a mission's purpose. Inferring from a
-    // majority would file it somewhere nobody chose.
-    await rawSql`UPDATE stations SET purpose = 'work' WHERE id = ${A}`;
-
-    await post("/missions", { name: "Half known", stationIds: [A, B] });
 
     expect(spaces).toEqual([{ name: "Missions" }]);
   });
