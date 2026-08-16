@@ -877,48 +877,35 @@ grant as sending the agent a message. A question stops standing the moment the
 turn moves on — answered in the console, cancelled, or failed — so a room can
 never approve something already decided.
 
-### 7g. Purpose: what an agent is FOR
+### 7g. Spaces: one per node
 
-A flat roster is fine at 32 agents and unreadable at 200. The axis to group by
-is **purpose** — personal, work, ad hoc, whatever you type — and deliberately
-**not** the node: this fleet's nodes line up with use cases today by accident of
-how it was built, and coming use cases span harnesses and runtimes.
+A flat roster is fine at 32 agents and unusable at 200, so every agent's room
+hangs under a Matrix space named for the machine it runs on — `molt-bot`,
+`superchotu`, and so on. Clients that read the hierarchy group the roster by it
+for free: supermessage's space rail scopes its list this way, and Element reads
+the same edges. **You are invited to each space as it is created; accept the
+invite or you will not see it.**
 
-Purpose lives on the **station**. A node has one too, but only as the default a
-station inherits when it is adopted — the station's is what anything reads.
+Nothing to configure. Every station has a node, so every station has a space —
+there is no labelling step between adopting an agent and it landing somewhere
+sensible.
 
-```sh
-# what one agent is for
-curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"purpose":"work"}' https://hub.agentpod.dev/api/stations/<id>/purpose
+- An agent that **moves machines** moves space: the old `m.space.child` edge is
+  removed and the new one added, so a room never hangs under two nodes at once.
+- A **mission** hangs in the one shared `Missions` space, whatever its members'
+  nodes. A mission that spans machines — which is the point of a mission —
+  belongs to all of them and to none, and filing it under one member's node
+  would be picking a member.
 
-# the default for a node — ALSO labels the agents on it that have none,
-# and the response says how many that was
-curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"purpose":"personal"}' https://hub.agentpod.dev/api/nodes/<id>/purpose
-```
+Filing happens during provisioning, so it is idempotent and self-healing: a
+node that reconnects re-files its stations, and restarting the hub moves
+nothing twice.
 
-Both are in the console: a **Purpose of agents here** field on the node page,
-and a **Purpose** field on each agent's page that overrides it.
-
-**What it does on Matrix.** Each purpose gets one space, and every labelled
-agent's room is hung under it (`m.space.child`). Clients that read the hierarchy
-group the roster by it for free — supermessage's space rail already scopes its
-list this way, and Element reads the same edges. You are invited to each space as
-it is created; **accept the invite or you will not see it**.
-
-- Changing a purpose **moves** the room: the old edge is removed and the new one
-  added, so a room never hangs under two purposes at once.
-- Clearing a purpose takes the room out of its space. It is then filed nowhere
-  and appears only in All rooms, which is where a fresh ad-hoc runtime belongs
-  until somebody says otherwise. There is no `Unsorted` space — an invented
-  group is a claim nobody made.
-- A **mission** hangs under the purpose its members agree on. When they do not
-  agree, or any member is unlabelled, it stays in the general **Missions**
-  space — a cross-purpose mission belongs to both and to neither.
-
-Filing happens during provisioning, so it is idempotent and self-healing: set a
-purpose and the room moves; restart the hub and nothing moves twice.
+**`purpose` is still recorded** on stations and nodes (`PUT
+/api/stations/:id/purpose`, `PUT /api/nodes/:id/purpose`, and the fields in the
+console). It says what an agent is FOR, which a machine name cannot — but
+nothing groups by it. It is the raw material for tags, which can overlap and do
+not fight a hierarchy the way a second axis of spaces would.
 
 ### 7h. What happened to the Synapse history
 

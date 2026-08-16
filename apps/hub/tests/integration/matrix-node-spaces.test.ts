@@ -6,16 +6,15 @@ import { resolveTenantForUser } from "../../src/auth/tenant";
 import { provisionStation } from "../../src/services/matrix-as/provision";
 
 /**
- * Filing an agent's room under what it is for.
+ * Filing an agent's room under the machine it runs on.
  *
- * The operator's fleet is laid out by use case, and a flat roster of every
- * agent stops being readable somewhere between 32 and 200. The axis is purpose
- * — not the node, which carries purpose only by accident in this fleet and is
- * already scheduled to stop.
+ * A flat roster of every agent stops being readable somewhere between 32 and
+ * 200. The axis is the NODE: true by construction, and needing no labelling
+ * step before a new agent lands somewhere sensible.
  *
  * These assert against the real `provisionStation`, because filing has to be
- * part of provisioning rather than a second path: setting a purpose announces
- * the station, and the announcement is what re-files it.
+ * part of provisioning rather than a second path: a station announced after it
+ * moves is re-filed by the same reconciler that created it.
  */
 
 const OWNER = "test-user-purpose-spaces";
@@ -78,7 +77,7 @@ beforeAll(async () => {
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-  await rawSql`DELETE FROM matrix_purpose_spaces WHERE tenant_id = ${tenant}`;
+  await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, 'ps-box', 'ps-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
@@ -105,7 +104,7 @@ beforeEach(async () => {
   addFails = false;
   const tenant = await resolveTenantForUser(OWNER);
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
-  await rawSql`DELETE FROM matrix_purpose_spaces WHERE tenant_id = ${tenant}`;
+  await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
   await setPurpose(A, null);
   await setPurpose(B, null);
 });
@@ -114,7 +113,7 @@ afterAll(async () => {
   try {
     const tenant = await resolveTenantForUser(OWNER);
     await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
-    await rawSql`DELETE FROM matrix_purpose_spaces WHERE tenant_id = ${tenant}`;
+    await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
     await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -124,13 +123,11 @@ afterAll(async () => {
   }
 });
 
-describe("filing a station's room by purpose", () => {
-  test("hangs the room under a space named for its purpose", async () => {
-    await setPurpose(A, "personal");
-
+describe("filing a station's room by node", () => {
+  test("hangs the room under a space named for its node", async () => {
     await provisionStation(A, deps());
 
-    expect(created).toEqual([{ name: "Personal", creator: expect.any(String) }]);
+    expect(created).toEqual([{ name: "ps-box", creator: expect.any(String) }]);
     expect(added).toHaveLength(1);
     expect(await spaceOf(A)).toBe(added[0]!.space);
   });
@@ -138,17 +135,12 @@ describe("filing a station's room by purpose", () => {
   test("invites the owner, or the space is one nobody can see", async () => {
     // The rail lists JOINED spaces. A space the operator was never invited to
     // is a container that exists and does nothing.
-    await setPurpose(A, "personal");
-
     await provisionStation(A, deps());
 
     expect(invited.some((i) => i.invitee === `@owner-ps:${DOMAIN}`)).toBe(true);
   });
 
-  test("two stations with one purpose share one space", async () => {
-    await setPurpose(A, "work");
-    await setPurpose(B, "work");
-
+  test("two stations on one node share one space", async () => {
     await provisionStation(A, deps());
     await provisionStation(B, deps());
 
@@ -156,46 +148,21 @@ describe("filing a station's room by purpose", () => {
     expect(await spaceOf(A)).toBe(await spaceOf(B));
   });
 
-  test("an unlabelled station hangs nowhere at all", async () => {
-    // Not under an invented `Unsorted`: that is a claim nobody made. It still
-    // appears in All rooms, which is where a fresh ad-hoc runtime belongs.
-    await provisionStation(A, deps());
-
-    expect(created).toEqual([]);
-    expect(added).toEqual([]);
-    expect(await spaceOf(A)).toBeNull();
-  });
-
-  test("a changed purpose moves the room instead of adding a second parent", async () => {
+  test("a purpose on the station changes nothing", async () => {
+    // `purpose` is still recorded — it is what an agent is FOR, which a machine
+    // name cannot say — but nothing groups by it. It is what tags will be built
+    // from later.
     await setPurpose(A, "personal");
-    await provisionStation(A, deps());
-    const personal = added[0]!.space;
 
-    await setPurpose(A, "work");
     await provisionStation(A, deps());
 
-    expect(removed).toEqual([{ space: personal, child: expect.any(String) }]);
-    expect(await spaceOf(A)).not.toBe(personal);
-    expect(added).toHaveLength(2);
-  });
-
-  test("clearing a purpose takes the room out of its space", async () => {
-    await setPurpose(A, "personal");
-    await provisionStation(A, deps());
-    const personal = added[0]!.space;
-
-    await setPurpose(A, null);
-    await provisionStation(A, deps());
-
-    expect(removed).toEqual([{ space: personal, child: expect.any(String) }]);
-    expect(await spaceOf(A)).toBeNull();
+    expect(created).toEqual([{ name: "ps-box", creator: expect.any(String) }]);
   });
 
   test("provisioning again changes nothing", async () => {
     // Provisioning runs at every boot. A second run that re-sent the child
     // event would be harmless on the homeserver and a lie in the logs; worse,
     // it is the shape of code that eventually re-creates the space too.
-    await setPurpose(A, "personal");
     await provisionStation(A, deps());
 
     created = [];
@@ -215,16 +182,13 @@ describe("who writes the child edge", () => {
     // agent that merely owns one of the rooms is not a member of the space, so
     // the homeserver refused every edge after the first. Ten rooms were
     // recorded as filed and one of them was.
-    await setPurpose(A, "personal");
     await provisionStation(A, deps());
     const creatorOfSpace = created[0]!.creator;
 
-    await setPurpose(B, "personal");
     await provisionStation(B, deps());
 
     expect(added).toHaveLength(2);
     expect(added[1]!.creator).toBe(creatorOfSpace);
-    // …which is emphatically not B's own agent, the actor that used to be used.
     expect(added[1]!.creator).not.toBe(added[1]!.child);
   });
 
@@ -232,7 +196,6 @@ describe("who writes the child edge", () => {
     // The other half of the same bug: the failure was caught and the room was
     // marked as filed anyway, so the next run saw nothing to do and the room
     // stayed outside the space forever.
-    await setPurpose(A, "personal");
     addFails = true;
 
     await provisionStation(A, deps());
@@ -241,7 +204,6 @@ describe("who writes the child edge", () => {
   });
 
   test("and the next run tries again", async () => {
-    await setPurpose(A, "personal");
     addFails = true;
     await provisionStation(A, deps());
 

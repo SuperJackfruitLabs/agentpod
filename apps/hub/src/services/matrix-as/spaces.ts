@@ -1,25 +1,31 @@
 /**
- * Filing an agent's room under what it is FOR.
+ * Filing an agent's room under the machine it runs on.
  *
- * A flat roster is fine at 32 agents and unusable at 200, and the axis an
- * operator actually thinks in is purpose — personal, work, ad hoc — not the
- * host a process happens to run on. Node correlates with purpose in this fleet
- * today by accident of how it was built, and that accident is already
- * scheduled to break: coming use cases span harnesses and runtimes.
+ * A flat roster is fine at 32 agents and unusable at 200. The grouping is the
+ * NODE: it is the thing an operator can point at, it needs no labelling step
+ * before a new agent lands somewhere sensible, and it is true by construction
+ * rather than by anybody remembering to keep it true.
  *
- * The mechanism is a Matrix space per purpose, and the reason it is worth
- * doing here rather than in the client is that it costs the client nothing:
+ * This replaced a purpose-based grouping that lasted a day (migration 0052).
+ * `stations.purpose` is still recorded — it is what an agent is FOR, which a
+ * machine name cannot say — and is meant to become tags, which can overlap and
+ * do not fight a hierarchy the way a second axis of spaces would.
+ *
+ * The mechanism is a Matrix space per node, and the reason it is worth doing
+ * here rather than in the client is that it costs the client nothing:
  * supermessage's rail already scopes its roster by `m.space.child` edges, and
  * Element reads the same hierarchy. One `m.space.child` state event per room is
  * the whole feature.
  *
  * Three rules this module exists to keep:
  *
- *   1. **A station with no purpose hangs nowhere.** Not under `Unsorted` — an
- *      invented space is a claim nobody made. It still appears in All rooms.
- *   2. **A room has at most one purpose parent.** Purposes change, so filing
- *      must remove the old edge as well as add the new one; a room that only
- *      ever gained parents would show up under every purpose it ever had.
+ *   1. **A station whose space could not be made hangs nowhere.** Not under an
+ *      invented `Unsorted` — that is a claim nobody made. It still appears in
+ *      All rooms.
+ *   2. **A room has at most one parent.** An agent can move between machines,
+ *      so filing must remove the old edge as well as add the new one; a room
+ *      that only ever gained parents would show up under every node it ever
+ *      ran on.
  *   3. **Re-running changes nothing.** Provisioning runs at every boot and on
  *      every adoption, and `space_room_id` is what makes the second run a
  *      no-op instead of a re-write.
@@ -27,10 +33,10 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
-import { matrixPurposeSpaces, matrixRooms } from "../../db/schema/matrix";
+import { matrixSpaces, matrixRooms } from "../../db/schema/matrix";
 import { createLogger } from "../../utils/logger";
 
-const log = createLogger("matrix-purpose-spaces");
+const log = createLogger("matrix-spaces");
 
 /** What making a space needs. Split from filing: a caller that only ever
  *  creates one (missions) has no business knowing how to unfile a room. */
@@ -50,24 +56,23 @@ export interface SpaceFileDeps {
 }
 
 /**
- * How a purpose reads as a space name. `personal` → `Personal`.
+ * How a node reads as a space name.
  *
- * Only the first letter, and only when the operator typed it lowercase: a
- * purpose is their word, and title-casing every word would turn "ad hoc R&D"
- * into "Ad Hoc R&d".
+ * Its own name, unchanged. A machine called `molt-bot` is called that
+ * everywhere else an operator looks — the console, `apn`, their ssh config —
+ * and prettifying it here would make the space the one place it is spelled
+ * differently.
  */
-export function spaceNameFor(purpose: string): string {
-  const trimmed = purpose.trim();
-  if (trimmed === "") return trimmed;
-  return trimmed[0]!.toUpperCase() + trimmed.slice(1);
+export function spaceNameFor(nodeName: string): string {
+  return nodeName.trim();
 }
 
 /**
- * The space for `purpose` in this tenant, creating it the first time.
+ * The space for `nodeName` in this tenant, creating it the first time.
  *
  * `creator` is the agent whose room is being filed — an appservice must act as
- * some user in its namespace, and the first agent to need a space is as good a
- * creator as any. `owner` is invited so the space appears in their client at
+ * some user in its namespace, and the first agent on a node to need its space
+ * is as good a creator as any. `owner` is invited so the space appears in their client at
  * all: a space nobody has joined is one the roster rail cannot show, and then
  * the whole feature is invisible.
  *
@@ -75,14 +80,14 @@ export function spaceNameFor(purpose: string): string {
  * rather than failing the provisioning that called it. An agent you can talk to
  * in the wrong part of the roster beats an agent that was never provisioned.
  */
-export async function ensurePurposeSpace(
+export async function ensureNodeSpace(
   tenantId: string,
-  purpose: string,
+  nodeName: string,
   creator: string,
   owner: string | null,
   deps: SpaceCreateDeps
 ): Promise<Space | null> {
-  return ensureSpaceRecord(tenantId, purpose, spaceNameFor(purpose), creator, owner, deps);
+  return ensureSpaceRecord(tenantId, nodeName, spaceNameFor(nodeName), creator, owner, deps);
 }
 
 /**
@@ -103,25 +108,25 @@ export interface Space {
 /**
  * The key under which the one general missions space is remembered.
  *
- * The empty string, and reachable only from here: the purpose routes trim what
- * an operator types and map an empty result to `null`, so no purpose can ever
- * be `""`. That is what makes this a sentinel rather than a name somebody
- * could collide with by typing "missions".
+ * The empty string, and unreachable as a node name: enrolment refuses an empty
+ * one (`uniqueNodeName` falls back to "node"). That is what makes this a
+ * sentinel rather than a name somebody could collide with by calling a machine
+ * "missions".
  *
- * It lives in the same table as the purpose spaces because it is the same kind
- * of thing — a per-tenant space this deployment made and has to find again.
+ * It lives in the same table as the node spaces because it is the same kind of
+ * thing — a per-tenant space this deployment made and has to find again.
  * The alternative it replaced was reading the space id off any existing
- * mission row, which stopped being correct the moment some missions started
- * hanging under purpose spaces instead: the next cross-purpose mission would
- * have been filed under whichever purpose that arbitrary row happened to hold.
+ * mission row, which stopped being correct the moment some missions hung
+ * elsewhere: the next one would have been filed under whichever space that
+ * arbitrary row happened to hold.
  */
 export const GENERAL_MISSIONS_KEY = "";
 
 /**
  * A per-tenant space, created once and remembered by `key`.
  *
- * See [`ensurePurposeSpace`] for the purpose case and [`GENERAL_MISSIONS_KEY`]
- * for the other one.
+ * See [`ensureNodeSpace`] for the node case and [`GENERAL_MISSIONS_KEY`] for
+ * the other one.
  */
 export async function ensureSpaceRecord(
   tenantId: string,
@@ -131,19 +136,10 @@ export async function ensureSpaceRecord(
   owner: string | null,
   deps: SpaceCreateDeps
 ): Promise<Space | null> {
-  const purpose = key;
   const [existing] = await db
-    .select({
-      roomId: matrixPurposeSpaces.roomId,
-      creator: matrixPurposeSpaces.creator,
-    })
-    .from(matrixPurposeSpaces)
-    .where(
-      and(
-        eq(matrixPurposeSpaces.tenantId, tenantId),
-        eq(matrixPurposeSpaces.purpose, purpose)
-      )
-    );
+    .select({ roomId: matrixSpaces.roomId, creator: matrixSpaces.creator })
+    .from(matrixSpaces)
+    .where(and(eq(matrixSpaces.tenantId, tenantId), eq(matrixSpaces.spaceKey, key)));
   if (existing) return existing;
 
   const roomId = await deps.client.createSpace({ creator, name }).catch(() => null);
@@ -153,8 +149,8 @@ export async function ensureSpaceRecord(
   }
 
   await db
-    .insert(matrixPurposeSpaces)
-    .values({ tenantId, purpose, roomId, creator })
+    .insert(matrixSpaces)
+    .values({ tenantId, spaceKey: key, roomId, creator })
     .onConflictDoNothing();
 
   // Without this the space exists and nobody can see it.
@@ -165,12 +161,11 @@ export async function ensureSpaceRecord(
 }
 
 /**
- * Put `roomId` under the space its station's purpose calls for — and take it
- * out of the one it is under now, if that is a different one.
+ * Put `roomId` under the space its station's node calls for — and take it out
+ * of the one it is under now, if that is a different one.
  *
- * `desired` of null means "belongs under nothing", which is what an unlabelled
- * station wants and also what a station whose purpose was just cleared wants.
- * Both cases still have work to do: the old edge has to go.
+ * `desired` of null means "belongs under nothing" — a station whose node space
+ * could not be made, mainly. It still has work to do: the old edge has to go.
  *
  * Every edge is written **as the space's own creator**, never as the room's
  * agent — see [`Space`] for the production failure that rule comes from.
@@ -189,9 +184,9 @@ export async function fileRoomUnderSpace(
 
   if (currentSpaceRoomId) {
     const [current] = await db
-      .select({ creator: matrixPurposeSpaces.creator })
-      .from(matrixPurposeSpaces)
-      .where(eq(matrixPurposeSpaces.roomId, currentSpaceRoomId));
+      .select({ creator: matrixSpaces.creator })
+      .from(matrixSpaces)
+      .where(eq(matrixSpaces.roomId, currentSpaceRoomId));
 
     if (!current?.creator) {
       log.warn("cannot unfile a room from a space with no known creator", {

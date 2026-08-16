@@ -72,20 +72,24 @@ export const matrixRooms = pgTable(
  * the other shape, and is an ordinary room precisely because it is not one-to-one.
  */
 /**
- * One space per purpose — personal, work, whatever the operator types.
+ * One space per node, plus one for missions.
  *
- * Keyed by (tenant, purpose) rather than by an alias: an alias is a global
- * address on the homeserver, and "personal" is exactly the kind of everyday
- * word two tenants would both use. Nobody types this room's address anyway;
- * it is a container, not a destination.
+ * Keyed by (tenant, key) rather than by an alias: an alias is a global address
+ * on the homeserver, and a node called `laptop` is exactly what two tenants
+ * would both have. Nobody types this room's address anyway — it is a
+ * container, not a destination.
+ *
+ * The key is a node's name, or [`GENERAL_MISSIONS_KEY`] for the one space that
+ * holds missions. It used to be a purpose; see migration 0052 for why the
+ * grouping moved to the machine.
  */
-export const matrixPurposeSpaces = pgTable(
-  "matrix_purpose_spaces",
+export const matrixSpaces = pgTable(
+  "matrix_spaces",
   {
     tenantId: text("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    purpose: text("purpose").notNull(),
+    spaceKey: text("space_key").notNull(),
     roomId: text("room_id").notNull(),
     /**
      * The agent that created the space, and therefore the only one that can
@@ -97,7 +101,7 @@ export const matrixPurposeSpaces = pgTable(
     creator: text("creator"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [primaryKey({ columns: [t.tenantId, t.purpose] })]
+  (t) => [primaryKey({ columns: [t.tenantId, t.spaceKey] })]
 );
 
 export const matrixMissions = pgTable(
