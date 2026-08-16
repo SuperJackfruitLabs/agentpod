@@ -695,6 +695,103 @@ mobile navigation bar.
 
 Hermes stations that have a Matrix identity configured display the **Matrix ID** and a `matrix.to` deep-link in the station detail panel, so you can open a conversation with that agent identity directly from the console.
 
+### 7a. The homeserver
+
+`id.agentpod.dev` runs **tuwunel** (Apache-2.0), on the same host as the hub. It
+replaced Synapse (AGPLv3) on 2026-08-16; see
+`docs/superpowers/specs/2026-08-16-tuwunel-appservice-spike-findings.md` for why,
+and what was verified before the switch.
+
+| | |
+|---|---|
+| service | `tuwunel` (systemd → Docker, unit in `deploy/tuwunel/`) |
+| listens | `127.0.0.1:6167`, never exposed directly; nginx proxies `/_matrix` |
+| data | `/var/lib/tuwunel` (RocksDB, embedded — there is no separate database) |
+| config | `/etc/tuwunel/tuwunel.toml` |
+| appservice | `/etc/tuwunel/appservices/agentpod.yaml` — namespaces `@agent_.*`, `#agentpod_.*` |
+| backups | `/var/backups/tuwunel`, nightly at 04:17 via `/etc/cron.d/tuwunel-backup` |
+
+```sh
+systemctl status tuwunel
+journalctl -u tuwunel -f
+curl -s localhost:6167/_matrix/client/versions      # is it serving?
+```
+
+**Two log lines that look like faults and are not.** `ERROR … loopback/localhost
+listening address … will NOT work` is a false positive under `--network host`,
+where 127.0.0.1 *is* the host. `Error response from daemon: No such container:
+tuwunel` is the unit's `ExecStartPre=-docker rm -f`, which is why it carries a
+`-`.
+
+**Registration is closed** (`allow_registration = false`). Accounts are made
+deliberately: the appservice registers agents inside its own namespace, and a
+human needs the admin console.
+
+### 7b. Admin commands
+
+tuwunel has **no Synapse-style admin HTTP API**. Its admin surface is a room —
+`!94p3O40IPw164WyxHc:id.agentpod.dev`, which `@rakesh` is a member of. Send
+`!admin <command>` as an ordinary message:
+
+```
+!admin server help
+!admin users list-users
+!admin users create-user <name> [password]      # prints the password — see below
+!admin server backup-database
+```
+
+**`create-user` echoes the generated password** into whatever ran it. If that is
+a terminal or a transcript, follow with `!admin users reset-password <name>` and
+keep only the second one.
+
+When the server is stopped, the same commands run offline against the database
+with `--execute`, which is how the first admin was made:
+
+```sh
+systemctl stop tuwunel
+docker run --rm --network host -v /var/lib/tuwunel:/var/lib/tuwunel \
+  -v /etc/tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro \
+  -e TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml \
+  ghcr.io/matrix-construct/tuwunel:latest --execute 'users make-user-admin <name>'
+systemctl start tuwunel
+```
+
+Only one process may hold the RocksDB lock, which is why this needs the stop.
+
+### 7c. Backups, and restoring one
+
+`backup-database` writes a **RocksDB checkpoint while the server keeps running** —
+consistent by construction, unlike copying live files. `database_backups_to_keep`
+holds the last 3.
+
+```sh
+/usr/local/bin/tuwunel-backup.sh          # take one now
+ls /var/backups/tuwunel/
+```
+
+Restoring is a startup flag: `--restore-backup [<id>]` restores before opening
+the database, most recent when no id is given. `!admin server list-backups` lists
+them.
+
+> **Every path in `tuwunel.toml` must also be mounted in the unit.** The backup
+> path was configured before it was mounted, and `backup-database` failed with
+> "No such file or directory" for a directory that plainly existed on the host.
+
+**Off-site is still an open gap.** The nightly backup is on the same disk as the
+thing it protects. The Synapse-era archive was copied off manually
+(`~/agentpod-backups/matrix-backup-2026-08-16.tar.gz`); nothing does that on a
+schedule yet.
+
+### 7d. What happened to the Synapse history
+
+The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
+import path from Synapse into the Conduit lineage, and Matrix here carries a
+projection rather than the truth (`acp_events` is the transcript of record). The
+SQLite database, its signing key and the appservice registration are preserved in
+`/root/matrix-backup-2026-08-16/` on the host and in
+`~/agentpod-backups/` off it. To read that history, run a throwaway Synapse
+against a *copy* — never against the original.
+
 ---
 
 ## 8. The kaambaan bridge

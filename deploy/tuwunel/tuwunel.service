@@ -8,6 +8,11 @@
 #
 # It binds 127.0.0.1 only. nginx terminates TLS for id.agentpod.dev and proxies
 # /_matrix to it — the homeserver is never reachable from outside directly.
+#
+# Every path named in tuwunel.toml must be mounted here too, or the server
+# reports it as missing from inside the container while it exists on the host —
+# which is how `backup-database` first failed with "No such file or directory"
+# for a directory that was plainly there.
 Description=tuwunel Matrix homeserver
 Documentation=https://matrix-construct.github.io/tuwunel/
 After=docker.service network-online.target
@@ -24,6 +29,7 @@ ExecStartPre=-/usr/bin/docker rm -f tuwunel
 ExecStart=/usr/bin/docker run --rm --name tuwunel \
   --network host \
   -v /var/lib/tuwunel:/var/lib/tuwunel \
+  -v /var/backups/tuwunel:/var/backups/tuwunel \
   -v /etc/tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro \
   -v /etc/tuwunel/appservices:/etc/tuwunel/appservices:ro \
   -e TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml \
