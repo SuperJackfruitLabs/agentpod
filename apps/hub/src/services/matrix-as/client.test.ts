@@ -143,3 +143,74 @@ describe("acting as a station", () => {
     expect(calls[0]!.body).toEqual({ user_id: "@rakesh:id.agentpod.dev" });
   });
 });
+
+describe("an alias that is already taken", () => {
+  const ALIAS = "#agentpod_box_pi-x:id.agentpod.dev";
+  const OLD = "!old:id.agentpod.dev";
+  const NEW = "!new:id.agentpod.dev";
+
+  const inUse = { status: 409, body: { errcode: "M_ROOM_IN_USE" } };
+
+  test("hands back the existing room when the agent is still in it", async () => {
+    // The ordinary restart. Returning null here — what shipped — made
+    // provisioning create nothing and call it success.
+    replies = [
+      inUse,
+      { status: 200, body: { room_id: OLD } }, // directory lookup
+      { status: 200, body: { joined_rooms: [OLD] } }, // still a member
+    ];
+
+    const roomId = await client().ensureRoom(ALIAS, {
+      creator: USER,
+      name: "pi-x",
+      topic: "t",
+    });
+
+    expect(roomId).toBe(OLD);
+    expect(calls.map((c) => c.method)).toEqual(["POST", "GET", "GET"]);
+  });
+
+  test("reclaims the alias when the agent has left that room, and creates a fresh one", async () => {
+    // After a clean slate: the room is emptied and forgotten, but the alias
+    // still points at it, so `createRoom` fails forever and nothing else will
+    // ever release it. This is the case that made a rebuild produce 0 rooms
+    // while reporting 32 provisioned.
+    replies = [
+      inUse,
+      { status: 200, body: { room_id: OLD } },
+      { status: 200, body: { joined_rooms: [] } }, // no longer in it
+      { status: 200, body: {} }, // alias deleted
+      { status: 200, body: { room_id: NEW } }, // created at last
+    ];
+
+    const roomId = await client().ensureRoom(ALIAS, {
+      creator: USER,
+      name: "pi-x",
+      topic: "t",
+    });
+
+    expect(roomId).toBe(NEW);
+    const del = calls.find((c) => c.method === "DELETE")!;
+    expect(del.url).toContain("/directory/room/");
+    // As the agent that owns the alias — the bridge's own token is refused
+    // with a 403, which is what the live homeserver answered.
+    expect(del.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("gives up rather than pretending when the alias cannot be released", async () => {
+    replies = [
+      inUse,
+      { status: 200, body: { room_id: OLD } },
+      { status: 200, body: { joined_rooms: [] } },
+      { status: 403, body: { errcode: "M_FORBIDDEN" } }, // delete refused
+    ];
+
+    const roomId = await client().ensureRoom(ALIAS, {
+      creator: USER,
+      name: "pi-x",
+      topic: "t",
+    });
+
+    expect(roomId).toBeNull();
+  });
+});
