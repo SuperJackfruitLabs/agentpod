@@ -101,13 +101,15 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           userId: input.userId,
           mode: input.mode as never,
         });
-        // The room hears the answer as soon as the session exists, not when the
-        // first chunk arrives — otherwise the opening of a conversation is the
-        // one part of it nobody sees.
         return { id: session.id };
       },
       promptSession,
     },
+    // The joint between inbound and outbound. Without it a session is created,
+    // prompted, and answers into a stream nobody is listening to — which is
+    // exactly what happened the first time this ran against the real fleet.
+    attach: (sessionId: string, roomId: string, agentUser: string) =>
+      attachRoomToSession(sessionId, roomId, agentUser, { client }),
   };
 
   return {

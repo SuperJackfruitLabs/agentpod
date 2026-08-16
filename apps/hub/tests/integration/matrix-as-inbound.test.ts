@@ -34,6 +34,7 @@ let created: Array<{ stationId: string; userId: string }> = [];
 let prompts: Array<{ sessionId: string; text: string; userId: string }> = [];
 let sessionCounter = 0;
 let createFails: Error | null = null;
+let attached: Array<{ sessionId: string; roomId: string; agentUser: string }> = [];
 
 function deps() {
   return {
@@ -53,6 +54,9 @@ function deps() {
       promptSession: async (userId: string, sessionId: string, text: string) => {
         prompts.push({ userId, sessionId, text });
       },
+    },
+    attach: (sessionId: string, roomId: string, agentUser: string) => {
+      attached.push({ sessionId, roomId, agentUser });
     },
   };
 }
@@ -99,6 +103,7 @@ beforeEach(async () => {
   sent = [];
   created = [];
   prompts = [];
+  attached = [];
   createFails = null;
   await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
   await rawSql`
@@ -131,6 +136,41 @@ describe("an inbound room message", () => {
     expect(created).toHaveLength(1);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.text).toBe("status?");
+  });
+
+  test("attaches the room to the session, or the answer has nowhere to go", async () => {
+    // The gap that live verification found: a session was created and prompted
+    // and the agent answered into a stream nobody was listening to. Both halves
+    // had tests; the joint did not.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+
+    await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
+
+    expect(attached).toHaveLength(1);
+    expect(attached[0]!.roomId).toBe(ROOM);
+    expect(attached[0]!.agentUser).toBe("@agent_inbound-box__openclaw_krishna:id.agentpod.dev");
+    expect(attached[0]!.sessionId).toBe(prompts[0]!.sessionId);
+  });
+
+  test("attaches again when reusing an existing session, because a restart forgets", async () => {
+    // Attachments live in memory. After a hub restart the session row survives
+    // and the listener does not, so a room whose session predates the restart
+    // would go permanently quiet.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+
+    await handleRoomMessage(message(OWNER_MXID, "first"), deps());
+    await handleRoomMessage(message(OWNER_MXID, "second"), deps());
+
+    expect(created).toHaveLength(1);
+    expect(attached).toHaveLength(2);
+  });
+
+  test("does not attach when the message was refused", async () => {
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+
+    await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
+
+    expect(attached).toHaveLength(0);
   });
 
   test("refuses IN THE ROOM when the grant does not cover this station", async () => {
