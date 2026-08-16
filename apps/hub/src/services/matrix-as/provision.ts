@@ -28,7 +28,13 @@ export interface ProvisionDeps {
     ensureUser(localpart: string, displayName: string): Promise<void>;
     ensureRoom(
       alias: string,
-      opts: { creator: string; name: string; topic: string }
+      opts: {
+        creator: string;
+        name: string;
+        topic: string;
+        invite?: string;
+        isDirect?: boolean;
+      }
     ): Promise<string | null>;
     invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   };
@@ -104,10 +110,22 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   // conversation in two, with each half unaware of the other.
   if (!s.roomId) {
     const alias = bridgeAlias(s.nodeName, s.stationKey, deps.domain);
+
+    // The owner is invited AT creation rather than afterwards, because the flag
+    // that makes this a DM rides on the invite's own member event and can only
+    // be set there.
+    //
+    // A one-to-one agent room is a conversation with one correspondent, so it
+    // belongs under People — 32 agents in a Rooms list is a wall. Rooms where
+    // several agents work together are ordinary rooms, and are what spaces will
+    // group.
+    const invitee = await ownerMxid(s.userId);
+
     const roomId = await deps.client.ensureRoom(alias, {
       creator: speaker,
       name: s.displayName,
       topic: `${s.harness} on ${s.nodeName} — ${s.stationKey}`,
+      ...(invitee ? { invite: invitee, isDirect: true } : {}),
     });
 
     if (roomId) {
@@ -115,11 +133,6 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
         .insert(matrixRooms)
         .values({ roomId, tenantId: s.tenantId, stationId: s.stationId, alias })
         .onConflictDoNothing();
-
-      const invitee = await ownerMxid(s.userId);
-      // Only on creation: re-inviting somebody into a room they are already in
-      // is an error on some homeservers and noise on all of them.
-      if (invitee) await deps.client.invite(speaker, roomId, invitee);
     }
   }
 

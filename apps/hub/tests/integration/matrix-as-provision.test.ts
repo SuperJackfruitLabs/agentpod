@@ -21,7 +21,14 @@ const DOMAIN = "id.agentpod.dev";
 const OWNER_MXID = "@owner-provision:id.agentpod.dev";
 
 let registered: Array<{ localpart: string; displayName: string }> = [];
-let rooms: Array<{ alias: string; creator: string; name: string; topic: string }> = [];
+let rooms: Array<{
+  alias: string;
+  creator: string;
+  name: string;
+  topic: string;
+  invite?: string;
+  isDirect?: boolean;
+}> = [];
 let invites: Array<{ roomId: string; invitee: string }> = [];
 let roomCounter = 0;
 
@@ -34,9 +41,9 @@ function deps() {
       },
       ensureRoom: async (
         alias: string,
-        opts: { creator: string; name: string; topic: string }
+        opts: { creator: string; name: string; topic: string; invite?: string; isDirect?: boolean }
       ) => {
-        rooms.push({ alias, ...opts });
+        rooms.push({ alias, ...opts } as any);
         return `!room${++roomCounter}:id.agentpod.dev`;
       },
       invite: async (_asUserId: string, roomId: string, invitee: string) => {
@@ -138,8 +145,37 @@ describe("provisioning a station", () => {
   test("invites the station's owner, so the room is not a locked door", async () => {
     await provisionStation(OPENCLAW, deps());
 
-    expect(invites).toHaveLength(1);
-    expect(invites[0]!.invitee).toBe(OWNER_MXID);
+    // Invited at creation rather than afterwards: the flag that makes this a DM
+    // rides on the invite's member event, and can only be set there.
+    expect(rooms[0]!.invite).toBe(OWNER_MXID);
+  });
+
+  test("a one-to-one agent room is a DM, which is what hermes's rooms were", async () => {
+    // Talking to one agent is a conversation with one correspondent. Element
+    // files it under People, and 32 agents in a Rooms list is a wall.
+    //
+    // `is_direct` at creation rather than writing the human's m.direct: that is
+    // what hermes did, and it needed a human's access token — the credential
+    // this bridge exists to stop keeping. A conformant client files the DM
+    // itself when it sees the flag on its invite.
+    await provisionStation(OPENCLAW, deps());
+
+    expect(rooms[0]!.isDirect).toBe(true);
+  });
+
+  test("a station whose owner has no Matrix identity gets a room, not a DM", async () => {
+    // Nobody to be direct WITH. The room still exists so the agent has somewhere
+    // to be, and somebody can be invited later.
+    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
+
+    await provisionStation(OPENCLAW, deps());
+
+    expect(rooms[0]!.isDirect).toBeFalsy();
+    expect(rooms[0]!.invite).toBeUndefined();
+
+    await rawSql`
+      INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
+      VALUES ('pid_mx_provision', ${OWNER}, 'matrix', ${OWNER_MXID}, now())`;
   });
 
   test("provisions a hermes station exactly like every other", async () => {
