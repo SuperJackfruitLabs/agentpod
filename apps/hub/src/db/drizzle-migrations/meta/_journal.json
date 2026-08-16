@@ -330,6 +330,13 @@
       "when": 1786687165202,
       "tag": "0046_matrix_rooms",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786687166202,
+      "tag": "0047_reset_identity_mode",
+      "breakpoints": true
     }
   ]
 }
