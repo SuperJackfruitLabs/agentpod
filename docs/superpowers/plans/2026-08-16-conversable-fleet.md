@@ -15,7 +15,8 @@
 
 - **Homeserver:** `id.agentpod.dev` on `178.105.68.68`, private, federation disabled, nginx proxying `/_matrix` to the homeserver's port. **tuwunel serves 6167 by default, not 8008** — the vhost changes with it.
 - **Registration file:** a YAML file in tuwunel's `appservice_dir`, Synapse-shaped (the spike confirmed the existing file's namespaces load unchanged): AS id `ai-agents`, `sender_localpart: ai-bridge`, users `@agent_.*` exclusive, aliases `#agentpod_.*` exclusive, **`receive_ephemeral: true`** (tuwunel's name for what Synapse spelled `de.sorunome.msc2409.push_ephemeral`), and `url` **left unset until Task 9**.
-- **Name derivation is a pure function** of `(nodeName, stationKey)`: lowercase, every character outside `[a-z0-9._=/-]` becomes `_`. User `@agent_<node>_<station>`, alias `#agentpod_<node>_<station>`. Never stored as a second source of truth.
+- **Name derivation is a pure function** of `(nodeName, stationKey)`: lowercase, every character outside `[a-z0-9._=/-]` becomes `_`. User `@agent_<node>_<station>`, alias `#agentpod_<node>_<station>`. Never stored as a second source of truth. **All 32 stations, hermes included** — there is no exception list, because a name that omits the node breaks the rule the whole scheme rests on.
+- **A station's identity has a mode**: `bridge` (the AS answers) or `harness` (the harness runs its own client). Exactly one answerer per address, always.
 - **`hs_token` authenticates every AS route**; a request without it is 403 and is never processed. The `as_token` is what the bridge sends *to* the homeserver. The two point in opposite directions and swapping them fails as a 403 that reads like a permissions bug.
 - **Drop every event sent by our own namespace** before any other handling.
 - **Transactions are idempotent by `txnId`.**
@@ -86,13 +87,12 @@ receive_ephemeral: true
 rate_limited: false
 namespaces:
   users:
+    # One namespace for all 32. An earlier revision carried a second one listing
+    # the 14 hermes localparts verbatim, to preserve addresses whose rooms and
+    # history are being discarded anyway — fourteen hardcoded exceptions to the
+    # rule that a name must include its node.
     - exclusive: true
       regex: "@agent_.*"
-    # The 14 hermes addresses people already use, recreated on the new server by
-    # the bridge. Listed explicitly rather than by pattern: a broad regex here
-    # would claim human accounts on this homeserver.
-    - exclusive: true
-      regex: "@(analyst-echo|artistic-lyra|buddhimaan|cleaner-cody|coder-kai|controller-casey|onboarding-olivia|optimizer-ollie|predictor-paul|project-manager-pete|research-ray|strategy-sam|threat-hunter-theo|writer-quill):id\\.agentpod\\.dev"
   aliases:
     - exclusive: true
       regex: "#agentpod_.*"
@@ -306,17 +306,17 @@ git commit -m "feat(hub): derive a station's Matrix names from its node and key"
 
 ---
 
-### Task 2: Record who owns a station's Matrix id
+### Task 2: Record which mode a station's identity is in
 
 **Files:**
-- Create: `apps/hub/src/db/drizzle-migrations/0044_matrix_id_source.sql`
+- Create: `apps/hub/src/db/drizzle-migrations/0044_matrix_identity_mode.sql`
 - Modify: `apps/hub/src/db/drizzle-migrations/meta/_journal.json`
 - Modify: `apps/hub/src/db/schema/stations.ts`
 - Modify: `apps/hub/src/services/station-registry.ts` (the refresh path)
 - Test: `apps/hub/tests/integration/matrix-id-source.test.ts`
 
 **Interfaces:**
-- Produces: `stations.matrixIdSource: "harness" | "bridge"`, default `"harness"`.
+- Produces: `stations.matrixIdentityMode: "bridge" | "harness"`, default `"bridge"`.
 
 > **A migration without a `meta/_journal.json` entry never runs.** This repo has been bitten; add the entry in the same commit.
 
@@ -333,20 +333,20 @@ git commit -m "feat(hub): derive a station's Matrix names from its node and key"
  * answering in a room, with nothing anywhere saying why.
  */
 test("a station refresh leaves a bridge-owned mxid alone", async () => {
-  await setMatrixIdBySource(STATION, "@agent_box_pi_x:id.agentpod.dev", "bridge");
+  await setMatrixIdentity(STATION, "@agent_box_pi_x:id.agentpod.dev", "bridge");
 
   // What the node agent does on every detect.
   await refreshStationFromDetect(STATION, { matrixId: null });
 
   const row = await stationRow(STATION);
   expect(row.matrixId).toBe("@agent_box_pi_x:id.agentpod.dev");
-  expect(row.matrixIdSource).toBe("bridge");
+  expect(row.matrixIdentityMode).toBe("bridge");
 });
 
-test("a harness-owned mxid is still refreshed by the node agent", async () => {
-  // The existing behaviour must not regress: hermes reads its own identity off
-  // the host, and a profile change has to land.
-  await setMatrixIdBySource(STATION, "@old:id.agentpod.dev", "harness");
+test("a harness-mode mxid is still refreshed by the node agent", async () => {
+  // The existing behaviour must not regress: a harness that runs its own Matrix
+  // client reads its identity off the host, and a profile change has to land.
+  await setMatrixIdentity(STATION, "@old:id.agentpod.dev", "harness");
 
   await refreshStationFromDetect(STATION, { matrixId: "@new:id.agentpod.dev" });
 
@@ -359,23 +359,24 @@ test("a harness-owned mxid is still refreshed by the node agent", async () => {
 - [ ] **Step 3: Write the migration**
 
 ```sql
--- 0044_matrix_id_source.sql
+-- 0044_matrix_identity_mode.sql
 ALTER TABLE stations
-  ADD COLUMN matrix_id_source text NOT NULL DEFAULT 'harness';
+  ADD COLUMN matrix_identity_mode text NOT NULL DEFAULT 'bridge';
 
--- Every mxid that exists today was read off a host by the node agent.
--- The default is therefore correct for all 14 rows that have one, and the
--- bridge writes 'bridge' only where it takes ownership.
+-- 'bridge' is the safe default: the AS answers, and no credential exists
+-- anywhere for that identity. A station only becomes 'harness' when somebody
+-- deliberately issues it credentials (Task 8b), which is the act that could
+-- otherwise produce two answerers on one address.
 ALTER TABLE stations
-  ADD CONSTRAINT stations_matrix_id_source_check
-  CHECK (matrix_id_source IN ('harness', 'bridge'));
+  ADD CONSTRAINT stations_matrix_identity_mode_check
+  CHECK (matrix_identity_mode IN ('bridge', 'harness'));
 ```
 
 Add the journal entry. Classify the column in `db/tenant-scope.ts` if that file requires it for new columns.
 
 - [ ] **Step 4: Guard the refresh path**
 
-In `station-registry.ts`, the detect-refresh must not overwrite `matrix_id` when `matrix_id_source = 'bridge'`.
+In `station-registry.ts`, the detect-refresh must not overwrite `matrix_id` when `matrix_identity_mode = 'bridge'`.
 
 - [ ] **Step 5: Run the tests, then the full hub suite**
 
@@ -787,20 +788,28 @@ test("is idempotent, because it runs on every adoption and every boot", async ()
   expect(created.rooms).toHaveLength(1);
 });
 
-test("records the station's mxid as bridge-owned", async () => {
+test("records the station's mxid, in bridge mode", async () => {
   await provisionStation(KRISHNA);
   const row = await stationRow(KRISHNA);
   expect(row.matrixId).toBe("@agent_superchotu_openclaw_krishna:id.agentpod.dev");
-  expect(row.matrixIdSource).toBe("bridge");
+  expect(row.matrixIdentityMode).toBe("bridge");
 });
 
-test("does not touch a harness-owned mxid", async () => {
-  // Task 10 migrates those deliberately, per agent, with the harness's own
-  // Matrix loop stopped first. Provisioning must not do it by accident.
+test("provisions a hermes station exactly like every other", async () => {
+  // No exception list. hermes gets the same derived name as openclaw, and the
+  // display name carries the readability its old address used to.
   await provisionStation(ANALYST_ECHO);
   const row = await stationRow(ANALYST_ECHO);
-  expect(row.matrixId).toBe("@analyst-echo:id.agentpod.dev");
-  expect(row.matrixIdSource).toBe("harness");
+  expect(row.matrixId).toBe("@agent_molt-bot_hermes_analyst-echo:id.agentpod.dev");
+  expect(created.displayNames.at(-1)).toBe("analyst-echo (hermes @ molt-bot)");
+});
+
+test("leaves a harness-mode station's conversations alone", async () => {
+  // The room is still provisioned — a harness client needs somewhere to talk —
+  // but the bridge must not answer for a station that answers for itself.
+  await setIdentityMode(ANALYST_ECHO, "harness");
+  await provisionStation(ANALYST_ECHO);
+  expect(subscribedSessionsFor(ANALYST_ECHO)).toHaveLength(0);
 });
 ```
 
@@ -824,7 +833,150 @@ git commit -m "feat(hub): every station gets a Matrix user and a room"
 
 ---
 
-### Task 9: Turn it on for the 18
+### Task 8b: Issue an identity, and optionally credentials, over the hub API
+
+**Files:**
+- Create: `apps/hub/src/routes/station-matrix.ts`
+- Create: `apps/hub/src/services/matrix-as/credentials.ts`
+- Test: `apps/hub/tests/integration/station-matrix-identity.test.ts`
+
+**Interfaces:**
+- Produces: `POST /api/stations/:id/matrix/identity` → `{ mxid, alias, roomId, mode }`; `POST /api/stations/:id/matrix/credentials` → `{ mxid, accessToken, deviceId }` and flips the station to `harness` mode.
+
+This is what replaces the Synapse admin token that lives on molt-bot today. It is also what makes **dynamically created agents** work: a new station on any harness gets an identity by asking the hub, rather than by each harness learning to talk to a homeserver.
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+/**
+ * Registering an agent identity, without an admin credential on a node.
+ *
+ * Today `hermes-agents onboard` holds a homeserver admin token in a file on
+ * molt-bot and can create, deactivate or take over ANY account on the
+ * homeserver — including a human's. An Application Service needs no such rights
+ * to register users inside its own namespace, so the ordinary path drops the
+ * admin credential entirely and the privileged path moves behind the hub.
+ */
+describe("POST /api/stations/:id/matrix/identity", () => {
+  test("provisions an identity with no admin credential involved", async () => {
+    const res = await post(`/api/stations/${KRISHNA}/matrix/identity`);
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).mxid).toBe("@agent_superchotu_openclaw_krishna:id.agentpod.dev");
+    expect(adminCommandsRun).toHaveLength(0);
+  });
+
+  test("is idempotent — a re-run returns the same identity", async () => {
+    const a = await (await post(`/api/stations/${KRISHNA}/matrix/identity`)).json();
+    const b = await (await post(`/api/stations/${KRISHNA}/matrix/identity`)).json();
+    expect(b).toEqual(a);
+  });
+});
+
+describe("POST /api/stations/:id/matrix/credentials", () => {
+  test("requires mayGrantReach, because a credential IS reach", async () => {
+    // Handing an agent an access token is the definition of granting it reach
+    // (charter → 2026-08-15-granting-reach-is-changing-an-agent). Dispatch
+    // permission is not enough.
+    await setGrant(PRINCIPAL, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+
+    const res = await post(`/api/stations/${ANALYST_ECHO}/matrix/credentials`);
+    expect(res.status).toBe(403);
+  });
+
+  test("mints a token and flips the station to harness mode", async () => {
+    await setGrant(PRINCIPAL, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+
+    const body = await (await post(`/api/stations/${ANALYST_ECHO}/matrix/credentials`)).json();
+
+    expect(body.accessToken).toBeTruthy();
+    expect((await stationRow(ANALYST_ECHO)).matrixIdentityMode).toBe("harness");
+  });
+
+  test("the bridge stops answering for that station the moment it does", async () => {
+    // The two-answerer failure, prevented by construction rather than by
+    // remembering to switch something off.
+    await setGrant(PRINCIPAL, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await post(`/api/stations/${ANALYST_ECHO}/matrix/credentials`);
+
+    await handleMessage(message(PRINCIPAL_MXID, "hi"), ROOM_FOR_ANALYST_ECHO);
+    expect(prompts).toHaveLength(0);
+  });
+
+  test("never logs the token it just issued", async () => {
+    await setGrant(PRINCIPAL, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    const body = await (await post(`/api/stations/${ANALYST_ECHO}/matrix/credentials`)).json();
+    expect(loggedLines.join("\n")).not.toContain(body.accessToken);
+  });
+});
+```
+
+- [ ] **Step 2: Run it and watch it fail**
+
+- [ ] **Step 3: Implement**
+
+`identity` calls Task 8's provisioning. `credentials` additionally: generate a password, run `users reset-password` (or `create-user`) through the homeserver's **admin room** as the hub's own admin account, then log in as the station's user to obtain a device token. Return it once; store nothing but the mode.
+
+> tuwunel has no Synapse-shaped admin HTTP API. Its `users create-user` and `users reset-password` are admin-room commands, which a client with an admin account can send remotely — verified in the CLI surface (`--execute`, `!admin users …`).
+
+- [ ] **Step 4: Run the tests, then the full hub suite**
+
+- [ ] **Step 5: Commit**
+
+```bash
+git commit -m "feat(hub): register an agent's Matrix identity, and issue credentials only behind mayGrantReach"
+```
+
+---
+
+### Task 8c: Port `hermes-agents onboard` onto the hub API
+
+**Files:**
+- Modify: `/root/maintenance/scripts/hermes-agents` on molt-bot (outside this repo)
+- Modify: `docs/OPERATING.md`
+
+Today's `cmd_onboard` does five Matrix things: checks the user through `/_synapse/admin/v2/users/…`, creates it with a generated password, logs in for a device token, creates a DM "home room", and writes `MATRIX_ACCESS_TOKEN` into the profile's env. **The first three break on tuwunel** — that admin API does not exist — and the fourth is what the bridge now does.
+
+- [ ] **Step 1: Prove the failure before changing anything**
+
+Run `hermes-agents onboard --homeserver <tuwunel> some-test-profile` against the new server and capture the error. A port that starts before the break is understood tends to preserve the wrong half.
+
+- [ ] **Step 2: Replace the Matrix section with two calls**
+
+```sh
+# was: curl -X PUT $hs/_synapse/admin/v2/users/$uid  (admin token on this box)
+# now: the hub owns identity, and the station is the thing that has one.
+station_id=$(hub_api GET "/api/stations?node=$(hostname)&key=hermes:$profile" | jq -r '.[0].id')
+creds=$(hub_api POST "/api/stations/$station_id/matrix/credentials")
+```
+
+The admin token file leaves molt-bot entirely.
+
+- [ ] **Step 3: Handle the ordering, which has inverted**
+
+Today the Matrix account exists before the agent runs. Now the **station must exist first** — the profile is created, the node agent detects it, the hub adopts it, and only then can it be given an identity. `onboard` waits for the station to appear (poll, with a timeout and a clear message naming what it is waiting for) rather than assuming.
+
+- [ ] **Step 4: Retire the home-room creation**
+
+The bridge provisions `#agentpod_<node>_hermes_<profile>` already. Keep marking it `m.direct` for the admin if that is what makes it land in a DM list.
+
+- [ ] **Step 5: Onboard a throwaway agent end to end**
+
+Create it, watch the station adopt, watch the identity provision, confirm the gateway starts and answers. Then remove it — including deactivating the Matrix user, which is now `users deactivate`.
+
+- [ ] **Step 6: Document, and delete the admin token**
+
+`docs/OPERATING.md`: how an agent is created now, and that no node holds homeserver admin rights any more. Then remove `/root/maintenance/.matrix-admin-token` from molt-bot and revoke it.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git commit -m "docs(ops): creating an agent no longer needs a homeserver admin token on a node"
+```
+
+---
+
+### Task 9: Turn it on
 
 **Files:**
 - Modify: `/etc/matrix-synapse/agents.yaml` (host — set `url`)
@@ -854,7 +1006,7 @@ Then `systemctl restart tuwunel`. **This is the moment the bridge starts receivi
 
 Pick `openclaw:krishna`. Join `#agentpod_superchotu_openclaw_krishna`, say hello, get an answer. Then check the refusal path: narrow your own grant to exclude openclaw, send again, and read the refusal **in the room**. Restore the grant.
 
-- [ ] **Step 4: Provision the remaining 17**
+- [ ] **Step 4: Provision the remaining 31**
 
 - [ ] **Step 5: Document**
 
@@ -868,48 +1020,48 @@ git commit -m "docs(deploy): running the Matrix bridge"
 
 ---
 
-### Task 10: Turn off hermes's native Matrix client
+### Task 10: Decide, per hermes agent, who answers
 
-On a fresh homeserver there is no adoption dance: the bridge already registered
-all 32 identities in Task 8, including the 14 hermes addresses, and hermes was
-never given credentials on the new server. This task is the cleanup that makes
-that true rather than accidental — and the honest conversation about what hermes
-loses.
+The old plan retired hermes's Matrix client wholesale. With identity modes that
+is no longer forced: hermes agents can keep their own clients under the same
+`@agent_*` identity, or hand the conversation to the bridge. What must never
+happen is both.
 
 **Files:**
-- Modify: hermes's own configuration on `molt-bot` (host, outside this repo)
+- Modify: hermes profile configuration on molt-bot (outside this repo)
 - Modify: `docs/OPERATING.md`
 
-- [ ] **Step 1: Confirm no hermes agent can log in**
+- [ ] **Step 1: Start all 14 in `bridge` mode**
 
-Its Matrix credentials point at a server that no longer exists, and its
-localparts are inside an exclusive namespace the bridge owns. Verify rather than
-assume: attempt a login as one of them with hermes's stored password and
-confirm it fails.
+They arrive that way — it is the column default and Task 8 provisions them like
+any other station. Their old credentials pointed at a homeserver that no longer
+exists, so nothing of theirs can log in. Verify rather than assume: attempt a
+login with a stored hermes token and confirm it fails.
 
-- [ ] **Step 2: Disable the Matrix loop in hermes's config**
+- [ ] **Step 2: Live with it for a week**
 
-Leaving it enabled means every agent retries a login it can never complete,
-forever, and fills a log with it.
+The question "what did hermes's own Matrix client do that ACP does not" is
+answered by absence, not by reading code. A week of ordinary use will surface
+anything that mattered — rooms it joined itself, DMs with humans, presence.
 
-- [ ] **Step 3: Confirm each of the 14 answers through the bridge**
+- [ ] **Step 3: For anything that mattered, switch that agent to `harness` mode**
 
-Message `#agentpod_molt-bot_hermes_analyst-echo` and get a reply whose transcript
-lands in `acp_events`. That is the proof the identity moved rather than merely
-stopped.
+`POST /api/stations/:id/matrix/credentials` (Task 8b) issues the token and flips
+the mode; the bridge stops answering for it in the same write. Per agent, and
+only where the absence was felt.
 
-- [ ] **Step 4: Write down what hermes lost**
+- [ ] **Step 4: Write down what each mode costs**
 
-In `docs/OPERATING.md`: hermes agents no longer speak Matrix natively; anything
-they did over Matrix that never went through ACP — agent-to-agent chatter, rooms
-they joined themselves — is gone with the old server, and comes back only as ACP
-conversation through the bridge.
+In `docs/OPERATING.md`: a `bridge` agent gains the control pair, an `acp_events`
+transcript and no credential on any host; a `harness` agent gains its own client
+and keeps its own Matrix behaviour, at the cost of a token existing and the
+control pair not seeing those conversations.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add docs/OPERATING.md
-git commit -m "docs(ops): hermes reaches Matrix through the bridge, like everything else"
+git commit -m "docs(ops): who answers for an agent, and what each mode costs"
 ```
 
 ---
@@ -952,7 +1104,7 @@ git commit -m "docs(ops): the Matrix bridge, and how to tell it is working"
 
 ## Self-review
 
-**Spec coverage.** Derived names (T1), ownership column (T2), transactions with auth/idempotency/loop-cut (T3), user and room queries (T4), acting as a station (T5), inbound with the control pair (T6), outbound streaming, typing and permissions (T7), provisioning all stations (T8), going live (T9), retiring hermes's native client (T10), operability (T11). Phase A replaces the homeserver rather than migrating its database, and closes #329.
+**Spec coverage.** Derived names, uniform across all 32 (T1), identity mode (T2), transactions with auth/idempotency/loop-cut (T3), user and room queries (T4), acting as a station (T5), inbound with the control pair (T6), outbound streaming, typing and permissions (T7), provisioning (T8), identity and credential registration over the hub API (T8b), porting `hermes-agents onboard` off the Synapse admin token (T8c), going live (T9), deciding who answers per hermes agent (T10), operability (T11). Phase A replaces the homeserver rather than migrating its database, and closes #329.
 
 **Deliberately not covered**, and named in the spec: kaambaan card/run/gate events (kaambaan#34 owns those schemas), E2EE, federation, and any node-agent change.
 

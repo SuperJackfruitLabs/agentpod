@@ -105,36 +105,85 @@ exists on two nodes right now. A Matrix identity that named only the station key
 would merge two different agents on two different machines into one, which is
 the collision this suite has already undone once.
 
-### The 14 hermes agents keep their addresses, and the bridge creates them
+### All 32 names are uniform, hermes included
 
-They are `@analyst-echo:id.agentpod.dev` — outside `@agent_.*`, because hermes
-registered them itself on the old server.
+An earlier revision kept the hermes addresses — `@analyst-echo:id.agentpod.dev`
+— on the grounds that they live in people's rooms, history and muscle memory.
+**That reasoning does not survive the move to a new homeserver**, and it was
+wrong in a second way that matters more.
 
-Those addresses are in people's rooms and in their muscle memory, so they are
-**recreated verbatim on the new homeserver by the bridge**. The registration
-carries a second exclusive namespace listing those 14 localparts explicitly —
-explicitly rather than by pattern, because a broad regex here would claim human
-accounts on the same homeserver.
+The rooms and the history are being discarded anyway, so the only thing those
+addresses were protecting was habit, which a display name protects better. And
+keeping them would have broken this design's own central rule: **a name includes
+the node**, because station keys repeat across the fleet. `@analyst-echo` names
+no node. Fourteen exceptions to the invariant, hardcoded as a regex alternation
+in a registration file, would have rotted the first time an agent was renamed.
 
-**hermes's own Matrix loop is not given credentials on the new server.** This is
-the part to say out loud: hermes stops being a Matrix client and becomes an
-agent you reach the same way as every other — a room, the bridge, an ACP
-session. Conversation gains the control pair, an `acp_events` transcript, and
-one code path for all 32. What it loses is whatever hermes did with Matrix
-natively that never went through ACP.
+So every station, on every harness, is `@agent_<node>_<station>`. One namespace,
+one rule, nothing to maintain by hand.
 
-The reward for doing this on a fresh homeserver is that **no address is ever
-served by two answerers**. On Synapse this was an adoption dance per agent with a
-day of soak between; here it is the initial state.
+**Readability is a display-name problem, and is solved there.** The member list
+shows `analyst-echo (hermes @ molt-bot)`; the mxid is the machine's business.
+
+### Two identity modes, because some harnesses really are Matrix clients
+
+hermes is not merely reachable over Matrix — it *is* a Matrix client. Each agent
+has its own account, device, access token and gateway process, and a DM room with
+the admin. Retiring that wholesale would throw away working behaviour to make a
+diagram tidy.
+
+So a station's Matrix identity has a **mode**, recorded on the station:
+
+- **`bridge` (default, and what the 18 get).** The AS registers the user and
+  speaks for it. No password, no access token, no credential anywhere outside
+  the hub. The station need not know Matrix exists.
+- **`harness`.** The same `@agent_*` identity, plus real credentials issued to
+  the harness so it can run its own client. The bridge provisions the room and
+  then **stays out of that station's conversations** — one answerer per address,
+  always.
+
+The mode is a column, not a fork in the code: everything upstream of "who
+answers" is identical.
+
+### Identity registration is a hub API, not a homeserver admin token
+
+Today `hermes-agents onboard` creates an account by calling the **Synapse admin
+API** with a token stored in `/root/maintenance/.matrix-admin-token` on molt-bot,
+then logs in as the new user to mint a device token. tuwunel implements no such
+API — its equivalents are the admin-room commands `users create-user` and
+`users reset-password` — so that script breaks on migration whatever else
+changes.
+
+That break is an opportunity worth taking deliberately. **A shell script on a
+node currently holds a credential that can create, deactivate or take over any
+account on the homeserver, including a human's.** The bridge already registers
+identities without any admin credential at all, because an Application Service
+may register users inside its own namespace.
+
+So identity registration moves to the hub:
+
+```
+POST /api/stations/:id/matrix/identity     → provision the AS-owned identity + room
+POST /api/stations/:id/matrix/credentials  → additionally mint credentials (mode: harness)
+```
+
+The first needs no admin rights — it is the AS acting in its own namespace. Only
+the second does, and the admin account it uses lives in the hub, behind the
+control pair, instead of in a file on a node. `mayGrantReach` is the gate:
+issuing an agent a credential is the definition of granting it reach
+(`2026-08-15-granting-reach-is-changing-an-agent`).
 
 ### Ownership is still recorded, because the node agent still writes that column
 
 `stations.matrix_id` is written by the node agent from a harness profile — it
 reads hermes's configured mxid off the host and will keep doing so. The bridge
-must not fight it. A new column `stations.matrix_id_source`
-(`harness` | `bridge`, default `harness`) says who owns the address, and the
-node agent's refresh leaves `bridge` rows alone. `resolveMatrixId` is unchanged
-— it answers about an mxid, not about its provenance.
+must not fight it. A new column `stations.matrix_identity_mode`
+(`bridge` | `harness`, default `bridge`) says **who answers**, and the node
+agent's refresh leaves the mxid of a `bridge` row alone. `resolveMatrixId` is
+unchanged — it answers about an mxid, not about its provenance.
+
+The mode is what stops two answerers on one address, and it is one column so
+that reverting is one write.
 
 ## How a message becomes work
 
