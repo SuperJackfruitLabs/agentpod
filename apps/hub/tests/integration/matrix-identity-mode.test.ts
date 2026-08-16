@@ -103,14 +103,14 @@ describe("matrix_identity_mode", () => {
     // for a station whose harness knows nothing about Matrix — and no report it
     // can make may erase what the Application Service minted.
     await rawSql`
-      UPDATE stations SET bridge_matrix_id = '@agent_mode-box__hermes_bridged:id.agentpod.dev',
+      UPDATE stations SET bridge_matrix_id = '@agent_mode-box_hermes-bridged:id.agentpod.dev',
                           matrix_identity_mode = 'bridge'
       WHERE id = ${BRIDGED}`;
 
     await nodeReports([{ key: "hermes:bridged", matrixId: null }]);
 
     const row = await stationRow(BRIDGED);
-    expect(row.bridge_matrix_id).toBe("@agent_mode-box__hermes_bridged:id.agentpod.dev");
+    expect(row.bridge_matrix_id).toBe("@agent_mode-box_hermes-bridged:id.agentpod.dev");
     expect(row.matrix_identity_mode).toBe("bridge");
   });
 

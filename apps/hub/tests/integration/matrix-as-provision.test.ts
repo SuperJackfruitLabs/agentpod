@@ -111,10 +111,10 @@ describe("provisioning a station", () => {
     await provisionStation(OPENCLAW, deps());
 
     expect(registered).toHaveLength(1);
-    expect(registered[0]!.localpart).toBe("agent_prov-box__openclaw_krishna");
+    expect(registered[0]!.localpart).toBe("agent_prov-box_openclaw-krishna");
     // The display name carries the readability a derived mxid does not have.
     expect(registered[0]!.displayName).toBe("krishna (openclaw @ prov-box)");
-    expect(rooms[0]!.alias).toBe("#agentpod_prov-box__openclaw_krishna:id.agentpod.dev");
+    expect(rooms[0]!.alias).toBe("#agentpod_prov-box_openclaw-krishna:id.agentpod.dev");
   });
 
   test("records the room, with the tenant it belongs to", async () => {
@@ -123,14 +123,14 @@ describe("provisioning a station", () => {
     const row = await roomRow(OPENCLAW);
     expect(row!.room_id).toMatch(/^!room/);
     expect(row!.tenant_id).toBeTruthy();
-    expect(row!.alias).toBe("#agentpod_prov-box__openclaw_krishna:id.agentpod.dev");
+    expect(row!.alias).toBe("#agentpod_prov-box_openclaw-krishna:id.agentpod.dev");
   });
 
   test("records the identity it minted, without touching the harness column", async () => {
     await provisionStation(OPENCLAW, deps());
 
     const row = await stationRow(OPENCLAW);
-    expect(row.bridge_matrix_id).toBe("@agent_prov-box__openclaw_krishna:id.agentpod.dev");
+    expect(row.bridge_matrix_id).toBe("@agent_prov-box_openclaw-krishna:id.agentpod.dev");
     expect(row.matrix_id).toBeNull();
     expect(row.matrix_identity_mode).toBe("bridge");
   });
@@ -147,7 +147,7 @@ describe("provisioning a station", () => {
     // carries the readability its old bespoke address used to.
     await provisionStation(HERMES, deps());
 
-    expect(registered[0]!.localpart).toBe("agent_prov-box__hermes_analyst-echo");
+    expect(registered[0]!.localpart).toBe("agent_prov-box_hermes-analyst-echo");
     expect(registered[0]!.displayName).toBe("analyst-echo (hermes @ prov-box)");
   });
 

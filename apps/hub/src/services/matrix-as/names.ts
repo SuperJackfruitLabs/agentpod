@@ -11,24 +11,30 @@
  */
 
 /**
- * The characters a Matrix localpart may contain, lowercased. Everything else —
- * `:` above all, which a station key is full of — becomes `_`.
+ * Everything that is not a safe localpart character becomes `-`, lowercased.
+ *
+ * `_` is deliberately NOT in the kept set and is never emitted, which is what
+ * makes it usable as a separator below. `:` — which every station key is full
+ * of — is the main casualty, along with anything else a hostname or a harness
+ * might contain.
  */
-const ILLEGAL = /[^a-z0-9._=/-]/g;
+const ILLEGAL = /[^a-z0-9.=/-]/g;
 
-const clean = (s: string): string => s.toLowerCase().replace(ILLEGAL, "_");
+const clean = (s: string): string => s.toLowerCase().replace(ILLEGAL, "-");
 
 /**
- * `<node>__<station>`, with a doubled separator between the halves.
+ * `<node>_<station>`.
  *
- * Doubled because a single `_` appears inside both halves after cleaning, and
- * `a_b` + `c` would otherwise produce the same localpart as `a` + `b_c` — two
- * different agents, one identity. `__` cannot appear inside a cleaned half,
- * since the cleaner never emits two in a row for a single character and any
- * literal `__` in a name is itself replaced.
+ * One underscore, and unambiguous **by construction**: `_` cannot survive
+ * cleaning, so the first one in a localpart is always the separator. An earlier
+ * version kept `_` inside the halves and doubled the separator to compensate,
+ * which made `a_b` + `c` and `a` + `b_c` distinct in practice but not in
+ * principle — two illegal characters in a row still produced `__` inside a half.
+ * Excluding `_` from the alphabet is the version that cannot collide, and it
+ * reads better: `molt-bot_hermes-analyst-echo`.
  */
 export function localpartFor(nodeName: string, stationKey: string): string {
-  return `${clean(nodeName)}__${clean(stationKey)}`;
+  return `${clean(nodeName)}_${clean(stationKey)}`;
 }
 
 /**

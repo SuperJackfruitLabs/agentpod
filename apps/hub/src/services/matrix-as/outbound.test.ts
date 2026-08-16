@@ -11,7 +11,7 @@ import { attachRoomToSession, detachRoom, _attachedCountForTest } from "./outbou
  */
 
 const ROOM = "!room:id.agentpod.dev";
-const AGENT = "@agent_box__openclaw_krishna:id.agentpod.dev";
+const AGENT = "@agent_box_openclaw-krishna:id.agentpod.dev";
 const SESSION = "acps_outbound_test";
 
 let sent: Array<{ userId: string; roomId: string; body: string }> = [];

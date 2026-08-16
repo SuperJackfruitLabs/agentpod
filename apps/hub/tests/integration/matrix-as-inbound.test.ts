@@ -49,7 +49,16 @@ function deps() {
       createSession: async (input: { stationId: string; userId: string }) => {
         if (createFails) throw createFails;
         created.push(input);
-        return { id: `acps_${++sessionCounter}` };
+        // A real createSession writes a row, and the bridge reads that row's
+        // status to decide whether the session is still usable. A fake that
+        // returned only an id would make every session look already-gone.
+        const id = `acps_mx_inbound_${++sessionCounter}`;
+        await rawSql`DELETE FROM acp_sessions WHERE id = ${id}`;
+        await rawSql`
+          INSERT INTO acp_sessions (id, tenant_id, station_id, user_id, mode, status, last_seq, created_at, last_event_at)
+          VALUES (${id}, (SELECT tenant_id FROM stations WHERE id = ${input.stationId}),
+                  ${input.stationId}, ${input.userId}, 'default', 'idle', 0, now(), now())`;
+        return { id };
       },
       promptSession: async (userId: string, sessionId: string, text: string) => {
         prompts.push({ userId, sessionId, text });
@@ -105,17 +114,19 @@ beforeEach(async () => {
   prompts = [];
   attached = [];
   createFails = null;
+  await rawSql`DELETE FROM acp_sessions WHERE id LIKE 'acps_mx_inbound_%'`;
   await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
   await rawSql`
     INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, created_at)
     VALUES (${ROOM}, (SELECT tenant_id FROM stations WHERE id = ${STATION}), ${STATION},
-            '#agentpod_inbound-box__openclaw_krishna:id.agentpod.dev', now())`;
+            '#agentpod_inbound-box_openclaw-krishna:id.agentpod.dev', now())`;
   await rawSql`UPDATE stations SET matrix_identity_mode = 'bridge' WHERE id = ${STATION}`;
 });
 
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
+    await rawSql`DELETE FROM acp_sessions WHERE id LIKE 'acps_mx_inbound_%'`;
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
     await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER}, ${OTHER})`;
     await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER}, ${OTHER})`;
@@ -148,7 +159,7 @@ describe("an inbound room message", () => {
 
     expect(attached).toHaveLength(1);
     expect(attached[0]!.roomId).toBe(ROOM);
-    expect(attached[0]!.agentUser).toBe("@agent_inbound-box__openclaw_krishna:id.agentpod.dev");
+    expect(attached[0]!.agentUser).toBe("@agent_inbound-box_openclaw-krishna:id.agentpod.dev");
     expect(attached[0]!.sessionId).toBe(prompts[0]!.sessionId);
   });
 
@@ -216,6 +227,24 @@ describe("an inbound room message", () => {
 
     expect(created).toHaveLength(1);
     expect(prompts.map((p) => p.text)).toEqual(["first", "second"]);
+  });
+
+  test("starts a new session when the room's one has ended", async () => {
+    // Boot reconciliation ends every live session with 'hub restarted'. Without
+    // this the room keeps prompting a corpse and every bridged room dies
+    // permanently at the first restart — the agent simply stops answering, with
+    // 'Session not found or not active' as the only clue.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await handleRoomMessage(message(OWNER_MXID, "first"), deps());
+    const dead = prompts[0]!.sessionId;
+
+    await rawSql`
+      UPDATE acp_sessions SET status = 'ended', ended_reason = 'hub restarted' WHERE id = ${dead}`;
+
+    await handleRoomMessage(message(OWNER_MXID, "second"), deps());
+
+    expect(created).toHaveLength(2);
+    expect(prompts[1]!.sessionId).not.toBe(dead);
   });
 
   test("says so when the station cannot be reached, rather than swallowing it", async () => {
