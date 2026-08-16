@@ -23,7 +23,10 @@ export interface OutboundDeps {
     sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
   };
   subscribe?: (sessionId: string, fn: (e: AcpEvent) => void) => () => void;
-  /** How long to wait for more text before sending. 0 in tests. */
+  /**
+   * A safety net, not a chunking strategy — see `FLUSH_SAFETY_MS`. 0 in tests
+   * that assert on flush timing directly.
+   */
   flushDelayMs?: number;
 }
 
@@ -44,6 +47,21 @@ interface Attachment {
  * a bridge bug.
  */
 const attached = new Map<string, Attachment>();
+
+/**
+ * How long buffered text may sit before it is sent without the turn having ended.
+ *
+ * **A safety net, not a chunking strategy.** The turn's end is what flushes; this
+ * only exists so a turn that never ends does not swallow what the agent already
+ * said.
+ *
+ * It was 400ms, which is short enough to fire on an ordinary mid-answer pause —
+ * and it did, in production: the console showed one message while the room showed
+ * "Hello! Analyst Echo" and " here, ready to turn your data into insights…" as
+ * two. An agent pausing to think mid-sentence is not the end of its turn, and
+ * treating it as one cuts sentences in half.
+ */
+export const FLUSH_SAFETY_MS = 20_000;
 
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
 export function _attachedCountForTest(): number {
@@ -91,7 +109,7 @@ export function attachRoomToSession(
   if (attached.has(sessionId)) return;
 
   const subscribe = deps.subscribe ?? subscribeToSession;
-  const flushDelayMs = deps.flushDelayMs ?? 400;
+  const flushDelayMs = deps.flushDelayMs ?? FLUSH_SAFETY_MS;
 
   const state: Attachment = {
     roomId,

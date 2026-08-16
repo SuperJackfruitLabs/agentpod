@@ -125,6 +125,25 @@ describe("streaming an answer into a room", () => {
     expect(sent[0]!.body).toBe("Hello there");
   });
 
+  test("does not split one answer because the agent paused mid-sentence", async () => {
+    // Observed in production: the console showed one message and the room showed
+    // two — "Hello! Analyst Echo" and " here, ready to turn your data into
+    // insights…". A debounce short enough to chunk on a pause is a debounce that
+    // cuts sentences in half, because an agent thinking mid-answer is ordinary.
+    // The turn's end is the flush; the timer is only a safety net for a turn
+    // that never ends.
+    attachRoomToSession(SESSION, ROOM, AGENT, { ...deps(), flushDelayMs: undefined });
+
+    emit(chunk("Hello! Analyst Echo"));
+    await new Promise((r) => setTimeout(r, 900));
+    emit(chunk(" here, ready to help."));
+    emit(state("idle"));
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toBe("Hello! Analyst Echo here, ready to help.");
+  }, 10_000);
+
   test("does not send an empty message when a turn produced no text", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, deps());
 
