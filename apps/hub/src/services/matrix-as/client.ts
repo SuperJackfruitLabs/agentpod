@@ -28,6 +28,17 @@ const ALREADY: Record<string, true> = { M_USER_IN_USE: true, M_ROOM_IN_USE: true
 
 export interface MatrixClient {
   ensureUser(localpart: string, displayName: string): Promise<void>;
+  /**
+   * Register an identity and keep the credentials it comes back with.
+   *
+   * Verified against a live tuwunel: an appservice registration returns an
+   * `access_token` and `device_id` directly, so handing a harness its own client
+   * needs no admin command and no password. Fails if the identity already
+   * exists — replacing credentials is a different, privileged act.
+   */
+  registerWithCredentials(
+    localpart: string
+  ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
   ensureRoom(
     alias: string,
     opts: { creator: string; name: string; topic: string }
@@ -108,6 +119,37 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         String(res.body.user_id ?? "") ||
         (deps.domain ? `@${localpart}:${deps.domain}` : "");
       if (userId) await this.setDisplayName(userId, displayName);
+    },
+
+    async registerWithCredentials(localpart) {
+      const res = await call("/_matrix/client/v3/register", {
+        method: "POST",
+        body: { type: "m.login.application_service", username: localpart },
+      });
+
+      // Deliberately NOT treating M_USER_IN_USE as success here. Everywhere else
+      // "already done" is what idempotency means; here it means the caller asked
+      // for credentials to an identity that already has some, and answering with
+      // nothing would leave a harness holding no token while believing it does.
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(
+          `matrix register ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+        );
+      }
+
+      const accessToken = String(res.body.access_token ?? "");
+      if (!accessToken) {
+        throw new Error(
+          `matrix register ${localpart} returned no access_token — this homeserver ` +
+            "does not issue appservice credentials this way"
+        );
+      }
+
+      return {
+        userId: String(res.body.user_id ?? `@${localpart}:${deps.domain ?? ""}`),
+        accessToken,
+        deviceId: String(res.body.device_id ?? ""),
+      };
     },
 
     async ensureRoom(alias, opts) {
