@@ -3,7 +3,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { adoptStations } from "../../src/services/station-registry";
+import { adoptStations, announceStationsForNode } from "../../src/services/station-registry";
 import { onStationsAdopted } from "../../src/services/matrix-as/hooks";
 
 /**
@@ -98,5 +98,37 @@ describe("adopting a station", () => {
     const rows = await adoptStations(USER, NODE, ["openclaw:three"], [detected("openclaw:three")]);
 
     expect(rows).toHaveLength(1);
+  });
+});
+
+describe("a node that has just reconnected", () => {
+  test("announces its stations, so the bridge tries again with the node reachable", async () => {
+    // Provisioning at boot runs while every node is still offline — the hub
+    // resets them all and the agents dial back seconds later. Everything it
+    // does against the homeserver works anyway; reading an agent's picture out
+    // of its workspace does not, and a failed read is silent by design. That is
+    // why 32 agents had rooms and not one had a face.
+    await adoptStations(USER, NODE, ["openclaw:one"], [detected("openclaw:one")]);
+    announced = [];
+    onStationsAdopted(async (ids) => {
+      announced.push(ids);
+    });
+
+    const count = await announceStationsForNode(NODE);
+
+    expect(count).toBe(1);
+    expect(announced).toHaveLength(1);
+  });
+
+  test("says nothing about a node with no stations", async () => {
+    // Every reconnect runs this, and most nodes are quiet. An empty
+    // announcement would make the bridge walk an empty list on every network
+    // blip in the fleet.
+    onStationsAdopted(async (ids) => {
+      announced.push(ids);
+    });
+
+    expect(await announceStationsForNode("node_that_has_none")).toBe(0);
+    expect(announced).toEqual([]);
   });
 });
