@@ -81,8 +81,23 @@ export async function ensurePurposeSpace(
   creator: string,
   owner: string | null,
   deps: SpaceCreateDeps
-): Promise<string | null> {
+): Promise<Space | null> {
   return ensureSpaceRecord(tenantId, purpose, spaceNameFor(purpose), creator, owner, deps);
+}
+
+/**
+ * A space and the user that can write its child edges.
+ *
+ * The pair travels together because filing needs both, and the actor is the
+ * half that is easy to get wrong: `m.space.child` state lives on the SPACE, so
+ * only somebody in the space can write it. Filing as the room's own agent —
+ * which is a member of its room and of nothing else — is what shipped, and the
+ * homeserver refused every edge but the first.
+ */
+export interface Space {
+  roomId: string;
+  /** Null only for a space recorded before the creator was stored. */
+  creator: string | null;
 }
 
 /**
@@ -115,10 +130,13 @@ export async function ensureSpaceRecord(
   creator: string,
   owner: string | null,
   deps: SpaceCreateDeps
-): Promise<string | null> {
+): Promise<Space | null> {
   const purpose = key;
   const [existing] = await db
-    .select({ roomId: matrixPurposeSpaces.roomId })
+    .select({
+      roomId: matrixPurposeSpaces.roomId,
+      creator: matrixPurposeSpaces.creator,
+    })
     .from(matrixPurposeSpaces)
     .where(
       and(
@@ -126,7 +144,7 @@ export async function ensureSpaceRecord(
         eq(matrixPurposeSpaces.purpose, purpose)
       )
     );
-  if (existing) return existing.roomId;
+  if (existing) return existing;
 
   const roomId = await deps.client.createSpace({ creator, name }).catch(() => null);
   if (!roomId) {
@@ -136,51 +154,93 @@ export async function ensureSpaceRecord(
 
   await db
     .insert(matrixPurposeSpaces)
-    .values({ tenantId, purpose, roomId })
+    .values({ tenantId, purpose, roomId, creator })
     .onConflictDoNothing();
 
   // Without this the space exists and nobody can see it.
   if (owner) await deps.client.invite(creator, roomId, owner).catch(() => {});
 
-  log.info("made a space", { name, roomId });
-  return roomId;
+  log.info("made a space", { name, roomId, creator });
+  return { roomId, creator };
 }
 
 /**
  * Put `roomId` under the space its station's purpose calls for — and take it
  * out of the one it is under now, if that is a different one.
  *
- * `desiredSpaceRoomId` of null means "belongs under nothing", which is what an
- * unlabelled station wants and also what a station whose purpose was just
- * cleared wants. Both cases still have work to do: the old edge has to go.
+ * `desired` of null means "belongs under nothing", which is what an unlabelled
+ * station wants and also what a station whose purpose was just cleared wants.
+ * Both cases still have work to do: the old edge has to go.
+ *
+ * Every edge is written **as the space's own creator**, never as the room's
+ * agent — see [`Space`] for the production failure that rule comes from.
+ *
+ * Nothing is recorded unless the homeserver accepted it. A filing written on
+ * top of a refused edge is worse than no filing at all: the next run sees
+ * nothing to do, and the room stays outside the space for good.
  */
 export async function fileRoomUnderSpace(
   roomId: string,
-  desiredSpaceRoomId: string | null,
+  desired: Space | null,
   currentSpaceRoomId: string | null,
-  creator: string,
   deps: SpaceFileDeps
 ): Promise<void> {
-  if (desiredSpaceRoomId === currentSpaceRoomId) return;
+  if ((desired?.roomId ?? null) === currentSpaceRoomId) return;
 
   if (currentSpaceRoomId) {
-    await deps.client
-      .removeSpaceChild(creator, currentSpaceRoomId, roomId)
-      .catch(() => {});
+    const [current] = await db
+      .select({ creator: matrixPurposeSpaces.creator })
+      .from(matrixPurposeSpaces)
+      .where(eq(matrixPurposeSpaces.roomId, currentSpaceRoomId));
+
+    if (!current?.creator) {
+      log.warn("cannot unfile a room from a space with no known creator", {
+        roomId,
+        spaceRoomId: currentSpaceRoomId,
+      });
+      return;
+    }
+
+    try {
+      await deps.client.removeSpaceChild(current.creator, currentSpaceRoomId, roomId);
+    } catch (err) {
+      log.warn("could not take a room out of its space; leaving it where it is", {
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
   }
 
-  if (desiredSpaceRoomId) {
-    await deps.client.addSpaceChild(creator, desiredSpaceRoomId, roomId).catch(() => {});
+  if (desired) {
+    if (!desired.creator) {
+      log.warn("cannot file a room into a space with no known creator", {
+        roomId,
+        spaceRoomId: desired.roomId,
+      });
+      return;
+    }
+    try {
+      await deps.client.addSpaceChild(desired.creator, desired.roomId, roomId);
+    } catch (err) {
+      // Left unrecorded on purpose, so the next provision tries again.
+      log.warn("could not file a room into its space", {
+        roomId,
+        spaceRoomId: desired.roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
   }
 
   await db
     .update(matrixRooms)
-    .set({ spaceRoomId: desiredSpaceRoomId })
+    .set({ spaceRoomId: desired?.roomId ?? null })
     .where(eq(matrixRooms.roomId, roomId));
 
   log.info("re-filed a room", {
     roomId,
     from: currentSpaceRoomId,
-    to: desiredSpaceRoomId,
+    to: desired?.roomId ?? null,
   });
 }

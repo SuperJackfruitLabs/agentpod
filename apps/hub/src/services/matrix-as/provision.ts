@@ -237,7 +237,7 @@ async function fileByPurpose(
       )
     : null;
 
-  await fileRoomUnderSpace(room.roomId, desired, room.spaceRoomId, speaker, spaceDeps);
+  await fileRoomUnderSpace(room.roomId, desired, room.spaceRoomId, spaceDeps);
 }
 
 /**
