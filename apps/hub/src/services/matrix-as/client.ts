@@ -41,7 +41,22 @@ export interface MatrixClient {
   ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
   ensureRoom(
     alias: string,
-    opts: { creator: string; name: string; topic: string }
+    opts: {
+      creator: string;
+      name: string;
+      topic: string;
+      /** Invited at creation, because `isDirect` rides on the invite's member event. */
+      invite?: string;
+      /**
+       * Make this a DM for the invitee.
+       *
+       * The server stamps `is_direct` on the invite it sends, and a conformant
+       * client files the room under People itself. Deliberately not written into
+       * the human's own `m.direct` account data — that needs a human's access
+       * token, which is the credential this bridge exists to stop keeping.
+       */
+      isDirect?: boolean;
+    }
   ): Promise<string | null>;
   sendText(userId: string, roomId: string, body: string): Promise<string | null>;
   sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
@@ -178,6 +193,8 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
           name: opts.name,
           topic: opts.topic,
           preset: "private_chat",
+          ...(opts.invite ? { invite: [opts.invite] } : {}),
+          ...(opts.isDirect ? { is_direct: true } : {}),
         },
       });
 
