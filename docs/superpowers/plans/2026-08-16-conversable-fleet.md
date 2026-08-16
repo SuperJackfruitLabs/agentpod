@@ -76,7 +76,19 @@ appservice_dir = "/etc/tuwunel/appservices"
 `allow_registration = false` from the first boot: the spike used open
 registration and tuwunel warned about it on every start, correctly.
 
-- [ ] **Step 3: Write the registration, and leave `url` out**
+> **Two log lines that look like faults and are not**, both seen on the real
+> deploy: `ERROR … loopback/localhost listening address … will NOT work` is a
+> false positive under `--network host`, where 127.0.0.1 *is* the host; and
+> `Error response from daemon: No such container: tuwunel` is the unit's
+> `ExecStartPre=-docker rm -f`, which is why it carries a `-`.
+
+- [ ] **Step 3: Write the registration with `url: null`**
+
+> **Corrected on 2026-08-16 while executing this step.** Synapse tolerates the
+> `url` key being absent; **tuwunel requires the field to be present** and aborts
+> its whole appservice service with `missing field \`url\`` when it is not —
+> which leaves the homeserver running and the appservice silently dead. `url:
+> null` is accepted and means the same thing: registered, receiving nothing.
 
 ```yaml
 id: ai-agents
@@ -120,9 +132,15 @@ git commit -m "deploy: the tuwunel unit and its configuration"
 
 - [ ] **Step 1: Register your own account on the new server**
 
-With `allow_registration = false`, use tuwunel's admin command or a one-shot
-registration token. Same localpart as before, so `@rakesh:id.agentpod.dev` is
-still you.
+With `allow_registration = false`, the admin console is the way in — and it needs
+the database, which the running server holds. So: stop the service, run the
+image once with `--execute "users create-user <name> <password>"`, start it again.
+
+> **`create-user` prints the password to stdout**, so it lands in whatever
+> terminal or transcript ran it. Either generate the password yourself and pass
+> it explicitly (still echoed), or follow with `users reset-password` and keep
+> only the second one. On this deploy the first password was echoed and was
+> rotated for exactly that reason.
 
 - [ ] **Step 2: Confirm the old client works against the new server**
 
@@ -917,7 +935,13 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
 
 `identity` calls Task 8's provisioning. `credentials` additionally: generate a password, run `users reset-password` (or `create-user`) through the homeserver's **admin room** as the hub's own admin account, then log in as the station's user to obtain a device token. Return it once; store nothing but the mode.
 
-> tuwunel has no Synapse-shaped admin HTTP API. Its `users create-user` and `users reset-password` are admin-room commands, which a client with an admin account can send remotely — verified in the CLI surface (`--execute`, `!admin users …`).
+> **Simpler than planned, verified on the real server:** an Application Service
+> registering a user through `POST /_matrix/client/v3/register` with
+> `m.login.application_service` gets back an **`access_token` and `device_id`
+> directly** — no admin command, no password, no login round-trip. The admin
+> path (`users create-user` / `users reset-password`, console-only since tuwunel
+> has no Synapse-shaped admin HTTP API) is only needed for accounts outside the
+> AS namespace, i.e. humans.
 
 - [ ] **Step 4: Run the tests, then the full hub suite**
 
