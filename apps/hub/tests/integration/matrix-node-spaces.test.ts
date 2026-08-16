@@ -214,3 +214,28 @@ describe("who writes the child edge", () => {
     expect(await spaceOf(A)).toBe(added[0]!.space);
   });
 });
+
+describe("a room whose old space we have forgotten", () => {
+  test("is still filed into its new one", async () => {
+    // What a change of grouping looks like from here: migration 0052 dropped
+    // the purpose spaces, so every room pointed at a space with no record. The
+    // unfile step could not know who was allowed to remove the edge and gave
+    // up — which stranded 24 of 32 rooms in production, filed nowhere.
+    await provisionStation(A, deps());
+    const forgotten = added[0]!.space;
+
+    // The space record disappears, exactly as a re-keying migration leaves it.
+    await rawSql`DELETE FROM matrix_spaces`;
+    await rawSql`UPDATE matrix_rooms SET space_room_id = ${forgotten} WHERE station_id = ${A}`;
+    added = [];
+    removed = [];
+
+    await provisionStation(A, deps());
+
+    expect(added).toHaveLength(1);
+    expect(await spaceOf(A)).toBe(added[0]!.space);
+    // Nothing was removed, because nothing knew how — that is the compromise,
+    // and it is the cosmetic half rather than the functional one.
+    expect(removed).toEqual([]);
+  });
+});
