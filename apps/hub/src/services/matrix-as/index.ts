@@ -20,7 +20,8 @@ import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll } from "./provision";
 import { handleRoomMessage } from "./inbound";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
-import { createSession, promptSession } from "../acp-sessions";
+import { createSession, promptSession,
+  answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-bridge");
@@ -155,6 +156,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         return { id: session.id };
       },
       promptSession,
+      answerPermission,
     },
     // The joint between inbound and outbound. Without it a session is created,
     // prompted, and answers into a stream nobody is listening to — which is

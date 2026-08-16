@@ -26,6 +26,12 @@ import { resolveMatrixId } from "../matrix-identity";
 import { getGrant, grantAllowsStation } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
+import {
+  clearPendingPermission,
+  matchPermissionAnswer,
+  pendingPermissionFor,
+  unmatchedAnswerText,
+} from "./permissions";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-inbound");
@@ -50,6 +56,16 @@ export interface InboundDeps {
       mode: string;
     }): Promise<{ id: string }>;
     promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+    /**
+     * Answer a permission request the agent is parked on. Optional so a
+     * deployment (or a test) that only relays messages still type-checks.
+     */
+    answerPermission?(
+      userId: string,
+      sessionId: string,
+      requestSeq: number,
+      optionId: string
+    ): Promise<void>;
   };
   /**
    * Start streaming this session into this room.
@@ -147,6 +163,57 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
       );
       return;
     }
+  }
+
+  // ── Is this an answer to a question the agent is waiting on? ─────────────
+  //
+  // Checked after the grant, deliberately: approving an action is dispatching
+  // the agent by another name, so somebody who may not dispatch it must not be
+  // able to approve its next tool call either.
+  //
+  // Checked before prompting, because while a permission is pending the
+  // session cannot take a prompt — it is parked. Treating the answer as a
+  // message would lose the answer AND fail the prompt.
+  const waiting = pendingPermissionFor(room.roomId);
+  if (waiting) {
+    const optionId = matchPermissionAnswer(text, waiting.options);
+    if (!optionId) {
+      // Not resolved to the nearest-looking option: approving a tool call the
+      // operator did not mean to approve is the one failure this must not
+      // have.
+      await say(unmatchedAnswerText(waiting.options));
+      return;
+    }
+
+    if (!deps.acp.answerPermission) {
+      await say("This hub cannot answer permission requests from a room yet.");
+      return;
+    }
+
+    try {
+      await deps.acp.answerPermission(
+        principalId,
+        waiting.sessionId,
+        waiting.requestSeq,
+        optionId
+      );
+      // Only after it was accepted: a cleared question plus a failed answer
+      // would leave the agent parked with nothing able to release it.
+      clearPendingPermission(room.roomId);
+      log.info("permission answered from a room", {
+        principalId,
+        room: room.roomId,
+        optionId,
+      });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      log.error("permission answer from a room was refused", {
+        room: room.roomId,
+        error: reason,
+      });
+      await say(`I could not record that answer: ${reason}`);
+    }
+    return;
   }
 
   // ── Say it to the agent ───────────────────────────────────────────────────

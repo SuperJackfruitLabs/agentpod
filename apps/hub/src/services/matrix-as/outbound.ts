@@ -13,6 +13,12 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 import { subscribe as subscribeToSession } from "../acp-sessions";
+import {
+  clearPendingPermission,
+  notePendingPermission,
+  permissionPrompt,
+  type PermissionOption,
+} from "./permissions";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-outbound");
@@ -130,20 +136,28 @@ function messageChunkText(payload: unknown): string | undefined {
   return typeof content.text === "string" ? content.text : undefined;
 }
 
-/** A permission request, rendered as a question a person can answer. */
-function permissionText(payload: unknown): string | null {
+/** What an agent is asking to do, and the answers it will accept. */
+function permissionRequest(payload: unknown): {
+  title: string;
+  options: PermissionOption[];
+} | null {
   if (!isRecord(payload)) return null;
   const toolCall = isRecord(payload.toolCall) ? payload.toolCall : {};
-  const what = typeof toolCall.title === "string" ? toolCall.title : "an action";
+  const title = typeof toolCall.title === "string" ? toolCall.title : "an action";
 
+  // Both halves or neither: an option the room can name but not answer with
+  // would be worse than one it never showed.
   const options = Array.isArray(payload.options)
     ? payload.options
-        .map((o) => (isRecord(o) && typeof o.name === "string" ? o.name : null))
-        .filter((n): n is string => n !== null)
+        .map((o) =>
+          isRecord(o) && typeof o.name === "string" && typeof o.optionId === "string"
+            ? { optionId: o.optionId, name: o.name }
+            : null
+        )
+        .filter((o): o is PermissionOption => o !== null)
     : [];
 
-  const choices = options.length > 0 ? ` — ${options.join(" / ")}` : "";
-  return `Permission needed: ${what}${choices}. Answer in the console; this room cannot yet.`;
+  return { title, options };
 }
 
 export function attachRoomToSession(
@@ -241,6 +255,7 @@ export function attachRoomToSession(
   const detach = () => {
     if (state.ended) return;
     state.ended = true;
+    clearPendingPermission(roomId);
     if (state.timer) clearTimeout(state.timer);
     if (state.typingTimer) clearInterval(state.typingTimer);
     triggers.delete(sessionId);
@@ -275,6 +290,11 @@ export function attachRoomToSession(
             return;
           }
 
+          // A question only stands while the agent is waiting on it. A turn
+          // that moved on — answered in the console, cancelled, failed — must
+          // not leave the room able to "approve" something already decided.
+          if (status !== "waiting") clearPendingPermission(roomId);
+
           // Anything that is not `working` means the agent is not typing —
           // including `waiting`, which is a permission request this room cannot
           // yet answer and could sit there for hours. Enumerating only idle and
@@ -294,8 +314,25 @@ export function attachRoomToSession(
         }
 
         case "permission-request": {
-          const text = permissionText(event.payload);
-          if (text) await say(text);
+          const request = permissionRequest(event.payload);
+          if (!request) return;
+
+          // Remembered BEFORE the message is sent: an answer cannot arrive
+          // before the question, but a reply racing a slow homeserver would
+          // find nothing pending and be treated as an ordinary prompt.
+          //
+          // `event.seq` is the request's own sequence number, which is how
+          // `answerPermission` addresses it — the same address the console's
+          // WebSocket sends.
+          if (request.options.length > 0) {
+            notePendingPermission(roomId, {
+              sessionId,
+              requestSeq: event.seq,
+              options: request.options,
+            });
+          }
+
+          await say(permissionPrompt(request.title, request.options));
           return;
         }
 
@@ -324,6 +361,7 @@ export function detachRoom(sessionId: string): void {
   const state = attached.get(sessionId);
   triggers.delete(sessionId);
   if (!state) return;
+  clearPendingPermission(state.roomId);
   state.ended = true;
   if (state.timer) clearTimeout(state.timer);
   if (state.typingTimer) clearInterval(state.typingTimer);

@@ -851,7 +851,33 @@ so everything it can do is something the control pair already governs.
 Matrix account first and the agent second; now the station must exist before it
 can have an identity.
 
-### 7f. Purpose: what an agent is FOR
+### 7f. Approving an agent's action from the room
+
+An agent in `ask` mode parks when it wants to run a tool, and the bridge posts
+the question where you are:
+
+```
+Permission needed: Write src/main.ts
+
+1. Allow once
+2. Allow always
+3. Reject
+
+Reply with the number, or the option's name.
+```
+
+Reply with `1`, or `Allow once`. Nothing else counts: a reply that is not
+plainly one of the options approves nothing and shows the list again. That is
+deliberate — against options named *Allow once* and *Allow always*, a bare
+"yes" does not say which, and approving a tool call you did not mean to
+approve is the one failure worth being pedantic about.
+
+Approving is dispatching by another name, so it needs the same `mayDispatch`
+grant as sending the agent a message. A question stops standing the moment the
+turn moves on — answered in the console, cancelled, or failed — so a room can
+never approve something already decided.
+
+### 7g. Purpose: what an agent is FOR
 
 A flat roster is fine at 32 agents and unreadable at 200. The axis to group by
 is **purpose** — personal, work, ad hoc, whatever you type — and deliberately
@@ -894,7 +920,7 @@ it is created; **accept the invite or you will not see it**.
 Filing happens during provisioning, so it is idempotent and self-healing: set a
 purpose and the room moves; restart the hub and nothing moves twice.
 
-### 7g. What happened to the Synapse history
+### 7h. What happened to the Synapse history
 
 The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
 import path from Synapse into the Conduit lineage, and Matrix here carries a
