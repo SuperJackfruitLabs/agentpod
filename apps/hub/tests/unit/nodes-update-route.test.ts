@@ -45,7 +45,13 @@ type RequestFn = (
  * every request.
  */
 function makeTestApp(mockRequest: RequestFn) {
-  const routes = createNodeRoutes({ request: mockRequest });
+  // fixedImageNodesFn is injected for the same reason `request` is: this file
+  // has no database behind it, and without the injection the route asks one
+  // which nodes boot from a substrate image.
+  const routes = createNodeRoutes({
+    request: mockRequest,
+    fixedImageNodesFn: async () => new Set<string>(),
+  });
 
   return new Hono()
     .use("/api/nodes/*", async (c, next) => {
