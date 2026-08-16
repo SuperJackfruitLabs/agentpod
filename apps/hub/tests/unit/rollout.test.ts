@@ -200,3 +200,48 @@ describe("executeRollout", () => {
     expect(results[1]!.outcome).toBe("updated");
   });
 });
+
+// ─── A node whose binary comes from an image (#349) ───────────────────────────
+
+/**
+ * `cf-opencode` went offline when someone pressed Update, and stayed on
+ * v0.1.22. Self-update swaps a binary and exits, expecting a supervisor; a
+ * Cloudflare container has none, so the exit IS the stop. And the disk is
+ * ephemeral, so the swapped binary would not survive the restart it never got.
+ *
+ * A fleet rollout that did this to every Cloudflare station is a much worse
+ * outcome than one that updates nothing, so the planner has to know.
+ */
+describe("nodes whose image is a deployment artifact", () => {
+  test("are skipped, and the reason says how to update them instead", () => {
+    const [item] = planRollout([node({ imageFixed: true })], {});
+
+    expect(item!.action).toBe("skip");
+    // A bare "not supported" would leave an operator with a stale station and
+    // no next step. The path that works is naming the image.
+    expect(item!.reason).toMatch(/image/i);
+  });
+
+  test("are skipped even under force, because force cannot make this work", () => {
+    // force overrides policy choices. This is not one: the binary cannot
+    // persist and the attempt stops the station.
+    const [item] = planRollout([node({ imageFixed: true })], { force: true });
+
+    expect(item!.action).toBe("skip");
+  });
+
+  test("do not stop the rest of the fleet being updated", () => {
+    const plan = planRollout(
+      [node({ id: "n1", name: "alpha", imageFixed: true }), node({ id: "n2", name: "beta" })],
+      {}
+    );
+
+    expect(plan.find((p) => p.nodeId === "n1")!.action).toBe("skip");
+    expect(plan.find((p) => p.nodeId === "n2")!.action).toBe("update");
+  });
+
+  test("an ordinary node is untouched by this rule", () => {
+    expect(planRollout([node()], {})[0]!.action).toBe("update");
+    expect(planRollout([node({ imageFixed: false })], {})[0]!.action).toBe("update");
+  });
+});

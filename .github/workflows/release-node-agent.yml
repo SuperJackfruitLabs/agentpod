@@ -215,7 +215,7 @@ jobs:
       # steps.bump.outputs.changed: 0 when both files already pin $TAG, which is
       # what a re-run or a re-cut tag hits, and is a clean success — no branch,
       # no empty commit, no PR.
-      - name: Bump the ARG in both Fly Dockerfiles
+      - name: Bump the ARG in the Fly and Cloudflare Dockerfiles
         id: bump
         run: sh fly/node-image/bump-version-pin.sh --to "$TAG"
 
@@ -229,7 +229,7 @@ jobs:
 
           # Belt and braces: `changed=1` already means the files differ, but an
           # empty commit here would fail the job on an otherwise fine release.
-          if git diff --quiet -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi; then
+          if git diff --quiet -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi cloudflare/worker-v2/Dockerfile; then
             echo "nothing to commit despite changed=1 — leaving the pin alone" >&2
             exit 1
           fi
@@ -239,7 +239,7 @@ jobs:
           git checkout -b "$branch"
           git commit -m "chore(fly): pin the node-agent to $TAG" \
             -m "Opened by release-node-agent.yml when $TAG was released (#302)." \
-            -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi
+            -- fly/node-image/Dockerfile fly/node-image/Dockerfile.pi cloudflare/worker-v2/Dockerfile
           # Force: re-running the release for the same tag must reach the same
           # end state rather than failing on a branch left by the first run.
           git push --force origin "HEAD:refs/heads/$branch"
