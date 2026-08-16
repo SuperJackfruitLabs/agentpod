@@ -824,7 +824,34 @@ anywhere) or `harness` (it runs its own Matrix client). `POST
 same write; it needs `mayGrantReach`, because handing an agent a credential is
 granting it reach.
 
-### 7e. What happened to the Synapse history
+### 7e. Creating a new agent
+
+`hermes-agents onboard` created a Matrix account through the **Synapse admin
+API** with a token stored on molt-bot — a credential that could create,
+deactivate or take over any account on the homeserver, including a human's. That
+API does not exist on tuwunel, so the Matrix half of that command cannot work
+and must not be used.
+
+Use `scripts/onboard-agent.sh` on the host instead:
+
+```sh
+# 1. create the harness profile as usual (hermes-agents create-service, etc.)
+# 2. then, on that host:
+AGENTPOD_HUB_URL=https://hub.agentpod.dev \
+AGENTPOD_API_TOKEN=<hub token> \
+  ./onboard-agent.sh hermes:analyst-echo
+```
+
+It never talks to the homeserver. It waits for the node agent to detect the
+station, adopts it through the hub, and **adoption is what makes the bridge
+provision** an identity and a DM room. The credential it holds is a hub token,
+so everything it can do is something the control pair already governs.
+
+**The ordering inverted**, and it is the thing to remember: the old flow made the
+Matrix account first and the agent second; now the station must exist before it
+can have an identity.
+
+### 7f. What happened to the Synapse history
 
 The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
 import path from Synapse into the Conduit lineage, and Matrix here carries a

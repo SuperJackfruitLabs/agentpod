@@ -54,6 +54,7 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
+import { onStationsAdopted } from './services/matrix-as/hooks.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -268,6 +269,10 @@ console.log(
 // after the routes are mounted so a homeserver that starts pushing immediately
 // finds somewhere to push to.
 if (matrixBridge) {
+  // A station adopted at noon must not wait for a restart to get a room.
+  onStationsAdopted(async (stationIds) => {
+    for (const id of stationIds) await matrixBridge.provision(id);
+  });
   await startMatrixBridge(matrixBridge);
 } else {
   console.log('matrix bridge: (disabled)');
