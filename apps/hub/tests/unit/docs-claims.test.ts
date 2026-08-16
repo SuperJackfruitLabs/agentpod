@@ -68,6 +68,9 @@ const CODE_FILES = [
   "apps/hub/src/utils/validate-config.ts",
   "apps/console/vite.config.js",
   "apps/console/src/lib/api/client.ts",
+  // A shell script an operator runs is code that reads env vars, and the ones
+  // OPERATING.md §7e tells them to export are read here rather than by the hub.
+  "scripts/onboard-agent.sh",
 ] as const;
 
 /**
