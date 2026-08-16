@@ -9,6 +9,7 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
+import { notifyStationsAdopted } from "./matrix-as/hooks";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -119,7 +120,15 @@ export async function adoptStations(
     .from(stations)
     .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
 
-  return allAdopted.filter((r) => keys.includes(r.stationKey));
+  const adopted = allAdopted.filter((r) => keys.includes(r.stationKey));
+
+  // Announce, do not act: this module knows nothing about Matrix, and nobody
+  // listens when the bridge is off. Fire-and-forget, because adoption has
+  // already succeeded and a bridge that could not make a room must not make it
+  // look as though the station was not adopted.
+  notifyStationsAdopted(adopted.map((r) => r.id));
+
+  return adopted;
 }
 
 // ─── listAdopted ─────────────────────────────────────────────────────────────
