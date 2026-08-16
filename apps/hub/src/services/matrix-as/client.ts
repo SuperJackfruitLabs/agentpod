@@ -151,6 +151,24 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     );
   }
 
+  /** The room an alias points at, or null when nothing does. */
+  async function resolveAlias(alias: string): Promise<string | null> {
+    const res = await call(
+      `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+      { method: "GET" }
+    );
+    if (res.status !== 200) return null;
+    return String(res.body.room_id ?? "") || null;
+  }
+
+  /** Whether `userId` is still in `roomId`. */
+  async function isJoined(userId: string, roomId: string): Promise<boolean> {
+    const res = await call("/_matrix/client/v3/joined_rooms", { method: "GET", userId });
+    if (res.status !== 200) return false;
+    const rooms = Array.isArray(res.body.joined_rooms) ? res.body.joined_rooms : [];
+    return rooms.some((r) => r === roomId);
+  }
+
   return {
     async ensureUser(localpart, displayName) {
       const res = await call("/_matrix/client/v3/register", {
@@ -222,8 +240,56 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         },
       });
 
-      if (!assertOkOrAlready(`createRoom ${alias}`, res)) return null;
-      return String(res.body.room_id ?? "") || null;
+      if (assertOkOrAlready(`createRoom ${alias}`, res)) {
+        return String(res.body.room_id ?? "") || null;
+      }
+
+      // M_ROOM_IN_USE. The alias is taken, and by what decides everything:
+      //
+      //  - by a room this agent is still in — the ordinary restart. That room
+      //    IS the answer, so resolve the alias and hand it back. Returning null
+      //    here (what shipped) made provisioning create nothing and report
+      //    success.
+      //  - by a room it has left — an emptied room after a clean slate. The
+      //    alias outlives the room's usefulness and nothing else will ever
+      //    release it, so take it back and try once more.
+      const existing = await resolveAlias(alias);
+      if (!existing) return null;
+
+      if (await isJoined(opts.creator, existing)) return existing;
+
+      log.info("reclaiming an alias from a room this agent has left", {
+        alias,
+        roomId: existing,
+      });
+      const dropped = await call(
+        `/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+        { method: "DELETE", userId: opts.creator }
+      );
+      if (dropped.status < 200 || dropped.status >= 300) {
+        log.warn("could not release a stale alias; the room cannot be recreated", {
+          alias,
+          status: dropped.status,
+        });
+        return null;
+      }
+
+      const retry = await call("/_matrix/client/v3/createRoom", {
+        method: "POST",
+        userId: opts.creator,
+        body: {
+          room_alias_name: aliasLocalpart,
+          name: opts.name,
+          topic: opts.topic,
+          preset: "private_chat",
+          ...(opts.invite ? { invite: [opts.invite] } : {}),
+          ...(opts.isDirect ? { is_direct: true } : {}),
+        },
+      });
+      if (!assertOkOrAlready(`createRoom ${alias} (after reclaiming its alias)`, retry)) {
+        return null;
+      }
+      return String(retry.body.room_id ?? "") || null;
     },
 
     async sendText(userId, roomId, body) {

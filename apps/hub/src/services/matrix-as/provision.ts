@@ -187,12 +187,20 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
       ...(invitee ? { invite: invitee, isDirect: true } : {}),
     });
 
-    if (roomId) {
-      await db
-        .insert(matrixRooms)
-        .values({ roomId, tenantId: s.tenantId, stationId: s.stationId, alias })
-        .onConflictDoNothing();
+    if (!roomId) {
+      // Thrown, not logged and stepped over: `provisionAll` counts failures,
+      // and a station left with no room is exactly what that count is for.
+      // Swallowing it is how a rebuild reported "provisioned 32, failed 0"
+      // while creating nothing at all.
+      throw new Error(
+        `could not create a room for ${s.stationKey} at ${alias} — the homeserver refused, or its alias is held by a room this agent cannot reclaim`
+      );
     }
+
+    await db
+      .insert(matrixRooms)
+      .values({ roomId, tenantId: s.tenantId, stationId: s.stationId, alias })
+      .onConflictDoNothing();
   }
 
   if (bridged) {
