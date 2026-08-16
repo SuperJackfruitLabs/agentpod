@@ -56,6 +56,7 @@ import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
+import { createStationSayRoutes } from './routes/station-say.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
@@ -174,6 +175,17 @@ if (matrixBridge) {
         // rather than pretending.
         register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
       },
+    }),
+  );
+
+  // An agent speaking without being spoken to — a cron job reporting in, and
+  // the last thing keeping bridge mode short of parity with a harness's own
+  // Matrix client.
+  app.route(
+    '/api',
+    createStationSayRoutes({
+      domain: matrixBridge.config.domain,
+      client: matrixBridge.client,
     }),
   );
 }

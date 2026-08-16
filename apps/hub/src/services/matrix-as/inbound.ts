@@ -60,6 +60,11 @@ export interface InboundDeps {
    * permanently quiet. Attaching is idempotent.
    */
   attach(sessionId: string, roomId: string, agentUser: string): void;
+  /**
+   * Which message started the turn about to run, so the agent can mark it —
+   * 👀 while working, ✅ when done. Absent for a turn nobody asked for.
+   */
+  noteTrigger?(sessionId: string, eventId: string): void;
 }
 
 /** The room, its station, and the node name that station's identity is built from. */
@@ -172,6 +177,7 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
     // Before prompting, so the first words of the answer are not produced into
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
+    if (event.event_id) deps.noteTrigger?.(sessionId, event.event_id);
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
