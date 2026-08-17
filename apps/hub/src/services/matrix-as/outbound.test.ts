@@ -871,3 +871,97 @@ describe("a permission request a client can render", () => {
     expect(sent[0]!.body).toContain("Permission needed");
   });
 });
+
+describe("a turn that ends without saying anything", () => {
+  test("does not mark it done, and says what happened", async () => {
+    // Measured in production on 2026-08-17: a provider quota was exhausted,
+    // every model in the failover chain failed, and openclaw ended the turn
+    // `idle` without emitting an ACP error. The room put a ✅ on the reader's
+    // message and showed nothing else. They asked twice — "Hi", then "No
+    // reply?" — and got a green tick both times.
+    //
+    // The hub cannot know *why* nothing came back. It can know that nothing
+    // did, and refuse to call that success.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-silent");
+
+    emit(state("working"));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-silent", key: "❌" });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toMatch(/without a reply/i);
+  });
+
+  test("still marks a turn done when the agent actually said something", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-answered");
+
+    emit(state("working"));
+    emit(chunk("Here you go."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-answered", key: "✅" });
+    expect(sent.some((m) => /without a reply/i.test(m.body))).toBe(false);
+  });
+
+  test("counts tool work as having happened, even with nothing said", async () => {
+    // An agent that tidied up and reported nothing did something. The turn
+    // card records it, and a ❌ would be wrong.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-tools");
+
+    emit(state("working"));
+    emit({
+      sessionId: SESSION,
+      seq: 2,
+      type: "agent-update",
+      payload: { sessionUpdate: "tool_call", toolCallId: "c1", title: "Tidy up", status: "completed" },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-tools", key: "✅" });
+    expect(sent.some((m) => /without a reply/i.test(m.body))).toBe(false);
+  });
+
+  test("leaves a reported error to the error path, which already explains itself", async () => {
+    // The `error` event says what went wrong. Adding "ended without a reply"
+    // underneath it would be the same news twice, and less specific.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-error");
+
+    emit(state("working"));
+    emit({
+      sessionId: SESSION,
+      seq: 2,
+      type: "error",
+      payload: { message: "harness exited" },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(sent.some((m) => /without a reply/i.test(m.body))).toBe(false);
+    expect(sent.some((m) => /harness exited/.test(m.body))).toBe(true);
+  });
+
+  test("says nothing about a turn nobody in the room started", async () => {
+    // A cron job speaking has no reader waiting on it, and no message to mark.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+
+    emit(state("working"));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(sent).toHaveLength(0);
+  });
+});

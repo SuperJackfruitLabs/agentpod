@@ -133,6 +133,19 @@ interface Attachment {
   tools: Map<string, ToolRecord>;
   /** Monotonic per turn, shared by every tool update. */
   toolSeq: number;
+  /**
+   * Whether this turn produced anything at all — a word, or a tool call.
+   *
+   * A turn that produced nothing is not a turn that succeeded, and the ✅ this
+   * used to put on the reader's message said otherwise. Measured on
+   * 2026-08-17: a provider quota was exhausted, every model in the failover
+   * chain failed, and openclaw ended the turn `idle` without emitting an ACP
+   * error — so the room marked it done and showed nothing. The reader asked
+   * twice and got a green tick both times.
+   */
+  produced: boolean;
+  /** Whether the harness already explained a failure this turn. */
+  reportedError: boolean;
 }
 
 /**
@@ -177,6 +190,18 @@ export const TYPING_REFRESH_MS = 20_000;
  * "did it even hear me" without costing a message.
  */
 const REACTION = { working: "👀", done: "✅", failed: "❌" } as const;
+
+/**
+ * What the room is told when a turn ends having produced nothing.
+ *
+ * Deliberately says only what is known. The hub sees a turn go `working` and
+ * then `idle` with no text, no tool call and no error — it does not know
+ * whether the model refused, ran out of quota, or crashed, because the harness
+ * that failed did not say. Guessing would be worse than the tick this replaces.
+ */
+const SILENT_TURN_NOTICE =
+  "This turn ended without a reply — the agent reported no answer and no error. " +
+  "Its own logs will say why.";
 
 /**
  * The message that started the turn about to run, per session.
@@ -278,6 +303,8 @@ export function attachRoomToSession(
     thoughtSentAt: 0,
     tools: new Map(),
     toolSeq: 0,
+    produced: false,
+    reportedError: false,
   };
 
   const say = async (body: string) => {
@@ -542,6 +569,7 @@ export function attachRoomToSession(
         case "agent-update": {
           const text = messageChunkText(event.payload);
           if (text !== undefined) {
+            state.produced = true;
             state.buffer.push(text);
             void streamLive(false);
             scheduleFlush();
@@ -557,6 +585,7 @@ export function attachRoomToSession(
 
           const tool = foldToolUpdate(state.tools, event.payload);
           if (tool !== null) {
+            state.produced = true;
             void streamTool(tool);
             return;
           }
@@ -599,7 +628,24 @@ export function attachRoomToSession(
           await flush();
           await stopTyping();
 
-          if (status === "idle" || status === "ended") await mark(REACTION.done);
+          if (status === "idle" || status === "ended") {
+            // A turn that said nothing, ran nothing, and reported nothing is
+            // not a turn that worked. The hub cannot know *why* — the harness
+            // that failed did not say — but it can refuse to call silence
+            // success, and it can tell the reader that their question went
+            // unanswered rather than leaving them to infer it from a tick.
+            //
+            // Nothing is said when nobody asked: an unprompted turn (a cron
+            // job speaking) has no reader waiting and no message to mark.
+            if (!state.produced && !state.reportedError) {
+              await mark(REACTION.failed);
+              if (state.triggerEventId) await say(SILENT_TURN_NOTICE);
+            } else if (!state.reportedError) {
+              await mark(REACTION.done);
+            }
+            state.produced = false;
+            state.reportedError = false;
+          }
 
           if (status === "ended") {
             // A session that ended takes its attachment with it — an
@@ -658,6 +704,9 @@ export function attachRoomToSession(
 
         case "error": {
           const message = isRecord(event.payload) ? event.payload.message : undefined;
+          // The error path explains itself; the silence check below must not
+          // repeat the same news less specifically.
+          state.reportedError = true;
           await stopTyping();
           await mark(REACTION.failed);
           await say(`This agent reported an error: ${String(message ?? "unknown")}`);
