@@ -12,9 +12,11 @@
  * nothing.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
+import { matrixRooms } from "../../db/schema/matrix";
+import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll } from "./provision";
@@ -44,6 +46,34 @@ export interface MatrixBridgeConfig {
 }
 
 /** What the deployment says. Read once, at boot, like every other switch here. */
+/**
+ * Who a room's live stream is for: the Matrix id of the person the station
+ * belongs to.
+ *
+ * A turn's text is pushed to that person's own devices while it is being
+ * written (see `live.ts`), so this answers "whose devices". `null` — a room
+ * whose owner has no Matrix identity mapped — simply means no live view; the
+ * room still gets its message.
+ *
+ * Looked up once per attachment rather than per chunk: this is three joins and
+ * an agent can emit hundreds of chunks in a turn.
+ */
+async function readerForRoom(roomId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .innerJoin(
+      principalIdentities,
+      and(
+        eq(principalIdentities.principalId, stations.userId),
+        eq(principalIdentities.system, "matrix")
+      )
+    )
+    .where(eq(matrixRooms.roomId, roomId));
+  return row?.externalId ?? null;
+}
+
 export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
   return {
     // The literal lowercase "true" — see the note above.
@@ -162,7 +192,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     // prompted, and answers into a stream nobody is listening to — which is
     // exactly what happened the first time this ran against the real fleet.
     attach: (sessionId: string, roomId: string, agentUser: string) =>
-      attachRoomToSession(sessionId, roomId, agentUser, { client }),
+      attachRoomToSession(sessionId, roomId, agentUser, {
+        client,
+        readerFor: readerForRoom,
+      }),
     noteTrigger: noteTurnTrigger,
   };
 

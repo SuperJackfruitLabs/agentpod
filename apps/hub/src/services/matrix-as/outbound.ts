@@ -13,6 +13,7 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 import { subscribe as subscribeToSession } from "../acp-sessions";
+import { deltaContent, LIVE_DELTA_TYPE, shouldSendDelta } from "./live";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -34,7 +35,23 @@ export interface OutboundDeps {
       key: string
     ): Promise<string | null>;
     redact?(userId: string, roomId: string, eventId: string): Promise<void>;
+    /**
+     * Push a turn's live text to the reader's own devices. Optional: a
+     * deployment without it simply does not stream, and the room is identical
+     * either way — see `live.ts`.
+     */
+    sendToDevice?(
+      userId: string,
+      targetUserId: string,
+      eventType: string,
+      content: Record<string, unknown>
+    ): Promise<void>;
   };
+  /**
+   * Who to stream this room's turns to — the reader's Matrix id, or null for a
+   * room with nobody to show it to. Resolved once per attachment.
+   */
+  readerFor?: (roomId: string) => Promise<string | null>;
   subscribe?: (sessionId: string, fn: (e: AcpEvent) => void) => () => void;
   /**
    * A safety net, not a chunking strategy — see `FLUSH_SAFETY_MS`. 0 in tests
@@ -55,6 +72,19 @@ interface Attachment {
   ended: boolean;
   /** The message that started the current turn, if a person started it. */
   triggerEventId: string | null;
+  /** Monotonic delta counter for the current turn — see `live.ts`. */
+  liveSeq: number;
+  /** How much of the buffered text has already been streamed. */
+  liveSentChars: number;
+  /** When the last delta went out, for the boundary backstop. */
+  liveSentAt: number;
+  /**
+   * The reader's Matrix id, resolved lazily on the first chunk and cached for
+   * the room's life. `undefined` means "not looked up yet"; `null` means
+   * "looked up, nobody to stream to" — a distinction that stops a room with no
+   * reader repeating the lookup on every chunk.
+   */
+  reader: string | null | undefined;
   /** The 👀 we put on it, so it can be taken off again. */
   workingReactionId: string | null;
 }
@@ -181,6 +211,10 @@ export function attachRoomToSession(
     ended: false,
     triggerEventId: null,
     workingReactionId: null,
+    liveSeq: 0,
+    liveSentChars: 0,
+    liveSentAt: 0,
+    reader: undefined,
   };
 
   const say = async (body: string) => {
@@ -204,9 +238,60 @@ export function attachRoomToSession(
       state.timer = null;
     }
     const text = state.buffer.join("");
+    // Before the buffer is cleared: the last delta carries the whole answer and
+    // marks the live view finished, so a reader's provisional text is replaced
+    // by the room's own message rather than lingering beside it.
+    await streamLive(true);
     state.buffer = [];
+    // A new turn starts its own sequence — the reader keys on it to know that
+    // what follows is a fresh answer rather than more of the last one.
+    state.liveSeq = 0;
+    state.liveSentChars = 0;
+    state.liveSentAt = 0;
     if (text.trim() === "") return;
     await say(text);
+  };
+
+  /**
+   * Push what the agent has said so far to the reader's devices.
+   *
+   * Best-effort in every direction: no reader, no `sendToDevice`, or a failed
+   * send all mean the same thing — no live view this turn — and none of them
+   * touch the room. The durable message is unaffected either way, which is
+   * what makes this safe to run against a live fleet.
+   */
+  const streamLive = async (done: boolean) => {
+    const send = deps.client.sendToDevice;
+    if (!send) return;
+
+    if (state.reader === undefined) {
+      state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
+    }
+    if (!state.reader) return;
+
+    const text = state.buffer.join("");
+    const pending = text.slice(state.liveSentChars);
+    if (!done && !shouldSendDelta(pending, Date.now() - state.liveSentAt)) return;
+    // The final delta is worth sending even with nothing new: it is what tells
+    // a reader the live view is over and the room now holds the real message.
+    if (done && pending.length === 0 && state.liveSeq === 0) return;
+
+    state.liveSeq += 1;
+    state.liveSentChars = text.length;
+    state.liveSentAt = Date.now();
+
+    await send(
+      agentUser,
+      state.reader,
+      LIVE_DELTA_TYPE,
+      deltaContent({ roomId, sessionId, seq: state.liveSeq, text, done })
+    ).catch((err) => {
+      log.debug("could not stream a turn to the reader's devices", {
+        sessionId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   };
 
   const scheduleFlush = () => {
@@ -272,6 +357,7 @@ export function attachRoomToSession(
           const text = messageChunkText(event.payload);
           if (text !== undefined) {
             state.buffer.push(text);
+            void streamLive(false);
             scheduleFlush();
           }
           return;
