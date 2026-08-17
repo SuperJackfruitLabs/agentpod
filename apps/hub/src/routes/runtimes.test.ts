@@ -2029,14 +2029,24 @@ async function seedUnobserved(id: string, agoMs = 45 * 60_000) {
   // starts from a clean slate rather than counting probes it did not cause.
   await rawSql`DELETE FROM provisioned_runtimes WHERE id LIKE 'rt_unobs_%'`;
   await rawSql`DELETE FROM nodes WHERE id LIKE 'node_unobs_%'`;
+  // The tenant is named, not scavenged. This read `(SELECT tenant_id FROM
+  // provisioned_runtimes LIMIT 1)` — from a table the two DELETEs above have
+  // just emptied of this helper's own rows, so it resolved to whatever some
+  // *other* test happened to have left lying around. When nothing had, the
+  // subquery returned NULL and the insert died on `nodes.tenant_id`'s NOT NULL
+  // constraint. That made the test order-dependent: green in a full run where a
+  // neighbour's row survived, red on its own, for a reason nothing in the test
+  // body could explain. `bun test` shares one process and one database across
+  // every file, which is exactly the condition that makes a scavenged fixture a
+  // coin toss. Every sibling in this file already names the same literal.
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, last_seen_at, created_at)
-    VALUES (${nodeId}, (SELECT tenant_id FROM provisioned_runtimes LIMIT 1), ${TEST_USER},
+    VALUES (${nodeId}, ${BOOTSTRAP_TENANT_ID}, ${TEST_USER},
             ${id}, ${id}, 'linux', 'amd64', 2, 'offline', 'x',
             now() - (${agoMs} || ' milliseconds')::interval, now())`;
   await rawSql`
     INSERT INTO provisioned_runtimes (id, tenant_id, user_id, provider, external_id, status, node_id, name, harness, created_at, updated_at)
-    VALUES (${id}, (SELECT tenant_id FROM nodes WHERE id = ${nodeId}), ${TEST_USER}, 'docker',
+    VALUES (${id}, ${BOOTSTRAP_TENANT_ID}, ${TEST_USER}, 'docker',
             ${`fake-container-${id}`}, 'online', ${nodeId}, ${id}, 'none',
             now() - (${agoMs} || ' milliseconds')::interval,
             now() - (${agoMs} || ' milliseconds')::interval)`;
