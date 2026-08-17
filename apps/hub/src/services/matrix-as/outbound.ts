@@ -13,8 +13,15 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 import { subscribe as subscribeToSession } from "../acp-sessions";
-import { deltaContent, LIVE_DELTA_TYPE, shouldSendDelta } from "./live";
-import { noteUnmappedKind } from "./activity";
+import {
+  deltaContent,
+  LIVE_DELTA_TYPE,
+  shouldSendDelta,
+  THOUGHT_DELTA_TYPE,
+  TOOL_UPDATE_TYPE,
+  toolUpdateContent,
+} from "./live";
+import { foldToolUpdate, noteUnmappedKind, type ToolRecord } from "./activity";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -88,6 +95,25 @@ interface Attachment {
   reader: string | null | undefined;
   /** The 👀 we put on it, so it can be taken off again. */
   workingReactionId: string | null;
+  /**
+   * The reasoning stream's own buffer and cursor.
+   *
+   * Separate from the answer's rather than shared: the two arrive interleaved
+   * and are read on different channels, so one cursor would make an agent's
+   * thinking and its answer overwrite each other. See `THOUGHT_DELTA_TYPE`.
+   */
+  thoughtBuffer: string[];
+  thoughtSeq: number;
+  thoughtSentChars: number;
+  thoughtSentAt: number;
+  /**
+   * This turn's tool calls, in the order they were first used, keyed by
+   * `toolCallId` so an update merges rather than appending. Cleared with the
+   * rest of the per-turn state in `flush`.
+   */
+  tools: Map<string, ToolRecord>;
+  /** Monotonic per turn, shared by every tool update. */
+  toolSeq: number;
 }
 
 /**
@@ -158,10 +184,21 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 /** The text of an `agent_message_chunk`, or undefined for anything else. */
 function messageChunkText(payload: unknown): string | undefined {
   if (!isRecord(payload)) return undefined;
-  // Thought chunks are deliberately excluded: reasoning belongs in the
-  // console's transcript, not in a room people share, where it would turn one
-  // answer into a monologue.
+  // Thought chunks are deliberately excluded *from the room*: reasoning
+  // belongs in the console's transcript, not in a room people share, where it
+  // would turn one answer into a monologue. They are streamed to the reader's
+  // own devices instead — see `streamThought`, which makes them watchable
+  // without making them permanent.
   if (payload.sessionUpdate !== "agent_message_chunk") return undefined;
+  const content = payload.content;
+  if (!isRecord(content) || content.type !== "text") return undefined;
+  return typeof content.text === "string" ? content.text : undefined;
+}
+
+/** The text of a chunk of the given kind, or undefined for anything else. */
+function chunkTextOfKind(payload: unknown, kind: string): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (payload.sessionUpdate !== kind) return undefined;
   const content = payload.content;
   if (!isRecord(content) || content.type !== "text") return undefined;
   return typeof content.text === "string" ? content.text : undefined;
@@ -216,6 +253,12 @@ export function attachRoomToSession(
     liveSentChars: 0,
     liveSentAt: 0,
     reader: undefined,
+    thoughtBuffer: [],
+    thoughtSeq: 0,
+    thoughtSentChars: 0,
+    thoughtSentAt: 0,
+    tools: new Map(),
+    toolSeq: 0,
   };
 
   const say = async (body: string) => {
@@ -249,6 +292,14 @@ export function attachRoomToSession(
     state.liveSeq = 0;
     state.liveSentChars = 0;
     state.liveSentAt = 0;
+    // The reasoning and tool state belong to the turn that just ended. Without
+    // this the next turn reports the previous one's work as its own.
+    state.thoughtBuffer = [];
+    state.thoughtSeq = 0;
+    state.thoughtSentChars = 0;
+    state.thoughtSentAt = 0;
+    state.tools = new Map();
+    state.toolSeq = 0;
     if (text.trim() === "") return;
     await say(text);
   };
@@ -265,10 +316,8 @@ export function attachRoomToSession(
     const send = deps.client.sendToDevice;
     if (!send) return;
 
-    if (state.reader === undefined) {
-      state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
-    }
-    if (!state.reader) return;
+    const reader = await resolveReader();
+    if (!reader) return;
 
     const text = state.buffer.join("");
     const pending = text.slice(state.liveSentChars);
@@ -283,11 +332,99 @@ export function attachRoomToSession(
 
     await send(
       agentUser,
-      state.reader,
+      reader,
       LIVE_DELTA_TYPE,
       deltaContent({ roomId, sessionId, seq: state.liveSeq, text, done })
     ).catch((err) => {
       log.debug("could not stream a turn to the reader's devices", {
+        sessionId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  /**
+   * The reader's Matrix id, looked up once per room and cached.
+   *
+   * Shared by all three live channels so a room with no reader does the lookup
+   * once rather than once per stream.
+   */
+  const resolveReader = async (): Promise<string | null> => {
+    if (state.reader === undefined) {
+      state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
+    }
+    return state.reader;
+  };
+
+  /**
+   * Push the agent's reasoning so far to the reader's devices.
+   *
+   * The same policy and the same best-effort posture as `streamLive`, against
+   * its own buffer and cursor. Unlike the answer there is no durable copy
+   * behind this: a dropped delta is simply reasoning nobody saw, which costs
+   * nothing, because reasoning is never written to the room at all.
+   */
+  const streamThought = async (done: boolean) => {
+    const send = deps.client.sendToDevice;
+    if (!send) return;
+    const reader = await resolveReader();
+    if (!reader) return;
+
+    const text = state.thoughtBuffer.join("");
+    const pending = text.slice(state.thoughtSentChars);
+    if (!done && !shouldSendDelta(pending, Date.now() - state.thoughtSentAt)) return;
+    if (done && pending.length === 0 && state.thoughtSeq === 0) return;
+
+    state.thoughtSeq += 1;
+    state.thoughtSentChars = text.length;
+    state.thoughtSentAt = Date.now();
+
+    await send(
+      agentUser,
+      reader,
+      THOUGHT_DELTA_TYPE,
+      deltaContent({ roomId, sessionId, seq: state.thoughtSeq, text, done })
+    ).catch((err) => {
+      log.debug("could not stream a turn's reasoning to the reader's devices", {
+        sessionId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  /**
+   * Push one tool call's current state to the reader's devices.
+   *
+   * Sent on every change rather than batched: this is the answer to "what is it
+   * doing right now", and a batched ticker is a contradiction. The durable
+   * record at the end of the turn is what makes it worth not batching — nothing
+   * here has to survive, so nothing here has to be complete.
+   */
+  const streamTool = async (record: ToolRecord) => {
+    const send = deps.client.sendToDevice;
+    if (!send) return;
+    const reader = await resolveReader();
+    if (!reader) return;
+
+    state.toolSeq += 1;
+    await send(
+      agentUser,
+      reader,
+      TOOL_UPDATE_TYPE,
+      toolUpdateContent({
+        roomId,
+        sessionId,
+        seq: state.toolSeq,
+        toolCallId: record.id,
+        title: record.title,
+        kind: record.kind,
+        status: record.status,
+        locations: record.locations,
+      })
+    ).catch((err) => {
+      log.debug("could not stream a tool call to the reader's devices", {
         sessionId,
         roomId,
         error: err instanceof Error ? err.message : String(err),
@@ -360,6 +497,19 @@ export function attachRoomToSession(
             state.buffer.push(text);
             void streamLive(false);
             scheduleFlush();
+            return;
+          }
+
+          const thought = chunkTextOfKind(event.payload, "agent_thought_chunk");
+          if (thought !== undefined) {
+            state.thoughtBuffer.push(thought);
+            void streamThought(false);
+            return;
+          }
+
+          const tool = foldToolUpdate(state.tools, event.payload);
+          if (tool !== null) {
+            void streamTool(tool);
             return;
           }
 

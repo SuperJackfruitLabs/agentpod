@@ -545,3 +545,152 @@ describe("streaming a turn to the reader's own devices", () => {
     expect(sent).toHaveLength(1);
   });
 });
+
+describe("an agent's thinking and tool use", () => {
+  /** The same shape as `streamingDeps` above, with its own sink. */
+  function activityDeps() {
+    const base = deps();
+    const events: Array<{ type: string; content: any }> = [];
+    return {
+      events,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          sendToDevice: async (
+            _userId: string,
+            _targetUserId: string,
+            eventType: string,
+            content: Record<string, unknown>
+          ) => {
+            events.push({ type: eventType, content });
+          },
+        },
+        readerFor: async () => "@rakesh:x.org",
+      },
+    };
+  }
+
+  const toolCall = (payload: Record<string, unknown>, seq = 2) => ({
+    sessionId: SESSION,
+    seq,
+    type: "agent-update",
+    payload,
+    createdAt: new Date().toISOString(),
+  });
+
+  test("reasoning reaches the reader's devices and never the room", async () => {
+    // The decision this defends is older than this test: reasoning "belongs in
+    // the console's transcript, not in a room people share, where it would turn
+    // one answer into a monologue". 202 thought chunks in one observed Hermes
+    // turn is the number behind that sentence. Watchable, never permanent.
+    const { events, deps: d } = activityDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(thought("Weighing whether the node is really down. "));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(events.filter((e) => e.type === "dev.agentpod.thought.delta").length).toBeGreaterThan(0);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("reasoning keeps its own sequence, so it cannot be read as the answer", async () => {
+    const { events, deps: d } = activityDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(chunk("The answer, long enough to be worth sending. "));
+    emit(thought("The reasoning, also long enough to send. "));
+    await settle();
+
+    const answer = events.find((e) => e.type === "dev.agentpod.stream.delta");
+    const reasoning = events.find((e) => e.type === "dev.agentpod.thought.delta");
+    expect(answer!.content.seq).toBe(1);
+    expect(reasoning!.content.seq).toBe(1);
+    expect(answer!.content.text).toBe("The answer, long enough to be worth sending. ");
+    expect(reasoning!.content.text).toBe("The reasoning, also long enough to send. ");
+  });
+
+  test("a tool call reaches the devices and not the room", async () => {
+    const { events, deps: d } = activityDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(
+      toolCall({
+        sessionUpdate: "tool_call",
+        toolCallId: "c1",
+        title: "Read src/main.ts",
+        kind: "read",
+        status: "in_progress",
+        locations: [{ path: "src/main.ts" }],
+      })
+    );
+    await settle();
+
+    const update = events.find((e) => e.type === "dev.agentpod.tool.update");
+    expect(update!.content).toMatchObject({
+      tool_call_id: "c1",
+      title: "Read src/main.ts",
+      kind: "read",
+      status: "in_progress",
+      locations: ["src/main.ts"],
+    });
+    expect(sent).toHaveLength(0);
+  });
+
+  test("an update to a tool call carries the title the call was given", async () => {
+    const { events, deps: d } = activityDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(toolCall({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Run tests" }, 2));
+    emit(toolCall({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "failed" }, 3));
+    await settle();
+
+    const updates = events.filter((e) => e.type === "dev.agentpod.tool.update");
+    expect(updates).toHaveLength(2);
+    expect(updates[1]!.content).toMatchObject({
+      tool_call_id: "c1",
+      title: "Run tests",
+      status: "failed",
+    });
+  });
+
+  test("a tool call with no id is ignored, since nothing could merge onto it", async () => {
+    const { events, deps: d } = activityDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(toolCall({ sessionUpdate: "tool_call", title: "Nameless" }));
+    await settle();
+
+    expect(events.filter((e) => e.type === "dev.agentpod.tool.update")).toHaveLength(0);
+  });
+
+  test("a room with no reader sends nothing anywhere, and still says the answer", async () => {
+    // The property that makes this safe against a live fleet: every activity
+    // channel is best-effort and none of them touches the room.
+    const base = deps();
+    const events: Array<{ type: string }> = [];
+    attachRoomToSession(SESSION, ROOM, AGENT, {
+      ...base,
+      client: {
+        ...base.client,
+        sendToDevice: async (_u: string, _t: string, type: string) => {
+          events.push({ type });
+        },
+      },
+      readerFor: async () => null,
+    } as any);
+
+    emit(thought("Thinking about it. "));
+    emit(toolCall({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a file" }));
+    emit(chunk("Here is the answer."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(events).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toBe("Here is the answer.");
+  });
+});

@@ -11,9 +11,12 @@ import { describe, expect, test } from "bun:test";
 import {
   deltaContent,
   endsAtBoundary,
+  LIVE_DELTA_TYPE,
   MAX_DELTA_WAIT_MS,
   MIN_DELTA_CHARS,
   shouldSendDelta,
+  THOUGHT_DELTA_TYPE,
+  toolUpdateContent,
 } from "./live";
 
 describe("deciding when to send", () => {
@@ -100,5 +103,53 @@ describe("the wire body", () => {
     });
 
     expect(content.done).toBe(true);
+  });
+});
+
+describe("activity to-device types", () => {
+  test("names the thought channel distinctly from the answer channel", () => {
+    // Same body, different type: the shape is reused so the client needs no
+    // second implementation, but a reader must still be able to tell an agent's
+    // reasoning from its answer.
+    expect(THOUGHT_DELTA_TYPE).toBe("dev.agentpod.thought.delta");
+    expect(THOUGHT_DELTA_TYPE).not.toBe(LIVE_DELTA_TYPE);
+  });
+
+  test("builds a tool update body in snake_case, like every other Matrix event", () => {
+    expect(
+      toolUpdateContent({
+        roomId: "!r:example.org",
+        sessionId: "sess_1",
+        seq: 2,
+        toolCallId: "call_1",
+        title: "Read src/main.ts",
+        kind: "read",
+        status: "in_progress",
+        locations: ["src/main.ts"],
+      })
+    ).toEqual({
+      room_id: "!r:example.org",
+      session_id: "sess_1",
+      seq: 2,
+      tool_call_id: "call_1",
+      title: "Read src/main.ts",
+      status: "in_progress",
+      locations: ["src/main.ts"],
+      kind: "read",
+    });
+  });
+
+  test("omits a kind ACP did not give, rather than sending an empty string", () => {
+    const body = toolUpdateContent({
+      roomId: "!r:example.org",
+      sessionId: "sess_1",
+      seq: 2,
+      toolCallId: "call_1",
+      title: "Something",
+      kind: undefined,
+      status: "pending",
+      locations: [],
+    });
+    expect("kind" in body).toBe(false);
   });
 });

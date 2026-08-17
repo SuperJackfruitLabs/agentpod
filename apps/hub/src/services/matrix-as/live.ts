@@ -107,3 +107,57 @@ export function deltaContent(delta: LiveDelta): Record<string, unknown> {
     done: delta.done,
   };
 }
+
+// ─── Activity: reasoning and tool use ────────────────────────────────────────
+
+/**
+ * The to-device event type carrying a turn's reasoning.
+ *
+ * A separate type from [`LIVE_DELTA_TYPE`] carrying an identical body. The
+ * *shape* is reused so the client's seq-ordering and reveal pacing work
+ * unchanged; the *type* must differ, or a reader cannot tell an agent's
+ * thinking from its answer.
+ *
+ * Reasoning is never written to the room, and that decision predates this
+ * channel — `outbound.ts` has said so since the day it was written: it "belongs
+ * in the console's transcript, not in a room people share, where it would turn
+ * one answer into a monologue". 202 thought chunks in one observed Hermes turn
+ * is the number behind that sentence. This makes it watchable without making it
+ * permanent.
+ */
+export const THOUGHT_DELTA_TYPE = "dev.agentpod.thought.delta";
+
+/** The to-device event type carrying one tool call's state. */
+export const TOOL_UPDATE_TYPE = "dev.agentpod.tool.update";
+
+/** One tool call's state, as it goes on the wire. */
+export interface ToolUpdate {
+  roomId: string;
+  sessionId: string;
+  /** Monotonic per turn. A receiver drops anything older than what it has. */
+  seq: number;
+  /** The identity later updates merge onto. */
+  toolCallId: string;
+  title: string;
+  /** ACP's tool kind. Absent when the harness did not say. */
+  kind: string | undefined;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  locations: string[];
+}
+
+/** The wire body for a tool update. Snake case, like every other Matrix event. */
+export function toolUpdateContent(update: ToolUpdate): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    room_id: update.roomId,
+    session_id: update.sessionId,
+    seq: update.seq,
+    tool_call_id: update.toolCallId,
+    title: update.title,
+    status: update.status,
+    locations: update.locations,
+  };
+  // Omitted rather than sent empty: absent means "the harness did not say",
+  // where `""` would render as a kind called nothing.
+  if (update.kind !== undefined) body.kind = update.kind;
+  return body;
+}
