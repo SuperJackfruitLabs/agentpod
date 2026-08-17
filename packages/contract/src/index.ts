@@ -12,3 +12,4 @@ export * from "./run";
 export * from "./card-prompt";
 export * from "./changeset";
 export * from "./posture";
+export * from "./matrix-events";
