@@ -14,6 +14,7 @@
 import type { AcpEvent } from "@agentpod/contract";
 import { subscribe as subscribeToSession } from "../acp-sessions";
 import { deltaContent, LIVE_DELTA_TYPE, shouldSendDelta } from "./live";
+import { noteUnmappedKind } from "./activity";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -359,6 +360,18 @@ export function attachRoomToSession(
             state.buffer.push(text);
             void streamLive(false);
             scheduleFlush();
+            return;
+          }
+
+          // Everything this path does not forward is recorded once, so the next
+          // capability a harness gains does not vanish here the way `tool_call`
+          // did for the whole life of the bridge. See `activity.ts`.
+          const kind = isRecord(event.payload) ? event.payload.sessionUpdate : undefined;
+          if (typeof kind === "string" && noteUnmappedKind(kind)) {
+            log.info("a session update kind reaches Matrix and is not forwarded", {
+              sessionId,
+              kind,
+            });
           }
           return;
         }
