@@ -60,6 +60,18 @@ export interface MatrixClient {
   ): Promise<string | null>;
   sendText(userId: string, roomId: string, body: string): Promise<string | null>;
   sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
+  /**
+   * Send a to-device event as `userId` to every device `targetUserId` has.
+   *
+   * Never stored in a room. Carries a turn's live text (`live.ts`) so the
+   * stream and the durable record stay separate channels.
+   */
+  sendToDevice(
+    userId: string,
+    targetUserId: string,
+    eventType: string,
+    content: Record<string, unknown>
+  ): Promise<void>;
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   /** Mark another event — 👀 while working, ✅ done, ❌ failed. */
@@ -302,6 +314,25 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       );
       assertOkOrAlready("send", res);
       return String(res.body.event_id ?? "") || null;
+    },
+
+    async sendToDevice(userId, targetUserId, eventType, content) {
+      // Delivered to the target's devices and never stored in a room — see
+      // `live.ts` for why a turn's live text goes here rather than into the
+      // timeline as edits.
+      //
+      // `*` is every device the reader has. A device that is asleep simply
+      // misses the stream and gets the real message when it wakes, which is
+      // correct rather than a gap: nothing here is the source of truth.
+      const res = await call(
+        `/_matrix/client/v3/sendToDevice/${encodeURIComponent(eventType)}/${crypto.randomUUID()}`,
+        {
+          method: "PUT",
+          userId,
+          body: { messages: { [targetUserId]: { "*": content } } },
+        }
+      );
+      assertOkOrAlready("sendToDevice", res);
     },
 
     async sendTyping(userId, roomId, typing) {

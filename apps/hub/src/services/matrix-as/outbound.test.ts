@@ -431,3 +431,117 @@ describe("live feedback, so a room is not a black box", () => {
     expect(reactions).toHaveLength(0);
   });
 });
+
+describe("streaming a turn to the reader's own devices", () => {
+  /**
+   * The deps above plus a to-device sink and a reader. Kept separate from
+   * `deps()` so every existing test goes on proving the no-streaming case:
+   * without `sendToDevice` the room is identical, which is the property that
+   * makes this safe to turn on against a live fleet.
+   */
+  function streamingDeps() {
+    const base = deps();
+    const deltas: Array<{ to: string; type: string; content: any }> = [];
+    return {
+      deltas,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          sendToDevice: async (
+            _userId: string,
+            targetUserId: string,
+            eventType: string,
+            content: Record<string, unknown>
+          ) => {
+            deltas.push({ to: targetUserId, type: eventType, content });
+          },
+        },
+        readerFor: async () => "@rakesh:x.org",
+      },
+    };
+  }
+
+  test("pushes the answer as it arrives, and the room still gets one message", async () => {
+    const { deltas, deps } = streamingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, deps as any);
+
+    // Two finished sentences, each long enough to be worth sending.
+    // Emitted back-to-back, like the coalescing test above: `flushDelayMs` is
+    // 0 here, so settling between chunks would end the turn between them and
+    // the second sentence would belong to a different answer.
+    emit(chunk("I looked at the node and it is online. "));
+    emit(chunk("Nothing else needs doing right now."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    // The live view moved more than once...
+    expect(deltas.length).toBeGreaterThan(1);
+    expect(deltas.every((d) => d.to === "@rakesh:x.org")).toBe(true);
+    expect(deltas.every((d) => d.type === "dev.agentpod.stream.delta")).toBe(true);
+
+    // ...while the room received exactly one message, unchanged by any of it.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toBe(
+      "I looked at the node and it is online. Nothing else needs doing right now."
+    );
+  });
+
+  test("carries the whole answer each time, so a dropped delta cannot corrupt it", async () => {
+    const { deltas, deps } = streamingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, deps as any);
+
+    emit(chunk("First sentence, long enough to send. "));
+    emit(chunk("Second sentence, also long enough."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    const texts = deltas.map((d) => d.content.text as string);
+    // Each delta is a prefix of the next: cumulative, never an increment.
+    for (let i = 1; i < texts.length; i++) {
+      expect(texts[i]!.startsWith(texts[i - 1]!)).toBe(true);
+    }
+    expect(texts.at(-1)).toBe("First sentence, long enough to send. Second sentence, also long enough.");
+  });
+
+  test("marks the last delta done, and numbers each turn from one", async () => {
+    const { deltas, deps } = streamingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, deps as any);
+
+    emit(chunk("A complete first answer, long enough to stream."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(deltas.at(-1)!.content.done).toBe(true);
+    expect(deltas.map((d) => d.content.seq)).toEqual(
+      deltas.map((_, i) => i + 1)
+    );
+
+    // A second turn starts its own sequence, so a reader can tell a new answer
+    // from more of the last one.
+    const before = deltas.length;
+    emit(chunk("A second answer, also long enough to stream."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(deltas[before]!.content.seq).toBe(1);
+  });
+
+  test("says nothing to a room with nobody to show it to", async () => {
+    const { deltas, deps } = streamingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, { ...deps, readerFor: async () => null } as any);
+
+    emit(chunk("An answer nobody is watching for, long enough to stream."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(deltas).toHaveLength(0);
+    // ...and the room is unaffected.
+    expect(sent).toHaveLength(1);
+  });
+});
