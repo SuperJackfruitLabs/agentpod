@@ -21,7 +21,15 @@ import {
   TOOL_UPDATE_TYPE,
   toolUpdateContent,
 } from "./live";
-import { foldToolUpdate, noteUnmappedKind, type ToolRecord } from "./activity";
+import {
+  foldToolUpdate,
+  noteUnmappedKind,
+  PERMISSION_REQUEST_TYPE,
+  permissionRequestContent,
+  TURN_ACTIVITY_TYPE,
+  turnActivityContent,
+  type ToolRecord,
+} from "./activity";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -54,6 +62,17 @@ export interface OutboundDeps {
       eventType: string,
       content: Record<string, unknown>
     ): Promise<void>;
+    /**
+     * Send one of the suite's own event types into the room. Optional for the
+     * same reason `sendToDevice` is: a deployment without it records no
+     * activity card, and the conversation is identical either way.
+     */
+    sendCustomEvent?(
+      userId: string,
+      roomId: string,
+      eventType: string,
+      content: Record<string, unknown>
+    ): Promise<string | null>;
   };
   /**
    * Who to stream this room's turns to — the reader's Matrix id, or null for a
@@ -293,13 +312,21 @@ export function attachRoomToSession(
     state.liveSentChars = 0;
     state.liveSentAt = 0;
     // The reasoning and tool state belong to the turn that just ended. Without
-    // this the next turn reports the previous one's work as its own.
+    // clearing it, the next turn reports the previous one's work as its own.
     state.thoughtBuffer = [];
     state.thoughtSeq = 0;
     state.thoughtSentChars = 0;
     state.thoughtSentAt = 0;
+
+    // Handed over and replaced in the same step, before the `await` below.
+    // `flush` runs twice for an ordinary turn — once on the debounce, once when
+    // the state event ends it — and the second call must find nothing left to
+    // record. Clearing after the await instead would let the second flush start
+    // while the first was still sending, and the turn would be recorded twice.
+    const tools = state.tools;
     state.tools = new Map();
     state.toolSeq = 0;
+    if (tools.size > 0) await recordTurn(tools);
     if (text.trim() === "") return;
     await say(text);
   };
@@ -342,6 +369,27 @@ export function attachRoomToSession(
         error: err instanceof Error ? err.message : String(err),
       });
     });
+  };
+
+  /**
+   * Write what the agent did during the turn into the room, once.
+   *
+   * Before the answer, so the room reads in the order things happened: did
+   * these things, then said this. Best-effort like every other outbound call
+   * here — a card that fails to send must not cost the answer behind it.
+   */
+  const recordTurn = async (tools: Map<string, ToolRecord>) => {
+    const send = deps.client.sendCustomEvent;
+    if (!send) return;
+    await send(agentUser, roomId, TURN_ACTIVITY_TYPE, turnActivityContent(sessionId, tools)).catch(
+      (err) => {
+        log.error("could not record a turn's activity in its room", {
+          sessionId,
+          roomId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    );
   };
 
   /**
@@ -582,6 +630,29 @@ export function attachRoomToSession(
           }
 
           await say(permissionPrompt(request.title, request.options));
+
+          // Beside the prose, never instead of it. The prose is what keeps
+          // Element and reply-by-number working; this only lets a client that
+          // understands it render buttons. Both answers come back as an
+          // ordinary message through the same matcher, so nothing downstream
+          // has to know which one a reader used.
+          const structured = permissionRequestContent(
+            sessionId,
+            event.seq,
+            request.title,
+            request.options
+          );
+          if (structured && deps.client.sendCustomEvent) {
+            await deps.client
+              .sendCustomEvent(agentUser, roomId, PERMISSION_REQUEST_TYPE, structured)
+              .catch((err) => {
+                log.error("could not send a structured permission request", {
+                  sessionId,
+                  roomId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
           return;
         }
 

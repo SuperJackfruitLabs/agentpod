@@ -9,10 +9,14 @@
 // the path that lacked it.
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { PermissionRequestEvent, TurnActivity, type ToolStatus } from "@agentpod/contract";
 import {
   _resetUnmappedForTest,
   foldToolUpdate,
   noteUnmappedKind,
+  permissionRequestContent,
+  TURN_TOOLS_MAX,
+  turnActivityContent,
   unmappedKinds,
   type ToolRecord,
 } from "./activity";
@@ -189,5 +193,91 @@ describe("kinds this path does handle", () => {
   it("still records one nobody handles", () => {
     expect(noteUnmappedKind("usage_update")).toBe(true);
     expect(unmappedKinds()).toEqual(["usage_update"]);
+  });
+});
+
+// The durable record: one event per turn, never one per action.
+describe("the per-turn record", () => {
+  function rec(id: string, status: ToolStatus = "completed"): ToolRecord {
+    return { id, title: `Do ${id}`, kind: "execute", status, locations: [] };
+  }
+
+  it("counts everything and lists what fits", () => {
+    const tools = new Map([
+      ["a", rec("a")],
+      ["b", rec("b", "failed")],
+    ]);
+    const content = turnActivityContent("sess_1", tools);
+    expect(content.schema_version).toBe(1);
+    expect(content.session_id).toBe("sess_1");
+    expect(content.tools).toHaveLength(2);
+    expect(content.counts).toEqual({ total: 2, failed: 1, omitted: 0 });
+  });
+
+  it("caps the list and says how many it left out", () => {
+    // A pathological turn must not produce an unbounded event. The counts still
+    // describe the whole turn, so a capped list is never mistaken for a
+    // complete one.
+    const tools = new Map(
+      Array.from({ length: TURN_TOOLS_MAX + 5 }, (_, i) => [`t${i}`, rec(`t${i}`)] as const)
+    );
+    const content = turnActivityContent("sess_1", tools);
+    expect(content.tools).toHaveLength(TURN_TOOLS_MAX);
+    expect(content.counts.total).toBe(TURN_TOOLS_MAX + 5);
+    expect(content.counts.omitted).toBe(5);
+  });
+
+  it("keeps the order the tools were first used in", () => {
+    const tools = new Map([
+      ["z", rec("z")],
+      ["a", rec("a")],
+    ]);
+    expect(turnActivityContent("sess_1", tools).tools.map((t) => t.id)).toEqual(["z", "a"]);
+  });
+
+  it("omits a kind the harness never gave", () => {
+    const tools = new Map([["a", { ...rec("a"), kind: undefined }]]);
+    expect("kind" in turnActivityContent("sess_1", tools).tools[0]!).toBe(false);
+  });
+
+  it("produces a body the contract accepts", () => {
+    // The schema is the shared vocabulary; a builder that drifts from it would
+    // be caught here rather than on a homeserver.
+    const tools = new Map([["a", rec("a")]]);
+    expect(TurnActivity.safeParse(turnActivityContent("sess_1", tools)).success).toBe(true);
+  });
+});
+
+describe("a permission request a client can render", () => {
+  const opts = [
+    { optionId: "allow_once", name: "Allow once" },
+    { optionId: "reject", name: "Reject" },
+  ];
+
+  it("carries the options a card can offer", () => {
+    const content = permissionRequestContent("sess_1", 41, "Write src/main.ts", opts)!;
+    expect(content.options).toEqual([
+      { option_id: "allow_once", name: "Allow once" },
+      { option_id: "reject", name: "Reject" },
+    ]);
+    expect(content.request_seq).toBe(41);
+  });
+
+  it("says nothing when there is nothing to choose between", () => {
+    // The prose already handles this case in words. An event carrying an empty
+    // option list would render as a card with no way to answer it.
+    expect(permissionRequestContent("sess_1", 41, "x", [])).toBeNull();
+  });
+
+  it("caps at four, the most a card can render", () => {
+    const five = Array.from({ length: 5 }, (_, i) => ({ optionId: `o${i}`, name: `O${i}` }));
+    const content = permissionRequestContent("sess_1", 41, "x", five)!;
+    expect(content.options).toHaveLength(4);
+  });
+
+  it("produces a body the contract accepts", () => {
+    expect(
+      PermissionRequestEvent.safeParse(permissionRequestContent("sess_1", 41, "x", opts)).success
+    ).toBe(true);
   });
 });

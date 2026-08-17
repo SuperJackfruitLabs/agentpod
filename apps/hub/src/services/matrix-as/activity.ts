@@ -15,7 +15,7 @@
  * this feature, because it is what makes the rest observable.
  */
 
-import { ToolStatus } from "@agentpod/contract";
+import { ToolStatus, type PermissionRequestEvent, type TurnActivity } from "@agentpod/contract";
 
 /**
  * Kinds seen and not handled, for the life of the process.
@@ -145,4 +145,87 @@ export function foldToolUpdate(
   };
   tools.set(id, record);
   return record;
+}
+
+// ─── The durable record ──────────────────────────────────────────────────────
+
+/** The room event type carrying what an agent did during one turn. */
+export const TURN_ACTIVITY_TYPE = "dev.agentpod.turn.v1";
+
+/**
+ * How many tool calls the durable record lists.
+ *
+ * A cap, not a sample: `counts` describes the whole turn regardless, so a
+ * capped list can never be mistaken for a complete one. Twenty is enough to
+ * read as a record of what happened, and small enough that no single turn can
+ * produce an event worth paginating around — which matters here more than it
+ * looks, because more and larger events per turn is exactly what makes limited
+ * syncs more frequent, and a limited sync unloads the reader's timeline.
+ */
+export const TURN_TOOLS_MAX = 20;
+
+/**
+ * The wire body for one turn's record.
+ *
+ * Sent once, before the answer, so a room reads in the order things happened:
+ * did these things, then said this.
+ */
+export function turnActivityContent(
+  sessionId: string,
+  tools: Map<string, ToolRecord>
+): TurnActivity {
+  const all = [...tools.values()];
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    tools: all.slice(0, TURN_TOOLS_MAX).map((t) => ({
+      id: t.id,
+      title: t.title,
+      // Omitted rather than null: absent means the harness never said.
+      ...(t.kind === undefined ? {} : { kind: t.kind }),
+      status: t.status,
+      locations: t.locations,
+    })),
+    counts: {
+      total: all.length,
+      failed: all.filter((t) => t.status === "failed").length,
+      omitted: Math.max(0, all.length - TURN_TOOLS_MAX),
+    },
+  };
+}
+
+// ─── Approvals ───────────────────────────────────────────────────────────────
+
+/** The room event type carrying a permission request a client can render. */
+export const PERMISSION_REQUEST_TYPE = "dev.agentpod.permission.v1";
+
+/**
+ * The wire body for a permission request, or `null` when there is nothing a
+ * client could render.
+ *
+ * Sent **beside** the prose message, never instead of it. The prose is what
+ * keeps Element and reply-by-number working, and the answer to either arrives
+ * as an ordinary room message through the same matcher — which is why
+ * structured approvals need no new send path on either side.
+ *
+ * Capped at four options because supermessage's `DECISION_MAX_OPTIONS` renders
+ * four and silently drops the rest; enforcing it here means the hub never sends
+ * something it knows will be discarded. The prose is not capped and still lists
+ * every option, so a fifth stays answerable by number or name — it just does
+ * not get a button.
+ */
+export function permissionRequestContent(
+  sessionId: string,
+  requestSeq: number,
+  title: string,
+  options: readonly { optionId: string; name: string }[]
+): PermissionRequestEvent | null {
+  if (options.length === 0) return null;
+  return {
+    schema_version: 1,
+    session_id: sessionId,
+    request_seq: requestSeq,
+    title,
+    options: options.slice(0, 4).map((o) => ({ option_id: o.optionId, name: o.name })),
+  };
 }

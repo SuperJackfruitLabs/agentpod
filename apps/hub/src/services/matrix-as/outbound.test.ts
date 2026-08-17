@@ -694,3 +694,180 @@ describe("an agent's thinking and tool use", () => {
     expect(sent[0]!.body).toBe("Here is the answer.");
   });
 });
+
+describe("the durable record of a turn", () => {
+  /** Deps with a custom-event sink, and a shared clock so order is assertable. */
+  function recordingDeps() {
+    const base = deps();
+    let tick = 0;
+    const custom: Array<{ type: string; content: any; at: number }> = [];
+    const said: Array<{ body: string; at: number }> = [];
+    return {
+      custom,
+      said,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          sendText: async (_userId: string, _roomId: string, body: string) => {
+            said.push({ body, at: tick++ });
+            return `$msg-${said.length}`;
+          },
+          sendCustomEvent: async (
+            _userId: string,
+            _roomId: string,
+            eventType: string,
+            content: Record<string, unknown>
+          ) => {
+            custom.push({ type: eventType, content, at: tick++ });
+            return `$custom-${custom.length}`;
+          },
+        },
+      },
+    };
+  }
+
+  const tool = (payload: Record<string, unknown>, seq = 2) => ({
+    sessionId: SESSION,
+    seq,
+    type: "agent-update",
+    payload,
+    createdAt: new Date().toISOString(),
+  });
+
+  test("records one card per turn, before the answer", async () => {
+    // Reading order is the point: did these things, then said this.
+    const { custom, said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "completed" }));
+    emit(chunk("Done."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(custom).toHaveLength(1);
+    expect(custom[0]!.type).toBe("dev.agentpod.turn.v1");
+    expect(custom[0]!.content.tools[0]).toMatchObject({ id: "c1", title: "Read a" });
+    expect(said).toHaveLength(1);
+    expect(custom[0]!.at).toBeLessThan(said[0]!.at);
+  });
+
+  test("says nothing extra for a turn that used no tools", async () => {
+    const { custom, said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(chunk("Just talking."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(custom).toHaveLength(0);
+    expect(said).toHaveLength(1);
+  });
+
+  test("records a turn that worked and said nothing", async () => {
+    // The empty-text guard sits after the card on purpose: an agent that did
+    // things and reported none of them is exactly when the record matters.
+    const { custom, said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Tidy up", status: "completed" }));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(custom).toHaveLength(1);
+    expect(said).toHaveLength(0);
+  });
+
+  test("does not report the previous turn's work on the next turn", async () => {
+    const { custom, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "completed" }));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    emit(chunk("Second turn, no tools."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(custom).toHaveLength(1);
+  });
+
+  test("a deployment without sendCustomEvent still says the answer", async () => {
+    // The property that makes this safe to roll out: the card is additive, and
+    // its absence changes nothing else.
+    const base = deps();
+    attachRoomToSession(SESSION, ROOM, AGENT, base as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a" }));
+    emit(chunk("Answer regardless."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toBe("Answer regardless.");
+  });
+});
+
+describe("a permission request a client can render", () => {
+  function recordingDeps() {
+    const base = deps();
+    const custom: Array<{ type: string; content: any }> = [];
+    return {
+      custom,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          sendCustomEvent: async (
+            _userId: string,
+            _roomId: string,
+            eventType: string,
+            content: Record<string, unknown>
+          ) => {
+            custom.push({ type: eventType, content });
+            return "$custom-1";
+          },
+        },
+      },
+    };
+  }
+
+  test("sends the structured event beside the prose, never instead of it", async () => {
+    // The regression that matters: a client that cannot read the custom event
+    // must be exactly as able to approve as it was before.
+    const { custom, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(permission());
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toContain("Permission needed: write /etc/hosts");
+    expect(sent[0]!.body).toContain("1. Allow");
+    expect(sent[0]!.body).toContain("Reply with the number, or the option's name.");
+
+    expect(custom).toHaveLength(1);
+    expect(custom[0]!.type).toBe("dev.agentpod.permission.v1");
+    expect(custom[0]!.content.options).toEqual([
+      { option_id: "allow", name: "Allow" },
+      { option_id: "reject", name: "Reject" },
+    ]);
+  });
+
+  test("a deployment without sendCustomEvent still asks in words", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+
+    emit(permission());
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toContain("Permission needed");
+  });
+});
