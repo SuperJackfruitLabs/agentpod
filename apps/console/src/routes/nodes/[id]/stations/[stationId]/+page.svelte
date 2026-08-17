@@ -17,6 +17,8 @@
   import { myReach } from "$lib/api/my-grant";
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
+  import PurposeField from "$lib/components/purpose/PurposeField.svelte";
+  import { setStationPurpose } from "$lib/api/client";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
@@ -266,6 +268,22 @@
   {:else if stationLoad === "loaded"}
     {#if station}
       <PostureBanner {nodeId} stationKey={station.stationKey} />
+      <!--
+        What this agent is FOR, which is not where it runs. It groups the
+        agent's Matrix room under that purpose's space — the thing that keeps a
+        roster of a hundred agents readable — and it overrides whatever its node
+        supplied when it was adopted.
+      -->
+      <div class="mb-4 rounded-lg border p-4">
+        <PurposeField
+          id="station-purpose"
+          value={station.purpose ?? null}
+          onSave={async (purpose) => {
+            await setStationPurpose(stationId, purpose);
+            await loadStation();
+          }}
+        />
+      </div>
     {/if}
     {@render stationPanels()}
   {:else}

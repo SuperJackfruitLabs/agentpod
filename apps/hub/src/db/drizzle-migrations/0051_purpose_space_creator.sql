@@ -1,0 +1,13 @@
+-- Who writes a space's child edges.
+--
+-- `m.space.child` state lives ON THE SPACE, so only somebody in the space can
+-- write it. Filing used to be done as the room's OWN agent, which is a member
+-- of its room and of nothing else — so the homeserver accepted the first edge
+-- (written by the agent that happened to create the space) and refused the
+-- other nine. Ten rooms were recorded as filed; one of them was.
+--
+-- Nullable because the rows that already exist were written before anything
+-- recorded this, and there is no value to invent for them. A space whose
+-- creator is unknown is skipped with a warning rather than filed as somebody
+-- who cannot file — the deployment's two rows are backfilled by hand.
+ALTER TABLE matrix_purpose_spaces ADD COLUMN creator text;

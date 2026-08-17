@@ -309,6 +309,69 @@
       "when": 1786687162202,
       "tag": "0043_node_name_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786687163202,
+      "tag": "0044_matrix_identity_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786687164202,
+      "tag": "0045_matrix_as_txns",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786687165202,
+      "tag": "0046_matrix_rooms",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786687166202,
+      "tag": "0047_reset_identity_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786687167202,
+      "tag": "0048_matrix_missions",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786687168202,
+      "tag": "0049_station_purpose",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786687169202,
+      "tag": "0050_purpose_spaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786687170202,
+      "tag": "0051_purpose_space_creator",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786687171202,
+      "tag": "0052_node_spaces",
+      "breakpoints": true
     }
   ]
 }

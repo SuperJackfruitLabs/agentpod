@@ -20,7 +20,7 @@ import { handleNodeMessage, dropNode } from "../services/broker";
 import { upgradeWebSocket } from "../ws";
 import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
 import { completeRuntimeStartForNode } from "../services/runtimes";
-import { refreshAdoptedCapabilities } from "../services/station-registry";
+import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/station-registry";
 import { recordHealth, clearNode } from "../services/health-cache";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
@@ -109,6 +109,22 @@ export const gatewayRoutes = new Hono().get(
             } catch {
               // autoAdoptProvisionedHarness never throws, but guard anyway.
             }
+          }
+        })();
+
+        // Tell the Matrix bridge to look at this node's stations again, now
+        // that the node can actually be reached. Provisioning at boot runs
+        // while every node is still offline (the hub resets them all and the
+        // agents dial back seconds later), so the one part that needs the node
+        // — reading an agent's picture out of its workspace — never succeeds
+        // there. 32 agents had rooms and none had a face because of it.
+        // Fire-and-forget, like its neighbours, and idempotent downstream.
+        void (async () => {
+          if (!(await sleep(3000))) return;
+          try {
+            await announceStationsForNode(nodeId);
+          } catch {
+            // announceStationsForNode never throws, but guard anyway.
           }
         })();
 

@@ -98,7 +98,7 @@ function station(capabilities: StationRow["capabilities"]): StationRow {
     displayName: "Workspace",
     workspacePath: "/home/user/workspace",
     capabilities,
-    matrixId: null,
+    matrixId: null, purpose: null,
     adoptedAt: "2026-06-22T00:00:00Z",
     createdAt: "2026-06-22T00:00:00Z",
   };

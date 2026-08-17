@@ -2013,7 +2013,17 @@ function fakeObservableProvisioner(
 }
 
 /** An `online` runtime whose node stopped heartbeating `agoMs` ago. */
-async function seedUnobserved(id: string, agoMs = 10 * 60_000) {
+/**
+ * `agoMs` defaults to well past the grace window, not exactly to it.
+ *
+ * At exactly UNOBSERVED_GRACE_MS the row sits on the boundary the sweep
+ * compares against, and the two timestamps come from different clocks — the
+ * row's from Postgres, the cutoff from this process. A second of skew between
+ * them decides the test, which is how it failed in CI while passing locally.
+ * The boundary itself is covered by the grace-window test below, deliberately
+ * and from the safe side.
+ */
+async function seedUnobserved(id: string, agoMs = 45 * 60_000) {
   const nodeId = `node_unobs_${id}`;
   // Every seeded row is a candidate for every other test's sweep, so each test
   // starts from a clean slate rather than counting probes it did not cause.

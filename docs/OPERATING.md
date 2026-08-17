@@ -695,6 +695,228 @@ mobile navigation bar.
 
 Hermes stations that have a Matrix identity configured display the **Matrix ID** and a `matrix.to` deep-link in the station detail panel, so you can open a conversation with that agent identity directly from the console.
 
+### 7a. The homeserver
+
+`id.agentpod.dev` runs **tuwunel** (Apache-2.0), on the same host as the hub. It
+replaced Synapse (AGPLv3) on 2026-08-16; see
+`docs/superpowers/specs/2026-08-16-tuwunel-appservice-spike-findings.md` for why,
+and what was verified before the switch.
+
+| | |
+|---|---|
+| service | `tuwunel` (systemd → Docker, unit in `deploy/tuwunel/`) |
+| listens | `127.0.0.1:6167`, never exposed directly; nginx proxies `/_matrix` |
+| data | `/var/lib/tuwunel` (RocksDB, embedded — there is no separate database) |
+| config | `/etc/tuwunel/tuwunel.toml` |
+| appservice | `/etc/tuwunel/appservices/agentpod.yaml` — namespaces `@agent_.*`, `#agentpod_.*` |
+| backups | `/var/backups/tuwunel`, nightly at 04:17 via `/etc/cron.d/tuwunel-backup` |
+
+```sh
+systemctl status tuwunel
+journalctl -u tuwunel -f
+curl -s localhost:6167/_matrix/client/versions      # is it serving?
+```
+
+**Two log lines that look like faults and are not.** `ERROR … loopback/localhost
+listening address … will NOT work` is a false positive under `--network host`,
+where 127.0.0.1 *is* the host. `Error response from daemon: No such container:
+tuwunel` is the unit's `ExecStartPre=-docker rm -f`, which is why it carries a
+`-`.
+
+**Registration is closed** (`allow_registration = false`). Accounts are made
+deliberately: the appservice registers agents inside its own namespace, and a
+human needs the admin console.
+
+### 7b. Admin commands
+
+tuwunel has **no Synapse-style admin HTTP API**. Its admin surface is a room —
+`!94p3O40IPw164WyxHc:id.agentpod.dev`, which `@rakesh` is a member of. Send
+`!admin <command>` as an ordinary message:
+
+```
+!admin server help
+!admin users list-users
+!admin users create-user <name> [password]      # prints the password — see below
+!admin server backup-database
+```
+
+**`create-user` echoes the generated password** into whatever ran it. If that is
+a terminal or a transcript, follow with `!admin users reset-password <name>` and
+keep only the second one.
+
+When the server is stopped, the same commands run offline against the database
+with `--execute`, which is how the first admin was made:
+
+```sh
+systemctl stop tuwunel
+docker run --rm --network host -v /var/lib/tuwunel:/var/lib/tuwunel \
+  -v /etc/tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro \
+  -e TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml \
+  ghcr.io/matrix-construct/tuwunel:latest --execute 'users make-user-admin <name>'
+systemctl start tuwunel
+```
+
+Only one process may hold the RocksDB lock, which is why this needs the stop.
+
+### 7c. Backups, and restoring one
+
+`backup-database` writes a **RocksDB checkpoint while the server keeps running** —
+consistent by construction, unlike copying live files. `database_backups_to_keep`
+holds the last 3.
+
+```sh
+/usr/local/bin/tuwunel-backup.sh          # take one now
+ls /var/backups/tuwunel/
+```
+
+Restoring is a startup flag: `--restore-backup [<id>]` restores before opening
+the database, most recent when no id is given. `!admin server list-backups` lists
+them.
+
+> **Every path in `tuwunel.toml` must also be mounted in the unit.** The backup
+> path was configured before it was mounted, and `backup-database` failed with
+> "No such file or directory" for a directory that plainly existed on the host.
+
+**Off-site is still an open gap.** The nightly backup is on the same disk as the
+thing it protects. The Synapse-era archive was copied off manually
+(`~/agentpod-backups/matrix-backup-2026-08-16.tar.gz`); nothing does that on a
+schedule yet.
+
+### 7d. The Matrix bridge
+
+Every station gets a Matrix identity and a room, so an agent whose harness has
+never spoken Matrix can be talked to from a phone. Design:
+`docs/superpowers/specs/2026-08-16-matrix-application-service-design.md`.
+
+| | |
+|---|---|
+| switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
+| config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
+| a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
+| its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
+
+**Finding an agent's room.** The names are derived from the node and the station
+key, so `openclaw:krishna` on `superchotu` is
+`#agentpod_superchotu__openclaw_krishna`. The member list shows the readable
+form — `krishna (openclaw @ superchotu)`.
+
+**Who may talk to an agent** is the control pair, unchanged. A refusal arrives
+**in the room**, saying which of the three things happened: the hub does not
+recognise the sender, the sender's grant does not cover that agent, or the
+station could not be reached.
+
+**Turning it off** is one field in the homeserver's registration file:
+
+```yaml
+url: null          # was http://127.0.0.1:3001
+```
+
+then `systemctl restart tuwunel`. The hub keeps running; the homeserver simply
+stops pushing. This is also the state the bridge shipped in, which is why the
+health check treats "no transaction has ever arrived" as **silent**, not healthy:
+a registration with no `url` is a perfectly healthy Application Service
+connected to nothing, and that went unnoticed for months.
+
+**Two modes, and only ever one answerer.** A station is `bridge` (the
+Application Service speaks for it — the default, and no credential exists
+anywhere) or `harness` (it runs its own Matrix client). `POST
+/api/stations/:id/matrix/credentials` issues a token and flips the mode in the
+same write; it needs `mayGrantReach`, because handing an agent a credential is
+granting it reach.
+
+### 7e. Creating a new agent
+
+`hermes-agents onboard` created a Matrix account through the **Synapse admin
+API** with a token stored on molt-bot — a credential that could create,
+deactivate or take over any account on the homeserver, including a human's. That
+API does not exist on tuwunel, so the Matrix half of that command cannot work
+and must not be used.
+
+Use `scripts/onboard-agent.sh` on the host instead:
+
+```sh
+# 1. create the harness profile as usual (hermes-agents create-service, etc.)
+# 2. then, on that host:
+AGENTPOD_HUB_URL=https://hub.agentpod.dev \
+AGENTPOD_API_TOKEN=<hub token> \
+  ./onboard-agent.sh hermes:analyst-echo
+```
+
+It never talks to the homeserver. It waits for the node agent to detect the
+station, adopts it through the hub, and **adoption is what makes the bridge
+provision** an identity and a DM room. The credential it holds is a hub token,
+so everything it can do is something the control pair already governs.
+
+**The ordering inverted**, and it is the thing to remember: the old flow made the
+Matrix account first and the agent second; now the station must exist before it
+can have an identity.
+
+### 7f. Approving an agent's action from the room
+
+An agent in `ask` mode parks when it wants to run a tool, and the bridge posts
+the question where you are:
+
+```
+Permission needed: Write src/main.ts
+
+1. Allow once
+2. Allow always
+3. Reject
+
+Reply with the number, or the option's name.
+```
+
+Reply with `1`, or `Allow once`. Nothing else counts: a reply that is not
+plainly one of the options approves nothing and shows the list again. That is
+deliberate — against options named *Allow once* and *Allow always*, a bare
+"yes" does not say which, and approving a tool call you did not mean to
+approve is the one failure worth being pedantic about.
+
+Approving is dispatching by another name, so it needs the same `mayDispatch`
+grant as sending the agent a message. A question stops standing the moment the
+turn moves on — answered in the console, cancelled, or failed — so a room can
+never approve something already decided.
+
+### 7g. Spaces: one per node
+
+A flat roster is fine at 32 agents and unusable at 200, so every agent's room
+hangs under a Matrix space named for the machine it runs on — `molt-bot`,
+`superchotu`, and so on. Clients that read the hierarchy group the roster by it
+for free: supermessage's space rail scopes its list this way, and Element reads
+the same edges. **You are invited to each space as it is created; accept the
+invite or you will not see it.**
+
+Nothing to configure. Every station has a node, so every station has a space —
+there is no labelling step between adopting an agent and it landing somewhere
+sensible.
+
+- An agent that **moves machines** moves space: the old `m.space.child` edge is
+  removed and the new one added, so a room never hangs under two nodes at once.
+- A **mission** hangs in the one shared `Missions` space, whatever its members'
+  nodes. A mission that spans machines — which is the point of a mission —
+  belongs to all of them and to none, and filing it under one member's node
+  would be picking a member.
+
+Filing happens during provisioning, so it is idempotent and self-healing: a
+node that reconnects re-files its stations, and restarting the hub moves
+nothing twice.
+
+**`purpose` is still recorded** on stations and nodes (`PUT
+/api/stations/:id/purpose`, `PUT /api/nodes/:id/purpose`, and the fields in the
+console). It says what an agent is FOR, which a machine name cannot — but
+nothing groups by it. It is the raw material for tags, which can overlap and do
+not fight a hierarchy the way a second axis of spaces would.
+
+### 7h. What happened to the Synapse history
+
+The old homeserver's 19,603 events are **not in tuwunel** — there is no supported
+import path from Synapse into the Conduit lineage, and Matrix here carries a
+projection rather than the truth (`acp_events` is the transcript of record). The
+SQLite database, its signing key and the appservice registration are preserved in
+`/root/matrix-backup-2026-08-16/` on the host and in
+`~/agentpod-backups/` off it. To read that history, run a throwaway Synapse
+against a *copy* — never against the original.
+
 ---
 
 ## 8. The kaambaan bridge

@@ -31,6 +31,7 @@ import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 import { runtimeRoutes } from './routes/runtimes.ts';
 // Station routes (detect, adopt, list, unadopt)
 import { stationRoutes } from './routes/stations.ts';
+import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
 // Station activity endpoint (audit log, fleet console)
@@ -53,6 +54,12 @@ import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
+import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
+import { onStationsAdopted } from './services/matrix-as/hooks.ts';
+import { createMatrixAsRoutes } from './routes/matrix-as.ts';
+import { createStationMatrixRoutes } from './routes/station-matrix.ts';
+import { createStationSayRoutes } from './routes/station-say.ts';
+import { createMissionRoutes } from './routes/missions.ts';
 // ACP session boot reconciliation (hub-owned sessions do not survive restarts)
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
@@ -71,6 +78,12 @@ await reconcileAcpSessions();
 const errorLogger = createLogger('error-handler');
 
 // Create the Hono app
+// The Matrix bridge, or null when this deployment has not opted in. Built
+// BEFORE the routes so both mounts share one client and one config; null means
+// neither is mounted, and a homeserver talking to us gets a 404 rather than a
+// half-built bridge.
+const matrixBridge = createMatrixBridge();
+
 const app = new Hono()
   // Middleware
   .use('*', logger())
@@ -118,6 +131,7 @@ const app = new Hono()
   .route('/api/runtimes', runtimeRoutes)                   // CRUD /api/runtimes
   // Station routes (detect, adopt, list, unadopt)
   .route('/api', stationRoutes)                            // GET/POST/DELETE /api/nodes/:id/... and /api/stations/:id
+  .route('/api', purposeRoutes)                            // PUT /api/stations/:id/purpose, /api/nodes/:id/purpose
   // Station terminal WebSocket bridge (fleet console ↔ node PTY)
   .route('/api', stationTerminalRoutes)                    // WS /api/stations/:id/terminal
   // Station activity log (audit rows, fleet console)
@@ -133,6 +147,63 @@ const app = new Hono()
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
   .route('/api', acpProxyRouter);                          // WS /api/acp/proxy — Doors: an editor's stdio, piped by `apn acp`
+
+// ── The Matrix Application Service ───────────────────────────────────────────
+//
+// Mounted OUTSIDE /api/* because the caller is a homeserver holding a shared
+// secret, not a session — and only when the bridge is configured, so an
+// unconfigured hub answers a homeserver with 404 rather than with a bridge that
+// cannot act.
+if (matrixBridge) {
+  app.route(
+    '/_matrix/app/v1',
+    createMatrixAsRoutes({
+      hsToken: matrixBridge.config.hsToken,
+      domain: matrixBridge.config.domain,
+      onEvent: (event) => matrixBridge.onEvent(event),
+      onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
+    }),
+  );
+
+  // …and the operator-facing half, which IS session-authenticated.
+  app.route(
+    '/api',
+    createStationMatrixRoutes({
+      domain: matrixBridge.config.domain,
+      provisionStation: (stationId) => matrixBridge.provision(stationId),
+      credentials: {
+        // An appservice registration returns an access_token directly — no
+        // admin command, no password, no login round-trip. `rotate` is
+        // deliberately absent: replacing an existing identity's credentials
+        // needs the homeserver's admin account, and the route says so plainly
+        // rather than pretending.
+        register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
+      },
+    }),
+  );
+
+  // An agent speaking without being spoken to — a cron job reporting in, and
+  // the last thing keeping bridge mode short of parity with a harness's own
+  // Matrix client.
+  app.route(
+    '/api',
+    createStationSayRoutes({
+      domain: matrixBridge.config.domain,
+      client: matrixBridge.client,
+    }),
+  );
+
+  // Rooms where several agents work together. A per-agent room is a DM; a
+  // mission has several correspondents, so it is an ordinary room — and
+  // ordinary rooms are what a space can group.
+  app.route(
+    '/api',
+    createMissionRoutes({
+      domain: matrixBridge.config.domain,
+      client: matrixBridge.client,
+    }),
+  );
+}
 
 app.onError((err, c) => {
   const requestId = c.req.header('x-request-id') || crypto.randomUUID();
@@ -195,6 +266,19 @@ console.log(
   'kaambaan bridge:',
   bridge ? `claiming as ${bridge.agents.join(', ')}` : '(disabled)',
 );
+
+// Give every station a Matrix identity and a room, if the bridge is on. Runs
+// after the routes are mounted so a homeserver that starts pushing immediately
+// finds somewhere to push to.
+if (matrixBridge) {
+  // A station adopted at noon must not wait for a restart to get a room.
+  onStationsAdopted(async (stationIds) => {
+    for (const id of stationIds) await matrixBridge.provision(id);
+  });
+  await startMatrixBridge(matrixBridge);
+} else {
+  console.log('matrix bridge: (disabled)');
+}
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {

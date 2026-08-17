@@ -1,0 +1,18 @@
+-- Every station answers through the bridge, because no harness identity survived
+-- the homeserver replacement.
+--
+-- 0044 backfilled `matrix_identity_mode = 'harness'` wherever a station had an
+-- mxid, on the reasoning that every one of those had been read off a host by the
+-- node agent. That was true, and it stopped being the whole truth on 2026-08-16
+-- when id.agentpod.dev moved from Synapse to tuwunel: those accounts existed on
+-- the old homeserver and do not exist on the new one. The stations kept pointing
+-- at identities nobody can log into and nothing can act as.
+--
+-- The symptom was precise: provisioning tried to create each room AS the
+-- harness's own identity and the homeserver answered
+-- `M_EXCLUSIVE: User is not in namespace` — 18 stations provisioned, 14 failed.
+--
+-- A station returns to `harness` only by being issued credentials
+-- (POST /api/stations/:id/matrix/credentials), which is an act somebody performs
+-- deliberately and which the control pair gates.
+UPDATE stations SET matrix_identity_mode = 'bridge';
