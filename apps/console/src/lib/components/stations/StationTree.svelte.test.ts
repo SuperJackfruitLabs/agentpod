@@ -14,7 +14,7 @@ const parentStation: StationRow = {
   displayName: "Parent Workspace",
   workspacePath: "/home/user/workspace",
   capabilities: ["health", "logs"],
-  matrixId: null,
+  matrixId: null, purpose: null,
   adoptedAt: new Date("2026-06-22T00:00:00Z"),
   createdAt: new Date("2026-06-22T00:00:00Z"),
 };
@@ -30,7 +30,7 @@ const childStation: StationRow = {
   displayName: "Child Station",
   workspacePath: "/home/user/workspace/sub",
   capabilities: ["health"],
-  matrixId: null,
+  matrixId: null, purpose: null,
   adoptedAt: new Date("2026-06-22T00:00:00Z"),
   createdAt: new Date("2026-06-22T00:00:00Z"),
 };

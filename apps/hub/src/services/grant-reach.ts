@@ -103,6 +103,49 @@ export async function requireGrantReach(
 }
 
 /**
+ * Guard issuing a station its own credentials.
+ *
+ * No capability is consulted, because this is not a capability: handing an agent
+ * an access token to a homeserver IS granting it reach, by the definition in
+ * `charter` → decisions/2026-08-15-granting-reach-is-changing-an-agent.md. The
+ * scope half is the same as everywhere else — you may only do it to an agent
+ * your dispatch grant already covers.
+ */
+export async function requireIssueCredentials(
+  userId: string,
+  station: { nodeId: string; stationKey: string }
+): Promise<void> {
+  if (!isControlPairEnforced()) return;
+
+  const grant = await getGrant(userId);
+  if (!grant?.mayGrantReach) {
+    log.warn("credential issue refused: principal may not change agents", {
+      principalId: userId,
+      stationKey: station.stationKey,
+    });
+    throw new GrantReachDenied(userId, station.stationKey, "credentials");
+  }
+
+  const [node] = await db
+    .select({ name: nodes.name })
+    .from(nodes)
+    .where(eq(nodes.id, station.nodeId))
+    .limit(1);
+
+  const inScope =
+    node !== undefined &&
+    grantAllowsStation(grant, { nodeName: node.name, stationKey: station.stationKey });
+
+  if (!inScope) {
+    log.warn("credential issue refused: station out of scope", {
+      principalId: userId,
+      stationKey: station.stationKey,
+    });
+    throw new GrantReachDenied(userId, station.stationKey, "credentials");
+  }
+}
+
+/**
  * Guard an act that names no station — minting an enrollment token today, the
  * credential broker later.
  *

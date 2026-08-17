@@ -8,7 +8,8 @@
  * user's data by providing a different nodeId or stationId.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
+import { notifyStationsAdopted } from "./matrix-as/hooks";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -51,11 +52,14 @@ export async function adoptStations(
   // station into a tenant its node is not in, so asking the node is the only
   // answer that can succeed.
   const [nodeRow] = await db
-    .select({ tenantId: nodes.tenantId })
+    .select({ tenantId: nodes.tenantId, purpose: nodes.purpose })
     .from(nodes)
     .where(eq(nodes.id, nodeId));
   if (!nodeRow) throw new Error(`cannot adopt stations on unknown node ${nodeId}`);
   const tenantId = nodeRow.tenantId;
+  // The node's purpose is a DEFAULT, not the truth — see `stations.purpose`.
+  // It is applied below only to a station that has none of its own.
+  const nodePurpose = nodeRow.purpose;
 
   // ── First pass: upsert all rows without parent links ─────────────────────
   for (const station of toAdopt) {
@@ -73,6 +77,7 @@ export async function adoptStations(
         workspacePath: station.workspacePath ?? null,
         capabilities: station.capabilities as string[],
         matrixId: station.matrixId ?? null,
+        purpose: nodePurpose,
         parentStationId: null,
         adoptedAt: new Date(),
         createdAt: new Date(),
@@ -86,6 +91,14 @@ export async function adoptStations(
           workspacePath: station.workspacePath ?? null,
           capabilities: station.capabilities as string[],
           matrixId: station.matrixId ?? null,
+          // Per column, not for the row, and only when the station has none.
+          // Re-adoption is routine — it is how capabilities refresh — so a node
+          // default that overwrote here would silently undo every deliberate
+          // labelling on a schedule. The other direction has to work too: a
+          // station adopted before anyone labelled its node must still be able
+          // to gain the default, or the stations that already exist could never
+          // join a space without being deleted and re-adopted.
+          purpose: sql`COALESCE(${stations.purpose}, EXCLUDED.purpose)`,
           adoptedAt: new Date(),
         },
       });
@@ -119,7 +132,15 @@ export async function adoptStations(
     .from(stations)
     .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
 
-  return allAdopted.filter((r) => keys.includes(r.stationKey));
+  const adopted = allAdopted.filter((r) => keys.includes(r.stationKey));
+
+  // Announce, do not act: this module knows nothing about Matrix, and nobody
+  // listens when the bridge is off. Fire-and-forget, because adoption has
+  // already succeeded and a bridge that could not make a room must not make it
+  // look as though the station was not adopted.
+  notifyStationsAdopted(adopted.map((r) => r.id));
+
+  return adopted;
 }
 
 // ─── listAdopted ─────────────────────────────────────────────────────────────
@@ -241,6 +262,38 @@ export async function refreshAdoptedCapabilities(
       `[refresh-caps] failed for node ${nodeId}:`,
       e instanceof Error ? e.message : e
     );
+    return 0;
+  }
+}
+
+/**
+ * Tell the Matrix bridge to look at this node's stations again.
+ *
+ * Provisioning runs at hub boot, and at boot **no node is connected yet** —
+ * the hub resets every node to offline and the agents dial back in seconds
+ * later. Everything provisioning does against the homeserver works anyway;
+ * the one part that needs the node does not, because it reads a file from the
+ * station's workspace. That is why 32 agents had rooms and none had a face:
+ * the read was attempted while every node was offline, and a failed read is
+ * silent by design — an agent's picture is never worth failing provisioning
+ * over.
+ *
+ * So the bridge is told again when the node is actually reachable. Everything
+ * downstream is idempotent: a station that has its room, its space and its
+ * face costs one profile GET and nothing else.
+ *
+ * Never throws: it runs from the gateway's connect path.
+ */
+export async function announceStationsForNode(nodeId: string): Promise<number> {
+  try {
+    const rows = await db
+      .select({ id: stations.id })
+      .from(stations)
+      .where(eq(stations.nodeId, nodeId));
+    if (rows.length === 0) return 0;
+    notifyStationsAdopted(rows.map((r) => r.id));
+    return rows.length;
+  } catch {
     return 0;
   }
 }

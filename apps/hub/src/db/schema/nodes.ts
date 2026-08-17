@@ -10,6 +10,12 @@ export const nodes = pgTable("nodes", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   hostname: text("hostname").notNull(),
+  /**
+   * The purpose a station adopted on this node inherits when it has none of
+   * its own — a default, not the truth. See `stations.purpose`, which is what
+   * every reader consults.
+   */
+  purpose: text("purpose"),
   os: text("os").notNull(),
   arch: text("arch").notNull(),
   cpuCount: integer("cpu_count").notNull().default(0),
