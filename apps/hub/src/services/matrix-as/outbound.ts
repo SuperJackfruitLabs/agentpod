@@ -13,7 +13,23 @@
 
 import type { AcpEvent } from "@agentpod/contract";
 import { subscribe as subscribeToSession } from "../acp-sessions";
-import { deltaContent, LIVE_DELTA_TYPE, shouldSendDelta } from "./live";
+import {
+  deltaContent,
+  LIVE_DELTA_TYPE,
+  shouldSendDelta,
+  THOUGHT_DELTA_TYPE,
+  TOOL_UPDATE_TYPE,
+  toolUpdateContent,
+} from "./live";
+import {
+  foldToolUpdate,
+  noteUnmappedKind,
+  PERMISSION_REQUEST_TYPE,
+  permissionRequestContent,
+  TURN_ACTIVITY_TYPE,
+  turnActivityContent,
+  type ToolRecord,
+} from "./activity";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -46,6 +62,17 @@ export interface OutboundDeps {
       eventType: string,
       content: Record<string, unknown>
     ): Promise<void>;
+    /**
+     * Send one of the suite's own event types into the room. Optional for the
+     * same reason `sendToDevice` is: a deployment without it records no
+     * activity card, and the conversation is identical either way.
+     */
+    sendCustomEvent?(
+      userId: string,
+      roomId: string,
+      eventType: string,
+      content: Record<string, unknown>
+    ): Promise<string | null>;
   };
   /**
    * Who to stream this room's turns to — the reader's Matrix id, or null for a
@@ -87,6 +114,38 @@ interface Attachment {
   reader: string | null | undefined;
   /** The 👀 we put on it, so it can be taken off again. */
   workingReactionId: string | null;
+  /**
+   * The reasoning stream's own buffer and cursor.
+   *
+   * Separate from the answer's rather than shared: the two arrive interleaved
+   * and are read on different channels, so one cursor would make an agent's
+   * thinking and its answer overwrite each other. See `THOUGHT_DELTA_TYPE`.
+   */
+  thoughtBuffer: string[];
+  thoughtSeq: number;
+  thoughtSentChars: number;
+  thoughtSentAt: number;
+  /**
+   * This turn's tool calls, in the order they were first used, keyed by
+   * `toolCallId` so an update merges rather than appending. Cleared with the
+   * rest of the per-turn state in `flush`.
+   */
+  tools: Map<string, ToolRecord>;
+  /** Monotonic per turn, shared by every tool update. */
+  toolSeq: number;
+  /**
+   * Whether this turn produced anything at all — a word, or a tool call.
+   *
+   * A turn that produced nothing is not a turn that succeeded, and the ✅ this
+   * used to put on the reader's message said otherwise. Measured on
+   * 2026-08-17: a provider quota was exhausted, every model in the failover
+   * chain failed, and openclaw ended the turn `idle` without emitting an ACP
+   * error — so the room marked it done and showed nothing. The reader asked
+   * twice and got a green tick both times.
+   */
+  produced: boolean;
+  /** Whether the harness already explained a failure this turn. */
+  reportedError: boolean;
 }
 
 /**
@@ -133,6 +192,18 @@ export const TYPING_REFRESH_MS = 20_000;
 const REACTION = { working: "👀", done: "✅", failed: "❌" } as const;
 
 /**
+ * What the room is told when a turn ends having produced nothing.
+ *
+ * Deliberately says only what is known. The hub sees a turn go `working` and
+ * then `idle` with no text, no tool call and no error — it does not know
+ * whether the model refused, ran out of quota, or crashed, because the harness
+ * that failed did not say. Guessing would be worse than the tick this replaces.
+ */
+const SILENT_TURN_NOTICE =
+  "This turn ended without a reply — the agent reported no answer and no error. " +
+  "Its own logs will say why.";
+
+/**
  * The message that started the turn about to run, per session.
  *
  * Set by the inbound path before it prompts. Kept outside the attachment because
@@ -157,10 +228,21 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 /** The text of an `agent_message_chunk`, or undefined for anything else. */
 function messageChunkText(payload: unknown): string | undefined {
   if (!isRecord(payload)) return undefined;
-  // Thought chunks are deliberately excluded: reasoning belongs in the
-  // console's transcript, not in a room people share, where it would turn one
-  // answer into a monologue.
+  // Thought chunks are deliberately excluded *from the room*: reasoning
+  // belongs in the console's transcript, not in a room people share, where it
+  // would turn one answer into a monologue. They are streamed to the reader's
+  // own devices instead — see `streamThought`, which makes them watchable
+  // without making them permanent.
   if (payload.sessionUpdate !== "agent_message_chunk") return undefined;
+  const content = payload.content;
+  if (!isRecord(content) || content.type !== "text") return undefined;
+  return typeof content.text === "string" ? content.text : undefined;
+}
+
+/** The text of a chunk of the given kind, or undefined for anything else. */
+function chunkTextOfKind(payload: unknown, kind: string): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (payload.sessionUpdate !== kind) return undefined;
   const content = payload.content;
   if (!isRecord(content) || content.type !== "text") return undefined;
   return typeof content.text === "string" ? content.text : undefined;
@@ -215,6 +297,14 @@ export function attachRoomToSession(
     liveSentChars: 0,
     liveSentAt: 0,
     reader: undefined,
+    thoughtBuffer: [],
+    thoughtSeq: 0,
+    thoughtSentChars: 0,
+    thoughtSentAt: 0,
+    tools: new Map(),
+    toolSeq: 0,
+    produced: false,
+    reportedError: false,
   };
 
   const say = async (body: string) => {
@@ -248,6 +338,22 @@ export function attachRoomToSession(
     state.liveSeq = 0;
     state.liveSentChars = 0;
     state.liveSentAt = 0;
+    // The reasoning and tool state belong to the turn that just ended. Without
+    // clearing it, the next turn reports the previous one's work as its own.
+    state.thoughtBuffer = [];
+    state.thoughtSeq = 0;
+    state.thoughtSentChars = 0;
+    state.thoughtSentAt = 0;
+
+    // Handed over and replaced in the same step, before the `await` below.
+    // `flush` runs twice for an ordinary turn — once on the debounce, once when
+    // the state event ends it — and the second call must find nothing left to
+    // record. Clearing after the await instead would let the second flush start
+    // while the first was still sending, and the turn would be recorded twice.
+    const tools = state.tools;
+    state.tools = new Map();
+    state.toolSeq = 0;
+    if (tools.size > 0) await recordTurn(tools);
     if (text.trim() === "") return;
     await say(text);
   };
@@ -264,10 +370,8 @@ export function attachRoomToSession(
     const send = deps.client.sendToDevice;
     if (!send) return;
 
-    if (state.reader === undefined) {
-      state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
-    }
-    if (!state.reader) return;
+    const reader = await resolveReader();
+    if (!reader) return;
 
     const text = state.buffer.join("");
     const pending = text.slice(state.liveSentChars);
@@ -282,11 +386,120 @@ export function attachRoomToSession(
 
     await send(
       agentUser,
-      state.reader,
+      reader,
       LIVE_DELTA_TYPE,
       deltaContent({ roomId, sessionId, seq: state.liveSeq, text, done })
     ).catch((err) => {
       log.debug("could not stream a turn to the reader's devices", {
+        sessionId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  /**
+   * Write what the agent did during the turn into the room, once.
+   *
+   * Before the answer, so the room reads in the order things happened: did
+   * these things, then said this. Best-effort like every other outbound call
+   * here — a card that fails to send must not cost the answer behind it.
+   */
+  const recordTurn = async (tools: Map<string, ToolRecord>) => {
+    const send = deps.client.sendCustomEvent;
+    if (!send) return;
+    await send(agentUser, roomId, TURN_ACTIVITY_TYPE, turnActivityContent(sessionId, tools)).catch(
+      (err) => {
+        log.error("could not record a turn's activity in its room", {
+          sessionId,
+          roomId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    );
+  };
+
+  /**
+   * The reader's Matrix id, looked up once per room and cached.
+   *
+   * Shared by all three live channels so a room with no reader does the lookup
+   * once rather than once per stream.
+   */
+  const resolveReader = async (): Promise<string | null> => {
+    if (state.reader === undefined) {
+      state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
+    }
+    return state.reader;
+  };
+
+  /**
+   * Push the agent's reasoning so far to the reader's devices.
+   *
+   * The same policy and the same best-effort posture as `streamLive`, against
+   * its own buffer and cursor. Unlike the answer there is no durable copy
+   * behind this: a dropped delta is simply reasoning nobody saw, which costs
+   * nothing, because reasoning is never written to the room at all.
+   */
+  const streamThought = async (done: boolean) => {
+    const send = deps.client.sendToDevice;
+    if (!send) return;
+    const reader = await resolveReader();
+    if (!reader) return;
+
+    const text = state.thoughtBuffer.join("");
+    const pending = text.slice(state.thoughtSentChars);
+    if (!done && !shouldSendDelta(pending, Date.now() - state.thoughtSentAt)) return;
+    if (done && pending.length === 0 && state.thoughtSeq === 0) return;
+
+    state.thoughtSeq += 1;
+    state.thoughtSentChars = text.length;
+    state.thoughtSentAt = Date.now();
+
+    await send(
+      agentUser,
+      reader,
+      THOUGHT_DELTA_TYPE,
+      deltaContent({ roomId, sessionId, seq: state.thoughtSeq, text, done })
+    ).catch((err) => {
+      log.debug("could not stream a turn's reasoning to the reader's devices", {
+        sessionId,
+        roomId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  };
+
+  /**
+   * Push one tool call's current state to the reader's devices.
+   *
+   * Sent on every change rather than batched: this is the answer to "what is it
+   * doing right now", and a batched ticker is a contradiction. The durable
+   * record at the end of the turn is what makes it worth not batching — nothing
+   * here has to survive, so nothing here has to be complete.
+   */
+  const streamTool = async (record: ToolRecord) => {
+    const send = deps.client.sendToDevice;
+    if (!send) return;
+    const reader = await resolveReader();
+    if (!reader) return;
+
+    state.toolSeq += 1;
+    await send(
+      agentUser,
+      reader,
+      TOOL_UPDATE_TYPE,
+      toolUpdateContent({
+        roomId,
+        sessionId,
+        seq: state.toolSeq,
+        toolCallId: record.id,
+        title: record.title,
+        kind: record.kind,
+        status: record.status,
+        locations: record.locations,
+      })
+    ).catch((err) => {
+      log.debug("could not stream a tool call to the reader's devices", {
         sessionId,
         roomId,
         error: err instanceof Error ? err.message : String(err),
@@ -356,9 +569,36 @@ export function attachRoomToSession(
         case "agent-update": {
           const text = messageChunkText(event.payload);
           if (text !== undefined) {
+            state.produced = true;
             state.buffer.push(text);
             void streamLive(false);
             scheduleFlush();
+            return;
+          }
+
+          const thought = chunkTextOfKind(event.payload, "agent_thought_chunk");
+          if (thought !== undefined) {
+            state.thoughtBuffer.push(thought);
+            void streamThought(false);
+            return;
+          }
+
+          const tool = foldToolUpdate(state.tools, event.payload);
+          if (tool !== null) {
+            state.produced = true;
+            void streamTool(tool);
+            return;
+          }
+
+          // Everything this path does not forward is recorded once, so the next
+          // capability a harness gains does not vanish here the way `tool_call`
+          // did for the whole life of the bridge. See `activity.ts`.
+          const kind = isRecord(event.payload) ? event.payload.sessionUpdate : undefined;
+          if (typeof kind === "string" && noteUnmappedKind(kind)) {
+            log.info("a session update kind reaches Matrix and is not forwarded", {
+              sessionId,
+              kind,
+            });
           }
           return;
         }
@@ -388,7 +628,24 @@ export function attachRoomToSession(
           await flush();
           await stopTyping();
 
-          if (status === "idle" || status === "ended") await mark(REACTION.done);
+          if (status === "idle" || status === "ended") {
+            // A turn that said nothing, ran nothing, and reported nothing is
+            // not a turn that worked. The hub cannot know *why* — the harness
+            // that failed did not say — but it can refuse to call silence
+            // success, and it can tell the reader that their question went
+            // unanswered rather than leaving them to infer it from a tick.
+            //
+            // Nothing is said when nobody asked: an unprompted turn (a cron
+            // job speaking) has no reader waiting and no message to mark.
+            if (!state.produced && !state.reportedError) {
+              await mark(REACTION.failed);
+              if (state.triggerEventId) await say(SILENT_TURN_NOTICE);
+            } else if (!state.reportedError) {
+              await mark(REACTION.done);
+            }
+            state.produced = false;
+            state.reportedError = false;
+          }
 
           if (status === "ended") {
             // A session that ended takes its attachment with it — an
@@ -419,11 +676,37 @@ export function attachRoomToSession(
           }
 
           await say(permissionPrompt(request.title, request.options));
+
+          // Beside the prose, never instead of it. The prose is what keeps
+          // Element and reply-by-number working; this only lets a client that
+          // understands it render buttons. Both answers come back as an
+          // ordinary message through the same matcher, so nothing downstream
+          // has to know which one a reader used.
+          const structured = permissionRequestContent(
+            sessionId,
+            event.seq,
+            request.title,
+            request.options
+          );
+          if (structured && deps.client.sendCustomEvent) {
+            await deps.client
+              .sendCustomEvent(agentUser, roomId, PERMISSION_REQUEST_TYPE, structured)
+              .catch((err) => {
+                log.error("could not send a structured permission request", {
+                  sessionId,
+                  roomId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
           return;
         }
 
         case "error": {
           const message = isRecord(event.payload) ? event.payload.message : undefined;
+          // The error path explains itself; the silence check below must not
+          // repeat the same news less specifically.
+          state.reportedError = true;
           await stopTyping();
           await mark(REACTION.failed);
           await say(`This agent reported an error: ${String(message ?? "unknown")}`);

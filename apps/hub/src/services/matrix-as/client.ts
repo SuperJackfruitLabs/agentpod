@@ -59,6 +59,20 @@ export interface MatrixClient {
     }
   ): Promise<string | null>;
   sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  /**
+   * Send a message-like event of any type into a room.
+   *
+   * The escape hatch `sendText` is a special case of. Used for the suite's own
+   * event types (`dev.agentpod.turn.v1`, `dev.agentpod.permission.v1`), which
+   * no other Matrix client will render — the answer text still arrives as an
+   * ordinary `m.room.message`, so nothing essential is invisible in Element.
+   */
+  sendCustomEvent(
+    userId: string,
+    roomId: string,
+    eventType: string,
+    content: Record<string, unknown>
+  ): Promise<string | null>;
   sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
   /**
    * Send a to-device event as `userId` to every device `targetUserId` has.
@@ -313,6 +327,19 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         { method: "PUT", userId, body: { msgtype: "m.text", body } }
       );
       assertOkOrAlready("send", res);
+      return String(res.body.event_id ?? "") || null;
+    },
+
+    async sendCustomEvent(userId, roomId, eventType, content) {
+      // A fresh transaction id per send, exactly as `sendText`: the homeserver
+      // deduplicates on it, so reusing one would silently drop a genuinely new
+      // event.
+      const txn = `apb-${crypto.randomUUID()}`;
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(eventType)}/${txn}`,
+        { method: "PUT", userId, body: content }
+      );
+      assertOkOrAlready("sendCustomEvent", res);
       return String(res.body.event_id ?? "") || null;
     },
 
