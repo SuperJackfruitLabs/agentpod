@@ -84,13 +84,27 @@ describe("the harness mark", () => {
     // Fully opaque: the source mark is white-on-transparent, and a Matrix
     // client that composites an avatar over its own background would otherwise
     // show a white shape on white.
+    //
+    // Counted, not asserted per pixel. A loop of 65k `expect`s reports the
+    // first bad pixel as "expected 255, got 0" with no idea how many others
+    // there were, and costs real time in a suite that shares one process with
+    // every other hub test.
     const { PNG } = await import("pngjs");
     const png = PNG.sync.read(Buffer.from(found!.bytes));
     expect(png.width).toBe(256);
     expect(png.height).toBe(256);
-    for (let i = 3; i < png.data.length; i += 4) {
-      expect(png.data[i]).toBe(255);
+
+    let translucent = 0;
+    let ink = 0;
+    for (let i = 0; i < png.data.length; i += 4) {
+      if (png.data[i + 3] !== 255) translucent++;
+      // The mark is white; the ground is not. Anything at full white is ink.
+      if (png.data[i] === 255 && png.data[i + 1] === 255 && png.data[i + 2] === 255) ink++;
     }
+    expect(translucent).toBe(0);
+    // The mark is actually drawn — a bug that filled the ground and skipped the
+    // blend would still be a valid, fully opaque PNG of a plain coloured square.
+    expect(ink).toBeGreaterThan(1000);
   });
 
   test("gives two stations of one harness different images", async () => {
