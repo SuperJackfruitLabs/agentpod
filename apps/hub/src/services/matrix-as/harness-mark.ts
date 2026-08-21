@@ -35,7 +35,7 @@ import { readFile } from "node:fs/promises";
  * column, and resolving that against the asset directory unchecked is how a row
  * becomes a read somewhere else on the disk.
  */
-export const MARKED_HARNESSES = ["claude-code", "codex", "opencode"] as const;
+export const MARKED_HARNESSES = ["claude-code", "codex", "opencode", "pi"] as const;
 
 export type MarkedHarness = (typeof MARKED_HARNESSES)[number];
 
