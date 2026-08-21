@@ -159,24 +159,48 @@ test("a node with invalid credentials is rejected", async () => {
       } as RequestInit & { headers: Record<string, string> }
     );
 
+    // The socket opening is NOT a failure, and asserting otherwise is what
+    // made this test flaky: the gateway accepts the connection and only then
+    // authenticates, inside `onOpen`, where `verifyNodeCredential` is an
+    // argon2id verify costing ~105ms. The handshake has long since completed
+    // by the time the close is sent, so a client is perfectly entitled to see
+    // `open` first — and on a loaded two-core runner it does, which is why
+    // this failed on CI while passing on every developer's machine.
+    //
+    // Accept-then-close is the design, not an accident (it is the same reason
+    // `onMessage` has to await `authReady`). What must be true is that the
+    // connection is terminated and the node never becomes usable.
     let closeCode: number | null = null;
-    await new Promise<void>((res, rej) => {
-      ws.onclose = (e) => {
-        closeCode = e.code;
-        res();
-      };
-      ws.onopen = () => {
-        ws.close();
-        rej(new Error("connection should have been rejected but was accepted"));
-      };
-    });
+    await Promise.race([
+      new Promise<void>((res) => {
+        ws.onclose = (e) => {
+          closeCode = e.code;
+          res();
+        };
+      }),
+      new Promise<void>((_, rej) =>
+        setTimeout(
+          () => rej(new Error("bad credentials left the socket open")),
+          5000
+        )
+      ),
+    ]);
 
     // Server calls ws.close(1008, "unauthorized"); Bun's WS client normalises
     // the server-sent 1008 to 1000 on the receiving end (a Bun quirk), so we
-    // accept either.  The unconditional assertion still proves the connection
-    // was terminated — the hardened onopen handler above is what proves no
-    // successful open ever happened.
+    // accept either.
     expect([1000, 1008]).toContain(closeCode);
+
+    // The security property, and the one the old `onopen` guard was reaching
+    // for: a rejected node is never registered, so nothing can be sent to it
+    // and it never counts as online. Deterministic — it is read after the
+    // close, not raced against it.
+    expect(connectionManager.isOnline(nodeId)).toBe(false);
+    expect(
+      (await listNodes(TEST_USER_ID)).find(
+        (n) => n.id === nodeId && n.status === "online"
+      )
+    ).toBeUndefined();
   } finally {
     server.stop(true);
   }
