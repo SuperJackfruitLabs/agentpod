@@ -27,10 +27,19 @@ command -v rsvg-convert >/dev/null || {
 
 for svg in *.svg; do
     name="${svg%.svg}"
-    # The source paths are `fill="currentColor"` or unfilled; force white here
-    # rather than in the committed source, so the source stays byte-identical to
-    # what simple-icons publishes and re-fetching it is a clean diff.
-    sed 's/fill="currentColor"//g; s/<path /<path fill="#FFFFFF" /g' "$svg" > ".tmp-$name.svg"
+    # Force white here rather than in the committed source, so each source stays
+    # byte-identical to what upstream publishes and re-fetching one is a clean
+    # diff.
+    #
+    # Any existing `fill` is STRIPPED before the white one is added. Simply
+    # prepending produced `<path fill="#FFFFFF" fill="#fff" ...>` for a source
+    # that already carried one — a duplicate attribute, which is not valid XML
+    # and which rsvg is entitled to reject. Sources differ: simple-icons ships
+    # `currentColor` or no fill at all, pi.dev ships `fill="#fff"`.
+    #
+    # `fill-rule` must survive, so the match is anchored to `fill=` preceded by
+    # a space and followed by a quote — it cannot eat `fill-rule=`.
+    sed 's/ fill="[^"]*"//g; s/<path /<path fill="#FFFFFF" /g' "$svg" > ".tmp-$name.svg"
     rsvg-convert -w "$((SIZE - INSET * 2))" -h "$((SIZE - INSET * 2))" \
         ".tmp-$name.svg" -o ".tmp-$name.png"
     # Centre it on a transparent canvas of the full size.

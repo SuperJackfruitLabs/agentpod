@@ -24,7 +24,19 @@ describe("the harness mark", () => {
     expect(MARKED_HARNESSES).toContain("claude-code");
     expect(MARKED_HARNESSES).toContain("codex");
     expect(MARKED_HARNESSES).toContain("opencode");
+    expect(MARKED_HARNESSES).toContain("pi");
     expect(await harnessMark("hermes", "hermes:coder-kai")).toBeNull();
+  });
+
+  test("every marked harness actually has a file to draw", async () => {
+    // `MARKED_HARNESSES` and the asset directory are two lists that have to
+    // agree, and nothing else checks it: naming a harness here without adding
+    // its PNG makes `harnessMark` swallow the read error and answer null,
+    // which is indistinguishable from "we have no mark for this one".
+    for (const harness of MARKED_HARNESSES) {
+      const found = await harnessMark(harness, `${harness}:some-station`);
+      expect(found).not.toBeNull();
+    }
   });
 
   test("refuses a harness name that is not one of ours", async () => {
