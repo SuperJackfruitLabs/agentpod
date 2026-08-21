@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "@types/pg": "^8.21.0",
+    "@types/pngjs": "^6.0.5",
     "drizzle-kit": "^0.31.10",
     "typescript": "^5.9.3"
   },
@@ -46,6 +47,7 @@
     "isomorphic-git": "^1.41.4",
     "modal": "0.9.0",
     "nanoid": "^5.1.16",
+    "pngjs": "^7.0.0",
     "postgres": "^3.4.9",
     "superjson": "^2.2.6",
     "yaml": "^2.9.0",

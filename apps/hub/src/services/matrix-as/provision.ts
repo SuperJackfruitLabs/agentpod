@@ -152,6 +152,11 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   if (bridged && !hasFace && deps.readWorkspaceFile && deps.client.uploadImage) {
     const found = await pickAvatar({
       read: (path) => deps.readWorkspaceFile!(s.stationId, path),
+      // Most coding-harness stations will never have a workspace picture —
+      // `avatar.png` in a project repo is a file you would have to commit — so
+      // without a drawn fallback they stay letters forever.
+      harness: s.harness,
+      stationKey: s.stationKey,
     }).catch(() => null);
 
     if (found) {
