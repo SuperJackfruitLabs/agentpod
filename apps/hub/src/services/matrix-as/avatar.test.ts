@@ -57,4 +57,60 @@ describe("finding an agent's avatar", () => {
     });
     expect(found).toBeNull();
   });
+
+  test("falls back to the harness mark when the workspace has nothing", async () => {
+    const found = await pickAvatar({
+      read: async () => null,
+      harness: "claude-code",
+      stationKey: "claude-code:c2c9f8e2",
+    });
+
+    expect(found).not.toBeNull();
+    expect(found!.contentType).toBe("image/png");
+    // The path names where it came from, so the provisioning log distinguishes
+    // "found the agent's own picture" from "drew one".
+    expect(found!.path).toBe("harness:claude-code");
+  });
+
+  test("prefers the agent's own picture over its harness's logo", async () => {
+    // A picture someone put in the workspace is a deliberate act. The mark is
+    // what we draw for the agents nobody has bothered with.
+    const own = new Uint8Array([1, 2, 3]);
+    const found = await pickAvatar({
+      read: async (path) =>
+        path === AVATAR_CANDIDATES[0]
+          ? { bytes: own, contentType: "image/png" }
+          : null,
+      harness: "claude-code",
+      stationKey: "claude-code:c2c9f8e2",
+    });
+
+    expect(found!.path).toBe(AVATAR_CANDIDATES[0]);
+    expect(found!.bytes).toEqual(own);
+  });
+
+  test("still answers null for a harness we have no mark for", async () => {
+    // The fallback is an asset lookup, not a promise that every station gets a
+    // face. A hermes agent without a `pfp.png` stays a letter.
+    const found = await pickAvatar({
+      read: async () => null,
+      harness: "hermes",
+      stationKey: "hermes:coder-kai",
+    });
+    expect(found).toBeNull();
+  });
+
+  test("falls back even when the node refused to answer", async () => {
+    // An offline node is exactly when a station has no reachable picture — and
+    // exactly when a drawn one is the only face available.
+    const found = await pickAvatar({
+      read: async () => {
+        throw new Error("node offline");
+      },
+      harness: "opencode",
+      stationKey: "opencode:18be38ff",
+    });
+    expect(found).not.toBeNull();
+    expect(found!.path).toBe("harness:opencode");
+  });
 });

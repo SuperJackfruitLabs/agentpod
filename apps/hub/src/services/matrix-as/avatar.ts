@@ -11,6 +11,8 @@
  * is not worth a round trip per message.
  */
 
+import { harnessMark } from "./harness-mark";
+
 /**
  * Where an agent's picture might be, in order of preference.
  *
@@ -25,6 +27,15 @@ const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 export interface AvatarDeps {
   /** Read a workspace-relative path, or null when it is not there. */
   read(path: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
+  /**
+   * The station's harness and key, for the drawn fallback.
+   *
+   * Optional so a caller that only wants to know whether an agent carries its
+   * own picture can ask exactly that. Omit both and this behaves as it always
+   * has: a station with no image in its workspace has no face.
+   */
+  harness?: string;
+  stationKey?: string;
 }
 
 export interface FoundAvatar {
@@ -40,8 +51,10 @@ export async function pickAvatar(deps: AvatarDeps): Promise<FoundAvatar | null> 
       found = await deps.read(path);
     } catch {
       // The workspace is on another machine, which may be offline or busy. An
-      // avatar is never worth failing provisioning over.
-      return null;
+      // avatar is never worth failing provisioning over — but an unreachable
+      // node is also exactly when a drawn face is the only one available, so
+      // this gives up on the workspace rather than on the agent.
+      break;
     }
     if (!found) continue;
 
@@ -51,5 +64,14 @@ export async function pickAvatar(deps: AvatarDeps): Promise<FoundAvatar | null> 
 
     return { path, ...found };
   }
+
+  // Nothing in the workspace. Draw one from the harness's own mark, which most
+  // stations on a coding harness will always need: `avatar.png` in a project
+  // repo is a file you would have to commit.
+  if (deps.harness && deps.stationKey) {
+    const drawn = await harnessMark(deps.harness, deps.stationKey);
+    if (drawn) return { path: `harness:${deps.harness}`, ...drawn };
+  }
+
   return null;
 }
