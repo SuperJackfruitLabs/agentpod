@@ -26,7 +26,7 @@ FROM oven/bun:1-slim
 # overrides this with --build-arg, so what a published image carries is the
 # release resolved at build time; this default is what a local `docker build`
 # gets.
-ARG AGENTPOD_VERSION=v0.1.27
+ARG AGENTPOD_VERSION=v0.1.28
 
 # oven/bun:1-slim leaves USER unset, i.e. root, which is what everything below
 # needs: apt, the release download, and at runtime the wrapper replacing
