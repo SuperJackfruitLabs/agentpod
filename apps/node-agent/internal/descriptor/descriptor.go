@@ -167,6 +167,35 @@ type Descriptor interface {
 	TailLogs(ctx context.Context, key string, follow bool, emit func([]byte) error) error
 }
 
+// HealthForStation is an OPTIONAL interface a Descriptor may implement to
+// report health for a station the caller has ALREADY detected.
+//
+// Health(key) must resolve key back to a workspace path, and for the workspace
+// harnesses (claude-code, codex, opencode) that means re-running Detect — a
+// full host re-scan that forks git once per project. A caller that sweeps
+// every station, which is exactly what the health tick does, therefore pays
+// O(N²) scans for N stations: 26 projects cost 702 git processes per tick.
+// HealthFor takes the Station the caller already holds and reads its
+// WorkspacePath directly, making the sweep O(N).
+//
+// Implementations MUST fall back to Health(s.Key) when s.WorkspacePath is nil.
+type HealthForStation interface {
+	HealthFor(s Station) (Health, error)
+}
+
+// HealthOf returns d's health snapshot for an already-detected station, taking
+// the O(N) path when d implements HealthForStation and falling back to the
+// key-resolving Health otherwise.
+//
+// Any caller sweeping many stations should use this rather than d.Health(s.Key)
+// — see HealthForStation for what the difference costs.
+func HealthOf(d Descriptor, s Station) (Health, error) {
+	if hf, ok := d.(HealthForStation); ok {
+		return hf.HealthFor(s)
+	}
+	return d.Health(s.Key)
+}
+
 // ACPCommander is an OPTIONAL interface implemented by descriptors whose
 // harness can serve an ACP (Agent Client Protocol) session over stdio. The
 // "acp" capability is advertised in Detect output ONLY when the descriptor

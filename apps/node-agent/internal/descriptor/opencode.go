@@ -331,7 +331,22 @@ func (o *openCodeDescriptor) Health(key string) (Health, error) {
 	if err != nil {
 		return Health{}, err
 	}
+	return o.healthAt(projPath), nil
+}
 
+// HealthFor implements HealthForStation: it reads the workspace off the station
+// the caller already detected instead of re-running Detect to find it again,
+// which is what turns a health sweep from O(N²) host scans into O(N).
+func (o *openCodeDescriptor) HealthFor(s Station) (Health, error) {
+	if s.WorkspacePath == nil || *s.WorkspacePath == "" {
+		return o.Health(s.Key)
+	}
+	return o.healthAt(*s.WorkspacePath), nil
+}
+
+// healthAt is the shared body of Health and HealthFor, keyed on a workspace
+// path the caller has already resolved.
+func (o *openCodeDescriptor) healthAt(projPath string) Health {
 	health := Health{}
 
 	// Disk usage from the shared async cache — never walk on the request path.
@@ -351,7 +366,7 @@ func (o *openCodeDescriptor) Health(key string) (Health, error) {
 		health.LastActivity = &s
 	}
 
-	return health, nil
+	return health
 }
 
 // openCodeProcessRunning checks for a running opencode process via pgrep.
