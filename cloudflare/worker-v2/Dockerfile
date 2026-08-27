@@ -15,7 +15,7 @@
 # bun base (Debian) for opencode, matching Dockerfile.opencode.
 FROM oven/bun:1-slim
 
-ARG AGENTPOD_VERSION=v0.1.27
+ARG AGENTPOD_VERSION=v0.1.28
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git procps \
