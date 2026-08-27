@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/rand"
 	"strings"
@@ -25,6 +26,13 @@ const (
 // frames to the hub. Exported as a package-level var so tests can override it
 // without touching production code paths.
 var healthTickInterval = 30 * time.Second
+
+// heartbeatInterval is the cadence of the keepalive frame, which doubles as
+// this connection's liveness probe: a failed heartbeat write is one of the two
+// things that returns connectOnce so the reconnect loop can dial again. A
+// package-level var for the same reason as healthTickInterval — a test must not
+// have to wait 15 s to observe a dropped connection.
+var heartbeatInterval = 15 * time.Second
 
 // HealthReport is a single station's health snapshot inside a health push frame.
 // Metrics fields are nullable (pointer) so they can be omitted as JSON null when
@@ -168,7 +176,15 @@ type HelloMsg struct {
 // gatherHealth, if non-nil, is called on each health tick (healthTickInterval)
 // and the result is pushed as a {"type":"health","stations":[...]} frame. The
 // health ticker runs in its own goroutine, independent of the heartbeat path.
-func connectOnce(ctx context.Context, cfg config.Config, h Handler, onConnected func(), version string, gatherHealth func() []HealthReport) error {
+//
+// Every goroutine started here is scoped to a per-connection context derived
+// from parent, cancelled on return. It MUST stay that way: started on parent
+// directly, the health ticker's only exit was node shutdown, so each reconnect
+// left another one sweeping stations against a dead socket forever.
+func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnected func(), version string, gatherHealth func() []HealthReport) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+
 	c, _, err := websocket.Dial(ctx, wsURL(cfg.Hub), &websocket.DialOptions{
 		HTTPHeader: map[string][]string{"Authorization": {"Bearer " + cfg.NodeID + ":" + cfg.NodeSecret}},
 	})
@@ -195,7 +211,14 @@ func connectOnce(ctx context.Context, cfg config.Config, h Handler, onConnected 
 	var writeMu sync.Mutex
 
 	// Start the inbound read-loop; shares writeMu with the heartbeat below.
-	go serve(ctx, c, h, &writeMu)
+	// Its exit closes serveDone, which ends this connection: a socket that has
+	// stopped reading is gone, and waiting for the next heartbeat to discover
+	// that leaves the connection nominally alive for up to heartbeatInterval.
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		serve(ctx, c, h, &writeMu)
+	}()
 
 	// Health ticker — runs in its own goroutine, entirely separate from the
 	// heartbeat path, so a slow gatherHealth call never delays heartbeats.
@@ -213,19 +236,29 @@ func connectOnce(ctx context.Context, cfg config.Config, h Handler, onConnected 
 						"stations": gatherHealth(),
 					})
 					writeMu.Lock()
-					_ = c.Write(ctx, websocket.MessageText, frame)
+					werr := c.Write(ctx, websocket.MessageText, frame)
 					writeMu.Unlock()
+					// A failed push means the socket is gone. Stop: the read
+					// loop is about to end the connection, and sweeping
+					// stations to write into a dead socket is exactly the
+					// runaway this ticker's scoping now prevents.
+					if werr != nil {
+						return
+					}
 				}
 			}
 		}()
 	}
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-serveDone:
+			// serve logs the underlying read error before returning.
+			return errors.New("inbound read loop closed")
 		case <-ticker.C:
 			hb, _ := json.Marshal(map[string]any{"type": "heartbeat", "ts": time.Now().UnixMilli()})
 			writeMu.Lock()

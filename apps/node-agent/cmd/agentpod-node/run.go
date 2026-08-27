@@ -73,39 +73,48 @@ func runCmd() {
 		}
 	})
 
-	// gatherHealth enumerates all detected stations and collects a point-in-time
-	// health snapshot for each one. Called by the gateway health ticker (~30 s).
-	gatherHealth := func() []gateway.HealthReport {
-		stations := reg.DetectAll()
-		reports := make([]gateway.HealthReport, 0, len(stations))
-		for _, s := range stations {
-			d, err := reg.For(s.Key)
-			if err != nil {
-				reports = append(reports, gateway.HealthReport{Key: s.Key, OK: false})
-				continue
-			}
-			h, err := d.Health(s.Key)
-			if err != nil {
-				reports = append(reports, gateway.HealthReport{Key: s.Key, OK: false})
-				continue
-			}
-			reports = append(reports, gateway.HealthReport{
-				Key:       s.Key,
-				OK:        true,
-				Running:   h.Running,
-				PID:       h.PID,
-				CPUPct:    h.CpuPct,
-				MemBytes:  h.MemBytes,
-				UptimeSec: h.UptimeSec,
-			})
-		}
-		return reports
-	}
-
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
 	h = gateway.NewChangesetHandler(h, resolver)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
 	h = gateway.NewUpdateHandler(h, version)
-	gateway.Run(ctx, cfg, h, version, gatherHealth)
+	gateway.Run(ctx, cfg, h, version, func() []gateway.HealthReport {
+		return gatherHealthReports(reg)
+	})
+}
+
+// gatherHealthReports enumerates all detected stations and collects a
+// point-in-time health snapshot for each one. Called by the gateway health
+// ticker (~30 s).
+//
+// The station list is detected ONCE and each station is then passed whole to
+// descriptor.HealthOf. Resolving health by key instead (d.Health(s.Key)) makes
+// every station re-run its descriptor's Detect, so a sweep of N stations costs
+// N+N² host scans — 702 git processes per tick on a 26-project host, which is
+// what pinned a real node's CPU. See descriptor.HealthForStation.
+func gatherHealthReports(reg *descriptor.Registry) []gateway.HealthReport {
+	stations := reg.DetectAll()
+	reports := make([]gateway.HealthReport, 0, len(stations))
+	for _, s := range stations {
+		d, err := reg.For(s.Key)
+		if err != nil {
+			reports = append(reports, gateway.HealthReport{Key: s.Key, OK: false})
+			continue
+		}
+		h, err := descriptor.HealthOf(d, s)
+		if err != nil {
+			reports = append(reports, gateway.HealthReport{Key: s.Key, OK: false})
+			continue
+		}
+		reports = append(reports, gateway.HealthReport{
+			Key:       s.Key,
+			OK:        true,
+			Running:   h.Running,
+			PID:       h.PID,
+			CPUPct:    h.CpuPct,
+			MemBytes:  h.MemBytes,
+			UptimeSec: h.UptimeSec,
+		})
+	}
+	return reports
 }

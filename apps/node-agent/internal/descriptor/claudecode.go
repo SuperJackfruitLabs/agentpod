@@ -348,7 +348,22 @@ func (c *claudeCodeDescriptor) Health(key string) (Health, error) {
 	if err != nil {
 		return Health{}, err
 	}
+	return c.healthAt(projPath), nil
+}
 
+// HealthFor implements HealthForStation: it reads the workspace off the station
+// the caller already detected instead of re-running Detect to find it again,
+// which is what turns a health sweep from O(N²) host scans into O(N).
+func (c *claudeCodeDescriptor) HealthFor(s Station) (Health, error) {
+	if s.WorkspacePath == nil || *s.WorkspacePath == "" {
+		return c.Health(s.Key)
+	}
+	return c.healthAt(*s.WorkspacePath), nil
+}
+
+// healthAt is the shared body of Health and HealthFor, keyed on a workspace
+// path the caller has already resolved.
+func (c *claudeCodeDescriptor) healthAt(projPath string) Health {
 	health := Health{}
 
 	// Disk usage from the shared async cache — never walk on the request path
@@ -369,7 +384,7 @@ func (c *claudeCodeDescriptor) Health(key string) (Health, error) {
 		health.LastActivity = &s
 	}
 
-	return health, nil
+	return health
 }
 
 // claudeProcessRunning checks for a running claude process whose working
