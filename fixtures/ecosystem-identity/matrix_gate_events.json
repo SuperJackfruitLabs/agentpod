@@ -1,0 +1,377 @@
+{
+  "corpus": "ecosystem-identity/matrix-gate-events",
+  "version": 1,
+  "authoredAt": "2026-08-30",
+  "authoredFrom": "the gates table in kaambaan apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
+  "purpose": "A kaambaan approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
+  "howToRead": {
+    "wireShape": "The two directions are DELIBERATELY ASYMMETRIC. Outbound, a gate is a genuine custom Matrix event type `dev.kaambaan.gate.v1`, matching the three `dev.agentpod.*` types already shipping, because it needs a renderer: it is a question with buttons. Inbound, a decision is an ordinary `m.room.message` with `msgtype: \"m.text\"` carrying `suite_event_type` in content, because it needs no renderer: it is a sentence, and sending it as a message means it reads in every client with no registry entry and no risk of a reader seeing their own answer twice.",
+    "versioning": "Major version in the `suite_event_type` string (`.v1` → `.v2`) mints a new type and a new renderer. Minor version is `schema_version`, an integer inside content, bumped for additive changes only. A renderer written against v1 tolerates a higher schema_version by ignoring fields it does not know.",
+    "accept": "Payloads a consumer MUST handle. Field names here are the contract.",
+    "reject": "Payloads a consumer MUST refuse. These are the point of the corpus — a fixture of only-valid examples proves almost nothing, which is how the mem_/mbr_ drift survived in kaambaan for as long as both halves existed.",
+    "stockClients": "A stock client renders an unknown EVENT TYPE as nothing at all — not as fallback text. So a gate is accompanied by a companion prose m.room.message carrying the same question. That is the suite's existing convention, documented on supermessage's PermissionRequestRenderer: the event is sent beside an ordinary prose message so a client that never renders it is \"exactly as able to answer as it was\". kaambaan#34 assumed a custom event's own `body` would be shown by every client; that is true of an unknown MSGTYPE and not of an unknown EVENT TYPE.",
+    "whichConsumer": "`reject` binds the SENDER and the Application Service: payloads that must not be emitted and must not be acted on. It does NOT ask a renderer to refuse an unrecognised field — additive tolerance is required in the other direction, and a renderer refusing unknown keys would break the moment `schema_version` is bumped. A renderer's obligation for a reject case is narrower: offer no decision it cannot honestly resolve."
+  },
+  "optionIds": {
+    "values": [
+      "approve",
+      "request_changes",
+      "reject"
+    ],
+    "meaning": "NOT free-form. kaambaan's resolveGate takes `GateDecision = 'approve' | 'request_changes' | 'reject'`, so an option id outside this set renders a button that is refused on resolution. kaambaan#34 proposed free-form ids mirroring a `select` signal's semantics; that is a good instinct and it is not what the endpoint does. Widening gates to arbitrary options is a `.v2`, not a field change.",
+    "labelsAreFree": "`label` is display text and carries no meaning. Per-board wording belongs there."
+  },
+  "droppedDeliberately": {
+    "run_id": "There is no run column on a gate. A gate is card-and-stage scoped. kaambaan#34 asked whether run_id was meaningful here; it is not.",
+    "task_id": "No such row exists in kaambaan's model. The pair is card and stage.",
+    "expires_at": "Gates do not expire. No column, no sweep, no alarm. An optional field nothing will ever set invites client code for an impossible case.",
+    "tenant_id": "kaambaan's internal isolation boundary. A room may have wider membership than a board, and no consumer needs it — the Application Service recorded which board a gate came from. (#34's sketch also wrote the prefix as `tn_`; the grammar pins `tnt_`.)"
+  },
+  "events": [
+    {
+      "suiteEventType": "dev.kaambaan.gate.v1",
+      "direction": "outbound — the board asks",
+      "sender": "the station's own virtual user, so the question comes from the agent whose room it is",
+      "requiredFields": [
+        "body",
+        "schema_version",
+        "board_id",
+        "card_id",
+        "gate_id",
+        "stage_key",
+        "return_stage_key",
+        "card_title",
+        "produced_by",
+        "prompt",
+        "options"
+      ],
+      "accept": [
+        {
+          "why": "the ordinary case",
+          "content": {
+            "body": "Approval needed — \"Add OAuth login\" at stage `review`. Approve, request changes, or reject: https://kaambaan.dev/b/brd_7c1f/c/crd_9a22",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship the OAuth change to staging?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              },
+              {
+                "id": "request_changes",
+                "label": "Request changes"
+              },
+              {
+                "id": "reject",
+                "label": "Reject"
+              }
+            ],
+            "deep_link": "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22"
+          }
+        },
+        {
+          "why": "a higher schema_version is tolerated — a v1 renderer reads the fields it knows and ignores the rest",
+          "content": {
+            "body": "Approval needed — \"Rotate the signing key\" at stage `review`.",
+            "schema_version": 2,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_0011",
+            "gate_id": "gat_0012",
+            "stage_key": "review",
+            "return_stage_key": "prepare",
+            "card_title": "Rotate the signing key",
+            "produced_by": "agt_31d0",
+            "prompt": "Rotate now?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Rotate"
+              },
+              {
+                "id": "reject",
+                "label": "Not yet"
+              }
+            ],
+            "a_field_from_the_future": "ignored, not fatal"
+          }
+        },
+        {
+          "why": "two options rather than three — a gate need not offer request_changes",
+          "content": {
+            "body": "Approval needed — \"Delete the staging bucket\" at stage `review`.",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_5150",
+            "gate_id": "gat_5151",
+            "stage_key": "review",
+            "return_stage_key": "plan",
+            "card_title": "Delete the staging bucket",
+            "produced_by": "agt_31d0",
+            "prompt": "This cannot be undone. Proceed?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Delete it"
+              },
+              {
+                "id": "reject",
+                "label": "Cancel"
+              }
+            ]
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "an option id outside GateDecision. Renders a fine button and is refused on resolution — the failure this corpus exists to make loud.",
+          "content": {
+            "body": "Approval needed — \"Add OAuth login\".",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": [
+              {
+                "id": "ship_it",
+                "label": "Ship it"
+              }
+            ]
+          }
+        },
+        {
+          "why": "no body. A message with nothing for a stock client to render defeats the reason the marker shape was chosen.",
+          "content": {
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              }
+            ]
+          }
+        },
+        {
+          "why": "carries tenant_id. Dropped deliberately; its presence means a sender built against the superseded #34 sketch.",
+          "content": {
+            "body": "Approval needed.",
+            "schema_version": 1,
+            "tenant_id": "tnt_e080b7a2cc39469e",
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              }
+            ]
+          }
+        },
+        {
+          "why": "carries run_id, task_id and expires_at — all three dropped. Same superseded sketch.",
+          "content": {
+            "body": "Approval needed.",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "run_id": "run_1234",
+            "task_id": "tsk_1234",
+            "expires_at": "2026-09-01T09:00:00Z",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              }
+            ]
+          }
+        },
+        {
+          "why": "empty options. A decision with nothing to choose is a card that cannot be answered; it must not render as pending.",
+          "content": {
+            "body": "Approval needed.",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": []
+          }
+        },
+        {
+          "why": "duplicate option ids. Resolution is by id, so two `approve` entries are ambiguous regardless of their labels.",
+          "content": {
+            "body": "Approval needed.",
+            "schema_version": 1,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gat_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              },
+              {
+                "id": "approve",
+                "label": "Approve again"
+              }
+            ]
+          }
+        }
+      ],
+      "matrixEventType": "dev.kaambaan.gate.v1",
+      "companion": "Sent beside a plain m.room.message carrying the same question, so stock clients can follow the room. The companion is prose only and carries no structured fields; nothing resolves against it.",
+      "bodyIsForThisClient": "`body` is supermessage's own FallbackBody path, used when the renderer cannot draw the card — not a stock-client fallback. That is what the companion message is for."
+    },
+    {
+      "suiteEventType": "dev.kaambaan.gate.decision.v1",
+      "direction": "inbound — the human answers",
+      "sender": "the human's own Matrix session, so the actor is carried inherently. charter decisions/2026-08-14-approvals-cross-planes-as-events.md turns on this: a bridge substituting its own identity would void kaambaan's separation-of-duties check and every approval in the suite would attribute to one account.",
+      "requiredFields": [
+        "body",
+        "schema_version",
+        "suite_event_type",
+        "gate_id",
+        "option_id",
+        "m.relates_to"
+      ],
+      "notes": {
+        "bothIdentifiers": "`gate_id` AND the m.relates_to reference, deliberately. The reference is what a client uses to thread the answer under the question; `gate_id` is what the Application Service resolves on. Trusting only the reference would mean resolving a gate by chasing an event id an untrusted sender chose; trusting only `gate_id` would leave the answer visually unmoored. They MUST agree, and a consumer refuses when they do not.",
+        "comment": "Not decoration. On `request_changes`, kaambaan merges it into the card's handoff as `feedback`, so the rework carries the reviewer's reasoning. A client should prompt for text on that option and no other."
+      },
+      "accept": [
+        {
+          "why": "an approval",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved — Ship the OAuth change to staging?",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "gate_id": "gat_4e8b",
+            "option_id": "approve",
+            "comment": null,
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "request_changes, carrying the feedback that becomes the rework's context",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Requested changes — Ship the OAuth change to staging?",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "gate_id": "gat_4e8b",
+            "option_id": "request_changes",
+            "comment": "Add a test for the refresh-token path first.",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "reject": [
+        {
+          "why": "option_id outside GateDecision",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Shipped it",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "gate_id": "gat_4e8b",
+            "option_id": "ship_it",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        },
+        {
+          "why": "no m.relates_to. The answer names a gate but is bound to no question, so nothing proves the sender saw the gate they claim to answer.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "gate_id": "gat_4e8b",
+            "option_id": "approve"
+          }
+        },
+        {
+          "why": "a reply relation rather than a reference. m.in_reply_to is a rendering hint any client sets when quoting; treating it as a decision binding would let an ordinary quoted reply resolve a gate.",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "gate_id": "gat_4e8b",
+            "option_id": "approve",
+            "m.relates_to": {
+              "m.in_reply_to": {
+                "event_id": "$gateEventId"
+              }
+            }
+          }
+        },
+        {
+          "why": "missing gate_id — the field resolution actually keys on",
+          "content": {
+            "msgtype": "m.text",
+            "body": "Approved",
+            "schema_version": 1,
+            "suite_event_type": "dev.kaambaan.gate.decision.v1",
+            "option_id": "approve",
+            "m.relates_to": {
+              "rel_type": "m.reference",
+              "event_id": "$gateEventId"
+            }
+          }
+        }
+      ],
+      "matrixEventType": "m.room.message",
+      "discriminator": "`suite_event_type` in content, because the Matrix event type is m.room.message. The Application Service switches on it."
+    }
+  ]
+}
