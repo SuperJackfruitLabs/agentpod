@@ -39,6 +39,23 @@ export interface MatrixClient {
   registerWithCredentials(
     localpart: string
   ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
+  /**
+   * Replace the credentials of an identity that already exists.
+   *
+   * An Application Service may log in as any user inside its own namespace, so
+   * this needs no homeserver admin account — which matters, because the admin
+   * credential this service exists to eliminate may not exist at all.
+   *
+   * Every existing token is invalidated first. Login alone would MINT a device
+   * rather than replace one, so repeated rotations would accumulate devices and
+   * live tokens on an identity forever, and nothing can delete them afterwards:
+   * `DELETE /devices/{id}` requires User-Interactive Auth, which an appservice
+   * session has no password to satisfy. `rotate` therefore means replace, and
+   * an identity ends every rotation holding exactly one device.
+   */
+  rotateCredentials(
+    localpart: string
+  ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
   ensureRoom(
     alias: string,
     opts: {
@@ -243,6 +260,52 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
 
       return {
         userId: String(res.body.user_id ?? `@${localpart}:${deps.domain ?? ""}`),
+        accessToken,
+        deviceId: String(res.body.device_id ?? ""),
+      };
+    },
+
+    async rotateCredentials(localpart) {
+      const userId = `@${localpart}:${deps.domain ?? ""}`;
+
+      // Impersonated, so no admin account is involved: an appservice may act as
+      // any user in its namespace. Verified against tuwunel 1.8.3.
+      const out = await call("/_matrix/client/v3/logout/all", {
+        method: "POST",
+        body: {},
+        userId,
+      });
+      if (out.status < 200 || out.status >= 300) {
+        throw new Error(
+          `matrix logout/all ${localpart} failed: ${out.status} ${String(out.body.errcode ?? "")}`.trim()
+        );
+      }
+
+      // Not impersonated — the login body names the user, and passing
+      // `?user_id=` as well is rejected.
+      const res = await call("/_matrix/client/v3/login", {
+        method: "POST",
+        body: {
+          type: "m.login.application_service",
+          identifier: { type: "m.id.user", user: localpart },
+        },
+      });
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(
+          `matrix login ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+        );
+      }
+
+      const accessToken = String(res.body.access_token ?? "");
+      if (!accessToken) {
+        throw new Error(
+          `matrix login ${localpart} returned no access_token — this homeserver ` +
+            "does not issue appservice credentials this way"
+        );
+      }
+
+      return {
+        userId: String(res.body.user_id ?? userId),
         accessToken,
         deviceId: String(res.body.device_id ?? ""),
       };

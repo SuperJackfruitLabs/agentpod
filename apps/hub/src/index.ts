@@ -173,11 +173,12 @@ if (matrixBridge) {
       provisionStation: (stationId) => matrixBridge.provision(stationId),
       credentials: {
         // An appservice registration returns an access_token directly — no
-        // admin command, no password, no login round-trip. `rotate` is
-        // deliberately absent: replacing an existing identity's credentials
-        // needs the homeserver's admin account, and the route says so plainly
-        // rather than pretending.
+        // admin command, no password, no login round-trip.
         register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
+        // And an appservice may LOG IN as any user in its own namespace, which
+        // is how an identity that already exists gets new credentials without
+        // the homeserver admin account this service exists to do away with.
+        rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
       },
     }),
   );

@@ -214,3 +214,71 @@ describe("an alias that is already taken", () => {
     expect(roomId).toBeNull();
   });
 });
+
+describe("rotateCredentials", () => {
+  test("invalidates every existing token before issuing a new one", async () => {
+    replies = [
+      { status: 200, body: {} },
+      {
+        status: 200,
+        body: {
+          user_id: "@agent_box_pi-x:id.agentpod.dev",
+          access_token: "syt_new",
+          device_id: "DEV2",
+        },
+      },
+    ];
+
+    const out = await client().rotateCredentials("agent_box_pi-x");
+
+    expect(calls).toHaveLength(2);
+    // logout/all first, or rotation accumulates devices forever.
+    expect(calls[0]!.url).toContain("/_matrix/client/v3/logout/all");
+    expect(calls[1]!.url).toContain("/_matrix/client/v3/login");
+    expect(out).toEqual({
+      userId: "@agent_box_pi-x:id.agentpod.dev",
+      accessToken: "syt_new",
+      deviceId: "DEV2",
+    });
+  });
+
+  test("impersonates for logout/all and does not for login", async () => {
+    replies = [
+      { status: 200, body: {} },
+      { status: 200, body: { access_token: "syt_new", device_id: "DEV2" } },
+    ];
+
+    await client().rotateCredentials("agent_box_pi-x");
+
+    // The appservice acts AS the user to clear its sessions...
+    expect(calls[0]!.url).toContain("user_id=%40agent_box_pi-x%3Aid.agentpod.dev");
+    // ...but the login body names the user, and impersonating there is rejected.
+    expect(calls[1]!.url).not.toContain("user_id=");
+    expect(calls[1]!.body).toEqual({
+      type: "m.login.application_service",
+      identifier: { type: "m.id.user", user: "agent_box_pi-x" },
+    });
+  });
+
+  test("does not issue credentials when the old ones could not be cleared", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    await expect(client().rotateCredentials("agent_box_pi-x")).rejects.toThrow(
+      /logout\/all/
+    );
+    // Crucially it stopped: a login here would have added a device to an
+    // identity whose existing tokens are still live.
+    expect(calls).toHaveLength(1);
+  });
+
+  test("refuses a login that comes back without a token", async () => {
+    replies = [
+      { status: 200, body: {} },
+      { status: 200, body: { user_id: "@agent_box_pi-x:id.agentpod.dev" } },
+    ];
+
+    await expect(client().rotateCredentials("agent_box_pi-x")).rejects.toThrow(
+      /no access_token/
+    );
+  });
+});
