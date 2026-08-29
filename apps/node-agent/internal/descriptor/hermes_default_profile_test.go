@@ -303,3 +303,89 @@ func assertNoStubRan(t *testing.T, markers ...string) {
 		}
 	}
 }
+
+// Regression tests for the root station's display name.
+//
+// The root station was named by the literal "Hermes". On a host where the root
+// gateway is the operator's primary agent that is the wrong name, and it could
+// not be corrected: the root has no directory to rename, and the hub overwrites
+// display_name from the detector on every re-adoption. Hermes already records
+// the intended name in <home>/profile.yaml via `hermes profile rename default`.
+func TestRootStationTakesDisplayNameFromProfileYAML(t *testing.T) {
+	home := defaultProfileHome(t)
+	if err := os.WriteFile(filepath.Join(home, "profile.yaml"),
+		[]byte("display_name: Super Chotu\n"), 0o644); err != nil {
+		t.Fatalf("write profile.yaml: %v", err)
+	}
+
+	stations, err := NewHermes(home).Detect()
+	if err != nil {
+		t.Fatalf("Detect: %v", err)
+	}
+
+	root := findStation(t, stations, "hermes")
+	if root.DisplayName != "Super Chotu" {
+		t.Errorf("root display name = %q, want %q", root.DisplayName, "Super Chotu")
+	}
+
+	// Profiles keep taking their name from their directory — this changes the
+	// root only.
+	profile := findStation(t, stations, "hermes:analyst-echo")
+	if profile.DisplayName != "analyst-echo" {
+		t.Errorf("profile display name = %q, want %q", profile.DisplayName, "analyst-echo")
+	}
+}
+
+// A host that has never been renamed must behave exactly as it did before.
+func TestRootStationFallsBackToHermes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body *string
+	}{
+		{"no profile.yaml", nil},
+		{"empty file", strPtr("")},
+		{"key present but empty", strPtr("display_name:\n")},
+		{"unrelated keys only", strPtr("model:\n  default: k3-256k\n")},
+		{"quoted empty value", strPtr("display_name: \"\"\n")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := defaultProfileHome(t)
+			if tc.body != nil {
+				if err := os.WriteFile(filepath.Join(home, "profile.yaml"), []byte(*tc.body), 0o644); err != nil {
+					t.Fatalf("write profile.yaml: %v", err)
+				}
+			}
+			stations, err := NewHermes(home).Detect()
+			if err != nil {
+				t.Fatalf("Detect: %v", err)
+			}
+			if root := findStation(t, stations, "hermes"); root.DisplayName != "Hermes" {
+				t.Errorf("root display name = %q, want %q", root.DisplayName, "Hermes")
+			}
+		})
+	}
+}
+
+// Quoted values and trailing whitespace are written by hand often enough to test.
+func TestRootStationDisplayNameIsTrimmedAndUnquoted(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{"display_name: \"Super Chotu\"\n", "Super Chotu"},
+		{"display_name: 'Super Chotu'\n", "Super Chotu"},
+		{"display_name:    Super Chotu   \n", "Super Chotu"},
+		{"# a comment\ndisplay_name: Super Chotu\n", "Super Chotu"},
+	} {
+		home := defaultProfileHome(t)
+		if err := os.WriteFile(filepath.Join(home, "profile.yaml"), []byte(tc.body), 0o644); err != nil {
+			t.Fatalf("write profile.yaml: %v", err)
+		}
+		stations, err := NewHermes(home).Detect()
+		if err != nil {
+			t.Fatalf("Detect: %v", err)
+		}
+		if root := findStation(t, stations, "hermes"); root.DisplayName != tc.want {
+			t.Errorf("body %q → display name %q, want %q", tc.body, root.DisplayName, tc.want)
+		}
+	}
+}
+
+func strPtr(s string) *string { return &s }

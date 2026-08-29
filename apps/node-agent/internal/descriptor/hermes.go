@@ -74,7 +74,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			Key:           "hermes",
 			Harness:       "hermes",
 			Kind:          "composite",
-			DisplayName:   "Hermes",
+			DisplayName:   h.rootDisplayName(),
 			ParentKey:     nil,
 			WorkspacePath: &homeCopy,
 			Capabilities:  AppendChangesetCap(caps, &homeCopy),
@@ -124,6 +124,46 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 	}
 
 	return stations, nil
+}
+
+// rootDisplayName is the name shown for the root station — the agent the bare
+// `hermes gateway run` serves.
+//
+// It was the literal "Hermes" until 2026-08-29. On a host where the root gateway
+// IS the operator's primary agent that is simply the wrong name, and there was no
+// way to correct it: profile stations take their name from their directory, but
+// the root has no directory to rename, and the hub overwrites `display_name`
+// from this value on every re-adoption — so renaming it in the console does not
+// survive either.
+//
+// Hermes already has the answer. `hermes profile rename default "<name>"` is a
+// supported command whose own help reads "for 'default': a display name — the
+// canonical id stays 'default'", and it writes that name to <home>/profile.yaml.
+// Reading it here means the operator names the agent with Hermes' own tool and
+// the name reaches the console unchanged.
+//
+// Falls back to "Hermes" whenever the file is absent or unreadable, so hosts
+// that have never been renamed behave exactly as before.
+func (h *hermesDescriptor) rootDisplayName() string {
+	const fallback = "Hermes"
+	data, err := os.ReadFile(filepath.Join(h.home, "profile.yaml"))
+	if err != nil {
+		return fallback
+	}
+	// Line-by-line, for the same reason mxidFromConfigYAML is: no YAML
+	// dependency, and only the intended field is ever read.
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "display_name:") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "display_name:"))
+		name = strings.Trim(name, `"'`)
+		if name != "" {
+			return name
+		}
+	}
+	return fallback
 }
 
 // hermesMatrixDomain is the default Matrix homeserver domain hint passed to the
