@@ -110,7 +110,10 @@ the scar behind it. Reject at minimum:
 
 ## 5. AgentPod hub — 6 changes
 
-1. **`POST /api/bridge/kaambaan/push`** — verifies `X-Kaambaan-Signature`
+1. **`POST /public/bridge/kaambaan/push`** — under `/public`, not `/api`, as
+   built: `/api/*` carries the CSRF middleware, which passes `Bearer` and would
+   reject an HMAC-signed body. `runtime-callback.ts` is already there for the
+   same reason. (The spec first said `/api`.) — verifies `X-Kaambaan-Signature`
    (HMAC-SHA256 over the exact bytes). **Must be CSRF-exempt**: it is a signed
    webhook, not a browser POST, and the middleware skips only Bearer today.
 2. **`matrix_gate_events`** — `gate_id` primary key → `event_id`, `room_id`,
@@ -172,6 +175,32 @@ card advances; and `gates.decided_by` reads the human's principal id — **not t
 bridge's**. That is the failure
 `charter → decisions/2026-08-14-approvals-cross-planes-as-events.md` exists to
 prevent, and it is the only thing this slice must prove.
+
+## 7a. What was built, and what was not (2026-08-30)
+
+Built and tested: the fixture; kaambaan's `gate.pending` and the alarm that
+drains the queue; hub-token gate resolution proven to record the human; the hub's
+signed receiver, projection and inbound decision handler; supermessage's renderer
+and send path; the iOS wiring.
+
+**Not built — the token that asserts another principal.** `handleGateDecision`
+performs the attribution and every refusal, but `resolveGate` is an injected
+seam. `GET /api/auth/token` mints only for the caller's own session and the
+Application Service has none, so closing this means signing with the key in the
+`jwks` table or adding a server-side mint for a named subject. That is a decision
+about how a service asserts someone else's identity — a service that can mint a
+token for any principal can approve anything — and it is the one part of this
+design that should not land unreviewed.
+
+**Not built — the reconciliation sweep** (§5.4). Push turned out to be
+at-least-once already, which lowers its urgency, but a gate whose deliveries all
+dead-letter is still silent.
+
+**Not verified — Android.** No NDK on the build machine, so the bindings were not
+regenerated and the Kotlin was not compiled. The Compose wiring is written and
+mirrors the Swift; treat it as unbuilt.
+
+**Not verified — any device.** iOS builds; nobody has tapped a button.
 
 ## 8. Explicitly not in this slice
 
