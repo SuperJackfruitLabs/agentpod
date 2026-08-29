@@ -11,6 +11,8 @@ import { authMiddleware } from './auth/middleware.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
+import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
+import { tenantForBoard } from './services/matrix-as/gates.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -155,6 +157,25 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // POST /public/bridge/kaambaan/push — a board telling us a gate is open.
+  //
+  // Under /public, not /api, because the caller is a Worker holding a signing
+  // secret rather than a browser holding a session — and /api/* carries the
+  // CSRF middleware, which passes Bearer and would reject an HMAC-signed body.
+  // `runtime-callback.ts` is already mounted here for the same reason.
+  app.route(
+    '/public',
+    createKaambaanPushRoutes({
+      secret: process.env.KAAMBAAN_PUSH_SECRET,
+      domain: matrixBridge.config.domain,
+      boardBaseUrl: process.env.KAAMBAAN_BOARD_URL,
+      tenantIdFor: tenantForBoard,
+      sendText: (userId, roomId, body) => matrixBridge.client.sendText(userId, roomId, body),
+      sendCustomEvent: (userId, roomId, eventType, content) =>
+        matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+    }),
+  );
+
   app.route(
     '/_matrix/app/v1',
     createMatrixAsRoutes({

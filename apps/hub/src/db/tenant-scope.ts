@@ -40,6 +40,7 @@ import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
 import {
   matrixAsTransactions,
+  matrixGateEvents,
   matrixRooms,
   matrixMissions,
   matrixMissionMembers,
@@ -110,6 +111,7 @@ export const TENANT_SCOPED_TABLES = {
   agentTasks,
   cloudflareSandboxes,
   matrixRooms,
+  matrixGateEvents,
   matrixMissions,
   matrixMissionMembers,
   matrixSpaces,

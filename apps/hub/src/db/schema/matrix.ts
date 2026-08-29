@@ -143,3 +143,49 @@ export const matrixMissionMembers = pgTable(
   },
   (t) => [index("matrix_mission_members_tenant_id_idx").on(t.tenantId)]
 );
+
+/**
+ * One kaambaan gate, one Matrix event.
+ *
+ * The record that makes the delivery path safe to retry. kaambaan's push is
+ * at-least-once within a cap, its alarm re-picks failed rows, and the
+ * reconciliation sweep asks independently which pending gates have no event —
+ * so the same gate arrives here more than once **by design**. Without this, each
+ * arrival would post the question again and a reader would be asked to approve
+ * one thing three times.
+ *
+ * `gateId` is the primary key rather than a surrogate with a unique index,
+ * because the gate is the identity: there is no such thing as two projections
+ * of one gate, and a schema able to represent one will eventually hold one.
+ */
+export const matrixGateEvents = pgTable(
+  "matrix_gate_events",
+  {
+    gateId: text("gate_id").primaryKey(),
+    /**
+     * Carried rather than derived through the room, for the same reason
+     * `matrixRooms` carries it: "reachable only through a scoped parent" is a
+     * claim about the routes that exist today.
+     */
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** kaambaan's board, needed to address the resolution endpoint. */
+    boardId: text("board_id").notNull(),
+    cardId: text("card_id").notNull(),
+    roomId: text("room_id").notNull(),
+    /** The event the gate was posted as — what a decision references. */
+    eventId: text("event_id").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("matrix_gate_events_tenant_id_idx").on(t.tenantId),
+    /**
+     * The reverse direction. A decision arrives holding the event it references
+     * and needing the gate; the sweep goes the other way. Unique because two
+     * gates projected onto one event would make the first question
+     * unanswerable.
+     */
+    uniqueIndex("matrix_gate_events_event_idx").on(t.eventId),
+  ]
+);

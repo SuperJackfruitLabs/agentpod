@@ -372,6 +372,13 @@
       "when": 1786687171202,
       "tag": "0052_node_spaces",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786687172202,
+      "tag": "0053_matrix_gate_events",
+      "breakpoints": true
     }
   ]
 }
