@@ -144,6 +144,24 @@ export interface MatrixClient {
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
 }
 
+/**
+ * A registration refused because the identity already exists.
+ *
+ * Typed rather than a string match, for the same reason `GrantReachDenied` is:
+ * the caller has to *decide* what to do about it, and deciding on a substring of
+ * an error message is how that breaks silently later.
+ */
+export class MatrixUserInUse extends Error {
+  readonly errcode = "M_USER_IN_USE";
+  constructor(localpart: string) {
+    super(`matrix register ${localpart} refused: the identity already exists`);
+    this.name = "MatrixUserInUse";
+  }
+}
+
+export const isMatrixUserInUse = (e: unknown): e is MatrixUserInUse =>
+  e instanceof MatrixUserInUse;
+
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
   const doFetch = deps.fetch ?? fetch;
 
@@ -245,6 +263,11 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       // for credentials to an identity that already has some, and answering with
       // nothing would leave a harness holding no token while believing it does.
       if (res.status < 200 || res.status >= 300) {
+        // Distinguished from every other failure because it is the one the
+        // caller can act on: the identity exists, so rotate it instead.
+        if (String(res.body.errcode ?? "") === "M_USER_IN_USE") {
+          throw new MatrixUserInUse(localpart);
+        }
         throw new Error(
           `matrix register ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
         );

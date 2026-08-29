@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { createMatrixClient } from "./client";
+import { createMatrixClient, isMatrixUserInUse } from "./client";
 
 /**
  * Speaking to a homeserver *as* a station.
@@ -280,5 +280,29 @@ describe("rotateCredentials", () => {
     await expect(client().rotateCredentials("agent_box_pi-x")).rejects.toThrow(
       /no access_token/
     );
+  });
+});
+
+describe("registerWithCredentials", () => {
+  test("throws a typed error when the identity already exists", async () => {
+    replies = [{ status: 400, body: { errcode: "M_USER_IN_USE" } }];
+
+    const err = await client()
+      .registerWithCredentials("agent_box_pi-x")
+      .catch((e: unknown) => e);
+
+    // Typed, so the caller can branch on it without matching a message.
+    expect(isMatrixUserInUse(err)).toBe(true);
+  });
+
+  test("any other failure stays an ordinary error", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    const err = await client()
+      .registerWithCredentials("agent_box_pi-x")
+      .catch((e: unknown) => e);
+
+    expect(isMatrixUserInUse(err)).toBe(false);
+    expect(String(err)).toContain("M_FORBIDDEN");
   });
 });
