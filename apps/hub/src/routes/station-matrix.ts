@@ -24,6 +24,7 @@ import { nodes } from "../db/schema/nodes";
 import { requireIssueCredentials } from "../services/grant-reach";
 import { isGrantReachDenied } from "../services/control-pair";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "../services/matrix-as/names";
+import { isMatrixUserInUse } from "../services/matrix-as/client";
 import type { AuthUser } from "../auth/middleware";
 
 export interface IssuedCredentials {
@@ -125,26 +126,33 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
 
       const localpart = bridgeLocalpart(station.nodeName, station.stationKey);
 
-      // An identity provisioned earlier already exists, so "already registered"
-      // is the normal case here rather than an error — but replacing its
-      // credentials needs the homeserver's admin account.
-      const alreadyHasIdentity = station.mode === "harness";
+      // Register, and rotate if the identity turns out to already exist.
+      //
+      // An earlier version branched on `station.mode === "harness"`, which reads
+      // as "does this identity exist" and is not. The bridge provisions an
+      // identity for every station it adopts, so a station in `bridge` mode has
+      // one too — it simply does not hold its own credentials. Every station on
+      // a real deployment was therefore sent down the `register` path and every
+      // one of them failed `M_USER_IN_USE`, which reached the operator as a 500.
+      //
+      // The homeserver is the authority on whether a user exists, so this asks
+      // it rather than inferring from a column that means something else.
       let issued: IssuedCredentials;
-
-      if (alreadyHasIdentity) {
+      try {
+        issued = await deps.credentials.register(localpart);
+      } catch (e) {
+        if (!isMatrixUserInUse(e)) throw e;
         if (!deps.credentials.rotate) {
           return c.json(
             {
               error:
-                "This identity already exists, and rotating its credentials needs the " +
-                "homeserver admin account, which this hub is not configured with.",
+                "This identity already exists, and rotating its credentials needs a " +
+                "capability this hub is not configured with.",
             },
             409
           );
         }
         issued = await deps.credentials.rotate(localpart);
-      } else {
-        issued = await deps.credentials.register(localpart);
       }
 
       await db

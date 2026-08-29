@@ -6,6 +6,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
+import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 
 /**
  * Registering an agent's Matrix identity, without an admin credential on a node.
@@ -30,6 +31,8 @@ let provisioned: string[] = [];
 let issued: Array<{ localpart: string }> = [];
 let rotated: Array<{ localpart: string }> = [];
 let canRotate = true;
+/** The homeserver already has this localpart — the normal case on a real deployment. */
+let identityExists = false;
 let logged: string[] = [];
 
 function app() {
@@ -40,6 +43,7 @@ function app() {
     },
     credentials: {
       register: async (localpart: string) => {
+        if (identityExists) throw new MatrixUserInUse(localpart);
         issued.push({ localpart });
         return {
           userId: `@${localpart}:${DOMAIN}`,
@@ -94,6 +98,7 @@ beforeEach(async () => {
   rotated = [];
   logged = [];
   canRotate = true;
+  identityExists = false;
   await rawSql`UPDATE stations SET matrix_identity_mode = 'bridge' WHERE id = ${STATION}`;
 });
 
@@ -189,7 +194,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     // The identity is provisioned long before anyone asks for credentials, so
     // "already registered" is the normal case, not an error.
     await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
-    await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${STATION}`;
+    identityExists = true;
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
 
@@ -205,12 +210,41 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     // is not configured, the honest answer is that this cannot be done here —
     // not a 500, and not a silent no-op that leaves a harness without a token.
     canRotate = false;
+    identityExists = true;
     await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
-    await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${STATION}`;
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
 
     expect(res.status).toBe(409);
-    expect((await res.text()).toLowerCase()).toMatch(/admin|rotate|configur/);
+    expect((await res.text()).toLowerCase()).toMatch(/rotate|configur/);
+  });
+
+  test("a station in BRIDGE mode whose identity exists is rotated, not refused", async () => {
+    // The regression this file did not have. The bridge provisions an identity
+    // for every station it adopts, so a station in `bridge` mode has one — it
+    // simply does not hold its own credentials. Branching on the mode sent every
+    // station on a real deployment down the register path, where all 32 of them
+    // failed M_USER_IN_USE and the operator saw a 500.
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await rawSql`UPDATE stations SET matrix_identity_mode = 'bridge' WHERE id = ${STATION}`;
+    identityExists = true;
+
+    const res = await post(`/stations/${STATION}/matrix/credentials`);
+
+    expect(res.status).toBe(200);
+    expect(rotated).toHaveLength(1);
+    expect(issued).toHaveLength(0);
+    expect(((await res.json()) as { mode: string }).mode).toBe("harness");
+  });
+
+  test("registers, without rotating, when the identity is genuinely new", async () => {
+    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    identityExists = false;
+
+    const res = await post(`/stations/${STATION}/matrix/credentials`);
+
+    expect(res.status).toBe(200);
+    expect(issued).toHaveLength(1);
+    expect(rotated).toHaveLength(0);
   });
 });
