@@ -306,3 +306,78 @@ describe("registerWithCredentials", () => {
     expect(String(err)).toContain("M_FORBIDDEN");
   });
 });
+
+describe("join, leave, isJoined — what the mxid migration needs", () => {
+  test("join impersonates the new user against the join endpoint", async () => {
+    await client().join(USER, ROOM);
+
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toContain(`/join/${encodeURIComponent(ROOM)}`);
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("joining a room the user is already in is not an error", async () => {
+    // What makes it safe to call unconditionally on a re-run: the endpoint's
+    // own idempotence, not a flag this script keeps.
+    replies = [{ status: 200, body: { room_id: ROOM } }];
+
+    await client().join(USER, ROOM);
+  });
+
+  test("a real failure to join surfaces", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN", error: "not in namespace" } }];
+
+    await expect(client().join(USER, ROOM)).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("leave impersonates the old user against the room's leave endpoint", async () => {
+    await client().leave(USER, ROOM);
+
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toContain(`/rooms/${encodeURIComponent(ROOM)}/leave`);
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("isJoined reads the user's own joined_rooms, not a room membership list", async () => {
+    replies = [{ status: 200, body: { joined_rooms: [ROOM, "!other:id.agentpod.dev"] } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(true);
+    expect(calls[0]!.url).toContain("/joined_rooms");
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("isJoined is false once the room drops out of joined_rooms", async () => {
+    replies = [{ status: 200, body: { joined_rooms: ["!other:id.agentpod.dev"] } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(false);
+  });
+});
+
+describe("account data — the read-modify-write m.direct needs", () => {
+  test("a type never set answers null, not an error", async () => {
+    replies = [{ status: 404, body: { errcode: "M_NOT_FOUND" } }];
+
+    expect(await client().getAccountData(USER, "m.direct")).toBeNull();
+  });
+
+  test("existing content comes back as-is, for the caller to merge", async () => {
+    replies = [{ status: 200, body: { "@old:h": ["!r:h"] } }];
+
+    expect(await client().getAccountData(USER, "m.direct")).toEqual({ "@old:h": ["!r:h"] });
+  });
+
+  test("a real failure reading account data surfaces", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    await expect(client().getAccountData(USER, "m.direct")).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("setAccountData writes the whole object as the given user", async () => {
+    await client().setAccountData(USER, "m.direct", { "@new:h": ["!r:h"] });
+
+    expect(calls[0]!.method).toBe("PUT");
+    expect(calls[0]!.url).toContain("/account_data/m.direct");
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+    expect(calls[0]!.body).toEqual({ "@new:h": ["!r:h"] });
+  });
+});

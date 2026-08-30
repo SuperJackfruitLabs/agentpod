@@ -105,6 +105,42 @@ export interface MatrixClient {
   ): Promise<void>;
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /**
+   * Join a room as a virtual user. The AS owns the whole `@agent_.*`
+   * namespace, so this needs no invite.
+   *
+   * Idempotent by the ordinary meaning of the Matrix endpoint: joining a room
+   * you are already in succeeds rather than erroring, which is what makes it
+   * safe for the migration to call unconditionally on a re-run.
+   */
+  join(userId: string, roomId: string): Promise<void>;
+  /**
+   * Leave a room as a virtual user.
+   *
+   * Must be safe to call on a user who is not currently a member — a run that
+   * crashed after a previous leave, and is simply run again, must not throw
+   * over a departure that already happened.
+   */
+  leave(userId: string, roomId: string): Promise<void>;
+  /**
+   * Whether `userId` is currently a member of `roomId`.
+   *
+   * The migration's way of asking "which of this room's steps are already
+   * done" — live membership, not a database flag nothing writes yet.
+   */
+  isJoined(userId: string, roomId: string): Promise<boolean>;
+  /** A user's account data of the given type, or null when it was never set. */
+  getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
+  /**
+   * Replace a user's account data of the given type outright.
+   *
+   * Not a merge: `m.direct` is a map covering every DM the owner has, and a
+   * caller that must preserve the entries it did not come to change — which is
+   * every caller of this for `m.direct` — reads first with `getAccountData`
+   * and writes back the whole object. Blindly writing one entry here is the
+   * single most destructive thing available to a caller of this client.
+   */
+  setAccountData(userId: string, type: string, content: Record<string, unknown>): Promise<void>;
   /** Mark another event — 👀 while working, ✅ done, ❌ failed. */
   sendReaction(
     userId: string,
@@ -576,6 +612,50 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         body: { user_id: invitee },
       });
       assertOkOrAlready("invite", res);
+    },
+
+    async join(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("join", res);
+    },
+
+    async leave(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("leave", res);
+    },
+
+    isJoined,
+
+    async getAccountData(userId, type) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "GET", userId }
+      );
+      // No account data of this type yet — the map this migration reads and
+      // rewrites simply starts empty, same as a profile with no avatar.
+      if (res.status === 404) return null;
+      if (res.status < 200 || res.status >= 300) {
+        throw new Error(
+          `matrix account_data GET ${type} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+        );
+      }
+      return res.body;
+    },
+
+    async setAccountData(userId, type, content) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "PUT", userId, body: content }
+      );
+      assertOkOrAlready("account_data", res);
     },
   };
 }
