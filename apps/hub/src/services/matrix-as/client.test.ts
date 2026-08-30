@@ -351,6 +351,33 @@ describe("join, leave, isJoined — what the mxid migration needs", () => {
 
     expect(await client().isJoined(USER, ROOM)).toBe(false);
   });
+
+  test("a homeserver that could not answer is not the same as 'already left'", async () => {
+    // This is the idempotency check on the only irreversible step in the slice.
+    // Read as `false`, a transient 502 says "the new user never joined" and
+    // "the old user has already left" in the same breath — so the migration
+    // re-joins a user that is already in, then reports the room as done while
+    // the old identity is still sitting in it. Thirty-two rooms with two agents
+    // in them, and a report saying there is nothing left to do.
+    replies = [{ status: 502, body: {} }];
+
+    await expect(client().isJoined(USER, ROOM)).rejects.toThrow(/502/);
+  });
+
+  test("a refusal is not 'already left' either", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN", error: "not in namespace" } }];
+
+    await expect(client().isJoined(USER, ROOM)).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("a 404 is still a clean 'not joined' — the user has no rooms to be in", async () => {
+    // The one non-200 that is an answer rather than a failure to answer: the
+    // homeserver knows nothing of this user, which for the migration's purposes
+    // is exactly "not in that room".
+    replies = [{ status: 404, body: { errcode: "M_NOT_FOUND" } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(false);
+  });
 });
 
 describe("account data — the read-modify-write m.direct needs", () => {
