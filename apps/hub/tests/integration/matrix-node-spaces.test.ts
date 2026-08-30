@@ -3,6 +3,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
+import { createPrincipal } from "../../src/services/principals";
 import { provisionStation } from "../../src/services/matrix-as/provision";
 
 /**
@@ -22,6 +23,17 @@ const NODE = "node_purpose_spaces";
 const A = "station_ps_a";
 const B = "station_ps_b";
 const DOMAIN = "id.agentpod.dev";
+
+/**
+ * The owner's principal, and one agent per station.
+ *
+ * A station with no occupying agent has no handle and therefore no address to
+ * provision, so `provisionStation` returns before it files anything — which
+ * would make every assertion below pass vacuously. And the owner's mxid hangs
+ * off their principal, not their Better Auth id: `principal_identities` is a
+ * foreign key onto `principals.id` now.
+ */
+let OWNER_PRINCIPAL: string;
 
 interface Edge {
   space: string;
@@ -73,6 +85,11 @@ const setPurpose = (stationId: string, purpose: string | null) =>
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "purpose-spaces@example.com", name: "PS" });
+  OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "ps-owner", userId: OWNER });
+  const agentFor: Record<string, string> = {
+    [A]: await createPrincipal({ kind: "agent", handle: "ps-agent-a" }),
+    [B]: await createPrincipal({ kind: "agent", handle: "ps-agent-b" }),
+  };
   const tenant = await resolveTenantForUser(OWNER);
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
   await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
@@ -86,12 +103,12 @@ beforeAll(async () => {
     [B, "openclaw:b"],
   ]) {
     await rawSql`
-      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
-      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, now(), now())`;
+      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
+      VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', ${key}, 'leaf', ${key}, '["acp"]'::jsonb, ${agentFor[id!]!}, now(), now())`;
   }
   await rawSql`
     INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-    VALUES ('pi_ps', ${OWNER}, 'matrix', ${"@owner-ps:" + DOMAIN}, now())
+    VALUES ('pi_ps', ${OWNER_PRINCIPAL}, 'matrix', ${"@owner-ps:" + DOMAIN}, now())
     ON CONFLICT DO NOTHING`;
 });
 
@@ -114,9 +131,9 @@ afterAll(async () => {
     const tenant = await resolveTenantForUser(OWNER);
     await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${A}, ${B})`;
     await rawSql`DELETE FROM matrix_spaces WHERE tenant_id = ${tenant}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE node_id = ${NODE}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('ps-owner', 'ps-agent-a', 'ps-agent-b')`;
     await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
   } catch {
     // cleanup only

@@ -20,7 +20,7 @@ import { principalIdentities } from "../../db/schema/identities";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
-import { principalHandle } from "../principals";
+import { principalHandle, principalForUser } from "../principals";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-provision");
@@ -94,14 +94,32 @@ async function context(stationId: string) {
   return row ?? null;
 }
 
-/** The owner's Matrix id, so the room is not a locked door. */
-async function ownerMxid(principalId: string): Promise<string | null> {
+/**
+ * The owner's Matrix id, so the room is not a locked door.
+ *
+ * Two lookups rather than one, and for the same reason `readerForRoom` in
+ * `index.ts` does it this way: `stations.userId` is a Better Auth id and
+ * `principal_identities.principal_id` holds `prn_…` values now, so handing
+ * this a user id and querying that column directly answers null for every
+ * station in the fleet. It did — the parameter was already named
+ * `principalId` while both call sites passed `s.userId`, and the only visible
+ * symptom was that `ensureRoom` quietly dropped `invite` and `isDirect`, so
+ * every room this created at boot was a room nobody was in but the agent.
+ *
+ * `null` — an owner with no principal, or a principal with no Matrix identity
+ * mapped — is an ordinary answer: the room is still made, so the agent has
+ * somewhere to be, and somebody can be invited later.
+ */
+async function ownerMxid(userId: string): Promise<string | null> {
+  const principal = await principalForUser(userId);
+  if (!principal) return null;
+
   const [row] = await db
     .select({ externalId: principalIdentities.externalId })
     .from(principalIdentities)
     .where(
       and(
-        eq(principalIdentities.principalId, principalId),
+        eq(principalIdentities.principalId, principal.id),
         eq(principalIdentities.system, "matrix")
       )
     );

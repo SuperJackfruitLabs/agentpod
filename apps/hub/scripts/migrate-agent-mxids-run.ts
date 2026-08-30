@@ -52,7 +52,7 @@ import { stations } from "../src/db/schema/stations";
 import { nodes } from "../src/db/schema/nodes";
 import { matrixRooms } from "../src/db/schema/matrix";
 import { principalIdentities } from "../src/db/schema/identities";
-import { principalHandle } from "../src/services/principals";
+import { principalHandle, principalForUser } from "../src/services/principals";
 import { bridgeUserId, localpartFor } from "../src/services/matrix-as/names";
 import { createMatrixClient } from "../src/services/matrix-as/client";
 import { matrixBridgeConfig } from "../src/services/matrix-as/index";
@@ -433,13 +433,27 @@ async function listRoomStations(): Promise<StationRoomRow[]> {
  * The owner's Matrix id, resolved exactly as `provision.ts`'s own `ownerMxid`
  * does — so the address this migration fixes `m.direct` for is the same one
  * provisioning invited in the first place.
+ *
+ * That parity claim was written while both functions were wrong in the same
+ * way, which is the worst thing a parity claim can be: `stations.userId` is a
+ * Better Auth id, `principal_identities.principal_id` holds `prn_…` values,
+ * and querying that column with a user id resolved null for every room in the
+ * fleet — so `m.direct` was never written and every room reported its DM flag
+ * outstanding forever. Both now resolve the principal first, and the parity is
+ * a fact rather than a hope: change one and this must change with it.
  */
 async function ownerMxidFor(userId: string): Promise<string | null> {
+  const principal = await principalForUser(userId);
+  if (!principal) return null;
+
   const [row] = await db
     .select({ externalId: principalIdentities.externalId })
     .from(principalIdentities)
     .where(
-      and(eq(principalIdentities.principalId, userId), eq(principalIdentities.system, "matrix"))
+      and(
+        eq(principalIdentities.principalId, principal.id),
+        eq(principalIdentities.system, "matrix")
+      )
     );
   return row?.externalId ?? null;
 }
