@@ -15,7 +15,7 @@
 
 import { resolveTenantForUser } from "./tenant";
 import { getGrant } from "../services/grants";
-import { principalForUser } from "../services/principals";
+import { principalById, principalForUser } from "../services/principals";
 import type { PrincipalKind } from "../db/schema/organization";
 
 export type { PrincipalKind };
@@ -28,6 +28,14 @@ export type { PrincipalKind };
  */
 const defaultResolvePrincipal = principalForUser;
 
+/**
+ * The default `resolvePrincipalById`, for a caller that already holds a
+ * principal id and must not have it re-resolved through Better Auth (see
+ * `principalById`'s doc comment for why `defaultResolvePrincipal` cannot
+ * stand in for this).
+ */
+const defaultResolvePrincipalById = principalById;
+
 export interface TokenPayload extends Record<string, unknown> {
   sub: string;
   principalKind: PrincipalKind;
@@ -38,19 +46,48 @@ export interface TokenPayload extends Record<string, unknown> {
 }
 
 export interface BuildPayloadInput {
-  user: { id: string };
+  /**
+   * A caller with a Better Auth session. Resolved to a principal via
+   * `resolvePrincipal`. Mutually exclusive with `principalId` below — pass
+   * exactly one.
+   */
+  user?: { id: string };
+  /**
+   * A caller that already holds a principal id, obtained by an explicit
+   * lookup elsewhere (e.g. `principal_identities` by mxid). Trusted as-is:
+   * this id is checked to exist via `resolvePrincipalById`, never
+   * re-resolved through `resolvePrincipal`/Better Auth. This is the path
+   * `mintPrincipalAssertion` uses — its subject is never a session, and
+   * treating it as one would silently answer "no principal" for a principal
+   * that does exist.
+   */
+  principalId?: string;
   /** Injectable so the claim shape is testable without a database. */
   resolveTenant?: (userId: string) => Promise<string | null>;
   /** Injectable for the same reason. Keyed by principal id, not user id. */
   loadGrant?: (
     principalId: string
   ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
-  /** Injectable for the same reason. Defaults to `principalForUser`. */
+  /** Injectable for the same reason. Defaults to `principalForUser`. Used only on the `user` path. */
   resolvePrincipal?: (userId: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
+  /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
+  resolvePrincipalById?: (id: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
 }
 
 /**
  * Build the claims for a principal.
+ *
+ * Takes exactly one of two callers. `user: { id }` is a Better Auth session:
+ * its id is resolved to a principal via `resolvePrincipal`
+ * (`principalForUser` by default), which looks the id up as a Better Auth
+ * external id and can therefore only ever answer for a session. `principalId`
+ * is a caller that already holds a principal id from elsewhere —
+ * `mintPrincipalAssertion` asserting a Matrix sender it looked up in
+ * `principal_identities` — and that id is trusted as-is: it is checked to
+ * exist via `resolvePrincipalById` (`principalById` by default, a lookup by
+ * primary key) and used directly as `sub`, never pushed back through
+ * `resolvePrincipal` where it would read as an unmapped Better Auth id and
+ * fail closed for a principal that is very much real.
  *
  * Resolves the principal FIRST, and refuses to mint when none resolves. A
  * token that verifies but names nobody is not a weaker caller, it is an
@@ -79,22 +116,30 @@ export interface BuildPayloadInput {
  * old issuer silently authorise everything.
  */
 export async function buildTokenPayload(input: BuildPayloadInput): Promise<TokenPayload> {
-  const resolvePrincipal = input.resolvePrincipal ?? defaultResolvePrincipal;
-  const principal = await resolvePrincipal(input.user.id);
+  let principal: { id: string; kind: PrincipalKind } | null;
+  let who: string;
+
+  if (input.principalId !== undefined) {
+    who = input.principalId;
+    const resolveById = input.resolvePrincipalById ?? defaultResolvePrincipalById;
+    principal = await resolveById(input.principalId);
+  } else if (input.user) {
+    who = input.user.id;
+    const resolvePrincipal = input.resolvePrincipal ?? defaultResolvePrincipal;
+    principal = await resolvePrincipal(input.user.id);
+  } else {
+    throw new Error("buildTokenPayload requires either `user` or `principalId`");
+  }
 
   if (!principal) {
-    throw new Error(
-      `refusing to mint a token for ${input.user.id}: no principal resolved`
-    );
+    throw new Error(`refusing to mint a token for ${who}: no principal resolved`);
   }
 
   const resolve = input.resolveTenant ?? resolveTenantForUser;
-  const tenant = await resolve(input.user.id);
+  const tenant = await resolve(who);
 
   if (!tenant) {
-    throw new Error(
-      `refusing to mint a token for ${input.user.id}: no tenant resolved`
-    );
+    throw new Error(`refusing to mint a token for ${who}: no tenant resolved`);
   }
 
   const loadGrant = input.loadGrant ?? getGrant;

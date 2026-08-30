@@ -30,3 +30,35 @@ describe("buildTokenPayload names its principal", () => {
     ).rejects.toThrow(/no principal/);
   });
 });
+
+/**
+ * A caller that already holds a principal id — e.g. a Matrix sender resolved
+ * through `principal_identities` — must never have that id re-resolved
+ * through Better Auth. `mintPrincipalAssertion` (service-signing.ts) is
+ * exactly this caller: it hands `buildTokenPayload` a `prn_…` id it already
+ * trusts, and `defaultResolvePrincipal` (keyed on a Better Auth external id)
+ * cannot answer for it — every gate approval minted this way threw before
+ * this fix.
+ */
+describe("buildTokenPayload for a caller that already holds a principal id", () => {
+  test("mints without re-resolving through Better Auth, and names the right kind", async () => {
+    const payload = await buildTokenPayload({
+      principalId: "prn_0123456789abcdef0123",
+      resolvePrincipalById: async (id) =>
+        id === "prn_0123456789abcdef0123" ? { id, kind: "agent" } : null,
+      resolveTenant: async () => "fleet_00000000000000000000",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false }),
+    });
+    expect(payload.sub).toBe("prn_0123456789abcdef0123");
+    expect(payload.principalKind).toBe("agent");
+  });
+
+  test("refuses to mint for a principal id that does not exist, rather than falling back", async () => {
+    expect(
+      buildTokenPayload({
+        principalId: "prn_doesnotexist00000000",
+        resolvePrincipalById: async () => null,
+      })
+    ).rejects.toThrow(/no principal/);
+  });
+});

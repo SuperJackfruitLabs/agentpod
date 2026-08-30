@@ -55,3 +55,27 @@ export async function principalForUser(
     .limit(1);
   return row ? { id: row.id, kind: row.kind as PrincipalKind } : null;
 }
+
+/**
+ * A principal by its own id, or null.
+ *
+ * For a caller that already holds a `prn_…` id it obtained by an explicit
+ * lookup elsewhere — `mintPrincipalAssertion` reading `principal_identities`
+ * by mxid, for instance — and must never have that id re-resolved through
+ * Better Auth: `principalForUser` looks for a Better Auth external id, which
+ * a principal id is not, and would answer null for every one of these
+ * callers regardless of whether the principal exists.
+ *
+ * Null rather than a fallback, for the same reason `principalForUser` is:
+ * an id that names nobody must fail closed, not mint for a default.
+ */
+export async function principalById(
+  id: string
+): Promise<{ id: string; kind: PrincipalKind } | null> {
+  const [row] = await db
+    .select({ id: principals.id, kind: principals.kind })
+    .from(principals)
+    .where(eq(principals.id, id))
+    .limit(1);
+  return row ? { id: row.id, kind: row.kind as PrincipalKind } : null;
+}

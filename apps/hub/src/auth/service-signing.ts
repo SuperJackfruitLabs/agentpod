@@ -132,7 +132,7 @@ export interface AssertionInput {
  * token would not.
  */
 export async function mintPrincipalAssertion(input: AssertionInput): Promise<string> {
-  const payload = await buildTokenPayload({ user: { id: input.principalId } });
+  const payload = await buildTokenPayload({ principalId: input.principalId });
   const key = await activeKey();
   const privateKey = await importJWK(key.privateJwk, ALG);
 
