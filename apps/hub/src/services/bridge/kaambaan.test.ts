@@ -15,6 +15,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { KaambaanApiError, KaambaanClient, isForeignRun, isLeaseSuperseded } from "./kaambaan";
+import type { GatePendingDelivery } from "../matrix-as/gates";
 
 const TOKEN = `kbn_${"a1b2c3d4".repeat(6)}`;
 const BOARD = "brd_9c1d4e5f6a7b8c9d";
@@ -220,5 +221,44 @@ describe("KaambaanClient — 403 and 409 are different facts", () => {
     const err = (await client.activity(work, { type: "thought" }).catch((e) => e)) as KaambaanApiError;
     expect(err.message).toContain("activities");
     expect(err.message).toContain("no active lease for this run");
+  });
+});
+
+describe("KaambaanClient — pending gates", () => {
+  const gate: GatePendingDelivery = {
+    event: "gate.pending",
+    boardId: BOARD,
+    cardId: "crd_1a2b3c4d5e6f7a8b",
+    gateId: "gate_4e8b",
+    stageKey: "review",
+    returnStageKey: "code",
+    cardTitle: "Add OAuth login",
+    producedBy: "agt_31d0",
+    handoffSummary: "Wrote the haiku.",
+    options: [{ id: "approve", label: "Approve" }],
+    ts: "2026-08-30T00:00:00.000Z",
+  };
+
+  test("reads the gates a board is still waiting on", async () => {
+    const { client, calls } = fakeBoard(() => ({ status: 200, body: { gates: [gate] } }));
+
+    expect(await client.pendingGates()).toEqual([gate]);
+    expect(calls[0]!.url).toBe(`https://board.test/v1/boards/${BOARD}/gates/pending`);
+    expect(calls[0]!.method).toBe("GET");
+    // The agent's own token. The board snapshot carrying the same gates is a
+    // human route, and reaching it would mean asserting a person on a timer.
+    expect(calls[0]!.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+  });
+
+  test("reads an empty board as no gates, not as a failure", async () => {
+    const { client } = fakeBoard(() => ({ status: 200, body: { gates: [] } }));
+    expect(await client.pendingGates()).toEqual([]);
+  });
+
+  test("throws on a refusal rather than reporting a quiet board", async () => {
+    // A rejected token that read as "no gates pending" would let the sweep
+    // report healthy forever while every gate it exists to catch stayed silent.
+    const { client } = fakeBoard(() => ({ status: 401, body: boardError("UNAUTHORIZED") }));
+    await expect(client.pendingGates()).rejects.toBeInstanceOf(KaambaanApiError);
   });
 });

@@ -13,7 +13,8 @@ import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
 import { servicePublicJwks } from './auth/service-signing.ts';
-import { tenantForBoard } from './services/matrix-as/gates.ts';
+import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
+import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -185,6 +186,22 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // How a gate reaches a room, however it got here. Shared by the push
+  // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
+  // be posted by two slightly different projections.
+  const gateProjection = {
+    domain: matrixBridge.config.domain,
+    boardBaseUrl: process.env.KAAMBAAN_BOARD_URL,
+    sendText: (userId: string, roomId: string, body: string) =>
+      matrixBridge.client.sendText(userId, roomId, body),
+    sendCustomEvent: (
+      userId: string,
+      roomId: string,
+      eventType: string,
+      content: Record<string, unknown>,
+    ) => matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+  };
+
   // POST /public/bridge/kaambaan/push — a board telling us a gate is open.
   //
   // Under /public, not /api, because the caller is a Worker holding a signing
@@ -195,14 +212,20 @@ if (matrixBridge) {
     '/public',
     createKaambaanPushRoutes({
       secret: process.env.KAAMBAAN_PUSH_SECRET,
-      domain: matrixBridge.config.domain,
-      boardBaseUrl: process.env.KAAMBAAN_BOARD_URL,
       tenantIdFor: tenantForBoard,
-      sendText: (userId, roomId, body) => matrixBridge.client.sendText(userId, roomId, body),
-      sendCustomEvent: (userId, roomId, eventType, content) =>
-        matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+      ...gateProjection,
     }),
   );
+
+  // …and the floor beneath it. kaambaan retries a push five times and then
+  // dead-letters it, at which point the gate is silent on both sides: a card
+  // blocked on an approval nobody was told about. This asks each board what it
+  // is still waiting on. `projectGate` is idempotent on `gate_id`, so the two
+  // paths are meant to overlap rather than to be arbitrated between.
+  startGateSweeper({
+    tenantIdFor: tenantForBoard,
+    project: (tenantId, delivery) => projectGate(tenantId, delivery, gateProjection),
+  });
 
   app.route(
     '/_matrix/app/v1',
