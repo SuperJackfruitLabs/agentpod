@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, AnyPgC
 import { user } from "./auth";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";
+import { principals } from "./organization";
 
 export const stations = pgTable("stations", {
   id: text("id").primaryKey(),
@@ -38,6 +39,17 @@ export const stations = pgTable("stations", {
    * has said, and an unlabelled station is filed under no Matrix space at all.
    */
   purpose: text("purpose"),
+  /**
+   * The agent that occupies this station, if any.
+   *
+   * Nullable and it stays nullable: a station nobody has assigned is a machine,
+   * not an agent, and it is dispatchable by nobody — which is the behaviour change
+   * charter decisions/2026-08-30-an-agent-is-a-principal.md §3 names.
+   *
+   * Here rather than in `principal_identities` because occupancy is not sameness.
+   * A principal's identities say who it also is; this says where it currently runs.
+   */
+  principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
