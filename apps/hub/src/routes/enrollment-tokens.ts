@@ -3,6 +3,9 @@ import { mintEnrollmentToken } from "../services/enrollment";
 import { requireFleetGrantReach } from "../services/grant-reach";
 import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
 import { principalForUser } from "../services/principals";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger("enrollment-tokens");
 
 /**
  * POST /api/enrollment-tokens
@@ -37,7 +40,10 @@ export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
   try {
     if (isControlPairEnforced()) {
       const principal = await principalForUser(user.id);
-      if (!principal) throw new GrantReachDenied(user.id, "fleet", null);
+      if (!principal) {
+        log.warn("fleet-level reach refused: no principal for this caller", { principalId: user.id });
+        throw new GrantReachDenied(user.id, "fleet", null);
+      }
       await requireFleetGrantReach(principal.id);
     }
   } catch (e) {
