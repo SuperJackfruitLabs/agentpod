@@ -47,6 +47,21 @@ describe("the gate event's wire shape", () => {
     }
   });
 
+  test("carries the work the reviewer is being asked to approve", () => {
+    // supermessage#37. A gate that shows a title and no work asks someone to
+    // approve something they cannot see.
+    const c = gateEventContent({ ...DELIVERY, handoffSummary: "Wrote the haiku." });
+    expect(c.handoff_summary).toBe("Wrote the haiku.");
+    expect(c.schema_version).toBe(2);
+  });
+
+  test("omits the summary entirely when the board sent none", () => {
+    // A board that predates this sends nothing, and an empty row reads like a
+    // card that failed to load.
+    expect(gateEventContent(DELIVERY).handoff_summary).toBeUndefined();
+    expect(gateEventContent({ ...DELIVERY, handoffSummary: null }).handoff_summary).toBeUndefined();
+  });
+
   test("carries none of the four fields kaambaan#34 proposed that do not exist", () => {
     // run_id and task_id name no column; gates do not expire; tenant_id is
     // kaambaan's internal boundary and a room can be wider than a board.
