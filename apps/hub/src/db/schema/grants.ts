@@ -22,7 +22,7 @@
 
 import { sql } from "drizzle-orm";
 import { pgTable, text, boolean, timestamp, check } from "drizzle-orm/pg-core";
-import { user } from "./auth";
+import { principals } from "./organization";
 
 export const principalGrants = pgTable(
   "principal_grants",
@@ -35,7 +35,7 @@ export const principalGrants = pgTable(
      */
     principalId: text("principal_id")
       .primaryKey()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .references(() => principals.id, { onDelete: "cascade" }),
 
     /**
      * Namespaced agent patterns this principal may dispatch.
