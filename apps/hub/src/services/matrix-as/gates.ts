@@ -147,28 +147,27 @@ async function roomForCard(
  */
 export function gateProseBody(d: GatePendingDelivery, link?: string): string {
   const where = `at stage \`${d.stageKey}\``;
-  const tail = link ? ` [Open the board](${link})` : "";
+  const tail = link ? ` [Open the card](${link})` : "";
   return `Approval needed — "${d.cardTitle}" ${where}. Approve, request changes, or reject.${tail}`;
 }
 
 /**
- * Where "open the board" goes.
+ * Where the card's link goes.
  *
- * **The board app, not the card.** kaambaan#34's example showed
- * `…/b/BOARD/c/CARD` and this projected that shape for a day; it returns 404,
- * because kaambaan's web app has no routing at all — no `$page`, no
- * `searchParams`, no `goto`, no card route anywhere in that repo. A card is
- * simply not addressable by URL yet.
+ * `…/b/<board>/c/<card>` — the address kaambaan#34 assumed and kaambaan did
+ * not have. This projected that shape for a day and it returned 404, because
+ * the board app had no routing at all: one page, no `$page`, no
+ * `searchParams`, no card route. It was briefly changed to the app root, and
+ * is now back to the card because kaambaan/#47 made cards addressable.
  *
- * So this links to the app a reader can reach, and the label says so. Sending
- * an address for a page that does not exist is worse than sending none: it
- * spends the reader's tap and returns an error that looks like the gate is
- * broken. Tracked as a kaambaan issue; when cards become addressable this
- * becomes a one-line change and the fixture gains a real deep link.
+ * Worth keeping the history in view: the field was in the schema and in the
+ * tests for a day before anyone tapped it. A test that asserts a link is
+ * *present* proves nothing about whether it *resolves*, which is why the
+ * kaambaan side is covered by end-to-end tests that follow it.
  */
-function boardLink(baseUrl?: string): string | undefined {
+function boardLink(baseUrl: string | undefined, boardId: string, cardId: string): string | undefined {
   if (!baseUrl) return undefined;
-  return baseUrl.replace(/\/+$/, "") + "/";
+  return `${baseUrl.replace(/\/+$/, "")}/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(cardId)}`;
 }
 
 /** The custom event's content. Pinned by the shared fixture. */
@@ -237,7 +236,7 @@ export async function projectGate(
   // `@agent_.*` namespace, where the appservice may not act — a 403 that
   // arrives later and elsewhere. See `names.ts`.
   const stationUser = bridgeUserId(found.nodeName, found.stationKey, deps.domain);
-  const deepLink = boardLink(deps.boardBaseUrl);
+  const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 
   // Prose first, deliberately: if only one lands, leave the room with a
   // readable question and no buttons rather than buttons and no context.
