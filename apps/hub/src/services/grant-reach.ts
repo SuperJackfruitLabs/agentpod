@@ -12,11 +12,13 @@
  * Design: `docs/superpowers/specs/2026-08-15-granting-reach-design.md`.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema";
-import { getGrant, grantAllowsStation, AGENTPOD_NS } from "./grants";
+import { principalIdentities } from "../db/schema/identities";
+import { getGrant, grantAllowsStation } from "./grants";
+import { isUserAdmin } from "../models/admin-users";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
 
@@ -146,27 +148,44 @@ export async function requireIssueCredentials(
 }
 
 /**
- * Guard an act that names no station — minting an enrollment token today, the
- * credential broker later.
+ * Is this principal an admin?
  *
- * There is no station to match a pattern against, so the rule is narrower: you
- * may grow a fleet only if your authority already spans it. The alternative —
- * the boolean alone — would let a principal scoped to one node add machines
- * indefinitely, which is the "register an agent" half of Decision 4's threat
- * restated.
+ * Resolves through the same identity the login session came from —
+ * `principal_identities` where `system = "better-auth"` — and asks the
+ * question the Better Auth admin plugin already answers for `/api/admin/*`:
+ * is `role` on that `user` row `"admin"`. No second notion of admin is
+ * introduced here; a principal with no linked Better Auth identity (an agent,
+ * a service) is simply not an admin.
  */
-export async function requireFleetGrantReach(userId: string): Promise<void> {
+async function isAdminPrincipal(principalId: string): Promise<boolean> {
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
+      and(
+        eq(principalIdentities.principalId, principalId),
+        eq(principalIdentities.system, "better-auth")
+      )
+    )
+    .limit(1);
+
+  if (!identity) return false;
+  return isUserAdmin(identity.externalId);
+}
+
+/**
+ * Growing a fleet is an admin act.
+ *
+ * This used to require `mayGrantReach` plus a dispatch value whose node half was
+ * `*` — "you may grow a fleet only if your authority already spans it". With no
+ * wildcards there is no way to say "spans", and
+ * 2026-08-15-granting-reach-is-changing-an-agent explicitly rejected a second
+ * scoped list as the asymmetric-grant hazard restated. Admin is the honest
+ * remaining answer, and /api/admin/grants is already guarded that way.
+ */
+export async function requireFleetGrantReach(principalId: string): Promise<void> {
   if (!isControlPairEnforced()) return;
-
-  const grant = await getGrant(userId);
-  const fleetWide =
-    grant?.mayGrantReach === true &&
-    grant.mayDispatch.some(
-      (v) => v.startsWith(AGENTPOD_NS) && v.slice(AGENTPOD_NS.length).startsWith("*/")
-    );
-
-  if (!fleetWide) {
-    log.warn("fleet-level reach refused by the control pair", { principalId: userId });
-    throw new GrantReachDenied(userId, "fleet", null);
-  }
+  if (await isAdminPrincipal(principalId)) return;
+  log.warn("fleet-level reach refused: not an admin", { principalId });
+  throw new GrantReachDenied(principalId, "fleet", null);
 }
