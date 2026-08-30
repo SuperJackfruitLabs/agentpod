@@ -80,26 +80,51 @@ func mxidFromConfigYAML(profileDir string) *string {
 		return nil
 	}
 
-	// Look for bare scalar keys: "user_id:", "mxid:", or nested "matrix:" section
-	// with "  user_id:" beneath it. We use simple line scanning (no YAML parser
-	// dependency) — sufficient for this use-case and avoids parsing side-channels.
+	// A station's own Matrix id lives at the top level of the file, or as an
+	// IMMEDIATE child of `matrix:`. Depth is the whole point of this function.
+	//
+	// The first version matched `user_id:` at any indentation and tracked a
+	// `matrix:` section it then never consulted. That is not a style problem. A
+	// Hermes profile with a home channel looks like this:
+	//
+	//	platforms:
+	//	  matrix:
+	//	    home_channel:
+	//	      user_id: '@rakesh:id.agentpod.dev'
+	//
+	// and that `user_id` is correct config — it names the human counterpart of
+	// the DM. Read as the station's own identity it made the operator's mxid
+	// ambiguous, so `resolveMatrixId` could attribute nothing they sent; it made
+	// the agent's messages attributable to them; and it made fleet liveness
+	// check the operator's phone to decide whether an agent was alive. The fleet
+	// reported 14/14 throughout.
+	//
+	// Line scanning still, rather than a YAML dependency — but indentation is
+	// now read instead of ignored.
 	lines := strings.Split(string(data), "\n")
-	inMatrixSection := false
+	matrixIndent := -1 // indent of the `matrix:` key, or -1 when outside it
+	childIndent := -1  // indent of its immediate children, learned from the first
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-
-		// Detect "matrix:" section header (no value on the same line).
-		if trimmed == "matrix:" {
-			inMatrixSection = true
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		// Exit the matrix section when we see a non-indented key.
-		if inMatrixSection && len(line) > 0 && line[0] != ' ' && line[0] != '\t' && line[0] != '#' && line[0] != '\n' {
-			inMatrixSection = false
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+
+		// Leaving the matrix section: a key at or above its own indentation.
+		if matrixIndent >= 0 && indent <= matrixIndent {
+			matrixIndent, childIndent = -1, -1
 		}
 
-		// Match "user_id: <value>" and "mxid: <value>" at any indentation level,
-		// or within the matrix section.
+		if trimmed == "matrix:" {
+			matrixIndent, childIndent = indent, -1
+			continue
+		}
+
+		if matrixIndent >= 0 && childIndent == -1 {
+			childIndent = indent
+		}
+
 		var value string
 		switch {
 		case strings.HasPrefix(trimmed, "user_id:"):
@@ -110,8 +135,15 @@ func mxidFromConfigYAML(profileDir string) *string {
 			continue
 		}
 
-		// Strip surrounding quotes if present.
-		value = strings.Trim(value, `"'`)
+		// Top level, or an immediate child of `matrix:`. Anything deeper belongs
+		// to some other object and is not this station's identity.
+		atTopLevel := matrixIndent < 0 && indent == 0
+		isMatrixChild := matrixIndent >= 0 && indent == childIndent
+		if !atTopLevel && !isMatrixChild {
+			continue
+		}
+
+		value = strings.Trim(value, `"\'`)
 
 		if m := validateMXID(value); m != nil {
 			return m
