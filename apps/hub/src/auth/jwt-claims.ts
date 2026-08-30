@@ -45,23 +45,37 @@ export interface TokenPayload extends Record<string, unknown> {
   mayGrantReach: boolean;
 }
 
-export interface BuildPayloadInput {
-  /**
-   * A caller with a Better Auth session. Resolved to a principal via
-   * `resolvePrincipal`. Mutually exclusive with `principalId` below — pass
-   * exactly one.
-   */
-  user?: { id: string };
-  /**
-   * A caller that already holds a principal id, obtained by an explicit
-   * lookup elsewhere (e.g. `principal_identities` by mxid). Trusted as-is:
-   * this id is checked to exist via `resolvePrincipalById`, never
-   * re-resolved through `resolvePrincipal`/Better Auth. This is the path
-   * `mintPrincipalAssertion` uses — its subject is never a session, and
-   * treating it as one would silently answer "no principal" for a principal
-   * that does exist.
-   */
-  principalId?: string;
+/**
+ * Exactly one subject. A discriminated union rather than two optional
+ * fields: two optionals would let a caller pass both, and would need a
+ * runtime rule (and a comment) to say which wins. Making it a compile error
+ * to pass both means the ambiguity cannot exist rather than merely being
+ * documented not to.
+ */
+type BuildPayloadSubject =
+  | {
+      /**
+       * A caller with a Better Auth session. Resolved to a principal via
+       * `resolvePrincipal`.
+       */
+      user: { id: string };
+      principalId?: never;
+    }
+  | {
+      /**
+       * A caller that already holds a principal id, obtained by an explicit
+       * lookup elsewhere (e.g. `principal_identities` by mxid). Trusted
+       * as-is: this id is checked to exist via `resolvePrincipalById`,
+       * never re-resolved through `resolvePrincipal`/Better Auth. This is
+       * the path `mintPrincipalAssertion` uses — its subject is never a
+       * session, and treating it as one would silently answer "no
+       * principal" for a principal that does exist.
+       */
+      principalId: string;
+      user?: never;
+    };
+
+export type BuildPayloadInput = BuildPayloadSubject & {
   /** Injectable so the claim shape is testable without a database. */
   resolveTenant?: (userId: string) => Promise<string | null>;
   /** Injectable for the same reason. Keyed by principal id, not user id. */
@@ -72,7 +86,7 @@ export interface BuildPayloadInput {
   resolvePrincipal?: (userId: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
   /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
   resolvePrincipalById?: (id: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
-}
+};
 
 /**
  * Build the claims for a principal.
@@ -123,12 +137,10 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     who = input.principalId;
     const resolveById = input.resolvePrincipalById ?? defaultResolvePrincipalById;
     principal = await resolveById(input.principalId);
-  } else if (input.user) {
+  } else {
     who = input.user.id;
     const resolvePrincipal = input.resolvePrincipal ?? defaultResolvePrincipal;
     principal = await resolvePrincipal(input.user.id);
-  } else {
-    throw new Error("buildTokenPayload requires either `user` or `principalId`");
   }
 
   if (!principal) {
