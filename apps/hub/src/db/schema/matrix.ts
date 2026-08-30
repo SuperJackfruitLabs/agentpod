@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
+import { principals } from "./organization";
 
 /**
  * Applied Application Service transactions.
@@ -40,6 +41,24 @@ export const matrixRooms = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     stationId: text("station_id").notNull(),
+    /**
+     * The occupying agent this room now speaks to, once Task 9's migration has
+     * run — added, not swapped in for `stationId`.
+     *
+     * `gates.ts` (`roomForCard`, `roomAgentUser`) and `gate-sweep.ts` join on
+     * `stationId`, and `gate-sweep.ts` is deployed in production today —
+     * re-keying this table onto `principalId` inside this slice would break
+     * the approvals chain that is this slice's own exit test. `stationId`
+     * stays the column every current reader uses; this is redundant with it,
+     * not a replacement for it. Retiring `stationId` is a later slice's own
+     * migration, once every reader has moved.
+     *
+     * Nullable because it starts empty for every existing row — Task 9's
+     * migration backfills it room by room as each one is re-addressed — and
+     * because a station can lose its occupant (`stations.principalId` is
+     * itself nullable) after ever having had one.
+     */
+    principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
     alias: text("alias").notNull(),
     /** The ACP session this room is talking to, if one is open. */
     acpSessionId: text("acp_session_id"),
@@ -57,6 +76,9 @@ export const matrixRooms = pgTable(
   (t) => [
     index("matrix_rooms_tenant_id_idx").on(t.tenantId),
     uniqueIndex("matrix_rooms_station_idx").on(t.stationId),
+    /** One room per occupying agent too, mirroring the station invariant
+     *  above — multiple NULLs are fine and expected before migration. */
+    uniqueIndex("matrix_rooms_principal_idx").on(t.principalId),
     foreignKey({
       columns: [t.stationId, t.tenantId],
       foreignColumns: [stations.id, stations.tenantId],
