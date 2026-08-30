@@ -25,6 +25,7 @@ import { requireIssueCredentials } from "../services/grant-reach";
 import { isGrantReachDenied } from "../services/control-pair";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "../services/matrix-as/names";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
+import { principalHandle } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
 
 export interface IssuedCredentials {
@@ -64,11 +65,25 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         nodeName: nodes.name,
         stationKey: stations.stationKey,
         mode: stations.matrixIdentityMode,
+        principalId: stations.principalId,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
       .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
     return row ?? null;
+  }
+
+  /**
+   * The handle of the agent occupying a station, or null.
+   *
+   * A station with no occupying principal has no handle and therefore no
+   * agent mxid — never invented from `(nodeName, stationKey)`, which is
+   * exactly the station-derived identity this file stopped minting. Every
+   * caller treats null as a 409, failing visibly rather than building an
+   * address for nobody.
+   */
+  async function occupyingHandle(station: { principalId: string | null }): Promise<string | null> {
+    return station.principalId ? principalHandle(station.principalId) : null;
   }
 
   return new Hono()
@@ -86,8 +101,19 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
 
       await deps.provisionStation(station.id);
 
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so it has no Matrix identity of its own.",
+          },
+          409
+        );
+      }
+
       return c.json({
-        mxid: bridgeUserId(station.nodeName, station.stationKey, deps.domain),
+        mxid: bridgeUserId(handle, deps.domain),
         alias: bridgeAlias(station.nodeName, station.stationKey, deps.domain),
         mode: station.mode,
       });
@@ -124,7 +150,18 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         );
       }
 
-      const localpart = bridgeLocalpart(station.nodeName, station.stationKey);
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so it has no Matrix identity to issue credentials for.",
+          },
+          409
+        );
+      }
+
+      const localpart = bridgeLocalpart(handle);
 
       // Register, and rotate if the identity turns out to already exist.
       //

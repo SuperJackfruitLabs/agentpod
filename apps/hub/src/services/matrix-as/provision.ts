@@ -20,6 +20,7 @@ import { principalIdentities } from "../../db/schema/identities";
 import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
+import { principalHandle } from "../principals";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-provision");
@@ -81,6 +82,7 @@ async function context(stationId: string) {
       identityMode: stations.matrixIdentityMode,
       harnessMxid: stations.matrixId,
       purpose: stations.purpose,
+      principalId: stations.principalId,
       nodeName: nodes.name,
       roomId: matrixRooms.roomId,
       spaceRoomId: matrixRooms.spaceRoomId,
@@ -113,19 +115,32 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   const bridged = s.identityMode === "bridge";
 
   // Whoever answers in this room is who creates it. For a bridge-mode station
-  // that is the identity we mint; for a harness-mode one it is the account the
-  // harness already holds, and if it has none there is nobody to create the
-  // room as — inventing one would be the bridge answering for a station that is
-  // supposed to answer for itself.
-  const speaker = bridged
-    ? bridgeUserId(s.nodeName, s.stationKey, deps.domain)
-    : s.harnessMxid;
-  if (!speaker) {
-    log.warn("station answers for itself but has no Matrix identity; nothing to provision", {
-      stationId,
-      stationKey: s.stationKey,
-    });
-    return;
+  // that is the identity minted for its occupying agent; for a harness-mode
+  // one it is the account the harness already holds. Either way, if there is
+  // nobody to answer as, there is nobody to create the room as — inventing an
+  // identity from `(nodeName, stationKey)` would be exactly the
+  // station-derived address this suite moved away from.
+  let speaker: string | null;
+  let handle: string | null = null;
+  if (bridged) {
+    handle = s.principalId ? await principalHandle(s.principalId) : null;
+    if (!handle) {
+      log.warn(
+        "station has no occupying agent, so it has no handle to provision a Matrix identity for",
+        { stationId, stationKey: s.stationKey }
+      );
+      return;
+    }
+    speaker = bridgeUserId(handle, deps.domain);
+  } else {
+    speaker = s.harnessMxid;
+    if (!speaker) {
+      log.warn("station answers for itself but has no Matrix identity; nothing to provision", {
+        stationId,
+        stationKey: s.stationKey,
+      });
+      return;
+    }
   }
 
   // A name a person can read. The mxid is derived and unlovely; this is what a
@@ -133,7 +148,7 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   const displayName = `${s.displayName} (${s.harness} @ ${s.nodeName})`;
 
   if (bridged) {
-    await deps.client.ensureUser(bridgeLocalpart(s.nodeName, s.stationKey), displayName);
+    await deps.client.ensureUser(bridgeLocalpart(handle!), displayName);
   }
 
   // An agent's face, if it has one.

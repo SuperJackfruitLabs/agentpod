@@ -26,6 +26,7 @@ import { resolveMatrixId } from "../matrix-identity";
 import { getGrant, grantAllowsPrincipal } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
+import { principalHandle } from "../principals";
 import {
   clearPendingPermission,
   matchPermissionAnswer,
@@ -150,7 +151,21 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
   // the failure the mode exists to prevent.
   if (room.identityMode !== "bridge") return;
 
-  const agentUser = bridgeUserId(room.nodeName, room.stationKey, deps.domain);
+  // A station with no occupying agent has no handle and therefore no mxid to
+  // speak as. This should not happen — provisioning refuses to create a room
+  // for an unoccupied bridge-mode station in the first place — but a defensive
+  // check beats inventing an address from `(nodeName, stationKey)` if it ever
+  // does.
+  const handle = room.principalId ? await principalHandle(room.principalId) : null;
+  if (!handle) {
+    log.warn("matrix room's station has no occupying agent; cannot speak as it", {
+      room: room.roomId,
+      stationKey: room.stationKey,
+    });
+    return;
+  }
+
+  const agentUser = bridgeUserId(handle, deps.domain);
   const say = (body: string) => deps.client.sendText(agentUser, room.roomId, body);
 
   // ── Who is this? ──────────────────────────────────────────────────────────

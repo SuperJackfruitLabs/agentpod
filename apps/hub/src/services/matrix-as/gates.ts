@@ -35,6 +35,7 @@ import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
 import { bridgeUserId } from "./names";
+import { principalHandle } from "../principals";
 
 const log = createLogger("matrix-gates");
 
@@ -118,7 +119,15 @@ export interface GateProjectionDeps {
 export type ProjectionOutcome =
   | { status: "sent"; eventId: string; roomId: string }
   | { status: "already" }
-  | { status: "no-room" };
+  | { status: "no-room" }
+  /**
+   * The room exists, but its station currently has no occupying agent — no
+   * handle, and therefore no mxid to post the gate as. Distinct from
+   * `no-room`, which means there is nowhere to post at all; this means there
+   * is a room but nobody to speak in it as, which must refuse rather than
+   * invent an address from `(nodeName, stationKey)`.
+   */
+  | { status: "no-agent" };
 
 /**
  * The room a card's work happened in.
@@ -136,7 +145,12 @@ async function roomForCard(
   tenantId: string,
   boardId: string,
   cardId: string
-): Promise<{ roomId: string; nodeName: string; stationKey: string } | null> {
+): Promise<{
+  roomId: string;
+  nodeName: string;
+  stationKey: string;
+  principalId: string | null;
+} | null> {
   const [dispatch] = await db
     .select({ stationId: bridgeDispatches.stationId })
     .from(bridgeDispatches)
@@ -156,6 +170,7 @@ async function roomForCard(
       roomId: matrixRooms.roomId,
       stationKey: stations.stationKey,
       nodeName: nodes.name,
+      principalId: stations.principalId,
     })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
@@ -164,7 +179,12 @@ async function roomForCard(
     .limit(1);
   if (!room) return null;
 
-  return { roomId: room.roomId, nodeName: room.nodeName, stationKey: room.stationKey };
+  return {
+    roomId: room.roomId,
+    nodeName: room.nodeName,
+    stationKey: room.stationKey,
+    principalId: room.principalId,
+  };
 }
 
 /**
@@ -269,10 +289,23 @@ export async function projectGate(
   }
 
   // The station's own virtual user, built the one way this codebase builds
-  // them. Registering or sending as anything else lands outside the exclusive
-  // `@agent_.*` namespace, where the appservice may not act — a 403 that
-  // arrives later and elsewhere. See `names.ts`.
-  const stationUser = bridgeUserId(found.nodeName, found.stationKey, deps.domain);
+  // them: from its occupying agent's handle, never from `(nodeName,
+  // stationKey)`. Registering or sending as anything else lands outside the
+  // exclusive `@agent_.*` namespace, where the appservice may not act — a 403
+  // that arrives later and elsewhere. See `names.ts`.
+  const handle = found.principalId ? await principalHandle(found.principalId) : null;
+  if (!handle) {
+    // The claim must go, or a gate for a station that later gains an
+    // occupying agent could never be re-attempted — the sweep would see the
+    // claimed row and conclude it had already been handled.
+    await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, d.gateId));
+    log.warn("gate's station has no occupying agent; claim released", {
+      gateId: d.gateId,
+      stationKey: found.stationKey,
+    });
+    return { status: "no-agent" };
+  }
+  const stationUser = bridgeUserId(handle, deps.domain);
   const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 
   // Prose first, deliberately: if only one lands, leave the room with a
@@ -581,11 +614,12 @@ export async function projectionForGate(gateId: string): Promise<{
  */
 export async function roomAgentUser(roomId: string, domain: string): Promise<string | null> {
   const [row] = await db
-    .select({ stationKey: stations.stationKey, nodeName: nodes.name })
+    .select({ principalId: stations.principalId })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
-    .innerJoin(nodes, eq(nodes.id, stations.nodeId))
     .where(eq(matrixRooms.roomId, roomId))
     .limit(1);
-  return row ? bridgeUserId(row.nodeName, row.stationKey, domain) : null;
+  if (!row?.principalId) return null;
+  const handle = await principalHandle(row.principalId);
+  return handle ? bridgeUserId(handle, domain) : null;
 }

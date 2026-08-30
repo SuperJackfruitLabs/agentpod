@@ -25,7 +25,7 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixRooms } from "../db/schema/matrix";
 import { getGrant, grantAllowsPrincipal } from "../services/grants";
-import { principalForUser } from "../services/principals";
+import { principalForUser, principalHandle } from "../services/principals";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { createLogger } from "../utils/logger";
@@ -118,7 +118,22 @@ export function createStationSayRoutes(deps: StationSayDeps) {
       );
     }
 
-    const agentUser = bridgeUserId(station.nodeName, station.stationKey, deps.domain);
+    // A station with no occupying agent has no handle and therefore no mxid to
+    // speak as — refused rather than falling back to the retired
+    // `(nodeName, stationKey)` form, which would silently reinvent a
+    // station-derived identity.
+    const handle = station.principalId ? await principalHandle(station.principalId) : null;
+    if (!handle) {
+      return c.json(
+        {
+          error:
+            "This station has no occupying agent, so there is nobody to speak as here.",
+        },
+        409
+      );
+    }
+
+    const agentUser = bridgeUserId(handle, deps.domain);
     const eventId = await deps.client.sendText(agentUser, station.roomId, text);
 
     log.info("station spoke unprompted", {

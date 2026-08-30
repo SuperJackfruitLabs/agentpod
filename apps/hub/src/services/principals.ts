@@ -79,3 +79,26 @@ export async function principalById(
     .limit(1);
   return row ? { id: row.id, kind: row.kind as PrincipalKind } : null;
 }
+
+/**
+ * A principal's immutable `handle`, or null.
+ *
+ * This is what an agent's Matrix identity is now built from
+ * (`charter` → decisions/2026-08-30-an-agent-is-a-principal.md): `names.ts`'s
+ * `bridgeUserId`/`bridgeLocalpart` take a handle, not a station, so every
+ * caller that used to derive an agent's mxid from `(nodeName, stationKey)`
+ * resolves the station's occupying principal to this instead. Kept here
+ * rather than let the matrix modules query `principals` themselves, so schema
+ * access to that table stays in the one service that owns it.
+ *
+ * Null both when the id names nobody and when a station has none — the two
+ * cases a caller must treat alike: fail closed, never invent an address.
+ */
+export async function principalHandle(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ handle: principals.handle })
+    .from(principals)
+    .where(eq(principals.id, id))
+    .limit(1);
+  return row?.handle ?? null;
+}

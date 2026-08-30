@@ -41,17 +41,26 @@ export function localpartFor(nodeName: string, stationKey: string): string {
  * The username to register, which is the mxid's localpart INCLUDING the
  * `agent_` prefix.
  *
- * Separate from `localpartFor` because registering the bare name creates
- * `@prov-box__openclaw_krishna` — outside the exclusive namespace the homeserver
- * reserved, where the appservice may not act. The failure arrives later and
- * elsewhere, as a 403 at send time.
+ * Built from a principal's `handle`, not from where it runs. `bridgeUserId`
+ * used to take `(nodeName, stationKey)`, which made an agent's chat identity a
+ * function of its station: move it to another node and it became a different
+ * person, with new DM rooms and its history left behind. The strategy states
+ * the opposite principle twice — an agent is an identity, a station is an
+ * execution location — and a principal's `handle` is immutable, so an
+ * address built from it survives the move `bridgeAlias`'s room address does
+ * not need to.
+ *
+ * Separate from a bare `clean(handle)` because registering that creates a name
+ * outside the exclusive namespace the homeserver reserved, where the
+ * appservice may not act. The failure arrives later and elsewhere, as a 403 at
+ * send time.
  */
-export function bridgeLocalpart(nodeName: string, stationKey: string): string {
-  return `agent_${localpartFor(nodeName, stationKey)}`;
+export function bridgeLocalpart(handle: string): string {
+  return `agent_${clean(handle)}`;
 }
 
-export function bridgeUserId(nodeName: string, stationKey: string, domain: string): string {
-  return `@${bridgeLocalpart(nodeName, stationKey)}:${domain}`;
+export function bridgeUserId(handle: string, domain: string): string {
+  return `@${bridgeLocalpart(handle)}:${domain}`;
 }
 
 export function bridgeAlias(nodeName: string, stationKey: string, domain: string): string {

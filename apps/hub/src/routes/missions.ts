@@ -19,7 +19,7 @@ import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
 import { principalIdentities } from "../db/schema/identities";
 import { getGrant, grantAllowsPrincipal } from "../services/grants";
-import { principalForUser } from "../services/principals";
+import { principalForUser, principalHandle } from "../services/principals";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { missionAlias } from "../services/matrix-as/missions";
@@ -159,11 +159,34 @@ export function createMissionRoutes(deps: MissionDeps) {
       return c.json({ id: existing.id, roomId: existing.roomId, alias: existing.alias });
     }
 
+    // A mission's members are addressed by their principal's handle now, not
+    // by where they run — resolved for every member before anything is
+    // created, because a half-made mission is worse than none. A station with
+    // no occupying agent has no handle and therefore no mxid to invite, and
+    // that must refuse the whole request rather than invent one from
+    // `(nodeName, stationKey)`, which is the station-derived identity this
+    // suite moved away from.
+    const handles = new Map<string, string>();
+    for (const m of members) {
+      const handle = m.principalId ? await principalHandle(m.principalId) : null;
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              `${m.nodeName}/${m.stationKey} has no occupying agent, so it has no Matrix ` +
+              "identity to put in this mission.",
+          },
+          409
+        );
+      }
+      handles.set(m.id, handle);
+    }
+
     const tenantId = members[0]!.tenantId;
     // The mission speaks as the first agent in it: an appservice must act as
     // SOME user in its namespace, and a room created by one of its members reads
     // better than one created by a nameless bot.
-    const speaker = bridgeUserId(members[0]!.nodeName, members[0]!.stationKey, deps.domain);
+    const speaker = bridgeUserId(handles.get(members[0]!.id)!, deps.domain);
 
     const roomId = await deps.client.ensureRoom(alias, {
       creator: speaker,
@@ -221,7 +244,7 @@ export function createMissionRoutes(deps: MissionDeps) {
     );
 
     for (const m of members) {
-      const agent = bridgeUserId(m.nodeName, m.stationKey, deps.domain);
+      const agent = bridgeUserId(handles.get(m.id)!, deps.domain);
       if (agent === speaker) continue; // already in the room, having made it
       await deps.client.invite(speaker, roomId, agent).catch(() => {});
     }
