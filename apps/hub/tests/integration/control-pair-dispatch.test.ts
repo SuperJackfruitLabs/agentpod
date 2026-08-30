@@ -8,6 +8,7 @@ import { Hono } from "hono";
 import { createSession } from "../../src/services/acp-sessions";
 import { stationAcpRoutes } from "../../src/routes/station-acp";
 import { setGrant, deleteGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 
 /**
  * The control pair, enforced where dispatch actually happens.
@@ -27,9 +28,21 @@ import { setGrant, deleteGrant } from "../../src/services/grants";
 
 const USER = "test-user-controlpair";
 let nodeId = "";
-let nodeName = "";
 let stationKey = "";
 let stationId = "";
+
+let USER_PRINCIPAL: string;
+/** The agent occupying `stationId` — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+
+// A second node, adopting a station with the SAME key, occupied by a
+// DIFFERENT agent — the shape that made a bare station key unsafe to grant on
+// (`opencode:c52ddf65` exists on two nodes in production). Proves the new,
+// principal-keyed matcher still tells the two apart, the same way the old
+// node-qualified pattern did.
+const OTHER_NODE = "node_controlpair_other";
+let otherStationId = "";
+let OTHER_AGENT_PRINCIPAL: string;
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -43,9 +56,6 @@ beforeAll(async () => {
     cpuCount: 2,
   });
   nodeId = enrolled.nodeId;
-  // The grant names the node, so the test has to know what this fleet ended up
-  // calling it — enrolment suffixes a hostname collision.
-  nodeName = (await rawSql`SELECT name FROM nodes WHERE id = ${nodeId}`)[0]!.name as string;
 
   stationKey = "hermes:cp-agent";
   await adoptStations(USER, nodeId, [stationKey], [
@@ -61,19 +71,46 @@ beforeAll(async () => {
     },
   ]);
   stationId = (await listAdopted(USER, nodeId)).find((s) => s.stationKey === stationKey)!.id;
+
+  USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "controlpair-it-user", userId: USER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "controlpair-it-agent" });
+  await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${stationId}`;
+
+  OTHER_AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "controlpair-it-other-agent" });
+  const tenant = (await rawSql`SELECT tenant_id FROM nodes WHERE id = ${nodeId}`)[0]!.tenant_id as string;
+  await rawSql`DELETE FROM nodes WHERE id = ${OTHER_NODE}`;
+  await rawSql`
+    INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
+    VALUES (${OTHER_NODE}, ${tenant}, ${USER}, 'controlpair-other-box', 'controlpair-other-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
+  await adoptStations(USER, OTHER_NODE, [stationKey], [
+    {
+      key: stationKey,
+      harness: "hermes",
+      kind: "leaf",
+      displayName: "CP Agent (other node)",
+      parentKey: null,
+      workspacePath: "/root/.hermes",
+      capabilities: ["health", "acp"],
+      adopted: false,
+    },
+  ]);
+  otherStationId = (await listAdopted(USER, OTHER_NODE)).find((s) => s.stationKey === stationKey)!.id;
+  await rawSql`UPDATE stations SET principal_id = ${OTHER_AGENT_PRINCIPAL} WHERE id = ${otherStationId}`;
 });
 
 afterEach(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
-  await deleteGrant(USER).catch(() => {});
+  await deleteGrant(USER_PRINCIPAL).catch(() => {});
 });
 
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER}`;
-    await rawSql`DELETE FROM stations WHERE node_id = ${nodeId}`;
-    await rawSql`DELETE FROM nodes WHERE id = ${nodeId}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
+    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
+    await rawSql`DELETE FROM stations WHERE node_id IN (${nodeId}, ${OTHER_NODE})`;
+    await rawSql`DELETE FROM nodes WHERE id IN (${nodeId}, ${OTHER_NODE})`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('controlpair-it-user', 'controlpair-it-agent', 'controlpair-it-other-agent')`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
     await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
   } catch {
@@ -94,8 +131,8 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
 
   test("refuses a grant that does not cover this station", async () => {
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, {
-      mayDispatch: [`agentpod:${nodeName}/hermes:some-other-agent`],
+    await setGrant(USER_PRINCIPAL, {
+      mayDispatch: ["prn_ffffffffffffffffffff"],
       mayGrantReach: false,
     });
 
@@ -104,12 +141,12 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     ).rejects.toThrow(/permission/i);
   });
 
-  test("refuses a grant written in another plane's namespace", async () => {
-    // The decision's rule from this side: a kaambaan value is not this plane's
-    // business, so it grants nothing here — while remaining a perfectly valid
-    // grant over there.
+  test("refuses a value that is not a principal id, rather than treating it as one", async () => {
+    // Namespacing is gone along with the pattern language: a value that is not
+    // this station's occupant is refused the same way whatever it looks like,
+    // whether it is shaped like the retired kaambaan namespace or anything else.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, { mayDispatch: ["kaambaan:agt_anything"], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: ["kaambaan:agt_anything"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
@@ -117,14 +154,13 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
   });
 
   test("refuses the retired formats rather than honouring them", async () => {
-    // `hermes:*` was valid in CONTROL_PAIR_GRANTS, and `agentpod:hermes:*` was
-    // valid before a grant named a node. Neither may still match: the first
-    // would let a half-migrated deployment enforce two rules at once, and the
-    // second cannot say WHICH node it meant, which is the over-grant that shape
-    // exists to remove.
+    // `hermes:*` was valid in CONTROL_PAIR_GRANTS, `agentpod:hermes:*` was valid
+    // before a grant named a node, and `agentpod:*/hermes:*` was the node-
+    // qualified form itself. None of the three may still match: a grant is now
+    // an enumeration of principal ids, and none of these is one.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, {
-      mayDispatch: ["hermes:*", "agentpod:hermes:*"],
+    await setGrant(USER_PRINCIPAL, {
+      mayDispatch: ["hermes:*", "agentpod:hermes:*", "agentpod:*/hermes:*"],
       mayGrantReach: false,
     });
 
@@ -143,23 +179,26 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/permission/i);
 
-    // With a grant, the SAME call gets past the control and fails on readiness
-    // instead — which is what proves the refusal above came from the control
-    // and not from the node being unreachable.
-    await setGrant(USER, { mayDispatch: [`agentpod:${nodeName}/hermes:*`], mayGrantReach: false });
+    // With a grant naming the station's actual occupant, the SAME call gets
+    // past the control and fails on readiness instead — which is what proves
+    // the refusal above came from the control and not from the node being
+    // unreachable.
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
     ).rejects.toThrow(/offline|not ready|does not support/i);
   });
 
-  test("a grant for the same station key on another node does not reach this one", async () => {
-    // The defect that produced the node-qualified shape: station keys repeat
-    // across nodes — `opencode:c52ddf65` exists on two in production — so a
-    // permission for one host must not silently cover another.
+  test("a grant for another node's occupant of the same station key does not reach this one", async () => {
+    // The defect that produced the retired node-qualified shape: station keys
+    // repeat across nodes — `opencode:c52ddf65` exists on two in production —
+    // so a permission for one host's agent must not silently cover another
+    // host's agent, even one sitting at the identical key. The new matcher
+    // gets this for free from equality: the two are different principal ids.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, {
-      mayDispatch: [`agentpod:some-other-host/${stationKey}`],
+    await setGrant(USER_PRINCIPAL, {
+      mayDispatch: [OTHER_AGENT_PRINCIPAL],
       mayGrantReach: false,
     });
 
@@ -168,13 +207,19 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
     ).rejects.toThrow(/permission/i);
   });
 
-  test("a node wildcard reaches it, because that says every node out loud", async () => {
+  test("a wildcard no longer reaches anything, however it is written", async () => {
+    // BEHAVIOUR CHANGE from the retired scheme: `agentpod:*/hermes:*` used to
+    // be the explicit, opt-in way to say "every node, said out loud", and this
+    // test used to assert exactly that it got through. Decision
+    // 2026-08-30-an-agent-is-a-principal.md §3 deletes wildcards rather than
+    // narrowing them — there is no way left to express "every agent" in a
+    // grant, so this now refuses like any other non-matching value.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: ["*", "prn_*"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })
-    ).rejects.toThrow(/offline|not ready|does not support/i);
+    ).rejects.toThrow(/permission/i);
   });
 
   test("is not enforced when the switch is off, whatever the grants say", async () => {
@@ -196,7 +241,7 @@ describe("the route reports a denial as a refusal, not a gateway failure", () =>
     // will retry something that can never succeed — an authorization decision
     // hidden behind an infrastructure one.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await deleteGrant(USER).catch(() => {});
+    await deleteGrant(USER_PRINCIPAL).catch(() => {});
 
     const app = new Hono();
     app.use("*", async (c, next) => {

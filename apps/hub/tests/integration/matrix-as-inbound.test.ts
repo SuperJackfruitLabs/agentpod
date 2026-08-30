@@ -4,6 +4,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant, deleteGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
 import {
   clearPendingPermission,
@@ -33,6 +34,13 @@ const ROOM = "!inbound:id.agentpod.dev";
 const DOMAIN = "id.agentpod.dev";
 const OWNER_MXID = "@owner-inbound:id.agentpod.dev";
 const OTHER_MXID = "@other-inbound:id.agentpod.dev";
+
+let OWNER_PRINCIPAL: string;
+let OTHER_PRINCIPAL: string;
+/** The agent occupying STATION — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+/** Some other agent, granted where a test wants to prove the scope check is real. */
+const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 let sent: Array<{ roomId: string; body: string }> = [];
 let created: Array<{ stationId: string; userId: string }> = [];
@@ -125,13 +133,19 @@ beforeAll(async () => {
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, 'inbound-box', 'inbound-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
-  await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
-    VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
-            '["acp"]'::jsonb, now(), now())`;
+  OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mx-inbound-it-owner", userId: OWNER });
+  OTHER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mx-inbound-it-other", userId: OTHER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "mx-inbound-it-agent" });
 
-  // Both principals are known to this hub by their Matrix ids.
-  for (const [p, mxid] of [[OWNER, OWNER_MXID], [OTHER, OTHER_MXID]] as const) {
+  await rawSql`
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
+    VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
+            '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
+
+  // Both principals are known to this hub by their Matrix ids. Keyed by the
+  // real principal id now — `principal_identities.principal_id` is a foreign
+  // key onto `principals.id`, not the Better Auth user id.
+  for (const [p, mxid] of [[OWNER_PRINCIPAL, OWNER_MXID], [OTHER_PRINCIPAL, OTHER_MXID]] as const) {
     await rawSql`DELETE FROM principal_identities WHERE principal_id = ${p}`;
     await rawSql`
       INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
@@ -164,9 +178,10 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM acp_sessions WHERE id LIKE 'acps_mx_inbound_%'`;
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER}, ${OTHER})`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER}, ${OTHER})`;
+    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('mx-inbound-it-owner', 'mx-inbound-it-other', 'mx-inbound-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER})`;
   } catch {
@@ -176,7 +191,7 @@ afterAll(async () => {
 
 describe("an inbound room message", () => {
   test("prompts the station when the sender's grant covers it", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -189,7 +204,7 @@ describe("an inbound room message", () => {
     // The gap that live verification found: a session was created and prompted
     // and the agent answered into a stream nobody was listening to. Both halves
     // had tests; the joint did not.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -203,7 +218,7 @@ describe("an inbound room message", () => {
     // Attachments live in memory. After a hub restart the session row survives
     // and the listener does not, so a room whose session predates the restart
     // would go permanently quiet.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     await handleRoomMessage(message(OWNER_MXID, "second"), deps());
@@ -213,7 +228,7 @@ describe("an inbound room message", () => {
   });
 
   test("does not attach when the message was refused", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -223,7 +238,7 @@ describe("an inbound room message", () => {
   test("refuses IN THE ROOM when the grant does not cover this station", async () => {
     // Silence would read as a broken agent and send the operator to the console,
     // the node and the harness — everywhere except the grant.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -235,11 +250,11 @@ describe("an inbound room message", () => {
   test("checks every message, not only the one that opened the session", async () => {
     // A room is shared. Without a per-message check, the first permitted person
     // to speak would open a session that everyone else in the room could drive.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     expect(prompts).toHaveLength(1);
 
-    await deleteGrant(OTHER);
+    await deleteGrant(OTHER_PRINCIPAL);
     await handleRoomMessage(message(OTHER_MXID, "and me"), deps());
 
     expect(prompts).toHaveLength(1);
@@ -256,7 +271,7 @@ describe("an inbound room message", () => {
   test("reuses the room's session instead of starting one per message", async () => {
     // A conversation is a conversation. One session per message would throw away
     // the agent's context between two consecutive sentences.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     await handleRoomMessage(message(OWNER_MXID, "second"), deps());
@@ -270,7 +285,7 @@ describe("an inbound room message", () => {
     // this the room keeps prompting a corpse and every bridged room dies
     // permanently at the first restart — the agent simply stops answering, with
     // 'Session not found or not active' as the only clue.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     const dead = prompts[0]!.sessionId;
 
@@ -284,7 +299,7 @@ describe("an inbound room message", () => {
   });
 
   test("says so when the station cannot be reached, rather than swallowing it", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     createFails = new Error("node offline");
 
     await handleRoomMessage(message(OWNER_MXID, "hi"), deps());
@@ -305,7 +320,7 @@ describe("an inbound room message", () => {
   test("stays out of a harness-mode station's room entirely", async () => {
     // That station answers for itself. Two answerers on one address is the
     // failure the mode exists to prevent.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${STATION}`;
 
     await handleRoomMessage(message(OWNER_MXID, "hi"), deps());
@@ -315,7 +330,7 @@ describe("an inbound room message", () => {
   });
 
   test("ignores anything that is not a text message", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(
       { type: "m.room.member", sender: OWNER_MXID, room_id: ROOM, content: { membership: "join" } },
@@ -327,7 +342,7 @@ describe("an inbound room message", () => {
   });
 
   test("ignores an empty message rather than prompting with nothing", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "   "), deps());
 
@@ -337,7 +352,7 @@ describe("an inbound room message", () => {
   test("passes the message through unchanged, including its exact text", async () => {
     // The prompt is the user's words. Trimming, prefixing or decorating them
     // would put the bridge's voice into the agent's input.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "deploy  the thing\nnow"), deps());
 
@@ -347,11 +362,11 @@ describe("an inbound room message", () => {
   test("prompts as the principal who sent it, not as the station's owner", async () => {
     // The ACP session belongs to whoever is talking, so the transcript and the
     // control pair both attribute the turn correctly.
-    await setGrant(OTHER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OTHER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OTHER_MXID, "hello"), deps());
 
-    expect(created[0]!.userId).toBe(OTHER);
+    expect(created[0]!.userId).toBe(OTHER_PRINCIPAL);
   });
 });
 
@@ -368,20 +383,20 @@ describe("answering a permission request from the room", () => {
     // While a permission is pending the session is PARKED — it cannot take a
     // prompt. Treating the answer as a message would lose the answer and fail
     // the prompt in the same breath.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
 
     expect(answered).toEqual([
-      { userId: OWNER, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
+      { userId: OWNER_PRINCIPAL, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
     ]);
     expect(created).toHaveLength(0);
     expect(prompts).toHaveLength(0);
   });
 
   test("the option's name answers it too", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "Reject"), depsWithPermissions());
@@ -393,7 +408,7 @@ describe("answering a permission request from the room", () => {
     // "yes" against options named "Allow once" and "Allow always" does not say
     // which. Resolving it to the nearest-looking one is the failure this must
     // never have.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "yes go ahead"), depsWithPermissions());
@@ -406,7 +421,7 @@ describe("answering a permission request from the room", () => {
 
   test("someone who may not dispatch the agent may not approve for it either", async () => {
     // Approving an action IS dispatching the agent, by another name.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:other/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
@@ -418,7 +433,7 @@ describe("answering a permission request from the room", () => {
   test("a refused answer leaves the question standing", async () => {
     // A cleared question plus a failed answer would park the agent forever
     // with nothing able to release it.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
     answerFails = new Error("No pending permission request.");
 
@@ -429,7 +444,7 @@ describe("answering a permission request from the room", () => {
   });
 
   test("an ordinary message is still an ordinary message when nothing is pending", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
 

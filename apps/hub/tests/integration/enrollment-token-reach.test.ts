@@ -70,11 +70,12 @@ describe("growing the fleet is an admin act", () => {
     expect(((await res.json()) as { token: string }).token).toBeTruthy();
   });
 
-  test("a non-admin may not, however wide their grant", async () => {
+  test("a non-admin may not, however permissive their grant", async () => {
     // This is the exact case the wildcard used to permit: a dispatch pattern
     // spanning every node, plus mayGrantReach. It used to be sufficient on its
-    // own. It no longer is — admin is the only thing that answers now.
-    await setGrant(USER_PRINCIPAL, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    // own. It no longer is — admin is the only thing that answers now, and
+    // there is no wildcard left to spell "every node" with anyway.
+    await setGrant(USER_PRINCIPAL, { mayDispatch: ["prn_ffffffffffffffffffff"], mayGrantReach: true });
 
     const res = await app(USER).request("/", { method: "POST" });
     expect(res.status).toBe(403);
