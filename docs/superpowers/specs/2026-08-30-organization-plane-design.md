@@ -41,12 +41,30 @@ Three slices, in order. **A** gives the suite the entity it has been describing
 and could not represent. **B** makes it load-bearing. **C** moves it to where
 the ownership map says it belongs.
 
+**Each slice is its own implementation plan and its own series of PRs.** This is
+one design because the three share a spine and a decision; it is not one plan.
+A alone touches four repositories, and the first PR in it — the fixture plus the
+`principals` table and its backfill — changes no behaviour and nothing reads it
+yet.
+
 ## 2. A — an agent is a principal
 
 ### 2.1 agentpod hub
 
 1. **`principals`** — `id (prn_)`, `kind`, `org_id`, `handle`, `display_name`.
    `handle` is immutable and unique; it is what an mxid is built from.
+
+   **What `org_id` holds before the plane exists**, because "the organisation"
+   is otherwise undefined for the whole of A and B: **the hub mints `org_` ids
+   from the first migration**, and `tenants.external_id` /
+   `external_source = 'org-plane'` maps fleet → org immediately. The hub *is*
+   the Organization plane until C moves it, exactly as it is already the issuer.
+   C then moves rows whose meaning does not change — which is the whole reason
+   `2026-08-15-one-issuer` could say *"only the issuer URL changes"*.
+
+   The alternative — a nullable `org_id` backfilled at C — would make A and B
+   depend on a column that means nothing yet, and would put a data change inside
+   the riskiest slice.
 2. **Re-point two foreign keys.** `principal_identities.principal_id` and
    `principal_grants.principal_id` move from `user.id` to `principals.id`.
    Backfill is one row today. Take the FK — a dangling grant in an
@@ -123,7 +141,9 @@ Fleet enrollment becomes an admin act, because the wildcard that encoded
 
 1. **agentpod#333** — Better Auth 1.6.26 hub / 1.4.6 console. Blocks C outright;
    now just an upgrade.
-2. **The spike**, below.
+2. **The spike** (§5). It runs *first of everything*, not merely before C — its
+   findings belong in the plan rather than in a surprise during the cutover —
+   but C is the slice that cannot start until it has answered.
 
 **Then:** stand up Better Auth with `jwt` + `admin`. **Not `organization`** — it
 ships a second org model beside `principals`, which is MT-1's mistake relocated.
