@@ -36,6 +36,7 @@ describe("the token claim contract (#332)", () => {
 
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -53,6 +54,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -71,6 +73,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => ({
         mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
@@ -90,6 +93,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -104,6 +108,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -116,6 +121,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -133,6 +139,7 @@ describe("the token claim contract (#332)", () => {
     await expect(
       buildTokenPayload({
         user: { id: "user_abc123" },
+        resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
         resolveTenant: async () => null as unknown as string,
         loadGrant: async () => null,
       })

@@ -15,9 +15,18 @@
 
 import { resolveTenantForUser } from "./tenant";
 import { getGrant } from "../services/grants";
+import { principalForUser } from "../services/principals";
+import type { PrincipalKind } from "../db/schema/organization";
 
-/** The kinds of principal this suite has. Humans and agents are both first-class. */
-export type PrincipalKind = "human" | "agent" | "service";
+export type { PrincipalKind };
+
+/**
+ * The default `resolvePrincipal`: `principalForUser` from one joined query
+ * (`principal_identities` ⋈ `principals`), returning the id AND the kind
+ * together — a second query for kind would be two round trips answering one
+ * question.
+ */
+const defaultResolvePrincipal = principalForUser;
 
 export interface TokenPayload extends Record<string, unknown> {
   sub: string;
@@ -31,13 +40,27 @@ export interface TokenPayload extends Record<string, unknown> {
 export interface BuildPayloadInput {
   user: { id: string };
   /** Injectable so the claim shape is testable without a database. */
-  resolveTenant?: (userId: string) => Promise<string>;
-  /** Injectable for the same reason. */
-  loadGrant?: (userId: string) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
+  resolveTenant?: (userId: string) => Promise<string | null>;
+  /** Injectable for the same reason. Keyed by principal id, not user id. */
+  loadGrant?: (
+    principalId: string
+  ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
+  /** Injectable for the same reason. Defaults to `principalForUser`. */
+  resolvePrincipal?: (userId: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
 }
 
 /**
  * Build the claims for a principal.
+ *
+ * Resolves the principal FIRST, and refuses to mint when none resolves. A
+ * token that verifies but names nobody is not a weaker caller, it is an
+ * unattributable one — the same reasoning as the no-tenant refusal below, and
+ * it applies before the tenant lookup because a claim naming no one has
+ * nothing to attach a tenant to.
+ *
+ * `sub` and `principalKind` come from the resolved principal, not from the
+ * caller passed in — an agent's token says it is an agent because the
+ * principal it maps to is one, not because of a separate exchange path.
  *
  * Throws when no tenant resolves, rather than falling back to a default
  * boundary. A token that verifies but names no tenant is not a weaker caller,
@@ -56,6 +79,15 @@ export interface BuildPayloadInput {
  * old issuer silently authorise everything.
  */
 export async function buildTokenPayload(input: BuildPayloadInput): Promise<TokenPayload> {
+  const resolvePrincipal = input.resolvePrincipal ?? defaultResolvePrincipal;
+  const principal = await resolvePrincipal(input.user.id);
+
+  if (!principal) {
+    throw new Error(
+      `refusing to mint a token for ${input.user.id}: no principal resolved`
+    );
+  }
+
   const resolve = input.resolveTenant ?? resolveTenantForUser;
   const tenant = await resolve(input.user.id);
 
@@ -66,14 +98,11 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
   }
 
   const loadGrant = input.loadGrant ?? getGrant;
-  const grant = await loadGrant(input.user.id);
+  const grant = await loadGrant(principal.id);
 
   return {
-    sub: input.user.id,
-    // Every principal the hub can issue a token for today is a human with a
-    // session. An agent gets one by exchanging its own credential, which is a
-    // separate path and will set this to "agent".
-    principalKind: "human",
+    sub: principal.id,
+    principalKind: principal.kind,
     tenant,
     mayDispatch: grant?.mayDispatch ?? [],
     mayGrantReach: grant?.mayGrantReach ?? false,
