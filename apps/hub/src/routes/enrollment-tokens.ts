@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { mintEnrollmentToken } from "../services/enrollment";
 import { requireFleetGrantReach } from "../services/grant-reach";
-import { isGrantReachDenied } from "../services/control-pair";
+import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
+import { principalForUser } from "../services/principals";
 
 /**
  * POST /api/enrollment-tokens
@@ -18,12 +19,27 @@ import { isGrantReachDenied } from "../services/control-pair";
  * it. Enforced on the route rather than in `mintEnrollmentToken`, because the
  * service is also how the *node* re-enrols itself and how tests build fixtures;
  * this is a check on a person asking, not on a token being made.
+ *
+ * `requireFleetGrantReach` takes a principal id, not a Better Auth user id, so
+ * the caller is resolved to one here via `principalForUser` — the same lookup
+ * Task 4's default resolver uses — before the guard runs. Gated behind
+ * `isControlPairEnforced()` up front, not just inside the guard: resolving
+ * a principal and refusing an unmapped one must stay exactly as inert as the
+ * guard itself when the pair is off, or a deployment that never enabled the
+ * control pair would start rejecting enrollment for every caller with no
+ * principal row — which today is everyone. A caller the pair DOES enforce
+ * against and who has no linked principal is refused, the same as a
+ * non-admin one: fail closed on an unmapped identity, never fail open.
  */
 export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
   const user = c.get("user");
 
   try {
-    await requireFleetGrantReach(user.id);
+    if (isControlPairEnforced()) {
+      const principal = await principalForUser(user.id);
+      if (!principal) throw new GrantReachDenied(user.id, "fleet", null);
+      await requireFleetGrantReach(principal.id);
+    }
   } catch (e) {
     if (!isGrantReachDenied(e)) throw e;
     return c.json({ error: "You do not have permission to add machines to this fleet." }, 403);
