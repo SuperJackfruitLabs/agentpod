@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { adminGrantsRouter } from "../../src/routes/admin-grants";
 import { getGrant, setGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 
 /**
  * The grants HTTP surface.
@@ -18,7 +18,15 @@ import { getGrant, setGrant } from "../../src/services/grants";
  * silently permit nothing.
  */
 
-const SUBJECT = "test-user-admin-grants";
+/**
+ * The principal being granted — a `prn_` id, not a Better Auth one.
+ *
+ * `principal_grants.principal_id` is a foreign key onto `principals.id`, so a
+ * grant keyed by a login id is not an older spelling of the same row, it is a
+ * write that cannot land. Both the path parameter and `setGrant` take this.
+ */
+const SUBJECT_HANDLE = "admin-grants-it-subject";
+let SUBJECT: string;
 
 /** The router, with a stub admin in context — the guard lives at the mount site. */
 function app() {
@@ -33,13 +41,13 @@ function app() {
 
 beforeAll(async () => {
   await ensurePgMigrations();
-  await createTestUser({ id: SUBJECT, email: "admin-grants@example.com", name: "Subject" });
+  await rawSql`DELETE FROM principals WHERE handle = ${SUBJECT_HANDLE}`;
+  SUBJECT = await createPrincipal({ kind: "human", handle: SUBJECT_HANDLE });
 });
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${SUBJECT}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${SUBJECT}`;
+    await rawSql`DELETE FROM principals WHERE handle = ${SUBJECT_HANDLE}`;
   } catch {
     // cleanup only
   }

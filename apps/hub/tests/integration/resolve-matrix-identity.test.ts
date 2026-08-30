@@ -5,6 +5,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations, listAdopted } from "../../src/services/station-registry";
 import { linkIdentity } from "../../src/services/principal-identities";
+import { createPrincipal } from "../../src/services/principals";
 import { resolveMatrixId } from "../../src/services/matrix-identity";
 
 /**
@@ -24,13 +25,27 @@ import { resolveMatrixId } from "../../src/services/matrix-identity";
 
 const USER = "test-user-mxresolve";
 const AGENT_MXID = "@onboarding-olivia:id.agentpod.dev";
-const CLASHER = "test-user-mxresolve-clash";
+
+/**
+ * The principals behind the two humans here.
+ *
+ * `resolveMatrixId` answers with a PRINCIPAL id, and `principal_identities` is
+ * keyed by one — a Better Auth id in that column is a foreign-key violation,
+ * not an older spelling of the same thing. `USER` stays a Better Auth id
+ * because that is what enrolment and adoption take.
+ */
+const USER_HANDLE = "mxresolve-it-user";
+const CLASH_HANDLE = "mxresolve-it-clash";
+let USER_PRINCIPAL = "";
+let CLASHER = "";
 let nodeId = "";
 let stationId = "";
 
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "mxresolve@example.com", name: "MX" });
+  await rawSql`DELETE FROM principals WHERE handle IN (${USER_HANDLE}, ${CLASH_HANDLE})`;
+  USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: USER_HANDLE, userId: USER });
 
   // Enrolled and adopted through the real services rather than hand-written
   // INSERTs. A fixture that writes its own rows has to guess the schema, and a
@@ -67,7 +82,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE node_id = ${nodeId}`;
     await rawSql`DELETE FROM nodes WHERE id = ${nodeId}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${USER}`;
+    await rawSql`DELETE FROM principals WHERE handle IN (${USER_HANDLE}, ${CLASH_HANDLE})`;
     await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
   } catch {
     // cleanup only
@@ -85,12 +100,12 @@ describe("resolveMatrixId", () => {
   });
 
   test("resolves a person's mxid to their principal", async () => {
-    await linkIdentity(USER, "matrix", "@rakesh:id.agentpod.dev");
+    await linkIdentity(USER_PRINCIPAL, "matrix", "@rakesh:id.agentpod.dev");
 
     const found = await resolveMatrixId("@rakesh:id.agentpod.dev");
     expect(found?.kind).toBe("principal");
     if (found?.kind !== "principal") throw new Error("unreachable");
-    expect(found.principalId).toBe(USER);
+    expect(found.principalId).toBe(USER_PRINCIPAL);
   });
 
   test("answers null for an mxid nobody claims", async () => {
@@ -104,7 +119,7 @@ describe("resolveMatrixId", () => {
     // External ids are opaque per system. A kaambaan id shaped like an mxid
     // names the same person in a different namespace, which is not the same
     // claim — and must not resolve a Matrix sender.
-    await linkIdentity(USER, "kaambaan", "@lookalike:id.agentpod.dev");
+    await linkIdentity(USER_PRINCIPAL, "kaambaan", "@lookalike:id.agentpod.dev");
 
     expect(await resolveMatrixId("@lookalike:id.agentpod.dev")).toBeNull();
   });
@@ -115,7 +130,7 @@ describe("resolveMatrixId", () => {
     // off a host by the node agent, one written by an operator. Silently
     // preferring either would attribute a human's approval to an agent, or an
     // agent's output to a human.
-    await createTestUser({ id: CLASHER, email: "clash@example.com", name: "Clash" });
+    CLASHER = await createPrincipal({ kind: "human", handle: CLASH_HANDLE });
     await linkIdentity(CLASHER, "matrix", AGENT_MXID);
 
     const found = await resolveMatrixId(AGENT_MXID);
@@ -128,8 +143,7 @@ describe("resolveMatrixId", () => {
     expect(found.stationId).toBe(stationId);
     expect(found.principalId).toBe(CLASHER);
 
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${CLASHER}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${CLASHER}`;
+    await rawSql`DELETE FROM principals WHERE id = ${CLASHER}`;
 
     // And with the clash removed it resolves cleanly again.
     expect((await resolveMatrixId(AGENT_MXID))?.kind).toBe("station");
