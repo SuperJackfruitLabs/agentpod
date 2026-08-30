@@ -16,7 +16,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
-import { KaambaanClient } from "./kaambaan";
+import { KaambaanClient, fetchAdapter } from "./kaambaan";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -179,12 +179,3 @@ const describe = (agent: BridgeAgentConfig, baseUrl: string) => ({
   mode: agent.mode,
   baseUrl,
 });
-
-/** Global `fetch`, narrowed to the shape the client injects. */
-const fetchAdapter = async (
-  url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
-) => {
-  const res = await fetch(url, init);
-  return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
-};

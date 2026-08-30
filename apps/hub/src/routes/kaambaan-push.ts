@@ -23,6 +23,7 @@ import { Hono } from "hono";
 
 import { createLogger } from "../utils/logger";
 import {
+  isGatePending,
   projectGate,
   type GatePendingDelivery,
   type GateProjectionDeps,
@@ -59,21 +60,6 @@ async function signatureMatches(secret: string, raw: string, header: string): Pr
     diff |= expected.charCodeAt(i) ^ header.charCodeAt(i);
   }
   return diff === 0;
-}
-
-function isGatePending(v: unknown): v is GatePendingDelivery {
-  if (typeof v !== "object" || v === null) return false;
-  const d = v as Record<string, unknown>;
-  return (
-    d.event === "gate.pending" &&
-    typeof d.boardId === "string" &&
-    typeof d.cardId === "string" &&
-    typeof d.gateId === "string" &&
-    d.gateId.length > 0 &&
-    typeof d.stageKey === "string" &&
-    typeof d.cardTitle === "string" &&
-    Array.isArray(d.options)
-  );
 }
 
 export function createKaambaanPushRoutes(deps: KaambaanPushDeps) {

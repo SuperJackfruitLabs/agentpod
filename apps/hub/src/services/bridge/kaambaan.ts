@@ -43,12 +43,25 @@
  */
 
 import type { BoardActivity } from "./coalesce";
+import type { GatePendingDelivery } from "../matrix-as/gates";
 
 /** Injected so the client runs in a test with no network and no wrangler. */
 export type Fetcher = (
   url: string,
   init: { method: string; headers: Record<string, string>; body?: string },
 ) => Promise<{ status: number; ok: boolean; json(): Promise<unknown> }>;
+
+/**
+ * Global `fetch`, narrowed to the shape the client injects.
+ *
+ * Lives beside `Fetcher` rather than in each caller so that the bridge loop and
+ * the gate sweep reach a board through the same adapter — two of these would be
+ * two places for a header or a status to be handled differently.
+ */
+export const fetchAdapter: Fetcher = async (url, init) => {
+  const res = await fetch(url, init);
+  return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
+};
 
 export interface KaambaanClientOptions {
   baseUrl: string;
@@ -278,6 +291,30 @@ export class KaambaanClient {
    */
   async context(runId: string): Promise<RunContext> {
     return (await this.send("GET", `/v1/boards/${this.boardId}/runs/${runId}`)) as RunContext;
+  }
+
+  /**
+   * Every gate on this board still waiting on a human.
+   *
+   * The read half of the reconciliation sweep. kaambaan pushes a gate when it
+   * opens and dead-letters the delivery after five attempts, at which point
+   * the gate is silent on both sides — the card blocked on an approval nobody
+   * was told about. This is how the hub asks instead of waiting to be told.
+   *
+   * Authenticated with the agent's own `kbn_` token. The board snapshot
+   * carries the same gates and is a human route; reaching it would mean
+   * minting an assertion for a person on a timer, and the property that makes
+   * assertions safe is that their subject is never chosen by the caller.
+   *
+   * A refusal throws. "No gates pending" and "this token is rejected" have the
+   * same shape and opposite meanings, and reporting the second as the first is
+   * how a floor beneath push becomes a floor that was never there.
+   */
+  async pendingGates(): Promise<GatePendingDelivery[]> {
+    const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`)) as {
+      gates?: GatePendingDelivery[];
+    };
+    return res.gates ?? [];
   }
 
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {

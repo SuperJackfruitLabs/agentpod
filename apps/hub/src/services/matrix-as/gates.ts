@@ -76,6 +76,30 @@ export interface GatePendingDelivery {
   ts: string;
 }
 
+/**
+ * Is this a gate this hub knows how to post?
+ *
+ * Used on both inbound paths — the signed push and the sweep's read — because
+ * "authenticated" is not "checked". A board a version ahead, or behind, would
+ * otherwise have this hub posting a card with an empty title and no buttons
+ * into somebody's room. One predicate rather than two so the two paths cannot
+ * come to disagree about what a gate is.
+ */
+export function isGatePending(v: unknown): v is GatePendingDelivery {
+  if (typeof v !== "object" || v === null) return false;
+  const d = v as Record<string, unknown>;
+  return (
+    d.event === "gate.pending" &&
+    typeof d.boardId === "string" &&
+    typeof d.cardId === "string" &&
+    typeof d.gateId === "string" &&
+    d.gateId.length > 0 &&
+    typeof d.stageKey === "string" &&
+    typeof d.cardTitle === "string" &&
+    Array.isArray(d.options)
+  );
+}
+
 export interface GateProjectionDeps {
   /** Sends as a station's own virtual user. Returns the event id, or null. */
   sendCustomEvent(
