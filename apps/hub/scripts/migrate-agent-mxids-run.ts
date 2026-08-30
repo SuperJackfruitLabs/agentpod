@@ -18,15 +18,32 @@
  * A run across 32 rooms is expected to die partway through, and the question
  * "does this room still need anything" cannot be answered from a database
  * flag — nothing writes `matrix_rooms.principal_id` today, so a flag-based
- * check would silently skip a room that is only half done. It is answered
- * from live membership instead, with `client.isJoined`.
+ * check would silently skip a room that is only half done. Membership is
+ * checked live with `client.isJoined`, and `m.direct` is checked live too, by
+ * reading it back rather than inferring it from the other two: join and leave
+ * no longer imply anything about `m.direct` (see below), so its own state has
+ * to be read directly for a room to ever stop being reported.
  *
- * `migrateAgentMxids`'s own steps run in a fixed order — join, then
- * `setDirect`, then leave — so a room whose OLD user has already left proves,
- * by that ordering alone, that `setDirect` already succeeded on some earlier
- * pass: leave is unreachable otherwise. So this only has to ask two
- * questions, not three: is the new user joined, and has the old user left.
- * Both true together is the only state this omits from its report.
+ * ## `m.direct` is optional, and never blocks the membership move
+ *
+ * `client.ts`'s own note on `ensureRoom`'s `isDirect` — written before this
+ * file existed — already concluded that writing a human's account data needs
+ * a credential this bridge exists to stop keeping; the tuwunel spike never
+ * tested `account_data` at all, and only ever proved `?user_id=` masquerading
+ * for identities *inside* `@agent_.*`. So a refusal here is the expected case,
+ * not a bug, and it must never be the thing that leaves a room stuck: if
+ * `setDirect` were allowed to throw, `migrateAgentMxids`'s own join-then-
+ * setDirect-then-leave order would abort before the old user ever leaves,
+ * and every room refused this way would end up with BOTH agents present,
+ * `m.direct` untouched, and an identical refusal on every re-run. `setDirect`
+ * therefore catches its own failure, records it, and always returns
+ * normally — membership always finishes moving, whether or not this bridge
+ * turns out to be allowed to fix the DM flag. Whether to pursue `m.direct` by
+ * some other route (a one-time use of a human's own token, say) is the
+ * operator's call, not this script's: it is a real cost — 32 rooms silently
+ * dropping out of People — traded against the charter principle that this
+ * bridge holds no human credential, and that trade is reported here, not
+ * made here.
  */
 import { and, eq } from "drizzle-orm";
 
@@ -68,25 +85,60 @@ export interface RoomStatus {
   ownerMxid: string | null;
   joinOutstanding: boolean;
   leaveOutstanding: boolean;
-  /** See the file doc: coupled to the other two by `migrateAgentMxids`'s own step order. */
+  /**
+   * True until `m.direct` is actually read back naming the new user for this
+   * room. Not inferred from `joinOutstanding`/`leaveOutstanding` — a refused
+   * `m.direct` write no longer blocks `leave` (see the file doc), so a room
+   * can have finished moving membership while this stays true forever, and
+   * that must stay visible rather than making the room vanish from the report.
+   */
   directOutstanding: boolean;
+}
+
+/** What `describeRooms` needs to ask a Matrix client. */
+export interface DescribeClient {
+  isJoined(userId: string, roomId: string): Promise<boolean>;
+  getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
 }
 
 export interface DescribeDeps {
   domain: string;
   rows(): Promise<StationRoomRow[]>;
-  isJoined(userId: string, roomId: string): Promise<boolean>;
+  client: DescribeClient;
   principalHandle(id: string): Promise<string | null>;
   ownerMxidFor(userId: string): Promise<string | null>;
+}
+
+/** Whether the owner's `m.direct` already names `newUserId` for this room. */
+async function directAlreadyFixed(
+  client: DescribeClient,
+  ownerMxid: string | null,
+  newUserId: string,
+  roomId: string
+): Promise<boolean> {
+  if (!ownerMxid) return false; // nothing this script can do is still "not done"
+  try {
+    const current = await client.getAccountData(ownerMxid, "m.direct");
+    const rooms = current && Array.isArray(current[newUserId]) ? (current[newUserId] as unknown[]) : [];
+    return rooms.includes(roomId);
+  } catch (err) {
+    // A read failure is reported as outstanding, not silently treated as
+    // fixed — the same "fail closed" stance `setDirect` takes on a write.
+    log.warn("could not read m.direct while describing this room; reporting it as outstanding", {
+      roomId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
 }
 
 /**
  * Every room that still needs some of this migration, and nothing else.
  *
- * A room whose new user has joined and whose old user has left is left out
- * entirely — not because a flag says it is done, but because those two live
- * facts, together, are the only way this migration itself is capable of
- * reaching that state (see the file doc).
+ * A room is left out only once join, leave, AND `m.direct` are all
+ * confirmed — the last one by reading it back, never inferred from the
+ * other two, because a refused `m.direct` write must keep the room visible
+ * even after membership has fully moved.
  */
 export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
   const out: RoomStatus[] = [];
@@ -114,15 +166,17 @@ export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
     // nothing today stores it. See requirement 3.
     const oldUserId = `@agent_${localpartFor(row.nodeName, row.stationKey)}:${deps.domain}`;
     const newUserId = bridgeUserId(handle, deps.domain);
+    const ownerMxid = await deps.ownerMxidFor(row.ownerUserId);
 
-    const newJoined = await deps.isJoined(newUserId, row.roomId);
-    const oldStillJoined = await deps.isJoined(oldUserId, row.roomId);
+    const newJoined = await deps.client.isJoined(newUserId, row.roomId);
+    const oldStillJoined = await deps.client.isJoined(oldUserId, row.roomId);
+    const directDone = await directAlreadyFixed(deps.client, ownerMxid, newUserId, row.roomId);
 
     const joinOutstanding = !newJoined;
     const leaveOutstanding = oldStillJoined;
-    const directOutstanding = joinOutstanding || leaveOutstanding;
+    const directOutstanding = !directDone;
 
-    if (!joinOutstanding && !leaveOutstanding) continue; // every step is already done
+    if (!joinOutstanding && !leaveOutstanding && !directOutstanding) continue; // truly nothing left
 
     out.push({
       roomId: row.roomId,
@@ -131,7 +185,7 @@ export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
       handle,
       oldUserId,
       newUserId,
-      ownerMxid: await deps.ownerMxidFor(row.ownerUserId),
+      ownerMxid,
       joinOutstanding,
       leaveOutstanding,
       directOutstanding,
@@ -149,19 +203,31 @@ export interface DirectClient {
   setAccountData(userId: string, type: string, content: Record<string, unknown>): Promise<void>;
 }
 
+/** How `m.direct` went for one room, once `setDirect` has run for it. */
+export type DirectOutcome =
+  | { status: "fixed" }
+  | { status: "no-owner" }
+  | { status: "failed"; error: string };
+
 /**
  * Wire `RoomStatus[]` into the deps shape `migrateAgentMxids` consumes.
  *
  * `setDirect` is where the read-modify-write lives: `m.direct` is every DM
  * the owner has, not just this one, so this reads the map, changes only the
- * two keys this room touches, and writes the whole thing back. A room whose
- * owner has no linked Matrix identity is logged and left alone rather than
- * guessed at.
+ * two keys this room touches, and writes the whole thing back. It is also
+ * where a refusal is caught rather than thrown — `migrateAgentMxids` calls
+ * `leave` right after this returns, and that call must still happen whether
+ * or not the write above succeeded. `directOutcomes` is how the caller finds
+ * out which happened, since `setDirect`'s own return type carries nothing.
  */
-export function buildMigrationDeps(rooms: RoomStatus[], client: DirectClient): MxidMigrationDeps {
+export function buildMigrationDeps(
+  rooms: RoomStatus[],
+  client: DirectClient
+): { deps: MxidMigrationDeps; directOutcomes: Map<string, DirectOutcome> } {
   const byRoom = new Map(rooms.map((r) => [r.roomId, r]));
+  const directOutcomes = new Map<string, DirectOutcome>();
 
-  return {
+  const deps: MxidMigrationDeps = {
     rooms: async () => rooms.map((r) => ({ roomId: r.roomId, handle: r.handle, oldUserId: r.oldUserId })),
     join: (userId, roomId) => client.join(userId, roomId),
     leave: (userId, roomId) => client.leave(userId, roomId),
@@ -171,23 +237,49 @@ export function buildMigrationDeps(rooms: RoomStatus[], client: DirectClient): M
         log.warn("cannot fix m.direct: the room's owner has no linked Matrix identity", {
           roomId,
         });
+        directOutcomes.set(roomId, { status: "no-owner" });
         return;
       }
 
-      const current = (await client.getAccountData(room.ownerMxid, "m.direct")) ?? {};
-      const next: Record<string, unknown> = { ...current };
+      try {
+        const current = (await client.getAccountData(room.ownerMxid, "m.direct")) ?? {};
+        const next: Record<string, unknown> = { ...current };
 
-      const oldRooms = Array.isArray(next[room.oldUserId]) ? (next[room.oldUserId] as unknown[]) : [];
-      const remaining = oldRooms.filter((r) => r !== roomId);
-      if (remaining.length > 0) next[room.oldUserId] = remaining;
-      else delete next[room.oldUserId];
+        const oldRooms = Array.isArray(next[room.oldUserId]) ? (next[room.oldUserId] as unknown[]) : [];
+        const remaining = oldRooms.filter((r) => r !== roomId);
+        if (remaining.length > 0) next[room.oldUserId] = remaining;
+        else delete next[room.oldUserId];
 
-      const newRooms = Array.isArray(next[newUserId]) ? (next[newUserId] as unknown[]) : [];
-      if (!newRooms.includes(roomId)) next[newUserId] = [...newRooms, roomId];
+        const newRooms = Array.isArray(next[newUserId]) ? (next[newUserId] as unknown[]) : [];
+        if (!newRooms.includes(roomId)) next[newUserId] = [...newRooms, roomId];
 
-      await client.setAccountData(room.ownerMxid, "m.direct", next);
+        await client.setAccountData(room.ownerMxid, "m.direct", next);
+        directOutcomes.set(roomId, { status: "fixed" });
+      } catch (err) {
+        // Not fatal, and deliberately so: see the file doc. The membership
+        // move must complete regardless of whether this bridge turns out to
+        // be allowed to touch the owner's account data.
+        const error = err instanceof Error ? err.message : String(err);
+        log.warn(
+          "could not fix m.direct for this room; leaving membership to move anyway",
+          { roomId, error }
+        );
+        directOutcomes.set(roomId, { status: "failed", error });
+      }
     },
   };
+
+  return { deps, directOutcomes };
+}
+
+/** One room's outcome after an apply run has actually touched it. */
+export interface RoomResult {
+  roomId: string;
+  stationKey: string;
+  /** Set only when `join` or `leave` threw and aborted this room's migration. */
+  error?: string;
+  /** Null when the room's migration failed before `setDirect` ever ran. */
+  direct: DirectOutcome | null;
 }
 
 export interface RunResult {
@@ -196,6 +288,8 @@ export interface RunResult {
   migrated: number;
   skipped: number;
   failures: Array<{ roomId: string; stationKey: string; error: string }>;
+  /** Per-room detail for an apply run; empty for a dry run. */
+  results: RoomResult[];
 }
 
 /**
@@ -216,13 +310,14 @@ export async function runMigration(
   const rooms = await describeRooms(describeDeps);
 
   if (!opts.apply) {
-    return { applied: false, rooms, migrated: 0, skipped: 0, failures: [] };
+    return { applied: false, rooms, migrated: 0, skipped: 0, failures: [], results: [] };
   }
 
-  const deps = buildMigrationDeps(rooms, client);
+  const { deps, directOutcomes } = buildMigrationDeps(rooms, client);
   let migrated = 0;
   let skipped = 0;
   const failures: RunResult["failures"] = [];
+  const results: RoomResult[] = [];
 
   for (const room of rooms) {
     try {
@@ -234,9 +329,20 @@ export async function runMigration(
       });
       migrated += r.migrated;
       skipped += r.skipped;
+      results.push({
+        roomId: room.roomId,
+        stationKey: room.stationKey,
+        direct: directOutcomes.get(room.roomId) ?? null,
+      });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       failures.push({ roomId: room.roomId, stationKey: room.stationKey, error });
+      results.push({
+        roomId: room.roomId,
+        stationKey: room.stationKey,
+        error,
+        direct: directOutcomes.get(room.roomId) ?? null,
+      });
       log.error("a room's migration failed; continuing with the rest", {
         roomId: room.roomId,
         stationKey: room.stationKey,
@@ -245,7 +351,14 @@ export async function runMigration(
     }
   }
 
-  return { applied: true, rooms, migrated, skipped, failures };
+  return { applied: true, rooms, migrated, skipped, failures, results };
+}
+
+function describeDirectOutcome(outcome: DirectOutcome | null): string {
+  if (!outcome) return "m.direct: not attempted";
+  if (outcome.status === "fixed") return "m.direct: fixed";
+  if (outcome.status === "no-owner") return "m.direct: skipped — owner has no linked Matrix identity";
+  return `m.direct: skipped — ${outcome.error}`;
 }
 
 /** What an operator reads, whether this was a dry run or a real one. */
@@ -276,7 +389,7 @@ export function formatReport(result: RunResult): string {
     lines.push(`  ${r.stationKey} @ ${r.nodeName}  (${r.roomId})`);
     lines.push(`    old: ${r.oldUserId}`);
     lines.push(`    new: ${r.newUserId}`);
-    lines.push(`    outstanding: ${steps}`);
+    lines.push(`    outstanding: ${steps || "none"}`);
     if (!r.ownerMxid) {
       lines.push(`    warning: owner has no linked Matrix identity — m.direct cannot be fixed`);
     }
@@ -285,8 +398,13 @@ export function formatReport(result: RunResult): string {
   if (result.applied) {
     lines.push("");
     lines.push(`migrated ${result.migrated}, skipped ${result.skipped}, failed ${result.failures.length}`);
-    for (const f of result.failures) {
-      lines.push(`  FAILED ${f.stationKey} (${f.roomId}): ${f.error} — re-run to retry`);
+    lines.push("");
+    for (const r of result.results) {
+      lines.push(
+        r.error
+          ? `  FAILED ${r.stationKey} (${r.roomId}): ${r.error} — re-run to retry`
+          : `  ${r.stationKey} (${r.roomId}): membership updated, ${describeDirectOutcome(r.direct)}`
+      );
     }
   }
 
@@ -339,7 +457,7 @@ async function main(): Promise<void> {
     {
       domain: cfg.domain,
       rows: listRoomStations,
-      isJoined: client.isJoined,
+      client,
       principalHandle,
       ownerMxidFor,
     },
