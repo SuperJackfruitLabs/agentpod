@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/matrix-gate-events",
-  "version": 1,
+  "version": 2,
   "authoredAt": "2026-08-30",
   "authoredFrom": "the gates table in kaambaan apps/api/src/board/board-do.ts, the GateDecision union it resolves against, and charter decisions/2026-08-30-a-gate-closes-over-chat.md",
   "purpose": "A kaambaan approval gate crosses into a Matrix room and a human's answer crosses back. Three codebases must agree on the field names: the board that opens the gate, the Application Service that projects and resolves it, and the client that draws the buttons. A rename in any one of them is a gate that silently never resolves — which reads to the human as a button that does nothing.",
@@ -51,7 +51,7 @@
           "why": "the ordinary case",
           "content": {
             "body": "Approval needed — \"Add OAuth login\" at stage `review`. Approve, request changes, or reject: https://kaambaan.dev/b/brd_7c1f/c/crd_9a22",
-            "schema_version": 1,
+            "schema_version": 2,
             "board_id": "brd_7c1f",
             "card_id": "crd_9a22",
             "gate_id": "gate_4e8b",
@@ -74,7 +74,8 @@
                 "label": "Reject"
               }
             ],
-            "deep_link": "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22"
+            "deep_link": "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22",
+            "handoff_summary": "Added the OAuth routes and a test for the refresh-token path."
           }
         },
         {
@@ -257,11 +258,39 @@
               }
             ]
           }
+        },
+        {
+          "why": "a handoff_summary that is not a string. It is displayed text; an object here would be rendered by whatever a host does with a non-string, which is exactly the coercion the renderers refuse.",
+          "content": {
+            "body": "Approval needed.",
+            "schema_version": 2,
+            "board_id": "brd_7c1f",
+            "card_id": "crd_9a22",
+            "gate_id": "gate_4e8b",
+            "stage_key": "review",
+            "return_stage_key": "code",
+            "card_title": "Add OAuth login",
+            "produced_by": "agt_31d0",
+            "prompt": "Ship it?",
+            "handoff_summary": {
+              "summary": "nested"
+            },
+            "options": [
+              {
+                "id": "approve",
+                "label": "Approve"
+              }
+            ]
+          }
         }
       ],
       "matrixEventType": "dev.kaambaan.gate.v1",
       "companion": "Sent beside a plain m.room.message carrying the same question, so stock clients can follow the room. The companion is prose only and carries no structured fields; nothing resolves against it.",
-      "bodyIsForThisClient": "`body` is supermessage's own FallbackBody path, used when the renderer cannot draw the card — not a stock-client fallback. That is what the companion message is for."
+      "bodyIsForThisClient": "`body` is supermessage's own FallbackBody path, used when the renderer cannot draw the card — not a stock-client fallback. That is what the companion message is for.",
+      "schemaVersions": {
+        "1": "card title, stage, produced_by, prompt, options.",
+        "2": "adds `handoff_summary` — what the reviewer is being asked to approve. Additive, so a v1 renderer ignores it and still draws the buttons. Added after a gate reached a phone showing a card title and no work: the reviewer was asked to approve a haiku with no haiku on the card (supermessage#37). Bounded by the board at 600 characters, because a room is not a document store and the client caps content at 8 KiB anyway."
+      }
     },
     {
       "suiteEventType": "dev.kaambaan.gate.decision.v1",

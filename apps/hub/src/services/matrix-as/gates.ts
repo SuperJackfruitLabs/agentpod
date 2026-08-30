@@ -64,6 +64,14 @@ export interface GatePendingDelivery {
   returnStageKey: string;
   cardTitle: string;
   producedBy: string;
+  /**
+   * What the reviewer is being asked to approve — the previous stage's
+   * handoff, bounded by the board at 600 characters.
+   *
+   * Optional because a board that has not shipped kaambaan#… yet sends none,
+   * and a gate without it must still render.
+   */
+  handoffSummary?: string | null;
   options: Array<{ id: string; label: string }>;
   ts: string;
 }
@@ -178,7 +186,7 @@ export function gateEventContent(
   const options = d.options.filter((o) => isGateOptionId(o.id));
   return {
     body: gateProseBody(d, deepLink),
-    schema_version: 1,
+    schema_version: 2,
     board_id: d.boardId,
     card_id: d.cardId,
     gate_id: d.gateId,
@@ -187,6 +195,11 @@ export function gateEventContent(
     card_title: d.cardTitle,
     produced_by: d.producedBy,
     prompt: `Approve "${d.cardTitle}"?`,
+    // supermessage#37: without this the card asks a reviewer to approve work
+    // it does not show them. Additive, so `schema_version` moves rather than
+    // the type — a renderer written against v1 ignores it and still draws the
+    // buttons.
+    ...(d.handoffSummary ? { handoff_summary: d.handoffSummary } : {}),
     options,
     ...(deepLink ? { deep_link: deepLink } : {}),
   };
