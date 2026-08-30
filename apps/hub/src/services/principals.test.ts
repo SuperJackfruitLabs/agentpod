@@ -1,5 +1,23 @@
-import { describe, expect, test } from "bun:test";
+/**
+ * Service Test: principals (mint + Better Auth lookup)
+ *
+ * Uses the local Docker test-postgres (localhost:5434).
+ * DATABASE_URL must be set before any src/ modules are imported.
+ */
+
+// ─── Set env vars BEFORE any src/ imports ─────────────────────────────────────
+process.env.DATABASE_URL =
+  process.env.DATABASE_URL ||
+  "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
+process.env.NODE_ENV = "test";
+
+import { describe, expect, test, beforeAll } from "bun:test";
+import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createPrincipal, principalForUser } from "./principals";
+
+beforeAll(async () => {
+  await ensurePgMigrations();
+});
 
 describe("principals", () => {
   test("mints an agent principal with a grammar-valid id", async () => {
