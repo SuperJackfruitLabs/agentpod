@@ -321,7 +321,7 @@
       "grammar": "^prn_[0-9a-f]{20}$",
       "grammarSource": "agentpod packages/contract/src/ids.ts — PrincipalId",
       "mintedAs": "^prn_[0-9a-f]{20}$",
-      "mintSource": "NONE — nothing in apps/hub/src mints a principal id yet, and no such statement has existed at any commit. The grammar is reserved and validated ahead of its first writer; Task 2 introduces apps/hub/src/utils/ids.ts and this citation becomes a file:line then.",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('prn')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3.",
       "note": "A suite principal — human, agent or service — the type `agentpod.user`'s bare UUID never was. Twenty lowercase hex, deliberately NOT a hyphenated UUID like agentpod.station: kaambaan's id schema is ^<prefix>_[A-Za-z0-9]{6,}$, whose alphabet has no hyphen, and a principal id crosses that seam on every grant.",
       "accept": [
         { "value": "prn_0123456789abcdef0123", "mint": true },
@@ -344,7 +344,7 @@
       "grammar": "^org_[0-9a-f]{20}$",
       "grammarSource": "agentpod packages/contract/src/ids.ts — OrganizationId",
       "mintedAs": "^org_[0-9a-f]{20}$",
-      "mintSource": "NONE — nothing in apps/hub/src mints an organization id yet, and no such statement has existed at any commit. The grammar is reserved and validated ahead of its first writer; Task 2 introduces apps/hub/src/utils/ids.ts and this citation becomes a file:line then.",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('org')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3. The migration's bootstrap row is deterministic (BOOTSTRAP_ORG_ID), not minted — the same exception tenants.ts documents for BOOTSTRAP_TENANT_ID.",
       "note": "Minted by the hub, which IS the Organization plane until the plane is extracted. tenants.external_id carries this value with external_source = 'org-plane'.",
       "accept": [
         { "value": "org_0123456789abcdef0123", "mint": true }

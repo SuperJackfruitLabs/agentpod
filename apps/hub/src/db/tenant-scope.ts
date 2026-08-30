@@ -53,6 +53,7 @@ import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
 import { tenants } from "./schema/tenants";
+import { organizations, principals } from "./schema/organization";
 
 export { BOOTSTRAP_TENANT_ID } from "./schema/tenants";
 
@@ -131,6 +132,31 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
     reason:
       "It IS the boundary. A tenant inside a tenant is the membership/hierarchy model the " +
       "Organization plane owns, and building it here is what MT-1 (#145) was rewritten to avoid.",
+  },
+
+  // ── The Organization plane, living in the hub before extraction ─────────────
+  //
+  // `tenants.externalId` maps a tenant to the organisation it stands for; these
+  // two tables ARE that organisation, not a tenant's contents. Scoping either by
+  // tenant_id would put the boundary's own referent inside the boundary — the
+  // same shape the `tenants` exemption above refuses, one level out.
+  organizations: {
+    table: organizations,
+    reason:
+      "The real thing `tenants.externalId` points at, not a row belonging to a tenant. An " +
+      "organisation is not inside a fleet — a fleet optionally names one via its external " +
+      "mapping — so a tenant_id column here would have the referent carry a pointer back to " +
+      "one of its own referrers, which is backwards. Same shape as the `tenants` exemption " +
+      "above, one level out.",
+  },
+  principals: {
+    table: principals,
+    reason:
+      "Belongs to an organization (orgId), not a fleet, for the same reason `user` and " +
+      "`principal_identities` are exempt above: a principal is not inside a tenant, it reaches " +
+      "one. This is the Organization-plane table `user`'s exemption comment already points at — " +
+      "'principals belong to the Organization plane, which owns Principal, Team, Role, " +
+      "identity mappings, authority' — now given a home instead of only a forward reference.",
   },
 
   // ── The Better Auth family ────────────────────────────────────────────────

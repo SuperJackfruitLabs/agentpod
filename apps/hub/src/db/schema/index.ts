@@ -9,6 +9,10 @@
 // First, because everything below references it.
 export * from "./tenants";
 
+// Organization plane — organizations and principals, living in the hub until
+// the plane is extracted (see the module doc in ./organization).
+export * from "./organization";
+
 // Authentication (Better Auth tables)
 export * from "./auth";
 

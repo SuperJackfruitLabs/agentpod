@@ -386,6 +386,13 @@
       "when": 1786687173202,
       "tag": "0054_service_signing_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788110577341,
+      "tag": "0055_spotty_namor",
+      "breakpoints": true
     }
   ]
 }
