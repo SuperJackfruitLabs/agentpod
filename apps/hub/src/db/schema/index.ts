@@ -39,3 +39,8 @@ export * from "./grants";
 
 // Matrix Application Service bookkeeping (#351)
 export * from "./matrix";
+
+// The key this deployment signs service assertions with — kept apart from
+// Better Auth's own `jwks` so the two authorities can be revoked separately
+// (migration 0054).
+export * from "./service-keys";

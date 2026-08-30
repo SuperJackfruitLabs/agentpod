@@ -45,6 +45,7 @@
     "gray-matter": "^4.0.3",
     "hono": "^4.13.2",
     "isomorphic-git": "^1.41.4",
+    "jose": "^6.2.9",
     "modal": "0.9.0",
     "nanoid": "^5.1.16",
     "pngjs": "^7.0.0",

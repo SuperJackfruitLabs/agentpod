@@ -33,6 +33,7 @@ import {
   unmatchedAnswerText,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
+import { parseGateDecision } from "./gates";
 
 const log = createLogger("matrix-inbound");
 
@@ -46,6 +47,18 @@ export interface InboundEvent {
 
 export interface InboundDeps {
   domain: string;
+  /**
+   * Answering a kaambaan approval gate.
+   *
+   * Optional so a deployment with no board wired up behaves exactly as before,
+   * and so the existing tests construct deps without it.
+   */
+  gates?: {
+    handle(
+      event: { sender: string; content: Record<string, unknown> },
+      roomId: string
+    ): Promise<unknown>;
+  };
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
   };
@@ -106,6 +119,21 @@ async function roomContext(roomId: string) {
 export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps): Promise<void> {
   if (event.type !== "m.room.message") return;
   if (!event.room_id) return;
+
+  // ── A decision, before anything else ──────────────────────────────────────
+  //
+  // Checked here rather than below the guards, and the position is the point.
+  // A decision is not a prompt: it answers a question the *board* asked, it
+  // never reaches the harness, and it must work in a harness-mode room — which
+  // the `identityMode !== "bridge"` guard further down would silently drop.
+  // That drop would look exactly like a button that did nothing.
+  if (deps.gates && event.content && parseGateDecision(event.content)) {
+    await deps.gates.handle(
+      { sender: event.sender, content: event.content },
+      event.room_id
+    );
+    return;
+  }
 
   const text = typeof event.content?.body === "string" ? event.content.body : "";
   // Whitespace is not a prompt. Sending one would start a turn with nothing in

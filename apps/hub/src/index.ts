@@ -11,6 +11,9 @@ import { authMiddleware } from './auth/middleware.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
+import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
+import { servicePublicJwks } from './auth/service-signing.ts';
+import { tenantForBoard } from './services/matrix-as/gates.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -111,6 +114,33 @@ const app = new Hono()
   .route('/public/nodes', gatewayRoutes)     // GET /public/nodes/gateway (WSS)
   // Signup check middleware - block signup if disabled (runs before auth handler)
   .use('/api/auth/*', signupCheckMiddleware)
+  /**
+   * GET /api/auth/jwks — Better Auth's key set, plus this hub's service
+   * signing keys.
+   *
+   * Registered BEFORE the catch-all below, because Hono matches in
+   * registration order and the catch-all would otherwise swallow it.
+   *
+   * Merged here rather than published separately so consumers keep fetching
+   * exactly one URL. kaambaan asks for `${issuer}/api/auth/jwks` and verifies
+   * against whatever comes back; teaching it about a second endpoint would put
+   * a deployment detail of this hub into another repository's code.
+   *
+   * If the plugin's own response cannot be parsed, this returns it untouched
+   * rather than substituting a set of its own — a JWKS endpoint that starts
+   * serving only half the keys would fail as "not authorized" at every
+   * consumer, which is the least diagnosable outcome available.
+   */
+  .get('/api/auth/jwks', async (c) => {
+    const upstream = await auth.handler(c.req.raw);
+    try {
+      const body = (await upstream.clone().json()) as { keys?: unknown[] };
+      if (!Array.isArray(body.keys)) return upstream;
+      return c.json({ ...body, keys: [...body.keys, ...(await servicePublicJwks())] });
+    } catch {
+      return upstream;
+    }
+  })
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
@@ -155,6 +185,25 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // POST /public/bridge/kaambaan/push — a board telling us a gate is open.
+  //
+  // Under /public, not /api, because the caller is a Worker holding a signing
+  // secret rather than a browser holding a session — and /api/* carries the
+  // CSRF middleware, which passes Bearer and would reject an HMAC-signed body.
+  // `runtime-callback.ts` is already mounted here for the same reason.
+  app.route(
+    '/public',
+    createKaambaanPushRoutes({
+      secret: process.env.KAAMBAAN_PUSH_SECRET,
+      domain: matrixBridge.config.domain,
+      boardBaseUrl: process.env.KAAMBAAN_BOARD_URL,
+      tenantIdFor: tenantForBoard,
+      sendText: (userId, roomId, body) => matrixBridge.client.sendText(userId, roomId, body),
+      sendCustomEvent: (userId, roomId, eventType, content) =>
+        matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+    }),
+  );
+
   app.route(
     '/_matrix/app/v1',
     createMatrixAsRoutes({

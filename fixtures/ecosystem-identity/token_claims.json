@@ -1,20 +1,21 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 3,
+  "version": 4,
   "authoredAt": "2026-08-15",
-  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants)",
+  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
     "standard": "Registered JWT claims the issuer sets. Consumers MUST validate iss, aud and exp.",
     "reserved": "Names that are SPOKEN FOR and not yet issued. A token must not use them to mean anything else, and a consumer must not infer permission from their absence.",
-    "reject": "Tokens a consumer MUST refuse. These are the point of the corpus \u2014 a fixture of only-valid examples proves almost nothing."
+    "reject": "Tokens a consumer MUST refuse. These are the point of the corpus — a fixture of only-valid examples proves almost nothing.",
+    "conditional": "Claims present only on SOME tokens. A consumer must not require them, and must not read their absence as a weaker caller — absence is the ordinary case."
   },
   "algorithm": {
     "alg": "EdDSA",
     "crv": "Ed25519",
     "source": "observed in agentpod#331; better-auth's jwt plugin default",
-    "note": "Consumers MUST pin the algorithm rather than trusting the token header, or a token signed with `alg: none` \u2014 or with a key of the consumer's choosing \u2014 is accepted."
+    "note": "Consumers MUST pin the algorithm rather than trusting the token header, or a token signed with `alg: none` — or with a key of the consumer's choosing — is accepted."
   },
   "issued": [
     {
@@ -31,7 +32,7 @@
         "agent",
         "service"
       ],
-      "meaning": "What kind of principal `sub` names. Present because this suite exists to make humans and agents both first-class \u2014 a consumer that cannot tell them apart cannot enforce separation of duties, which is what charter decisions/2026-08-14-approvals-cross-planes-as-events.md turns on.",
+      "meaning": "What kind of principal `sub` names. Present because this suite exists to make humans and agents both first-class — a consumer that cannot tell them apart cannot enforce separation of duties, which is what charter decisions/2026-08-14-approvals-cross-planes-as-events.md turns on.",
       "required": true
     },
     {
@@ -40,20 +41,20 @@
       "grammar": "^fleet_[0-9a-f]{20}$",
       "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, kaambaan migration 0002).",
       "required": true,
-      "crossRef": "id_grammar.json \u2192 agentpod.tenant"
+      "crossRef": "id_grammar.json → agentpod.tenant"
     },
     {
       "claim": "mayDispatch",
       "type": "string[]",
-      "meaning": "First half of the control pair \u2014 which agents this principal may dispatch. Values are NAMESPACED by plane, and AgentPod's also name a node: `agentpod:<nodeName>/<stationKey>`, `kaambaan:<agentId>`.",
+      "meaning": "First half of the control pair — which agents this principal may dispatch. Values are NAMESPACED by plane, and AgentPod's also name a node: `agentpod:<nodeName>/<stationKey>`, `kaambaan:<agentId>`.",
       "required": true,
       "grammar": "^[a-z][a-z0-9-]*:.+$",
       "valueRules": {
-        "namespaced": "Every value carries a plane prefix. An UNPREFIXED value matches nothing anywhere \u2014 that was the retired CONTROL_PAIR_GRANTS format, and letting it keep working would mean a half-migrated deployment enforcing two different rules depending on which reader ran.",
+        "namespaced": "Every value carries a plane prefix. An UNPREFIXED value matches nothing anywhere — that was the retired CONTROL_PAIR_GRANTS format, and letting it keep working would mean a half-migrated deployment enforcing two different rules depending on which reader ran.",
         "unknownNamespaceIsIgnored": "A consumer IGNORES a namespace it does not recognise; it must never deny on one. A plane that refused what it did not understand would break the day a third plane appeared, and a claim is read by more planes over time, not fewer.",
         "wildcard": "One trailing `*` per segment. In the station half it may not cross the `:` it was written inside, so `hermes:*` never reaches an OpenClaw station.",
         "emptyDenies": "`[]` is a decision, and the decision is no. It is what an operator writes to suspend someone without deleting their grant.",
-        "agentpodNamesANode": "A station key is NOT unique across the fleet \u2014 uniqueness is (node, key), and `opencode:c52ddf65` exists on two nodes in production. So an agentpod value names both: `agentpod:molt-bot/hermes:*` is Hermes stations on molt-bot, `agentpod:*/hermes:*` is Hermes stations anywhere. A two-part value (`agentpod:hermes:*`) cannot say which node it meant and MATCHES NOTHING \u2014 reading it as 'any node' is the over-grant this shape removes.",
+        "agentpodNamesANode": "A station key is NOT unique across the fleet — uniqueness is (node, key), and `opencode:c52ddf65` exists on two nodes in production. So an agentpod value names both: `agentpod:molt-bot/hermes:*` is Hermes stations on molt-bot, `agentpod:*/hermes:*` is Hermes stations anywhere. A two-part value (`agentpod:hermes:*`) cannot say which node it meant and MATCHES NOTHING — reading it as 'any node' is the over-grant this shape removes.",
         "nodeNamesAreUnique": "Within a tenant, by construction: enrolment suffixes a hostname collision (`molt-bot`, `molt-bot-2`) and a unique index enforces it. Names rather than ids because a grant must be readable by whoever writes it."
       },
       "source": "charter decisions/2026-08-15-a-grant-names-an-agent-per-plane.md"
@@ -61,7 +62,7 @@
     {
       "claim": "mayGrantReach",
       "type": "boolean",
-      "meaning": "Second half of the control pair \u2014 whether this principal may grant an agent its reach. Both halves are required: dispatch control alone is decorative, because anyone who can grant an agent production credentials does not need permission to dispatch it.",
+      "meaning": "Second half of the control pair — whether this principal may grant an agent its reach. Both halves are required: dispatch control alone is decorative, because anyone who can grant an agent production credentials does not need permission to dispatch it.",
       "required": true,
       "source": "charter decisions/2026-08-13-ecosystem-identity.md, Decision 4"
     }
@@ -96,7 +97,7 @@
     },
     {
       "case": "expired",
-      "why": "exp in the past. This is the whole revocation story \u2014 a consumer that ignores exp has no revocation at all."
+      "why": "exp in the past. This is the whole revocation story — a consumer that ignores exp has no revocation at all."
     },
     {
       "case": "wrong-issuer",
@@ -108,7 +109,7 @@
     },
     {
       "case": "unknown-kid",
-      "why": "Signed by a key not in the JWKS \u2014 including a key that WAS in it and has been retired. agentpod#331 found retirement propagates only as fast as each consumer's JWKS cache, so this case is reachable in normal operation, not only under attack."
+      "why": "Signed by a key not in the JWKS — including a key that WAS in it and has been retired. agentpod#331 found retirement propagates only as fast as each consumer's JWKS cache, so this case is reachable in normal operation, not only under attack."
     },
     {
       "case": "missing-tenant",
@@ -120,11 +121,25 @@
     },
     {
       "case": "mayDispatch-absent",
-      "why": "A token from an issuer that predates the control pair. A consumer must not treat absence as an empty grant, nor as an unrestricted one \u2014 it means the issuer cannot answer, and the consumer decides its own posture."
+      "why": "A token from an issuer that predates the control pair. A consumer must not treat absence as an empty grant, nor as an unrestricted one — it means the issuer cannot answer, and the consumer decides its own posture."
     },
     {
       "case": "agentpod-value-without-a-node",
-      "why": "`agentpod:hermes:*` \u2014 the two-part form. It names no node, and station keys repeat across nodes, so it must match nothing rather than be read as fleet-wide."
+      "why": "`agentpod:hermes:*` — the two-part form. It names no node, and station keys repeat across nodes, so it must match nothing rather than be read as fleet-wide."
+    }
+  ],
+  "conditional": [
+    {
+      "claim": "act",
+      "type": "object",
+      "shape": {
+        "sub": "string — the service that minted this token"
+      },
+      "required": false,
+      "meaning": "RFC 8693's actor claim. Present when a SERVICE minted this token while asserting a principal who was not present to sign in — today, the Matrix Application Service resolving an approval gate on behalf of the human who tapped a button in a room. `sub` remains the human; `act.sub` is who spoke for them.",
+      "whyItExists": "charter decisions/2026-08-14-approvals-cross-planes-as-events.md requires a human's approval to reach kaambaan AS that human, because a bridge substituting its own identity would make every approval in the suite attribute to one account and void the separation-of-duties check. That requirement creates a token nobody signed in for. Such a token should not be INDISTINGUISHABLE from one a person minted from their own session — delegation that cannot be seen in the record is impersonation with better manners.",
+      "consumerObligation": "A consumer MUST NOT grant more because `act` is present, and MUST NOT deny because it is absent. It carries no authority of its own: the claims beside it are built by the same code path a session token uses, so an assertion can never carry reach the person's own token would not. What a consumer MAY do is RECORD it, so an audit can distinguish 'she approved it' from 'the bridge approved it for her'.",
+      "signedBy": "A separate key from the one session tokens use — agentpod migration 0054. Both are published in the same JWKS and verify identically, so this is an authority boundary rather than a cryptographic one: revoking the bridge's ability to speak for people is deleting one row, and does not sign every human out of the console."
     }
   ]
 }
