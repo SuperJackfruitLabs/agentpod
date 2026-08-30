@@ -23,7 +23,7 @@ import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { resolveMatrixId } from "../matrix-identity";
-import { getGrant, grantAllowsStation } from "../grants";
+import { getGrant, grantAllowsPrincipal } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
 import {
@@ -106,6 +106,7 @@ async function roomContext(roomId: string) {
       stationKey: stations.stationKey,
       identityMode: stations.matrixIdentityMode,
       nodeName: nodes.name,
+      principalId: stations.principalId,
       sessionStatus: acpSessions.status,
     })
     .from(matrixRooms)
@@ -174,10 +175,7 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
   // ── May they dispatch THIS agent? ─────────────────────────────────────────
   if (isControlPairEnforced()) {
     const grant = await getGrant(principalId);
-    const allowed = grantAllowsStation(grant, {
-      nodeName: room.nodeName,
-      stationKey: room.stationKey,
-    });
+    const allowed = grantAllowsPrincipal(grant, room.principalId);
 
     if (!allowed) {
       log.warn("matrix message refused by the control pair", {

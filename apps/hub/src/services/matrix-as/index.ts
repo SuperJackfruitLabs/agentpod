@@ -29,6 +29,7 @@ import {
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
+import { principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
@@ -60,26 +61,36 @@ export interface MatrixBridgeConfig {
  *
  * A turn's text is pushed to that person's own devices while it is being
  * written (see `live.ts`), so this answers "whose devices". `null` — a room
- * whose owner has no Matrix identity mapped — simply means no live view; the
- * room still gets its message.
+ * whose owner has no principal, or a principal with no Matrix identity mapped —
+ * simply means no live view; the room still gets its message.
  *
- * Looked up once per attachment rather than per chunk: this is three joins and
- * an agent can emit hundreds of chunks in a turn.
+ * Two lookups rather than one join, because `stations.userId` is a Better Auth
+ * id and `principal_identities.principal_id` is a `prn_…` value now — joining
+ * them directly would silently match nothing for every station. Still looked
+ * up once per attachment rather than per chunk: an agent can emit hundreds of
+ * chunks in a turn.
  */
 async function readerForRoom(roomId: string): Promise<string | null> {
   const [row] = await db
-    .select({ externalId: principalIdentities.externalId })
+    .select({ userId: stations.userId })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
-    .innerJoin(
-      principalIdentities,
+    .where(eq(matrixRooms.roomId, roomId));
+  if (!row) return null;
+
+  const principal = await principalForUser(row.userId);
+  if (!principal) return null;
+
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
       and(
-        eq(principalIdentities.principalId, stations.userId),
+        eq(principalIdentities.principalId, principal.id),
         eq(principalIdentities.system, "matrix")
       )
-    )
-    .where(eq(matrixRooms.roomId, roomId));
-  return row?.externalId ?? null;
+    );
+  return identity?.externalId ?? null;
 }
 
 export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {

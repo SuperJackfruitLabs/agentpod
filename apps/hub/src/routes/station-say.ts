@@ -24,7 +24,8 @@ import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixRooms } from "../db/schema/matrix";
-import { getGrant, grantAllowsStation } from "../services/grants";
+import { getGrant, grantAllowsPrincipal } from "../services/grants";
+import { principalForUser } from "../services/principals";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { createLogger } from "../utils/logger";
@@ -50,6 +51,7 @@ export function createStationSayRoutes(deps: StationSayDeps) {
         mode: stations.matrixIdentityMode,
         nodeName: nodes.name,
         roomId: matrixRooms.roomId,
+        principalId: stations.principalId,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -67,14 +69,19 @@ export function createStationSayRoutes(deps: StationSayDeps) {
     // The same question dispatching asks. Speaking as an agent is speaking AS
     // it, and a grant that does not cover this station does not cover this.
     if (isControlPairEnforced()) {
-      const grant = await getGrant(user.id);
-      const allowed = grantAllowsStation(grant, {
-        nodeName: station.nodeName,
-        stationKey: station.stationKey,
-      });
+      // `getGrant` is keyed by principal id now, not the Better Auth user id a
+      // session carries — a caller with no principal has no grant to hold and
+      // must be refused, not treated as unrestricted.
+      const principal = await principalForUser(user.id);
+      if (!principal) {
+        log.warn("unprompted message refused: no principal for this caller", { userId: user.id });
+        return c.json({ error: "You are not permitted to speak as this agent." }, 403);
+      }
+      const grant = await getGrant(principal.id);
+      const allowed = grantAllowsPrincipal(grant, station.principalId);
       if (!allowed) {
         log.warn("unprompted message refused by the control pair", {
-          principalId: user.id,
+          principalId: principal.id,
           node: station.nodeName,
           stationKey: station.stationKey,
         });

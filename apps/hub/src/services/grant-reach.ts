@@ -15,9 +15,10 @@
 import { and, eq } from "drizzle-orm";
 import { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { nodes } from "../db/schema";
+import { stations } from "../db/schema";
 import { principalIdentities } from "../db/schema/identities";
-import { getGrant, grantAllowsStation } from "./grants";
+import { getGrant, grantAllowsPrincipal } from "./grants";
+import { principalForUser } from "./principals";
 import { isUserAdmin } from "../models/admin-users";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
@@ -58,9 +59,14 @@ export function isReachBearing(cap: Capability): boolean {
  * Guard a station-scoped act.
  *
  * Two conditions, both required: the principal holds `mayGrantReach`, AND their
- * dispatch scope covers this station. One scope list, shared with dispatch, so
- * the two can never disagree about what a pattern means — `grantAllowsStation`
+ * dispatch scope covers this station. One scope check, shared with dispatch, so
+ * the two can never disagree about what a grant means — `grantAllowsPrincipal`
  * is the same function `acp.createSession` calls.
+ *
+ * `userId` is a Better Auth user id — every caller reaches this through a
+ * console route holding a session, never a principal id obtained elsewhere —
+ * and is resolved to a principal before either `getGrant` or the station scope
+ * check, both of which are keyed by principal id now.
  */
 export async function requireGrantReach(
   userId: string,
@@ -71,36 +77,44 @@ export async function requireGrantReach(
   if (!isControlPairEnforced()) return;
   if (effect === "read" || !isReachBearing(cap)) return;
 
-  const grant = await getGrant(userId);
-  if (!grant?.mayGrantReach) {
-    log.warn("reach refused by the control pair: principal may not change agents", {
-      principalId: userId,
+  const principal = await principalForUser(userId);
+  if (!principal) {
+    log.warn("reach refused by the control pair: no principal for this caller", {
+      userId,
       stationKey: station.stationKey,
       capability: cap,
     });
     throw new GrantReachDenied(userId, station.stationKey, cap);
   }
 
-  // The node name, because a grant names a node as well as a station — station
-  // keys repeat across the fleet.
-  const [node] = await db
-    .select({ name: nodes.name })
-    .from(nodes)
-    .where(eq(nodes.id, station.nodeId))
-    .limit(1);
-
-  const inScope =
-    node !== undefined &&
-    grantAllowsStation(grant, { nodeName: node.name, stationKey: station.stationKey });
-
-  if (!inScope) {
-    log.warn("reach refused by the control pair: station out of scope", {
-      principalId: userId,
-      node: node?.name,
+  const grant = await getGrant(principal.id);
+  if (!grant?.mayGrantReach) {
+    log.warn("reach refused by the control pair: principal may not change agents", {
+      principalId: principal.id,
       stationKey: station.stationKey,
       capability: cap,
     });
-    throw new GrantReachDenied(userId, station.stationKey, cap);
+    throw new GrantReachDenied(principal.id, station.stationKey, cap);
+  }
+
+  // The station's OCCUPYING PRINCIPAL, not the station itself — a grant names
+  // an agent, and (nodeId, stationKey) is the unique index that gets there
+  // without a second copy of the id in every caller's hands.
+  const [row] = await db
+    .select({ principalId: stations.principalId })
+    .from(stations)
+    .where(and(eq(stations.nodeId, station.nodeId), eq(stations.stationKey, station.stationKey)))
+    .limit(1);
+
+  const inScope = row !== undefined && grantAllowsPrincipal(grant, row.principalId);
+
+  if (!inScope) {
+    log.warn("reach refused by the control pair: station out of scope", {
+      principalId: principal.id,
+      stationKey: station.stationKey,
+      capability: cap,
+    });
+    throw new GrantReachDenied(principal.id, station.stationKey, cap);
   }
 }
 
@@ -119,31 +133,38 @@ export async function requireIssueCredentials(
 ): Promise<void> {
   if (!isControlPairEnforced()) return;
 
-  const grant = await getGrant(userId);
-  if (!grant?.mayGrantReach) {
-    log.warn("credential issue refused: principal may not change agents", {
-      principalId: userId,
+  const principal = await principalForUser(userId);
+  if (!principal) {
+    log.warn("credential issue refused: no principal for this caller", {
+      userId,
       stationKey: station.stationKey,
     });
     throw new GrantReachDenied(userId, station.stationKey, "credentials");
   }
 
-  const [node] = await db
-    .select({ name: nodes.name })
-    .from(nodes)
-    .where(eq(nodes.id, station.nodeId))
+  const grant = await getGrant(principal.id);
+  if (!grant?.mayGrantReach) {
+    log.warn("credential issue refused: principal may not change agents", {
+      principalId: principal.id,
+      stationKey: station.stationKey,
+    });
+    throw new GrantReachDenied(principal.id, station.stationKey, "credentials");
+  }
+
+  const [row] = await db
+    .select({ principalId: stations.principalId })
+    .from(stations)
+    .where(and(eq(stations.nodeId, station.nodeId), eq(stations.stationKey, station.stationKey)))
     .limit(1);
 
-  const inScope =
-    node !== undefined &&
-    grantAllowsStation(grant, { nodeName: node.name, stationKey: station.stationKey });
+  const inScope = row !== undefined && grantAllowsPrincipal(grant, row.principalId);
 
   if (!inScope) {
     log.warn("credential issue refused: station out of scope", {
-      principalId: userId,
+      principalId: principal.id,
       stationKey: station.stationKey,
     });
-    throw new GrantReachDenied(userId, station.stationKey, "credentials");
+    throw new GrantReachDenied(principal.id, station.stationKey, "credentials");
   }
 }
 

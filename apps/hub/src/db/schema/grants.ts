@@ -8,11 +8,11 @@
  * the eventual claim** — which it did (`CONTROL_PAIR_GRANTS`). This is the
  * eventual claim arriving.
  *
- * Values are namespaced per
- * decisions/2026-08-15-a-grant-names-an-agent-per-plane.md: `agentpod:<stationKey>`
- * is matched here, `kaambaan:<agentId>` is matched there, and a namespace a plane
- * does not recognise is ignored rather than refused — a claim is read by more
- * planes over time, not fewer.
+ * Values are bare principal ids (`prn_…`), matched by equality, per
+ * decisions/2026-08-30-an-agent-is-a-principal.md §3 — which replaced the two
+ * namespaced, pattern-matched forms this table used to carry with one
+ * enumeration. A value that is not a recognised principal id is ignored rather
+ * than refused — a claim is read by more planes over time, not fewer.
  *
  * **A grant is authority, unlike `principal_identities` next door, which is only
  * sameness.** The distinction is the whole reason they are two tables: reading
@@ -38,7 +38,7 @@ export const principalGrants = pgTable(
       .references(() => principals.id, { onDelete: "cascade" }),
 
     /**
-     * Namespaced agent patterns this principal may dispatch.
+     * The ids of the agents this principal may dispatch.
      *
      * Stored as JSON text rather than a Postgres array: the value travels into a
      * JWT claim verbatim, and a round trip through `text[]` adds a shape

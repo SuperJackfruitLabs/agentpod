@@ -62,27 +62,26 @@ describe("/api/admin/grants", () => {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
+        mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
         mayGrantReach: true,
       }),
     });
     expect(res.status).toBe(200);
 
     expect(await getGrant(SUBJECT)).toEqual({
-      mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
+      mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
       mayGrantReach: true,
     });
   });
 
-  test("refuses an unnamespaced value instead of storing a grant that matches nothing", async () => {
-    // The retired `CONTROL_PAIR_GRANTS` format. A reader IGNORES a namespace it
-    // does not recognise; a WRITER must refuse a malformed one — otherwise this
-    // stores happily, matches nothing anywhere, and looks like a working grant,
-    // which is the worst of the three outcomes.
+  test("refuses a wildcard instead of storing a grant that matches nothing", async () => {
+    // A reader IGNORES a value it does not recognise; a WRITER must refuse a
+    // malformed one — otherwise this stores happily, matches nothing anywhere,
+    // and looks like a working grant, which is the worst of the three outcomes.
     const res = await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["hermes:*"], mayGrantReach: false }),
+      body: JSON.stringify({ mayDispatch: ["*"], mayGrantReach: false }),
     });
 
     expect(res.status).toBe(400);
@@ -90,32 +89,45 @@ describe("/api/admin/grants", () => {
     expect((await getGrant(SUBJECT))!.mayGrantReach).toBe(true);
   });
 
+  test("refuses a value that is not a well-formed principal id", async () => {
+    // The retired `agentpod:`/`kaambaan:` namespaced form, and any other string
+    // shaped like something else — a grant now enumerates principal ids and
+    // nothing else, so this must match nothing rather than look like a working
+    // grant that silently permits nobody.
+    const res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ mayDispatch: ["kaambaan:agt_x"], mayGrantReach: false }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   test("refuses a grant missing half the pair", async () => {
     const res = await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:molt-bot/hermes:*"] }),
+      body: JSON.stringify({ mayDispatch: ["prn_0123456789abcdef0123"] }),
     });
     expect(res.status).toBe(400);
   });
 
   test("replaces rather than merges, so narrowing is as easy as widening", async () => {
     await setGrant(SUBJECT, {
-      mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_x"],
+      mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
       mayGrantReach: true,
     });
 
     await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:molt-bot/hermes:analyst-echo"], mayGrantReach: false }),
+      body: JSON.stringify({ mayDispatch: ["prn_0123456789abcdef0123"], mayGrantReach: false }),
     });
 
     // A PATCH that merged arrays would make removing a permission harder than
     // adding one, and an authorization surface must never be easier to widen
     // than to narrow.
     expect(await getGrant(SUBJECT)).toEqual({
-      mayDispatch: ["agentpod:molt-bot/hermes:analyst-echo"],
+      mayDispatch: ["prn_0123456789abcdef0123"],
       mayGrantReach: false,
     });
   });
@@ -147,27 +159,16 @@ describe("/api/admin/grants", () => {
     }
   });
 
-  test("refuses an AgentPod value that names no node, because it matches nothing", async () => {
-    // `agentpod:hermes:*` is the shape everyone writes first, and since the
-    // amendment it matches no station on any node — uniqueness is (node, key).
-    // Stored, it reads as a working grant and permits nothing, which is the
-    // failure this writer exists to prevent. Fleet-wide has to be said out loud.
+  test("refuses a truncated principal id, because it matches nothing minted", async () => {
+    // One character short of `PrincipalId`'s grammar — the mint-site regex, not
+    // a hand-rolled one, is what decides this, so this pins that the two never
+    // drift apart rather than pinning a length nobody chose on purpose.
     const res = await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:hermes:*"], mayGrantReach: false }),
+      body: JSON.stringify({ mayDispatch: ["prn_0123456789abcdef012"], mayGrantReach: false }),
     });
     expect(res.status).toBe(400);
-    expect(await res.text()).toMatch(/node/i);
-  });
-
-  test("accepts fleet-wide only when it is written out", async () => {
-    const res = await app().request(`/grants/${SUBJECT}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false }),
-    });
-    expect(res.status).toBe(200);
   });
 
   test("removing a grant is not the same as emptying it", async () => {
