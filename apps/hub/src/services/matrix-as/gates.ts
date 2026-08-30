@@ -135,11 +135,39 @@ async function roomForCard(
   return { roomId: room.roomId, nodeName: room.nodeName, stationKey: room.stationKey };
 }
 
-/** The sentence a stock client sees. */
-export function gateProseBody(d: GatePendingDelivery, deepLink?: string): string {
+/**
+ * The sentence a stock client sees.
+ *
+ * The link is written as **markdown**, not as a bare URL, and that is the whole
+ * reason it is tappable. supermessage parses a plain `body` with
+ * `blocks_from_markdown` when the event carries no `formatted_body`
+ * (`item_view.rs`), and pulldown-cmark does not autolink bare URLs — so
+ * `https://…` sitting in prose renders as characters to retype. It looks like a
+ * link and is not, which is worse than omitting it.
+ */
+export function gateProseBody(d: GatePendingDelivery, link?: string): string {
   const where = `at stage \`${d.stageKey}\``;
-  const tail = deepLink ? ` ${deepLink}` : "";
+  const tail = link ? ` [Open the card](${link})` : "";
   return `Approval needed — "${d.cardTitle}" ${where}. Approve, request changes, or reject.${tail}`;
+}
+
+/**
+ * Where the card's link goes.
+ *
+ * `…/b/<board>/c/<card>` — the address kaambaan#34 assumed and kaambaan did
+ * not have. This projected that shape for a day and it returned 404, because
+ * the board app had no routing at all: one page, no `$page`, no
+ * `searchParams`, no card route. It was briefly changed to the app root, and
+ * is now back to the card because kaambaan/#47 made cards addressable.
+ *
+ * Worth keeping the history in view: the field was in the schema and in the
+ * tests for a day before anyone tapped it. A test that asserts a link is
+ * *present* proves nothing about whether it *resolves*, which is why the
+ * kaambaan side is covered by end-to-end tests that follow it.
+ */
+function boardLink(baseUrl: string | undefined, boardId: string, cardId: string): string | undefined {
+  if (!baseUrl) return undefined;
+  return `${baseUrl.replace(/\/+$/, "")}/b/${encodeURIComponent(boardId)}/c/${encodeURIComponent(cardId)}`;
 }
 
 /** The custom event's content. Pinned by the shared fixture. */
@@ -208,9 +236,7 @@ export async function projectGate(
   // `@agent_.*` namespace, where the appservice may not act — a 403 that
   // arrives later and elsewhere. See `names.ts`.
   const stationUser = bridgeUserId(found.nodeName, found.stationKey, deps.domain);
-  const deepLink = deps.boardBaseUrl
-    ? `${deps.boardBaseUrl}/b/${d.boardId}/c/${d.cardId}`
-    : undefined;
+  const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 
   // Prose first, deliberately: if only one lands, leave the room with a
   // readable question and no buttons rather than buttons and no context.

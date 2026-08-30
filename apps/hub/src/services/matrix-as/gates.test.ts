@@ -79,8 +79,17 @@ describe("the gate event's wire shape", () => {
 
   test("omits the deep link rather than sending a broken one", () => {
     expect(gateEventContent(DELIVERY).deep_link).toBeUndefined();
-    expect(gateEventContent(DELIVERY, "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22").deep_link)
-      .toBe("https://kaambaan.dev/b/brd_7c1f/c/crd_9a22");
+    expect(
+      gateEventContent(DELIVERY, "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22").deep_link
+    ).toBe("https://kaambaan.dev/b/brd_7c1f/c/crd_9a22");
+  });
+
+  test("the prose and the card agree on where the link goes", () => {
+    // They are two events describing one gate. A reader who taps the prose
+    // link and a reader who taps the card's must land in the same place.
+    const link = "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22";
+    expect(gateProseBody(DELIVERY, link)).toContain(link);
+    expect(gateEventContent(DELIVERY, link).deep_link).toBe(link);
   });
 });
 
@@ -94,8 +103,14 @@ describe("the prose a stock client sees", () => {
     );
   });
 
-  test("appends the deep link when there is one", () => {
-    expect(gateProseBody(DELIVERY, "https://k.dev/x")).toEndWith(" https://k.dev/x");
+  test("writes the link as markdown, because a bare URL is not tappable", () => {
+    // supermessage markdown-parses a plain body when there is no
+    // formatted_body, and pulldown-cmark does not autolink bare URLs. A raw
+    // https:// in prose renders as characters to retype — it looks like a link
+    // and is not, which is worse than omitting it.
+    expect(
+      gateProseBody(DELIVERY, "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22")
+    ).toEndWith(" [Open the card](https://kaambaan.dev/b/brd_7c1f/c/crd_9a22)");
   });
 
   test("is the same sentence the custom event carries as its body", () => {
