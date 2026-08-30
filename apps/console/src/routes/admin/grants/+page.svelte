@@ -12,12 +12,27 @@
    * server's own answer rather than a build flag. And it must not hide a grant
    * whose principal no longer exists: those still match tokens if that id is ever
    * reissued, and they are exactly what nobody goes looking for.
+   *
+   * **Keyed by principal, not by Better Auth user.** A grant's row is
+   * `principal_grants.principal_id`, a foreign key onto `principals.id`, and
+   * every value in `mayDispatch` is a principal id too. This page used to list
+   * Better Auth users and PUT to `/api/admin/grants/<user.id>`, which since
+   * that key moved is not a grant on the wrong principal — it is a write that
+   * cannot land, and every existing grant rendered as an orphan besides. The
+   * directory comes from `/api/admin/principals`; users are joined onto it only
+   * to put an email against a person.
    */
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   import { listUsers } from "$lib/api/admin";
-  import { listGrants, deleteGrant, type PrincipalGrant, type Grant } from "$lib/api/grants";
-  import { listNodes, listStations } from "$lib/api/client";
+  import {
+    listGrants,
+    listPrincipals,
+    deleteGrant,
+    type PrincipalGrant,
+    type PrincipalSummary,
+    type Grant,
+  } from "$lib/api/grants";
   import type { AdminUserView } from "@agentpod/types";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -39,7 +54,7 @@
     sublabel: string | null;
     grant: Grant;
     granted: boolean;
-    /** A grant whose principal is not a user here — kept visible on purpose. */
+    /** A grant naming a principal this hub has no record of — kept visible. */
     orphan: boolean;
   }
 
@@ -47,42 +62,61 @@
   let error = $state<string | null>(null);
   let enforced = $state(false);
   let rows = $state<Row[]>([]);
-  let stationValues = $state<string[]>([]);
+  let agentOptions = $state<Array<{ id: string; label: string }>>([]);
 
   let showDialog = $state(false);
   let editing = $state<Row | null>(null);
   let showRemove = $state(false);
   let removing = $state<Row | null>(null);
 
+  /** What a principal is called, in the order a person would recognise it. */
+  function nameOf(p: PrincipalSummary, user: AdminUserView | undefined): string {
+    return p.displayName || user?.name || user?.email || p.handle;
+  }
+
   async function loadData() {
     isLoading = true;
     error = null;
     try {
-      const [usersResponse, grantsResponse] = await Promise.all([
-        listUsers({ limit: 200 }),
+      // `listGrants` is the only blocking call. The directory and the user list
+      // are what put a readable name on a row; without them the page still has
+      // to show every grant, because narrowing one is exactly what you do when
+      // something has gone wrong and a page that refused to load would be the
+      // one thing standing in the way.
+      const [grantsResponse, directory, usersResponse] = await Promise.all([
         listGrants(),
+        listPrincipals().catch(() => [] as PrincipalSummary[]),
+        listUsers({ limit: 200 }).catch(() => ({ users: [] as AdminUserView[] })),
       ]);
 
       enforced = grantsResponse.enforced;
       const byPrincipal = new Map<string, PrincipalGrant>(
         grantsResponse.grants.map((g) => [g.principalId, g])
       );
+      const byUserId = new Map<string, AdminUserView>(
+        usersResponse.users.map((u: AdminUserView) => [u.id, u])
+      );
 
-      const users: Row[] = usersResponse.users.map((u: AdminUserView) => {
-        const grant = byPrincipal.get(u.id);
-        byPrincipal.delete(u.id);
+      const known: Row[] = directory.map((p) => {
+        const user = p.userId ? byUserId.get(p.userId) : undefined;
+        const grant = byPrincipal.get(p.id);
+        byPrincipal.delete(p.id);
         return {
-          principalId: u.id,
-          label: u.name || u.email,
-          sublabel: u.name ? u.email : null,
+          principalId: p.id,
+          label: nameOf(p, user),
+          // The handle and the kind, because two principals can share a display
+          // name and only one of them is the agent you meant to grant.
+          sublabel: [p.kind, p.handle, user?.email].filter(Boolean).join(" · "),
           grant: grant ?? NO_GRANT,
           granted: grant !== undefined,
           orphan: false,
         };
       });
 
-      // Whatever is left names a principal this hub has no user for — a deleted
-      // account, or an id from another issuer. Shown last, and marked.
+      // Whatever is left names a principal this hub has no record of — a deleted
+      // one, or an id from another issuer. Shown last, and marked: it still
+      // matches a token carrying that id, and it is exactly what nobody goes
+      // looking for.
       const orphans: Row[] = [...byPrincipal.values()].map((g) => ({
         principalId: g.principalId,
         label: g.principalId,
@@ -92,7 +126,14 @@
         orphan: true,
       }));
 
-      rows = [...users, ...orphans];
+      // Agents are what a grant's VALUES name, so they are what the dialog
+      // suggests. People and services are grantees, not grantable.
+      agentOptions = directory
+        .filter((p) => p.kind === "agent")
+        .map((p) => ({ id: p.id, label: p.displayName || p.handle }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      rows = [...known, ...orphans];
     } catch (e) {
       error = (e as Error).message || "Couldn’t load grants.";
     } finally {
@@ -100,35 +141,8 @@
     }
   }
 
-  /**
-   * Live stations, as grant values.
-   *
-   * Best-effort and non-blocking: these are suggestions, and a fleet that is
-   * unreachable must not stop someone editing a grant — narrowing one is exactly
-   * what you do when something has gone wrong.
-   */
-  async function loadStationValues() {
-    try {
-      const nodes = await listNodes();
-      const perNode = await Promise.all(
-        nodes.map(async (n) => {
-          try {
-            const stations = await listStations(n.id);
-            return stations.map((s) => `agentpod:${n.name}/${s.stationKey}`);
-          } catch {
-            return [];
-          }
-        })
-      );
-      stationValues = [...new Set(perNode.flat())].sort();
-    } catch {
-      stationValues = [];
-    }
-  }
-
   onMount(() => {
     loadData();
-    loadStationValues();
   });
 
   function openEdit(row: Row) {
@@ -224,7 +238,7 @@
               <div class="flex items-center gap-2">
                 <p class="text-sm font-medium">{row.label}</p>
                 {#if row.orphan}
-                  <Badge variant="outline" class="text-amber-600">No such user</Badge>
+                  <Badge variant="outline" class="text-amber-600">No such principal</Badge>
                 {/if}
                 {#if row.grant.mayGrantReach}
                   <Badge variant="outline">May grant reach</Badge>
@@ -279,7 +293,7 @@
   bind:open={showDialog}
   principal={editing ? { id: editing.principalId, label: editing.label } : null}
   grant={editing?.grant ?? NO_GRANT}
-  {stationValues}
+  {agentOptions}
   onSaved={loadData}
 />
 

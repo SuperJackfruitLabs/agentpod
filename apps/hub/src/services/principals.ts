@@ -102,3 +102,52 @@ export async function principalHandle(id: string): Promise<string | null> {
     .limit(1);
   return row?.handle ?? null;
 }
+
+/**
+ * Every principal, with the Better Auth login each one has if any.
+ *
+ * For the admin surface, and for one reason: a grant now names a principal id
+ * on both sides — the row is keyed by one and every value in `mayDispatch` is
+ * one — and a `prn_` id is not something a person can type from memory or
+ * recognise on sight. Without this the console can only offer a text box and
+ * hope, which is how an authorization surface stops being one people use.
+ *
+ * `userId` travels with the row so the console can put a name and an email
+ * against a human principal without a second call and a second guess about
+ * how to join the two id spaces. It is null for an agent or a service, which
+ * is the ordinary case and not a gap.
+ *
+ * Unpaginated, deliberately: this is one row per person and per agent in one
+ * organisation, which is the same order of magnitude as the fleet — and a
+ * paginated picker that silently stopped at page one would offer a narrower
+ * choice than exists, which on an authorization surface reads as "that agent
+ * cannot be granted".
+ */
+export async function listPrincipals(): Promise<
+  Array<{ id: string; kind: PrincipalKind; handle: string; displayName: string | null; userId: string | null }>
+> {
+  const rows = await db
+    .select({
+      id: principals.id,
+      kind: principals.kind,
+      handle: principals.handle,
+      displayName: principals.displayName,
+      externalId: principalIdentities.externalId,
+    })
+    .from(principals)
+    .leftJoin(
+      principalIdentities,
+      and(
+        eq(principalIdentities.principalId, principals.id),
+        eq(principalIdentities.system, "better-auth")
+      )
+    );
+
+  return rows.map((r) => ({
+    id: r.id,
+    kind: r.kind as PrincipalKind,
+    handle: r.handle,
+    displayName: r.displayName,
+    userId: r.externalId ?? null,
+  }));
+}

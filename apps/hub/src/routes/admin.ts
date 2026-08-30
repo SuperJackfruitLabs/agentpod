@@ -15,6 +15,7 @@ import { adminMiddleware, getRequestContext } from "../auth/admin-middleware";
 import { authMiddleware } from "../auth/middleware";
 import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
+import { adminPrincipalsRouter } from "./admin-principals";
 
 // Models
 import {
@@ -49,6 +50,11 @@ adminRouter.use("*", adminMiddleware);
 // surface the control is operable only by someone with a database client, and
 // an authorization system nobody can inspect is one people route around.
 adminRouter.route("/grants", adminGrantsRouter);
+
+// The vocabulary those grants are written in. A grant names a `prn_` id on both
+// sides and nothing else in this API says what those ids are, so without this
+// the console can offer only a text box for a twenty-hex string.
+adminRouter.route("/principals", adminPrincipalsRouter);
 
 // =============================================================================
 // Validation Schemas

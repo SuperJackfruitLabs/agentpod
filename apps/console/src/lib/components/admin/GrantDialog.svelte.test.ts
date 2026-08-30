@@ -10,6 +10,12 @@
  * is narrowed when the value they typed narrowed nothing. So most of what is
  * asserted below is about **refusing** values, and about the save being a
  * replacement rather than a merge.
+ *
+ * A value is one agent's principal id. The namespaced, pattern-matched forms
+ * this dialog used to ask for — `agentpod:<node>/<stationKey>`,
+ * `kaambaan:<agentId>` — are deleted rather than deprecated, so they are
+ * asserted here as REFUSALS: they are still written down in older notes and
+ * still what someone would paste in first.
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
@@ -25,7 +31,6 @@ vi.mock("$lib/api/grants", async () => {
     // The validator is pure and shared with the server's rule — mocking it would
     // test a stub instead of the thing that decides.
     grantValueProblem: actual.grantValueProblem,
-    KNOWN_PLANES: actual.KNOWN_PLANES,
     setGrant: vi.fn(),
     deleteGrant: vi.fn(),
   };
@@ -34,7 +39,9 @@ vi.mock("$lib/api/grants", async () => {
 import * as grantsApi from "$lib/api/grants";
 import GrantDialog from "./GrantDialog.svelte";
 
-const PRINCIPAL = { id: "user_abc", label: "jo@example.com" };
+const PRINCIPAL = { id: "prn_00000000000000000001", label: "jo@example.com" };
+const QUILL = "prn_0123456789abcdef0123";
+const ECHO = "prn_ffffffffffffffffffff";
 
 function open(props: Record<string, unknown> = {}) {
   return render(GrantDialog, {
@@ -42,7 +49,7 @@ function open(props: Record<string, unknown> = {}) {
       open: true,
       principal: PRINCIPAL,
       grant: { mayDispatch: [], mayGrantReach: false },
-      stationValues: [],
+      agentOptions: [],
       onSaved: vi.fn(),
       ...props,
     },
@@ -59,31 +66,52 @@ afterEach(cleanup);
 
 test("shows the values the principal already has", () => {
   const { getByText } = open({
-    grant: { mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_7abf"], mayGrantReach: true },
+    grant: { mayDispatch: [QUILL, ECHO], mayGrantReach: true },
   });
 
-  expect(getByText("agentpod:molt-bot/hermes:*")).toBeTruthy();
-  expect(getByText("kaambaan:agt_7abf")).toBeTruthy();
+  expect(getByText(QUILL)).toBeTruthy();
+  expect(getByText(ECHO)).toBeTruthy();
 });
 
-test("refuses an AgentPod value that names no node", async () => {
-  // The shape everyone writes first. Station keys repeat across nodes, so this
-  // matches nothing anywhere — and stored, it looks like a working grant.
+test("refuses the namespaced form this box used to ask for", async () => {
+  // The shape everyone still has written down, and the one that would be pasted
+  // in first. It is deleted, not narrowed — so the message has to say the
+  // grammar changed rather than that this particular value is malformed.
   const { getByLabelText, getByRole, findByText } = open();
 
-  await addValue(getByLabelText, getByRole, "agentpod:hermes:*");
+  await addValue(getByLabelText, getByRole, "agentpod:molt-bot/hermes:*");
 
-  expect(await findByText(/must name a node/i)).toBeTruthy();
+  expect(await findByText(/that form is gone/i)).toBeTruthy();
   await fireEvent.click(getByRole("button", { name: /save/i }));
   expect(grantsApi.setGrant).not.toHaveBeenCalled();
 });
 
-test("refuses a value that names no plane", async () => {
+test("refuses a wildcard, which would store happily and match nothing", async () => {
+  // The value someone types meaning "all of them". Matching is equality now, so
+  // stored it permits nobody while reading exactly like a working grant.
   const { getByLabelText, getByRole, findByText } = open();
 
-  await addValue(getByLabelText, getByRole, "hermes:*");
+  await addValue(getByLabelText, getByRole, "*");
 
-  expect(await findByText(/must name a plane/i)).toBeTruthy();
+  expect(await findByText(/wildcards match nothing/i)).toBeTruthy();
+});
+
+test("refuses anything that is not a well-formed principal id", async () => {
+  const { getByLabelText, getByRole, findByText } = open();
+
+  await addValue(getByLabelText, getByRole, "hermes");
+
+  expect(await findByText(/must be a principal id/i)).toBeTruthy();
+});
+
+test("refuses a principal id one character short of the grammar", async () => {
+  // The same length the mint site pins. A truncated id names nothing that was
+  // ever minted, and it is the typo a copy-paste actually produces.
+  const { getByLabelText, getByRole, findByText } = open();
+
+  await addValue(getByLabelText, getByRole, "prn_0123456789abcdef012");
+
+  expect(await findByText(/must be a principal id/i)).toBeTruthy();
 });
 
 test("saves the whole grant, so removing a value actually narrows it", async () => {
@@ -92,7 +120,7 @@ test("saves the whole grant, so removing a value actually narrows it", async () 
   const onSaved = vi.fn();
   const { getByRole, getAllByRole } = open({
     grant: {
-      mayDispatch: ["agentpod:molt-bot/hermes:*", "kaambaan:agt_7abf"],
+      mayDispatch: [QUILL, ECHO],
       mayGrantReach: false,
     },
     onSaved,
@@ -102,8 +130,8 @@ test("saves the whole grant, so removing a value actually narrows it", async () 
   await fireEvent.click(getByRole("button", { name: /save/i }));
 
   await waitFor(() =>
-    expect(grantsApi.setGrant).toHaveBeenCalledWith("user_abc", {
-      mayDispatch: ["kaambaan:agt_7abf"],
+    expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+      mayDispatch: [ECHO],
       mayGrantReach: false,
     })
   );
@@ -113,12 +141,30 @@ test("saves the whole grant, so removing a value actually narrows it", async () 
 test("adds a valid value and carries it into the save", async () => {
   const { getByLabelText, getByRole } = open();
 
-  await addValue(getByLabelText, getByRole, "agentpod:*/hermes:*");
+  await addValue(getByLabelText, getByRole, QUILL);
   await fireEvent.click(getByRole("button", { name: /save/i }));
 
   await waitFor(() =>
-    expect(grantsApi.setGrant).toHaveBeenCalledWith("user_abc", {
-      mayDispatch: ["agentpod:*/hermes:*"],
+    expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+      mayDispatch: [QUILL],
+      mayGrantReach: false,
+    })
+  );
+});
+
+test("a suggested agent is added by its id, never by the name shown on it", async () => {
+  // The label is what a person recognises; the id is what is compared by
+  // equality. Storing the label would be a grant that matches nothing.
+  const { getByRole } = open({
+    agentOptions: [{ id: QUILL, label: "Quill" }],
+  });
+
+  await fireEvent.click(getByRole("button", { name: /\+ Quill/ }));
+  await fireEvent.click(getByRole("button", { name: /save/i }));
+
+  await waitFor(() =>
+    expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+      mayDispatch: [QUILL],
       mayGrantReach: false,
     })
   );
@@ -128,24 +174,24 @@ test("does not add the same value twice", async () => {
   // A duplicate grants nothing extra and makes the list harder to read, which is
   // how an over-wide grant hides in plain sight.
   const { getByLabelText, getByRole, getAllByText } = open({
-    grant: { mayDispatch: ["kaambaan:agt_7abf"], mayGrantReach: false },
+    grant: { mayDispatch: [QUILL], mayGrantReach: false },
   });
 
-  await addValue(getByLabelText, getByRole, "kaambaan:agt_7abf");
+  await addValue(getByLabelText, getByRole, QUILL);
 
-  expect(getAllByText("kaambaan:agt_7abf")).toHaveLength(1);
+  expect(getAllByText(QUILL)).toHaveLength(1);
 });
 
 test("an empty grant is savable, because 'permitted nothing' is a real decision", async () => {
   const { getByRole } = open({
-    grant: { mayDispatch: ["kaambaan:agt_7abf"], mayGrantReach: false },
+    grant: { mayDispatch: [QUILL], mayGrantReach: false },
   });
 
   await fireEvent.click(getByRole("button", { name: /remove value/i }));
   await fireEvent.click(getByRole("button", { name: /save/i }));
 
   await waitFor(() =>
-    expect(grantsApi.setGrant).toHaveBeenCalledWith("user_abc", {
+    expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
       mayDispatch: [],
       mayGrantReach: false,
     })
@@ -158,10 +204,10 @@ test("a failed save keeps the dialog open with the edits intact", async () => {
   vi.mocked(grantsApi.setGrant).mockRejectedValueOnce(new Error("hub unreachable"));
   const { getByLabelText, getByRole, getByText } = open();
 
-  await addValue(getByLabelText, getByRole, "kaambaan:agt_7abf");
+  await addValue(getByLabelText, getByRole, QUILL);
   await fireEvent.click(getByRole("button", { name: /save/i }));
 
   const { toast } = await import("svelte-sonner");
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
-  expect(getByText("kaambaan:agt_7abf")).toBeTruthy();
+  expect(getByText(QUILL)).toBeTruthy();
 });
