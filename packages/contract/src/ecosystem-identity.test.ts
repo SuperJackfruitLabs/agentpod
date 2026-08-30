@@ -36,6 +36,8 @@ import {
   AcpSessionId,
   AcpRunId,
   UserId,
+  PrincipalId,
+  OrganizationId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt } from "./card-prompt";
@@ -100,10 +102,17 @@ const VALIDATORS: Record<string, ZodType> = {
   "agentpod.acpSession": AcpSessionId,
   "agentpod.acpRun": AcpRunId,
   "agentpod.user": UserId,
+  "agentpod.principal": PrincipalId,
+  "agentpod.organization": OrganizationId,
 };
 
 /** Entities AgentPod deliberately has no validator for. Empty, and a decision each time. */
-const SKIPPED: readonly string[] = [];
+const SKIPPED: readonly string[] = [
+  // Owned by kaambaan and crosses a repo boundary on every projected approval,
+  // but nothing on AgentPod's side consumes a gate id today — there is no
+  // agentpod-side validator to map it to. Revisit if AgentPod ever reads one.
+  "kaambaan.gate",
+];
 
 describe("ecosystem identity corpus — coverage", () => {
   test("every corpus entity is either validated or explicitly skipped", () => {
