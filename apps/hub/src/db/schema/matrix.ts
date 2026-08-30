@@ -42,8 +42,19 @@ export const matrixRooms = pgTable(
       .references(() => tenants.id, { onDelete: "restrict" }),
     stationId: text("station_id").notNull(),
     /**
-     * The occupying agent this room now speaks to, once Task 9's migration has
-     * run — added, not swapped in for `stationId`.
+     * The occupying agent this room speaks to — added, not swapped in for
+     * `stationId`.
+     *
+     * **Reserved ahead of its first writer: nothing populates it today.** The
+     * same manoeuvre `IDENTITY_SYSTEMS` uses for `org-plane` in
+     * `identities.ts` — declared before there is anything to put in it, so
+     * that adopting it later is a data move rather than a migration. An
+     * earlier version of this note said Task 9's migration backfills it room
+     * by room; it does not. `scripts/migrate-agent-mxids-run.ts` derives a
+     * room's old address from `(nodeName, stationKey)` and its new one from
+     * the station's principal handle, and writes neither back here. Anything
+     * reading this column as a record of what has been migrated would read
+     * null for all 32 rooms and conclude nothing had happened.
      *
      * `gates.ts` (`roomForCard`, `roomAgentUser`) and `gate-sweep.ts` join on
      * `stationId`, and `gate-sweep.ts` is deployed in production today —
@@ -53,10 +64,10 @@ export const matrixRooms = pgTable(
      * not a replacement for it. Retiring `stationId` is a later slice's own
      * migration, once every reader has moved.
      *
-     * Nullable because it starts empty for every existing row — Task 9's
-     * migration backfills it room by room as each one is re-addressed — and
-     * because a station can lose its occupant (`stations.principalId` is
-     * itself nullable) after ever having had one.
+     * Nullable because it is empty for every row until something writes it,
+     * and because a station can lose its occupant (`stations.principalId` is
+     * itself nullable) after ever having had one — so it would stay nullable
+     * even once a writer exists.
      */
     principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
     alias: text("alias").notNull(),

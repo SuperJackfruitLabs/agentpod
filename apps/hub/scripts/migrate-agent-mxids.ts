@@ -41,11 +41,15 @@
  * where the first left off. The skip condition is a fact about the room, not
  * a flag this script writes: a room whose already-correct address is what
  * `rooms()` reports as `oldUserId` needs nothing done to it, so
- * `bridgeUserId(handle, domain) === oldUserId` is skipped. `rooms()` itself is
- * expected to source `oldUserId` from the newly-added `matrix_rooms.principal_id`
- * (falling back to the station-derived address only for a room that has never
- * been migrated), so a room this script has already touched is simply absent
- * from the next run's list, or present with its new address already in place.
+ * `bridgeUserId(handle, domain) === oldUserId` is skipped.
+ *
+ * `rooms()` establishes that fact by ASKING THE HOMESERVER, not by reading a
+ * column. `matrix_rooms.principal_id` exists and is reserved ahead of its
+ * first writer — nothing populates it — so a check keyed on it would report
+ * every one of the 32 rooms as untouched forever, including the ones a
+ * previous run half-finished. `migrate-agent-mxids-run.ts` therefore derives
+ * `oldUserId` from `(nodeName, stationKey)` and settles each of the three
+ * steps against live membership and a live `m.direct` read.
  *
  * ## A station with no occupying principal
  *
