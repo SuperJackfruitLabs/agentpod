@@ -17,11 +17,18 @@ const log = createLogger("enrollment-tokens");
  * reach: "anyone who can register an agent and grant it production credentials
  * … they build the agent they want."
  *
- * It names no station, so there is no pattern to match against and the rule is
- * the narrower one — you may grow a fleet only if your authority already spans
- * it. Enforced on the route rather than in `mintEnrollmentToken`, because the
- * service is also how the *node* re-enrols itself and how tests build fixtures;
- * this is a check on a person asking, not on a token being made.
+ * It names no station, so there is nothing for a grant to be compared against.
+ * The rule used to be "you may grow a fleet only if your authority already
+ * spans it" — a dispatch value whose node half was `*`. With wildcards deleted
+ * (charter decisions/2026-08-30-an-agent-is-a-principal.md §3) there is no way
+ * to write "spans", and 2026-08-15-granting-reach-is-changing-an-agent
+ * explicitly rejected a second scoped list as the asymmetric-grant hazard
+ * restated. So `requireFleetGrantReach` asks whether the caller is an admin,
+ * which is what `/api/admin/grants` is already guarded by, and this route
+ * carries the same answer. Enforced on the route rather than in
+ * `mintEnrollmentToken`, because the service is also how the *node* re-enrols
+ * itself and how tests build fixtures; this is a check on a person asking, not
+ * on a token being made.
  *
  * `requireFleetGrantReach` takes a principal id, not a Better Auth user id, so
  * the caller is resolved to one here via `principalForUser` — the same lookup

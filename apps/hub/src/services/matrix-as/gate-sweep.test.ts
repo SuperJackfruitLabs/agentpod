@@ -96,6 +96,36 @@ describe("the gate sweep", () => {
     expect((await sweepGates(f.deps)).projected).toBe(0);
   });
 
+  test("does not count a gate whose room has a station but no agent in it", async () => {
+    // The outcome this slice added, and the one that is now fleet-wide rather
+    // than exceptional: `stations.principal_id` is nullable and nothing assigns
+    // it, so a room can exist with nobody to post the gate AS. Distinct from
+    // `no-room` — there is somewhere to put the question and no one to ask it —
+    // and, like `no-room`, it is not a delivery. Counting it would make the
+    // sweep's own logs say a person had been asked for an approval that is
+    // still sitting on the board.
+    const f = fake({}, { gate_1: { status: "no-agent" } });
+
+    const result = await sweepGates(f.deps);
+
+    expect(result.checked).toBe(1);
+    expect(result.projected).toBe(0);
+  });
+
+  test("a station with no agent does not stop the gates behind it", async () => {
+    // Every failure here is per-gate. One station left unoccupied must not take
+    // the rest of the board's pending gates with it — that is how a sweep stops
+    // being a floor and does it invisibly.
+    const f = fake({ pendingGates: async (b) => [gate("gate_1", b), gate("gate_2", b)] }, {
+      gate_1: { status: "no-agent" },
+    });
+
+    const result = await sweepGates(f.deps);
+
+    expect(f.offered).toEqual(["gate_1", "gate_2"]);
+    expect(result.projected).toBe(1);
+  });
+
   test("never asks a board whose gates it could not place anyway", async () => {
     // `tenantIdFor` is null for a board this hub has never dispatched work to,
     // which means no card→station binding and therefore no room for any gate on
