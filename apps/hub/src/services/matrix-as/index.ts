@@ -21,6 +21,14 @@ import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll } from "./provision";
 import { handleRoomMessage } from "./inbound";
+import {
+  handleGateDecision,
+  projectionForGate,
+  resolveGateAtKaambaan,
+  roomAgentUser,
+} from "./gates";
+import { mintPrincipalAssertion } from "../../auth/service-signing";
+import { resolveMatrixId } from "../matrix-identity";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
@@ -173,8 +181,45 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
 
   const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
 
+  /**
+   * Answering a gate, wired only when a board is configured.
+   *
+   * `KAAMBAAN_BASE_URL` absent means no board, which means no gate could have
+   * been projected in the first place — so leaving this undefined is the
+   * honest state rather than a half-built path that fails at the last step.
+   */
+  const kaambaanBaseUrl = (process.env.KAAMBAAN_BASE_URL ?? "").trim();
+  const gates = kaambaanBaseUrl
+    ? {
+        handle: (
+          event: { sender: string; content: Record<string, unknown> },
+          roomId: string
+        ) =>
+          handleGateDecision(event, roomId, {
+            // The subject comes from here and from nowhere else. This is the
+            // control that makes minting an assertion for another principal
+            // safe to have at all — see `mintPrincipalAssertion`.
+            principalForMatrixId: async (mxid: string) => {
+              const identity = await resolveMatrixId(mxid);
+              return identity?.kind === "principal" ? identity.principalId : null;
+            },
+            projectionFor: projectionForGate,
+            resolveGate: (input) =>
+              resolveGateAtKaambaan(input, {
+                baseUrl: kaambaanBaseUrl,
+                mint: (principalId) => mintPrincipalAssertion({ principalId }),
+              }),
+            reply: async (roomId: string, body: string) => {
+              const room = await roomAgentUser(roomId, cfg.domain);
+              return room ? client.sendText(room, roomId, body) : null;
+            },
+          }),
+      }
+    : undefined;
+
   const inboundDeps = {
     domain: cfg.domain,
+    gates,
     client,
     acp: {
       createSession: async (input: { stationId: string; userId: string; mode: string }) => {

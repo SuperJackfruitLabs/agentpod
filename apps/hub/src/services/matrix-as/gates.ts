@@ -418,3 +418,111 @@ export async function tenantForBoard(boardId: string): Promise<string | null> {
     .limit(1);
   return row?.tenantId ?? null;
 }
+
+/**
+ * Resolve a gate at kaambaan **as the human**, using a short-lived assertion.
+ *
+ * This is the function `charter →
+ * decisions/2026-08-14-approvals-cross-planes-as-events.md` is about. The
+ * alternative — calling with this service's own `kbn_` agent token — would work
+ * on the first try and make every approval in the suite attribute to one
+ * account, voiding kaambaan's separation-of-duties check while appearing to
+ * succeed. That is why the token is minted per decision rather than held.
+ *
+ * `principalId` must have come from `principal_identities`. See
+ * `mintPrincipalAssertion`, which says the same thing louder.
+ */
+export async function resolveGateAtKaambaan(
+  input: {
+    boardId: string;
+    gateId: string;
+    decision: GateOptionId;
+    comment: string | null;
+    principalId: string;
+  },
+  deps: {
+    baseUrl: string;
+    mint(principalId: string): Promise<string>;
+    fetch?: typeof fetch;
+  }
+): Promise<{ ok: true } | { ok: false; code: string }> {
+  const token = await deps.mint(input.principalId);
+  const doFetch = deps.fetch ?? fetch;
+  const base = deps.baseUrl.replace(/\/+$/, "");
+
+  let res: Response;
+  try {
+    res = await doFetch(
+      `${base}/v1/boards/${encodeURIComponent(input.boardId)}/gates/${encodeURIComponent(input.gateId)}/resolve`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          decision: input.decision,
+          ...(input.comment ? { comment: input.comment } : {}),
+        }),
+      }
+    );
+  } catch (err) {
+    // The network, not a refusal. Distinguished because a refusal is final and
+    // this is not — the reader should be able to press the button again.
+    log.warn("gate resolution did not reach the board", {
+      gateId: input.gateId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, code: "UNREACHABLE" };
+  }
+
+  if (res.ok) return { ok: true };
+
+  // kaambaan answers with `{ error: { code } }`. The code is what matters:
+  // it answers 403 for SEPARATION_OF_DUTIES and 409 for GATE_NOT_PENDING, and
+  // those are different situations with the same shape.
+  let code = `HTTP_${res.status}`;
+  try {
+    const body = (await res.json()) as { error?: { code?: string } };
+    if (body.error?.code) code = body.error.code;
+  } catch {
+    // Keep the status-derived code.
+  }
+  return { ok: false, code };
+}
+
+/** What this hub recorded when it posted a gate, or null if it never did. */
+export async function projectionForGate(gateId: string): Promise<{
+  tenantId: string;
+  boardId: string;
+  eventId: string;
+} | null> {
+  const [row] = await db
+    .select({
+      tenantId: matrixGateEvents.tenantId,
+      boardId: matrixGateEvents.boardId,
+      eventId: matrixGateEvents.eventId,
+    })
+    .from(matrixGateEvents)
+    .where(eq(matrixGateEvents.gateId, gateId))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * The virtual user this hub speaks as in a given room.
+ *
+ * Used when a gate needs an answer *about* itself — "that was already decided"
+ * — which must come from the agent whose room it is rather than from a bot
+ * nobody invited.
+ */
+export async function roomAgentUser(roomId: string, domain: string): Promise<string | null> {
+  const [row] = await db
+    .select({ stationKey: stations.stationKey, nodeName: nodes.name })
+    .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .innerJoin(nodes, eq(nodes.id, stations.nodeId))
+    .where(eq(matrixRooms.roomId, roomId))
+    .limit(1);
+  return row ? bridgeUserId(row.nodeName, row.stationKey, domain) : null;
+}

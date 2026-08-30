@@ -38,6 +38,7 @@ import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
+import { serviceSigningKeys } from "./schema/service-keys";
 import {
   matrixAsTransactions,
   matrixGateEvents,
@@ -202,6 +203,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "tenants their rooms do. Scoping this would mean asking which tenant a retry belongs to " +
       "before reading what is in it, which is backwards, and would let one tenant's replay " +
       "re-deliver another's.",
+  },
+
+  service_signing_keys: {
+    table: serviceSigningKeys,
+    reason:
+      "The key this deployment signs service assertions with. A signing key belongs to the " +
+      "installation, not to a fleet — scoping it would mean asking which tenant a key belongs " +
+      "to before verifying a token that names one, which is backwards. Same reasoning as jwks " +
+      "below, and it sits beside it for that reason.",
   },
 
   jwks: {

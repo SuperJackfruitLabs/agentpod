@@ -247,3 +247,109 @@ describe("acting on a decision", () => {
     expect(calls).toEqual(["principal"]);
   });
 });
+
+import { resolveGateAtKaambaan } from "./gates";
+
+/**
+ * Calling kaambaan as the person, not as this service.
+ *
+ * The alternative — using the bridge's own `kbn_` agent token — would work on
+ * the first try and make every approval in the suite attribute to one account.
+ * It fails in the direction that looks like success, which is why the token is
+ * minted per decision rather than held.
+ */
+describe("resolving at the board", () => {
+  function capture(status = 200, body: unknown = {}) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const f = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return { calls, f };
+  }
+
+  const input = {
+    boardId: "brd_7c1f",
+    gateId: "gate_4e8b",
+    decision: "approve" as const,
+    comment: null,
+    principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+  };
+
+  test("carries a freshly minted assertion for that principal", async () => {
+    const minted: string[] = [];
+    const { calls, f } = capture();
+    await resolveGateAtKaambaan(input, {
+      baseUrl: "https://kaambaan.dev/",
+      mint: async (p) => { minted.push(p); return "the.jwt.here"; },
+      fetch: f,
+    });
+    expect(minted, "one token, for the person who tapped").toEqual([input.principalId]);
+    expect((calls[0]!.init.headers as Record<string, string>).Authorization)
+      .toBe("Bearer the.jwt.here");
+  });
+
+  test("addresses the gate on its own board, with a trimmed base url", async () => {
+    const { calls, f } = capture();
+    await resolveGateAtKaambaan(input, {
+      baseUrl: "https://kaambaan.dev/", mint: async () => "t", fetch: f,
+    });
+    expect(calls[0]!.url).toBe("https://kaambaan.dev/v1/boards/brd_7c1f/gates/gate_4e8b/resolve");
+  });
+
+  test("omits a comment rather than sending null", async () => {
+    const { calls, f } = capture();
+    await resolveGateAtKaambaan(input, { baseUrl: "https://k.dev", mint: async () => "t", fetch: f });
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ decision: "approve" });
+  });
+
+  test("sends the feedback that becomes the rework's context", async () => {
+    const { calls, f } = capture();
+    await resolveGateAtKaambaan(
+      { ...input, decision: "request_changes", comment: "Add a test." },
+      { baseUrl: "https://k.dev", mint: async () => "t", fetch: f }
+    );
+    expect(JSON.parse(String(calls[0]!.init.body)))
+      .toEqual({ decision: "request_changes", comment: "Add a test." });
+  });
+
+  test("reports kaambaan's own code, not the status it arrived under", async () => {
+    // 403 is SEPARATION_OF_DUTIES and 409 is GATE_NOT_PENDING, and the caller
+    // reacts differently to each. Reading the status alone loses that.
+    const { f } = capture(409, { error: { code: "GATE_NOT_PENDING" } });
+    const r = await resolveGateAtKaambaan(input, {
+      baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
+    });
+    expect(r).toEqual({ ok: false, code: "GATE_NOT_PENDING" });
+  });
+
+  test("falls back to the status when the body says nothing useful", async () => {
+    const { f } = capture(502, "<html>bad gateway</html>");
+    const r = await resolveGateAtKaambaan(input, {
+      baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
+    });
+    expect(r).toEqual({ ok: false, code: "HTTP_502" });
+  });
+
+  test("distinguishes not reaching the board from being refused by it", async () => {
+    // A refusal is final; a network failure is not, and the reader should be
+    // able to press the button again.
+    const f = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
+    const r = await resolveGateAtKaambaan(input, {
+      baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
+    });
+    expect(r).toEqual({ ok: false, code: "UNREACHABLE" });
+  });
+
+  test("does not mint a second token for a retry it never makes", async () => {
+    let mints = 0;
+    const { f } = capture(409, { error: { code: "GATE_NOT_PENDING" } });
+    await resolveGateAtKaambaan(input, {
+      baseUrl: "https://k.dev", mint: async () => { mints++; return "t"; }, fetch: f,
+    });
+    expect(mints).toBe(1);
+  });
+});
