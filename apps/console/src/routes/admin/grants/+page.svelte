@@ -29,6 +29,8 @@
     listGrants,
     listPrincipals,
     deleteGrant,
+    suspendPrincipal,
+    restorePrincipal,
     type PrincipalGrant,
     type PrincipalSummary,
     type Grant,
@@ -45,6 +47,8 @@
   import ShieldOffIcon from "@lucide/svelte/icons/shield-off";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import BanIcon from "@lucide/svelte/icons/ban";
+  import RotateCcwIcon from "@lucide/svelte/icons/rotate-ccw";
 
   const NO_GRANT: Grant = { mayDispatch: [], mayGrantReach: false };
 
@@ -56,6 +60,12 @@
     granted: boolean;
     /** A grant naming a principal this hub has no record of — kept visible. */
     orphan: boolean;
+    /**
+     * When this principal was suspended, or null. Null for an orphan row too
+     * — there is no principal record to hold that state, so suspending one is
+     * not offered.
+     */
+    suspendedAt: string | null;
   }
 
   let isLoading = $state(true);
@@ -68,6 +78,10 @@
   let editing = $state<Row | null>(null);
   let showRemove = $state(false);
   let removing = $state<Row | null>(null);
+  let showSuspend = $state(false);
+  let suspending = $state<Row | null>(null);
+  /** The one row with a suspend/restore request in flight — disables its own buttons only. */
+  let pendingSuspendId = $state<string | null>(null);
 
   /** What a principal is called, in the order a person would recognise it. */
   function nameOf(p: PrincipalSummary, user: AdminUserView | undefined): string {
@@ -110,6 +124,7 @@
           grant: grant ?? NO_GRANT,
           granted: grant !== undefined,
           orphan: false,
+          suspendedAt: p.suspendedAt,
         };
       });
 
@@ -124,6 +139,7 @@
         grant: { mayDispatch: g.mayDispatch, mayGrantReach: g.mayGrantReach },
         granted: true,
         orphan: true,
+        suspendedAt: null,
       }));
 
       // Agents are what a grant's VALUES name, so they are what the dialog
@@ -167,6 +183,52 @@
     } finally {
       showRemove = false;
       removing = null;
+    }
+  }
+
+  function openSuspend(row: Row) {
+    suspending = row;
+    showSuspend = true;
+  }
+
+  /**
+   * Suspend a principal. This is the reason `/api/admin/principals` gained
+   * suspend/restore at all: `buildTokenPayload` already refuses a suspended
+   * principal on every path, but until this button existed that lever had no
+   * surface a person could reach without a database client.
+   */
+  async function handleSuspend() {
+    if (!suspending) return;
+    const target = suspending;
+    pendingSuspendId = target.principalId;
+    try {
+      await suspendPrincipal(target.principalId);
+      toast.success(`${target.label} suspended`);
+      await loadData();
+    } catch (e) {
+      toast.error("Couldn’t suspend", { description: (e as Error).message });
+    } finally {
+      pendingSuspendId = null;
+      showSuspend = false;
+      suspending = null;
+    }
+  }
+
+  /**
+   * Lift a suspension — reversible from the same row it was applied from, on
+   * purpose: a control that can only be applied and never undone is one
+   * people route around rather than use.
+   */
+  async function handleRestore(row: Row) {
+    pendingSuspendId = row.principalId;
+    try {
+      await restorePrincipal(row.principalId);
+      toast.success(`${row.label} restored`);
+      await loadData();
+    } catch (e) {
+      toast.error("Couldn’t restore", { description: (e as Error).message });
+    } finally {
+      pendingSuspendId = null;
     }
   }
 
@@ -225,6 +287,17 @@
       <p class="text-sm text-destructive">{error}</p>
       <Button variant="outline" size="sm" onclick={loadData}>Retry</Button>
     </div>
+  {:else if rows.length === 0}
+    <!-- An empty directory reads two ways — "nobody exists yet" and "the load
+         quietly returned nothing" — and a bare "0 of 0 principals" said neither.
+         This says what zero means. -->
+    <div class="rounded-lg border border-dashed p-8 text-center" data-testid="empty-state">
+      <p class="text-sm font-medium">No principals yet</p>
+      <p class="mt-1 text-xs text-muted-foreground">
+        Nobody — human or agent — is registered with this hub, so there is nothing to grant or
+        suspend.
+      </p>
+    </div>
   {:else}
     <p class="text-xs text-muted-foreground">
       {grantedCount} of {rows.length} principals have a grant.
@@ -239,6 +312,9 @@
                 <p class="text-sm font-medium">{row.label}</p>
                 {#if row.orphan}
                   <Badge variant="outline" class="text-amber-600">No such principal</Badge>
+                {/if}
+                {#if row.suspendedAt}
+                  <Badge variant="outline" class="text-destructive">Suspended</Badge>
                 {/if}
                 {#if row.grant.mayGrantReach}
                   <Badge variant="outline">May grant reach</Badge>
@@ -270,6 +346,32 @@
                 <PencilIcon class="mr-1 h-3.5 w-3.5" />
                 {row.granted ? "Edit" : "Grant"}
               </Button>
+              {#if !row.orphan}
+                {#if row.suspendedAt}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onclick={() => handleRestore(row)}
+                    disabled={pendingSuspendId === row.principalId}
+                    aria-label="Restore {row.label}"
+                  >
+                    <RotateCcwIcon class="mr-1 h-3.5 w-3.5" />
+                    Restore
+                  </Button>
+                {:else}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onclick={() => openSuspend(row)}
+                    disabled={pendingSuspendId === row.principalId}
+                    aria-label="Suspend {row.label}"
+                  >
+                    <BanIcon class="mr-1 h-3.5 w-3.5" />
+                    Suspend
+                  </Button>
+                {/if}
+              {/if}
               {#if row.granted}
                 <Button
                   variant="ghost"
@@ -307,5 +409,18 @@
   onCancel={() => {
     showRemove = false;
     removing = null;
+  }}
+/>
+
+<ConfirmDialog
+  open={showSuspend}
+  title="Suspend principal"
+  message="{suspending?.label} will be refused everywhere, on both planes — no token is minted for a suspended principal, session or agent alike. Reversible from this same page at any time."
+  confirmLabel="Suspend"
+  destructive
+  onConfirm={handleSuspend}
+  onCancel={() => {
+    showSuspend = false;
+    suspending = null;
   }}
 />

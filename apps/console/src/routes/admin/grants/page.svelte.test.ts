@@ -40,6 +40,8 @@ vi.mock("$lib/api/grants", async () => {
     listPrincipals: vi.fn(),
     setGrant: vi.fn(),
     deleteGrant: vi.fn(),
+    suspendPrincipal: vi.fn(),
+    restorePrincipal: vi.fn(),
   };
 });
 
@@ -73,6 +75,7 @@ const JO_PRINCIPAL: PrincipalSummary = {
   handle: "jo",
   displayName: null,
   userId: "user_1",
+  suspendedAt: null,
 };
 
 function setup({
@@ -146,7 +149,14 @@ test("shows an agent, because an agent is a principal and can hold a grant too",
   const { findByText } = setup({
     principals: [
       JO_PRINCIPAL,
-      { id: QUILL, kind: "agent", handle: "quill", displayName: "Quill", userId: null },
+      {
+        id: QUILL,
+        kind: "agent",
+        handle: "quill",
+        displayName: "Quill",
+        userId: null,
+        suspendedAt: null,
+      },
     ] satisfies PrincipalSummary[],
   });
 
@@ -198,4 +208,52 @@ test("an unreachable directory does not stop grant editing", async () => {
   });
 
   expect(await findByText(QUILL)).toBeTruthy();
+});
+
+test("says what an empty directory means, rather than a bare '0 of 0'", async () => {
+  // Regression guard: a bare "0 of 0 principals have a grant" reads as a
+  // loading glitch, not as "nobody is registered here yet".
+  const { findByTestId, queryByText } = setup({ principals: [] });
+
+  const empty = await findByTestId("empty-state");
+  expect(empty.textContent).toMatch(/no principals yet/i);
+  expect(queryByText(/0 of 0 principals/i)).toBeNull();
+});
+
+test("suspending a principal asks first, calls the endpoint, then reloads", async () => {
+  const { findByRole, getByRole } = setup();
+  vi.mocked(grantsApi.suspendPrincipal).mockResolvedValue({ id: JO, suspendedAt: "now" });
+
+  await fireEvent.click(await findByRole("button", { name: /^suspend jo$/i }));
+  await fireEvent.click(getByRole("button", { name: /^suspend$/i }));
+
+  await waitFor(() => expect(grantsApi.suspendPrincipal).toHaveBeenCalledWith(JO));
+  // Reloaded rather than patched locally — the server, not this button, is the
+  // authority on whether the principal is actually suspended now.
+  await waitFor(() => expect(grantsApi.listPrincipals).toHaveBeenCalledTimes(2));
+});
+
+test("a suspended principal shows Restore in place of Suspend, and it is reversible with one click — no confirmation needed to undo", async () => {
+  const { findByRole, findByText } = setup({
+    principals: [{ ...JO_PRINCIPAL, suspendedAt: "2026-08-30T00:00:00.000Z" }],
+  });
+  vi.mocked(grantsApi.restorePrincipal).mockResolvedValue({ id: JO, suspendedAt: null });
+
+  expect(await findByText("Suspended")).toBeTruthy();
+
+  await fireEvent.click(await findByRole("button", { name: /^restore jo$/i }));
+
+  await waitFor(() => expect(grantsApi.restorePrincipal).toHaveBeenCalledWith(JO));
+  await waitFor(() => expect(grantsApi.listPrincipals).toHaveBeenCalledTimes(2));
+});
+
+test("an orphaned grant offers no suspend control — there is no principal row to suspend", async () => {
+  const { findByText, queryByRole } = setup({
+    grants: [
+      { principalId: "prn_0000000000000000dead", mayDispatch: [QUILL], mayGrantReach: false },
+    ],
+  });
+
+  expect(await findByText("prn_0000000000000000dead")).toBeTruthy();
+  expect(queryByRole("button", { name: /suspend prn_0000000000000000dead/i })).toBeNull();
 });

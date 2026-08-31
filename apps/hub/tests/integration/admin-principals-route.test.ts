@@ -4,7 +4,8 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { adminPrincipalsRouter } from "../../src/routes/admin-principals";
-import { createPrincipal } from "../../src/services/principals";
+import { adminMiddleware } from "../../src/auth/admin-middleware";
+import { createPrincipal, principalById } from "../../src/services/principals";
 
 /**
  * The directory a grant is written against.
@@ -23,6 +24,8 @@ import { createPrincipal } from "../../src/services/principals";
 const USER = "test-user-admin-principals";
 const HUMAN_HANDLE = "admin-principals-it-human";
 const AGENT_HANDLE = "admin-principals-it-agent";
+const ADMIN_ACTOR = "test-admin-actor-principals";
+const NON_ADMIN_ACTOR = "test-non-admin-actor-principals";
 
 let HUMAN: string;
 let AGENT: string;
@@ -33,6 +36,7 @@ interface Row {
   handle: string;
   displayName: string | null;
   userId: string | null;
+  suspendedAt: string | null;
 }
 
 function app() {
@@ -41,6 +45,24 @@ function app() {
     c.set("user", { id: "test-admin", role: "admin" });
     await next();
   });
+  a.route("/principals", adminPrincipalsRouter);
+  return a;
+}
+
+/**
+ * The real guard, not the stub above. `app()` fakes an already-admin context
+ * so the other tests in this file can exercise the router in isolation; the
+ * suspend/restore tests below need the actual `adminMiddleware` in the chain,
+ * because "a non-admin cannot suspend" is a claim about that middleware, not
+ * about the router.
+ */
+function guardedApp(actorId: string) {
+  const a = new Hono();
+  a.use("*", async (c, next) => {
+    c.set("user", { id: actorId, authType: "api_key", tenantId: "default" });
+    await next();
+  });
+  a.use("*", adminMiddleware);
   a.route("/principals", adminPrincipalsRouter);
   return a;
 }
@@ -55,6 +77,17 @@ beforeAll(async () => {
   await ensurePgMigrations();
   await rawSql`DELETE FROM principals WHERE handle IN (${HUMAN_HANDLE}, ${AGENT_HANDLE})`;
   await createTestUser({ id: USER, email: "admin-principals@example.com", name: "Directory" });
+  await createTestUser({
+    id: ADMIN_ACTOR,
+    email: "admin-principals-actor@example.com",
+    name: "Actor",
+    role: "admin",
+  });
+  await createTestUser({
+    id: NON_ADMIN_ACTOR,
+    email: "admin-principals-non-actor@example.com",
+    name: "Non-actor",
+  });
   HUMAN = await createPrincipal({
     kind: "human",
     handle: HUMAN_HANDLE,
@@ -67,7 +100,7 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM principals WHERE handle IN (${HUMAN_HANDLE}, ${AGENT_HANDLE})`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await rawSql`DELETE FROM "user" WHERE id IN (${USER}, ${ADMIN_ACTOR}, ${NON_ADMIN_ACTOR})`;
   } catch {
     // cleanup only
   }
@@ -104,5 +137,76 @@ describe("/api/admin/principals", () => {
     expect(found!.kind).toBe("human");
     expect(found!.userId).toBe(USER);
     expect(found!.displayName).toBe("Directory Person");
+  });
+
+  test("reports suspendedAt: null for a principal never suspended, in the same call", async () => {
+    // The page must be able to show state without a second round trip.
+    const found = (await list()).find((p) => p.id === HUMAN);
+    expect(found!.suspendedAt).toBeNull();
+  });
+});
+
+describe("POST /api/admin/principals/:id/suspend and /restore", () => {
+  test("a non-admin cannot suspend a principal", async () => {
+    const res = await guardedApp(NON_ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+    expect((await principalById(AGENT))!.suspendedAt).toBeNull();
+  });
+
+  test("a non-admin cannot restore a principal", async () => {
+    const res = await guardedApp(NON_ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(403);
+  });
+
+  test("an admin can suspend, and the directory reflects it in the same call", async () => {
+    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; suspendedAt: string | null };
+    expect(body.id).toBe(AGENT);
+    expect(body.suspendedAt).not.toBeNull();
+
+    const found = (await list()).find((p) => p.id === AGENT);
+    expect(found!.suspendedAt).not.toBeNull();
+  });
+
+  test("suspending an already-suspended principal does not error", async () => {
+    // An operator double-clicking is ordinary, not a fault.
+    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("suspension is reversible from the same surface", async () => {
+    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; suspendedAt: string | null };
+    expect(body.suspendedAt).toBeNull();
+
+    const found = (await list()).find((p) => p.id === AGENT);
+    expect(found!.suspendedAt).toBeNull();
+  });
+
+  test("restoring a principal that is not suspended does not error", async () => {
+    const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+  });
+
+  test("suspending an unknown principal id answers 404, not a silent no-op", async () => {
+    const res = await guardedApp(ADMIN_ACTOR).request(
+      "/principals/prn_ffffffffffffffffff00/suspend",
+      { method: "POST" }
+    );
+    expect(res.status).toBe(404);
   });
 });

@@ -44,12 +44,46 @@ export interface PrincipalSummary {
   displayName: string | null;
   /** The Better Auth login, when this principal is a person. Null otherwise. */
   userId: string | null;
+  /**
+   * When this principal was suspended, or null if it is not. Carried on the
+   * directory itself so the page can show the state without a second call
+   * per row — the hub already refuses to mint a token for a suspended
+   * principal on every path; this is what tells an operator that lever
+   * exists at all.
+   */
+  suspendedAt: string | null;
 }
 
 /** Every principal this hub knows — people, agents and services alike. */
 export async function listPrincipals(): Promise<PrincipalSummary[]> {
   const body = await http<{ principals: PrincipalSummary[] }>("/api/admin/principals");
   return body.principals;
+}
+
+/**
+ * Stop a principal from being allowed to act, from now. Idempotent — this
+ * still succeeds for a principal that is already suspended, because an
+ * operator double-clicking is ordinary, not an error to surface.
+ */
+export async function suspendPrincipal(
+  principalId: string
+): Promise<{ id: string; suspendedAt: string | null }> {
+  return http(`/api/admin/principals/${encodeURIComponent(principalId)}/suspend`, {
+    method: "POST",
+  });
+}
+
+/**
+ * Lift a suspension — the other half of the same control. Idempotent for the
+ * same reason as {@link suspendPrincipal}: restoring one that is not
+ * suspended succeeds rather than erroring.
+ */
+export async function restorePrincipal(
+  principalId: string
+): Promise<{ id: string; suspendedAt: string | null }> {
+  return http(`/api/admin/principals/${encodeURIComponent(principalId)}/restore`, {
+    method: "POST",
+  });
 }
 
 export interface PrincipalGrant extends Grant {

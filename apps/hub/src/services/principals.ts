@@ -142,7 +142,21 @@ export async function principalHandle(id: string): Promise<string | null> {
  * cannot be granted".
  */
 export async function listPrincipals(): Promise<
-  Array<{ id: string; kind: PrincipalKind; handle: string; displayName: string | null; userId: string | null }>
+  Array<{
+    id: string;
+    kind: PrincipalKind;
+    handle: string;
+    displayName: string | null;
+    userId: string | null;
+    /**
+     * Whether this principal is suspended right now, and since when. Carried
+     * here rather than left for a second call per row: an admin surface that
+     * had to ask separately for every principal's state would either be slow
+     * enough nobody used it, or would render the list before the state and
+     * flash a wrong answer first.
+     */
+    suspendedAt: Date | null;
+  }>
 > {
   const rows = await db
     .select({
@@ -150,6 +164,7 @@ export async function listPrincipals(): Promise<
       kind: principals.kind,
       handle: principals.handle,
       displayName: principals.displayName,
+      suspendedAt: principals.suspendedAt,
       externalId: principalIdentities.externalId,
     })
     .from(principals)
@@ -167,5 +182,6 @@ export async function listPrincipals(): Promise<
     handle: r.handle,
     displayName: r.displayName,
     userId: r.externalId ?? null,
+    suspendedAt: r.suspendedAt,
   }));
 }
