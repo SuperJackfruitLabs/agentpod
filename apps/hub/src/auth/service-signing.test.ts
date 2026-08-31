@@ -21,11 +21,12 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { decodeJwt } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
+import { config } from "../config";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { rawSql } from "../db/drizzle";
 import { createPrincipal } from "../services/principals";
-import { mintPrincipalAssertion } from "./service-signing";
+import { BRIDGE_ACTOR, mintPrincipalAssertion, servicePublicJwks } from "./service-signing";
 
 // Fixed handle, cleaned up on both ends: running this suite twice against the
 // same database (no reset between runs, unlike CI) must not hit
@@ -54,8 +55,43 @@ describe("mintPrincipalAssertion", () => {
 
     const token = await mintPrincipalAssertion({ principalId });
     const claims = decodeJwt(token);
+    const header = decodeProtectedHeader(token);
 
     expect(claims.sub).toBe(principalId);
     expect(claims.principalKind).toBe("agent");
+
+    // The claim this whole module exists for: WHO minted it is recorded
+    // distinctly from WHO it is minted for. Asserting only sub/principalKind
+    // (as this test used to) stays green even if `act` is deleted entirely —
+    // that would silently make an assertion indistinguishable from the
+    // principal's own token, exactly the impersonation-without-a-trace this
+    // module's own doc comment says must not be possible.
+    expect(claims.act).toEqual({ sub: BRIDGE_ACTOR });
+
+    // iss/aud: this hub, both ends — a consumer verifies against a specific
+    // issuer/audience pair, and a drift here is a token nothing accepts.
+    expect(claims.iss).toBe(config.publicUrl);
+    expect(claims.aud).toBe(config.publicUrl);
+
+    // alg/kid: EdDSA, matching Better Auth's own jwt plugin and what
+    // kaambaan pins — a different algorithm here is a token no consumer's
+    // pinned verifier would even attempt.
+    expect(header.alg).toBe("EdDSA");
+    expect(header.kid).toBeTruthy();
+
+    // The kid must be one this hub actually publishes — otherwise a
+    // consumer's offline verification (the entire point of a separate
+    // service key) fails for a token that was, in fact, validly signed.
+    const published = await servicePublicJwks();
+    expect(published.some((k) => k.kid === header.kid)).toBe(true);
+
+    // TTL is what it claims to be: ~120s, not the 5-minute session TTL and
+    // not unbounded. A wide tolerance (not exact-equality) because iat/exp
+    // are wall-clock seconds and the assertion cost real time to mint.
+    expect(typeof claims.iat).toBe("number");
+    expect(typeof claims.exp).toBe("number");
+    const ttlSeconds = (claims.exp as number) - (claims.iat as number);
+    expect(ttlSeconds).toBeGreaterThan(100);
+    expect(ttlSeconds).toBeLessThanOrEqual(120);
   });
 });

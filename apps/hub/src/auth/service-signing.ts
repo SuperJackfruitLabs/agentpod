@@ -109,6 +109,18 @@ export async function servicePublicJwks(): Promise<JWK[]> {
   return rows.map((r) => JSON.parse(r.publicJwk) as JWK);
 }
 
+/**
+ * The only claim `signServiceToken`'s caller may add on top of a built
+ * payload. Narrowed to this one shape — not `Record<string, unknown>` — so
+ * that overwriting `principalKind`, `tenant`, `mayDispatch` or
+ * `mayGrantReach` is a compile error, not a convention a caller has to
+ * remember. RFC 8693's actor claim: who minted this token, distinct from
+ * `sub`, who it is minted for.
+ */
+export interface ActClaim {
+  act: { sub: string };
+}
+
 export interface SignServiceTokenInput {
   /**
    * Already-built claims. Never assembled here — the one thing every caller
@@ -120,8 +132,12 @@ export interface SignServiceTokenInput {
   subject: string;
   /** A `jose` duration string, e.g. `"120s"` or the shared `TOKEN_TTL`. */
   ttl: string;
-  /** Merged on top of `payload` in the signed body — e.g. an `act` claim. */
-  extraClaims?: Record<string, unknown>;
+  /**
+   * Adds `act` to the signed body — nothing else, and by type rather than by
+   * discipline: `payload` is spread LAST below, so even a widened caller in
+   * future could not make this override a built claim, only add to it.
+   */
+  extraClaims?: ActClaim;
 }
 
 /**
@@ -131,14 +147,16 @@ export interface SignServiceTokenInput {
  * station-token exchange (`routes/station-token.ts`), which mints an agent's
  * OWN token rather than an assertion of an absent human — shares the same key
  * management (`activeKey`, its lazy creation, `servicePublicJwks`) instead of
- * re-deriving it. The two callers differ only in TTL and in whether
- * `extraClaims` adds an `act`.
+ * re-deriving it. The two callers differ only in TTL and in `act.sub`.
  */
 export async function signServiceToken(input: SignServiceTokenInput): Promise<string> {
   const key = await activeKey();
   const privateKey = await importJWK(key.privateJwk, ALG);
 
-  return new SignJWT({ ...input.payload, ...(input.extraClaims ?? {}) })
+  // `payload` spread LAST: `extraClaims` can only ever add `act`, by type —
+  // this ordering means even a mistaken future widening of `ActClaim` could
+  // not let an extra claim overwrite a built one, only merge under it.
+  return new SignJWT({ ...(input.extraClaims ?? {}), ...input.payload })
     .setProtectedHeader({ alg: ALG, kid: key.kid })
     .setSubject(input.subject)
     .setIssuedAt()

@@ -25,6 +25,14 @@
  * re-implemented, only translated from the 500 it throws as into the 403 it
  * means.
  *
+ * **The token also carries `act: { sub: nodeId }`.** `sub` is the agent —
+ * this is its own token, not an assertion of someone else — but the agent
+ * did not present a credential; the node did, on its behalf. Recording that
+ * distinctly is what lets an auditor tell "the agent acted" apart from
+ * "node N minted a token for the agent", which is the fact that scopes a
+ * compromised node's blast radius to that node
+ * (`auth/service-signing.ts`:19-25).
+ *
  * Mounted under `/api`, not `/public`: `Bearer` already passes the CSRF
  * middleware (unlike the HMAC-signed `kaambaan-push` receiver, which needs
  * `/public` because a signed body is not a bearer credential), so nothing
@@ -108,6 +116,13 @@ export const stationTokenRoutes = new Hono().post(
       payload,
       subject: station.principalId,
       ttl: TOKEN_TTL,
+      // Delegation that cannot be seen in the record is impersonation with
+      // better manners (service-signing.ts:19-25). sub names the agent, but
+      // the agent is not the one presenting a credential here — the node is,
+      // on its behalf — so act.sub names the node. On a compromised node
+      // this is the fact that scopes the blast radius to that node instead
+      // of reading as "the agent acted" with nothing to tell the two apart.
+      extraClaims: { act: { sub: nodeId } },
     });
 
     // Read back from the signed token rather than a second constant, so

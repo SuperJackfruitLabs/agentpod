@@ -148,6 +148,11 @@ describe("a node exchanges for one of its stations", () => {
     const claims = decodeJwt(body.token);
     expect(claims.sub).toBe(agentPrincipalId);
     expect(claims.principalKind).toBe("agent");
+    // The node minted this, the agent did not present a credential of its
+    // own — act.sub names the node, so an auditor can tell "the agent
+    // acted" apart from "node N minted for the agent", the fact that scopes
+    // a compromised node's blast radius (service-signing.ts:19-25).
+    expect(claims.act).toEqual({ sub: nodeId });
   });
 
   test("refuses a station hosted by a different node", async () => {
