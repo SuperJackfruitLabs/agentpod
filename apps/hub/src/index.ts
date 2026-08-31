@@ -35,6 +35,8 @@ import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 import { runtimeRoutes } from './routes/runtimes.ts';
 // Station routes (detect, adopt, list, unadopt)
 import { stationRoutes } from './routes/stations.ts';
+// A node exchanging its credential for a station-scoped agent token
+import { stationTokenRoutes } from './routes/station-token.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
@@ -146,6 +148,18 @@ const app = new Hono()
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
   })
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/token — a node exchanging its
+   * long-term `<nodeId>:<nodeSecret>` credential for a short-lived agent
+   * token. `Bearer <nodeId>:<nodeSecret>` is not a Better Auth session and is
+   * never the static API_TOKEN either, so `authMiddleware` below would 401 it
+   * before the route's own credential check ever ran — the same reason the
+   * jwks route and `/api/auth/*` above are registered here, ahead of it. The
+   * route authenticates itself; `/api` is still right for it (Bearer passes
+   * CSRF, unlike the HMAC-signed `kaambaan-push` receiver under `/public`),
+   * it just cannot sit behind a middleware built for a session.
+   */
+  .route('/api', stationTokenRoutes)
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
