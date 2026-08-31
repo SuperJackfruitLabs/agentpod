@@ -21,8 +21,24 @@ import { stations } from "../db/schema/stations";
 import { seedAgentPrincipals } from "../../scripts/seed-agent-principals";
 import { createPrincipal, principalForUser } from "./principals";
 
+// Fixed handles, cleaned up below: running this suite twice against the same
+// database (no reset between runs, unlike CI) previously hit
+// "principals_org_handle_idx" on the second pass because nothing deleted
+// these rows — the same reason every DB-bound fixture in this slice cleans up
+// its own fixed handles in `afterAll`.
+const HANDLES = ["writer-quill", "analyst-echo", "rakesh"];
+
 beforeAll(async () => {
   await ensurePgMigrations();
+  await rawSql`DELETE FROM principals WHERE handle = ANY(${HANDLES})`;
+});
+
+afterAll(async () => {
+  try {
+    await rawSql`DELETE FROM principals WHERE handle = ANY(${HANDLES})`;
+  } catch {
+    // cleanup only
+  }
 });
 
 describe("principals", () => {

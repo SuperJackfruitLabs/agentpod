@@ -110,7 +110,9 @@ describe("POST /api/stations/:id/matrix/say", () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       roomId: ROOM,
-      userId: "@agent_say-box_hermes-cron-carl:id.agentpod.dev",
+      // Built from the occupying agent's principal handle now, not from
+      // where the station runs.
+      userId: "@agent_station-say-it-agent:id.agentpod.dev",
       body: "Morning report: 3 tasks done, 1 blocked.",
     });
   });

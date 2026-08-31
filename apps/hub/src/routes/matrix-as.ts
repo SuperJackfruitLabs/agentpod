@@ -19,7 +19,7 @@ import { matrixAsTransactions } from "../db/schema/matrix";
 import { isBridgeUser } from "../services/matrix-as/names";
 import {
   stationForLocalpart,
-  localpartFromUserId,
+  stationForAgentUserId,
   localpartFromAlias,
 } from "../services/matrix-as/stations";
 import { recordTransaction } from "../services/matrix-as/health";
@@ -183,11 +183,10 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
       .get("/users/:userId", async (c) => {
         if (!authorised(c, deps)) return c.json({ errcode: "M_FORBIDDEN" }, 403);
 
-        const localpart = localpartFromUserId(
-          decodeURIComponent(c.req.param("userId")),
-          deps.domain
-        );
-        const station = localpart ? await stationForLocalpart(localpart) : null;
+        // An agent's user id is built from its occupying principal's handle
+        // now, not from `(nodeName, stationKey)` — see `stationForAgentUserId`.
+        const userId = decodeURIComponent(c.req.param("userId"));
+        const station = await stationForAgentUserId(userId, deps.domain);
         if (!station) return c.json({ errcode: "M_NOT_FOUND" }, 404);
 
         return c.json({}, 200);

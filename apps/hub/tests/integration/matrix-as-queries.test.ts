@@ -6,6 +6,7 @@ import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { createMatrixAsRoutes } from "../../src/routes/matrix-as";
 import { bridgeUserId, bridgeAlias } from "../../src/services/matrix-as/names";
+import { createPrincipal } from "../../src/services/principals";
 
 /**
  * What the homeserver asks before it will let anyone talk to one of our users
@@ -25,6 +26,8 @@ const HS_TOKEN = "test-hs-token-queries";
 
 /** Rooms the bridge was asked to create, so provisioning can be asserted. */
 let provisioned: string[] = [];
+/** The agent occupying STATION — a user's mxid is built from its handle now. */
+let AGENT_PRINCIPAL: string;
 
 function app() {
   return new Hono().route(
@@ -52,26 +55,32 @@ beforeAll(async () => {
   const tenant = await resolveTenantForUser(USER);
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
+  await rawSql`DELETE FROM principals WHERE handle = 'matrix-queries-it-agent'`;
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "matrix-queries-it-agent" });
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${USER}, 'query-box', 'query-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
   await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
     VALUES (${STATION}, ${tenant}, ${USER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
-            '["acp"]'::jsonb, now(), now())`;
+            '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
 });
 
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
+    await rawSql`DELETE FROM principals WHERE handle = 'matrix-queries-it-agent'`;
     await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
   } catch {
     // cleanup only
   }
 });
 
-const REAL_USER = bridgeUserId("query-box", "openclaw:krishna", DOMAIN);
+// A user's mxid is built from its occupying principal's immutable handle now
+// (`names.ts`'s `bridgeUserId`), not from `(nodeName, stationKey)` — only the
+// room ALIAS is still station-derived.
+const REAL_USER = bridgeUserId("matrix-queries-it-agent", DOMAIN);
 const REAL_ALIAS = bridgeAlias("query-box", "openclaw:krishna", DOMAIN);
 
 describe("GET /_matrix/app/v1/users/:userId", () => {

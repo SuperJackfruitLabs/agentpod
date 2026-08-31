@@ -91,7 +91,12 @@ beforeAll(async () => {
   // `principal_identities.principal_id` is a foreign key onto `principals.id`
   // now, not the Better Auth user id — the row this route reads to invite the
   // human back into their own mission has to be keyed by the real principal.
-  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL}`;
+  // Only the 'matrix' row is cleared: `createPrincipal` above already wrote
+  // this principal's 'better-auth' row, and deleting every system's row for
+  // this principal_id would take that one with it — `principalForUser` would
+  // then find nobody, and the route would fail closed for a caller who really
+  // does have a principal.
+  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'matrix'`;
   await rawSql`
     INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
     VALUES ('pid_mission', ${OWNER_PRINCIPAL}, 'matrix', ${OWNER_MXID}, now())`;
@@ -146,10 +151,13 @@ describe("POST /api/missions", () => {
     // would be an error on some homeservers and noise on all of them.
     await post("/missions", { name: "Q3 migration", stationIds: [A, B] });
 
+    // Built from each occupying agent's principal handle now, not from where
+    // the station runs. A (agent-a) is the first member in `stationIds`, so it
+    // speaks for the room and is never on its own invite list.
     const invitees = invited.map((i) => i.invitee);
-    expect(invitees).toContain("@agent_mission-box_openclaw-two:id.agentpod.dev");
+    expect(invitees).toContain("@agent_mission-it-agent-b:id.agentpod.dev");
     expect(invitees).toContain(OWNER_MXID);
-    expect(invitees).not.toContain("@agent_mission-box_hermes-one:id.agentpod.dev");
+    expect(invitees).not.toContain("@agent_mission-it-agent-a:id.agentpod.dev");
   });
 
   test("refuses a station the caller may not dispatch", async () => {

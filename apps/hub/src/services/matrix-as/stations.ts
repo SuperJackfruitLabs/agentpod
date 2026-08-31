@@ -16,7 +16,8 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { localpartFor } from "./names";
+import { localpartFor, bridgeUserId } from "./names";
+import { principalHandle } from "../principals";
 
 export interface BridgedStation {
   stationId: string;
@@ -26,6 +27,7 @@ export interface BridgedStation {
   harness: string;
   displayName: string;
   identityMode: string;
+  principalId: string | null;
 }
 
 /** Every adopted station, with the node name its Matrix identity is built from. */
@@ -39,6 +41,7 @@ async function allBridgeable(): Promise<BridgedStation[]> {
       harness: stations.harness,
       displayName: stations.displayName,
       identityMode: stations.matrixIdentityMode,
+      principalId: stations.principalId,
     })
     .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId));
@@ -47,6 +50,12 @@ async function allBridgeable(): Promise<BridgedStation[]> {
 
 /**
  * The station whose derived localpart is exactly this one, or null.
+ *
+ * For ROOM ALIASES only: `bridgeAlias`/`localpartFor` are still derived from
+ * `(nodeName, stationKey)` — a room's address is not the identity occupying
+ * it, and rooms are migrated separately (`charter` →
+ * decisions/2026-08-30-an-agent-is-a-principal.md). Do not use this for a
+ * user id; see `stationForAgentUserId` below.
  *
  * Null is the answer the homeserver needs for "there is nobody here" — claiming
  * every name in our namespace would let anyone conjure an agent by typing one.
@@ -58,12 +67,27 @@ export async function stationForLocalpart(localpart: string): Promise<BridgedSta
   return null;
 }
 
-/** `@agent_<localpart>:<domain>` → the localpart, or null if it is not one of ours. */
-export function localpartFromUserId(mxid: string, domain: string): string | null {
-  const prefix = "@agent_";
-  const suffix = `:${domain}`;
-  if (!mxid.startsWith(prefix) || !mxid.endsWith(suffix)) return null;
-  return mxid.slice(prefix.length, mxid.length - suffix.length) || null;
+/**
+ * The station whose OCCUPYING AGENT's mxid is exactly this one, or null.
+ *
+ * An agent's user id is built from its principal's immutable `handle` now
+ * (`names.ts`'s `bridgeUserId`), not from `(nodeName, stationKey)` —
+ * `stationForLocalpart` above answers a different question (a ROOM alias) and
+ * would 404 forever for a real agent mxid, since a handle and a
+ * `node_stationKey` pair are unrelated strings. A station with no occupying
+ * principal has no handle and therefore claims no user id here, the same
+ * fail-closed rule `missions.ts` and `station-matrix.ts` already apply.
+ */
+export async function stationForAgentUserId(
+  mxid: string,
+  domain: string
+): Promise<BridgedStation | null> {
+  for (const s of await allBridgeable()) {
+    if (!s.principalId) continue;
+    const handle = await principalHandle(s.principalId);
+    if (handle && bridgeUserId(handle, domain) === mxid) return s;
+  }
+  return null;
 }
 
 /** `#agentpod_<localpart>:<domain>` → the localpart, or null. */

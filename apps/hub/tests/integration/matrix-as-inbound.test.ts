@@ -210,7 +210,9 @@ describe("an inbound room message", () => {
 
     expect(attached).toHaveLength(1);
     expect(attached[0]!.roomId).toBe(ROOM);
-    expect(attached[0]!.agentUser).toBe("@agent_inbound-box_openclaw-krishna:id.agentpod.dev");
+    // Built from the occupying agent's principal handle now, not from where
+    // the station runs.
+    expect(attached[0]!.agentUser).toBe("@agent_mx-inbound-it-agent:id.agentpod.dev");
     expect(attached[0]!.sessionId).toBe(prompts[0]!.sessionId);
   });
 

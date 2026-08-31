@@ -20,14 +20,27 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { describe, expect, test, beforeAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { decodeJwt } from "jose";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
+import { rawSql } from "../db/drizzle";
 import { createPrincipal } from "../services/principals";
 import { mintPrincipalAssertion } from "./service-signing";
 
+// Fixed handle, cleaned up on both ends: running this suite twice against the
+// same database (no reset between runs, unlike CI) must not hit
+// "principals_org_handle_idx" on the second pass.
 beforeAll(async () => {
   await ensurePgMigrations();
+  await rawSql`DELETE FROM principals WHERE handle = 'assertion-target'`;
+});
+
+afterAll(async () => {
+  try {
+    await rawSql`DELETE FROM principals WHERE handle = 'assertion-target'`;
+  } catch {
+    // cleanup only
+  }
 });
 
 describe("mintPrincipalAssertion", () => {

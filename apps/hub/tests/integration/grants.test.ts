@@ -3,6 +3,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { getGrant, setGrant, deleteGrant, listGrants, grantAllowsPrincipal, NO_GRANT } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 
 /**
  * Grants as data — the source of authority replacing `CONTROL_PAIR_GRANTS`.
@@ -13,19 +14,31 @@ import { getGrant, setGrant, deleteGrant, listGrants, grantAllowsPrincipal, NO_G
  * the move, and that the dangerous readings are all refused.
  */
 
-const ALICE = "test-user-grants-alice";
-const BOB = "test-user-grants-bob";
+const ALICE_USER = "test-user-grants-alice";
+const BOB_USER = "test-user-grants-bob";
+
+/**
+ * `principal_grants.principal_id` is a foreign key onto `principals.id` now,
+ * not a raw Better Auth user id — every row this suite writes has to be keyed
+ * by a real principal, the same as the store's own writer.
+ */
+let ALICE: string;
+let BOB: string;
 
 beforeAll(async () => {
   await ensurePgMigrations();
-  await createTestUser({ id: ALICE, email: "grants-alice@example.com", name: "Alice" });
-  await createTestUser({ id: BOB, email: "grants-bob@example.com", name: "Bob" });
+  await createTestUser({ id: ALICE_USER, email: "grants-alice@example.com", name: "Alice" });
+  await createTestUser({ id: BOB_USER, email: "grants-bob@example.com", name: "Bob" });
+  await rawSql`DELETE FROM principals WHERE handle IN ('grants-it-alice', 'grants-it-bob')`;
+  ALICE = await createPrincipal({ kind: "human", handle: "grants-it-alice", userId: ALICE_USER });
+  BOB = await createPrincipal({ kind: "human", handle: "grants-it-bob", userId: BOB_USER });
 });
 
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${ALICE}, ${BOB})`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${ALICE}, ${BOB})`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('grants-it-alice', 'grants-it-bob')`;
+    await rawSql`DELETE FROM "user" WHERE id IN (${ALICE_USER}, ${BOB_USER})`;
   } catch {
     // cleanup only
   }

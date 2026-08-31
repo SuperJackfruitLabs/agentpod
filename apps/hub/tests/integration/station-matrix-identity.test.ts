@@ -132,7 +132,10 @@ describe("POST /api/stations/:id/matrix/identity", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { mxid: string; alias: string; mode: string };
-    expect(body.mxid).toBe("@agent_sm-box_hermes-analyst-echo:id.agentpod.dev");
+    // The mxid is built from the occupying agent's principal handle now, not
+    // from where the station runs (`charter` → the-mission decisions on an
+    // agent-is-a-principal); the alias, below, is still station-derived.
+    expect(body.mxid).toBe("@agent_station-matrix-it-agent:id.agentpod.dev");
     expect(body.alias).toBe("#agentpod_sm-box_hermes-analyst-echo:id.agentpod.dev");
     expect(body.mode).toBe("bridge");
     expect(provisioned).toEqual([STATION]);
