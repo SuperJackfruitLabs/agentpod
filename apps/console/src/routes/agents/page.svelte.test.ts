@@ -10,6 +10,8 @@
  *  - an unassigned station (no occupying principal) reads as unassigned,
  *    not merely healthy — the console previously had no signal for this at
  *    all, and a station with no principal is dispatchable by nobody
+ *  - Ruling 6: an unassigned station offers a way to put an EXISTING agent
+ *    in it, and driving that control actually leaves the station occupied
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
@@ -18,6 +20,33 @@ import * as api from "$lib/api/client";
 import * as grantsApi from "$lib/api/grants";
 import * as agentsApi from "$lib/api/agents";
 import { setSearchParam, resetReactivePageState } from "../../mocks/reactive-page-state.svelte";
+
+// bits-ui's Select opens on `pointerdown` (not `click`) and picks an item on
+// `pointerup`, and touches `hasPointerCapture`/`releasePointerCapture` along
+// the way — jsdom implements neither. Needed once the "assign an existing
+// agent" dialog's picker is actually opened, below.
+if (typeof window.PointerEvent === "undefined") {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: PointerEventInit = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error jsdom has no native PointerEvent
+  window.PointerEvent = PointerEventPolyfill;
+}
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.releasePointerCapture) {
+  Element.prototype.releasePointerCapture = () => {};
+}
+if (!Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => {};
+}
 
 // ---------------------------------------------------------------------------
 // SvelteKit stubs
@@ -292,6 +321,50 @@ test("an actively-assigned station offers a real Unassign control — not SQL", 
   await fireEvent.click(getByRole("button", { name: /^unassign$/i }));
 
   await waitFor(() => expect(agentsApi.unassignStationAgent).toHaveBeenCalledWith("s1"));
+});
+
+test("Ruling 6: assigning an existing agent to an unassigned station leaves it occupied", async () => {
+  // Task 3 wired `unassignStationAgent`; `assignStationAgent`'s only caller
+  // was AgentCreate's mint-and-assign flow. This is the way back for a
+  // principal that already exists — most pointedly, one this same page just
+  // unassigned above — with no database client required.
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  const rows = [
+    stationRow({ id: "s1", stationKey: "hermes:hanuman", displayName: "hanuman", principalId: "prn_a" }),
+    stationRow({ id: "s2", stationKey: "hermes:kubera", displayName: "kubera", principalId: null }),
+  ];
+  const listStationsSpy = vi.spyOn(api, "listStations").mockImplementation(async () => rows.map((r) => ({ ...r })));
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([
+    { id: "prn_a", kind: "agent", handle: "hanuman", displayName: null, userId: null, suspendedAt: null },
+    { id: "prn_stranded", kind: "agent", handle: "stranded-writer", displayName: null, userId: null, suspendedAt: null },
+  ]);
+  vi.spyOn(agentsApi, "assignStationAgent").mockImplementation(async (stationId, principalId) => {
+    // What the hub actually does: the NEXT read reflects the write.
+    rows.find((r) => r.id === stationId)!.principalId = principalId;
+    return { stationId, principalId };
+  });
+
+  const { findByRole, getByRole, getByTestId } = render(AgentsPage);
+
+  await waitFor(() => expect(getByTestId("unassigned-stations")).toBeTruthy());
+
+  await fireEvent.click(await findByRole("button", { name: /assign an existing agent to kubera/i }));
+  const trigger = await findByRole("button", { name: /^agent to assign$/i });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  const option = await waitFor(() => getByRole("option", { name: /stranded-writer/i }));
+  await fireEvent.pointerUp(option, { pointerId: 1, button: 0, pointerType: "mouse" });
+  await fireEvent.click(getByRole("button", { name: /^assign$/i }));
+
+  await waitFor(() => {
+    expect(agentsApi.assignStationAgent).toHaveBeenCalledWith("s2", "prn_stranded");
+  });
+  // Reloaded rather than patched locally, and the station now reads as
+  // occupied — proving the control actually worked, not merely that the
+  // endpoint was invoked.
+  await waitFor(() => {
+    expect(listStationsSpy).toHaveBeenCalledTimes(2);
+    expect(getByTestId("all-assigned")).toBeTruthy();
+  });
 });
 
 test("?updates=1 seeds the updates-only pill pressed and shows only update-available agents", async () => {

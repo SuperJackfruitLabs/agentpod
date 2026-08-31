@@ -9,6 +9,7 @@
   import PageHeader from "$lib/components/page-header.svelte";
   import AgentTable from "$lib/components/fleet/AgentTable.svelte";
   import AgentCreate, { type StationOption } from "$lib/components/fleet/AgentCreate.svelte";
+  import AssignAgent, { type AssignStationTarget } from "$lib/components/fleet/AssignAgent.svelte";
   import StatusRibbon from "$lib/components/fleet/StatusRibbon.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Button } from "$lib/components/ui/button";
@@ -136,6 +137,22 @@
     unassignedStations.map((s) => ({ id: s.id, stationKey: s.stationKey, displayName: s.displayName, nodeName: s.nodeName }))
   );
 
+  /**
+   * Agent principals nothing currently occupies a station with — the pool
+   * Ruling 6's "assign an existing agent" control offers. Filtered on
+   * currently-known occupancy (`assignments`, the same map `stationStatuses`
+   * reads) rather than on the principal directory alone: offering one that
+   * is already active elsewhere would silently orphan its current station,
+   * since the hub's assign endpoint has no opinion about where a principal
+   * was before this call.
+   */
+  let availableAgentPrincipals = $derived.by((): PrincipalSummary[] => {
+    const occupied = new Set(
+      [...assignments.values()].map((a) => a.principalId).filter((id): id is string => id !== null)
+    );
+    return [...principalsById.values()].filter((p) => p.kind === "agent" && !occupied.has(p.id));
+  });
+
   async function loadAssignments(nodeIds: string[]) {
     assignedNodeIds = nodeIds;
     try {
@@ -210,6 +227,25 @@
   }
 
   function handleAgentCreated() {
+    void loadFleet();
+  }
+
+  // ── Assign an existing agent — Ruling 6: the way back for a stranded one ──
+  //
+  // AgentCreate wires `assignStationAgent`'s only caller before this: minting
+  // a brand-new principal and handing it a station in one click. An operator
+  // who unassigns one (below) had no way to put it — or any other existing
+  // principal — into a station again, short of SQL.
+
+  let assignOpen = $state(false);
+  let assignTarget = $state<AssignStationTarget | null>(null);
+
+  function openAssign(station: AssignStationTarget) {
+    assignTarget = station;
+    assignOpen = true;
+  }
+
+  function handleAgentAssigned() {
     void loadFleet();
   }
 
@@ -333,20 +369,30 @@
                   <p class="truncate text-sm font-medium">{station.displayName}</p>
                   <p class="text-xs text-muted-foreground">{station.nodeName} · no agent</p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="shrink-0"
-                  onclick={() =>
-                    openCreateForStation({
-                      id: station.id,
-                      stationKey: station.stationKey,
-                      displayName: station.displayName,
-                      nodeName: station.nodeName,
-                    })}
-                >
-                  Create an agent for this station
-                </Button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Assign an existing agent to {station.displayName}"
+                    onclick={() =>
+                      openAssign({ id: station.id, displayName: station.displayName, nodeName: station.nodeName })}
+                  >
+                    Assign an existing agent
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onclick={() =>
+                      openCreateForStation({
+                        id: station.id,
+                        stationKey: station.stationKey,
+                        displayName: station.displayName,
+                        nodeName: station.nodeName,
+                      })}
+                  >
+                    Create an agent for this station
+                  </Button>
+                </div>
               </li>
             {/each}
             {#each suspendedStations as station (station.id)}
@@ -422,6 +468,13 @@
   station={createForStation}
   stationOptions={createForStation ? [] : unassignedOptions}
   onCreated={handleAgentCreated}
+/>
+
+<AssignAgent
+  bind:open={assignOpen}
+  station={assignTarget}
+  candidates={availableAgentPrincipals}
+  onAssigned={handleAgentAssigned}
 />
 
 <ConfirmDialog
