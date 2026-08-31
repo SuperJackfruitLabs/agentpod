@@ -221,6 +221,7 @@ describe("buildMigrationDeps — m.direct is read-modify-write, and never fatal"
   function client(overrides: Partial<DirectClient> = {}, accountData: Record<string, unknown> = {}) {
     const state = { written: null as Record<string, unknown> | null };
     const c: DirectClient = {
+      invite: overrides.invite ?? (async () => {}),
       join: overrides.join ?? (async () => {}),
       leave: overrides.leave ?? (async () => {}),
       getAccountData:
@@ -311,6 +312,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
   test("dry run reports the room and calls no client method at all", async () => {
     let calls = 0;
     const c: DirectClient = {
+      invite: async () => {},
       join: async () => { calls++; },
       leave: async () => { calls++; },
       getAccountData: async () => { calls++; return null; },
@@ -329,6 +331,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
   test("applying runs join, then setDirect, then leave, in that order", async () => {
     const acts: string[] = [];
     const c: DirectClient = {
+      invite: async (as, r, invitee) => { acts.push(`invite ${as} ${r} ${invitee}`); },
       join: async (u, r) => { acts.push(`join ${u} ${r}`); },
       leave: async (u, r) => { acts.push(`leave ${u} ${r}`); },
       getAccountData: async () => null,
@@ -340,6 +343,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     expect(result.applied).toBe(true);
     expect(result.migrated).toBe(1);
     expect(acts).toEqual([
+      `invite ${OLD_USER} ${ROW.roomId} ${NEW_USER}`,
       `join ${NEW_USER} ${ROW.roomId}`,
       // setAccountData is called as the OWNER, not the agent — m.direct is
       // the human's own account data, not the agent's.
@@ -354,6 +358,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
   test("a refused m.direct write does not stop leave from running, and is reported per room", async () => {
     const acts: string[] = [];
     const c: DirectClient = {
+      invite: async (as, r, invitee) => { acts.push(`invite ${as} ${r} ${invitee}`); },
       join: async (u, r) => { acts.push(`join ${u} ${r}`); },
       leave: async (u, r) => { acts.push(`leave ${u} ${r}`); },
       getAccountData: async () => null,
@@ -366,7 +371,11 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
 
     // leave still ran, and the room still counts as migrated: membership
     // moved correctly even though the DM flag could not be fixed.
-    expect(acts).toEqual([`join ${NEW_USER} ${ROW.roomId}`, `leave ${OLD_USER} ${ROW.roomId}`]);
+    expect(acts).toEqual([
+      `invite ${OLD_USER} ${ROW.roomId} ${NEW_USER}`,
+      `join ${NEW_USER} ${ROW.roomId}`,
+      `leave ${OLD_USER} ${ROW.roomId}`,
+    ]);
     expect(result.migrated).toBe(1);
     expect(result.failures).toEqual([]);
     expect(result.results).toEqual([
@@ -381,6 +390,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     ];
     let joinCalls = 0;
     const c: DirectClient = {
+      invite: async () => {},
       join: async (_u, roomId) => {
         joinCalls++;
         if (roomId === ROW.roomId) throw new Error("rate limited");
@@ -416,6 +426,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
       },
     });
     const c: DirectClient = {
+      invite: async () => {},
       join: async () => {},
       leave: async () => {},
       getAccountData: async () => null,

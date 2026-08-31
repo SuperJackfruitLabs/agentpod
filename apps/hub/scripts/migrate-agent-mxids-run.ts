@@ -284,6 +284,12 @@ export async function describeRooms(deps: DescribeDeps): Promise<DescribeRoomsRe
 
 /** What `buildMigrationDeps` needs from a live (or fake) Matrix client. */
 export interface DirectClient {
+  /**
+   * Invite, acting as an existing member. Not optional: these rooms are
+   * invite-only, and the live homeserver refused an uninvited join for all 32
+   * of them with `403 M_FORBIDDEN ... cannot join a room that is not \`public\``.
+   */
+  invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   join(userId: string, roomId: string): Promise<void>;
   leave(userId: string, roomId: string): Promise<void>;
   getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
@@ -316,6 +322,7 @@ export function buildMigrationDeps(
 
   const deps: MxidMigrationDeps = {
     rooms: async () => rooms.map((r) => ({ roomId: r.roomId, handle: r.handle, oldUserId: r.oldUserId })),
+    invite: (asUserId, roomId, invitee) => client.invite(asUserId, roomId, invitee),
     join: (userId, roomId) => client.join(userId, roomId),
     leave: (userId, roomId) => client.leave(userId, roomId),
     async setDirect(newUserId, roomId) {
@@ -410,11 +417,15 @@ export async function runMigration(
 
   for (const room of rooms) {
     try {
+      // Spread `deps` rather than naming its fields. This loop used to pick out
+      // `join`, `leave` and `setDirect` by hand, so when `invite` was added to
+      // `MxidMigrationDeps` it reached `buildMigrationDeps` and stopped here —
+      // silently, because a missing dependency is only a runtime error once the
+      // room it would have served is already being migrated. Only `rooms` is
+      // overridden, because this loop drives one room at a time.
       const r = await migrateAgentMxids({
+        ...deps,
         rooms: async () => [{ roomId: room.roomId, handle: room.handle, oldUserId: room.oldUserId }],
-        join: deps.join,
-        leave: deps.leave,
-        setDirect: deps.setDirect,
       });
       migrated += r.migrated;
       skipped += r.skipped;

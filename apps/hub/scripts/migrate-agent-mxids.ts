@@ -9,9 +9,20 @@
  *
  * **No room is deleted and no history is lost.** A room id is stable; only its
  * membership changes. The new virtual user joins the existing room and the old
- * one leaves; Matrix keeps every message from a member who has departed. The
- * AS owns the whole `@agent_.*` namespace, so the new user joins without an
- * invite.
+ * one leaves; Matrix keeps every message from a member who has departed.
+ *
+ * ## The new user must be invited first
+ *
+ * An earlier version of this note claimed the AS owning the whole `@agent_.*`
+ * namespace meant the new user could join without an invite. That is wrong, and
+ * it was wrong against the live homeserver on every one of 32 rooms:
+ *
+ *     403 M_FORBIDDEN Auth check failed: cannot join a room that is not `public`
+ *
+ * Namespace ownership lets the appservice ACT AS a user; it does not exempt that
+ * user from a room's join rules. These rooms are invite-only DMs, so the new
+ * user is invited by the OLD one — which is still a member, and created the room,
+ * so it has the power level to invite — and only then joins.
  *
  * ## Join before leave
  *
@@ -83,7 +94,12 @@ import { bridgeUserId } from "../src/services/matrix-as/names";
 export interface MxidMigrationDeps {
   /** Every room still needing this, or already done — see the skip rule above. */
   rooms(): Promise<Array<{ roomId: string; handle: string; oldUserId: string }>>;
-  /** Join as the new user. The AS owns `@agent_.*`, so no invite is needed. */
+  /**
+   * Invite the new user, acting as the old one. Required: these rooms are
+   * invite-only, and an uninvited join is refused with `M_FORBIDDEN`.
+   */
+  invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /** Join as the new user, once invited. */
   join(userId: string, roomId: string): Promise<void>;
   /** Leave as the old user, once the new one is in and `m.direct` points at it. */
   leave(userId: string, roomId: string): Promise<void>;
@@ -109,6 +125,10 @@ export async function migrateAgentMxids(
       skipped++;
       continue;
     }
+    // Invite before joining: the room is invite-only, and the old user is the
+    // only member with the power to let the new one in. Both calls tolerate
+    // "already done", so a re-run after a partial failure is safe.
+    await deps.invite(room.oldUserId, room.roomId, next);
     // Join first. Leaving first would leave the room with no agent in it, and
     // a crash between the two would leave it that way permanently.
     await deps.join(next, room.roomId);
