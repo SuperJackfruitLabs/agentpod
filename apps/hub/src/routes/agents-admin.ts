@@ -36,7 +36,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
@@ -147,6 +147,30 @@ export const agentsAdminRouter = new Hono()
     }
 
     await db.update(stations).set({ principalId }).where(eq(stations.id, stationId));
+
+    // `matrix_rooms.principal_id`'s one writer — `charter →
+    // decisions/2026-08-30-an-agent-is-a-principal.md`'s whole reason a
+    // room's identity comes from a handle rather than a station. Binds this
+    // station's own room to this principal EXACTLY ONCE: only when that room
+    // exists, has no binding yet, and this principal has no room bound
+    // anywhere else. Every later assignment — this principal moving to a
+    // different station, or a different principal taking this one — leaves
+    // the binding alone, which is what makes the room follow the agent
+    // rather than the station: `gates.ts`'s `roomForCard` finds THIS
+    // principal's room from wherever it is dispatched next, not a fresh room
+    // its new station happens to have. Conditioned on `NOT EXISTS` rather
+    // than checked-then-written so two assignments racing each other cannot
+    // both decide the room is free and violate `matrix_rooms_principal_idx`.
+    await db.execute(sql`
+      UPDATE matrix_rooms
+      SET principal_id = ${principalId}
+      WHERE station_id = ${stationId}
+        AND principal_id IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM matrix_rooms already_bound WHERE already_bound.principal_id = ${principalId}
+        )
+    `);
+
     log.info("station assigned", { stationId, principalId, by: c.get("user")?.id });
     return c.json({ stationId, principalId });
   })

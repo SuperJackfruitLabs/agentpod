@@ -136,6 +136,24 @@ export type ProjectionOutcome =
  * exactly this tuple, so the binding is free — the hub's own bridge wrote it
  * when it dispatched the work.
  *
+ * card → dispatch → station → principal → room: the dispatch names a
+ * station, and the station's CURRENT occupant (not necessarily who did the
+ * work — occupancy can move on) is who this posts as. That occupant's OWN
+ * room — the one `routes/agents-admin.ts` bound it to, wherever it was bound
+ * — is preferred over the dispatch's own station-tied room, so an agent
+ * reassigned to a brand-new station still speaks in the room it has always
+ * had rather than a fresh one its new station happens to own. This is the
+ * entire reason an agent's mxid comes from its handle rather than
+ * `(nodeName, stationKey)`.
+ *
+ * Falls back to the plain `stationId` join — this table's ORIGINAL and still
+ * primary index — whenever there is no such binding: a room the backfill
+ * migration has not reached, a station whose occupant has never moved, or a
+ * station with no occupant at all (handled below as `no-agent`). This is the
+ * fallback `gate-sweep.ts` depends on without knowing it — it calls into this
+ * function rather than querying `matrix_rooms` itself, and it is deployed in
+ * production today.
+ *
  * `null` when no AgentPod station ran the card. That is a real and named
  * limitation rather than a fault: a gate on work this fleet never touched has
  * no room to appear in, and inventing one would put an approval somewhere
@@ -165,25 +183,46 @@ async function roomForCard(
     .limit(1);
   if (!dispatch) return null;
 
-  const [room] = await db
+  const [station] = await db
     .select({
-      roomId: matrixRooms.roomId,
       stationKey: stations.stationKey,
       nodeName: nodes.name,
       principalId: stations.principalId,
     })
-    .from(matrixRooms)
-    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
+    .where(eq(stations.id, dispatch.stationId))
+    .limit(1);
+  if (!station) return null;
+
+  if (station.principalId) {
+    const [own] = await db
+      .select({ roomId: matrixRooms.roomId })
+      .from(matrixRooms)
+      .where(eq(matrixRooms.principalId, station.principalId))
+      .limit(1);
+    if (own) {
+      return {
+        roomId: own.roomId,
+        nodeName: station.nodeName,
+        stationKey: station.stationKey,
+        principalId: station.principalId,
+      };
+    }
+  }
+
+  const [room] = await db
+    .select({ roomId: matrixRooms.roomId })
+    .from(matrixRooms)
     .where(eq(matrixRooms.stationId, dispatch.stationId))
     .limit(1);
   if (!room) return null;
 
   return {
     roomId: room.roomId,
-    nodeName: room.nodeName,
-    stationKey: room.stationKey,
-    principalId: room.principalId,
+    nodeName: station.nodeName,
+    stationKey: station.stationKey,
+    principalId: station.principalId,
   };
 }
 
@@ -611,15 +650,27 @@ export async function projectionForGate(gateId: string): Promise<{
  * Used when a gate needs an answer *about* itself — "that was already decided"
  * — which must come from the agent whose room it is rather than from a bot
  * nobody invited.
+ *
+ * Prefers the room's OWN bound occupant (`matrixRooms.principalId`) over its
+ * station's current one: a room keeps its resident even after that agent
+ * moves to a different station, and a reply about an old gate must still come
+ * from the agent whose history is actually in this room. Falls back to the
+ * station's current occupant — the only fact there was before this room had
+ * its own binding — for a room the backfill has not reached.
  */
 export async function roomAgentUser(roomId: string, domain: string): Promise<string | null> {
   const [row] = await db
-    .select({ principalId: stations.principalId })
+    .select({
+      ownPrincipalId: matrixRooms.principalId,
+      stationPrincipalId: stations.principalId,
+    })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
     .where(eq(matrixRooms.roomId, roomId))
     .limit(1);
-  if (!row?.principalId) return null;
-  const handle = await principalHandle(row.principalId);
+  if (!row) return null;
+  const principalId = row.ownPrincipalId ?? row.stationPrincipalId;
+  if (!principalId) return null;
+  const handle = await principalHandle(principalId);
   return handle ? bridgeUserId(handle, domain) : null;
 }

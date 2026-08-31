@@ -45,29 +45,35 @@ export const matrixRooms = pgTable(
      * The occupying agent this room speaks to — added, not swapped in for
      * `stationId`.
      *
-     * **Reserved ahead of its first writer: nothing populates it today.** The
-     * same manoeuvre `IDENTITY_SYSTEMS` uses for `org-plane` in
-     * `identities.ts` — declared before there is anything to put in it, so
-     * that adopting it later is a data move rather than a migration. An
-     * earlier version of this note said Task 9's migration backfills it room
-     * by room; it does not. `scripts/migrate-agent-mxids-run.ts` derives a
-     * room's old address from `(nodeName, stationKey)` and its new one from
-     * the station's principal handle, and writes neither back here. Anything
-     * reading this column as a record of what has been migrated would read
-     * null for all 32 rooms and conclude nothing had happened.
+     * **Has a writer now.** `routes/agents-admin.ts`'s assign endpoint binds
+     * it once: the first time a station's own room finds an occupant that has
+     * no room of its own anywhere yet. It is never moved or cleared after
+     * that — an agent keeps the room it was first bound to for as long as it
+     * exists, however many stations it occupies afterward, which is the
+     * entire point of keying gates on the agent rather than on wherever it
+     * currently sits. Migration `0060_matrix_rooms_backfill_principal_id`
+     * backfilled every room that predates the writer from its station's
+     * occupant at the time, so no pre-existing room reads null forever for
+     * having existed before this column had one.
      *
-     * `gates.ts` (`roomForCard`, `roomAgentUser`) and `gate-sweep.ts` join on
-     * `stationId`, and `gate-sweep.ts` is deployed in production today —
-     * re-keying this table onto `principalId` inside this slice would break
-     * the approvals chain that is this slice's own exit test. `stationId`
-     * stays the column every current reader uses; this is redundant with it,
-     * not a replacement for it. Retiring `stationId` is a later slice's own
-     * migration, once every reader has moved.
+     * `gates.ts`'s `roomForCard` reads this in preference to the plain
+     * `stationId` join precisely so a reassigned agent's gates keep landing
+     * in its original room rather than in whatever room its new station
+     * happens to have; `roomAgentUser` does the same for a room that already
+     * has a bound resident. Both still fall back to the `stationId` join when
+     * this is null — a room the backfill has not reached, or one whose
+     * occupant has simply never moved — which is what keeps `gate-sweep.ts`
+     * working exactly as it does today: it calls into `gates.ts` rather than
+     * querying this table itself, and it is deployed in production. `stationId`
+     * stays the column every current reader still needs; this is redundant
+     * with it, not a replacement for it. Retiring `stationId` is a later
+     * slice's own migration, once every reader has moved.
      *
-     * Nullable because it is empty for every row until something writes it,
-     * and because a station can lose its occupant (`stations.principalId` is
-     * itself nullable) after ever having had one — so it would stay nullable
-     * even once a writer exists.
+     * Nullable because a room this hasn't reached is still nullable, and
+     * because a station can lose its occupant (`stations.principalId` is
+     * itself nullable) without this column following it down — a room's own
+     * binding does not un-bind just because its station's current occupant
+     * changed — so it would stay nullable even with a writer in place.
      */
     principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
     alias: text("alias").notNull(),

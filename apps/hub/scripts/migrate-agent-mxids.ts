@@ -55,10 +55,17 @@
  * `bridgeUserId(handle, domain) === oldUserId` is skipped.
  *
  * `rooms()` establishes that fact by ASKING THE HOMESERVER, not by reading a
- * column. `matrix_rooms.principal_id` exists and is reserved ahead of its
- * first writer — nothing populates it — so a check keyed on it would report
- * every one of the 32 rooms as untouched forever, including the ones a
- * previous run half-finished. `migrate-agent-mxids-run.ts` therefore derives
+ * column. `matrix_rooms.principal_id` has a writer now (Task 5's admin
+ * assign endpoint, and the migration that backfilled it) — but that column
+ * answers a different question than the one this skip condition needs. It
+ * records which principal is SUPPOSED to occupy a room, not whether the
+ * Matrix-side rename this script performs has actually happened. A room's
+ * `principal_id` can already name the right principal while its membership
+ * still answers to the old, station-derived address — closing that gap is
+ * this script's own job, so checking the column instead of the homeserver
+ * would report a room done before it is, and a previous run's half-finished
+ * rooms would read as untouched forever right alongside it.
+ * `migrate-agent-mxids-run.ts` therefore still derives
  * `oldUserId` from `(nodeName, stationKey)` and settles each of the three
  * steps against live membership and a live `m.direct` read.
  *
