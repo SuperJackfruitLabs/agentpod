@@ -83,6 +83,23 @@ describe("a principal can be suspended", () => {
     const payload = await buildTokenPayload({ principalId: id });
     expect(payload.sub).toBe(id);
   });
+
+  test("a suspended principal's own session cannot mint either, through the real user lookup", async () => {
+    // The two subject paths in buildTokenPayload merge before the suspension
+    // check, so proving the principalId path (above) does not prove the user
+    // path — a later refactor that special-cased either branch could pass
+    // every other test while a suspended human kept minting tokens. This goes
+    // through the real principalForUser, not an injected resolver, so it
+    // fails if that merge is ever undone.
+    const userId = `usr-${crypto.randomUUID()}`;
+    const id = await createPrincipal({
+      kind: "human",
+      handle: `t-${crypto.randomUUID().slice(0, 8)}`,
+      userId,
+    });
+    await suspendPrincipal(id);
+    expect(buildTokenPayload({ user: { id: userId } })).rejects.toThrow(/suspended/);
+  });
 });
 
 // ─── stations record which agent occupies them ────────────────────────────────
