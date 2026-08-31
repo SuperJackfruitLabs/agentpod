@@ -98,6 +98,7 @@ const adoptedStation: StationRow = {
   workspacePath: "/home/user/workspace",
   capabilities: ["health"],
   matrixId: null, purpose: null,
+  principalId: null,
   adoptedAt: "2026-06-22T00:00:00Z",
   createdAt: "2026-06-22T00:00:00Z",
 };
