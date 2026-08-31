@@ -243,6 +243,12 @@ async function adoptStation(
 
 /** Put the test's agent in the station, so a grant naming it covers this one. */
 async function occupy(stationId: string): Promise<void> {
+  // Occupancy is exclusive as of the fix round on Task 5
+  // (`stations_principal_id_idx`) — this file reuses ONE `AGENT_PRINCIPAL`
+  // across many tests, each adopting its own fresh station, so it has to
+  // vacate wherever that principal already sits (an earlier test's station)
+  // before placing it here, exactly as the real assign endpoint now does.
+  await rawSql`UPDATE stations SET principal_id = NULL WHERE principal_id = ${AGENT_PRINCIPAL}`;
   await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${stationId}`;
 }
 

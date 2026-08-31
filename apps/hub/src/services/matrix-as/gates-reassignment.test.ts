@@ -9,6 +9,15 @@
  * database, exercising the real admin routes rather than writing to
  * `matrix_rooms` by hand, so this is the same write path an operator's click
  * goes through.
+ *
+ * **Fix round: occupancy is exclusive.** A principal runs in one station at
+ * a time (`stations_principal_id_idx`), assigning an already-placed
+ * principal elsewhere is a MOVE (no manual unassign required), and the
+ * `stationId` fallback that used to hand a new occupant another principal's
+ * room is scoped to stations with no current occupant at all. The most
+ * important test below is the one the review's finding named directly: when
+ * P leaves a station and Q takes it, Q's gate must reach Q's own room,
+ * answered as `@agent_Q` — never P's room, never `@agent_P`.
  */
 
 // ─── Set env vars BEFORE any src/ imports ─────────────────────────────────────
@@ -33,6 +42,7 @@ import { createPrincipal } from "../principals";
 import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
+import { bridgeUserId } from "./names";
 import type { GatePendingDelivery } from "./gates";
 
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -42,6 +52,7 @@ const ADMIN_ACTOR = `test-admin-actor-gates-reassign-${RUN}`;
 let stationAId: string;
 let stationBId: string;
 let principalId: string;
+let sharedNodeId: string;
 
 function adminApp() {
   const a = new Hono();
@@ -95,6 +106,7 @@ beforeAll(async () => {
     arch: "amd64",
     cpuCount: 1,
   });
+  sharedNodeId = nodeId;
 
   stationAId = `st_gra_a_${RUN}`;
   stationBId = `st_gra_b_${RUN}`;
@@ -147,7 +159,9 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM matrix_gate_events WHERE tenant_id = ${BOOTSTRAP_TENANT_ID} AND board_id LIKE ${"brd_" + RUN + "%"}`;
     await rawSql`DELETE FROM bridge_dispatches WHERE tenant_id = ${BOOTSTRAP_TENANT_ID} AND external_source = 'kaambaan' AND board_id LIKE ${"brd_" + RUN + "%"}`;
-    await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${stationAId}, ${stationBId})`;
+    // `matrix_rooms` cascades from `stations` (ON DELETE CASCADE), so every
+    // room this file created — however many stations it added below — goes
+    // with it, without listing station ids by hand.
     await rawSql`DELETE FROM stations WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ADMIN_ACTOR}`;
@@ -181,11 +195,15 @@ function fakeDeps() {
       domain: "id.agentpod.dev",
       sendText: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
-        return `$prose-${sent.length}`;
+        // `matrix_gate_events.event_id` is globally unique, and this file
+        // runs several gates through several `fakeDeps()` calls — a plain
+        // per-call counter (`$prose-1`, `$prose-2`, …) collides across
+        // tests, not just within one.
+        return `$prose-${crypto.randomUUID()}`;
       },
       sendCustomEvent: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
-        return `$gate-${sent.length}`;
+        return `$gate-${crypto.randomUUID()}`;
       },
     },
   };
@@ -246,5 +264,163 @@ describe("reassignment: the room follows the agent, not the station", () => {
     // is what must answer here.
     const user = await roomAgentUser(`!room-a-${RUN}:id.agentpod.dev`, "id.agentpod.dev");
     expect(user).toBe(`@agent_${HANDLE_PREFIX}-agent:id.agentpod.dev`);
+  });
+});
+
+describe("occupancy is exclusive — a principal runs in one station at a time", () => {
+  let stationMoveAId: string;
+  let stationMoveBId: string;
+  let movePrincipalId: string;
+
+  let stationXId: string;
+  let stationYId: string;
+  let pId: string;
+  let qId: string;
+  const roomX1 = `!room-x1-${RUN}:id.agentpod.dev`;
+  const roomX2 = `!room-x2-${RUN}:id.agentpod.dev`;
+  const roomY = `!room-y-${RUN}:id.agentpod.dev`;
+
+  beforeAll(async () => {
+    stationMoveAId = `st_gra_ma_${RUN}`;
+    stationMoveBId = `st_gra_mb_${RUN}`;
+    stationXId = `st_gra_x_${RUN}`;
+    stationYId = `st_gra_y_${RUN}`;
+
+    await db.insert(stations).values([
+      {
+        id: stationMoveAId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-ma`,
+        kind: "workspace",
+        displayName: "Station Move A",
+      },
+      {
+        id: stationMoveBId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-mb`,
+        kind: "workspace",
+        displayName: "Station Move B",
+      },
+      {
+        id: stationXId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-x`,
+        kind: "workspace",
+        displayName: "Station X",
+      },
+      {
+        id: stationYId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-y`,
+        kind: "workspace",
+        displayName: "Station Y",
+      },
+    ]);
+
+    await db.insert(matrixRooms).values([
+      { roomId: roomX1, tenantId: BOOTSTRAP_TENANT_ID, stationId: stationXId, alias: `#x1-${RUN}:id.agentpod.dev` },
+      { roomId: roomY, tenantId: BOOTSTRAP_TENANT_ID, stationId: stationYId, alias: `#y-${RUN}:id.agentpod.dev` },
+    ]);
+
+    movePrincipalId = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-mover` });
+    pId = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-p` });
+    qId = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-q` });
+  });
+
+  test("assigning an already-placed principal elsewhere moves it — no manual unassign, and the old station ends up empty", async () => {
+    await assign(stationMoveAId, movePrincipalId);
+    const before = await db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationMoveAId));
+    expect(before[0]!.principalId).toBe(movePrincipalId);
+
+    // No unassign call in between — the assign endpoint itself vacates
+    // wherever the principal already was.
+    await assign(stationMoveBId, movePrincipalId);
+
+    const [a, b] = await Promise.all([
+      db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationMoveAId)),
+      db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationMoveBId)),
+    ]);
+    expect(a[0]!.principalId, "the old station is empty").toBeNull();
+    expect(b[0]!.principalId, "the principal is in exactly the new station").toBe(movePrincipalId);
+  });
+
+  test("P leaves X, Q takes X: Q's gate goes to Q's own room and is answered by @agent_Q — never P's room, never @agent_P", async () => {
+    // P occupies X first, binding X's only room at the time (roomX1) to P.
+    await assign(stationXId, pId);
+    const roomX1Bound = await roomRow(roomX1);
+    expect(roomX1Bound!.principalId, "P's assignment bound X's room to P").toBe(pId);
+
+    // P moves on to Y — the move this whole slice is about. X is now empty.
+    await assign(stationYId, pId);
+    const xAfterPLeaves = await db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationXId));
+    expect(xAfterPLeaves[0]!.principalId).toBeNull();
+
+    // X gets a second, fresh room — what provisioning gives whoever occupies
+    // X next, since roomX1 is P's and stays P's. Inserted directly here
+    // rather than through a Matrix client this suite has no fake for.
+    await db.insert(matrixRooms).values({
+      roomId: roomX2,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      stationId: stationXId,
+      alias: `#x2-${RUN}:id.agentpod.dev`,
+    });
+
+    // Q takes X. The admin route binds the ONE unbound room at X (roomX2) —
+    // roomX1, still P's, is never touched.
+    await assign(stationXId, qId);
+    expect((await roomRow(roomX1))!.principalId, "P's room is untouched by Q's assignment").toBe(pId);
+    expect((await roomRow(roomX2))!.principalId).toBe(qId);
+
+    // New work dispatched to X, now that Q occupies it.
+    const cardId = `crd_${RUN}_q`;
+    await db.insert(bridgeDispatches).values({
+      externalSource: "kaambaan",
+      externalRunId: `run_${RUN}_q`,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      boardId: `brd_${RUN}`,
+      externalCardId: cardId,
+      agentKey: "test",
+      stationId: stationXId,
+      leaseEpoch: 1,
+      outcome: "produced",
+      startedAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const { deps, sent } = fakeDeps();
+    const outcome = await projectGate(BOOTSTRAP_TENANT_ID, delivery(`gate_${RUN}_q`, cardId), deps);
+
+    expect(outcome.status).toBe("sent");
+    // Q's OWN room — never roomX1, which is P's.
+    expect((outcome as { roomId: string }).roomId).toBe(roomX2);
+    expect((outcome as { roomId: string }).roomId).not.toBe(roomX1);
+    expect(sent.every((s) => s.roomId === roomX2)).toBe(true);
+    // Posted as Q — never as P.
+    const qHandleMxid = bridgeUserId(`${HANDLE_PREFIX}-q`, "id.agentpod.dev");
+    const pHandleMxid = bridgeUserId(`${HANDLE_PREFIX}-p`, "id.agentpod.dev");
+    expect(sent.every((s) => s.userId === qHandleMxid)).toBe(true);
+    expect(sent.some((s) => s.userId === pHandleMxid)).toBe(false);
+
+    // `station_id` is still populated on both rooms at X — the brief's
+    // explicit negative, since the deployed sweep joins on it.
+    expect((await roomRow(roomX1))!.stationId).toBe(stationXId);
+    expect((await roomRow(roomX2))!.stationId).toBe(stationXId);
+
+    // And each room still answers as its OWN bound resident, not the
+    // station's current one.
+    expect(await roomAgentUser(roomX1, "id.agentpod.dev")).toBe(pHandleMxid);
+    expect(await roomAgentUser(roomX2, "id.agentpod.dev")).toBe(qHandleMxid);
   });
 });

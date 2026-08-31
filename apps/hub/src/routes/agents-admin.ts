@@ -36,7 +36,7 @@
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
@@ -132,6 +132,16 @@ export const agentsAdminRouter = new Hono()
    *
    * Refused for a suspended principal: a suspension that can still be handed
    * a station is a suspension that does not suspend.
+   *
+   * **Occupancy is exclusive — a principal runs in one station at a time.**
+   * Fix-round ruling: nothing had ever decided this, so the code assumed
+   * both answers at once — `stations.principal_id` carried no constraint
+   * against a principal appearing twice, while `matrix_rooms_principal_idx`
+   * only ever allowed it one room. Assigning an already-placed principal is
+   * therefore a MOVE: its previous station (if any) is vacated in the same
+   * transaction this writes the new one, and `stations_principal_id_idx` (a
+   * partial unique index, not-null only) is what makes a principal in two
+   * stations impossible at the schema itself rather than merely unusual.
    */
   .put("/stations/:stationId/agent", zValidator("json", assignBody), async (c) => {
     const stationId = c.req.param("stationId");
@@ -146,30 +156,43 @@ export const agentsAdminRouter = new Hono()
       return c.json({ error: "principal is suspended" }, 403);
     }
 
-    await db.update(stations).set({ principalId }).where(eq(stations.id, stationId));
+    await db.transaction(async (tx) => {
+      // Vacate wherever this principal already is — including this same
+      // station, harmlessly — BEFORE placing it here. Done first and in the
+      // same transaction so a crash between the two steps cannot leave the
+      // principal occupying two stations, which `stations_principal_id_idx`
+      // would refuse anyway; doing it in this order is what makes that
+      // index's own errno the exception rather than the ordinary path.
+      await tx
+        .update(stations)
+        .set({ principalId: null })
+        .where(and(eq(stations.principalId, principalId), ne(stations.id, stationId)));
 
-    // `matrix_rooms.principal_id`'s one writer — `charter →
-    // decisions/2026-08-30-an-agent-is-a-principal.md`'s whole reason a
-    // room's identity comes from a handle rather than a station. Binds this
-    // station's own room to this principal EXACTLY ONCE: only when that room
-    // exists, has no binding yet, and this principal has no room bound
-    // anywhere else. Every later assignment — this principal moving to a
-    // different station, or a different principal taking this one — leaves
-    // the binding alone, which is what makes the room follow the agent
-    // rather than the station: `gates.ts`'s `roomForCard` finds THIS
-    // principal's room from wherever it is dispatched next, not a fresh room
-    // its new station happens to have. Conditioned on `NOT EXISTS` rather
-    // than checked-then-written so two assignments racing each other cannot
-    // both decide the room is free and violate `matrix_rooms_principal_idx`.
-    await db.execute(sql`
-      UPDATE matrix_rooms
-      SET principal_id = ${principalId}
-      WHERE station_id = ${stationId}
-        AND principal_id IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM matrix_rooms already_bound WHERE already_bound.principal_id = ${principalId}
-        )
-    `);
+      await tx.update(stations).set({ principalId }).where(eq(stations.id, stationId));
+
+      // `matrix_rooms.principal_id`'s one writer — `charter →
+      // decisions/2026-08-30-an-agent-is-a-principal.md`'s whole reason a
+      // room's identity comes from a handle rather than a station. Binds this
+      // station's own room to this principal EXACTLY ONCE: only when that room
+      // exists, has no binding yet, and this principal has no room bound
+      // anywhere else. Every later assignment — this principal moving to a
+      // different station, or a different principal taking this one — leaves
+      // the binding alone, which is what makes the room follow the agent
+      // rather than the station: `gates.ts`'s `roomForCard` finds THIS
+      // principal's room from wherever it is dispatched next, not a fresh room
+      // its new station happens to have. Conditioned on `NOT EXISTS` rather
+      // than checked-then-written so two assignments racing each other cannot
+      // both decide the room is free and violate `matrix_rooms_principal_idx`.
+      await tx.execute(sql`
+        UPDATE matrix_rooms
+        SET principal_id = ${principalId}
+        WHERE station_id = ${stationId}
+          AND principal_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM matrix_rooms already_bound WHERE already_bound.principal_id = ${principalId}
+          )
+      `);
+    });
 
     log.info("station assigned", { stationId, principalId, by: c.get("user")?.id });
     return c.json({ stationId, principalId });

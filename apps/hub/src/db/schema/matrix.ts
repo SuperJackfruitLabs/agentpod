@@ -60,14 +60,24 @@ export const matrixRooms = pgTable(
      * `stationId` join precisely so a reassigned agent's gates keep landing
      * in its original room rather than in whatever room its new station
      * happens to have; `roomAgentUser` does the same for a room that already
-     * has a bound resident. Both still fall back to the `stationId` join when
-     * this is null — a room the backfill has not reached, or one whose
-     * occupant has simply never moved — which is what keeps `gate-sweep.ts`
-     * working exactly as it does today: it calls into `gates.ts` rather than
-     * querying this table itself, and it is deployed in production. `stationId`
-     * stays the column every current reader still needs; this is redundant
-     * with it, not a replacement for it. Retiring `stationId` is a later
-     * slice's own migration, once every reader has moved.
+     * has a bound resident.
+     *
+     * **The `stationId` fallback is scoped, not unconditional — fix round on
+     * Task 5.** The first cut fell back to the `stationId` join whenever this
+     * column was null, which included a station whose CURRENT occupant
+     * simply hadn't been bound yet — and since a departed principal's room
+     * keeps its `stationId`, that fallback could hand a new occupant's gates
+     * to the room, and the address, of whoever used to be there. `roomForCard`
+     * now falls back to `stationId` only when the station has NO occupant at
+     * all; an occupied station whose occupant has no room of its own answers
+     * "no room yet" instead of guessing. `gate-sweep.ts` — deployed in
+     * production, and unaware it depends on this — is unaffected: it calls
+     * into `gates.ts` rather than querying this table itself, and the
+     * fallback it actually exercises (an unoccupied station's own room) is
+     * untouched. `stationId` stays the column every current reader still
+     * needs; this is redundant with it, not a replacement for it. Retiring
+     * `stationId` is a later slice's own migration, once every reader has
+     * moved.
      *
      * Nullable because a room this hasn't reached is still nullable, and
      * because a station can lose its occupant (`stations.principalId` is
@@ -92,9 +102,17 @@ export const matrixRooms = pgTable(
   },
   (t) => [
     index("matrix_rooms_tenant_id_idx").on(t.tenantId),
-    uniqueIndex("matrix_rooms_station_idx").on(t.stationId),
-    /** One room per occupying agent too, mirroring the station invariant
-     *  above — multiple NULLs are fine and expected before migration. */
+    /**
+     * NOT unique, as of the fix round on Task 5 — deliberately. A station
+     * can now carry more than one room: a departed principal's, kept so it
+     * keeps its history and address, alongside its new occupant's own. A
+     * unique index here would refuse the second row outright, which is
+     * exactly what "the room follows the agent" requires being able to do.
+     */
+    index("matrix_rooms_station_idx").on(t.stationId),
+    /** One room per occupying agent — enforceable now that occupancy
+     *  itself is exclusive (`stations_principal_id_idx`); multiple NULLs
+     *  are still fine, for every room with no bound occupant. */
     uniqueIndex("matrix_rooms_principal_idx").on(t.principalId),
     foreignKey({
       columns: [t.stationId, t.tenantId],

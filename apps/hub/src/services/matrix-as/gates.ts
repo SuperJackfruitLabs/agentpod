@@ -26,7 +26,7 @@
  * `gate_id` is what turns that overlap into one question instead of three.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { bridgeDispatches } from "../../db/schema/bridge";
@@ -137,22 +137,34 @@ export type ProjectionOutcome =
  * when it dispatched the work.
  *
  * card → dispatch → station → principal → room: the dispatch names a
- * station, and the station's CURRENT occupant (not necessarily who did the
- * work — occupancy can move on) is who this posts as. That occupant's OWN
- * room — the one `routes/agents-admin.ts` bound it to, wherever it was bound
- * — is preferred over the dispatch's own station-tied room, so an agent
- * reassigned to a brand-new station still speaks in the room it has always
- * had rather than a fresh one its new station happens to own. This is the
- * entire reason an agent's mxid comes from its handle rather than
- * `(nodeName, stationKey)`.
+ * station, and the station's CURRENT occupant is who this posts as. That
+ * occupant's OWN room — the one `routes/agents-admin.ts` bound it to,
+ * wherever it was bound — is what a gate lands in, not the dispatch's own
+ * station-tied room, so an agent reassigned to a brand-new station still
+ * speaks in the room it has always had. This is the entire reason an
+ * agent's mxid comes from its handle rather than `(nodeName, stationKey)`.
  *
- * Falls back to the plain `stationId` join — this table's ORIGINAL and still
- * primary index — whenever there is no such binding: a room the backfill
- * migration has not reached, a station whose occupant has never moved, or a
- * station with no occupant at all (handled below as `no-agent`). This is the
- * fallback `gate-sweep.ts` depends on without knowing it — it calls into this
- * function rather than querying `matrix_rooms` itself, and it is deployed in
- * production today.
+ * **When the station has a current occupant, this NEVER falls back to the
+ * `stationId` join — fix round on Task 5.** A room still sitting at this
+ * `stationId` from a departed occupant is not the current one's room, and
+ * that fallback used to hand it out anyway: P leaves a station, Q takes it,
+ * Q's own binding is a no-op (the room is still P's — occupancy binds a
+ * room once and never rebinds it), and the old fallback then posted Q's
+ * gates into P's room, addressed as `@agent_P`, in a room whose Matrix
+ * membership belongs to P — reachable through the very controls this slice
+ * shipped. An occupied station whose occupant has no room of its own yet
+ * answers `null` (no room yet) instead of guessing; provisioning is what
+ * gives that occupant a room.
+ *
+ * The `stationId` join is used ONLY when the station has NO occupant at
+ * all, constrained to the row whose `principal_id IS NULL` — a station can
+ * now carry more than one room (occupancy binds a room to the agent, not
+ * the other way around, so a departed occupant's room stays here too), and
+ * without that constraint an arbitrary one of them would answer. This is
+ * the fallback `gate-sweep.ts` depends on without knowing it — it calls
+ * into this function rather than querying `matrix_rooms` itself, and it is
+ * deployed in production today; it is unaffected, since an unoccupied
+ * station's own `no-agent` outcome is unchanged by this scoping.
  *
  * `null` when no AgentPod station ran the card. That is a real and named
  * limitation rather than a fault: a gate on work this fleet never touched has
@@ -196,25 +208,31 @@ async function roomForCard(
   if (!station) return null;
 
   if (station.principalId) {
+    // The station has an occupant. Only THAT principal's own room counts —
+    // no fallback to whatever room happens to sit at this `stationId`, which
+    // could belong to whoever occupied it before.
     const [own] = await db
       .select({ roomId: matrixRooms.roomId })
       .from(matrixRooms)
       .where(eq(matrixRooms.principalId, station.principalId))
       .limit(1);
-    if (own) {
-      return {
-        roomId: own.roomId,
-        nodeName: station.nodeName,
-        stationKey: station.stationKey,
-        principalId: station.principalId,
-      };
-    }
+    if (!own) return null;
+    return {
+      roomId: own.roomId,
+      nodeName: station.nodeName,
+      stationKey: station.stationKey,
+      principalId: station.principalId,
+    };
   }
 
+  // No current occupant at all — the room this station's own row names, if
+  // it has one with no binding of its own. `principal_id IS NULL` matters
+  // once a station can carry more than one room: a departed occupant's room
+  // stays here too, and is never this answer.
   const [room] = await db
     .select({ roomId: matrixRooms.roomId })
     .from(matrixRooms)
-    .where(eq(matrixRooms.stationId, dispatch.stationId))
+    .where(and(eq(matrixRooms.stationId, dispatch.stationId), isNull(matrixRooms.principalId)))
     .limit(1);
   if (!room) return null;
 
@@ -222,7 +240,7 @@ async function roomForCard(
     roomId: room.roomId,
     nodeName: station.nodeName,
     stationKey: station.stationKey,
-    principalId: station.principalId,
+    principalId: null,
   };
 }
 

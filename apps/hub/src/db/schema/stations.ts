@@ -1,4 +1,5 @@
 import { pgTable, text, timestamp, index, uniqueIndex, jsonb, foreignKey, AnyPgColumn } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth";
 import { nodes } from "./nodes";
 import { tenants } from "./tenants";
@@ -48,12 +49,23 @@ export const stations = pgTable("stations", {
    *
    * Here rather than in `principal_identities` because occupancy is not sameness.
    * A principal's identities say who it also is; this says where it currently runs.
+   *
+   * **Occupancy is exclusive.** Fix-round ruling on Task 5: a principal runs
+   * in one station at a time — `stations_principal_id_idx` below enforces it
+   * at the schema, and `routes/agents-admin.ts`'s assign endpoint vacates a
+   * principal's previous station in the same transaction it places it in a
+   * new one. Before this ruling nothing enforced it, while
+   * `matrix_rooms_principal_idx` already allowed a principal only one room —
+   * a contradiction the code silently carried both sides of.
    */
   principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
   adoptedAt: timestamp("adopted_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("stations_node_id_station_key_idx").on(t.nodeId, t.stationKey),
+  // Partial: many stations share `principal_id IS NULL` (unoccupied is the
+  // default state), and only a non-null occupant needs to be unique.
+  uniqueIndex("stations_principal_id_idx").on(t.principalId).where(sql`${t.principalId} IS NOT NULL`),
   index("stations_node_id_idx").on(t.nodeId),
   index("stations_user_id_idx").on(t.userId),
   index("stations_tenant_id_idx").on(t.tenantId),
