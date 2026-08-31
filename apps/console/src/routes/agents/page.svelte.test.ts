@@ -13,8 +13,10 @@
  */
 
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup } from "@testing-library/svelte";
+import { render, waitFor, cleanup, fireEvent } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import * as grantsApi from "$lib/api/grants";
+import * as agentsApi from "$lib/api/agents";
 import { setSearchParam, resetReactivePageState } from "../../mocks/reactive-page-state.svelte";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +59,7 @@ beforeEach(() => {
   // Default: no stations to cross-reference, so tests that don't care about
   // assignment never make a real network call for it.
   vi.spyOn(api, "listStations").mockResolvedValue([]);
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([]);
 });
 afterEach(cleanup);
 
@@ -207,6 +210,88 @@ test("when every station has an agent, the page says so instead of staying silen
     expect(getByTestId("all-assigned")).toBeTruthy();
   });
   expect(queryByTestId("unassigned-stations")).toBeNull();
+});
+
+test("a suspended agent's station reads as not dispatchable, and says why — not merely healthy", async () => {
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    stationRow({ id: "s1", stationKey: "hermes:hanuman", principalId: "prn_active" }),
+    stationRow({ id: "s2", stationKey: "hermes:kubera", principalId: "prn_suspended" }),
+  ]);
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([
+    { id: "prn_active", kind: "agent", handle: "hanuman", displayName: null, userId: null, suspendedAt: null },
+    {
+      id: "prn_suspended",
+      kind: "agent",
+      handle: "kubera-agent",
+      displayName: null,
+      userId: null,
+      suspendedAt: "2026-08-30T00:00:00Z",
+    },
+  ]);
+
+  const { getByTestId, queryByTestId } = render(AgentsPage);
+
+  await waitFor(() => {
+    // A principalId being present is not enough — kubera's row would have
+    // read as "assigned" (i.e. healthy) under the old, principalId-only check.
+    const panel = getByTestId("unassigned-stations");
+    expect(panel.textContent).toMatch(/suspended/i);
+    expect(panel.textContent).toContain("kubera-agent");
+  });
+  // hanuman's agent is active — it must not appear as blocked.
+  expect(queryByTestId("all-assigned")).toBeNull();
+});
+
+test("unassigning a suspended station's agent asks first, calls the endpoint, then reloads", async () => {
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  const listStationsSpy = vi.spyOn(api, "listStations").mockResolvedValue([
+    stationRow({ id: "s1", stationKey: "hermes:hanuman", principalId: "prn_active" }),
+    stationRow({ id: "s2", stationKey: "hermes:kubera", principalId: "prn_suspended" }),
+  ]);
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([
+    { id: "prn_active", kind: "agent", handle: "hanuman", displayName: null, userId: null, suspendedAt: null },
+    {
+      id: "prn_suspended",
+      kind: "agent",
+      handle: "kubera-agent",
+      displayName: null,
+      userId: null,
+      suspendedAt: "2026-08-30T00:00:00Z",
+    },
+  ]);
+  vi.spyOn(agentsApi, "unassignStationAgent").mockResolvedValue({ stationId: "s2", principalId: null });
+
+  const { findByRole, getByRole } = render(AgentsPage);
+
+  await fireEvent.click(await findByRole("button", { name: /unassign kubera/i }));
+  await fireEvent.click(getByRole("button", { name: /^unassign$/i }));
+
+  await waitFor(() => expect(agentsApi.unassignStationAgent).toHaveBeenCalledWith("s2"));
+  // Reloaded rather than patched locally — same convention as the grants page.
+  await waitFor(() => expect(listStationsSpy).toHaveBeenCalledTimes(2));
+});
+
+test("an actively-assigned station offers a real Unassign control — not SQL", async () => {
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    stationRow({ id: "s1", stationKey: "hermes:hanuman", principalId: "prn_a" }),
+    stationRow({ id: "s2", stationKey: "hermes:kubera", principalId: "prn_b" }),
+  ]);
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([
+    { id: "prn_a", kind: "agent", handle: "hanuman", displayName: null, userId: null, suspendedAt: null },
+    { id: "prn_b", kind: "agent", handle: "kubera", displayName: null, userId: null, suspendedAt: null },
+  ]);
+  vi.spyOn(agentsApi, "unassignStationAgent").mockResolvedValue({ stationId: "s1", principalId: null });
+
+  const { findByRole, getByRole, getByTestId } = render(AgentsPage);
+
+  await waitFor(() => expect(getByTestId("assigned-stations")).toBeTruthy());
+
+  await fireEvent.click(await findByRole("button", { name: /unassign hanuman/i }));
+  await fireEvent.click(getByRole("button", { name: /^unassign$/i }));
+
+  await waitFor(() => expect(agentsApi.unassignStationAgent).toHaveBeenCalledWith("s1"));
 });
 
 test("?updates=1 seeds the updates-only pill pressed and shows only update-available agents", async () => {

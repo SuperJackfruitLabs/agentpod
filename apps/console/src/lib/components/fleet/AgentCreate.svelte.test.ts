@@ -109,6 +109,39 @@ test("creating for a locked station calls createAgent then assignStationAgent, a
   });
 });
 
+test("create succeeds but the assignment fails: the agent is reported created-but-unassigned, not lost", async () => {
+  vi.mocked(agentsApi.createAgent).mockResolvedValue({
+    id: "prn_abc",
+    kind: "agent",
+    handle: "writer-quill",
+    displayName: null,
+    suspendedAt: null,
+  });
+  vi.mocked(agentsApi.assignStationAgent).mockRejectedValue(new Error("Principal is suspended."));
+  const { toast } = await import("svelte-sonner");
+  const onCreated = vi.fn();
+
+  const { getByRole } = render(AgentCreate, {
+    props: { open: true, station, stationOptions: [], onCreated },
+  });
+
+  await fireEvent.submit(getByRole("button", { name: /create/i }).closest("form")!);
+
+  await waitFor(() => {
+    // The principal was minted — losing that from the caller's view would
+    // strand an identity nobody can find again, and a retry would 409.
+    expect(onCreated).toHaveBeenCalledWith({
+      principal: expect.objectContaining({ id: "prn_abc" }),
+      stationId: null,
+    });
+    // The refusal itself — not a generic failure — is what's reported.
+    expect(toast.error).toHaveBeenCalledWith(
+      "Agent created, but couldn't be assigned",
+      expect.objectContaining({ description: "Principal is suspended." })
+    );
+  });
+});
+
 test("a taken handle surfaces the 409 as a readable message, not a generic failure", async () => {
   vi.mocked(agentsApi.createAgent).mockRejectedValue(new Error("Handle already taken."));
 

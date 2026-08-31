@@ -3,6 +3,8 @@
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
   import { getFleet, listStations } from "$lib/api/client";
+  import { listPrincipals, type PrincipalSummary } from "$lib/api/grants";
+  import { unassignStationAgent } from "$lib/api/agents";
   import type { FleetAgent } from "@agentpod/contract";
   import PageHeader from "$lib/components/page-header.svelte";
   import AgentTable from "$lib/components/fleet/AgentTable.svelte";
@@ -10,9 +12,13 @@
   import StatusRibbon from "$lib/components/fleet/StatusRibbon.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Button } from "$lib/components/ui/button";
+  import { Badge } from "$lib/components/ui/badge";
+  import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
+  import { toast } from "svelte-sonner";
   import UserPlusIcon from "@lucide/svelte/icons/user-plus";
   import UserXIcon from "@lucide/svelte/icons/user-x";
   import UserCheckIcon from "@lucide/svelte/icons/user-check";
+  import BanIcon from "@lucide/svelte/icons/ban";
 
   interface ExternalFilter {
     stationId?: string;
@@ -25,10 +31,10 @@
   let error = $state<string | null>(null);
 
   /**
-   * stationId → occupying principal, or null. Built from `listStations` (the
-   * DB row already carries `principalId`; `getFleet`'s aggregate doesn't) —
-   * this is what turns "healthy" into "healthy AND dispatchable" or
-   * "healthy but nobody can dispatch it".
+   * stationId → occupying principal id, or null. Built from `listStations`
+   * (the DB row already carries `principalId`; `getFleet`'s aggregate
+   * doesn't) — this is the first half of turning "healthy" into "healthy AND
+   * dispatchable" or "healthy but nobody can dispatch it".
    *
    * A station with no principal is *correct*, deliberate behaviour
    * (`charter → decisions/2026-08-30-an-agent-is-a-principal.md`), not a
@@ -39,6 +45,17 @@
   let assignments = $state<Map<string, { stationKey: string; principalId: string | null }>>(new Map());
   let assignmentsError = $state<string | null>(null);
   let assignedNodeIds: string[] = [];
+
+  /**
+   * The second half: a station can carry a principal id and still be
+   * dispatchable by nobody, because that principal is suspended. Only
+   * `principalId !== null` was checked before this — which reads a
+   * suspended agent's station as "assigned", i.e. healthy, which is exactly
+   * the invisibility this task exists to remove, just arriving through a
+   * different door. `GET /api/admin/principals` already carries `suspendedAt`.
+   */
+  let principalsById = $state<Map<string, PrincipalSummary>>(new Map());
+  let principalsError = $state<string | null>(null);
 
   // Derive the external filter from the URL query params reactively.
   // ?station=<id> → filter by stationId; ?status=<s> → filter by status
@@ -58,16 +75,65 @@
     return filter;
   });
 
-  /** Every adopted station this fleet page knows about that has no occupying agent. */
-  let unassignedStations = $derived.by((): StationOption[] =>
-    agents
-      .filter((a) => assignments.get(a.stationId)?.principalId === null)
-      .map((a) => ({
-        id: a.stationId,
-        stationKey: assignments.get(a.stationId)!.stationKey,
-        displayName: a.agentName,
-        nodeName: a.nodeName,
-      }))
+  type StationStatus =
+    | { id: string; stationKey: string; displayName: string; nodeName: string; kind: "unassigned" }
+    | {
+        id: string;
+        stationKey: string;
+        displayName: string;
+        nodeName: string;
+        kind: "suspended";
+        principal: PrincipalSummary;
+      }
+    | {
+        id: string;
+        stationKey: string;
+        displayName: string;
+        nodeName: string;
+        kind: "active";
+        principal: PrincipalSummary;
+      };
+
+  /**
+   * Every adopted station this page knows about, classified by whether it
+   * can actually be dispatched right now — not merely whether a principal id
+   * is on the row. Omits stations `assignments` hasn't resolved yet (still
+   * loading, or the lookup failed) rather than guessing either way.
+   */
+  let stationStatuses = $derived.by((): StationStatus[] =>
+    agents.flatMap((a): StationStatus[] => {
+      const info = assignments.get(a.stationId);
+      if (!info) return [];
+      const base = { id: a.stationId, stationKey: info.stationKey, displayName: a.agentName, nodeName: a.nodeName };
+      if (info.principalId === null) {
+        return [{ ...base, kind: "unassigned" }];
+      }
+      const principal = principalsById.get(info.principalId);
+      // A principal id on the row that the directory doesn't (yet) know is
+      // treated as active rather than flagged — the directory can lag the
+      // assignment on first load, and there is no path today for a
+      // principal to be deleted out from under a station.
+      if (!principal || !principal.suspendedAt) {
+        return [{ ...base, kind: "active", principal: principal ?? { id: info.principalId, kind: "agent", handle: info.principalId, displayName: null, userId: null, suspendedAt: null } }];
+      }
+      return [{ ...base, kind: "suspended", principal }];
+    })
+  );
+
+  let unassignedStations = $derived(
+    stationStatuses.filter((s): s is Extract<StationStatus, { kind: "unassigned" }> => s.kind === "unassigned")
+  );
+  let suspendedStations = $derived(
+    stationStatuses.filter((s): s is Extract<StationStatus, { kind: "suspended" }> => s.kind === "suspended")
+  );
+  let activeStations = $derived(
+    stationStatuses.filter((s): s is Extract<StationStatus, { kind: "active" }> => s.kind === "active")
+  );
+  /** Stations that cannot be dispatched right now, for any reason. */
+  let blockedStations = $derived([...unassignedStations, ...suspendedStations]);
+
+  let unassignedOptions = $derived<StationOption[]>(
+    unassignedStations.map((s) => ({ id: s.id, stationKey: s.stationKey, displayName: s.displayName, nodeName: s.nodeName }))
   );
 
   async function loadAssignments(nodeIds: string[]) {
@@ -89,6 +155,16 @@
     }
   }
 
+  async function loadPrincipals() {
+    try {
+      principalsById = new Map((await listPrincipals()).map((p) => [p.id, p]));
+      principalsError = null;
+    } catch (e) {
+      principalsError =
+        e instanceof Error ? e.message : "Couldn't check which agents are suspended.";
+    }
+  }
+
   async function loadFleet(background = false) {
     if (!background) {
       isLoading = true;
@@ -98,7 +174,10 @@
       const result = await getFleet();
       agents = result.agents;
       error = null;
-      await loadAssignments([...new Set(result.agents.map((a) => a.nodeId))]);
+      await Promise.all([
+        loadAssignments([...new Set(result.agents.map((a) => a.nodeId))]),
+        loadPrincipals(),
+      ]);
     } catch (e) {
       // Background refreshes keep the last good data on screen; the shell's
       // hub-unreachable banner carries the staleness signal.
@@ -132,6 +211,40 @@
 
   function handleAgentCreated() {
     void loadFleet();
+  }
+
+  // ── Unassign — the other half of the pair, and a real control ────────────
+  //
+  // Task 2 built DELETE .../agent; until this, nothing in the console ever
+  // called it, so a mis-assignment (or a since-suspended agent left sitting
+  // in a station) could only be undone with SQL — the exact thing this
+  // slice exists to end.
+
+  let showUnassign = $state(false);
+  let unassignTarget = $state<Extract<StationStatus, { kind: "suspended" | "active" }> | null>(null);
+  let isUnassigning = $state(false);
+
+  function openUnassign(station: Extract<StationStatus, { kind: "suspended" | "active" }>) {
+    unassignTarget = station;
+    showUnassign = true;
+  }
+
+  async function handleUnassign() {
+    if (!unassignTarget) return;
+    isUnassigning = true;
+    try {
+      await unassignStationAgent(unassignTarget.id);
+      toast.success(`${unassignTarget.displayName} unassigned`);
+      showUnassign = false;
+      unassignTarget = null;
+      await loadFleet();
+    } catch (e) {
+      toast.error("Couldn't unassign", {
+        description: e instanceof Error ? e.message : "Something went wrong.",
+      });
+    } finally {
+      isUnassigning = false;
+    }
   }
 </script>
 
@@ -174,31 +287,42 @@
     </div>
 
   {:else}
-    {#if assignmentsError}
+    {#if assignmentsError || principalsError}
       <div
         class="flex items-start justify-between gap-3 rounded-lg border border-amber-500/50 bg-amber-500/5 p-3"
         role="alert"
       >
-        <p class="text-xs text-amber-700 dark:text-amber-400">{assignmentsError}</p>
-        <Button variant="outline" size="sm" onclick={() => loadAssignments(assignedNodeIds)}>Retry</Button>
+        <p class="text-xs text-amber-700 dark:text-amber-400">{assignmentsError ?? principalsError}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onclick={() => {
+            void loadAssignments(assignedNodeIds);
+            void loadPrincipals();
+          }}
+        >
+          Retry
+        </Button>
       </div>
     {:else if agents.length > 0}
-      {#if unassignedStations.length > 0}
-        <!-- The point of this task: a station with no occupying agent must read
-             as unassigned, not merely healthy — a fleet-wide refusal to
-             dispatch otherwise produces no signal anywhere in this console. -->
+      {#if blockedStations.length > 0}
+        <!-- The point of this task: a station that cannot be dispatched must
+             read that way, not merely healthy — whether because nobody has
+             assigned it an agent, or because the agent it has is suspended.
+             Either way a fleet-wide refusal to dispatch otherwise produces no
+             signal anywhere in this console. -->
         <div class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4" data-testid="unassigned-stations">
           <div class="flex items-start gap-2">
             <UserXIcon class="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden="true" />
             <div class="space-y-1">
               <p class="text-sm font-medium">
-                {unassignedStations.length}
-                {unassignedStations.length === 1 ? "station has" : "stations have"} no agent
+                {blockedStations.length}
+                {blockedStations.length === 1 ? "station can't" : "stations can't"} be dispatched
               </p>
               <p class="text-xs text-muted-foreground">
-                A station with no occupying agent is dispatchable by nobody — correct behaviour
-                for a station nobody has assigned yet, but indistinguishable from a fault unless
-                it's shown. Give one a principal to make it dispatchable.
+                A station with no agent, or whose agent is suspended, is dispatchable by nobody —
+                correct behaviour for a station nobody has assigned yet, but indistinguishable
+                from a fault unless it's shown here.
               </p>
             </div>
           </div>
@@ -213,9 +337,39 @@
                   variant="outline"
                   size="sm"
                   class="shrink-0"
-                  onclick={() => openCreateForStation(station)}
+                  onclick={() =>
+                    openCreateForStation({
+                      id: station.id,
+                      stationKey: station.stationKey,
+                      displayName: station.displayName,
+                      nodeName: station.nodeName,
+                    })}
                 >
                   Create an agent for this station
+                </Button>
+              </li>
+            {/each}
+            {#each suspendedStations as station (station.id)}
+              <li class="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium">{station.displayName}</p>
+                  <p class="flex items-center gap-1 text-xs text-destructive">
+                    <BanIcon class="h-3 w-3 shrink-0" aria-hidden="true" />
+                    {station.nodeName} · agent suspended — {station.principal.handle}
+                  </p>
+                  <p class="text-xs text-muted-foreground">
+                    Suspended principals are refused everywhere. Unassign to free the station, or
+                    <a href="/admin/grants" class="underline hover:text-foreground">restore it in Grants</a>.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  aria-label="Unassign {station.displayName}"
+                  onclick={() => openUnassign(station)}
+                >
+                  Unassign
                 </Button>
               </li>
             {/each}
@@ -224,8 +378,38 @@
       {:else}
         <p class="flex items-center gap-1.5 text-xs text-muted-foreground" data-testid="all-assigned">
           <UserCheckIcon class="h-3.5 w-3.5" aria-hidden="true" />
-          Every adopted station has an agent assigned.
+          Every adopted station has an active agent assigned.
         </p>
+      {/if}
+
+      {#if activeStations.length > 0}
+        <!-- The other half of "wire unassign to a real control": even a
+             correctly-assigned station needs a way off, or a mis-assignment
+             can only be undone with SQL. -->
+        <div class="rounded-lg border p-3" data-testid="assigned-stations">
+          <p class="mb-2 text-xs font-medium text-muted-foreground">
+            {activeStations.length} {activeStations.length === 1 ? "station is" : "stations are"} assigned
+          </p>
+          <ul class="space-y-1.5">
+            {#each activeStations as station (station.id)}
+              <li class="flex items-center justify-between gap-3 rounded-md px-2 py-1.5 hover:bg-muted/50">
+                <div class="flex min-w-0 items-center gap-2">
+                  <span class="truncate text-sm">{station.displayName}</span>
+                  <Badge variant="outline" class="shrink-0 font-mono text-[11px]">{station.principal.handle}</Badge>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="shrink-0 text-muted-foreground hover:text-destructive"
+                  aria-label="Unassign {station.displayName}"
+                  onclick={() => openUnassign(station)}
+                >
+                  Unassign
+                </Button>
+              </li>
+            {/each}
+          </ul>
+        </div>
       {/if}
     {/if}
 
@@ -236,6 +420,22 @@
 <AgentCreate
   bind:open={createOpen}
   station={createForStation}
-  stationOptions={createForStation ? [] : unassignedStations}
+  stationOptions={createForStation ? [] : unassignedOptions}
   onCreated={handleAgentCreated}
+/>
+
+<ConfirmDialog
+  open={showUnassign}
+  title="Unassign agent"
+  message={unassignTarget
+    ? `${unassignTarget.displayName}'s agent (${unassignTarget.principal.handle}) will be removed from this station. It becomes dispatchable by nobody until an agent is assigned again.`
+    : ""}
+  confirmLabel="Unassign"
+  destructive
+  onConfirm={handleUnassign}
+  onCancel={() => {
+    if (isUnassigning) return;
+    showUnassign = false;
+    unassignTarget = null;
+  }}
 />
