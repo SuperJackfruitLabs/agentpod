@@ -222,6 +222,7 @@ describe("buildMigrationDeps — m.direct is read-modify-write, and never fatal"
     const state = { written: null as Record<string, unknown> | null };
     const c: DirectClient = {
       invite: overrides.invite ?? (async () => {}),
+      isJoined: async () => false,
       join: overrides.join ?? (async () => {}),
       leave: overrides.leave ?? (async () => {}),
       getAccountData:
@@ -313,6 +314,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     let calls = 0;
     const c: DirectClient = {
       invite: async () => {},
+      isJoined: async () => false,
       join: async () => { calls++; },
       leave: async () => { calls++; },
       getAccountData: async () => { calls++; return null; },
@@ -332,6 +334,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     const acts: string[] = [];
     const c: DirectClient = {
       invite: async (as, r, invitee) => { acts.push(`invite ${as} ${r} ${invitee}`); },
+      isJoined: async () => false,
       join: async (u, r) => { acts.push(`join ${u} ${r}`); },
       leave: async (u, r) => { acts.push(`leave ${u} ${r}`); },
       getAccountData: async () => null,
@@ -359,6 +362,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     const acts: string[] = [];
     const c: DirectClient = {
       invite: async (as, r, invitee) => { acts.push(`invite ${as} ${r} ${invitee}`); },
+      isJoined: async () => false,
       join: async (u, r) => { acts.push(`join ${u} ${r}`); },
       leave: async (u, r) => { acts.push(`leave ${u} ${r}`); },
       getAccountData: async () => null,
@@ -391,6 +395,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     let joinCalls = 0;
     const c: DirectClient = {
       invite: async () => {},
+      isJoined: async () => false,
       join: async (_u, roomId) => {
         joinCalls++;
         if (roomId === ROW.roomId) throw new Error("rate limited");
@@ -427,6 +432,7 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
     });
     const c: DirectClient = {
       invite: async () => {},
+      isJoined: async () => false,
       join: async () => {},
       leave: async () => {},
       getAccountData: async () => null,

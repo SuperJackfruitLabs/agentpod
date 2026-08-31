@@ -290,6 +290,7 @@ export interface DirectClient {
    * of them with `403 M_FORBIDDEN ... cannot join a room that is not \`public\``.
    */
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  isJoined(userId: string, roomId: string): Promise<boolean>;
   join(userId: string, roomId: string): Promise<void>;
   leave(userId: string, roomId: string): Promise<void>;
   getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
@@ -323,6 +324,7 @@ export function buildMigrationDeps(
   const deps: MxidMigrationDeps = {
     rooms: async () => rooms.map((r) => ({ roomId: r.roomId, handle: r.handle, oldUserId: r.oldUserId })),
     invite: (asUserId, roomId, invitee) => client.invite(asUserId, roomId, invitee),
+    isJoined: (userId, roomId) => client.isJoined(userId, roomId),
     join: (userId, roomId) => client.join(userId, roomId),
     leave: (userId, roomId) => client.leave(userId, roomId),
     async setDirect(newUserId, roomId) {
