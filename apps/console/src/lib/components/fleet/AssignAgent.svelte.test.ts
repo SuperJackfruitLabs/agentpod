@@ -37,6 +37,10 @@ if (!Element.prototype.setPointerCapture) {
   Element.prototype.setPointerCapture = () => {};
 }
 
+vi.mock("svelte-sonner", () => ({
+  toast: { warning: vi.fn(), error: vi.fn(), success: vi.fn() },
+}));
+
 vi.mock("$lib/api/agents", async () => {
   const actual = await vi.importActual<typeof import("$lib/api/agents")>("$lib/api/agents");
   return {
@@ -45,6 +49,7 @@ vi.mock("$lib/api/agents", async () => {
   };
 });
 
+import { toast } from "svelte-sonner";
 import * as agentsApi from "$lib/api/agents";
 import { apiError } from "$lib/api/http-error";
 import AssignAgent from "./AssignAgent.svelte";
@@ -103,6 +108,58 @@ test("picking an agent and submitting calls assignStationAgent and reports it, a
       stationId: "st_2",
     });
   });
+});
+
+test("assigned but with no room: the operator is told, and it is not reported as a failed assignment", async () => {
+  // The whole-branch review's Critical was that assignment never provisioned
+  // a room at all. It does now, and provisioning talks to a homeserver that
+  // can be down — so the remaining risk is the same one in a smaller shape:
+  // a partial success that reads as a whole one. The assignment stands (the
+  // hub does not roll it back), so this must NOT surface as an error, and it
+  // must not surface as nothing either.
+  vi.mocked(agentsApi.assignStationAgent).mockResolvedValue({
+    stationId: "st_2",
+    principalId: "prn_stranded",
+    room: { status: "failed", error: "homeserver unreachable" },
+  });
+  const onAssigned = vi.fn();
+
+  const { getByRole } = render(AssignAgent, {
+    props: { open: true, station, candidates, onAssigned },
+  });
+
+  await pickAgent(getByRole, /stranded-writer/i);
+  await fireEvent.click(getByRole("button", { name: /^assign$/i }));
+
+  await waitFor(() => {
+    expect(toast.warning).toHaveBeenCalledWith(
+      "stranded-writer was assigned",
+      expect.objectContaining({ description: expect.stringContaining("homeserver unreachable") })
+    );
+  });
+  expect(toast.error, "not an error — the assignment landed").not.toHaveBeenCalled();
+  expect(onAssigned, "and the station really is occupied").toHaveBeenCalledWith({
+    principal: expect.objectContaining({ id: "prn_stranded" }),
+    stationId: "st_2",
+  });
+});
+
+test("a provisioned room says nothing extra — an ordinary assignment is not an event", async () => {
+  vi.mocked(agentsApi.assignStationAgent).mockResolvedValue({
+    stationId: "st_2",
+    principalId: "prn_stranded",
+    room: { status: "provisioned" },
+  });
+
+  const { getByRole } = render(AssignAgent, {
+    props: { open: true, station, candidates, onAssigned: vi.fn() },
+  });
+
+  await pickAgent(getByRole, /stranded-writer/i);
+  await fireEvent.click(getByRole("button", { name: /^assign$/i }));
+
+  await waitFor(() => expect(agentsApi.assignStationAgent).toHaveBeenCalled());
+  expect(toast.warning).not.toHaveBeenCalled();
 });
 
 test("the submit button stays disabled until an agent is picked", () => {

@@ -28,7 +28,7 @@
   import { Field } from "$lib/components/ui/field";
   import { Spinner } from "$lib/components/ui/spinner";
   import { toast } from "svelte-sonner";
-  import { createAgent, assignStationAgent, defaultHandleFromStationKey, type CreatedAgent } from "$lib/api/agents";
+  import { createAgent, assignStationAgent, defaultHandleFromStationKey, roomProblem, type CreatedAgent } from "$lib/api/agents";
 
   export interface StationOption {
     id: string;
@@ -103,8 +103,19 @@
       let stationId: string | null = null;
       if (selectedStationId) {
         try {
-          await assignStationAgent(selectedStationId, principal.id);
+          const result = await assignStationAgent(selectedStationId, principal.id);
           stationId = selectedStationId;
+          // Assigned, but with no room. A third state beside "created" and
+          // "created but not assigned", and it gets its own sentence for the
+          // same reason those do — the assignment stands, so it is not an
+          // error, and it is not nothing either.
+          const roomIssue = roomProblem(result.room);
+          if (roomIssue) {
+            toast.warning(`${principal.handle} created and assigned`, { description: roomIssue });
+            open = false;
+            onCreated({ principal, stationId });
+            return;
+          }
         } catch (assignErr) {
           // The principal exists now even though the assignment failed —
           // reporting this as a failed create would strand an identity the

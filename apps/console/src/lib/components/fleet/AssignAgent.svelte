@@ -37,7 +37,8 @@
   import { Button } from "$lib/components/ui/button";
   import { Field } from "$lib/components/ui/field";
   import { Spinner } from "$lib/components/ui/spinner";
-  import { assignStationAgent } from "$lib/api/agents";
+  import { toast } from "svelte-sonner";
+  import { assignStationAgent, roomProblem } from "$lib/api/agents";
   import type { PrincipalSummary } from "$lib/api/grants";
 
   export interface AssignStationTarget {
@@ -96,8 +97,17 @@
     isAssigning = true;
     problem = null;
     try {
-      await assignStationAgent(station.id, candidate.principal.id);
+      const result = await assignStationAgent(station.id, candidate.principal.id);
       open = false;
+      // Assigned, but the homeserver refused it a room. Deliberately not an
+      // error toast: the assignment stands, and calling it a failure would
+      // send the operator to retry something that already happened. It must
+      // still be said — the whole finding this came from is that a silent
+      // gap looked exactly like success.
+      const roomIssue = roomProblem(result.room);
+      if (roomIssue) {
+        toast.warning(`${candidate.principal.handle} was assigned`, { description: roomIssue });
+      }
       onAssigned({ principal: candidate.principal, stationId: station.id });
     } catch (e) {
       // The hub's own sentence — "principal is suspended", "no such

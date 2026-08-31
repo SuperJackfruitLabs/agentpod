@@ -43,16 +43,47 @@ export function createAgent(input: { handle: string; displayName?: string }): Pr
 }
 
 /**
- * Put a principal in a station — what makes the station dispatchable.
+ * Whether the assigned agent actually ended up with a Matrix room.
+ *
+ * The hub provisions one as part of the assignment, and provisioning talks
+ * to a homeserver, which can be down. A failure there deliberately does NOT
+ * undo the assignment — occupancy is a fact in the organization plane and a
+ * room is its shadow on a system the hub does not own — so the outcome
+ * rides back in the body instead, and the operator is told rather than left
+ * to discover it weeks later from a gate that never arrived.
+ *
+ * `no-bridge` is a configuration answer rather than a fault: a hub with no
+ * homeserver configured has no rooms for anything, and the assignment is
+ * complete without one.
+ */
+export type RoomOutcome =
+  | { status: "provisioned" }
+  | { status: "no-bridge" }
+  | { status: "failed"; error: string };
+
+/** The sentence to show for an outcome, or null when there is nothing to say. */
+export function roomProblem(room: RoomOutcome | undefined): string | null {
+  if (!room || room.status !== "failed") return null;
+  return `It has no Matrix room yet — provisioning failed: ${room.error}. It will get one when the hub next provisions; the assignment itself stands.`;
+}
+
+/**
+ * Put a principal in a station — what makes the station dispatchable, and
+ * provisions its Matrix room.
  *
  * Throws on 403 when the principal is suspended (a suspension that could be
  * routed around by handing the same agent a station would not be a
  * suspension) and on 404 when either side of the pair no longer exists.
+ *
+ * Resolves — rather than throwing — when the assignment landed but the room
+ * did not. See {@link RoomOutcome}: that is a partial success, and reporting
+ * it as a failure would tell the operator to retry something that already
+ * happened.
  */
 export function assignStationAgent(
   stationId: string,
   principalId: string
-): Promise<{ stationId: string; principalId: string }> {
+): Promise<{ stationId: string; principalId: string; room?: RoomOutcome }> {
   return http(`/api/admin/stations/${encodeURIComponent(stationId)}/agent`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
