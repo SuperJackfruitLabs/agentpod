@@ -36,11 +36,27 @@
 --     being unique in fix round 1 precisely so a departed occupant's room
 --     could sit beside its successor's. A set-wide UPDATE would bind the
 --     same principal onto every one of them in a single statement and raise
---     23505 -- and even if it could pick one, picking is guessing. The
---     `1 = (SELECT COUNT(*) ...)` clause binds only where there is exactly
---     one candidate and therefore nothing to guess about; an ambiguous
---     station is left alone, which `roomAgentUser` now reports honestly as
---     "no answer" rather than as the wrong agent.
+--     23505. The subquery below picks exactly ONE room per station, so the
+--     statement can match at most one row per principal and the index has
+--     nothing to refuse.
+--
+--     **This clause used to decline instead** -- `1 = (SELECT COUNT(*) ...)`,
+--     on the reasoning that picking between siblings is guessing. The
+--     whole-branch review pointed out that the LIVE writer
+--     (`routes/agents-admin.ts`'s bind-on-assign) was picking anyway, with
+--     an unordered `LIMIT 1`: same data, opposite policy, and the arbitrary
+--     one was the one an operator actually hit. So the rule was decided
+--     rather than avoided -- **oldest `created_at`, tie-broken by
+--     `room_id`** -- and it is applied identically here, in that endpoint,
+--     in `station-room.ts`'s `roomForStation`, and in
+--     `roomAliasForStation`. Oldest, because the station's ORIGINAL room is
+--     the one carrying the history this whole slice exists to preserve;
+--     `room_id` breaks the tie because `created_at` is not unique and two
+--     rooms provisioned in one batch can share it.
+--
+--     Declining was not the safer option it looked like. It left exactly
+--     the rooms whose stations are rightfully occupied answering nothing,
+--     which is what this file exists to stop.
 --
 -- Idempotent: every row it touches stops matching `r."principal_id" IS
 -- NULL`, so a second run changes nothing.
@@ -54,8 +70,10 @@ WHERE s."id" = r."station_id"
     SELECT 1 FROM "matrix_rooms" AS held
     WHERE held."principal_id" = s."principal_id"
   )
-  AND 1 = (
-    SELECT COUNT(*) FROM "matrix_rooms" AS sibling
+  AND r."room_id" = (
+    SELECT sibling."room_id" FROM "matrix_rooms" AS sibling
     WHERE sibling."station_id" = s."id"
       AND sibling."principal_id" IS NULL
+    ORDER BY sibling."created_at" ASC, sibling."room_id" ASC
+    LIMIT 1
   );

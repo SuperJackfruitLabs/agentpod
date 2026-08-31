@@ -45,13 +45,32 @@ export const matrixRooms = pgTable(
      * The occupying agent this room speaks to — added, not swapped in for
      * `stationId`.
      *
-     * **Has a writer now.** `routes/agents-admin.ts`'s assign endpoint binds
-     * it once: the first time a station's own room finds an occupant that has
-     * no room of its own anywhere yet. It is never moved or cleared after
-     * that — an agent keeps the room it was first bound to for as long as it
-     * exists, however many stations it occupies afterward, which is the
-     * entire point of keying gates on the agent rather than on wherever it
-     * currently sits. Migration `0060_matrix_rooms_backfill_principal_id`
+     * **Has TWO writers, and they agree.** The whole-branch review found this
+     * comment still claiming one, which by then was false:
+     *
+     *  - `routes/agents-admin.ts`'s assign endpoint binds an EXISTING unbound
+     *    room — the oldest at the station, under the rule in
+     *    `matrix-as/station-room.ts` — and only under `NOT EXISTS (… WHERE
+     *    principal_id = …)`, because the row it is updating was created for
+     *    somebody else's benefit and it has no other way to know whether this
+     *    principal is already housed.
+     *  - `matrix-as/provision.ts` binds a room it is CREATING, at insert,
+     *    unconditionally.
+     *
+     * The two policies read as a disagreement and are not: provisioning only
+     * reaches its insert when `roomForStation` has already answered "this
+     * occupant has no room", which is the same predicate assign spells out as
+     * `NOT EXISTS`. One checks it by having asked a moment earlier; the other
+     * checks it in the statement, because it is racing other assigns.
+     * `matrix_rooms_principal_idx` is what makes the agreement enforced
+     * rather than merely intended — if either ever stopped holding, the
+     * second write raises 23505 instead of quietly giving an agent two rooms.
+     *
+     * Once bound, never moved or cleared — an agent keeps the room it was
+     * first bound to for as long as it exists, however many stations it
+     * occupies afterward, which is the entire point of keying gates on the
+     * agent rather than on wherever it currently sits.
+     * Migration `0060_matrix_rooms_backfill_principal_id`
      * backfilled every room that predates the writer from its station's
      * occupant at the time, so no pre-existing room reads null forever for
      * having existed before this column had one.

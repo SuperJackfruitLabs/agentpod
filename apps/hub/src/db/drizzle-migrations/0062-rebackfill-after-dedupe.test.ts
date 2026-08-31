@@ -21,6 +21,13 @@
  *  - **The behaviour**, on the real tables, because "the column got
  *    written" is not the thing that matters — `gates.ts`'s `roomAgentUser`
  *    answering again is.
+ *
+ * **Whole-branch review.** `0062` used to DECLINE for a station carrying two
+ * unbound rooms, while the live writer picked one arbitrarily — same data,
+ * opposite policy. The rule is now decided in one place (oldest
+ * `created_at`, tie-broken by `room_id`; see `station-room.ts`'s
+ * `unboundRoomsForStation`) and this file proves `0062` applies it,
+ * including the tie-break, while both of its 23505 guards still hold.
  */
 
 process.env.DATABASE_URL =
@@ -121,7 +128,7 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
         ON COMMIT DROP
       `;
       await tx`
-        CREATE TEMP TABLE tmp_rooms_0062 (room_id text PRIMARY KEY, station_id text, principal_id text)
+        CREATE TEMP TABLE tmp_rooms_0062 (room_id text PRIMARY KEY, station_id text, principal_id text, created_at timestamp)
         ON COMMIT DROP
       `;
       // The index that makes every "would raise 23505" claim in these three
@@ -138,10 +145,10 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
           ('st_solo', 'prn_solo',    '2026-01-01T00:00:00Z')
       `;
       await tx`
-        INSERT INTO tmp_rooms_0062 (room_id, station_id, principal_id) VALUES
-          ('!r-old',  'st_old',  NULL),
-          ('!r-new',  'st_new',  NULL),
-          ('!r-solo', 'st_solo', NULL)
+        INSERT INTO tmp_rooms_0062 (room_id, station_id, principal_id, created_at) VALUES
+          ('!r-old',  'st_old',  NULL, '2026-01-01T00:00:00Z'),
+          ('!r-new',  'st_new',  NULL, '2026-06-01T00:00:00Z'),
+          ('!r-solo', 'st_solo', NULL, '2026-01-01T00:00:00Z')
       `;
 
       await tx.unsafe(backfill0060);
@@ -175,17 +182,28 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
       await tx`
         INSERT INTO tmp_stations_0062 (id, principal_id, adopted_at) VALUES
           ('st_moved', 'prn_moved', '2026-02-01T00:00:00Z'),
-          ('st_ambig', 'prn_ambig', '2026-03-01T00:00:00Z')
+          ('st_ambig', 'prn_ambig', '2026-03-01T00:00:00Z'),
+          ('st_tie',   'prn_tie',   '2026-04-01T00:00:00Z')
       `;
       await tx`
-        INSERT INTO tmp_rooms_0062 (room_id, station_id, principal_id) VALUES
+        INSERT INTO tmp_rooms_0062 (room_id, station_id, principal_id, created_at) VALUES
           -- an agent that moved stations keeps its old room; its new
           -- station carries an unbound one it never lived in
-          ('!r-moved-own',    'st_elsewhere', 'prn_moved'),
-          ('!r-moved-orphan', 'st_moved',     NULL),
-          -- one station, two unbound rooms: nothing to pick between them
-          ('!r-ambig-1', 'st_ambig', NULL),
-          ('!r-ambig-2', 'st_ambig', NULL)
+          ('!r-moved-own',    'st_elsewhere', 'prn_moved', '2026-02-01T00:00:00Z'),
+          ('!r-moved-orphan', 'st_moved',     NULL,        '2026-02-01T00:00:00Z'),
+          -- one station, two unbound rooms. This used to be the case 0062
+          -- declined outright; the rule now says the OLDEST carries the
+          -- history, and the newer one stays unbound. Deliberately
+          -- inserted newest-first, so a statement that has lost its
+          -- ORDER BY and falls back to insertion order picks the wrong one.
+          ('!r-ambig-new', 'st_ambig', NULL, '2026-05-01T00:00:00Z'),
+          ('!r-ambig-old', 'st_ambig', NULL, '2026-03-01T00:00:00Z'),
+          -- two unbound rooms created in the SAME instant: created_at
+          -- cannot separate them, and room_id is what stops the rule from
+          -- being an arbitrary pick in nicer clothes. !r-tie-a sorts first
+          -- and is inserted second.
+          ('!r-tie-b', 'st_tie', NULL, '2026-04-01T00:00:00Z'),
+          ('!r-tie-a', 'st_tie', NULL, '2026-04-01T00:00:00Z')
       `;
 
       await tx.unsafe(rebackfill0062);
@@ -210,10 +228,18 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
       ).toBeNull();
       expect(after0062.get("!r-moved-own"), "and that occupant's own room is untouched").toBe("prn_moved");
       expect(
-        after0062.get("!r-ambig-1"),
-        "two unbound rooms at one station is a guess, so 0062 declines to make it"
+        after0062.get("!r-ambig-old"),
+        "two unbound rooms at one station: the OLDEST carries the history and gets bound"
+      ).toBe("prn_ambig");
+      expect(
+        after0062.get("!r-ambig-new"),
+        "and the newer one stays unbound — binding both would violate matrix_rooms_principal_idx"
       ).toBeNull();
-      expect(after0062.get("!r-ambig-2")).toBeNull();
+      expect(
+        after0062.get("!r-tie-a"),
+        "same created_at: room_id breaks the tie, deterministically"
+      ).toBe("prn_tie");
+      expect(after0062.get("!r-tie-b")).toBeNull();
       expect(after0062.get("!r-solo"), "already bound, so a no-op").toBe("prn_solo");
 
       // Idempotent: a re-deploy must change nothing.
@@ -254,10 +280,10 @@ describe("migration 0062 re-runs the backfill 0061's dedupe left half-done", () 
     ).toBeNull();
 
     // The shipped file, verbatim, against the real schema — the same
-    // statement a deploy runs. Safe to run suite-wide: its `NOT EXISTS` and
-    // single-candidate clauses mean it can only bind a room whose station's
-    // occupant holds no other room and has no other unbound room to be
-    // confused with.
+    // statement a deploy runs. Safe to run suite-wide: its `NOT EXISTS`
+    // clause means it can only bind a room whose station's occupant holds
+    // no other room, and its one-row subquery means at most one room per
+    // station is touched.
     const rebackfill = statementStartingWith(
       "0062_matrix_rooms_rebackfill_after_dedupe.sql",
       'UPDATE "matrix_rooms"'

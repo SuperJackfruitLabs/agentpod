@@ -20,15 +20,25 @@
  * provisioned, silently, forever). Patching call sites one at a time
  * leaves the next one for the next agent to find. Every reader that needs
  * "the room for this station's occupant" goes through this function now.
+ *
+ * The whole-branch review found the second half of the same problem: once
+ * a station can carry several rooms, *choosing between the unbound ones*
+ * was being done four different ways, three of them by an unordered
+ * `LIMIT 1`. `unboundRoomsForStation` below is that choice, made once —
+ * see its comment for the rule and why the earlier alias-matching rule was
+ * withdrawn.
  */
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { matrixRooms } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { roomAliasFor } from "./names";
 import { principalHandle } from "../principals";
+import { createLogger } from "../../utils/logger";
+
+const log = createLogger("station-room");
 
 export interface StationRoom {
   roomId: string;
@@ -52,6 +62,71 @@ export interface StationOccupancy {
    * merely happens to share this station's `station_id`.
    */
   room: StationRoom | null;
+}
+
+/**
+ * **The rule for choosing among a station's UNBOUND rooms: oldest
+ * `created_at` wins, tie-broken by `room_id`.**
+ *
+ * One rule, applied at every site that has to make this choice — here, at
+ * `roomAliasForStation` below, at `routes/agents-admin.ts`'s bind-on-assign
+ * `UPDATE` (as an inline `ORDER BY`, because that write must stay a single
+ * atomic statement), and in migration `0062`. Four sites making the same
+ * choice by four different accidents is how this codebase acquired the bug
+ * class this whole task has been closing.
+ *
+ * Oldest, because the station's ORIGINAL room is the one carrying the
+ * history — the room adoption provisioned, the one an operator has been
+ * reading for months. `room_id` breaks a tie because `created_at` has no
+ * uniqueness of its own and two rooms provisioned in the same batch can
+ * share a timestamp to the microsecond; without it the "rule" would still
+ * be an arbitrary pick, just a better-dressed one.
+ *
+ * A previously-proposed rule — match the sibling whose stored alias equals
+ * `bridgeAliasForHandle(handle)` — was withdrawn as unsound: `provision.ts`
+ * binds `principal_id` at CREATION, so every room that is still unbound
+ * carries the STATION-derived alias. That rule matches all of a station's
+ * siblings or none of them, and at the assign site it would refuse the
+ * ordinary adoption-time room and hand the agent a fresh one, abandoning
+ * exactly the history this slice exists to preserve.
+ *
+ * **Logged whenever it actually had to choose.** A deterministic pick out of
+ * two candidates is still a guess about which room an operator meant; the
+ * point of the log line is that the ambiguity is visible in the record
+ * rather than settled in silence. One candidate is the ordinary case and
+ * says nothing.
+ */
+export async function unboundRoomsForStation(stationId: string): Promise<StationRoom[]> {
+  return db
+    .select({
+      roomId: matrixRooms.roomId,
+      spaceRoomId: matrixRooms.spaceRoomId,
+      alias: matrixRooms.alias,
+    })
+    .from(matrixRooms)
+    .where(and(eq(matrixRooms.stationId, stationId), isNull(matrixRooms.principalId)))
+    .orderBy(asc(matrixRooms.createdAt), asc(matrixRooms.roomId));
+}
+
+/**
+ * The one unbound room a station's history lives in, under the rule above,
+ * or null. `where` names the caller so an ambiguity log line says which
+ * decision was made on incomplete information.
+ */
+export async function oldestUnboundRoom(
+  stationId: string,
+  where: string
+): Promise<StationRoom | null> {
+  const rooms = await unboundRoomsForStation(stationId);
+  if (rooms.length > 1) {
+    log.warn("station carries more than one unbound room; chose the oldest", {
+      stationId,
+      where,
+      chose: rooms[0]!.roomId,
+      among: rooms.map((r) => r.roomId),
+    });
+  }
+  return rooms[0] ?? null;
 }
 
 /**
@@ -94,16 +169,11 @@ export async function roomForStation(stationId: string): Promise<StationOccupanc
     return { principalId, room: own ?? null };
   }
 
-  const [unbound] = await db
-    .select({
-      roomId: matrixRooms.roomId,
-      spaceRoomId: matrixRooms.spaceRoomId,
-      alias: matrixRooms.alias,
-    })
-    .from(matrixRooms)
-    .where(and(eq(matrixRooms.stationId, stationId), isNull(matrixRooms.principalId)))
-    .limit(1);
-  return { principalId: null, room: unbound ?? null };
+  // Ordered by `unboundRoomsForStation`'s rule rather than picked off an
+  // unordered `LIMIT 1` — with no `ORDER BY`, `routes/station-say.ts` and
+  // `gates.ts` could resolve the SAME unoccupied station to two different
+  // rooms across two calls and split one conversation in half.
+  return { principalId: null, room: await oldestUnboundRoom(stationId, "roomForStation") };
 }
 
 /**
@@ -137,6 +207,22 @@ export async function roomAliasForStation(
 ): Promise<string | null> {
   const occupancy = await roomForStation(stationId);
   if (occupancy.room) return occupancy.room.alias;
+
+  // An OCCUPIED station whose occupant holds no bound room yet is the case
+  // this branch used to misreport. `roomForStation` answers `null` there, on
+  // purpose — an honest "not yet" rather than a departed occupant's room —
+  // and deriving from here would then claim an address that is wrong twice
+  // over: the station carries a real room already, at a real stored alias,
+  // and bind-on-assign's `UPDATE` is going to hand the occupant THAT room
+  // under the same oldest-wins rule. Reporting where it will be, when the
+  // answer to where it IS is sitting in the table, is the same class of
+  // mistake as `routes/station-matrix.ts` re-deriving a station-keyed alias.
+  //
+  // Derivation is kept for what it is actually honest about: a station with
+  // no room at all, where "here is where it will be" is the only answer
+  // there is.
+  const unbound = await oldestUnboundRoom(stationId, "roomAliasForStation");
+  if (unbound) return unbound.alias;
 
   const [station] = await db
     .select({

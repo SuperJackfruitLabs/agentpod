@@ -17,7 +17,7 @@ import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
-import { bridgeUserId, bridgeLocalpart, roomAliasFor } from "./names";
+import { bridgeLocalpart, roomAliasFor, stationSpeaker } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { principalHandle, principalForUser } from "../principals";
@@ -155,34 +155,30 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   // nobody to answer as, there is nobody to create the room as — inventing an
   // identity from `(nodeName, stationKey)` would be exactly the
   // station-derived address this suite moved away from.
-  let speaker: string | null;
-  let handle: string | null = null;
-  if (bridged) {
-    handle = s.principalId ? await principalHandle(s.principalId) : null;
-    if (!handle) {
-      log.warn(
-        "station has no occupying agent, so it has no handle to provision a Matrix identity for",
-        { stationId, stationKey: s.stationKey }
-      );
-      return;
-    }
-    speaker = bridgeUserId(handle, deps.domain);
-  } else {
-    speaker = s.harnessMxid;
-    if (!speaker) {
-      log.warn("station answers for itself but has no Matrix identity; nothing to provision", {
-        stationId,
-        stationKey: s.stationKey,
-      });
-      return;
-    }
-    // Harness mode's SPEAKER is the harness's own fixed identity, unchanged
-    // by who occupies the station — but the ROOM'S ALIAS still has to
-    // follow the occupant (below), or a harness station whose occupant
-    // changes collides on the exact alias its predecessor's room still
-    // holds. Resolved here for that alone; it never becomes the speaker in
-    // this branch.
-    handle = s.principalId ? await principalHandle(s.principalId) : null;
+  // Resolved unconditionally, in both modes. Harness mode's SPEAKER is the
+  // harness's own fixed identity, unchanged by who occupies the station —
+  // but the ROOM'S ALIAS still has to follow the occupant (below), or a
+  // harness station whose occupant changes collides on the exact alias its
+  // predecessor's room still holds.
+  const handle: string | null = s.principalId ? await principalHandle(s.principalId) : null;
+
+  // `names.ts`'s `stationSpeaker` is the one place this choice is made now —
+  // `gates.ts` was making it a second time and getting harness mode wrong,
+  // posting as an `@agent_…` nothing had registered. Two independently
+  // maintained answers to one question is how every other divergence in this
+  // task started.
+  const speaker = stationSpeaker(
+    { identityMode: s.identityMode, harnessMxid: s.harnessMxid, handle },
+    deps.domain
+  );
+  if (!speaker) {
+    log.warn(
+      bridged
+        ? "station has no occupying agent, so it has no handle to provision a Matrix identity for"
+        : "station answers for itself but has no Matrix identity; nothing to provision",
+      { stationId, stationKey: s.stationKey }
+    );
+    return;
   }
 
   // A name a person can read. The mxid is derived and unlovely; this is what a

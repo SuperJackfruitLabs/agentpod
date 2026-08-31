@@ -61,7 +61,7 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
-import { onStationsAdopted } from './services/matrix-as/hooks.ts';
+import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -362,6 +362,12 @@ if (matrixBridge) {
   onStationsAdopted(async (stationIds) => {
     for (const id of stationIds) await matrixBridge.provision(id);
   });
+  // Nor must an agent assigned at noon. Adoption fires before a station has
+  // an occupant, and a bridge-mode station with none is exactly what
+  // `provision.ts` returns early from — so without this the console could
+  // create an agent, put it in a station, and leave it with no room at all
+  // until the next restart. `routes/agents-admin.ts` awaits this one.
+  onProvisionStation((stationId) => matrixBridge.provision(stationId));
   await startMatrixBridge(matrixBridge);
 } else {
   console.log('matrix bridge: (disabled)');

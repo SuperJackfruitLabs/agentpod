@@ -127,6 +127,43 @@ export function roomAliasFor(
 }
 
 /**
+ * Who this hub speaks as in a station's room — the one place THAT choice is
+ * made, for the same reason `roomAliasFor` above exists.
+ *
+ * It is the identity that CREATED the room, and it has to be, because that
+ * is the identity the homeserver knows is registered and joined:
+ *
+ *  - **bridge** — the Application Service answers for the station, as its
+ *    occupying agent. `provision.ts` calls `ensureUser` for exactly this
+ *    localpart, so it exists.
+ *  - **harness** — the station runs its own Matrix client and owns its own
+ *    account, which is what `stations.matrix_id` records. `provision.ts`
+ *    creates the room as that account and deliberately does NOT call
+ *    `ensureUser`, since registering over an account somebody else holds is
+ *    the failure the mode exists to prevent.
+ *
+ * The whole-branch review's Minor: `gates.ts` posted as
+ * `bridgeUserId(handle)` for harness-mode stations too — an mxid nothing had
+ * registered, in a room it was never a member of. The `roomAgentUser` half
+ * of the same mistake was already on the record; the SEND half is worse,
+ * because a read that answers the wrong name is recoverable and a send that
+ * the homeserver refuses loses the gate.
+ *
+ * `null` — a bridge-mode station with no occupant, or a harness-mode one
+ * that has never reported an mxid — is a real answer meaning "there is
+ * nobody here to say this as". Never patched over with the retired
+ * `(nodeName, stationKey)` form, which would put words in a station-derived
+ * mouth this suite spent a slice retiring.
+ */
+export function stationSpeaker(
+  station: { identityMode: string; harnessMxid: string | null; handle: string | null },
+  domain: string
+): string | null {
+  if (station.identityMode !== "bridge") return station.harnessMxid;
+  return station.handle ? bridgeUserId(station.handle, domain) : null;
+}
+
+/**
  * Is this mxid one of ours?
  *
  * The first question asked of every inbound event. An Application Service is

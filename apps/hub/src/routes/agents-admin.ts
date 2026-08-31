@@ -39,7 +39,10 @@ import { z } from "zod";
 import { and, eq, ne, sql } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
+import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
+import { provisionStationNow } from "../services/matrix-as/hooks";
+import { unboundRoomsForStation } from "../services/matrix-as/station-room";
 import { createPrincipal, principalById } from "../services/principals";
 import { createLogger } from "../utils/logger";
 
@@ -168,6 +171,12 @@ export const agentsAdminRouter = new Hono()
     const evictedPrincipalId =
       station.principalId && station.principalId !== principalId ? station.principalId : null;
 
+    // Read for the log line below, not for the write: the `UPDATE` picks its
+    // own row atomically. Held so that if the bind lands on one of several
+    // candidates, the choice is visible in the record — see
+    // `unboundRoomsForStation`.
+    const candidates = await unboundRoomsForStation(stationId);
+
     await db.transaction(async (tx) => {
       // Vacate wherever this principal already is — including this same
       // station, harmlessly — BEFORE placing it here. Done first and in the
@@ -204,12 +213,23 @@ export const agentsAdminRouter = new Hono()
       // would itself violate `matrix_rooms_principal_idx` the moment more
       // than one existed — a real, reachable crash a fix-round-2 test found,
       // not a hypothetical one.
+      //
+      // WHICH one is decided by the rule in `matrix-as/station-room.ts`'s
+      // `unboundRoomsForStation`: oldest `created_at`, tie-broken by
+      // `room_id`. Written out here as an inline `ORDER BY` rather than read
+      // through that function because this must stay ONE atomic statement —
+      // a select-then-update would reopen the race the `NOT EXISTS` clause
+      // exists to close. Until the whole-branch review this was an unordered
+      // `LIMIT 1`: the live writer guessed in exactly the state migration
+      // `0062` was declining to guess in, and could hand the agent a
+      // departed occupant's leftover room instead of the station's own.
       await tx.execute(sql`
         UPDATE matrix_rooms
         SET principal_id = ${principalId}
         WHERE room_id = (
           SELECT room_id FROM matrix_rooms
           WHERE station_id = ${stationId} AND principal_id IS NULL
+          ORDER BY created_at ASC, room_id ASC
           LIMIT 1
         )
         AND NOT EXISTS (
@@ -226,8 +246,58 @@ export const agentsAdminRouter = new Hono()
         by: c.get("user")?.id,
       });
     }
+
+    // Did the bind actually have to choose? Only worth a line when more than
+    // one unbound room was available AND one of them is now this principal's
+    // — a station with several unbound rooms whose occupant already held a
+    // room elsewhere made no choice at all, and saying it did would be the
+    // same sort of untrue record this branch has spent five rounds removing.
+    if (candidates.length > 1) {
+      const [bound] = await db
+        .select({ roomId: matrixRooms.roomId })
+        .from(matrixRooms)
+        .where(eq(matrixRooms.principalId, principalId));
+      if (bound && candidates.some((r) => r.roomId === bound.roomId)) {
+        log.warn("station carried more than one unbound room; bound the oldest", {
+          stationId,
+          principalId,
+          chose: bound.roomId,
+          among: candidates.map((r) => r.roomId),
+        });
+      }
+    }
+
     log.info("station assigned", { stationId, principalId, by: c.get("user")?.id });
-    return c.json({ stationId, principalId });
+
+    // **Provisioning runs here, and its failure does NOT undo the
+    // assignment.** The whole-branch review's Critical was that it did not
+    // run at all: the console reaches no other trigger, and a bridge-mode
+    // station with no occupant is exactly the case `provision.ts` returns
+    // early from — so adoption made no room, assignment made no room, and
+    // the first anyone heard of it was a gate that resolved to nowhere.
+    //
+    // Why the assignment stands when the homeserver does not:
+    //
+    //  - Occupancy is a fact in the organization plane; a Matrix room is
+    //    that plane's shadow on a system this hub does not own. Letting an
+    //    unreachable homeserver veto who occupies a station inverts which of
+    //    the two is authoritative.
+    //  - A rollback here could not be partial. Assignment is a MOVE — it has
+    //    already vacated wherever this principal was — so undoing it would
+    //    have to restore an occupancy the operator deliberately ended, or
+    //    leave the principal nowhere. Both are worse lies than a missing
+    //    room.
+    //  - `provisionStation` is idempotent and re-runs at boot and on every
+    //    later trigger, so a recorded assignment with no room self-heals. A
+    //    rolled-back assignment heals nothing, and the operator's retry is
+    //    the same call either way.
+    //
+    // What it must not do is read as success. The outcome is logged at error
+    // level by `provisionStationNow` and returned in the body, so the console
+    // can say "assigned, but it has no room yet" instead of nothing at all.
+    const room = await provisionStationNow(stationId);
+
+    return c.json({ stationId, principalId, room });
   })
 
   /**

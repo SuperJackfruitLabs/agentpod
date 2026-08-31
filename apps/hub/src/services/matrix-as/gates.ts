@@ -34,7 +34,7 @@ import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
 import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
-import { bridgeUserId } from "./names";
+import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
 
@@ -128,7 +128,16 @@ export type ProjectionOutcome =
    * is a room but nobody to speak in it as, which must refuse rather than
    * invent an address from `(nodeName, stationKey)`.
    */
-  | { status: "no-agent" };
+  | { status: "no-agent" }
+  /**
+   * The room exists and its station HAS an occupying agent, but the station
+   * answers for itself on Matrix and has never reported the account it
+   * answers as (`stations.matrix_id`). Distinct from `no-agent`: there is
+   * an agent, and the missing thing is the harness's own identity. Posting
+   * as `@agent_<handle>` anyway is what this status replaced — an mxid the
+   * bridge never registered, in a room it never joined.
+   */
+  | { status: "no-speaker" };
 
 /**
  * The room a card's work happened in.
@@ -167,6 +176,8 @@ async function roomForCard(
   nodeName: string;
   stationKey: string;
   principalId: string | null;
+  identityMode: string;
+  harnessMxid: string | null;
 } | null> {
   const [dispatch] = await db
     .select({ stationId: bridgeDispatches.stationId })
@@ -186,6 +197,13 @@ async function roomForCard(
     .select({
       stationKey: stations.stationKey,
       nodeName: nodes.name,
+      // Who this hub may speak as here. Carried out of the same row rather
+      // than re-derived downstream — the whole-branch review's Minor was
+      // that `projectGate` assumed the bridge answered for every station
+      // and posted as `@agent_<handle>` into harness-mode rooms, where that
+      // account was never registered and never a member.
+      identityMode: stations.matrixIdentityMode,
+      harnessMxid: stations.matrixId,
     })
     .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -205,6 +223,8 @@ async function roomForCard(
     nodeName: station.nodeName,
     stationKey: station.stationKey,
     principalId: occupancy.principalId,
+    identityMode: station.identityMode,
+    harnessMxid: station.harnessMxid,
   };
 }
 
@@ -271,6 +291,18 @@ export function gateEventContent(
 }
 
 /**
+ * Give back a claim this delivery took and could not use.
+ *
+ * Without it the row sits at `pending:<gateId>` forever and `gate-sweep.ts`
+ * reads it as handled, so a gate that becomes sendable later — the station
+ * gains an occupant, or the harness finally reports its mxid — is never
+ * re-attempted.
+ */
+async function releaseClaim(gateId: string): Promise<void> {
+  await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, gateId));
+}
+
+/**
  * Post a gate into its station's room, exactly once.
  *
  * The insert is the gate on the send, not a record of it: `onConflictDoNothing`
@@ -319,14 +351,38 @@ export async function projectGate(
     // The claim must go, or a gate for a station that later gains an
     // occupying agent could never be re-attempted — the sweep would see the
     // claimed row and conclude it had already been handled.
-    await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, d.gateId));
+    await releaseClaim(d.gateId);
     log.warn("gate's station has no occupying agent; claim released", {
       gateId: d.gateId,
       stationKey: found.stationKey,
     });
     return { status: "no-agent" };
   }
-  const stationUser = bridgeUserId(handle, deps.domain);
+
+  // …and WHICH virtual user is `names.ts`'s `stationSpeaker`, not
+  // `bridgeUserId` applied unconditionally, which is what this line was.
+  // A harness-mode station's room was created by the account the harness
+  // holds (`stations.matrix_id`), and `provision.ts` deliberately never
+  // calls `ensureUser` for such a station — so `@agent_<handle>` there is an
+  // mxid nothing registered, in a room it never joined. The homeserver
+  // refuses, and the gate is lost with its claim already taken. Speaking as
+  // the identity that actually owns the room is the only send that can land.
+  const stationUser = stationSpeaker(
+    { identityMode: found.identityMode, harnessMxid: found.harnessMxid, handle },
+    deps.domain
+  );
+  if (!stationUser) {
+    // Harness mode with no reported mxid: there is a room and an occupant,
+    // and still nobody this hub may speak as. Released for the same reason
+    // as above — the node agent reports `matrix_id`, so this can become
+    // sendable later without anything else changing.
+    await releaseClaim(d.gateId);
+    log.warn("gate's station answers for itself but has reported no Matrix identity; claim released", {
+      gateId: d.gateId,
+      stationKey: found.stationKey,
+    });
+    return { status: "no-speaker" };
+  }
   const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 
   // Prose first, deliberately: if only one lands, leave the room with a
@@ -657,11 +713,32 @@ export async function projectionForGate(gateId: string): Promise<{
  */
 export async function roomAgentUser(roomId: string, domain: string): Promise<string | null> {
   const [row] = await db
-    .select({ ownPrincipalId: matrixRooms.principalId })
+    .select({
+      ownPrincipalId: matrixRooms.principalId,
+      // The station is joined for its MODE, not for its occupant. Fix round
+      // 4 removed a `stations.principal_id` fallback from here on purpose
+      // and nothing below reinstates it: a room with no binding of its own
+      // still answers null.
+      identityMode: stations.matrixIdentityMode,
+      harnessMxid: stations.matrixId,
+    })
     .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
     .where(eq(matrixRooms.roomId, roomId))
     .limit(1);
   if (!row?.ownPrincipalId) return null;
   const handle = await principalHandle(row.ownPrincipalId);
-  return handle ? bridgeUserId(handle, domain) : null;
+  if (!handle) return null;
+  // Same rule as the send path, from the same function — a reply that goes
+  // out as an identity the room's send path could not use would be the two
+  // halves of one question answered two ways again.
+  //
+  // Known limit, stated rather than hidden: a station that changed modes
+  // after this room was created is unknowable from the schema, which records
+  // no creator. The mode is read live because it is the only answer there
+  // is, and it is right for every room whose station has not changed modes.
+  return stationSpeaker(
+    { identityMode: row.identityMode, harnessMxid: row.harnessMxid, handle },
+    domain
+  );
 }
