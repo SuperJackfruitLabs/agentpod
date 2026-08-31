@@ -233,8 +233,10 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
     }
 
     try {
+      // The station's owner, for the same reason `createSession` takes it:
+      // `requireLive` scopes on the session's `user_id`, a Better Auth id.
       await deps.acp.answerPermission(
-        principalId,
+        room.stationUserId,
         waiting.sessionId,
         waiting.requestSeq,
         optionId
@@ -304,7 +306,13 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
-    await deps.acp.promptSession(principalId, sessionId, text);
+    // The owner again, not the principal: `promptSession` resolves the live
+    // session with `requireLive(userId, sessionId)`. Passing a `prn_…` meant
+    // the session was created correctly and then could not be prompted —
+    // "Session not found or not active." The same defect as the station
+    // lookup, one call later; it survived the first fix because only the
+    // createSession site was corrected.
+    await deps.acp.promptSession(room.stationUserId, sessionId, text);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log.error("matrix message could not reach the station", {

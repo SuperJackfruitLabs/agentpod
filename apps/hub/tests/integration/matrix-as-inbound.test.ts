@@ -205,6 +205,12 @@ describe("an inbound room message", () => {
     expect(created[0]!.userId).not.toBe(OWNER_PRINCIPAL);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.text).toBe("status?");
+    // `promptSession` scopes on the session's user the same way the station
+    // lookup does. The fake recorded this id from the beginning and nothing
+    // asserted it, so the bridge could create a session correctly and then be
+    // unable to prompt it.
+    expect(prompts[0]!.userId).toBe(OWNER);
+    expect(prompts[0]!.userId).not.toBe(OWNER_PRINCIPAL);
   });
 
 
@@ -414,8 +420,12 @@ describe("answering a permission request from the room", () => {
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
 
+    // The OWNER, not the principal: `answerPermission` resolves the live
+    // session with `requireLive(userId, sessionId)`, scoped on a Better Auth
+    // id. This assertion named the principal and passed, while in production
+    // the same value produced "Session not found or not active."
     expect(answered).toEqual([
-      { userId: OWNER_PRINCIPAL, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
+      { userId: OWNER, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
     ]);
     expect(created).toHaveLength(0);
     expect(prompts).toHaveLength(0);
