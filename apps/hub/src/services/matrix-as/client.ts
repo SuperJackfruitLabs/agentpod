@@ -203,6 +203,28 @@ export class MatrixUserInUse extends Error {
 export const isMatrixUserInUse = (e: unknown): e is MatrixUserInUse =>
   e instanceof MatrixUserInUse;
 
+/**
+ * The appservice tried to act as a user outside its own exclusive namespace.
+ *
+ * Confirmed live against tuwunel on 2026-08-30: `GET account_data` as the
+ * human operator answers `400 M_EXCLUSIVE — User is not in namespace.` This
+ * is permanent, not transient — the AS's exclusive namespace is `@agent_.*`,
+ * the operator's own mxid is outside it, and no retry changes that. Typed,
+ * like `MatrixUserInUse`, so a caller (the mxid migration's report, in
+ * particular) can tell this apart from a real, retriable failure without
+ * matching an error message.
+ */
+export class MatrixExclusiveNamespace extends Error {
+  readonly errcode = "M_EXCLUSIVE";
+  constructor(what: string, userId: string) {
+    super(`matrix ${what} refused: ${userId} is outside the appservice's exclusive namespace`);
+    this.name = "MatrixExclusiveNamespace";
+  }
+}
+
+export const isMatrixExclusiveNamespace = (e: unknown): e is MatrixExclusiveNamespace =>
+  e instanceof MatrixExclusiveNamespace;
+
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
   const doFetch = deps.fetch ?? fetch;
 
@@ -677,8 +699,12 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       // rewrites simply starts empty, same as a profile with no avatar.
       if (res.status === 404) return null;
       if (res.status < 200 || res.status >= 300) {
+        const errcode = String(res.body.errcode ?? "");
+        if (errcode === "M_EXCLUSIVE") {
+          throw new MatrixExclusiveNamespace(`account_data GET ${type}`, userId);
+        }
         throw new Error(
-          `matrix account_data GET ${type} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+          `matrix account_data GET ${type} failed: ${res.status} ${errcode}`.trim()
         );
       }
       return res.body;

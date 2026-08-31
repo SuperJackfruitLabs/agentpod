@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from "bun:test";
 
+import { MatrixExclusiveNamespace } from "../src/services/matrix-as/client";
 import {
   buildMigrationDeps,
   describeRooms,
@@ -63,7 +64,7 @@ function describeDeps(overrides: Partial<DescribeDeps> = {}): DescribeDeps {
 
 describe("describeRooms — live membership and a live m.direct read, never a flag", () => {
   test("a room where nothing has happened yet is reported with all three steps outstanding", async () => {
-    const rooms = await describeRooms(describeDeps());
+    const { rooms } = await describeRooms(describeDeps());
 
     expect(rooms).toHaveLength(1);
     expect(rooms[0]).toMatchObject({
@@ -81,7 +82,7 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
     // leave. Detected from membership, because nothing wrote a flag for it.
     const joined = new Set([`${NEW_USER}|${ROW.roomId}`, `${OLD_USER}|${ROW.roomId}`]);
 
-    const rooms = await describeRooms(describeDeps({ client: fakeClient({ joined }) }));
+    const { rooms } = await describeRooms(describeDeps({ client: fakeClient({ joined }) }));
 
     expect(rooms).toHaveLength(1);
     expect(rooms[0]).toMatchObject({ joinOutstanding: false, leaveOutstanding: true });
@@ -91,7 +92,7 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
     const joined = new Set([`${NEW_USER}|${ROW.roomId}`]); // old is NOT in this set — it left
     const direct = { [OWNER]: { [NEW_USER]: [ROW.roomId] } };
 
-    const rooms = await describeRooms(describeDeps({ client: fakeClient({ joined, direct }) }));
+    const { rooms } = await describeRooms(describeDeps({ client: fakeClient({ joined, direct }) }));
 
     expect(rooms).toEqual([]);
   });
@@ -101,7 +102,7 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
     // membership can finish moving while m.direct never gets fixed. That must
     // stay visible forever, not vanish once the coupling would have hidden it.
     const joined = new Set([`${NEW_USER}|${ROW.roomId}`]); // old left, m.direct never written
-    const rooms = await describeRooms(describeDeps({ client: fakeClient({ joined, direct: {} }) }));
+    const { rooms } = await describeRooms(describeDeps({ client: fakeClient({ joined, direct: {} }) }));
 
     expect(rooms).toHaveLength(1);
     expect(rooms[0]).toMatchObject({
@@ -115,7 +116,7 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
     // The bug named "Important": ownerMxid null must not make the room
     // silently disappear once membership finishes moving.
     const joined = new Set([`${NEW_USER}|${ROW.roomId}`]);
-    const rooms = await describeRooms(
+    const { rooms } = await describeRooms(
       describeDeps({ client: fakeClient({ joined }), ownerMxidFor: async () => null })
     );
 
@@ -132,14 +133,55 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
       },
     });
 
-    const rooms = await describeRooms(describeDeps({ client }));
+    const { rooms, mDirectExcluded } = await describeRooms(describeDeps({ client }));
 
     expect(rooms).toHaveLength(1);
     expect(rooms[0]!.directOutstanding).toBe(true);
+    // A genuine, retriable failure is not the permanent M_EXCLUSIVE case: it
+    // must not trip the "cannot ever be fixed through this bridge" note.
+    expect(rooms[0]!.directExcluded).toBe(false);
+    expect(mDirectExcluded).toBe(false);
+  });
+
+  test("m.direct refused with M_EXCLUSIVE is reported not-applicable, not outstanding", async () => {
+    // The permanent case, settled by a live probe: the appservice can never
+    // act as the human operator, so this must read differently from a
+    // transient failure — it must not sit in `outstanding` forever.
+    const client = fakeClient({
+      onGetAccountData: async () => {
+        throw new MatrixExclusiveNamespace("account_data GET m.direct", OWNER);
+      },
+    });
+
+    const { rooms, mDirectExcluded } = await describeRooms(describeDeps({ client }));
+
+    expect(rooms).toHaveLength(1); // join is still outstanding, so the room stays listed
+    expect(rooms[0]).toMatchObject({ directOutstanding: false, directExcluded: true });
+    expect(mDirectExcluded).toBe(true);
+  });
+
+  test("a room whose join and leave are both done is omitted even though m.direct is permanently excluded", async () => {
+    // Requirement 3: completion is join + leave. A step that is structurally
+    // impossible through this bridge must not keep a finished room reported
+    // forever.
+    const joined = new Set([`${NEW_USER}|${ROW.roomId}`]); // old left
+    const client = fakeClient({
+      joined,
+      onGetAccountData: async () => {
+        throw new MatrixExclusiveNamespace("account_data GET m.direct", OWNER);
+      },
+    });
+
+    const { rooms, mDirectExcluded } = await describeRooms(describeDeps({ client }));
+
+    expect(rooms).toEqual([]);
+    // The exclusion is still a fact worth surfacing once, even though no
+    // room is left in the list to attach it to.
+    expect(mDirectExcluded).toBe(true);
   });
 
   test("a station with no occupying principal is omitted, not migrated to a guessed address", async () => {
-    const rooms = await describeRooms(
+    const { rooms } = await describeRooms(
       describeDeps({ rows: async () => [{ ...ROW, principalId: null }] })
     );
 
@@ -147,13 +189,13 @@ describe("describeRooms — live membership and a live m.direct read, never a fl
   });
 
   test("a principal with no handle is omitted the same way", async () => {
-    const rooms = await describeRooms(describeDeps({ principalHandle: async () => null }));
+    const { rooms } = await describeRooms(describeDeps({ principalHandle: async () => null }));
 
     expect(rooms).toEqual([]);
   });
 
   test("the old address is derived from the station's own (node, key), not guessed from membership", async () => {
-    const rooms = await describeRooms(
+    const { rooms } = await describeRooms(
       describeDeps({ rows: async () => [{ ...ROW, nodeName: "Box!", stationKey: "OpenCode:C52DDF65" }] })
     );
 
@@ -172,6 +214,7 @@ const ROOM_STATUS_BASE = {
   joinOutstanding: true,
   leaveOutstanding: false,
   directOutstanding: true,
+  directExcluded: false,
 };
 
 describe("buildMigrationDeps — m.direct is read-modify-write, and never fatal", () => {
@@ -365,6 +408,24 @@ describe("runMigration — a refused m.direct still lets leave run, and failures
       direct: null,
     });
   });
+
+  test("mDirectExcluded carries through from describeRooms into the run result", async () => {
+    const excludedClient = fakeClient({
+      onGetAccountData: async () => {
+        throw new MatrixExclusiveNamespace("account_data GET m.direct", OWNER);
+      },
+    });
+    const c: DirectClient = {
+      join: async () => {},
+      leave: async () => {},
+      getAccountData: async () => null,
+      setAccountData: async () => {},
+    };
+
+    const result = await runMigration(describeDeps({ client: excludedClient }), c, { apply: false });
+
+    expect(result.mDirectExcluded).toBe(true);
+  });
 });
 
 describe("formatReport — what an operator reads before deciding", () => {
@@ -376,6 +437,7 @@ describe("formatReport — what an operator reads before deciding", () => {
       failures: [],
       results: [],
       rooms: [ROOM_STATUS_BASE],
+      mDirectExcluded: false,
     });
 
     expect(report).toContain("DRY RUN");
@@ -400,6 +462,7 @@ describe("formatReport — what an operator reads before deciding", () => {
         },
       ],
       rooms: [{ ...ROOM_STATUS_BASE, joinOutstanding: false, leaveOutstanding: false }],
+      mDirectExcluded: false,
     });
 
     expect(report).toContain("membership updated");
@@ -408,7 +471,71 @@ describe("formatReport — what an operator reads before deciding", () => {
 
   test("no outstanding rooms is reported plainly", () => {
     expect(
-      formatReport({ applied: false, migrated: 0, skipped: 0, failures: [], results: [], rooms: [] })
+      formatReport({
+        applied: false,
+        migrated: 0,
+        skipped: 0,
+        failures: [],
+        results: [],
+        rooms: [],
+        mDirectExcluded: false,
+      })
     ).toContain("No rooms need migration");
+  });
+
+  test("mDirectExcluded prints one plain explanation at the top, naming M_EXCLUSIVE and the fix", () => {
+    const report = formatReport({
+      applied: false,
+      migrated: 0,
+      skipped: 0,
+      failures: [],
+      results: [],
+      rooms: [{ ...ROOM_STATUS_BASE, directOutstanding: false, directExcluded: true }],
+      mDirectExcluded: true,
+    });
+
+    expect(report).toContain("M_EXCLUSIVE");
+    expect(report).toContain("m.direct");
+    // The honest fix: whoever reads this needs to know it takes the
+    // operator's own token, not the bridge's.
+    expect(report).toContain("operator's own");
+    // Reported once — not repeated as a full explanation for every room.
+    expect(report.split("M_EXCLUSIVE")).toHaveLength(2);
+  });
+
+  test("a room whose m.direct is excluded reads as not applicable, not as outstanding work", () => {
+    const report = formatReport({
+      applied: false,
+      migrated: 0,
+      skipped: 0,
+      failures: [],
+      results: [],
+      rooms: [{ ...ROOM_STATUS_BASE, directOutstanding: false, directExcluded: true }],
+      mDirectExcluded: true,
+    });
+
+    // "m.direct" must not be listed among this room's outstanding steps...
+    expect(report).not.toContain("outstanding: join, m.direct");
+    expect(report).toContain("outstanding: join");
+    // ...but the room's own line still says plainly that it is excluded, not
+    // silently finished.
+    expect(report).toContain("not applicable");
+  });
+
+  test("the exclusion note still prints even when every room's join and leave are done", () => {
+    // Requirement 4: a reader must know m.direct was excluded deliberately,
+    // not forgotten — even once no room is left needing membership work.
+    const report = formatReport({
+      applied: false,
+      migrated: 0,
+      skipped: 0,
+      failures: [],
+      results: [],
+      rooms: [],
+      mDirectExcluded: true,
+    });
+
+    expect(report).toContain("M_EXCLUSIVE");
+    expect(report).toContain("No rooms need migration");
   });
 });

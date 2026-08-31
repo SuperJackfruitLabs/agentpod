@@ -34,6 +34,17 @@
  * regression, so the account-data update is folded into the same pass rather
  * than left as a follow-up.
  *
+ * A live probe on 2026-08-30 settled that the fold cannot actually reach the
+ * operator's account data: the AS's exclusive namespace is `@agent_.*`, the
+ * operator's own mxid sits outside it, and `GET account_data` as the
+ * operator answers `400 M_EXCLUSIVE`, permanently. `setDirect` below is
+ * still attempted and still non-fatal on any failure, `M_EXCLUSIVE`
+ * included — see `migrate-agent-mxids-run.ts` for how the report tells that
+ * permanent case apart from a real, retriable one, and for who has to close
+ * it (the operator's own access token, in a one-off run this script cannot
+ * make).
+ *
+
  * ## Idempotency is real, not decorative
  *
  * A run across 32 rooms is expected to fail partway through — a timeout, a

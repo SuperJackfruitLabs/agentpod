@@ -44,6 +44,39 @@
  * dropping out of People — traded against the charter principle that this
  * bridge holds no human credential, and that trade is reported here, not
  * made here.
+ *
+ * ## `M_EXCLUSIVE` is permanent, not transient — settled 2026-08-30
+ *
+ * A probe against the live homeserver answered the question the paragraph
+ * above only speculated about: `GET account_data` as the operator comes back
+ * `400 M_EXCLUSIVE — User is not in namespace.` The AS's exclusive namespace
+ * is `@agent_.*`; the operator's own mxid is outside it; no retry, backoff,
+ * or re-run changes that. This is why `describeRooms` tells `M_EXCLUSIVE`
+ * apart from every other read failure (`isMatrixExclusiveNamespace`, from
+ * `client.ts`): a genuine transient error must still fail closed and read as
+ * `directOutstanding`, but `M_EXCLUSIVE` must not — reporting it as
+ * outstanding forever, on every run, for all 32 rooms, is worse than a known
+ * limitation, because it buries the rooms that actually need attention under
+ * noise that can never clear. Such a room's `m.direct` reads as
+ * `directExcluded`, not outstanding, and — per "completion is join + leave"
+ * below — stops being reported at all once its membership has moved. The
+ * fact itself is not lost: `describeRooms` also returns `mDirectExcluded`,
+ * and `formatReport` states it once, at the top, in every report where it
+ * was true this run. The honest close for the DM mapping is a one-off run
+ * using the OPERATOR'S OWN access token, not the bridge's — that token is
+ * inside no `@agent_.*` namespace restriction, because it is not the
+ * bridge's credential to hold. This script cannot do that run; it can only
+ * say, plainly, that the remaining work exists and whose token closes it.
+ *
+ * ## Completion is join + leave
+ *
+ * `M_EXCLUSIVE` means `m.direct` can never be fixed through this bridge, and
+ * a room whose join and leave are both done is, for this migration's
+ * purposes, done — it must not stay on the report forever over a step that
+ * is structurally impossible here. `directExcluded` is what keeps that
+ * honest instead of silent: it says the step was excluded on purpose, not
+ * forgotten, which is why `formatReport` still names it once even once no
+ * room is left outstanding.
  */
 import { and, eq } from "drizzle-orm";
 
@@ -54,7 +87,7 @@ import { matrixRooms } from "../src/db/schema/matrix";
 import { principalIdentities } from "../src/db/schema/identities";
 import { principalHandle, principalForUser } from "../src/services/principals";
 import { bridgeUserId, localpartFor } from "../src/services/matrix-as/names";
-import { createMatrixClient } from "../src/services/matrix-as/client";
+import { createMatrixClient, isMatrixExclusiveNamespace } from "../src/services/matrix-as/client";
 import { matrixBridgeConfig } from "../src/services/matrix-as/index";
 import { migrateAgentMxids, type MxidMigrationDeps } from "./migrate-agent-mxids";
 import { createLogger } from "../src/utils/logger";
@@ -87,12 +120,24 @@ export interface RoomStatus {
   leaveOutstanding: boolean;
   /**
    * True until `m.direct` is actually read back naming the new user for this
-   * room. Not inferred from `joinOutstanding`/`leaveOutstanding` — a refused
-   * `m.direct` write no longer blocks `leave` (see the file doc), so a room
-   * can have finished moving membership while this stays true forever, and
-   * that must stay visible rather than making the room vanish from the report.
+   * room, UNLESS `directExcluded` is true (see below) — a permanently
+   * excluded room reads as not-applicable, never as outstanding, no matter
+   * how many times this is checked. Not inferred from
+   * `joinOutstanding`/`leaveOutstanding` — a refused `m.direct` write no
+   * longer blocks `leave` (see the file doc), so a room can have finished
+   * moving membership while this stays true forever, and that must stay
+   * visible rather than making the room vanish from the report.
    */
   directOutstanding: boolean;
+  /**
+   * True when reading `m.direct` for this room's owner failed with
+   * `M_EXCLUSIVE` — the appservice acting as a user outside its own
+   * namespace, confirmed permanent (see the file doc). Mutually exclusive
+   * with `directOutstanding`: this is the "not applicable" reading, not the
+   * "still needs work" one, and it is what lets a room whose join and leave
+   * are both done stop being reported at all.
+   */
+  directExcluded: boolean;
 }
 
 /** What `describeRooms` needs to ask a Matrix client. */
@@ -109,39 +154,78 @@ export interface DescribeDeps {
   ownerMxidFor(userId: string): Promise<string | null>;
 }
 
-/** Whether the owner's `m.direct` already names `newUserId` for this room. */
-async function directAlreadyFixed(
+/** The three things a room's `m.direct` state can turn out to be. */
+type DirectCheck = "done" | "outstanding" | "excluded";
+
+/**
+ * Whether the owner's `m.direct` already names `newUserId` for this room —
+ * or, if it can never be read at all, whether that is a real, retriable
+ * failure or the permanent `M_EXCLUSIVE` case (see the file doc).
+ *
+ * These three outcomes must not collapse into two: `"excluded"` is a fact
+ * about this bridge's reach, settled once and for all by a live probe, and
+ * conflating it with `"outstanding"` is exactly the defect this function
+ * exists to avoid — 32 rooms reported as needing work that can never be
+ * done, forever, on every run.
+ */
+async function checkDirect(
   client: DescribeClient,
   ownerMxid: string | null,
   newUserId: string,
   roomId: string
-): Promise<boolean> {
-  if (!ownerMxid) return false; // nothing this script can do is still "not done"
+): Promise<DirectCheck> {
+  if (!ownerMxid) return "outstanding"; // nothing this script can do is still "not done"
   try {
     const current = await client.getAccountData(ownerMxid, "m.direct");
     const rooms = current && Array.isArray(current[newUserId]) ? (current[newUserId] as unknown[]) : [];
-    return rooms.includes(roomId);
+    return rooms.includes(roomId) ? "done" : "outstanding";
   } catch (err) {
-    // A read failure is reported as outstanding, not silently treated as
-    // fixed — the same "fail closed" stance `setDirect` takes on a write.
+    if (isMatrixExclusiveNamespace(err)) {
+      // Permanent, not transient — confirmed live. Reported as excluded, not
+      // outstanding, so a room whose membership has fully moved is not kept
+      // on the report forever over a step that can never be done here.
+      log.warn(
+        "m.direct cannot be read as the owner — outside the appservice's namespace; reporting as not applicable, not outstanding",
+        { roomId }
+      );
+      return "excluded";
+    }
+    // A genuine, retriable failure is reported as outstanding, not silently
+    // treated as fixed — the same "fail closed" stance `setDirect` takes on
+    // a write. This must stay a different fact from `M_EXCLUSIVE` above: a
+    // transient error deserves a re-run, not a permanent write-off.
     log.warn("could not read m.direct while describing this room; reporting it as outstanding", {
       roomId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return false;
+    return "outstanding";
   }
+}
+
+/** What `describeRooms` reports: the outstanding rooms, and one run-wide fact. */
+export interface DescribeRoomsResult {
+  rooms: RoomStatus[];
+  /**
+   * True when at least one room's `m.direct` read failed with `M_EXCLUSIVE`
+   * this run. The one fact `formatReport` states at the top, once — never
+   * per room — because it is the same fact for all 32 rooms: this bridge
+   * cannot act as the operator, permanently, and no re-run changes it.
+   */
+  mDirectExcluded: boolean;
 }
 
 /**
  * Every room that still needs some of this migration, and nothing else.
  *
- * A room is left out only once join, leave, AND `m.direct` are all
- * confirmed — the last one by reading it back, never inferred from the
- * other two, because a refused `m.direct` write must keep the room visible
- * even after membership has fully moved.
+ * A room is left out once join, leave, AND `m.direct` are all settled —
+ * `m.direct` either confirmed fixed by reading it back, or `excluded`
+ * (`M_EXCLUSIVE`, permanent — see the file doc). A refused-but-retriable
+ * `m.direct` read is the one case that must keep a room visible even after
+ * membership has fully moved; `excluded` deliberately is not that case.
  */
-export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
+export async function describeRooms(deps: DescribeDeps): Promise<DescribeRoomsResult> {
   const out: RoomStatus[] = [];
+  let mDirectExcluded = false;
 
   for (const row of await deps.rows()) {
     if (!row.principalId) {
@@ -170,13 +254,15 @@ export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
 
     const newJoined = await deps.client.isJoined(newUserId, row.roomId);
     const oldStillJoined = await deps.client.isJoined(oldUserId, row.roomId);
-    const directDone = await directAlreadyFixed(deps.client, ownerMxid, newUserId, row.roomId);
+    const direct = await checkDirect(deps.client, ownerMxid, newUserId, row.roomId);
+    if (direct === "excluded") mDirectExcluded = true;
 
     const joinOutstanding = !newJoined;
     const leaveOutstanding = oldStillJoined;
-    const directOutstanding = !directDone;
+    const directOutstanding = direct === "outstanding";
+    const directExcluded = direct === "excluded";
 
-    if (!joinOutstanding && !leaveOutstanding && !directOutstanding) continue; // truly nothing left
+    if (!joinOutstanding && !leaveOutstanding && !directOutstanding) continue; // truly nothing left — completion is join + leave, and m.direct is done or excluded
 
     out.push({
       roomId: row.roomId,
@@ -189,10 +275,11 @@ export async function describeRooms(deps: DescribeDeps): Promise<RoomStatus[]> {
       joinOutstanding,
       leaveOutstanding,
       directOutstanding,
+      directExcluded,
     });
   }
 
-  return out;
+  return { rooms: out, mDirectExcluded };
 }
 
 /** What `buildMigrationDeps` needs from a live (or fake) Matrix client. */
@@ -285,6 +372,8 @@ export interface RoomResult {
 export interface RunResult {
   applied: boolean;
   rooms: RoomStatus[];
+  /** See `DescribeRoomsResult` — the one run-wide fact `formatReport` states once. */
+  mDirectExcluded: boolean;
   migrated: number;
   skipped: number;
   failures: Array<{ roomId: string; stationKey: string; error: string }>;
@@ -307,10 +396,10 @@ export async function runMigration(
   client: DirectClient,
   opts: { apply: boolean }
 ): Promise<RunResult> {
-  const rooms = await describeRooms(describeDeps);
+  const { rooms, mDirectExcluded } = await describeRooms(describeDeps);
 
   if (!opts.apply) {
-    return { applied: false, rooms, migrated: 0, skipped: 0, failures: [], results: [] };
+    return { applied: false, rooms, mDirectExcluded, migrated: 0, skipped: 0, failures: [], results: [] };
   }
 
   const { deps, directOutcomes } = buildMigrationDeps(rooms, client);
@@ -351,7 +440,7 @@ export async function runMigration(
     }
   }
 
-  return { applied: true, rooms, migrated, skipped, failures, results };
+  return { applied: true, rooms, mDirectExcluded, migrated, skipped, failures, results };
 }
 
 function describeDirectOutcome(outcome: DirectOutcome | null): string {
@@ -361,9 +450,27 @@ function describeDirectOutcome(outcome: DirectOutcome | null): string {
   return `m.direct: skipped — ${outcome.error}`;
 }
 
+/**
+ * The `M_EXCLUSIVE` note — stated once, at the top, never per room. See the
+ * file doc's "`M_EXCLUSIVE` is permanent, not transient" section for the
+ * full story; this is the short form an operator reads before anything else.
+ */
+const M_DIRECT_EXCLUDED_NOTE =
+  "NOTE: m.direct (the operator's own DM mapping) cannot be updated through this bridge. " +
+  "Reading it as the operator gets 400 M_EXCLUSIVE — the operator's own mxid sits outside " +
+  "the appservice's exclusive @agent_.* namespace, confirmed live, and that is permanent, " +
+  "not a bug here. Room membership (join and leave) still moves in full for every room below; " +
+  "closing the DM mapping needs a one-off run using the operator's OWN access token, not the " +
+  "bridge's. Rooms below show this step as 'not applicable', not outstanding.";
+
 /** What an operator reads, whether this was a dry run or a real one. */
 export function formatReport(result: RunResult): string {
   const lines: string[] = [];
+
+  if (result.mDirectExcluded) {
+    lines.push(M_DIRECT_EXCLUDED_NOTE);
+    lines.push("");
+  }
 
   if (result.rooms.length === 0) {
     lines.push("No rooms need migration — every room already carries its new address.");
@@ -390,6 +497,9 @@ export function formatReport(result: RunResult): string {
     lines.push(`    old: ${r.oldUserId}`);
     lines.push(`    new: ${r.newUserId}`);
     lines.push(`    outstanding: ${steps || "none"}`);
+    if (r.directExcluded) {
+      lines.push(`    m.direct: not applicable — see note above`);
+    }
     if (!r.ownerMxid) {
       lines.push(`    warning: owner has no linked Matrix identity — m.direct cannot be fixed`);
     }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { createMatrixClient, isMatrixUserInUse } from "./client";
+import { createMatrixClient, isMatrixExclusiveNamespace, isMatrixUserInUse } from "./client";
 
 /**
  * Speaking to a homeserver *as* a station.
@@ -397,6 +397,21 @@ describe("account data — the read-modify-write m.direct needs", () => {
     replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
 
     await expect(client().getAccountData(USER, "m.direct")).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("reading account data as a user outside the AS's namespace throws a typed error", async () => {
+    // Confirmed live against tuwunel: GET account_data as the human operator
+    // (who is outside the AS's exclusive @agent_.* namespace) answers 400
+    // M_EXCLUSIVE. Typed, like MatrixUserInUse, so a caller can branch on it
+    // without matching a message — the migration report needs to tell this
+    // permanent case apart from a transient failure.
+    replies = [{ status: 400, body: { errcode: "M_EXCLUSIVE", error: "User is not in namespace." } }];
+
+    const err = await client()
+      .getAccountData("@rakesh:id.agentpod.dev", "m.direct")
+      .catch((e: unknown) => e);
+
+    expect(isMatrixExclusiveNamespace(err)).toBe(true);
   });
 
   test("setAccountData writes the whole object as the given user", async () => {
