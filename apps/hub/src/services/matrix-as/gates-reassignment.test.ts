@@ -411,8 +411,20 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
           if (alias === stationDerivedAlias) {
             // The collision a station-derived alias would still produce —
             // modelled as the real homeserver's M_ROOM_IN_USE, answered
-            // here as P's own room id (the "already joined" branch a
-            // harness-mode station would take in production).
+            // here as P's own room id.
+            //
+            // That is `client.ts`'s "already joined" branch, and station X
+            // is bridge-mode (the column's default), so in production this
+            // collision would take the RECLAIM branch instead: Q's speaker
+            // is `@agent_Q`, never a member of P's room, so the alias would
+            // be pulled off P's still-live room and Q would get a fresh one.
+            // Handing back P's room here is therefore strictly harsher than
+            // reality — the test asserts a room was created FOR Q, and this
+            // branch makes that assertion fail if the alias ever regresses
+            // to the station-derived form, where the real reclaim branch
+            // would have hidden the regression behind a new room id while
+            // silently stealing P's address. Harsher on purpose; do not
+            // soften it to match production.
             return roomX1;
           }
           ensuredRooms.push(roomX2);
@@ -509,5 +521,121 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+/**
+ * Fix round 4: an unattributable room gets NO answer, not the wrong one.
+ *
+ * `roomAgentUser` used to read `matrix_rooms.principal_id ?? stations.
+ * principal_id` — so a room with no binding of its own was answered as
+ * whoever occupies its station *right now*. Migration 0060 backfilled every
+ * legacy room whose station had an occupant, which leaves the fallback
+ * covering only rooms their station's occupant never lived in, and putting
+ * that agent's name on a reply in somebody else's old room.
+ *
+ * The schema cannot tell "never bound" from "a departed occupant's, never
+ * bound". That argues for silence, not for a guess: the one caller
+ * (`index.ts`'s gate `reply`) already says nothing when there is nobody to
+ * say it as, and a missing reply is visible and recoverable where a
+ * misattributed one is neither.
+ */
+describe("a room nobody is bound to is not answered as its station's current occupant", () => {
+  test("an unbound room left behind by an arriving occupant gets null, while that occupant's own room still answers as it", async () => {
+    const tHandle = `${HANDLE_PREFIX}-t`;
+    const tId = await createPrincipal({ kind: "agent", handle: tHandle });
+    const homeStationId = `st_gra_home_${RUN}`;
+    const orphanStationId = `st_gra_orphan_${RUN}`;
+
+    await db.insert(stations).values([
+      {
+        id: homeStationId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-home`,
+        kind: "workspace",
+        displayName: "Station Home",
+      },
+      {
+        // Harness mode, and this matters: it is the one control still live
+        // in this slice that writes a room with NO occupant bound to it.
+        // `provision.ts` reaches `ensureRoom` with `principal_id: null` only
+        // when the station answers for itself and nobody is in it — a
+        // bridge-mode station with no occupant has no handle, so it
+        // provisions nothing at all.
+        id: orphanStationId,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        userId: ADMIN_ACTOR,
+        nodeId: sharedNodeId,
+        harness: "opencode",
+        stationKey: `opencode:${RUN}-orphan`,
+        kind: "workspace",
+        displayName: "Station Orphan",
+        matrixIdentityMode: "harness",
+        matrixId: `@harness-${RUN}:id.agentpod.dev`,
+      },
+    ]);
+
+    // The homeserver's alias directory, so one alias means one room.
+    const roomsByAlias = new Map<string, string>();
+    const client = {
+      ensureUser: async () => {},
+      ensureRoom: async (alias: string) => {
+        const existing = roomsByAlias.get(alias);
+        if (existing) return existing;
+        const roomId = `!room-orphan-${roomsByAlias.size + 1}-${RUN}:id.agentpod.dev`;
+        roomsByAlias.set(alias, roomId);
+        return roomId;
+      },
+      invite: async () => {},
+    };
+
+    // T takes its home station and is provisioned there, which binds its
+    // room to it at creation.
+    await assign(homeStationId, tId);
+    await provisionStation(homeStationId, { domain: "id.agentpod.dev", client });
+
+    // The harness station is provisioned while EMPTY: its room is written
+    // with no binding, through the real provisioning path.
+    await provisionStation(orphanStationId, { domain: "id.agentpod.dev", client });
+
+    const roomIdFor = async (stationId: string) => {
+      const [row] = await db
+        .select({ roomId: matrixRooms.roomId })
+        .from(matrixRooms)
+        .where(eq(matrixRooms.stationId, stationId));
+      return row!.roomId;
+    };
+    const homeRoom = await roomIdFor(homeStationId);
+    const orphanRoom = await roomIdFor(orphanStationId);
+    expect((await roomRow(homeRoom))!.principalId, "T's own room is bound to T").toBe(tId);
+    expect((await roomRow(orphanRoom))!.principalId, "the empty station's room is unbound").toBeNull();
+
+    // T MOVES to the harness station. `agents-admin`'s bind-on-assign binds
+    // an unbound room only to a principal that holds no room anywhere, and T
+    // already holds its own — so the room stays unbound, and the station now
+    // has an occupant who has never spoken in it.
+    await assign(orphanStationId, tId);
+    expect((await roomRow(orphanRoom))!.principalId, "still unbound after the move").toBeNull();
+    const [occupied] = await db
+      .select({ principalId: stations.principalId })
+      .from(stations)
+      .where(eq(stations.id, orphanStationId));
+    expect(occupied!.principalId, "and T is the station's current occupant").toBe(tId);
+
+    // The fix. Before it, this answered `@agent_…-t` — T's name on a reply
+    // in a room T has no history in.
+    expect(
+      await roomAgentUser(orphanRoom, "id.agentpod.dev"),
+      "an unattributable room gets no answer at all"
+    ).toBeNull();
+
+    // And failing closed costs nothing that was working: T's own room still
+    // answers as T, from its own binding.
+    expect(await roomAgentUser(homeRoom, "id.agentpod.dev")).toBe(
+      bridgeUserId(tHandle, "id.agentpod.dev")
+    );
   });
 });

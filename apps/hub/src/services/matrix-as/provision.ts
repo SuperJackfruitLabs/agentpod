@@ -22,6 +22,7 @@ import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { principalHandle, principalForUser } from "../principals";
 import { roomForStation } from "./station-room";
+import { stationForAlias } from "./stations";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-provision");
@@ -338,6 +339,29 @@ async function fileByNode(
   );
 
   await fileRoomUnderSpace(room.roomId, desired, room.spaceRoomId, spaceDeps);
+}
+
+/**
+ * Provision the station behind a room alias the homeserver asked about.
+ *
+ * The homeserver asks when somebody tried to resolve the alias. Answering
+ * yes without creating the room would send them somewhere that is not
+ * there — so the route's 200 and this call have to agree about which
+ * aliases are ours, which is why both go through `stationForAlias` and
+ * neither carries a shape list of its own. Fix round 4: they did not agree,
+ * and the route's narrower gate made this function's second shape
+ * unreachable.
+ *
+ * Silent on an alias with no station behind it: the route has already
+ * answered 404 for that case, and this is also called on aliases the
+ * homeserver merely wondered about.
+ */
+export async function provisionStationForAlias(
+  alias: string,
+  deps: ProvisionDeps
+): Promise<void> {
+  const station = await stationForAlias(alias, deps.domain);
+  if (station) await provisionStation(station.stationId, deps);
 }
 
 /**

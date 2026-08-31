@@ -118,6 +118,34 @@ export async function stationForAgentUserId(
   return null;
 }
 
+/**
+ * The station an inbound ROOM ALIAS names, in whichever shape it arrives —
+ * the one resolver for that question, and the only one anything should use.
+ *
+ * Fix round 4 on Task 5. Round 3 taught `index.ts`'s `onProvisionAlias` to
+ * try both shapes and left the HTTP entry point in front of it
+ * (`routes/matrix-as.ts`) gating on `stationForLocalpart` alone — so an
+ * occupant-derived alias for a room that does not exist yet was answered
+ * `M_NOT_FOUND` at the route and the new branch was never reached for
+ * exactly the shape it was added for. That is the third round running in
+ * which the layer under inspection was fixed and the adjacent entry point
+ * was not; a resolver both callers share is what stops there being a
+ * fourth, the same way `station-room.ts` closed the station→room reads.
+ *
+ * Order matters: occupant-derived first, because that is the ordinary case
+ * for any station with somebody in it, and station-derived second as the
+ * fallback that keeps the fleet's existing rooms — created before the alias
+ * followed the occupant — resolving exactly as they always have.
+ */
+export async function stationForAlias(
+  alias: string,
+  domain: string
+): Promise<BridgedStation | null> {
+  const localpart = localpartFromAlias(alias, domain);
+  if (!localpart) return null;
+  return (await stationForOccupantLocalpart(localpart)) ?? (await stationForLocalpart(localpart));
+}
+
 /** `#agentpod_<localpart>:<domain>` → the localpart, or null. */
 export function localpartFromAlias(alias: string, domain: string): string | null {
   const prefix = "#agentpod_";

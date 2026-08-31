@@ -633,26 +633,35 @@ export async function projectionForGate(gateId: string): Promise<{
  * — which must come from the agent whose room it is rather than from a bot
  * nobody invited.
  *
- * Prefers the room's OWN bound occupant (`matrixRooms.principalId`) over its
- * station's current one: a room keeps its resident even after that agent
- * moves to a different station, and a reply about an old gate must still come
- * from the agent whose history is actually in this room. Falls back to the
- * station's current occupant — the only fact there was before this room had
- * its own binding — for a room the backfill has not reached.
+ * Answered from the room's OWN bound occupant (`matrixRooms.principalId`)
+ * and from nothing else: a room keeps its resident even after that agent
+ * moves to a different station, and a reply about an old gate must come from
+ * the agent whose history is actually in this room.
+ *
+ * An UNBOUND room gets null — fix round 4, and a deliberate reversal. This
+ * used to fall back to `stations.principalId`, the station's *current*
+ * occupant, on the reasoning that a room from before the binding existed had
+ * been speaking as that agent all along. Migration 0060 already backfilled
+ * every such room, and what the fallback actually covers now is a room its
+ * station's occupant never lived in — a harness-mode station's room,
+ * provisioned while nobody occupied it (`provision.ts` writes
+ * `principal_id: null` there), left behind when an occupant arrives who
+ * already holds a room elsewhere. Answering that as the station's current
+ * occupant puts the WRONG agent's name on a reply in somebody else's old
+ * room. The schema genuinely cannot tell "never bound" from "a departed
+ * occupant's, never bound" — but "cannot distinguish" argues for no answer,
+ * not for a guess. The one caller (`index.ts`'s gate `reply`) already treats
+ * null as "there is nobody to say this as" and stays silent, which is the
+ * failure worth having: a missing reply is visible and recoverable, a
+ * misattributed one is neither.
  */
 export async function roomAgentUser(roomId: string, domain: string): Promise<string | null> {
   const [row] = await db
-    .select({
-      ownPrincipalId: matrixRooms.principalId,
-      stationPrincipalId: stations.principalId,
-    })
+    .select({ ownPrincipalId: matrixRooms.principalId })
     .from(matrixRooms)
-    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
     .where(eq(matrixRooms.roomId, roomId))
     .limit(1);
-  if (!row) return null;
-  const principalId = row.ownPrincipalId ?? row.stationPrincipalId;
-  if (!principalId) return null;
-  const handle = await principalHandle(principalId);
+  if (!row?.ownPrincipalId) return null;
+  const handle = await principalHandle(row.ownPrincipalId);
   return handle ? bridgeUserId(handle, domain) : null;
 }

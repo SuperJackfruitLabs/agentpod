@@ -19,7 +19,7 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
-import { provisionStation, provisionAll } from "./provision";
+import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage } from "./inbound";
 import {
   handleGateDecision,
@@ -269,25 +269,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     },
 
     async onProvisionAlias(alias: string) {
-      // The homeserver asks about an alias when somebody tried to resolve it.
-      // Answering yes without creating the room would send them somewhere that
-      // is not there.
-      //
-      // Two shapes to try — fix round 3 on Task 5: an occupied station's
-      // room alias is occupant-derived now (`bridgeAliasForHandle`), and a
-      // station with no occupant still uses the station-derived form
-      // (`bridgeAlias`). Occupant-derived is tried first since it is the
-      // ordinary case for any station with someone in it; station-derived
-      // is what a room with no occupant, or one this migration hasn't
-      // reached, still resolves through.
-      const { stationForLocalpart, stationForOccupantLocalpart, localpartFromAlias } = await import(
-        "./stations"
-      );
-      const localpart = localpartFromAlias(alias, cfg.domain);
-      const station = localpart
-        ? (await stationForOccupantLocalpart(localpart)) ?? (await stationForLocalpart(localpart))
-        : null;
-      if (station) await provisionStation(station.stationId, provisionDeps);
+      // Both alias shapes, resolved by the same `stationForAlias` the route
+      // in front of this one gates on — fix round 4. Round 3 wrote the
+      // two-shape lookup out longhand here, and the route kept its own
+      // narrower one, which is how an occupant-derived alias came to be
+      // 404'd before this ever ran.
+      await provisionStationForAlias(alias, provisionDeps);
     },
   };
 }
