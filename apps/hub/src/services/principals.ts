@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { principalIdentities } from "../db/schema/identities";
@@ -88,9 +88,19 @@ export async function principalById(
  * wants to read it. `buildTokenPayload` refuses to mint for a suspended
  * principal on both subject paths — a session caller whose principal is
  * suspended is exactly as suspended as an agent.
+ *
+ * Guarded by `suspendedAt IS NULL` rather than an unconditional write: the
+ * column exists to answer "since when" (see its comment in
+ * `db/schema/organization.ts`), and a stray second suspend — a stale tab, a
+ * retried request, a race between two admins — must not silently replace the
+ * real answer with the time of the click. Idempotent either way: a
+ * re-suspend still succeeds, it just leaves the original timestamp alone.
  */
 export async function suspendPrincipal(id: string): Promise<void> {
-  await db.update(principals).set({ suspendedAt: new Date() }).where(eq(principals.id, id));
+  await db
+    .update(principals)
+    .set({ suspendedAt: new Date() })
+    .where(and(eq(principals.id, id), isNull(principals.suspendedAt)));
 }
 
 /** Lift a suspension. The principal can be minted for again. */

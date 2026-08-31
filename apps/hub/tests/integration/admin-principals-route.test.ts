@@ -183,6 +183,29 @@ describe("POST /api/admin/principals/:id/suspend and /restore", () => {
     expect(res.status).toBe(200);
   });
 
+  test("a re-suspend does not overwrite the original suspension time", async () => {
+    // The column's own reason for existing (`db/schema/organization.ts`): "a
+    // timestamp rather than a boolean, because 'since when' is the first
+    // question asked of a suspension, and a boolean cannot answer it." An
+    // unconditional UPDATE would answer that question with the time of the
+    // *second* click — a stale tab, a retry, a race between two admins — and
+    // nothing about the wrong answer would look wrong. Asserting only that the
+    // second call doesn't error, as the test above does, is exactly what let
+    // that through.
+    const first = (await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
+      method: "POST",
+    }).then((r) => r.json())) as { suspendedAt: string | null };
+    expect(first.suspendedAt).not.toBeNull();
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    const second = (await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/suspend`, {
+      method: "POST",
+    }).then((r) => r.json())) as { suspendedAt: string | null };
+
+    expect(second.suspendedAt).toBe(first.suspendedAt);
+  });
+
   test("suspension is reversible from the same surface", async () => {
     const res = await guardedApp(ADMIN_ACTOR).request(`/principals/${AGENT}/restore`, {
       method: "POST",
