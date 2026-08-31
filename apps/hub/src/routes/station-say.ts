@@ -23,11 +23,11 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { matrixRooms } from "../db/schema/matrix";
 import { getGrant, grantAllowsPrincipal } from "../services/grants";
 import { principalForUser, principalHandle } from "../services/principals";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
+import { roomForStation } from "../services/matrix-as/station-room";
 import { createLogger } from "../utils/logger";
 import type { AuthUser } from "../auth/middleware";
 
@@ -50,12 +50,10 @@ export function createStationSayRoutes(deps: StationSayDeps) {
         stationKey: stations.stationKey,
         mode: stations.matrixIdentityMode,
         nodeName: nodes.name,
-        roomId: matrixRooms.roomId,
         principalId: stations.principalId,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-      .leftJoin(matrixRooms, eq(matrixRooms.stationId, stations.id))
       .where(and(eq(stations.id, c.req.param("id")), eq(stations.userId, user.id)));
 
     if (!station) return c.json({ error: "Not Found" }, 404);
@@ -109,7 +107,16 @@ export function createStationSayRoutes(deps: StationSayDeps) {
       );
     }
 
-    if (!station.roomId) {
+    // The CURRENT occupant's own room — never a departed occupant's room
+    // that merely still sits at this `station_id`. A plain
+    // `leftJoin(matrixRooms, stationId)` here was finding 1 of a fix-round
+    // review's second pass: it would speak as `station.principalId` into
+    // whatever room that unordered join happened to return, which could
+    // belong to a predecessor — `@agent_Q` sent into `@agent_P`'s room, a
+    // room whose Matrix membership belongs to P. `station-room.ts` is the
+    // one place this resolves now.
+    const roomId = (await roomForStation(station.id)).room?.roomId ?? null;
+    if (!roomId) {
       // Provisioning may simply not have run yet. Saying which thing is missing
       // beats swallowing the message.
       return c.json(
@@ -134,7 +141,7 @@ export function createStationSayRoutes(deps: StationSayDeps) {
     }
 
     const agentUser = bridgeUserId(handle, deps.domain);
-    const eventId = await deps.client.sendText(agentUser, station.roomId, text);
+    const eventId = await deps.client.sendText(agentUser, roomId, text);
 
     log.info("station spoke unprompted", {
       principalId: user.id,
@@ -142,6 +149,6 @@ export function createStationSayRoutes(deps: StationSayDeps) {
       chars: text.length,
     });
 
-    return c.json({ eventId, roomId: station.roomId, mxid: agentUser });
+    return c.json({ eventId, roomId, mxid: agentUser });
   });
 }

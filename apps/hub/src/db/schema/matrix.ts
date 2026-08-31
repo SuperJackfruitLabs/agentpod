@@ -56,28 +56,30 @@ export const matrixRooms = pgTable(
      * occupant at the time, so no pre-existing room reads null forever for
      * having existed before this column had one.
      *
-     * `gates.ts`'s `roomForCard` reads this in preference to the plain
-     * `stationId` join precisely so a reassigned agent's gates keep landing
-     * in its original room rather than in whatever room its new station
-     * happens to have; `roomAgentUser` does the same for a room that already
-     * has a bound resident.
+     * `matrix-as/station-room.ts`'s `roomForStation` is the ONE place this
+     * resolves for every reader now — `gates.ts`, `routes/station-say.ts`,
+     * and `provision.ts` all call into it rather than joining on `stationId`
+     * themselves, so a reassigned agent's gates, unprompted messages, and
+     * provisioning all keep landing in its original room rather than
+     * whatever room its new station happens to have.
      *
-     * **The `stationId` fallback is scoped, not unconditional — fix round on
-     * Task 5.** The first cut fell back to the `stationId` join whenever this
-     * column was null, which included a station whose CURRENT occupant
-     * simply hadn't been bound yet — and since a departed principal's room
-     * keeps its `stationId`, that fallback could hand a new occupant's gates
-     * to the room, and the address, of whoever used to be there. `roomForCard`
-     * now falls back to `stationId` only when the station has NO occupant at
-     * all; an occupied station whose occupant has no room of its own answers
-     * "no room yet" instead of guessing. `gate-sweep.ts` — deployed in
-     * production, and unaware it depends on this — is unaffected: it calls
-     * into `gates.ts` rather than querying this table itself, and the
-     * fallback it actually exercises (an unoccupied station's own room) is
-     * untouched. `stationId` stays the column every current reader still
-     * needs; this is redundant with it, not a replacement for it. Retiring
-     * `stationId` is a later slice's own migration, once every reader has
-     * moved.
+     * **The `stationId` fallback is scoped, not unconditional — fix round 1
+     * on Task 5, then centralised in fix round 2.** The first cut fell back
+     * to the `stationId` join whenever this column was null, which included
+     * a station whose CURRENT occupant simply hadn't been bound yet — and
+     * since a departed principal's room keeps its `stationId`, that fallback
+     * could hand a new occupant's gates (and, a second review found, its
+     * unprompted messages, and its provisioning) to the room, and the
+     * address, of whoever used to be there. `roomForStation` falls back to
+     * `stationId` only when the station has NO occupant at all; an occupied
+     * station whose occupant has no room of its own answers "no room yet"
+     * instead of guessing. `gate-sweep.ts` — deployed in production, and
+     * unaware it depends on this — is unaffected: it calls into `gates.ts`
+     * rather than querying this table itself, and the fallback it actually
+     * exercises (an unoccupied station's own room) is untouched. `stationId`
+     * stays the column every current reader still needs; this is redundant
+     * with it, not a replacement for it. Retiring `stationId` is a later
+     * slice's own migration, once every reader has moved.
      *
      * Nullable because a room this hasn't reached is still nullable, and
      * because a station can lose its occupant (`stations.principalId` is

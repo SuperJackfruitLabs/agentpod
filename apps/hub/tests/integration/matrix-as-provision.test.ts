@@ -440,3 +440,120 @@ describe("an agent that has not got its face yet", () => {
     expect(avatars).toHaveLength(1);
   });
 });
+
+describe("occupancy changes — a new occupant must actually get a room", () => {
+  // Fix round 2 on Task 5. A review traced the bug end to end: assigning a
+  // new occupant to a station whose room already belongs to a departed one
+  // leaves the new occupant unbound (the bind-on-assign write requires
+  // `principal_id IS NULL`, and the departed occupant's row is not null).
+  // `context()`'s old `leftJoin(matrixRooms, stationId)` — no `ORDER BY`, a
+  // single `[row]` — then answered `roomId: <the departed occupant's room>`
+  // for the STATION, so `provisionStation` believed a room already existed
+  // and never created one. Round 1 fixed the SYMPTOM (gates no longer post
+  // into that stranger's room); this closes the CAUSE — a room is actually
+  // provisioned for the new occupant.
+  //
+  // Driven through the REAL `provisionStation`, against a fake Matrix
+  // client — nothing here hand-inserts a `matrix_rooms` row for the new
+  // occupant. If `context()` regressed to the old join, `rooms` below would
+  // stay empty and this would fail.
+
+  let SUCCESSOR_PRINCIPAL: string;
+
+  beforeAll(async () => {
+    SUCCESSOR_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "mx-provision-successor" });
+  });
+
+  afterAll(async () => {
+    try {
+      await rawSql`DELETE FROM principals WHERE handle = 'mx-provision-successor'`;
+    } catch {
+      // cleanup only
+    }
+  });
+
+  test("a new occupant with no room of its own gets ONE actually provisioned — never a departed occupant's", async () => {
+    // krishna occupies OPENCLAW first, provisioned as always.
+    await provisionStation(OPENCLAW, deps());
+    const [krishnaRoom] = await rawSql`
+      SELECT room_id, principal_id FROM matrix_rooms WHERE station_id = ${OPENCLAW} AND principal_id = ${KRISHNA_PRINCIPAL}`;
+    expect(krishnaRoom).toBeTruthy();
+
+    // krishna moves on. Occupancy is exclusive as of fix round 1 — this
+    // single write is exactly what `agents-admin.ts`'s assign-is-a-move
+    // does to `stations.principal_id`; `matrix_rooms` is untouched by it,
+    // same as the real endpoint (its own bind-on-assign finds no unbound
+    // room here to bind).
+    await rawSql`UPDATE stations SET principal_id = ${SUCCESSOR_PRINCIPAL} WHERE id = ${OPENCLAW}`;
+
+    registered = [];
+    rooms = [];
+
+    // THE REAL PROVISIONING PATH.
+    await provisionStation(OPENCLAW, deps());
+
+    // A room was actually created — not silently skipped because a bare
+    // `leftJoin(stationId)` still saw krishna's old room sitting here.
+    expect(rooms).toHaveLength(1);
+    expect(registered.at(-1)!.localpart).toBe("agent_mx-provision-successor");
+
+    const [successorRoom] = await rawSql`
+      SELECT room_id, principal_id FROM matrix_rooms WHERE station_id = ${OPENCLAW} AND principal_id = ${SUCCESSOR_PRINCIPAL}`;
+    expect(successorRoom, "the new occupant has its OWN bound room").toBeTruthy();
+    expect(successorRoom!.room_id).not.toBe(krishnaRoom!.room_id);
+
+    // krishna's own room is untouched — still exists, still bound to krishna.
+    const [krishnaRoomAfter] = await rawSql`
+      SELECT principal_id FROM matrix_rooms WHERE room_id = ${krishnaRoom!.room_id}`;
+    expect(krishnaRoomAfter!.principal_id).toBe(KRISHNA_PRINCIPAL);
+
+    // Station A now genuinely carries two rooms — the ordinary case since
+    // fix round 1 dropped uniqueness from `matrix_rooms_station_idx`.
+    const stationRooms = await rawSql`
+      SELECT room_id FROM matrix_rooms WHERE station_id = ${OPENCLAW}`;
+    expect(stationRooms.length).toBe(2);
+
+    // Restore for any test after this one in the file.
+    await rawSql`UPDATE stations SET principal_id = ${KRISHNA_PRINCIPAL} WHERE id = ${OPENCLAW}`;
+    await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${successorRoom!.room_id}`;
+  });
+
+  test("re-filing under a space re-files the CURRENT occupant's room, never a departed occupant's", async () => {
+    // `fileByNode` (provision.ts) re-reads the room to hang it under a
+    // space — the second call site the same review found making the
+    // identical unordered-join mistake. Exercised here via a client that
+    // implements the space methods; `provisionStation` calls it on every
+    // run.
+    await provisionStation(OPENCLAW, deps());
+    const [krishnaRoom] = await rawSql`
+      SELECT room_id FROM matrix_rooms WHERE station_id = ${OPENCLAW} AND principal_id = ${KRISHNA_PRINCIPAL}`;
+
+    await rawSql`UPDATE stations SET principal_id = ${SUCCESSOR_PRINCIPAL} WHERE id = ${OPENCLAW}`;
+
+    const filed: Array<{ roomId: string; spaceRoomId: string }> = [];
+    const d = deps();
+    const spaceClient = {
+      ...d.client,
+      createSpace: async (_opts: { creator: string; name: string }) => `!space${++roomCounter}:id.agentpod.dev`,
+      addSpaceChild: async (_creator: string, spaceRoomId: string, childRoomId: string) => {
+        filed.push({ roomId: childRoomId, spaceRoomId });
+      },
+      removeSpaceChild: async () => {},
+    };
+
+    await provisionStation(OPENCLAW, { ...d, client: spaceClient });
+
+    const [successorRoom] = await rawSql`
+      SELECT room_id FROM matrix_rooms WHERE station_id = ${OPENCLAW} AND principal_id = ${SUCCESSOR_PRINCIPAL}`;
+    expect(successorRoom).toBeTruthy();
+
+    // Filed the NEW occupant's room — never krishna's, which stays put and
+    // unfiled by this run.
+    expect(filed.some((f) => f.roomId === successorRoom!.room_id)).toBe(true);
+    expect(filed.some((f) => f.roomId === krishnaRoom!.room_id)).toBe(false);
+
+    // Restore for any test after this one in the file.
+    await rawSql`UPDATE stations SET principal_id = ${KRISHNA_PRINCIPAL} WHERE id = ${OPENCLAW}`;
+    await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${successorRoom!.room_id}`;
+  });
+});

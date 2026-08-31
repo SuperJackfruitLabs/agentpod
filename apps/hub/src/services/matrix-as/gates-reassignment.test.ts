@@ -26,7 +26,7 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
@@ -43,6 +43,7 @@ import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
 import { bridgeUserId } from "./names";
+import { provisionStation } from "./provision";
 import type { GatePendingDelivery } from "./gates";
 
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -367,21 +368,37 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
     const xAfterPLeaves = await db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationXId));
     expect(xAfterPLeaves[0]!.principalId).toBeNull();
 
-    // X gets a second, fresh room — what provisioning gives whoever occupies
-    // X next, since roomX1 is P's and stays P's. Inserted directly here
-    // rather than through a Matrix client this suite has no fake for.
-    await db.insert(matrixRooms).values({
-      roomId: roomX2,
-      tenantId: BOOTSTRAP_TENANT_ID,
-      stationId: stationXId,
-      alias: `#x2-${RUN}:id.agentpod.dev`,
-    });
-
-    // Q takes X. The admin route binds the ONE unbound room at X (roomX2) —
-    // roomX1, still P's, is never touched.
+    // Q takes X. X is already empty at this point (P vacated it the moment
+    // it was assigned to Y, above) — nothing to evict here. Nothing at X is
+    // bound to Q yet either — the admin route's bind-on-assign found no
+    // unbound room to give it (roomX1, still P's, is not null), same as it
+    // would in production the moment a station's room already belongs to a
+    // departed occupant.
     await assign(stationXId, qId);
     expect((await roomRow(roomX1))!.principalId, "P's room is untouched by Q's assignment").toBe(pId);
-    expect((await roomRow(roomX2))!.principalId).toBe(qId);
+
+    // THE REAL PROVISIONING PATH gives Q its own room — nothing here is
+    // hand-inserted into `matrix_rooms`. A fix-round review named this
+    // exactly: a test whose room is hand-seeded with a "simulating
+    // provisioning" comment proves nothing about whether provisioning
+    // actually works, and it did not — `provision.ts`'s own station->room
+    // join had the identical unordered-[row] bug `roomForCard` was fixed
+    // for, so a new occupant with no room of its own never got one. This
+    // fails if that regresses.
+    const ensuredRooms: string[] = [];
+    await provisionStation(stationXId, {
+      domain: "id.agentpod.dev",
+      client: {
+        ensureUser: async () => {},
+        ensureRoom: async () => {
+          ensuredRooms.push(roomX2);
+          return roomX2;
+        },
+        invite: async () => {},
+      },
+    });
+    expect(ensuredRooms, "a room was actually created for Q, not skipped").toHaveLength(1);
+    expect((await roomRow(roomX2))!.principalId, "and bound to Q at creation").toBe(qId);
 
     // New work dispatched to X, now that Q occupies it.
     const cardId = `crd_${RUN}_q`;
@@ -422,5 +439,51 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
     // station's current one.
     expect(await roomAgentUser(roomX1, "id.agentpod.dev")).toBe(pHandleMxid);
     expect(await roomAgentUser(roomX2, "id.agentpod.dev")).toBe(qHandleMxid);
+  });
+
+  test("assigning a station already held by a DIFFERENT principal evicts it — and that eviction is logged", async () => {
+    // A genuine eviction, not a move: R already occupies Y (assigned above,
+    // and never vacated by anything since), and S is assigned to Y directly
+    // — nobody unassigned R first. R silently loses its station as a
+    // consequence, which is legitimate (Ruling 6's "assign a different
+    // agent" reassigns exactly this way) but must not be SILENT.
+    const rId = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-r` });
+    const sId = await createPrincipal({ kind: "agent", handle: `${HANDLE_PREFIX}-s` });
+    const stationEvictId = `st_gra_evict_${RUN}`;
+    await db.insert(stations).values({
+      id: stationEvictId,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      userId: ADMIN_ACTOR,
+      nodeId: sharedNodeId,
+      harness: "opencode",
+      stationKey: `opencode:${RUN}-evict`,
+      kind: "workspace",
+      displayName: "Station Evict",
+    });
+
+    await assign(stationEvictId, rId);
+    const before = await db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationEvictId));
+    expect(before[0]!.principalId).toBe(rId);
+
+    const warnSpy = spyOn(console, "warn");
+    try {
+      await assign(stationEvictId, sId);
+
+      const after = await db.select({ principalId: stations.principalId }).from(stations).where(eq(stations.id, stationEvictId));
+      expect(after[0]!.principalId, "S actually occupies the station now").toBe(sId);
+
+      const evictionLogged = warnSpy.mock.calls.some(([line]) => {
+        if (typeof line !== "string") return false;
+        return (
+          line.includes("evicted") &&
+          line.includes(stationEvictId) &&
+          line.includes(rId) &&
+          line.includes(sId)
+        );
+      });
+      expect(evictionLogged, "R's eviction from the station is logged, not silent").toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

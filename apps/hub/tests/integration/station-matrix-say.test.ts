@@ -75,9 +75,15 @@ beforeAll(async () => {
     INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
     VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'hermes', 'hermes:cron-carl', 'leaf', 'cron-carl',
             '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
+  // `principal_id` bound at insert — fix round 2 on Task 5: `station-say.ts`
+  // resolves a room through `station-room.ts` now, which answers for an
+  // OCCUPIED station only with a room actually bound to that occupant
+  // (never a bare `station_id` match). A room seeded here without it would
+  // read as "not yet provisioned" and 409, which is not what this fixture
+  // means to represent.
   await rawSql`
-    INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, created_at)
-    VALUES (${ROOM}, ${tenant}, ${STATION}, '#agentpod_say-box_hermes-cron-carl:id.agentpod.dev', now())`;
+    INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, principal_id, created_at)
+    VALUES (${ROOM}, ${tenant}, ${STATION}, '#agentpod_say-box_hermes-cron-carl:id.agentpod.dev', ${AGENT_PRINCIPAL}, now())`;
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -147,8 +153,8 @@ describe("POST /api/stations/:id/matrix/say", () => {
 
     const tenant = await resolveTenantForUser(OWNER);
     await rawSql`
-      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, created_at)
-      VALUES (${ROOM}, ${tenant}, ${STATION}, '#agentpod_say-box_hermes-cron-carl:id.agentpod.dev', now())`;
+      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, principal_id, created_at)
+      VALUES (${ROOM}, ${tenant}, ${STATION}, '#agentpod_say-box_hermes-cron-carl:id.agentpod.dev', ${AGENT_PRINCIPAL}, now())`;
   });
 
   test("stays out of the way when the harness answers for itself", async () => {

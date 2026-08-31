@@ -147,7 +147,10 @@ export const agentsAdminRouter = new Hono()
     const stationId = c.req.param("stationId");
     const { principalId } = c.req.valid("json");
 
-    const [station] = await db.select({ id: stations.id }).from(stations).where(eq(stations.id, stationId));
+    const [station] = await db
+      .select({ id: stations.id, principalId: stations.principalId })
+      .from(stations)
+      .where(eq(stations.id, stationId));
     if (!station) return c.json({ error: "no such station" }, 404);
 
     const principal = await principalById(principalId);
@@ -155,6 +158,15 @@ export const agentsAdminRouter = new Hono()
     if (principal.suspendedAt) {
       return c.json({ error: "principal is suspended" }, 403);
     }
+
+    // Read BEFORE the transaction overwrites it — fix round 2: assigning a
+    // NEW principal to a station that already holds a DIFFERENT one evicts
+    // that one silently otherwise. It is a legitimate operation (Ruling 6's
+    // "assign a different agent" reassigns exactly this way), but a silent
+    // one is how an operator loses track of an agent without ever seeing it
+    // happen — logged below once the eviction actually lands.
+    const evictedPrincipalId =
+      station.principalId && station.principalId !== principalId ? station.principalId : null;
 
     await db.transaction(async (tx) => {
       // Vacate wherever this principal already is — including this same
@@ -183,17 +195,37 @@ export const agentsAdminRouter = new Hono()
       // its new station happens to have. Conditioned on `NOT EXISTS` rather
       // than checked-then-written so two assignments racing each other cannot
       // both decide the room is free and violate `matrix_rooms_principal_idx`.
+      //
+      // Targets exactly ONE unbound row via a `LIMIT 1` subquery, not a bare
+      // `WHERE station_id = … AND principal_id IS NULL` — a station can carry
+      // more than one room since fix round 1 (`matrix_rooms_station_idx` is
+      // no longer unique), and a plain multi-row UPDATE binding the SAME
+      // principal onto every unbound row at this station in one statement
+      // would itself violate `matrix_rooms_principal_idx` the moment more
+      // than one existed — a real, reachable crash a fix-round-2 test found,
+      // not a hypothetical one.
       await tx.execute(sql`
         UPDATE matrix_rooms
         SET principal_id = ${principalId}
-        WHERE station_id = ${stationId}
-          AND principal_id IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM matrix_rooms already_bound WHERE already_bound.principal_id = ${principalId}
-          )
+        WHERE room_id = (
+          SELECT room_id FROM matrix_rooms
+          WHERE station_id = ${stationId} AND principal_id IS NULL
+          LIMIT 1
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM matrix_rooms already_bound WHERE already_bound.principal_id = ${principalId}
+        )
       `);
     });
 
+    if (evictedPrincipalId) {
+      log.warn("assigning a new occupant evicted the station's previous one", {
+        stationId,
+        principalId,
+        evictedPrincipalId,
+        by: c.get("user")?.id,
+      });
+    }
     log.info("station assigned", { stationId, principalId, by: c.get("user")?.id });
     return c.json({ stationId, principalId });
   })

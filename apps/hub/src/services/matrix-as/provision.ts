@@ -21,6 +21,7 @@ import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { principalHandle, principalForUser } from "../principals";
+import { roomForStation } from "./station-room";
 import { createLogger } from "../../utils/logger";
 
 const log = createLogger("matrix-provision");
@@ -69,7 +70,18 @@ export interface ProvisionDeps {
   ): Promise<{ bytes: Uint8Array; contentType: string } | null>;
 }
 
-/** The station, its node's name, and whether a room already exists for it. */
+/**
+ * The station, its node's name, and whether its CURRENT occupant already
+ * has a room.
+ *
+ * `roomId`/`spaceRoomId` come from `station-room.ts`, not from a bare
+ * `leftJoin(matrixRooms, eq(matrixRooms.stationId, stations.id))` — that
+ * join, with no `ORDER BY` and `[row]` picked off whatever Postgres
+ * happened to return, was a fix-round review's finding: it could answer
+ * with a DEPARTED occupant's room, which made this function believe a new
+ * occupant already had one and skip creating it. A new occupant with no
+ * room of its own must see `roomId: null` here, or it never gets one.
+ */
 async function context(stationId: string) {
   const [row] = await db
     .select({
@@ -84,14 +96,18 @@ async function context(stationId: string) {
       purpose: stations.purpose,
       principalId: stations.principalId,
       nodeName: nodes.name,
-      roomId: matrixRooms.roomId,
-      spaceRoomId: matrixRooms.spaceRoomId,
     })
     .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-    .leftJoin(matrixRooms, eq(matrixRooms.stationId, stations.id))
     .where(eq(stations.id, stationId));
-  return row ?? null;
+  if (!row) return null;
+
+  const occupancy = await roomForStation(stationId);
+  return {
+    ...row,
+    roomId: occupancy.room?.roomId ?? null,
+    spaceRoomId: occupancy.room?.spaceRoomId ?? null,
+  };
 }
 
 /**
@@ -237,7 +253,20 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
 
     await db
       .insert(matrixRooms)
-      .values({ roomId, tenantId: s.tenantId, stationId: s.stationId, alias })
+      .values({
+        roomId,
+        tenantId: s.tenantId,
+        stationId: s.stationId,
+        alias,
+        // Bound to this occupant at creation — the room this function just
+        // made exists FOR whoever `s.principalId` names (null for a
+        // harness-mode or not-yet-occupied station, same as ever). Without
+        // this, a freshly created room sat unbound until some later assign
+        // call happened to find it, and `agents-admin.ts`'s bind-on-assign
+        // already ran BEFORE this room existed for a station occupied via
+        // the admin route first — it would never bind on its own.
+        principalId: s.principalId,
+      })
       .onConflictDoNothing();
   }
 
@@ -268,12 +297,14 @@ async function fileByNode(
   const { createSpace, addSpaceChild, removeSpaceChild } = deps.client;
   if (!createSpace || !addSpaceChild || !removeSpaceChild) return;
 
-  // Re-read: the room may have been created moments ago, above.
-  const [room] = await db
-    .select({ roomId: matrixRooms.roomId, spaceRoomId: matrixRooms.spaceRoomId })
-    .from(matrixRooms)
-    .where(eq(matrixRooms.stationId, s.stationId));
-  if (!room) return;
+  // Re-resolve: the room may have been created moments ago, above, and
+  // `station-room.ts` is what makes this the CURRENT occupant's own room —
+  // a departed occupant's room, still sitting at this `station_id`, must
+  // never be re-filed under a space as if it belonged to whoever occupies
+  // the station now.
+  const occupancy = await roomForStation(s.stationId);
+  if (!occupancy.room) return;
+  const room = occupancy.room;
 
   const spaceDeps = {
     client: { createSpace, addSpaceChild, removeSpaceChild, invite: deps.client.invite },
