@@ -174,6 +174,15 @@ export type StationRow = {
    * in All rooms.
    */
   purpose: string | null;
+  /**
+   * The agent occupying this station, or null.
+   *
+   * The hub's row already carries this (`stations.principal_id`); it was just
+   * never typed here. Null is not an unhealthy station — it is a station
+   * dispatchable by nobody, which is a real and legitimate state the console
+   * must be able to tell apart from "assigned and running".
+   */
+  principalId: string | null;
   adoptedAt: string | Date;
   createdAt: string | Date;
 };

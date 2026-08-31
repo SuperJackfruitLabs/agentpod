@@ -27,6 +27,7 @@ import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
 import { setGrant } from "../services/grants";
+import { createPrincipal } from "../services/principals";
 import { gatewayRoutes } from "./gateway";
 import { stationTerminalRoutes } from "./station-terminal";
 import { stationRoutes } from "./stations";
@@ -39,6 +40,22 @@ import type { StationRow } from "../services/station-registry";
 const TEST_USER = "test-user-sterm-001";
 const STATION_KEY = "sterm-station";
 const FAKE_SESSION_ID = "pty-session-abc123";
+
+/**
+ * The two principals the control-pair tests need.
+ *
+ * A grant is keyed by the CALLER's principal and its values are the principal
+ * ids of the agents that caller may dispatch — `principal_grants.principal_id`
+ * is a foreign key onto `principals.id`, so a grant keyed by a Better Auth id
+ * is not a wide grant, it is a failed INSERT. And the scope half compares the
+ * grant against the station's OCCUPANT, so a station with nobody in it is
+ * dispatchable by nobody: `AGENT_PRINCIPAL` is put on the station after adoption,
+ * which is the fixture standing in for an assignment nothing yet does.
+ */
+const USER_HANDLE = "sterm-it-user";
+const AGENT_HANDLE = "sterm-it-agent";
+let USER_PRINCIPAL: string;
+let AGENT_PRINCIPAL: string;
 
 // ─── Minimal test app ─────────────────────────────────────────────────────────
 
@@ -67,6 +84,12 @@ beforeAll(async () => {
     email: "sterm-test@example.com",
     name: "Station Terminal Test User",
   });
+  USER_PRINCIPAL = await createPrincipal({
+    kind: "human",
+    handle: USER_HANDLE,
+    userId: TEST_USER,
+  });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: AGENT_HANDLE });
 });
 
 afterAll(async () => {
@@ -74,6 +97,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations          WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
+    await rawSql`DELETE FROM principals        WHERE handle IN (${USER_HANDLE}, ${AGENT_HANDLE})`;
     await rawSql`DELETE FROM "user"            WHERE id = ${TEST_USER}`;
   } catch {
     // Ignore cleanup errors
@@ -215,6 +239,17 @@ async function adoptStation(
   const rows = (await res.json()) as StationRow[];
   expect(rows).toHaveLength(1);
   return rows[0]!;
+}
+
+/** Put the test's agent in the station, so a grant naming it covers this one. */
+async function occupy(stationId: string): Promise<void> {
+  // Occupancy is exclusive as of the fix round on Task 5
+  // (`stations_principal_id_idx`) — this file reuses ONE `AGENT_PRINCIPAL`
+  // across many tests, each adopting its own fresh station, so it has to
+  // vacate wherever that principal already sits (an earlier test's station)
+  // before placing it here, exactly as the real assign endpoint now does.
+  await rawSql`UPDATE stations SET principal_id = NULL WHERE principal_id = ${AGENT_PRINCIPAL}`;
+  await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${stationId}`;
 }
 
 // ─── Helpers (event-driven) ───────────────────────────────────────────────────
@@ -619,8 +654,10 @@ test(
       });
       const station = await adoptStation(baseUrl, nodeId);
 
-      // Dispatch as wide as it goes, and no reach.
-      await setGrant(TEST_USER, { mayDispatch: ["agentpod:*/sterm-station"], mayGrantReach: false });
+      // Dispatch over this very agent, and no reach — so the only thing that
+      // can refuse is the reach half.
+      await occupy(station.id);
+      await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
       await rawSql`DELETE FROM station_audit WHERE user_id = ${TEST_USER} AND verb = 'terminal'`;
 
       await new Promise<void>((resolve) => {
@@ -656,7 +693,7 @@ test(
       fakeNode.close();
     } finally {
       delete process.env.ENFORCE_CONTROL_PAIR;
-      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${TEST_USER}`;
+      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
       server.stop(true);
     }
   },
@@ -685,7 +722,8 @@ test(
       });
       const station = await adoptStation(baseUrl, nodeId);
 
-      await setGrant(TEST_USER, { mayDispatch: ["agentpod:*/sterm-station"], mayGrantReach: true });
+      await occupy(station.id);
+      await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
       const clientWs = new WebSocket(
         `ws://localhost:${server.port}/api/stations/${station.id}/terminal`,
@@ -713,7 +751,7 @@ test(
       fakeNode.close();
     } finally {
       delete process.env.ENFORCE_CONTROL_PAIR;
-      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${TEST_USER}`;
+      await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
       server.stop(true);
     }
   },

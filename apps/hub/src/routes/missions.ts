@@ -18,7 +18,8 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
 import { principalIdentities } from "../db/schema/identities";
-import { getGrant, grantAllowsStation } from "../services/grants";
+import { getGrant, grantAllowsPrincipal } from "../services/grants";
+import { principalForUser, principalHandle } from "../services/principals";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { missionAlias } from "../services/matrix-as/missions";
@@ -93,6 +94,7 @@ export function createMissionRoutes(deps: MissionDeps) {
         tenantId: stations.tenantId,
         stationKey: stations.stationKey,
         nodeName: nodes.name,
+        principalId: stations.principalId,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -108,17 +110,30 @@ export function createMissionRoutes(deps: MissionDeps) {
     // different day — and the room's creator is visible to everyone in it.
     members.sort((a, b) => stationIds.indexOf(a.id) - stationIds.indexOf(b.id));
 
+    // `getGrant` and `principal_identities` are both keyed by principal id now,
+    // never by the Better Auth user id a session carries — resolved once, up
+    // front, for the control-pair check below and the Matrix invite further
+    // down. A caller with no principal has no grant to hold and no identity to
+    // invite, so both must fail closed on it rather than querying a table with
+    // an id shaped like the wrong plane's.
+    const principal = await principalForUser(user.id);
+
     // Putting an agent in a room is putting it to work, so the grant that
     // governs dispatching it governs this too — checked for EVERY member before
     // anything is created, because a half-made mission is worse than none.
     if (isControlPairEnforced()) {
-      const grant = await getGrant(user.id);
-      const refused = members.filter(
-        (m) => !grantAllowsStation(grant, { nodeName: m.nodeName, stationKey: m.stationKey })
-      );
+      if (!principal) {
+        log.warn("mission refused: no principal for this caller", { userId: user.id });
+        return c.json(
+          { error: "You are not permitted to dispatch every agent in this mission." },
+          403
+        );
+      }
+      const grant = await getGrant(principal.id);
+      const refused = members.filter((m) => !grantAllowsPrincipal(grant, m.principalId));
       if (refused.length > 0) {
         log.warn("mission refused by the control pair", {
-          principalId: user.id,
+          principalId: principal.id,
           refused: refused.map((m) => `${m.nodeName}/${m.stationKey}`),
         });
         return c.json(
@@ -144,11 +159,34 @@ export function createMissionRoutes(deps: MissionDeps) {
       return c.json({ id: existing.id, roomId: existing.roomId, alias: existing.alias });
     }
 
+    // A mission's members are addressed by their principal's handle now, not
+    // by where they run — resolved for every member before anything is
+    // created, because a half-made mission is worse than none. A station with
+    // no occupying agent has no handle and therefore no mxid to invite, and
+    // that must refuse the whole request rather than invent one from
+    // `(nodeName, stationKey)`, which is the station-derived identity this
+    // suite moved away from.
+    const handles = new Map<string, string>();
+    for (const m of members) {
+      const handle = m.principalId ? await principalHandle(m.principalId) : null;
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              `${m.nodeName}/${m.stationKey} has no occupying agent, so it has no Matrix ` +
+              "identity to put in this mission.",
+          },
+          409
+        );
+      }
+      handles.set(m.id, handle);
+    }
+
     const tenantId = members[0]!.tenantId;
     // The mission speaks as the first agent in it: an appservice must act as
     // SOME user in its namespace, and a room created by one of its members reads
     // better than one created by a nameless bot.
-    const speaker = bridgeUserId(members[0]!.nodeName, members[0]!.stationKey, deps.domain);
+    const speaker = bridgeUserId(handles.get(members[0]!.id)!, deps.domain);
 
     const roomId = await deps.client.ensureRoom(alias, {
       creator: speaker,
@@ -157,15 +195,20 @@ export function createMissionRoutes(deps: MissionDeps) {
     });
     if (!roomId) return c.json({ error: "Could not create the mission's room." }, 502);
 
-    const [identity] = await db
-      .select({ externalId: principalIdentities.externalId })
-      .from(principalIdentities)
-      .where(
-        and(
-          eq(principalIdentities.principalId, user.id),
-          eq(principalIdentities.system, "matrix")
-        )
-      );
+    // `principal_identities.principal_id` is a `prn_…` value — comparing it
+    // against the raw Better Auth `user.id` would find nothing for every
+    // caller, silently dropping them from their own mission's invite list.
+    const [identity] = principal
+      ? await db
+          .select({ externalId: principalIdentities.externalId })
+          .from(principalIdentities)
+          .where(
+            and(
+              eq(principalIdentities.principalId, principal.id),
+              eq(principalIdentities.system, "matrix")
+            )
+          )
+      : [];
 
     // Every mission goes in the one Missions space. Grouping is by NODE now,
     // and a mission that spans machines — which is most of them, since that is
@@ -201,7 +244,7 @@ export function createMissionRoutes(deps: MissionDeps) {
     );
 
     for (const m of members) {
-      const agent = bridgeUserId(m.nodeName, m.stationKey, deps.domain);
+      const agent = bridgeUserId(handles.get(m.id)!, deps.domain);
       if (agent === speaker) continue; // already in the room, having made it
       await deps.client.invite(speaker, roomId, agent).catch(() => {});
     }

@@ -105,6 +105,47 @@ export interface MatrixClient {
   ): Promise<void>;
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /**
+   * Join a room as a virtual user. The AS owns the whole `@agent_.*`
+   * namespace, so this needs no invite.
+   *
+   * Idempotent by the ordinary meaning of the Matrix endpoint: joining a room
+   * you are already in succeeds rather than erroring, which is what makes it
+   * safe for the migration to call unconditionally on a re-run.
+   */
+  join(userId: string, roomId: string): Promise<void>;
+  /**
+   * Leave a room as a virtual user.
+   *
+   * Must be safe to call on a user who is not currently a member — a run that
+   * crashed after a previous leave, and is simply run again, must not throw
+   * over a departure that already happened.
+   */
+  leave(userId: string, roomId: string): Promise<void>;
+  /**
+   * Whether `userId` is currently a member of `roomId`.
+   *
+   * The migration's way of asking "which of this room's steps are already
+   * done" — live membership, not a database flag nothing writes yet
+   * (`matrix_rooms.principal_id` is reserved ahead of its first writer).
+   *
+   * **Throws when the homeserver did not answer.** Only a 200 and a clean 404
+   * produce a boolean; see the implementation for why "could not ask" must not
+   * collapse into "already left".
+   */
+  isJoined(userId: string, roomId: string): Promise<boolean>;
+  /** A user's account data of the given type, or null when it was never set. */
+  getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
+  /**
+   * Replace a user's account data of the given type outright.
+   *
+   * Not a merge: `m.direct` is a map covering every DM the owner has, and a
+   * caller that must preserve the entries it did not come to change — which is
+   * every caller of this for `m.direct` — reads first with `getAccountData`
+   * and writes back the whole object. Blindly writing one entry here is the
+   * single most destructive thing available to a caller of this client.
+   */
+  setAccountData(userId: string, type: string, content: Record<string, unknown>): Promise<void>;
   /** Mark another event — 👀 while working, ✅ done, ❌ failed. */
   sendReaction(
     userId: string,
@@ -161,6 +202,28 @@ export class MatrixUserInUse extends Error {
 
 export const isMatrixUserInUse = (e: unknown): e is MatrixUserInUse =>
   e instanceof MatrixUserInUse;
+
+/**
+ * The appservice tried to act as a user outside its own exclusive namespace.
+ *
+ * Confirmed live against tuwunel on 2026-08-30: `GET account_data` as the
+ * human operator answers `400 M_EXCLUSIVE — User is not in namespace.` This
+ * is permanent, not transient — the AS's exclusive namespace is `@agent_.*`,
+ * the operator's own mxid is outside it, and no retry changes that. Typed,
+ * like `MatrixUserInUse`, so a caller (the mxid migration's report, in
+ * particular) can tell this apart from a real, retriable failure without
+ * matching an error message.
+ */
+export class MatrixExclusiveNamespace extends Error {
+  readonly errcode = "M_EXCLUSIVE";
+  constructor(what: string, userId: string) {
+    super(`matrix ${what} refused: ${userId} is outside the appservice's exclusive namespace`);
+    this.name = "MatrixExclusiveNamespace";
+  }
+}
+
+export const isMatrixExclusiveNamespace = (e: unknown): e is MatrixExclusiveNamespace =>
+  e instanceof MatrixExclusiveNamespace;
 
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
   const doFetch = deps.fetch ?? fetch;
@@ -222,10 +285,33 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     return String(res.body.room_id ?? "") || null;
   }
 
-  /** Whether `userId` is still in `roomId`. */
+  /**
+   * Whether `userId` is still in `roomId`.
+   *
+   * **Anything that is not a 200 or a clean 404 throws.** This used to answer
+   * `false` for every non-200, which quietly conflated "the homeserver says
+   * no" with "the homeserver did not say" — and this is the idempotency check
+   * on the only irreversible step in the mxid migration. A transient 502 read
+   * as `false` tells the migration both that the new user never joined and
+   * that the old one has already left: it re-joins an identity that is already
+   * in the room, skips the leave it still owes, and reports the room finished
+   * with two agents sitting in it. A failure to answer must stop the run and
+   * be retried, which is what a re-run is for; the same failure swallowed
+   * strands the room with nothing left looking at it.
+   *
+   * A 404 is the one non-200 that IS an answer: the homeserver knows nothing
+   * of this user, so it is in no rooms, so it is not in this one.
+   */
   async function isJoined(userId: string, roomId: string): Promise<boolean> {
     const res = await call("/_matrix/client/v3/joined_rooms", { method: "GET", userId });
-    if (res.status !== 200) return false;
+    if (res.status === 404) return false;
+    if (res.status !== 200) {
+      throw new Error(
+        `matrix joined_rooms ${userId} failed: ${res.status} ${String(
+          res.body.errcode ?? ""
+        )} ${String(res.body.error ?? "")}`.trim()
+      );
+    }
     const rooms = Array.isArray(res.body.joined_rooms) ? res.body.joined_rooms : [];
     return rooms.some((r) => r === roomId);
   }
@@ -368,6 +454,12 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       const existing = await resolveAlias(alias);
       if (!existing) return null;
 
+      // Left to throw on a homeserver that could not answer, and deliberately.
+      // The branch below this line DELETES the alias directory entry, so a
+      // swallowed 502 answering "not joined" would release the alias of a room
+      // this agent is still living in. `provisionAll` counts a thrown station
+      // as a failure and the next boot retries it; a released alias is not
+      // retried, it is gone.
       if (await isJoined(opts.creator, existing)) return existing;
 
       log.info("reclaiming an alias from a room this agent has left", {
@@ -576,6 +668,54 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         body: { user_id: invitee },
       });
       assertOkOrAlready("invite", res);
+    },
+
+    async join(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("join", res);
+    },
+
+    async leave(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("leave", res);
+    },
+
+    isJoined,
+
+    async getAccountData(userId, type) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "GET", userId }
+      );
+      // No account data of this type yet — the map this migration reads and
+      // rewrites simply starts empty, same as a profile with no avatar.
+      if (res.status === 404) return null;
+      if (res.status < 200 || res.status >= 300) {
+        const errcode = String(res.body.errcode ?? "");
+        if (errcode === "M_EXCLUSIVE") {
+          throw new MatrixExclusiveNamespace(`account_data GET ${type}`, userId);
+        }
+        throw new Error(
+          `matrix account_data GET ${type} failed: ${res.status} ${errcode}`.trim()
+        );
+      }
+      return res.body;
+    },
+
+    async setAccountData(userId, type, content) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "PUT", userId, body: content }
+      );
+      assertOkOrAlready("account_data", res);
     },
   };
 }

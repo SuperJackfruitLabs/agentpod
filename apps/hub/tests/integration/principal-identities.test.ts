@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
+import { createPrincipal } from "../../src/services/principals";
 import {
   linkIdentity,
   identitiesFor,
@@ -20,21 +20,30 @@ import {
  *
  * The station half already works: `stations.matrix_id` has been populated since
  * 2026-08-15 (14 Hermes stations). This is the principal half.
+ *
+ * These are principals, not Better Auth users. `principal_identities.principal_id`
+ * is a foreign key onto `principals.id` now: a Better Auth id in it is not a
+ * mapping keyed the old way, it is a row that cannot be written. A principal's
+ * Better Auth login is simply one more identity in this same table, which is
+ * what `createPrincipal({ userId })` links.
  */
 
-const USER_A = "test-user-identities-a";
-const USER_B = "test-user-identities-b";
+const HANDLE_A = "identities-it-a";
+const HANDLE_B = "identities-it-b";
+const HANDLE_C = "identities-it-c";
+let PRINCIPAL_A: string;
+let PRINCIPAL_B: string;
 
 beforeAll(async () => {
   await ensurePgMigrations();
-  await createTestUser({ id: USER_A, email: "identities-a@example.com", name: "A" });
-  await createTestUser({ id: USER_B, email: "identities-b@example.com", name: "B" });
+  await rawSql`DELETE FROM principals WHERE handle IN (${HANDLE_A}, ${HANDLE_B}, ${HANDLE_C})`;
+  PRINCIPAL_A = await createPrincipal({ kind: "human", handle: HANDLE_A });
+  PRINCIPAL_B = await createPrincipal({ kind: "human", handle: HANDLE_B });
 });
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${USER_A}, ${USER_B})`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${USER_A}, ${USER_B})`;
+    await rawSql`DELETE FROM principals WHERE handle IN (${HANDLE_A}, ${HANDLE_B}, ${HANDLE_C})`;
   } catch {
     // cleanup only
   }
@@ -42,10 +51,10 @@ afterAll(async () => {
 
 describe("principal identities", () => {
   test("links a principal to a Matrix id and resolves both directions", async () => {
-    await linkIdentity(USER_A, "matrix", "@olivia:id.agentpod.dev");
+    await linkIdentity(PRINCIPAL_A, "matrix", "@olivia:id.agentpod.dev");
 
-    expect(await principalByExternal("matrix", "@olivia:id.agentpod.dev")).toBe(USER_A);
-    expect(await externalIdFor(USER_A, "matrix")).toBe("@olivia:id.agentpod.dev");
+    expect(await principalByExternal("matrix", "@olivia:id.agentpod.dev")).toBe(PRINCIPAL_A);
+    expect(await externalIdFor(PRINCIPAL_A, "matrix")).toBe("@olivia:id.agentpod.dev");
   });
 
   test("answers unknown rather than guessing", async () => {
@@ -53,7 +62,7 @@ describe("principal identities", () => {
     // Matrix account and never will, and a bridge asking about one is not an
     // error condition.
     expect(await principalByExternal("matrix", "@nobody:id.agentpod.dev")).toBeNull();
-    expect(await externalIdFor(USER_B, "matrix")).toBeNull();
+    expect(await externalIdFor(PRINCIPAL_B, "matrix")).toBeNull();
   });
 
   test("refuses to let two principals claim one external identity", async () => {
@@ -62,24 +71,24 @@ describe("principal identities", () => {
     // when it matters — attributing a human's approval, which must carry its
     // sender or kaambaan's separation-of-duties check is void.
     await expect(
-      linkIdentity(USER_B, "matrix", "@olivia:id.agentpod.dev")
+      linkIdentity(PRINCIPAL_B, "matrix", "@olivia:id.agentpod.dev")
     ).rejects.toThrow();
 
-    expect(await principalByExternal("matrix", "@olivia:id.agentpod.dev")).toBe(USER_A);
+    expect(await principalByExternal("matrix", "@olivia:id.agentpod.dev")).toBe(PRINCIPAL_A);
   });
 
   test("a principal has at most one identity per system", async () => {
     // The reverse direction needs a single answer too: "which mxid do I message
     // this principal at" cannot return three.
     await expect(
-      linkIdentity(USER_A, "matrix", "@olivia-alt:id.agentpod.dev")
+      linkIdentity(PRINCIPAL_A, "matrix", "@olivia-alt:id.agentpod.dev")
     ).rejects.toThrow();
   });
 
   test("holds several systems for one principal", async () => {
-    await linkIdentity(USER_A, "kaambaan", "usr_kaambaan_a");
+    await linkIdentity(PRINCIPAL_A, "kaambaan", "usr_kaambaan_a");
 
-    const all = await identitiesFor(USER_A);
+    const all = await identitiesFor(PRINCIPAL_A);
     expect(all.map((i) => i.system).sort()).toEqual(["kaambaan", "matrix"]);
   });
 
@@ -87,21 +96,21 @@ describe("principal identities", () => {
     // A typo'd system name would create a mapping nothing ever reads — a row
     // that looks like a link and is not one.
     await expect(
-      linkIdentity(USER_B, "matrix-ish" as never, "@b:id.agentpod.dev")
+      linkIdentity(PRINCIPAL_B, "matrix-ish" as never, "@b:id.agentpod.dev")
     ).rejects.toThrow();
   });
 
   test("refuses an empty external id", async () => {
-    await expect(linkIdentity(USER_B, "matrix", "")).rejects.toThrow();
+    await expect(linkIdentity(PRINCIPAL_B, "matrix", "")).rejects.toThrow();
   });
 
   test("unlinking is idempotent and scoped to one system", async () => {
-    await unlinkIdentity(USER_A, "kaambaan");
-    expect(await externalIdFor(USER_A, "kaambaan")).toBeNull();
+    await unlinkIdentity(PRINCIPAL_A, "kaambaan");
+    expect(await externalIdFor(PRINCIPAL_A, "kaambaan")).toBeNull();
     // Still there — unlinking one system must not touch another.
-    expect(await externalIdFor(USER_A, "matrix")).toBe("@olivia:id.agentpod.dev");
+    expect(await externalIdFor(PRINCIPAL_A, "matrix")).toBe("@olivia:id.agentpod.dev");
 
-    await unlinkIdentity(USER_A, "kaambaan"); // again: no throw
+    await unlinkIdentity(PRINCIPAL_A, "kaambaan"); // again: no throw
   });
 
   test("deleting a principal takes its identities with it", async () => {
@@ -109,10 +118,10 @@ describe("principal identities", () => {
     // identity outliving its principal is a mapping to nothing that still
     // occupies its external id, so the next person to link that mxid is
     // refused for a reason nobody can see.
-    await createTestUser({ id: "test-user-identities-c", email: "c@example.com", name: "C" });
-    await linkIdentity("test-user-identities-c", "matrix", "@gone:id.agentpod.dev");
+    const gone = await createPrincipal({ kind: "human", handle: HANDLE_C });
+    await linkIdentity(gone, "matrix", "@gone:id.agentpod.dev");
 
-    await rawSql`DELETE FROM "user" WHERE id = 'test-user-identities-c'`;
+    await rawSql`DELETE FROM principals WHERE id = ${gone}`;
 
     expect(await principalByExternal("matrix", "@gone:id.agentpod.dev")).toBeNull();
   });

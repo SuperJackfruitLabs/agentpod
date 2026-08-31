@@ -127,6 +127,26 @@ const uuidSuffixedId = (prefix: string) =>
  */
 export const TenantId = truncatedUuidId("fleet");
 
+/**
+ * A suite principal — a human, an agent, or a service.
+ *
+ * 20-hex family, not the hyphenated one: this id crosses the kaambaan seam on
+ * every grant, and kaambaan's own id schema (`^<prefix>_[A-Za-z0-9]{6,}$`) has
+ * no hyphen in its alphabet. `agentpod.station` already mints a hyphenated
+ * UUID and is a known scar recorded in the corpus; this does not add a second.
+ *
+ * Distinct from `UserId` above, which is Better Auth's bare-UUID row and stays
+ * that way — this is the new, type-legible id a principal is minted with.
+ */
+export const PrincipalId = truncatedUuidId("prn");
+
+/**
+ * An organisation. Minted by the hub, which IS the Organization plane until
+ * the plane is extracted into its own service — see `TenantId`'s doc comment
+ * for why AgentPod and kaambaan each keep a local tenant in the meantime.
+ */
+export const OrganizationId = truncatedUuidId("org");
+
 export const NodeId = truncatedUuidId("node");
 export const RuntimeId = truncatedUuidId("rt");
 /**

@@ -23,9 +23,10 @@ import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { resolveMatrixId } from "../matrix-identity";
-import { getGrant, grantAllowsStation } from "../grants";
+import { getGrant, grantAllowsPrincipal } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
+import { principalHandle } from "../principals";
 import {
   clearPendingPermission,
   matchPermissionAnswer,
@@ -106,6 +107,7 @@ async function roomContext(roomId: string) {
       stationKey: stations.stationKey,
       identityMode: stations.matrixIdentityMode,
       nodeName: nodes.name,
+      principalId: stations.principalId,
       sessionStatus: acpSessions.status,
     })
     .from(matrixRooms)
@@ -149,7 +151,21 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
   // the failure the mode exists to prevent.
   if (room.identityMode !== "bridge") return;
 
-  const agentUser = bridgeUserId(room.nodeName, room.stationKey, deps.domain);
+  // A station with no occupying agent has no handle and therefore no mxid to
+  // speak as. This should not happen — provisioning refuses to create a room
+  // for an unoccupied bridge-mode station in the first place — but a defensive
+  // check beats inventing an address from `(nodeName, stationKey)` if it ever
+  // does.
+  const handle = room.principalId ? await principalHandle(room.principalId) : null;
+  if (!handle) {
+    log.warn("matrix room's station has no occupying agent; cannot speak as it", {
+      room: room.roomId,
+      stationKey: room.stationKey,
+    });
+    return;
+  }
+
+  const agentUser = bridgeUserId(handle, deps.domain);
   const say = (body: string) => deps.client.sendText(agentUser, room.roomId, body);
 
   // ── Who is this? ──────────────────────────────────────────────────────────
@@ -174,10 +190,7 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
   // ── May they dispatch THIS agent? ─────────────────────────────────────────
   if (isControlPairEnforced()) {
     const grant = await getGrant(principalId);
-    const allowed = grantAllowsStation(grant, {
-      nodeName: room.nodeName,
-      stationKey: room.stationKey,
-    });
+    const allowed = grantAllowsPrincipal(grant, room.principalId);
 
     if (!allowed) {
       log.warn("matrix message refused by the control pair", {

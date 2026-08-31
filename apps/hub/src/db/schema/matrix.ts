@@ -9,6 +9,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { stations } from "./stations";
+import { principals } from "./organization";
 
 /**
  * Applied Application Service transactions.
@@ -40,6 +41,72 @@ export const matrixRooms = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     stationId: text("station_id").notNull(),
+    /**
+     * The occupying agent this room speaks to — added, not swapped in for
+     * `stationId`.
+     *
+     * **Has TWO writers, and they agree.** The whole-branch review found this
+     * comment still claiming one, which by then was false:
+     *
+     *  - `routes/agents-admin.ts`'s assign endpoint binds an EXISTING unbound
+     *    room — the oldest at the station, under the rule in
+     *    `matrix-as/station-room.ts` — and only under `NOT EXISTS (… WHERE
+     *    principal_id = …)`, because the row it is updating was created for
+     *    somebody else's benefit and it has no other way to know whether this
+     *    principal is already housed.
+     *  - `matrix-as/provision.ts` binds a room it is CREATING, at insert,
+     *    unconditionally.
+     *
+     * The two policies read as a disagreement and are not: provisioning only
+     * reaches its insert when `roomForStation` has already answered "this
+     * occupant has no room", which is the same predicate assign spells out as
+     * `NOT EXISTS`. One checks it by having asked a moment earlier; the other
+     * checks it in the statement, because it is racing other assigns.
+     * `matrix_rooms_principal_idx` is what makes the agreement enforced
+     * rather than merely intended — if either ever stopped holding, the
+     * second write raises 23505 instead of quietly giving an agent two rooms.
+     *
+     * Once bound, never moved or cleared — an agent keeps the room it was
+     * first bound to for as long as it exists, however many stations it
+     * occupies afterward, which is the entire point of keying gates on the
+     * agent rather than on wherever it currently sits.
+     * Migration `0060_matrix_rooms_backfill_principal_id`
+     * backfilled every room that predates the writer from its station's
+     * occupant at the time, so no pre-existing room reads null forever for
+     * having existed before this column had one.
+     *
+     * `matrix-as/station-room.ts`'s `roomForStation` is the ONE place this
+     * resolves for every reader now — `gates.ts`, `routes/station-say.ts`,
+     * and `provision.ts` all call into it rather than joining on `stationId`
+     * themselves, so a reassigned agent's gates, unprompted messages, and
+     * provisioning all keep landing in its original room rather than
+     * whatever room its new station happens to have.
+     *
+     * **The `stationId` fallback is scoped, not unconditional — fix round 1
+     * on Task 5, then centralised in fix round 2.** The first cut fell back
+     * to the `stationId` join whenever this column was null, which included
+     * a station whose CURRENT occupant simply hadn't been bound yet — and
+     * since a departed principal's room keeps its `stationId`, that fallback
+     * could hand a new occupant's gates (and, a second review found, its
+     * unprompted messages, and its provisioning) to the room, and the
+     * address, of whoever used to be there. `roomForStation` falls back to
+     * `stationId` only when the station has NO occupant at all; an occupied
+     * station whose occupant has no room of its own answers "no room yet"
+     * instead of guessing. `gate-sweep.ts` — deployed in production, and
+     * unaware it depends on this — is unaffected: it calls into `gates.ts`
+     * rather than querying this table itself, and the fallback it actually
+     * exercises (an unoccupied station's own room) is untouched. `stationId`
+     * stays the column every current reader still needs; this is redundant
+     * with it, not a replacement for it. Retiring `stationId` is a later
+     * slice's own migration, once every reader has moved.
+     *
+     * Nullable because a room this hasn't reached is still nullable, and
+     * because a station can lose its occupant (`stations.principalId` is
+     * itself nullable) without this column following it down — a room's own
+     * binding does not un-bind just because its station's current occupant
+     * changed — so it would stay nullable even with a writer in place.
+     */
+    principalId: text("principal_id").references(() => principals.id, { onDelete: "set null" }),
     alias: text("alias").notNull(),
     /** The ACP session this room is talking to, if one is open. */
     acpSessionId: text("acp_session_id"),
@@ -56,7 +123,18 @@ export const matrixRooms = pgTable(
   },
   (t) => [
     index("matrix_rooms_tenant_id_idx").on(t.tenantId),
-    uniqueIndex("matrix_rooms_station_idx").on(t.stationId),
+    /**
+     * NOT unique, as of the fix round on Task 5 — deliberately. A station
+     * can now carry more than one room: a departed principal's, kept so it
+     * keeps its history and address, alongside its new occupant's own. A
+     * unique index here would refuse the second row outright, which is
+     * exactly what "the room follows the agent" requires being able to do.
+     */
+    index("matrix_rooms_station_idx").on(t.stationId),
+    /** One room per occupying agent — enforceable now that occupancy
+     *  itself is exclusive (`stations_principal_id_idx`); multiple NULLs
+     *  are still fine, for every room with no bound occupant. */
+    uniqueIndex("matrix_rooms_principal_idx").on(t.principalId),
     foreignKey({
       columns: [t.stationId, t.tenantId],
       foreignColumns: [stations.id, stations.tenantId],

@@ -12,12 +12,29 @@
    * server's own answer rather than a build flag. And it must not hide a grant
    * whose principal no longer exists: those still match tokens if that id is ever
    * reissued, and they are exactly what nobody goes looking for.
+   *
+   * **Keyed by principal, not by Better Auth user.** A grant's row is
+   * `principal_grants.principal_id`, a foreign key onto `principals.id`, and
+   * every value in `mayDispatch` is a principal id too. This page used to list
+   * Better Auth users and PUT to `/api/admin/grants/<user.id>`, which since
+   * that key moved is not a grant on the wrong principal — it is a write that
+   * cannot land, and every existing grant rendered as an orphan besides. The
+   * directory comes from `/api/admin/principals`; users are joined onto it only
+   * to put an email against a person.
    */
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
   import { listUsers } from "$lib/api/admin";
-  import { listGrants, deleteGrant, type PrincipalGrant, type Grant } from "$lib/api/grants";
-  import { listNodes, listStations } from "$lib/api/client";
+  import {
+    listGrants,
+    listPrincipals,
+    deleteGrant,
+    suspendPrincipal,
+    restorePrincipal,
+    type PrincipalGrant,
+    type PrincipalSummary,
+    type Grant,
+  } from "$lib/api/grants";
   import type { AdminUserView } from "@agentpod/types";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
@@ -30,6 +47,8 @@
   import ShieldOffIcon from "@lucide/svelte/icons/shield-off";
   import PencilIcon from "@lucide/svelte/icons/pencil";
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
+  import BanIcon from "@lucide/svelte/icons/ban";
+  import RotateCcwIcon from "@lucide/svelte/icons/rotate-ccw";
 
   const NO_GRANT: Grant = { mayDispatch: [], mayGrantReach: false };
 
@@ -39,50 +58,80 @@
     sublabel: string | null;
     grant: Grant;
     granted: boolean;
-    /** A grant whose principal is not a user here — kept visible on purpose. */
+    /** A grant naming a principal this hub has no record of — kept visible. */
     orphan: boolean;
+    /**
+     * When this principal was suspended, or null. Null for an orphan row too
+     * — there is no principal record to hold that state, so suspending one is
+     * not offered.
+     */
+    suspendedAt: string | null;
   }
 
   let isLoading = $state(true);
   let error = $state<string | null>(null);
   let enforced = $state(false);
   let rows = $state<Row[]>([]);
-  let stationValues = $state<string[]>([]);
+  let agentOptions = $state<Array<{ id: string; label: string }>>([]);
 
   let showDialog = $state(false);
   let editing = $state<Row | null>(null);
   let showRemove = $state(false);
   let removing = $state<Row | null>(null);
+  let showSuspend = $state(false);
+  let suspending = $state<Row | null>(null);
+  /** The one row with a suspend/restore request in flight — disables its own buttons only. */
+  let pendingSuspendId = $state<string | null>(null);
+
+  /** What a principal is called, in the order a person would recognise it. */
+  function nameOf(p: PrincipalSummary, user: AdminUserView | undefined): string {
+    return p.displayName || user?.name || user?.email || p.handle;
+  }
 
   async function loadData() {
     isLoading = true;
     error = null;
     try {
-      const [usersResponse, grantsResponse] = await Promise.all([
-        listUsers({ limit: 200 }),
+      // `listGrants` is the only blocking call. The directory and the user list
+      // are what put a readable name on a row; without them the page still has
+      // to show every grant, because narrowing one is exactly what you do when
+      // something has gone wrong and a page that refused to load would be the
+      // one thing standing in the way.
+      const [grantsResponse, directory, usersResponse] = await Promise.all([
         listGrants(),
+        listPrincipals().catch(() => [] as PrincipalSummary[]),
+        listUsers({ limit: 200 }).catch(() => ({ users: [] as AdminUserView[] })),
       ]);
 
       enforced = grantsResponse.enforced;
       const byPrincipal = new Map<string, PrincipalGrant>(
         grantsResponse.grants.map((g) => [g.principalId, g])
       );
+      const byUserId = new Map<string, AdminUserView>(
+        usersResponse.users.map((u: AdminUserView) => [u.id, u])
+      );
 
-      const users: Row[] = usersResponse.users.map((u: AdminUserView) => {
-        const grant = byPrincipal.get(u.id);
-        byPrincipal.delete(u.id);
+      const known: Row[] = directory.map((p) => {
+        const user = p.userId ? byUserId.get(p.userId) : undefined;
+        const grant = byPrincipal.get(p.id);
+        byPrincipal.delete(p.id);
         return {
-          principalId: u.id,
-          label: u.name || u.email,
-          sublabel: u.name ? u.email : null,
+          principalId: p.id,
+          label: nameOf(p, user),
+          // The handle and the kind, because two principals can share a display
+          // name and only one of them is the agent you meant to grant.
+          sublabel: [p.kind, p.handle, user?.email].filter(Boolean).join(" · "),
           grant: grant ?? NO_GRANT,
           granted: grant !== undefined,
           orphan: false,
+          suspendedAt: p.suspendedAt,
         };
       });
 
-      // Whatever is left names a principal this hub has no user for — a deleted
-      // account, or an id from another issuer. Shown last, and marked.
+      // Whatever is left names a principal this hub has no record of — a deleted
+      // one, or an id from another issuer. Shown last, and marked: it still
+      // matches a token carrying that id, and it is exactly what nobody goes
+      // looking for.
       const orphans: Row[] = [...byPrincipal.values()].map((g) => ({
         principalId: g.principalId,
         label: g.principalId,
@@ -90,9 +139,17 @@
         grant: { mayDispatch: g.mayDispatch, mayGrantReach: g.mayGrantReach },
         granted: true,
         orphan: true,
+        suspendedAt: null,
       }));
 
-      rows = [...users, ...orphans];
+      // Agents are what a grant's VALUES name, so they are what the dialog
+      // suggests. People and services are grantees, not grantable.
+      agentOptions = directory
+        .filter((p) => p.kind === "agent")
+        .map((p) => ({ id: p.id, label: p.displayName || p.handle }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      rows = [...known, ...orphans];
     } catch (e) {
       error = (e as Error).message || "Couldn’t load grants.";
     } finally {
@@ -100,35 +157,8 @@
     }
   }
 
-  /**
-   * Live stations, as grant values.
-   *
-   * Best-effort and non-blocking: these are suggestions, and a fleet that is
-   * unreachable must not stop someone editing a grant — narrowing one is exactly
-   * what you do when something has gone wrong.
-   */
-  async function loadStationValues() {
-    try {
-      const nodes = await listNodes();
-      const perNode = await Promise.all(
-        nodes.map(async (n) => {
-          try {
-            const stations = await listStations(n.id);
-            return stations.map((s) => `agentpod:${n.name}/${s.stationKey}`);
-          } catch {
-            return [];
-          }
-        })
-      );
-      stationValues = [...new Set(perNode.flat())].sort();
-    } catch {
-      stationValues = [];
-    }
-  }
-
   onMount(() => {
     loadData();
-    loadStationValues();
   });
 
   function openEdit(row: Row) {
@@ -153,6 +183,52 @@
     } finally {
       showRemove = false;
       removing = null;
+    }
+  }
+
+  function openSuspend(row: Row) {
+    suspending = row;
+    showSuspend = true;
+  }
+
+  /**
+   * Suspend a principal. This is the reason `/api/admin/principals` gained
+   * suspend/restore at all: `buildTokenPayload` already refuses a suspended
+   * principal on every path, but until this button existed that lever had no
+   * surface a person could reach without a database client.
+   */
+  async function handleSuspend() {
+    if (!suspending) return;
+    const target = suspending;
+    pendingSuspendId = target.principalId;
+    try {
+      await suspendPrincipal(target.principalId);
+      toast.success(`${target.label} suspended`);
+      await loadData();
+    } catch (e) {
+      toast.error("Couldn’t suspend", { description: (e as Error).message });
+    } finally {
+      pendingSuspendId = null;
+      showSuspend = false;
+      suspending = null;
+    }
+  }
+
+  /**
+   * Lift a suspension — reversible from the same row it was applied from, on
+   * purpose: a control that can only be applied and never undone is one
+   * people route around rather than use.
+   */
+  async function handleRestore(row: Row) {
+    pendingSuspendId = row.principalId;
+    try {
+      await restorePrincipal(row.principalId);
+      toast.success(`${row.label} restored`);
+      await loadData();
+    } catch (e) {
+      toast.error("Couldn’t restore", { description: (e as Error).message });
+    } finally {
+      pendingSuspendId = null;
     }
   }
 
@@ -211,6 +287,17 @@
       <p class="text-sm text-destructive">{error}</p>
       <Button variant="outline" size="sm" onclick={loadData}>Retry</Button>
     </div>
+  {:else if rows.length === 0}
+    <!-- An empty directory reads two ways — "nobody exists yet" and "the load
+         quietly returned nothing" — and a bare "0 of 0 principals" said neither.
+         This says what zero means. -->
+    <div class="rounded-lg border border-dashed p-8 text-center" data-testid="empty-state">
+      <p class="text-sm font-medium">No principals yet</p>
+      <p class="mt-1 text-xs text-muted-foreground">
+        Nobody — human or agent — is registered with this hub, so there is nothing to grant or
+        suspend.
+      </p>
+    </div>
   {:else}
     <p class="text-xs text-muted-foreground">
       {grantedCount} of {rows.length} principals have a grant.
@@ -224,7 +311,10 @@
               <div class="flex items-center gap-2">
                 <p class="text-sm font-medium">{row.label}</p>
                 {#if row.orphan}
-                  <Badge variant="outline" class="text-amber-600">No such user</Badge>
+                  <Badge variant="outline" class="text-amber-600">No such principal</Badge>
+                {/if}
+                {#if row.suspendedAt}
+                  <Badge variant="outline" class="text-destructive">Suspended</Badge>
                 {/if}
                 {#if row.grant.mayGrantReach}
                   <Badge variant="outline">May grant reach</Badge>
@@ -256,6 +346,32 @@
                 <PencilIcon class="mr-1 h-3.5 w-3.5" />
                 {row.granted ? "Edit" : "Grant"}
               </Button>
+              {#if !row.orphan}
+                {#if row.suspendedAt}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onclick={() => handleRestore(row)}
+                    disabled={pendingSuspendId === row.principalId}
+                    aria-label="Restore {row.label}"
+                  >
+                    <RotateCcwIcon class="mr-1 h-3.5 w-3.5" />
+                    Restore
+                  </Button>
+                {:else}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onclick={() => openSuspend(row)}
+                    disabled={pendingSuspendId === row.principalId}
+                    aria-label="Suspend {row.label}"
+                  >
+                    <BanIcon class="mr-1 h-3.5 w-3.5" />
+                    Suspend
+                  </Button>
+                {/if}
+              {/if}
               {#if row.granted}
                 <Button
                   variant="ghost"
@@ -279,7 +395,7 @@
   bind:open={showDialog}
   principal={editing ? { id: editing.principalId, label: editing.label } : null}
   grant={editing?.grant ?? NO_GRANT}
-  {stationValues}
+  {agentOptions}
   onSaved={loadData}
 />
 
@@ -293,5 +409,18 @@
   onCancel={() => {
     showRemove = false;
     removing = null;
+  }}
+/>
+
+<ConfirmDialog
+  open={showSuspend}
+  title="Suspend principal"
+  message="{suspending?.label} will be refused everywhere, on both planes — no token is minted for a suspended principal, session or agent alike. Reversible from this same page at any time."
+  confirmLabel="Suspend"
+  destructive
+  onConfirm={handleSuspend}
+  onCancel={() => {
+    showSuspend = false;
+    suspending = null;
   }}
 />

@@ -386,6 +386,62 @@
       "when": 1786687173202,
       "tag": "0054_service_signing_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788110577341,
+      "tag": "0055_spotty_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788111076830,
+      "tag": "0056_left_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788112729533,
+      "tag": "0057_motionless_professor_monster",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788118319157,
+      "tag": "0058_matrix_rooms_principal_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788141024903,
+      "tag": "0059_abandoned_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1788165015180,
+      "tag": "0060_matrix_rooms_backfill_principal_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1788167041109,
+      "tag": "0061_occupancy_exclusive",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788176000000,
+      "tag": "0062_matrix_rooms_rebackfill_after_dedupe",
+      "breakpoints": true
     }
   ]
 }

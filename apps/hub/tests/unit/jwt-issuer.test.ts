@@ -36,6 +36,7 @@ describe("the token claim contract (#332)", () => {
 
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -53,6 +54,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -71,14 +73,23 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
+      // Bare principal ids, which is what a grant value is now: one agent, by
+      // its own id, matched by equality. The namespaced patterns that used to
+      // sit here (`agentpod:<node>/<key>`, `kaambaan:<agentId>`) are deleted,
+      // and a literal in the issuer's own test is how a retired form outlives
+      // the code that read it.
       loadGrant: async () => ({
-        mayDispatch: ["agentpod:hermes:*", "kaambaan:agt_x"],
+        mayDispatch: ["prn_a0b1c2d3e4f5a6b7c8d9", "prn_112233445566778899aa"],
         mayGrantReach: true,
       }),
     });
 
-    expect(payload.mayDispatch).toEqual(["agentpod:hermes:*", "kaambaan:agt_x"]);
+    expect(payload.mayDispatch).toEqual([
+      "prn_a0b1c2d3e4f5a6b7c8d9",
+      "prn_112233445566778899aa",
+    ]);
     expect(payload.mayGrantReach).toBe(true);
   });
 
@@ -90,6 +101,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -104,6 +116,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -116,6 +129,7 @@ describe("the token claim contract (#332)", () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
     const payload = await buildTokenPayload({
       user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       loadGrant: async () => null,
     });
@@ -133,6 +147,7 @@ describe("the token claim contract (#332)", () => {
     await expect(
       buildTokenPayload({
         user: { id: "user_abc123" },
+        resolvePrincipal: async () => ({ id: "prn_test0123456789abcdef", kind: "human" as const }),
         resolveTenant: async () => null as unknown as string,
         loadGrant: async () => null,
       })

@@ -48,9 +48,9 @@ import type {
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
-import { getGrant, grantAllowsStation } from "./grants";
+import { getGrant, grantAllowsPrincipal } from "./grants";
+import { principalForUser } from "./principals";
 import { acpSessions, acpEvents } from "../db/schema/acp";
-import { nodes } from "../db/schema/nodes";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
 import { getStation } from "./station-registry";
@@ -655,25 +655,18 @@ export async function createSession(
   // to someone who was never permitted leaks which stations exist.
   const station = await getStation(userId, stationId);
   if (station && isControlPairEnforced()) {
-    // The grant names a node as well as a station, because station keys repeat
-    // across nodes — `opencode:c52ddf65` exists on two of them in production.
-    const [node] = await db
-      .select({ name: nodes.name })
-      .from(nodes)
-      .where(eq(nodes.id, station.nodeId))
-      .limit(1);
-
+    // `getGrant` is keyed by principal id now, not the Better Auth user id
+    // `userId` is here — `getStation` above requires it to equal
+    // `stations.userId`, so this is always a session id, never one obtained
+    // elsewhere. A caller with no principal has no grant to hold.
+    const principal = await principalForUser(userId);
     const allowed =
-      node !== undefined &&
-      grantAllowsStation(await getGrant(userId), {
-        nodeName: node.name,
-        stationKey: station.stationKey,
-      });
+      principal !== null && grantAllowsPrincipal(await getGrant(principal.id), station.principalId);
 
     if (!allowed) {
       log.warn("dispatch refused by the control pair", {
-        principalId: userId,
-        node: node?.name,
+        userId,
+        principalId: principal?.id ?? null,
         stationKey: station.stationKey,
         stationId,
       });

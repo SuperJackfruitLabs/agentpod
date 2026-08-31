@@ -14,7 +14,7 @@
  * that already has one, and the two would eventually disagree.
  */
 
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import { bridgeGateSweepDeps, startGateSweeper, sweepGates, type GateSweepDeps } from "./gate-sweep";
 import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
@@ -94,6 +94,123 @@ describe("the gate sweep", () => {
     const f = fake({}, { gate_1: { status: "no-room" } });
 
     expect((await sweepGates(f.deps)).projected).toBe(0);
+  });
+
+  test("does not count a gate whose room has a station but no agent in it", async () => {
+    // The outcome this slice added, and the one that is now fleet-wide rather
+    // than exceptional: `stations.principal_id` is nullable and nothing assigns
+    // it, so a room can exist with nobody to post the gate AS. Distinct from
+    // `no-room` — there is somewhere to put the question and no one to ask it —
+    // and, like `no-room`, it is not a delivery. Counting it would make the
+    // sweep's own logs say a person had been asked for an approval that is
+    // still sitting on the board.
+    const f = fake({}, { gate_1: { status: "no-agent" } });
+
+    const result = await sweepGates(f.deps);
+
+    expect(result.checked).toBe(1);
+    expect(result.projected).toBe(0);
+  });
+
+  test("a station with no agent does not stop the gates behind it", async () => {
+    // Every failure here is per-gate. One station left unoccupied must not take
+    // the rest of the board's pending gates with it — that is how a sweep stops
+    // being a floor and does it invisibly.
+    const f = fake({ pendingGates: async (b) => [gate("gate_1", b), gate("gate_2", b)] }, {
+      gate_1: { status: "no-agent" },
+    });
+
+    const result = await sweepGates(f.deps);
+
+    expect(f.offered).toEqual(["gate_1", "gate_2"]);
+    expect(result.projected).toBe(1);
+  });
+
+  test("tallies every outcome by status, so a pass that delivered nothing cannot read as a pass that delivered", async () => {
+    // The whole-branch review's last finding, and this branch's own doing:
+    // `projected` counted `sent` alone, so a sweep in which every single gate
+    // came back `no-room` reported the identical number as one in which every
+    // gate was already safely in a room. That is exactly the shape that hid
+    // this branch's Critical — assignment never provisioned, so every gate
+    // resolved `no-room`, and the floor beneath push had no way to say so.
+    const f = fake(
+      {
+        pendingGates: async (b) => [
+          gate("gate_sent", b),
+          gate("gate_already", b),
+          gate("gate_noroom", b),
+          gate("gate_noagent", b),
+          gate("gate_nospeaker", b),
+        ],
+      },
+      {
+        gate_already: { status: "already" },
+        gate_noroom: { status: "no-room" },
+        gate_noagent: { status: "no-agent" },
+        gate_nospeaker: { status: "no-speaker" },
+      },
+    );
+
+    const result = await sweepGates(f.deps);
+
+    expect(result.byStatus).toEqual({
+      sent: 1,
+      already: 1,
+      "no-room": 1,
+      "no-agent": 1,
+      "no-speaker": 1,
+    });
+    // Every gate it looked at is accounted for somewhere — nothing falls
+    // through the tally unseen, which is the property that failed before.
+    const tallied = Object.values(result.byStatus).reduce((a, b) => a + b, 0);
+    expect(tallied).toBe(result.checked);
+    expect(result.projected, "and `projected` still means delivered, not seen").toBe(1);
+  });
+
+  test("a gate it could not place reaches the log of a running hub — no-room, no-agent and no-speaker alike", async () => {
+    // Behaviour, not the wording: the assertion is that each stuck outcome is
+    // surfaced at warn level and identifies the gate, because the whole point
+    // is that an operator sees this while it is happening rather than a
+    // reviewer finding it months later.
+    for (const status of ["no-room", "no-agent", "no-speaker"] as const) {
+      const f = fake({}, { gate_1: { status } });
+      const warnSpy = spyOn(console, "warn");
+      try {
+        const result = await sweepGates(f.deps);
+
+        expect(result.byStatus[status], `${status} is counted`).toBe(1);
+        const surfaced = warnSpy.mock.calls.some(([line]) =>
+          typeof line === "string" && line.includes("gate_1") && line.includes(status),
+        );
+        expect(surfaced, `${status} is surfaced at warn, naming the gate`).toBe(true);
+      } finally {
+        warnSpy.mockRestore();
+      }
+    }
+  });
+
+  test("a pass where everything landed says nothing alarming — `already` is a delivery, not a fault", async () => {
+    // The other half, and why `already` is deliberately not warned on: it is
+    // the ordinary healthy answer on a sweep pass (push got there first). A
+    // warn per delivered gate every five minutes would bury the three that
+    // actually mean a person is waiting.
+    const f = fake({ pendingGates: async (b) => [gate("gate_1", b), gate("gate_2", b)] }, {
+      gate_1: { status: "already" },
+      gate_2: { status: "already" },
+    });
+
+    const warnSpy = spyOn(console, "warn");
+    try {
+      const result = await sweepGates(f.deps);
+
+      expect(result.byStatus.already).toBe(2);
+      const alarmed = warnSpy.mock.calls.some(([line]) =>
+        typeof line === "string" && line.includes("could not"),
+      );
+      expect(alarmed, "nothing is reported as stuck").toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test("never asks a board whose gates it could not place anyway", async () => {

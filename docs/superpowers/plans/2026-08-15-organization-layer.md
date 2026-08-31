@@ -1,5 +1,19 @@
 # Building the Organization layer
 
+> **Superseded 2026-08-30. Nothing below is edited.**
+>
+> This plan is built on the supermessage/MAS coupling — *"that coupling is real
+> and unchanged"* — and it is not. matrix-authentication-service is not part of
+> this suite: the premise was a fact about Synapse, replaced by tuwunel on
+> 2026-08-16, the day after the decision that recorded it. See
+> `charter → decisions/2026-08-30-matrix-identity-without-mas.md`.
+>
+> The Organization plane's design now lives in
+> `docs/superpowers/specs/2026-08-30-organization-plane-design.md`, under two
+> charter decisions — an agent is a principal, and Matrix identity without MAS —
+> and under a frame this plan predates: nothing is in production, so the work
+> builds destinations rather than migration paths.
+
 **Status:** Written 2026-08-15 as a plan; **most of it was then built the same
 day**, which is why this header exists. The phase bodies below are left as
 written — they are the reasoning, and rewriting them to match the outcome would

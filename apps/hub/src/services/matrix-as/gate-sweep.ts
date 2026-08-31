@@ -12,6 +12,18 @@
  * failing 116,666 times over eight days with nothing configured to notice. The
  * sweep is what makes "a gate cannot be lost" a property rather than a hope.
  *
+ * ## It has to report what it could NOT place
+ *
+ * This file counted `sent` and nothing else for most of its life, which made it
+ * the same failure one level up: a gate that came back `no-room`, `no-agent` or
+ * `no-speaker` was seen, stepped over, and reported as nothing — the number an
+ * operator reads is identical whether every gate landed or none did. The
+ * whole-branch review found precisely that hiding this branch's own Critical
+ * (assignment never provisioned, so every gate resolved `no-room`). The
+ * detector and the defect were built on the same branch. Outcomes are tallied
+ * by status now, and the three that mean a gate is stuck are warned per gate
+ * and again as a pass summary.
+ *
  * ## It holds no idempotency of its own
  *
  * `projectGate` claims the gate in `matrix_gate_events` before it sends, so
@@ -51,12 +63,41 @@ export interface GateSweepDeps {
   project(tenantId: string, d: GatePendingDelivery): Promise<ProjectionOutcome>;
 }
 
+/** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
+export type GateOutcomeStatus = ProjectionOutcome["status"];
+
+/**
+ * The outcomes a gate can land in that mean it is STUCK — a person is waiting
+ * on an approval that is not in any room, and nothing else is looking.
+ *
+ * `sent` is a delivery. `already` is a delivery somebody else made, which is
+ * the ordinary healthy answer on a sweep pass and would be pure noise if it
+ * warned. These three are the ones that were invisible.
+ */
+const STUCK: readonly GateOutcomeStatus[] = ["no-room", "no-agent", "no-speaker"];
+
 export interface GateSweepResult {
   /** Pending gates seen across every board that answered. */
   checked: number;
   /** Gates this pass actually put in a room. Anything else was already there,
    *  had nowhere to go, or failed — and none of those is a delivery. */
   projected: number;
+  /**
+   * Every outcome this pass produced, by status.
+   *
+   * **The whole-branch review's last finding, and it is this branch's own
+   * doing.** `projected` counted `sent` alone, so `no-room`, `no-agent` and
+   * `no-speaker` were seen, stepped over, and reported as nothing at all — a
+   * sweep whose number reads the same whether every gate landed or none did.
+   * That is exactly how the Critical this wave closed stayed invisible:
+   * assignment never provisioned, `roomForStation` answered null, every gate
+   * came back `no-room`, and the detector built to be the floor beneath push
+   * had no way to say so. The detector and the defect shipped on the same
+   * branch. Counting by status is what makes "a gate cannot be lost" a
+   * property the sweep can actually report on rather than one it merely
+   * intends.
+   */
+  byStatus: Record<GateOutcomeStatus, number>;
   /** Boards that could not be asked. Named, because an empty sweep and an
    *  unreachable board look identical from the outside. */
   failedBoards: string[];
@@ -66,6 +107,13 @@ export interface GateSweepResult {
 export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> {
   let checked = 0;
   let projected = 0;
+  const byStatus: Record<GateOutcomeStatus, number> = {
+    sent: 0,
+    already: 0,
+    "no-room": 0,
+    "no-agent": 0,
+    "no-speaker": 0,
+  };
   const failedBoards: string[] = [];
 
   for (const boardId of await deps.boards()) {
@@ -95,6 +143,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
       checked++;
       try {
         const outcome = await deps.project(tenantId, gate);
+        byStatus[outcome.status]++;
         if (outcome.status === "sent") {
           projected++;
           // Deliberately loud. Every line here is a gate that push failed to
@@ -104,6 +153,18 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
             gateId: gate.gateId,
             boardId,
             roomId: outcome.roomId,
+          });
+        } else if (STUCK.includes(outcome.status)) {
+          // Louder still, and this is the line that was missing. A gate the
+          // sweep could not place is the failure the sweep exists to be the
+          // floor beneath — it must reach the log of a RUNNING hub, not wait
+          // to be noticed in a review months later. `already` is skipped
+          // deliberately: it is a gate that was delivered, and warning on it
+          // every five minutes would bury these three.
+          log.warn("a pending gate could not be put in a room", {
+            gateId: gate.gateId,
+            boardId,
+            status: outcome.status,
           });
         }
       } catch (err) {
@@ -115,7 +176,14 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     }
   }
 
-  return { checked, projected, failedBoards };
+  const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);
+  if (stuck > 0) {
+    // One line an operator can alert on, with the tally beside it — the
+    // per-gate warns above say which, this says how bad.
+    log.warn("pending gates the sweep could not deliver", { stuck, ...byStatus });
+  }
+
+  return { checked, projected, byStatus, failedBoards };
 }
 
 /**

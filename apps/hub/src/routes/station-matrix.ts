@@ -23,8 +23,10 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { requireIssueCredentials } from "../services/grant-reach";
 import { isGrantReachDenied } from "../services/control-pair";
-import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "../services/matrix-as/names";
+import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
+import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
+import { principalHandle } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
 
 export interface IssuedCredentials {
@@ -64,11 +66,25 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         nodeName: nodes.name,
         stationKey: stations.stationKey,
         mode: stations.matrixIdentityMode,
+        principalId: stations.principalId,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
       .where(and(eq(stations.id, stationId), eq(stations.userId, userId)));
     return row ?? null;
+  }
+
+  /**
+   * The handle of the agent occupying a station, or null.
+   *
+   * A station with no occupying principal has no handle and therefore no
+   * agent mxid — never invented from `(nodeName, stationKey)`, which is
+   * exactly the station-derived identity this file stopped minting. Every
+   * caller treats null as a 409, failing visibly rather than building an
+   * address for nobody.
+   */
+  async function occupyingHandle(station: { principalId: string | null }): Promise<string | null> {
+    return station.principalId ? principalHandle(station.principalId) : null;
   }
 
   return new Hono()
@@ -86,9 +102,30 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
 
       await deps.provisionStation(station.id);
 
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so it has no Matrix identity of its own.",
+          },
+          409
+        );
+      }
+
+      // The address the room this endpoint just provisioned is ACTUALLY
+      // reachable at, read through the one resolver for that question — not
+      // `bridgeAlias(nodeName, stationKey)` re-derived here, which is what
+      // this returned until fix round 5. An occupied station's room is
+      // addressed by its occupant's handle, and this endpoint 409s below
+      // unless the station HAS an occupant, so the station-derived form was
+      // wrong for every station it can answer for: the AS route 200s on it
+      // through the legacy fallback and then creates nothing (the station
+      // already has a room), and the caller is left with a directory lookup
+      // that fails.
       return c.json({
-        mxid: bridgeUserId(station.nodeName, station.stationKey, deps.domain),
-        alias: bridgeAlias(station.nodeName, station.stationKey, deps.domain),
+        mxid: bridgeUserId(handle, deps.domain),
+        alias: await roomAliasForStation(station.id, deps.domain),
         mode: station.mode,
       });
     })
@@ -124,7 +161,18 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         );
       }
 
-      const localpart = bridgeLocalpart(station.nodeName, station.stationKey);
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so it has no Matrix identity to issue credentials for.",
+          },
+          409
+        );
+      }
+
+      const localpart = bridgeLocalpart(handle);
 
       // Register, and rotate if the identity turns out to already exist.
       //

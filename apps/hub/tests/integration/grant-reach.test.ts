@@ -4,6 +4,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { setGrant, deleteGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import {
   REACH_BEARING,
@@ -23,17 +24,45 @@ import { isGrantReachDenied } from "../../src/services/control-pair";
  */
 
 const USER = "test-user-grant-reach";
+const ADMIN_USER = "test-user-grant-reach-it-admin";
 const NODE = "node_grant_reach";
+
+// requireFleetGrantReach takes a principal id, not a Better Auth user id —
+// these link USER and ADMIN_USER to one, the same way any real caller would
+// be linked, so "an admin may" and "a non-admin may not" mean something.
+let USER_PRINCIPAL: string;
+let ADMIN_PRINCIPAL: string;
 
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "grant-reach@example.com", name: "GR" });
+  await createTestUser({
+    id: ADMIN_USER,
+    email: "grant-reach-it-admin@example.com",
+    name: "GR Admin",
+    role: "admin",
+  });
+  USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "grant-reach-it-user", userId: USER });
+  ADMIN_PRINCIPAL = await createPrincipal({
+    kind: "human",
+    handle: "grant-reach-it-admin",
+    userId: ADMIN_USER,
+  });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "grant-reach-it-agent" });
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
   const tenant = await resolveTenantForUser(USER);
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${USER},
             'reach-box', 'reach-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
+  // requireGrantReach's scope check now compares a grant against the STATION'S
+  // OCCUPANT, not a node/station pattern — so the station this suite drives
+  // has to be a real row with a real occupant, not just a nodeId/stationKey pair.
+  await rawSql`DELETE FROM stations WHERE id = ${STATION_ID}`;
+  await rawSql`
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, principal_id, adopted_at, created_at)
+    VALUES (${STATION_ID}, ${tenant}, ${USER}, ${NODE}, 'hermes', ${STATION.stationKey}, 'leaf', 'Analyst Echo',
+            ${AGENT_PRINCIPAL}, now(), now())`;
 
   // The guards are no-ops when the pair is off — which is itself asserted below.
   process.env.ENFORCE_CONTROL_PAIR = "true";
@@ -42,15 +71,23 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${USER_PRINCIPAL}, ${ADMIN_PRINCIPAL})`;
+    await rawSql`DELETE FROM principal_identities WHERE external_id IN (${USER}, ${ADMIN_USER})`;
+    await rawSql`DELETE FROM stations WHERE id = ${STATION_ID}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('grant-reach-it-user', 'grant-reach-it-admin', 'grant-reach-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await rawSql`DELETE FROM "user" WHERE id IN (${USER}, ${ADMIN_USER})`;
   } catch {
     // cleanup only
   }
 });
 
+const STATION_ID = "station_grant_reach";
 const STATION = { nodeId: NODE, stationKey: "hermes:analyst-echo" };
+/** The agent occupying STATION — the new matcher compares a grant against this, not a pattern. */
+let AGENT_PRINCIPAL: string;
+/** Some other agent, granted in a couple of tests to prove the scope check is real. */
+const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 async function denial(fn: () => Promise<void>): Promise<unknown> {
   try {
@@ -90,13 +127,13 @@ describe("the capability classification", () => {
 
 describe("requireGrantReach", () => {
   test("permits when the principal holds reach and the scope matches", async () => {
-    await setGrant(USER, { mayDispatch: ["agentpod:reach-box/hermes:*"], mayGrantReach: true });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     expect(await denial(() => requireGrantReach(USER, STATION, "fs.write", "mutate"))).toBeNull();
   });
 
-  test("refuses without the boolean, however wide the dispatch scope", async () => {
+  test("refuses without the boolean, even though the dispatch scope covers it", async () => {
     // The whole point: dispatch permission is not permission to rewrite.
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     const e = await denial(() => requireGrantReach(USER, STATION, "fs.write", "mutate"));
     expect(isGrantReachDenied(e)).toBe(true);
@@ -104,26 +141,26 @@ describe("requireGrantReach", () => {
 
   test("refuses when the boolean is held but this station is out of scope", async () => {
     // One scope, shared with dispatch: you may rewrite only agents you may talk to.
-    await setGrant(USER, { mayDispatch: ["agentpod:other-box/hermes:*"], mayGrantReach: true });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: true });
 
     const e = await denial(() => requireGrantReach(USER, STATION, "terminal", "mutate"));
     expect(isGrantReachDenied(e)).toBe(true);
   });
 
   test("refuses a principal with no grant at all", async () => {
-    await deleteGrant(USER);
+    await deleteGrant(USER_PRINCIPAL);
     const e = await denial(() => requireGrantReach(USER, STATION, "terminal", "mutate"));
     expect(isGrantReachDenied(e)).toBe(true);
   });
 
   test("lets a read through even on a reach-bearing capability", async () => {
     // `cleanup` covers plan (read) and apply (destroys) under one word.
-    await setGrant(USER, { mayDispatch: [], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [], mayGrantReach: false });
     expect(await denial(() => requireGrantReach(USER, STATION, "cleanup", "read"))).toBeNull();
   });
 
   test("lets an open capability through even when mutating", async () => {
-    await setGrant(USER, { mayDispatch: [], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [], mayGrantReach: false });
     expect(await denial(() => requireGrantReach(USER, STATION, "lifecycle", "mutate"))).toBeNull();
   });
 
@@ -131,7 +168,7 @@ describe("requireGrantReach", () => {
     const before = process.env.ENFORCE_CONTROL_PAIR;
     try {
       process.env.ENFORCE_CONTROL_PAIR = "false";
-      await setGrant(USER, { mayDispatch: [], mayGrantReach: false });
+      await setGrant(USER_PRINCIPAL, { mayDispatch: [], mayGrantReach: false });
       expect(await denial(() => requireGrantReach(USER, STATION, "terminal", "mutate"))).toBeNull();
     } finally {
       if (before === undefined) delete process.env.ENFORCE_CONTROL_PAIR;
@@ -141,23 +178,22 @@ describe("requireGrantReach", () => {
 });
 
 describe("requireFleetGrantReach", () => {
-  test("permits a principal whose authority already spans the fleet", async () => {
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
-    expect(await denial(() => requireFleetGrantReach(USER))).toBeNull();
+  // The wildcard that used to encode "your authority spans the fleet" is
+  // gone, and a second scoped list was rejected as the asymmetric-grant
+  // hazard restated (2026-08-15-granting-reach-is-changing-an-agent). Admin
+  // is what is left, so these two facts are the whole rule now.
+
+  test("an admin may, even with no grant at all", async () => {
+    await deleteGrant(ADMIN_PRINCIPAL); // NO_GRANT is legal, and irrelevant to an admin
+    expect(await denial(() => requireFleetGrantReach(ADMIN_PRINCIPAL))).toBeNull();
   });
 
-  test("refuses a node-scoped principal, who could otherwise grow the fleet forever", async () => {
-    // Decision 4 counts *registering* an agent as granting reach: build the
-    // agent you want, then dispatch it. A machine added under a node-scoped
-    // grant is a machine that grant never described.
-    await setGrant(USER, { mayDispatch: ["agentpod:reach-box/hermes:*"], mayGrantReach: true });
+  test("a non-admin may not, however wide their grant", async () => {
+    // The whole point of the change: a fleet-wide dispatch pattern plus
+    // mayGrantReach used to be sufficient on its own. It no longer is.
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
-    const e = await denial(() => requireFleetGrantReach(USER));
+    const e = await denial(() => requireFleetGrantReach(USER_PRINCIPAL));
     expect(isGrantReachDenied(e)).toBe(true);
-  });
-
-  test("refuses fleet-wide dispatch without the boolean", async () => {
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
-    expect(isGrantReachDenied(await denial(() => requireFleetGrantReach(USER)))).toBe(true);
   });
 });

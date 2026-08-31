@@ -5,6 +5,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { stationWriteRoutes } from "../../src/routes/station-writes";
 
 /**
@@ -20,6 +21,12 @@ const USER = "test-user-writes-reach";
 const NODE = "node_writes_reach";
 const STATION = "station_writes_reach";
 
+let USER_PRINCIPAL: string;
+/** The agent occupying STATION — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+/** Some other agent, granted where a test wants to prove the scope check is real. */
+const OTHER_AGENT = "prn_ffffffffffffffffffff";
+
 function app() {
   const a = new Hono();
   a.use("*", async (c, next) => {
@@ -33,6 +40,8 @@ function app() {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "writes-reach@example.com", name: "WR" });
+  USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "writes-reach-it-user", userId: USER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "writes-reach-it-agent" });
   const tenant = await resolveTenantForUser(USER);
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -40,9 +49,9 @@ beforeAll(async () => {
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${USER}, 'writes-box', 'writes-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
   await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
     VALUES (${STATION}, ${tenant}, ${USER}, ${NODE}, 'hermes', 'hermes:writes', 'leaf', 'Writes',
-            '["fs.write"]'::jsonb, now(), now())`;
+            '["fs.write"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -51,7 +60,9 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM station_audit WHERE user_id = ${USER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
+    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('writes-reach-it-user', 'writes-reach-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
   } catch {
@@ -77,8 +88,8 @@ function post(path: string, body: Record<string, unknown>) {
 describe("fs mutations require reach", () => {
   for (const [path, body] of MUTATIONS) {
     test(`${path} is refused without mayGrantReach`, async () => {
-      // Wide dispatch, no reach: exactly the principal this control exists for.
-      await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+      // In scope, no reach: exactly the principal this control exists for.
+      await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
       const res = await post(path, body);
 
@@ -89,7 +100,7 @@ describe("fs mutations require reach", () => {
   }
 
   test("is refused when reach is held but the station is out of scope", async () => {
-    await setGrant(USER, { mayDispatch: ["agentpod:other-box/hermes:*"], mayGrantReach: true });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: true });
     expect((await post("fs/write", { path: "a.txt", content: "x", encoding: "utf8" })).status).toBe(403);
   });
 
@@ -97,7 +108,7 @@ describe("fs mutations require reach", () => {
     // An attempt refused and recorded nowhere is indistinguishable from an
     // attempt nobody made — which is what an operator is trying to tell apart.
     await rawSql`DELETE FROM station_audit WHERE user_id = ${USER}`;
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await post("fs/write", { path: "a.txt", content: "x", encoding: "utf8" });
 
@@ -110,7 +121,7 @@ describe("fs mutations require reach", () => {
   test("the capability gate still answers first, because the two refusals mean different things", async () => {
     // "This station cannot" and "you may not" send an operator to different
     // places. Reordering these would send them to the wrong one.
-    await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     await rawSql`UPDATE stations SET capabilities = '[]'::jsonb WHERE id = ${STATION}`;
 
     const res = await post("fs/write", { path: "a.txt", content: "x", encoding: "utf8" });
@@ -123,7 +134,7 @@ describe("fs mutations require reach", () => {
   test("a principal with reach in scope gets past the gate", async () => {
     // Past the gate is as far as this suite goes: there is no live node, so the
     // broker answers "node offline" (409). What matters is that it is not 403.
-    await setGrant(USER, { mayDispatch: ["agentpod:writes-box/hermes:*"], mayGrantReach: true });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
     const res = await post("fs/write", { path: "a.txt", content: "x", encoding: "utf8" });
     expect(res.status).not.toBe(403);

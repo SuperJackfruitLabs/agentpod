@@ -37,8 +37,21 @@ function getClientIdentifier(c: Context): string {
   return `ip:${ip}`;
 }
 
-function getLimitType(path: string): keyof typeof LIMITS {
+/**
+ * The station-token exchange: `POST /api/nodes/:nodeId/stations/:stationId/token`.
+ *
+ * It is auth traffic that does not live under `/api/auth`. A node presents
+ * `<nodeId>:<nodeSecret>` to it (station-token.ts), so it is a
+ * credential-guessing surface exactly like a sign-in — and because a node
+ * holds no session it sits outside the auth middleware chain by design, which
+ * is what kept the prefix above from catching it. Left in the generic bucket
+ * it would allow ten times the attempts per minute the sign-in route allows.
+ */
+const STATION_TOKEN_EXCHANGE = /^\/api\/nodes\/[^/]+\/stations\/[^/]+\/token$/;
+
+export function getLimitType(path: string): keyof typeof LIMITS {
   if (path.startsWith("/api/auth")) return "auth";
+  if (STATION_TOKEN_EXCHANGE.test(path)) return "auth";
   if (path.includes("/event") || path.includes("/stream")) return "sse";
   return "api";
 }

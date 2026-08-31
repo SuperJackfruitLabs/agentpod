@@ -5,6 +5,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { createMissionRoutes } from "../../src/routes/missions";
 
 /**
@@ -21,6 +22,11 @@ const NODE = "node_mission";
 const A = "station_mission_a";
 const B = "station_mission_b";
 const OWNER_MXID = "@owner-mission:id.agentpod.dev";
+
+let OWNER_PRINCIPAL: string;
+/** The agents occupying A and B — the matcher compares a grant against these now. */
+let AGENT_A: string;
+let AGENT_B: string;
 
 let rooms: Array<{ alias: string; name: string; invite?: string }> = [];
 let spaces: Array<{ name: string }> = [];
@@ -65,6 +71,9 @@ const post = (path: string, body: unknown) =>
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "mission@example.com", name: "Owner" });
+  OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mission-it-owner", userId: OWNER });
+  AGENT_A = await createPrincipal({ kind: "agent", handle: "mission-it-agent-a" });
+  AGENT_B = await createPrincipal({ kind: "agent", handle: "mission-it-agent-b" });
   const tenant = await resolveTenantForUser(OWNER);
   await rawSql`DELETE FROM matrix_mission_members`;
   await rawSql`DELETE FROM matrix_missions`;
@@ -73,16 +82,24 @@ beforeAll(async () => {
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, 'mission-box', 'mission-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
-  for (const [id, key] of [[A, "hermes:one"], [B, "openclaw:two"]] as const) {
+  for (const [id, key, agent] of [[A, "hermes:one", AGENT_A], [B, "openclaw:two", AGENT_B]] as const) {
     await rawSql`
-      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
+      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
       VALUES (${id}, ${tenant}, ${OWNER}, ${NODE}, ${key.split(":")[0]}, ${key}, 'leaf', ${key},
-              '["acp"]'::jsonb, now(), now())`;
+              '["acp"]'::jsonb, ${agent}, now(), now())`;
   }
-  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
+  // `principal_identities.principal_id` is a foreign key onto `principals.id`
+  // now, not the Better Auth user id — the row this route reads to invite the
+  // human back into their own mission has to be keyed by the real principal.
+  // Only the 'matrix' row is cleared: `createPrincipal` above already wrote
+  // this principal's 'better-auth' row, and deleting every system's row for
+  // this principal_id would take that one with it — `principalForUser` would
+  // then find nobody, and the route would fail closed for a caller who really
+  // does have a principal.
+  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'matrix'`;
   await rawSql`
     INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-    VALUES ('pid_mission', ${OWNER}, 'matrix', ${OWNER_MXID}, now())`;
+    VALUES ('pid_mission', ${OWNER_PRINCIPAL}, 'matrix', ${OWNER_MXID}, now())`;
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -95,7 +112,7 @@ beforeEach(async () => {
   await rawSql`DELETE FROM matrix_missions`;
   await rawSql`DELETE FROM matrix_spaces`;
   await rawSql`UPDATE stations SET purpose = NULL WHERE node_id = ${NODE}`;
-  await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*", "agentpod:*/openclaw:*"], mayGrantReach: false });
+  await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_A, AGENT_B], mayGrantReach: false });
 });
 
 afterAll(async () => {
@@ -104,9 +121,10 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_mission_members`;
     await rawSql`DELETE FROM matrix_missions`;
     await rawSql`DELETE FROM matrix_spaces`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER}`;
+    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER_PRINCIPAL}`;
     await rawSql`DELETE FROM stations WHERE id IN (${A}, ${B})`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('mission-it-owner', 'mission-it-agent-a', 'mission-it-agent-b')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
   } catch {
@@ -133,16 +151,20 @@ describe("POST /api/missions", () => {
     // would be an error on some homeservers and noise on all of them.
     await post("/missions", { name: "Q3 migration", stationIds: [A, B] });
 
+    // Built from each occupying agent's principal handle now, not from where
+    // the station runs. A (agent-a) is the first member in `stationIds`, so it
+    // speaks for the room and is never on its own invite list.
     const invitees = invited.map((i) => i.invitee);
-    expect(invitees).toContain("@agent_mission-box_openclaw-two:id.agentpod.dev");
+    expect(invitees).toContain("@agent_mission-it-agent-b:id.agentpod.dev");
     expect(invitees).toContain(OWNER_MXID);
-    expect(invitees).not.toContain("@agent_mission-box_hermes-one:id.agentpod.dev");
+    expect(invitees).not.toContain("@agent_mission-it-agent-a:id.agentpod.dev");
   });
 
   test("refuses a station the caller may not dispatch", async () => {
     // Putting an agent in a room is putting it to work. The grant that governs
     // dispatching it governs this too.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    // Covers A (agent-a) but not B (agent-b).
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_A], mayGrantReach: false });
 
     const res = await post("/missions", { name: "Half a mission", stationIds: [A, B] });
 

@@ -23,7 +23,7 @@
 
 import { sql } from "drizzle-orm";
 import { pgTable, text, timestamp, uniqueIndex, index, check } from "drizzle-orm/pg-core";
-import { user } from "./auth";
+import { principals } from "./organization";
 
 /**
  * The systems a principal can be known to.
@@ -31,9 +31,11 @@ import { user } from "./auth";
  * Deliberately a CHECK rather than a Postgres enum: adding a system should be a
  * one-line migration, and an enum makes removing one painful. `org-plane` is
  * listed before it exists, because the whole point is that adopting it is a
- * data move.
+ * data move. `better-auth` is here because Better Auth's user is now one
+ * identity of one kind of principal, reached like any other system rather than
+ * being what a principal structurally is.
  */
-export const IDENTITY_SYSTEMS = ["matrix", "kaambaan", "org-plane"] as const;
+export const IDENTITY_SYSTEMS = ["better-auth", "matrix", "kaambaan", "agentpod", "org-plane"] as const;
 export type IdentitySystem = (typeof IDENTITY_SYSTEMS)[number];
 
 export const principalIdentities = pgTable(
@@ -41,10 +43,10 @@ export const principalIdentities = pgTable(
   {
     id: text("id").primaryKey(),
 
-    /** The local principal. Today a Better Auth user; a canonical principal later. */
+    /** The principal this identity belongs to. */
     principalId: text("principal_id")
       .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .references(() => principals.id, { onDelete: "cascade" }),
 
     /** Which system knows them. */
     system: text("system").notNull(),
@@ -85,7 +87,7 @@ export const principalIdentities = pgTable(
 
     check(
       "principal_identities_system_known",
-      sql`${t.system} IN ('matrix', 'kaambaan', 'org-plane')`
+      sql`${t.system} IN ('better-auth', 'matrix', 'kaambaan', 'agentpod', 'org-plane')`
     ),
 
     /** An empty external id is not a mapping; it is a row that looks like one. */

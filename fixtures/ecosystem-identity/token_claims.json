@@ -1,8 +1,8 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 4,
-  "authoredAt": "2026-08-15",
-  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row",
+  "version": 5,
+  "authoredAt": "2026-08-30",
+  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3)",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
@@ -46,18 +46,17 @@
     {
       "claim": "mayDispatch",
       "type": "string[]",
-      "meaning": "First half of the control pair — which agents this principal may dispatch. Values are NAMESPACED by plane, and AgentPod's also name a node: `agentpod:<nodeName>/<stationKey>`, `kaambaan:<agentId>`.",
+      "meaning": "First half of the control pair — which agents this principal may dispatch. Values are bare principal ids, matched by EQUALITY. A grant no longer names an agent per plane with a namespaced pattern; it enumerates the `prn_…` ids of the agents it covers.",
       "required": true,
-      "grammar": "^[a-z][a-z0-9-]*:.+$",
+      "grammar": "^prn_[0-9a-f]{20}$",
+      "crossRef": "id_grammar.json → agentpod.principal",
       "valueRules": {
-        "namespaced": "Every value carries a plane prefix. An UNPREFIXED value matches nothing anywhere — that was the retired CONTROL_PAIR_GRANTS format, and letting it keep working would mean a half-migrated deployment enforcing two different rules depending on which reader ran.",
-        "unknownNamespaceIsIgnored": "A consumer IGNORES a namespace it does not recognise; it must never deny on one. A plane that refused what it did not understand would break the day a third plane appeared, and a claim is read by more planes over time, not fewer.",
-        "wildcard": "One trailing `*` per segment. In the station half it may not cross the `:` it was written inside, so `hermes:*` never reaches an OpenClaw station.",
+        "equality": "A value matches a principal id if and only if it is that id, character for character. There is no pattern language: `*` is not a wildcard here, it is a string that will never equal a real id. Patterns were deleted, not deprecated, because they matched things nobody intended — `hermes:*` silently spanned nodes, and `agentpod:*/hermes` reached a root station that should never have existed and was removed on 2026-08-30.",
+        "unrecognisedIsIgnored": "A consumer IGNORES a value that is not a `prn_…` id; it must never deny on one. A claim is read by more planes over time, and a plane that refused what it did not understand would break the day a third one appeared. The `prn_` prefix is the namespace now, so 'ignore an unrecognised value, never deny it' keeps working with no separate namespace grammar to check it against.",
         "emptyDenies": "`[]` is a decision, and the decision is no. It is what an operator writes to suspend someone without deleting their grant.",
-        "agentpodNamesANode": "A station key is NOT unique across the fleet — uniqueness is (node, key), and `opencode:c52ddf65` exists on two nodes in production. So an agentpod value names both: `agentpod:molt-bot/hermes:*` is Hermes stations on molt-bot, `agentpod:*/hermes:*` is Hermes stations anywhere. A two-part value (`agentpod:hermes:*`) cannot say which node it meant and MATCHES NOTHING — reading it as 'any node' is the over-grant this shape removes.",
-        "nodeNamesAreUnique": "Within a tenant, by construction: enrolment suffixes a hostname collision (`molt-bot`, `molt-bot-2`) and a unique index enforces it. Names rather than ids because a grant must be readable by whoever writes it."
+        "unassignedStationIsNobodys": "A station occupied by no principal has no id to enumerate, so no grant can name it — it is dispatchable by nobody. That is a behaviour change from the per-plane, wildcard-bearing form this claim used to carry."
       },
-      "source": "charter decisions/2026-08-15-a-grant-names-an-agent-per-plane.md"
+      "source": "charter decisions/2026-08-30-an-agent-is-a-principal.md §3"
     },
     {
       "claim": "mayGrantReach",
@@ -116,16 +115,12 @@
       "why": "A token that verifies but names no tenant is not a weaker caller, it is an unresolvable one. Refuse it rather than falling back to a default boundary."
     },
     {
-      "case": "unprefixed-mayDispatch-value",
-      "why": "`hermes:*` with no plane prefix. The retired format; it must match nothing rather than be read as this plane's."
-    },
-    {
       "case": "mayDispatch-absent",
       "why": "A token from an issuer that predates the control pair. A consumer must not treat absence as an empty grant, nor as an unrestricted one — it means the issuer cannot answer, and the consumer decides its own posture."
     },
     {
-      "case": "agentpod-value-without-a-node",
-      "why": "`agentpod:hermes:*` — the two-part form. It names no node, and station keys repeat across nodes, so it must match nothing rather than be read as fleet-wide."
+      "case": "wildcard-mayDispatch-value",
+      "why": "`*` or `prn_*` in mayDispatch. Patterns were deleted on 2026-08-30, not deprecated: a grant is now an enumeration of principal ids, matched by equality, and a wildcard string simply fails that check — it must never be read as 'every agent' or 'every agent of this shape'. `agentpod:*/hermes` reaching a root station that should never have existed is the evidence this removal answers."
     }
   ],
   "conditional": [

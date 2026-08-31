@@ -17,11 +17,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixAsTransactions } from "../db/schema/matrix";
 import { isBridgeUser } from "../services/matrix-as/names";
-import {
-  stationForLocalpart,
-  localpartFromUserId,
-  localpartFromAlias,
-} from "../services/matrix-as/stations";
+import { stationForAgentUserId, stationForAlias } from "../services/matrix-as/stations";
 import { recordTransaction } from "../services/matrix-as/health";
 import { createLogger } from "../utils/logger";
 
@@ -183,11 +179,10 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
       .get("/users/:userId", async (c) => {
         if (!authorised(c, deps)) return c.json({ errcode: "M_FORBIDDEN" }, 403);
 
-        const localpart = localpartFromUserId(
-          decodeURIComponent(c.req.param("userId")),
-          deps.domain
-        );
-        const station = localpart ? await stationForLocalpart(localpart) : null;
+        // An agent's user id is built from its occupying principal's handle
+        // now, not from `(nodeName, stationKey)` — see `stationForAgentUserId`.
+        const userId = decodeURIComponent(c.req.param("userId"));
+        const station = await stationForAgentUserId(userId, deps.domain);
         if (!station) return c.json({ errcode: "M_NOT_FOUND" }, 404);
 
         return c.json({}, 200);
@@ -203,9 +198,17 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
       .get("/rooms/:alias", async (c) => {
         if (!authorised(c, deps)) return c.json({ errcode: "M_FORBIDDEN" }, 403);
 
+        // Both alias shapes, through the one resolver `onProvisionAlias`
+        // uses — fix round 4. This gate used to ask `stationForLocalpart`
+        // alone, which knows only the station-derived form: an
+        // occupant-derived alias (`bridgeAliasForHandle`, the shape every
+        // occupied station's room carries now) was 404'd HERE, before
+        // `onProvisionAlias` and its two-shape lookup ever ran. Nothing live
+        // broke, because a legacy alias still resolved — but the path that
+        // creates a missing room for an agent addressed by its handle could
+        // never heal itself.
         const alias = decodeURIComponent(c.req.param("alias"));
-        const localpart = localpartFromAlias(alias, deps.domain);
-        const station = localpart ? await stationForLocalpart(localpart) : null;
+        const station = await stationForAlias(alias, deps.domain);
         if (!station) return c.json({ errcode: "M_NOT_FOUND" }, 404);
 
         if (deps.onProvisionAlias) await deps.onProvisionAlias(alias);

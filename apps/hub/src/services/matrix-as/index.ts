@@ -19,7 +19,7 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
-import { provisionStation, provisionAll } from "./provision";
+import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage } from "./inbound";
 import {
   handleGateDecision,
@@ -29,6 +29,7 @@ import {
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
+import { principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
@@ -60,26 +61,36 @@ export interface MatrixBridgeConfig {
  *
  * A turn's text is pushed to that person's own devices while it is being
  * written (see `live.ts`), so this answers "whose devices". `null` — a room
- * whose owner has no Matrix identity mapped — simply means no live view; the
- * room still gets its message.
+ * whose owner has no principal, or a principal with no Matrix identity mapped —
+ * simply means no live view; the room still gets its message.
  *
- * Looked up once per attachment rather than per chunk: this is three joins and
- * an agent can emit hundreds of chunks in a turn.
+ * Two lookups rather than one join, because `stations.userId` is a Better Auth
+ * id and `principal_identities.principal_id` is a `prn_…` value now — joining
+ * them directly would silently match nothing for every station. Still looked
+ * up once per attachment rather than per chunk: an agent can emit hundreds of
+ * chunks in a turn.
  */
 async function readerForRoom(roomId: string): Promise<string | null> {
   const [row] = await db
-    .select({ externalId: principalIdentities.externalId })
+    .select({ userId: stations.userId })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
-    .innerJoin(
-      principalIdentities,
+    .where(eq(matrixRooms.roomId, roomId));
+  if (!row) return null;
+
+  const principal = await principalForUser(row.userId);
+  if (!principal) return null;
+
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
       and(
-        eq(principalIdentities.principalId, stations.userId),
+        eq(principalIdentities.principalId, principal.id),
         eq(principalIdentities.system, "matrix")
       )
-    )
-    .where(eq(matrixRooms.roomId, roomId));
-  return row?.externalId ?? null;
+    );
+  return identity?.externalId ?? null;
 }
 
 export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
@@ -258,13 +269,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     },
 
     async onProvisionAlias(alias: string) {
-      // The homeserver asks about an alias when somebody tried to resolve it.
-      // Answering yes without creating the room would send them somewhere that
-      // is not there.
-      const { stationForLocalpart, localpartFromAlias } = await import("./stations");
-      const localpart = localpartFromAlias(alias, cfg.domain);
-      const station = localpart ? await stationForLocalpart(localpart) : null;
-      if (station) await provisionStation(station.stationId, provisionDeps);
+      // Both alias shapes, resolved by the same `stationForAlias` the route
+      // in front of this one gates on — fix round 4. Round 3 wrote the
+      // two-shape lookup out longhand here, and the route kept its own
+      // narrower one, which is how an occupant-derived alias came to be
+      // 404'd before this ever ran.
+      await provisionStationForAlias(alias, provisionDeps);
     },
   };
 }

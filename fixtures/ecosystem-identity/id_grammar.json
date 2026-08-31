@@ -312,6 +312,68 @@
         { "value": "f47ac10b-58cc-4372-a567", "reason": "too-short" },
         { "value": "", "reason": "empty" }
       ]
+    },
+
+    {
+      "entity": "agentpod.principal",
+      "owner": "agentpod",
+      "prefix": "prn",
+      "grammar": "^prn_[0-9a-f]{20}$",
+      "grammarSource": "agentpod packages/contract/src/ids.ts — PrincipalId",
+      "mintedAs": "^prn_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('prn')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3.",
+      "note": "A suite principal — human, agent or service — the type `agentpod.user`'s bare UUID never was. Twenty lowercase hex, deliberately NOT a hyphenated UUID like agentpod.station: kaambaan's id schema is ^<prefix>_[A-Za-z0-9]{6,}$, whose alphabet has no hyphen, and a principal id crosses that seam on every grant.",
+      "accept": [
+        { "value": "prn_0123456789abcdef0123", "mint": true },
+        { "value": "prn_ffffffffffffffffffff", "mint": true }
+      ],
+      "reject": [
+        { "value": "org_0123456789abcdef0123", "reason": "other-entity", "note": "an AgentPod organization id, minted from the same 20-hex family" },
+        { "value": "prn_0123456789abcdef012", "reason": "too-short" },
+        { "value": "prn_0123456789ABCDEF0123", "reason": "wrong-alphabet", "note": "uppercase hex is never minted" },
+        { "value": "prn_01234567-89ab-cdef-0123-456789abcdef", "reason": "wrong-alphabet", "note": "hyphenated UUID — the family kaambaan's declared alphabet would reject on arrival, exactly the agentpod.station scar this entity does not repeat" },
+        { "value": "principal_0123456789abcdef0123", "reason": "wrong-prefix", "note": "the spelled-out word, not the declared prefix" },
+        { "value": "prn_", "reason": "prefix-only" }
+      ]
+    },
+
+    {
+      "entity": "agentpod.organization",
+      "owner": "agentpod",
+      "prefix": "org",
+      "grammar": "^org_[0-9a-f]{20}$",
+      "grammarSource": "agentpod packages/contract/src/ids.ts — OrganizationId",
+      "mintedAs": "^org_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('org')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3. The migration's bootstrap row is deterministic (BOOTSTRAP_ORG_ID), not minted — the same exception tenants.ts documents for BOOTSTRAP_TENANT_ID.",
+      "note": "Minted by the hub, which IS the Organization plane until the plane is extracted. tenants.external_id carries this value with external_source = 'org-plane'.",
+      "accept": [
+        { "value": "org_0123456789abcdef0123", "mint": true }
+      ],
+      "reject": [
+        { "value": "prn_0123456789abcdef0123", "reason": "other-entity", "note": "an AgentPod principal id, minted from the same 20-hex family" },
+        { "value": "org_0123456789abcdef012", "reason": "too-short" },
+        { "value": "org_0123456789ABCDEF0123", "reason": "wrong-alphabet", "note": "uppercase hex is never minted" },
+        { "value": "org_", "reason": "prefix-only" }
+      ]
+    },
+
+    {
+      "entity": "kaambaan.gate",
+      "owner": "kaambaan",
+      "prefix": "gate",
+      "grammar": "^gate_[A-Za-z0-9]{6,}$",
+      "grammarSource": "kaambaan apps/api/src/board/board-do.ts createGate() — newId('gate')",
+      "mintedAs": "^gate_[A-Za-z0-9]{16}$",
+      "mintSource": "kaambaan newId('gate')",
+      "note": "Absent from this corpus until 2026-08-30 although it crosses a repo boundary on every projected approval. kaambaan#34's sketch proposed `gat_`, which is why this entry exists — the prefix registry below already claims `gate` for kaambaan, but no entity carried its grammar until now.",
+      "accept": [
+        { "value": "gate_4e8b1c2d3f4a5b6c", "mint": true }
+      ],
+      "reject": [
+        { "value": "gat_4e8b1c2d3f4a5b6c", "reason": "wrong-prefix", "note": "kaambaan#34's rejected sketch" },
+        { "value": "gate_", "reason": "prefix-only" },
+        { "value": "gate_short", "reason": "too-short" }
+      ]
     }
   ],
 

@@ -5,12 +5,17 @@
    * Edits one principal's control pair — what they may dispatch, and whether
    * they may grant an agent its reach.
    *
-   * The form is deliberately a list of exact strings rather than a set of
-   * checkboxes over live stations. A grant outlives the station it names: nodes
-   * are reprovisioned, stations are re-adopted, and a permission that quietly
-   * disappeared with its station would be a silent widening or narrowing nobody
-   * ordered. Live stations appear as *suggestions* instead, so the common case is
-   * one click and the uncommon case is still expressible.
+   * The form is deliberately a list of exact ids rather than a set of checkboxes
+   * over the live directory. A grant outlives the thing it names — an agent can
+   * be retired, a principal can be deleted — and a permission that quietly
+   * disappeared with it would be a silent narrowing nobody ordered, just as a
+   * checkbox list would make a grant on an id this hub does not know
+   * unexpressible. Known agents appear as *suggestions* instead, so the common
+   * case is one click and the uncommon case is still typable.
+   *
+   * A value is one agent's principal id and nothing else. There are no
+   * wildcards and no plane prefixes; `agentpod:<node>/<stationKey>` is deleted,
+   * not deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3).
    */
   import * as Dialog from "$lib/components/ui/dialog";
   import { Button } from "$lib/components/ui/button";
@@ -31,8 +36,11 @@
     open: boolean;
     principal: GrantPrincipal | null;
     grant: Grant;
-    /** Live `agentpod:<node>/<stationKey>` values, offered as suggestions. */
-    stationValues: string[];
+    /**
+     * The agents this fleet knows, offered as suggestions — `id` is what goes
+     * into the grant, `label` is what a person can recognise.
+     */
+    agentOptions: Array<{ id: string; label: string }>;
     onSaved: () => void;
   }
 
@@ -40,7 +48,7 @@
     open = $bindable(false),
     principal,
     grant,
-    stationValues = [],
+    agentOptions = [],
     onSaved,
   }: Props = $props();
 
@@ -61,7 +69,16 @@
     }
   });
 
-  let unusedSuggestions = $derived(stationValues.filter((v) => !values.includes(v)).slice(0, 8));
+  let unusedSuggestions = $derived(agentOptions.filter((a) => !values.includes(a.id)).slice(0, 8));
+
+  /**
+   * A recognisable name for an id, when this hub knows one.
+   *
+   * The id itself is always shown, never replaced by the label: this is the
+   * exact string that will be stored and compared by equality, and a row that
+   * showed only "Quill" would hide a typo'd id that grants nothing.
+   */
+  let labelOf = $derived((id: string) => agentOptions.find((a) => a.id === id)?.label ?? null);
 
   function addValue(value: string): boolean {
     const trimmed = value.trim();
@@ -133,6 +150,9 @@
                 <li>
                   <Badge variant="outline" class="gap-1 font-mono text-xs">
                     {value}
+                    {#if labelOf(value)}
+                      <span class="font-sans text-muted-foreground">· {labelOf(value)}</span>
+                    {/if}
                     <button
                       type="button"
                       aria-label="Remove value {value}"
@@ -154,7 +174,7 @@
             <Input
               id="grant-value"
               bind:value={draft}
-              placeholder="agentpod:node/hermes:agent — or kaambaan:agt_…"
+              placeholder="prn_0123456789abcdef0123"
               class="font-mono text-xs"
               onkeydown={(e: KeyboardEvent) => {
                 if (e.key === "Enter") {
@@ -169,20 +189,22 @@
             <p class="text-xs text-destructive" role="alert">{problem}</p>
           {:else}
             <p class="text-xs text-muted-foreground">
-              An AgentPod value names a node as well as a station — station keys repeat across
-              nodes. Fleet-wide is written out: <code>agentpod:*/hermes:*</code>.
+              One agent per value, named by its principal id — <code>prn_</code> and 20 hex
+              characters. Matched by equality: there are no wildcards, so granting three agents
+              means three values.
             </p>
           {/if}
 
           {#if unusedSuggestions.length > 0}
             <div class="flex flex-wrap gap-1 pt-1">
-              {#each unusedSuggestions as suggestion (suggestion)}
+              {#each unusedSuggestions as suggestion (suggestion.id)}
                 <button
                   type="button"
-                  class="rounded border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-primary"
-                  onclick={() => addValue(suggestion)}
+                  class="rounded border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground hover:border-primary hover:text-primary"
+                  onclick={() => addValue(suggestion.id)}
+                  title={suggestion.id}
                 >
-                  + {suggestion}
+                  + {suggestion.label}
                 </button>
               {/each}
             </div>

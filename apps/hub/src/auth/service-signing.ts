@@ -37,7 +37,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { config } from "../config";
 import { db } from "../db/drizzle";
 import { serviceSigningKeys } from "../db/schema/service-keys";
-import { buildTokenPayload } from "./jwt-claims";
+import { buildTokenPayload, type TokenPayload } from "./jwt-claims";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("service-signing");
@@ -109,6 +109,63 @@ export async function servicePublicJwks(): Promise<JWK[]> {
   return rows.map((r) => JSON.parse(r.publicJwk) as JWK);
 }
 
+/**
+ * The only claim `signServiceToken`'s caller may add on top of a built
+ * payload. Narrowed to this one shape — not `Record<string, unknown>` — so
+ * that overwriting `principalKind`, `tenant`, `mayDispatch` or
+ * `mayGrantReach` is a compile error, not a convention a caller has to
+ * remember. RFC 8693's actor claim: who minted this token, distinct from
+ * `sub`, who it is minted for.
+ */
+export interface ActClaim {
+  act: { sub: string };
+}
+
+export interface SignServiceTokenInput {
+  /**
+   * Already-built claims. Never assembled here — the one thing every caller
+   * of this function must share is that `buildTokenPayload` produced them,
+   * so nobody can carry authority its grant does not give.
+   */
+  payload: TokenPayload;
+  /** Becomes `sub`. Kept apart from `payload` so a caller cannot forget it. */
+  subject: string;
+  /** A `jose` duration string, e.g. `"120s"` or the shared `TOKEN_TTL`. */
+  ttl: string;
+  /**
+   * Adds `act` to the signed body — nothing else, and by type rather than by
+   * discipline: `payload` is spread LAST below, so even a widened caller in
+   * future could not make this override a built claim, only add to it.
+   */
+  extraClaims?: ActClaim;
+}
+
+/**
+ * Sign a set of claims with this hub's service signing key.
+ *
+ * Pulled out of `mintPrincipalAssertion` so a second caller — the
+ * station-token exchange (`routes/station-token.ts`), which mints an agent's
+ * OWN token rather than an assertion of an absent human — shares the same key
+ * management (`activeKey`, its lazy creation, `servicePublicJwks`) instead of
+ * re-deriving it. The two callers differ only in TTL and in `act.sub`.
+ */
+export async function signServiceToken(input: SignServiceTokenInput): Promise<string> {
+  const key = await activeKey();
+  const privateKey = await importJWK(key.privateJwk, ALG);
+
+  // `payload` spread LAST: `extraClaims` can only ever add `act`, by type —
+  // this ordering means even a mistaken future widening of `ActClaim` could
+  // not let an extra claim overwrite a built one, only merge under it.
+  return new SignJWT({ ...(input.extraClaims ?? {}), ...input.payload })
+    .setProtectedHeader({ alg: ALG, kid: key.kid })
+    .setSubject(input.subject)
+    .setIssuedAt()
+    .setIssuer(config.publicUrl)
+    .setAudience(config.publicUrl)
+    .setExpirationTime(input.ttl)
+    .sign(privateKey);
+}
+
 export interface AssertionInput {
   /**
    * The principal being asserted.
@@ -132,19 +189,11 @@ export interface AssertionInput {
  * token would not.
  */
 export async function mintPrincipalAssertion(input: AssertionInput): Promise<string> {
-  const payload = await buildTokenPayload({ user: { id: input.principalId } });
-  const key = await activeKey();
-  const privateKey = await importJWK(key.privateJwk, ALG);
-
-  return new SignJWT({
-    ...payload,
-    act: { sub: input.actor ?? BRIDGE_ACTOR },
-  })
-    .setProtectedHeader({ alg: ALG, kid: key.kid })
-    .setSubject(input.principalId)
-    .setIssuedAt()
-    .setIssuer(config.publicUrl)
-    .setAudience(config.publicUrl)
-    .setExpirationTime(ASSERTION_TTL)
-    .sign(privateKey);
+  const payload = await buildTokenPayload({ principalId: input.principalId });
+  return signServiceToken({
+    payload,
+    subject: input.principalId,
+    ttl: ASSERTION_TTL,
+    extraClaims: { act: { sub: input.actor ?? BRIDGE_ACTOR } },
+  });
 }

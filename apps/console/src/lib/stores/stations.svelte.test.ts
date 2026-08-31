@@ -29,6 +29,7 @@ const mockStationRow = {
   workspacePath: "/home/user/workspace",
   capabilities: ["health", "logs"],
   matrixId: null, purpose: null,
+  principalId: null,
   adoptedAt: new Date("2026-06-22T00:00:00Z"),
   createdAt: new Date("2026-06-22T00:00:00Z"),
 };

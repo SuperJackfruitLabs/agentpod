@@ -5,6 +5,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 
@@ -26,6 +27,12 @@ const OWNER = "test-user-station-matrix";
 const NODE = "node_station_matrix";
 const STATION = "station_station_matrix";
 const DOMAIN = "id.agentpod.dev";
+
+let OWNER_PRINCIPAL: string;
+/** The agent occupying STATION — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+/** Some other agent, granted where a test wants to prove the scope check is real. */
+const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 let provisioned: string[] = [];
 let issued: Array<{ localpart: string }> = [];
@@ -78,6 +85,8 @@ const post = (path: string) => app().request(`/api${path}`, { method: "POST" });
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: OWNER, email: "station-matrix@example.com", name: "Owner" });
+  OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "station-matrix-it-owner", userId: OWNER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "station-matrix-it-agent" });
   const tenant = await resolveTenantForUser(OWNER);
   await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
@@ -86,9 +95,9 @@ beforeAll(async () => {
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, 'sm-box', 'sm-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
   await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
     VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'hermes', 'hermes:analyst-echo', 'leaf', 'analyst-echo',
-            '["acp"]'::jsonb, now(), now())`;
+            '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -106,8 +115,10 @@ afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${OWNER_PRINCIPAL}`;
+    await rawSql`DELETE FROM principal_identities WHERE external_id = ${OWNER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('station-matrix-it-owner', 'station-matrix-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
   } catch {
@@ -121,8 +132,15 @@ describe("POST /api/stations/:id/matrix/identity", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { mxid: string; alias: string; mode: string };
-    expect(body.mxid).toBe("@agent_sm-box_hermes-analyst-echo:id.agentpod.dev");
-    expect(body.alias).toBe("#agentpod_sm-box_hermes-analyst-echo:id.agentpod.dev");
+    // The mxid is built from the occupying agent's principal handle, not from
+    // where the station runs (`charter` → the-mission decisions on an
+    // agent-is-a-principal) — and so, since fix round 3, is the room's alias.
+    // This asserted the station-derived `#agentpod_sm-box_hermes-analyst-echo`
+    // until fix round 5, which is an address no room this endpoint can answer
+    // for has ever held: it 409s below unless the station HAS an occupant, and
+    // an occupied station's room is created at `bridgeAliasForHandle`.
+    expect(body.mxid).toBe("@agent_station-matrix-it-agent:id.agentpod.dev");
+    expect(body.alias).toBe("#agentpod_agent_station-matrix-it-agent:id.agentpod.dev");
     expect(body.mode).toBe("bridge");
     expect(provisioned).toEqual([STATION]);
     // Issuing an identity is the appservice acting in its own namespace. No
@@ -131,7 +149,7 @@ describe("POST /api/stations/:id/matrix/identity", () => {
   });
 
   test("does not need mayGrantReach, because it grants nothing", async () => {
-    await setGrant(OWNER, { mayDispatch: [], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [], mayGrantReach: false });
 
     expect((await post(`/stations/${STATION}/matrix/identity`)).status).toBe(200);
   });
@@ -146,13 +164,36 @@ describe("POST /api/stations/:id/matrix/identity", () => {
     const res = await post("/stations/station_does_not_exist/matrix/identity");
     expect(res.status).toBe(404);
   });
+
+  test("reports the alias the station's room is ACTUALLY reachable at, not one re-derived here", async () => {
+    // A room that already exists, at an address neither derivation would
+    // produce today — an ordinary state on the deployed box, where the 32
+    // live rooms were created before a room's alias followed its occupant.
+    // Re-deriving would misreport every one of them; the stored alias is the
+    // only thing that is true about where the room actually is.
+    const tenant = await resolveTenantForUser(OWNER);
+    const storedAlias = "#agentpod_sm-box_hermes-analyst-echo-legacy:id.agentpod.dev";
+    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    await rawSql`
+      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, principal_id, created_at)
+      VALUES (${"!sm-legacy:" + DOMAIN}, ${tenant}, ${STATION}, ${storedAlias}, ${AGENT_PRINCIPAL}, now())`;
+
+    try {
+      const body = (await (await post(`/stations/${STATION}/matrix/identity`)).json()) as {
+        alias: string;
+      };
+      expect(body.alias).toBe(storedAlias);
+    } finally {
+      await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    }
+  });
 });
 
 describe("POST /api/stations/:id/matrix/credentials", () => {
   test("requires mayGrantReach, because a credential IS reach", async () => {
     // Dispatch permission is not enough: handing an agent an access token is
     // the definition of granting it reach.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
 
@@ -161,13 +202,13 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
   });
 
   test("requires the station to be in scope as well", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: true });
 
     expect((await post(`/stations/${STATION}/matrix/credentials`)).status).toBe(403);
   });
 
   test("mints a token and flips the station to harness mode", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
 
@@ -181,7 +222,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
   });
 
   test("never writes the token it just issued into a log", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
     await post(`/stations/${STATION}/matrix/credentials`);
 
@@ -193,7 +234,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
   test("rotates rather than failing when the identity already exists", async () => {
     // The identity is provisioned long before anyone asks for credentials, so
     // "already registered" is the normal case, not an error.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     identityExists = true;
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
@@ -211,7 +252,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     // not a 500, and not a silent no-op that leaves a harness without a token.
     canRotate = false;
     identityExists = true;
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
 
@@ -225,7 +266,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     // simply does not hold its own credentials. Branching on the mode sent every
     // station on a real deployment down the register path, where all 32 of them
     // failed M_USER_IN_USE and the operator saw a 500.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     await rawSql`UPDATE stations SET matrix_identity_mode = 'bridge' WHERE id = ${STATION}`;
     identityExists = true;
 
@@ -238,7 +279,7 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
   });
 
   test("registers, without rotating, when the identity is genuinely new", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: true });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
     identityExists = false;
 
     const res = await post(`/stations/${STATION}/matrix/credentials`);
