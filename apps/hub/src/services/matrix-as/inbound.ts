@@ -104,6 +104,7 @@ async function roomContext(roomId: string) {
       roomId: matrixRooms.roomId,
       sessionId: matrixRooms.acpSessionId,
       stationId: stations.id,
+      stationUserId: stations.userId,
       stationKey: stations.stationKey,
       identityMode: stations.matrixIdentityMode,
       nodeName: nodes.name,
@@ -270,9 +271,23 @@ export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps):
       // One session per room, not per message: a conversation is a
       // conversation, and a session per message would throw away the agent's
       // context between two consecutive sentences.
+      // The station's OWNER, not the sender's principal. `createSession` looks
+      // the station up with `getStation(userId, stationId)`, which scopes on
+      // `stations.user_id` — a Better Auth id. Passing a `prn_…` matched no
+      // row, so every bridged room failed with "Station not found." after the
+      // hub had already received, resolved and authorised the message.
+      //
+      // Authorisation still belongs to the principal: the control-pair check
+      // above is what decides whether this sender may dispatch this agent, and
+      // it must stay that way — a grant can cover a station its holder does not
+      // own. What this line settles is only which user the station is read as.
+      //
+      // The cost, recorded rather than hidden: `acp_sessions.user_id` now names
+      // the owner, so a transcript no longer says WHICH principal asked. That
+      // needs its own column, not this one doing two jobs.
       const session = await deps.acp.createSession({
         stationId: room.stationId,
-        userId: principalId,
+        userId: room.stationUserId,
         mode: "default",
       });
       sessionId = session.id;

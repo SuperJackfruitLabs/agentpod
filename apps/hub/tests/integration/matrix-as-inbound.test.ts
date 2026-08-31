@@ -152,6 +152,7 @@ beforeAll(async () => {
       VALUES (${`pid_${p}`}, ${p}, 'matrix', ${mxid}, now())`;
   }
 
+
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -196,9 +197,16 @@ describe("an inbound room message", () => {
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
     expect(created).toHaveLength(1);
+    // The station is scoped on `stations.user_id`, a Better Auth id. Asserting
+    // only that A session was created is what let the bridge pass a `prn_…`
+    // here and fail on every real room: `getStation` matched nothing, and the
+    // hub reported "Station not found." for a message it had just authorised.
+    expect(created[0]!.userId).toBe(OWNER);
+    expect(created[0]!.userId).not.toBe(OWNER_PRINCIPAL);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.text).toBe("status?");
   });
+
 
   test("attaches the room to the session, or the answer has nowhere to go", async () => {
     // The gap that live verification found: a session was created and prompted
@@ -361,14 +369,30 @@ describe("an inbound room message", () => {
     expect(prompts[0]!.text).toBe("deploy  the thing\nnow");
   });
 
-  test("prompts as the principal who sent it, not as the station's owner", async () => {
-    // The ACP session belongs to whoever is talking, so the transcript and the
-    // control pair both attribute the turn correctly.
+  test("opens the session as the station's OWNER, even when another principal sent it", async () => {
+    // This test used to assert the opposite — that the session is opened as the
+    // sending principal, "so the transcript and the control pair both attribute
+    // the turn correctly". The intent was right and the mechanism was not:
+    // `createSession` resolves the station with `getStation(userId, stationId)`,
+    // which scopes on `stations.user_id`. A `prn_…` matches no row there, so in
+    // production EVERY bridged room answered "Station not found." for a message
+    // the hub had already received, resolved and authorised. The fake here
+    // accepted any id, which is why the suite stayed green while no real room
+    // worked.
+    //
+    // Authorisation is still the principal's: OTHER_PRINCIPAL dispatches this
+    // station on a grant, and is not its owner. Only the station LOOKUP uses
+    // the owner.
+    //
+    // What is genuinely lost is attribution — `acp_sessions.user_id` no longer
+    // records which principal asked. That needs its own column rather than this
+    // one serving two masters, and it is written down as a gap, not fixed here.
     await setGrant(OTHER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OTHER_MXID, "hello"), deps());
 
-    expect(created[0]!.userId).toBe(OTHER_PRINCIPAL);
+    expect(created[0]!.userId).toBe(OWNER);
+    expect(created[0]!.userId).not.toBe(OTHER_PRINCIPAL);
   });
 });
 
