@@ -152,6 +152,9 @@ describe("stations record which agent occupies them", () => {
     const second = await seedAgentPrincipals();
     expect(first.created).toBeGreaterThan(0);
     expect(second.created).toBe(0); // re-running must not mint a second identity
+    // The second run's "nothing to do" must be a reported number, not silence
+    // — everything the first run touched now counts as skipped.
+    expect(second.skipped).toBeGreaterThanOrEqual(first.created);
 
     // The station this suite set up is one of the ones seeding must have
     // reached — otherwise `first.created > 0` could be satisfied by some
