@@ -144,8 +144,20 @@ describe("a node exchanges for one of its stations", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as { token: string; expiresIn: number };
     expect(typeof body.expiresIn).toBe("number");
-    expect(body.expiresIn).toBeGreaterThan(0);
+    // The ACTUAL bound, not its sign. TOKEN_TTL = "5m" is the revocation SLA
+    // (jwt-claims.ts: verification is offline, there is no revocation list,
+    // "the expiry IS the revocation SLA") — it is precisely how long a
+    // suspended principal's already-issued token keeps working. Asserting
+    // only `> 0` would let a drift to "5h" pass the whole suite in silence.
+    // Bounded rather than exact for the same reason service-signing.test.ts
+    // bounds its 120s: iat and exp are wall-clock seconds and minting costs
+    // real time.
+    expect(body.expiresIn).toBeGreaterThan(280);
+    expect(body.expiresIn).toBeLessThanOrEqual(300);
     const claims = decodeJwt(body.token);
+    // Same bound read off the token itself, since `expiresIn` is a number the
+    // response computes and a consumer verifying offline reads only these.
+    expect((claims.exp as number) - (claims.iat as number)).toBe(body.expiresIn);
     expect(claims.sub).toBe(agentPrincipalId);
     expect(claims.principalKind).toBe("agent");
     // The node minted this, the agent did not present a credential of its
