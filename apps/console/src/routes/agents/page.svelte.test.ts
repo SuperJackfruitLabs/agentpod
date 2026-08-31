@@ -367,6 +367,54 @@ test("Ruling 6: assigning an existing agent to an unassigned station leaves it o
   });
 });
 
+test("Ruling 6, fix round: an already-occupied station can be given a DIFFERENT existing agent — the room follows the move", async () => {
+  // Occupancy is exclusive now, so this is safe: assigning hanuman's agent
+  // to kubera's station moves it there and leaves hanuman's station empty,
+  // rather than the hub refusing or silently double-occupying.
+  vi.spyOn(api, "getFleet").mockResolvedValue({ stats: mockStats, agents: mockAgents });
+  const rows = [
+    stationRow({ id: "s1", stationKey: "hermes:hanuman", displayName: "hanuman", principalId: "prn_mover" }),
+    stationRow({ id: "s2", stationKey: "hermes:kubera", displayName: "kubera", principalId: "prn_b" }),
+  ];
+  const listStationsSpy = vi.spyOn(api, "listStations").mockImplementation(async () => rows.map((r) => ({ ...r })));
+  vi.spyOn(grantsApi, "listPrincipals").mockResolvedValue([
+    { id: "prn_mover", kind: "agent", handle: "mover-writer", displayName: null, userId: null, suspendedAt: null },
+    { id: "prn_b", kind: "agent", handle: "kubera-agent", displayName: null, userId: null, suspendedAt: null },
+  ]);
+  vi.spyOn(agentsApi, "assignStationAgent").mockImplementation(async (stationId, principalId) => {
+    // What the hub's transaction actually does: vacate the principal's old
+    // station, then place it — reflected on the NEXT read, same as above.
+    for (const r of rows) {
+      if (r.principalId === principalId) r.principalId = null;
+    }
+    rows.find((r) => r.id === stationId)!.principalId = principalId;
+    return { stationId, principalId };
+  });
+
+  const { findByRole, getByRole, getByTestId } = render(AgentsPage);
+
+  await waitFor(() => expect(getByTestId("assigned-stations")).toBeTruthy());
+
+  await fireEvent.click(await findByRole("button", { name: /assign a different agent to kubera/i }));
+  const trigger = await findByRole("button", { name: /^agent to assign$/i });
+  await fireEvent.pointerDown(trigger, { pointerId: 1, button: 0, pointerType: "mouse" });
+  // Labelled with where it is moving FROM — an operator picking this sees a
+  // move, not a spare agent conjured from nowhere.
+  const option = await waitFor(() => getByRole("option", { name: /mover-writer — moving from hanuman/i }));
+  await fireEvent.pointerUp(option, { pointerId: 1, button: 0, pointerType: "mouse" });
+  await fireEvent.click(getByRole("button", { name: /^assign$/i }));
+
+  await waitFor(() => {
+    expect(agentsApi.assignStationAgent).toHaveBeenCalledWith("s2", "prn_mover");
+  });
+  // Reloaded, and hanuman's OWN station now reads as unassigned — the agent
+  // actually moved, it was not merely handed a second station.
+  await waitFor(() => {
+    expect(listStationsSpy).toHaveBeenCalledTimes(2);
+    expect(getByTestId("unassigned-stations")).toBeTruthy();
+  });
+});
+
 test("?updates=1 seeds the updates-only pill pressed and shows only update-available agents", async () => {
   setSearchParam("updates", "1");
   vi.spyOn(api, "getFleet").mockResolvedValue({

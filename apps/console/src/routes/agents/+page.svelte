@@ -9,7 +9,7 @@
   import PageHeader from "$lib/components/page-header.svelte";
   import AgentTable from "$lib/components/fleet/AgentTable.svelte";
   import AgentCreate, { type StationOption } from "$lib/components/fleet/AgentCreate.svelte";
-  import AssignAgent, { type AssignStationTarget } from "$lib/components/fleet/AssignAgent.svelte";
+  import AssignAgent, { type AssignStationTarget, type AssignCandidate } from "$lib/components/fleet/AssignAgent.svelte";
   import StatusRibbon from "$lib/components/fleet/StatusRibbon.svelte";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Button } from "$lib/components/ui/button";
@@ -138,20 +138,38 @@
   );
 
   /**
-   * Agent principals nothing currently occupies a station with — the pool
-   * Ruling 6's "assign an existing agent" control offers. Filtered on
-   * currently-known occupancy (`assignments`, the same map `stationStatuses`
-   * reads) rather than on the principal directory alone: offering one that
-   * is already active elsewhere would silently orphan its current station,
-   * since the hub's assign endpoint has no opinion about where a principal
-   * was before this call.
+   * stationId → occupied station's own {id, displayName} — from
+   * `stationStatuses`, which already carries a human-readable name per
+   * station (`assignments` alone only has `stationKey`). Occupancy is
+   * exclusive as of the fix round on Task 5 (`stations_principal_id_idx`,
+   * `routes/agents-admin.ts`'s assign-is-a-move), so a principal occupies at
+   * most one station and this map is unambiguous by construction.
    */
-  let availableAgentPrincipals = $derived.by((): PrincipalSummary[] => {
-    const occupied = new Set(
-      [...assignments.values()].map((a) => a.principalId).filter((id): id is string => id !== null)
-    );
-    return [...principalsById.values()].filter((p) => p.kind === "agent" && !occupied.has(p.id));
+  let occupiedStationByPrincipal = $derived.by((): Map<string, { id: string; displayName: string }> => {
+    const map = new Map<string, { id: string; displayName: string }>();
+    for (const s of stationStatuses) {
+      if (s.kind === "active" || s.kind === "suspended") {
+        map.set(s.principal.id, { id: s.id, displayName: s.displayName });
+      }
+    }
+    return map;
   });
+
+  /**
+   * Every agent principal, occupied or not — the pool Ruling 6's "assign an
+   * existing agent" control offers. Picking an already-occupied one is now
+   * safe rather than orphaning: `routes/agents-admin.ts`'s assign endpoint
+   * vacates a principal's previous station in the same transaction it
+   * places it in a new one. Each candidate carries where it currently runs,
+   * if anywhere, so the control can label a move as a move — not filtered
+   * down to unoccupied ones, which would hide the exact capability this
+   * ruling exists to add.
+   */
+  let assignCandidates = $derived.by((): AssignCandidate[] =>
+    [...principalsById.values()]
+      .filter((p) => p.kind === "agent")
+      .map((p) => ({ principal: p, currentStation: occupiedStationByPrincipal.get(p.id) ?? null }))
+  );
 
   async function loadAssignments(nodeIds: string[]) {
     assignedNodeIds = nodeIds;
@@ -408,15 +426,25 @@
                     <a href="/admin/grants" class="underline hover:text-foreground">restore it in Grants</a>.
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  aria-label="Unassign {station.displayName}"
-                  onclick={() => openUnassign(station)}
-                >
-                  Unassign
-                </Button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    aria-label="Assign a different agent to {station.displayName}"
+                    onclick={() => openAssign({ id: station.id, displayName: station.displayName, nodeName: station.nodeName })}
+                  >
+                    Assign a different agent
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    aria-label="Unassign {station.displayName}"
+                    onclick={() => openUnassign(station)}
+                  >
+                    Unassign
+                  </Button>
+                </div>
               </li>
             {/each}
           </ul>
@@ -443,15 +471,26 @@
                   <span class="truncate text-sm">{station.displayName}</span>
                   <Badge variant="outline" class="shrink-0 font-mono text-[11px]">{station.principal.handle}</Badge>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  class="shrink-0 text-muted-foreground hover:text-destructive"
-                  aria-label="Unassign {station.displayName}"
-                  onclick={() => openUnassign(station)}
-                >
-                  Unassign
-                </Button>
+                <div class="flex shrink-0 items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-muted-foreground hover:text-foreground"
+                    aria-label="Assign a different agent to {station.displayName}"
+                    onclick={() => openAssign({ id: station.id, displayName: station.displayName, nodeName: station.nodeName })}
+                  >
+                    Assign a different agent
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="text-muted-foreground hover:text-destructive"
+                    aria-label="Unassign {station.displayName}"
+                    onclick={() => openUnassign(station)}
+                  >
+                    Unassign
+                  </Button>
+                </div>
               </li>
             {/each}
           </ul>
@@ -473,7 +512,7 @@
 <AssignAgent
   bind:open={assignOpen}
   station={assignTarget}
-  candidates={availableAgentPrincipals}
+  candidates={assignCandidates}
   onAssigned={handleAgentAssigned}
 />
 

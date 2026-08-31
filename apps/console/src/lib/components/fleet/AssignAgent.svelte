@@ -14,10 +14,17 @@
    * Reuses `GET /api/admin/principals` (via `$lib/api/grants`'s
    * `listPrincipals`) rather than a second endpoint — the same list Task 3
    * already loads to know which stations are suspended-not-dispatchable.
-   * The page passes in only the agent principals not already occupying a
-   * station; picking one already active elsewhere would silently orphan its
-   * current station, since the hub's assign endpoint has no opinion about
-   * where a principal was before.
+   *
+   * **Occupancy is exclusive — fix round.** `routes/agents-admin.ts`'s
+   * assign endpoint now vacates a principal's previous station in the same
+   * transaction it places it in a new one, which makes offering an
+   * ALREADY-occupied agent safe: picking one moves it, it does not leave two
+   * stations claiming it. The page therefore offers every agent principal,
+   * not only unoccupied ones — each candidate carries the station it
+   * currently occupies, if any, so its option reads "moving an agent" rather
+   * than "placing a spare one". The one candidate excluded here, not by the
+   * page, is the principal already at THIS station: reassigning it to
+   * itself is a real no-op the picker has no business offering.
    *
    * A suspended principal is still offered rather than filtered out — hiding
    * it would look like it does not exist, when what is actually true is that
@@ -39,11 +46,18 @@
     nodeName?: string;
   }
 
+  /** A candidate agent, and where it currently runs — if anywhere. */
+  export interface AssignCandidate {
+    principal: PrincipalSummary;
+    currentStation: { id: string; displayName: string } | null;
+  }
+
   interface Props {
     open: boolean;
     station: AssignStationTarget | null;
-    /** Agent principals offered — the page decides which ones make sense. */
-    candidates: PrincipalSummary[];
+    /** Every agent principal — occupied or not. The page decides nothing
+     *  here except which station each one is currently at. */
+    candidates: AssignCandidate[];
     onAssigned: (result: { principal: PrincipalSummary; stationId: string }) => void;
   }
 
@@ -53,6 +67,11 @@
   let isAssigning = $state(false);
   let problem = $state<string | null>(null);
 
+  // The one filter this component owns, rather than the page: whoever
+  // already occupies the TARGET station has nothing to move — offering it
+  // would be a picker option whose only effect is a no-op round trip.
+  let offered = $derived(candidates.filter((c) => c.currentStation?.id !== station?.id));
+
   $effect(() => {
     if (open) {
       selectedId = null;
@@ -61,24 +80,25 @@
     }
   });
 
-  function labelFor(p: PrincipalSummary): string {
-    return p.suspendedAt ? `${p.handle} (suspended)` : p.handle;
+  function labelFor(c: AssignCandidate): string {
+    const base = c.principal.suspendedAt ? `${c.principal.handle} (suspended)` : c.principal.handle;
+    return c.currentStation ? `${base} — moving from ${c.currentStation.displayName}` : base;
   }
 
-  function selected(): PrincipalSummary | null {
-    return candidates.find((p) => p.id === selectedId) ?? null;
+  function selected(): AssignCandidate | null {
+    return offered.find((c) => c.principal.id === selectedId) ?? null;
   }
 
   async function handleSubmit() {
-    const principal = selected();
-    if (!station || !principal || isAssigning) return;
+    const candidate = selected();
+    if (!station || !candidate || isAssigning) return;
 
     isAssigning = true;
     problem = null;
     try {
-      await assignStationAgent(station.id, principal.id);
+      await assignStationAgent(station.id, candidate.principal.id);
       open = false;
-      onAssigned({ principal, stationId: station.id });
+      onAssigned({ principal: candidate.principal, stationId: station.id });
     } catch (e) {
       // The hub's own sentence — "principal is suspended", "no such
       // principal" — reaches the operator here rather than being swallowed.
@@ -112,9 +132,9 @@
         class="space-y-4 py-2"
       >
         <Field label="Agent to assign" for="assign-agent-principal" error={problem ?? undefined}>
-          {#if candidates.length === 0}
+          {#if offered.length === 0}
             <p class="text-xs text-muted-foreground" data-testid="no-available-agents">
-              No unassigned agent principals right now — create a new one instead.
+              No other agent principals right now — create a new one instead.
             </p>
           {:else}
             <Select.Root
@@ -126,8 +146,8 @@
                 {selectedId ? labelFor(selected()!) : "Choose an agent"}
               </Select.Trigger>
               <Select.Content>
-                {#each candidates as p (p.id)}
-                  <Select.Item value={p.id}>{labelFor(p)}</Select.Item>
+                {#each offered as c (c.principal.id)}
+                  <Select.Item value={c.principal.id}>{labelFor(c)}</Select.Item>
                 {/each}
               </Select.Content>
             </Select.Root>
