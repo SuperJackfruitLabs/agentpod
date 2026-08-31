@@ -99,6 +99,14 @@ export interface MxidMigrationDeps {
    * invite-only, and an uninvited join is refused with `M_FORBIDDEN`.
    */
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /**
+   * Is the new user already in the room? Gates the invite: Matrix refuses to
+   * invite a member with `403 ... cannot invite user that is joined or banned`,
+   * so a re-run over a partially migrated fleet would fail on exactly the rooms
+   * a previous run had already fixed. Asked rather than inferred from the error,
+   * because that one message conflates "joined" (done) with "banned" (not done).
+   */
+  isJoined(userId: string, roomId: string): Promise<boolean>;
   /** Join as the new user, once invited. */
   join(userId: string, roomId: string): Promise<void>;
   /** Leave as the old user, once the new one is in and `m.direct` points at it. */
@@ -126,9 +134,12 @@ export async function migrateAgentMxids(
       continue;
     }
     // Invite before joining: the room is invite-only, and the old user is the
-    // only member with the power to let the new one in. Both calls tolerate
-    // "already done", so a re-run after a partial failure is safe.
-    await deps.invite(room.oldUserId, room.roomId, next);
+    // only member with the power to let the new one in. Skipped when the new
+    // user is already a member, which is what makes a re-run over a partially
+    // migrated fleet safe.
+    if (!(await deps.isJoined(next, room.roomId))) {
+      await deps.invite(room.oldUserId, room.roomId, next);
+    }
     // Join first. Leaving first would leave the room with no agent in it, and
     // a crash between the two would leave it that way permanently.
     await deps.join(next, room.roomId);

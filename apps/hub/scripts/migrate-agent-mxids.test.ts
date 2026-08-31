@@ -18,6 +18,7 @@ test("the new user is invited, joins, and the old one leaves — in that order",
   await migrateAgentMxids({
     rooms: async () => [{ roomId: "!r:h", handle: "writer-quill", oldUserId: "@agent_guild_hermes-writer-quill:h" }],
     invite: async (as, r, invitee) => { acts.push(`invite ${as} ${r} ${invitee}`); },
+    isJoined: async () => false,
     join: async (u, r) => { acts.push(`join ${u} ${r}`); },
     leave: async (u, r) => { acts.push(`leave ${u} ${r}`); },
     setDirect: async (u, r) => { acts.push(`direct ${u} ${r}`); },
@@ -46,6 +47,7 @@ test("a room is never joined without an invite first", async () => {
   await migrateAgentMxids({
     rooms: async () => [{ roomId: "!r:h", handle: "writer-quill", oldUserId: "@agent_guild_hermes-writer-quill:h" }],
     invite: async () => { invited = true; },
+    isJoined: async () => false,
     join: async () => {
       expect(invited).toBe(true);
     },
@@ -56,7 +58,8 @@ test("a room is never joined without an invite first", async () => {
 });
 
 test("is idempotent — a room already migrated is skipped", async () => {
-  const r = await migrateAgentMxids({ rooms: async () => [], invite: fail, join: fail, leave: fail, setDirect: fail });
+  const r = await migrateAgentMxids({ rooms: async () => [], invite: fail,
+    isJoined: async () => false, join: fail, leave: fail, setDirect: fail });
   expect(r.migrated).toBe(0);
 });
 
@@ -64,9 +67,29 @@ test("a room whose new address matches its recorded one is skipped, not re-sent"
   const r = await migrateAgentMxids({
     rooms: async () => [{ roomId: "!r:h", handle: "writer-quill", oldUserId: "@agent_writer-quill:h" }],
     invite: fail,
+    isJoined: async () => false,
+    isJoined: async () => false,
     join: fail,
     leave: fail,
     setDirect: fail,
   });
   expect(r).toEqual({ migrated: 0, skipped: 1 });
+});
+
+test("a room whose new user is already joined is not invited again", async () => {
+  // The half-migrated case: a previous run (or a hand-run probe) already put the
+  // new user in the room. Matrix refuses to invite a member — `403 ... cannot
+  // invite user that is joined or banned` — so re-running would fail on exactly
+  // the rooms an earlier run had already fixed. Found on the live fleet, on the
+  // one room of 32 that had been migrated by hand first.
+  const acts: string[] = [];
+  await migrateAgentMxids({
+    rooms: async () => [{ roomId: "!r:h", handle: "writer-quill", oldUserId: "@agent_guild_hermes-writer-quill:h" }],
+    isJoined: async () => true,
+    invite: async () => { acts.push("invite"); },
+    join: async () => { acts.push("join"); },
+    leave: async () => { acts.push("leave"); },
+    setDirect: async () => { acts.push("direct"); },
+  });
+  expect(acts).toEqual(["join", "direct", "leave"]);
 });
