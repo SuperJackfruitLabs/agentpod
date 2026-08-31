@@ -47,6 +47,13 @@ export const principals = pgTable(
     handle: text("handle").notNull(),
     displayName: text("display_name"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
+    /**
+     * When this principal stopped being allowed to act, if it has.
+     *
+     * A timestamp rather than a boolean: "since when" is the first question asked
+     * of a suspension, and a boolean cannot answer it. NULL is the normal state.
+     */
+    suspendedAt: timestamp("suspended_at"),
   },
   (t) => [
     check("principals_id_is_prn", sql`${t.id} LIKE 'prn\\_%'`),

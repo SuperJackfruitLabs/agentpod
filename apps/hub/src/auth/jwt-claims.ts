@@ -83,9 +83,13 @@ export type BuildPayloadInput = BuildPayloadSubject & {
     principalId: string
   ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
   /** Injectable for the same reason. Defaults to `principalForUser`. Used only on the `user` path. */
-  resolvePrincipal?: (userId: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
+  resolvePrincipal?: (
+    userId: string
+  ) => Promise<{ id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null>;
   /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
-  resolvePrincipalById?: (id: string) => Promise<{ id: string; kind: PrincipalKind } | null>;
+  resolvePrincipalById?: (
+    id: string
+  ) => Promise<{ id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null>;
 };
 
 /**
@@ -130,7 +134,7 @@ export type BuildPayloadInput = BuildPayloadSubject & {
  * old issuer silently authorise everything.
  */
 export async function buildTokenPayload(input: BuildPayloadInput): Promise<TokenPayload> {
-  let principal: { id: string; kind: PrincipalKind } | null;
+  let principal: { id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null;
   let who: string;
 
   if (input.principalId !== undefined) {
@@ -145,6 +149,16 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
 
   if (!principal) {
     throw new Error(`refusing to mint a token for ${who}: no principal resolved`);
+  }
+
+  // Distinguishable from the no-principal refusal above on purpose: an
+  // operator debugging a refusal needs to tell "this caller maps to
+  // nobody" apart from "this caller maps to somebody who has been shut
+  // off" — the same fail-closed reasoning applies on both subject paths, a
+  // session caller included, since a session's principal being suspended
+  // makes it exactly as suspended as an agent's.
+  if (principal.suspendedAt) {
+    throw new Error(`refusing to mint a token for ${who}: principal ${principal.id} is suspended`);
   }
 
   const resolve = input.resolveTenant ?? resolveTenantForUser;

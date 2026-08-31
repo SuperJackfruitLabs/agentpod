@@ -1,0 +1,1 @@
+ALTER TABLE "principals" ADD COLUMN "suspended_at" timestamp;

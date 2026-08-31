@@ -19,7 +19,8 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { seedAgentPrincipals } from "../../scripts/seed-agent-principals";
-import { createPrincipal, principalForUser } from "./principals";
+import { createPrincipal, principalForUser, suspendPrincipal, restorePrincipal } from "./principals";
+import { buildTokenPayload } from "../auth/jwt-claims";
 
 // Fixed handles, cleaned up below: running this suite twice against the same
 // database (no reset between runs, unlike CI) previously hit
@@ -63,6 +64,24 @@ describe("principals", () => {
   test("a user with no principal resolves to null, never to a default", async () => {
     // Falling back would hand one principal's authority to an unmapped caller.
     expect(await principalForUser("usr-nobody")).toBeNull();
+  });
+});
+
+describe("a principal can be suspended", () => {
+  test("a suspended principal cannot be minted for", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
+    await suspendPrincipal(id);
+    // Fail closed, and for a reason a reader can act on — not the same message
+    // as "no principal", which means something different.
+    expect(buildTokenPayload({ principalId: id })).rejects.toThrow(/suspended/);
+  });
+
+  test("restoring lets it mint again", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
+    await suspendPrincipal(id);
+    await restorePrincipal(id);
+    const payload = await buildTokenPayload({ principalId: id });
+    expect(payload.sub).toBe(id);
   });
 });
 

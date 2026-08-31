@@ -44,16 +44,16 @@ export async function createPrincipal(input: {
  */
 export async function principalForUser(
   userId: string
-): Promise<{ id: string; kind: PrincipalKind } | null> {
+): Promise<{ id: string; kind: PrincipalKind; suspendedAt: Date | null } | null> {
   const [row] = await db
-    .select({ id: principals.id, kind: principals.kind })
+    .select({ id: principals.id, kind: principals.kind, suspendedAt: principals.suspendedAt })
     .from(principalIdentities)
     .innerJoin(principals, eq(principals.id, principalIdentities.principalId))
     .where(
       and(eq(principalIdentities.system, "better-auth"), eq(principalIdentities.externalId, userId))
     )
     .limit(1);
-  return row ? { id: row.id, kind: row.kind as PrincipalKind } : null;
+  return row ? { id: row.id, kind: row.kind as PrincipalKind, suspendedAt: row.suspendedAt } : null;
 }
 
 /**
@@ -71,13 +71,31 @@ export async function principalForUser(
  */
 export async function principalById(
   id: string
-): Promise<{ id: string; kind: PrincipalKind } | null> {
+): Promise<{ id: string; kind: PrincipalKind; suspendedAt: Date | null } | null> {
   const [row] = await db
-    .select({ id: principals.id, kind: principals.kind })
+    .select({ id: principals.id, kind: principals.kind, suspendedAt: principals.suspendedAt })
     .from(principals)
     .where(eq(principals.id, id))
     .limit(1);
-  return row ? { id: row.id, kind: row.kind as PrincipalKind } : null;
+  return row ? { id: row.id, kind: row.kind as PrincipalKind, suspendedAt: row.suspendedAt } : null;
+}
+
+/**
+ * Stop a principal from being allowed to act, from now.
+ *
+ * Suspension rather than deletion: deleting a principal cascades its
+ * identities and grants away, destroying the audit trail exactly when someone
+ * wants to read it. `buildTokenPayload` refuses to mint for a suspended
+ * principal on both subject paths — a session caller whose principal is
+ * suspended is exactly as suspended as an agent.
+ */
+export async function suspendPrincipal(id: string): Promise<void> {
+  await db.update(principals).set({ suspendedAt: new Date() }).where(eq(principals.id, id));
+}
+
+/** Lift a suspension. The principal can be minted for again. */
+export async function restorePrincipal(id: string): Promise<void> {
+  await db.update(principals).set({ suspendedAt: null }).where(eq(principals.id, id));
 }
 
 /**
