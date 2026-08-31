@@ -272,9 +272,21 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       // The homeserver asks about an alias when somebody tried to resolve it.
       // Answering yes without creating the room would send them somewhere that
       // is not there.
-      const { stationForLocalpart, localpartFromAlias } = await import("./stations");
+      //
+      // Two shapes to try — fix round 3 on Task 5: an occupied station's
+      // room alias is occupant-derived now (`bridgeAliasForHandle`), and a
+      // station with no occupant still uses the station-derived form
+      // (`bridgeAlias`). Occupant-derived is tried first since it is the
+      // ordinary case for any station with someone in it; station-derived
+      // is what a room with no occupant, or one this migration hasn't
+      // reached, still resolves through.
+      const { stationForLocalpart, stationForOccupantLocalpart, localpartFromAlias } = await import(
+        "./stations"
+      );
       const localpart = localpartFromAlias(alias, cfg.domain);
-      const station = localpart ? await stationForLocalpart(localpart) : null;
+      const station = localpart
+        ? (await stationForOccupantLocalpart(localpart)) ?? (await stationForLocalpart(localpart))
+        : null;
       if (station) await provisionStation(station.stationId, provisionDeps);
     },
   };

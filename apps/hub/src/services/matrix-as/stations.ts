@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { localpartFor, bridgeUserId } from "./names";
+import { localpartFor, bridgeUserId, bridgeLocalpart } from "./names";
 import { principalHandle } from "../principals";
 
 export interface BridgedStation {
@@ -49,13 +49,16 @@ async function allBridgeable(): Promise<BridgedStation[]> {
 }
 
 /**
- * The station whose derived localpart is exactly this one, or null.
+ * The station whose STATION-DERIVED localpart is exactly this one, or null.
  *
- * For ROOM ALIASES only: `bridgeAlias`/`localpartFor` are still derived from
- * `(nodeName, stationKey)` — a room's address is not the identity occupying
- * it, and rooms are migrated separately (`charter` →
- * decisions/2026-08-30-an-agent-is-a-principal.md). Do not use this for a
- * user id; see `stationForAgentUserId` below.
+ * For a room alias with NO occupant — `bridgeAlias`/`localpartFor` are still
+ * derived from `(nodeName, stationKey)` for exactly that case (`names.ts`).
+ * An occupied station's room alias is occupant-derived instead (fix round
+ * 3, `bridgeAliasForHandle`) and resolves through
+ * `stationForOccupantLocalpart` below, not this function — a station-keyed
+ * lookup would never find it, since the two schemes produce different
+ * strings by design. Do not use this for a user id either; see
+ * `stationForAgentUserId` below.
  *
  * Null is the answer the homeserver needs for "there is nobody here" — claiming
  * every name in our namespace would let anyone conjure an agent by typing one.
@@ -63,6 +66,31 @@ async function allBridgeable(): Promise<BridgedStation[]> {
 export async function stationForLocalpart(localpart: string): Promise<BridgedStation | null> {
   for (const s of await allBridgeable()) {
     if (localpartFor(s.nodeName, s.stationKey) === localpart) return s;
+  }
+  return null;
+}
+
+/**
+ * The station whose CURRENT OCCUPANT's room-alias localpart is exactly this
+ * one, or null — the alias counterpart to `stationForAgentUserId` below,
+ * which answers the identical question for a full mxid instead.
+ *
+ * Fix round 3 on Task 5: once an occupied station's room alias is derived
+ * from its occupant's handle (`bridgeAliasForHandle`) rather than from
+ * `(nodeName, stationKey)`, resolving an inbound alias query has to try
+ * this shape too, or a homeserver asking about an occupant-derived alias
+ * for a station whose room does not exist yet would get no answer and
+ * provisioning would never run for it.
+ *
+ * A station with no occupying principal has no handle and therefore no
+ * occupant-derived alias to claim here — the same fail-closed rule
+ * `stationForAgentUserId` already applies.
+ */
+export async function stationForOccupantLocalpart(localpart: string): Promise<BridgedStation | null> {
+  for (const s of await allBridgeable()) {
+    if (!s.principalId) continue;
+    const handle = await principalHandle(s.principalId);
+    if (handle && bridgeLocalpart(handle) === localpart) return s;
   }
   return null;
 }

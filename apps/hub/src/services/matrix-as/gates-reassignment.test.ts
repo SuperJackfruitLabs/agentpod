@@ -34,6 +34,7 @@ import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../../tests/helpers/database";
 import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
+import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
@@ -42,7 +43,7 @@ import { createPrincipal } from "../principals";
 import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
-import { bridgeUserId } from "./names";
+import { bridgeUserId, bridgeAlias } from "./names";
 import { provisionStation } from "./provision";
 import type { GatePendingDelivery } from "./gates";
 
@@ -54,6 +55,7 @@ let stationAId: string;
 let stationBId: string;
 let principalId: string;
 let sharedNodeId: string;
+let sharedNodeName: string;
 
 function adminApp() {
   const a = new Hono();
@@ -108,6 +110,8 @@ beforeAll(async () => {
     cpuCount: 1,
   });
   sharedNodeId = nodeId;
+  const [node] = await db.select({ name: nodes.name }).from(nodes).where(eq(nodes.id, nodeId));
+  sharedNodeName = node!.name;
 
   stationAId = `st_gra_a_${RUN}`;
   stationBId = `st_gra_b_${RUN}`;
@@ -385,19 +389,39 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
     // join had the identical unordered-[row] bug `roomForCard` was fixed
     // for, so a new occupant with no room of its own never got one. This
     // fails if that regresses.
+    //
+    // The fake below models alias collision, not just room-id minting — a
+    // second fix-round review's finding: the room's ALIAS was still
+    // `bridgeAlias(nodeName, stationKey)`, station-derived, so a room
+    // created for Q reused P's exact alias, and a fake that ignores the
+    // alias argument entirely (what shipped in round 2) can never fail the
+    // way the real homeserver's M_ROOM_IN_USE would. `stationDerivedAlias`
+    // is what P's room WOULD collide on if `provision.ts` regressed to it;
+    // asking for it here returns P's own room id — exactly what a
+    // same-alias `ensureRoom` call answers with in production — so this
+    // test fails if the alias fix regresses, not only if the room-binding
+    // fix does.
+    const stationDerivedAlias = bridgeAlias(sharedNodeName, `opencode:${RUN}-x`, "id.agentpod.dev");
     const ensuredRooms: string[] = [];
     await provisionStation(stationXId, {
       domain: "id.agentpod.dev",
       client: {
         ensureUser: async () => {},
-        ensureRoom: async () => {
+        ensureRoom: async (alias: string) => {
+          if (alias === stationDerivedAlias) {
+            // The collision a station-derived alias would still produce —
+            // modelled as the real homeserver's M_ROOM_IN_USE, answered
+            // here as P's own room id (the "already joined" branch a
+            // harness-mode station would take in production).
+            return roomX1;
+          }
           ensuredRooms.push(roomX2);
           return roomX2;
         },
         invite: async () => {},
       },
     });
-    expect(ensuredRooms, "a room was actually created for Q, not skipped").toHaveLength(1);
+    expect(ensuredRooms, "a room was actually created for Q, not skipped, and not P's").toHaveLength(1);
     expect((await roomRow(roomX2))!.principalId, "and bound to Q at creation").toBe(qId);
 
     // New work dispatched to X, now that Q occupies it.

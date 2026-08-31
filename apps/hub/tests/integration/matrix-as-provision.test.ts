@@ -56,6 +56,21 @@ let avatars: Array<{ userId: string; mxcUrl: string }> = [];
 let faces: Record<string, string> = {};
 let workspaceFiles: Record<string, { bytes: Uint8Array; contentType: string } | null> = {};
 
+/**
+ * The homeserver's own alias directory — what makes this fake capable of
+ * producing M_ROOM_IN_USE at all. A fake that mints a fresh room id on
+ * every `ensureRoom` call, whatever the alias, can never fail the way the
+ * real homeserver does when a caller creates a room under an alias that is
+ * already taken — which is exactly the shape of bug (fix round 3) that let
+ * a station-derived alias silently swallow a new occupant's room for two
+ * rounds running.
+ */
+let roomsByAlias = new Map<string, { roomId: string; members: Set<string> }>();
+/** Aliases this fake has reassigned away from the room that first held them —
+ *  the "reclaim" branch `client.ts` takes when the new creator was never a
+ *  member of the room already sitting at that alias. */
+let reclaimedAliases: string[] = [];
+
 function deps() {
   return {
     domain: DOMAIN,
@@ -68,7 +83,29 @@ function deps() {
         opts: { creator: string; name: string; topic: string; invite?: string; isDirect?: boolean }
       ) => {
         rooms.push({ alias, ...opts } as any);
-        return `!room${++roomCounter}:id.agentpod.dev`;
+
+        const existing = roomsByAlias.get(alias);
+        if (existing) {
+          // M_ROOM_IN_USE, real client.ts's own two branches:
+          if (existing.members.has(opts.creator)) {
+            // Already in that room — the ordinary restart. That room IS
+            // the answer.
+            return existing.roomId;
+          }
+          // Not a member — reclaim: the alias moves to a FRESH room as
+          // this creator, and the room it used to point at loses it. This
+          // is the consequence a principal-derived alias must make
+          // unreachable for an occupant change, not something to paper
+          // over in the fake.
+          reclaimedAliases.push(alias);
+          const roomId = `!room${++roomCounter}:id.agentpod.dev`;
+          roomsByAlias.set(alias, { roomId, members: new Set([opts.creator]) });
+          return roomId;
+        }
+
+        const roomId = `!room${++roomCounter}:id.agentpod.dev`;
+        roomsByAlias.set(alias, { roomId, members: new Set([opts.creator]) });
+        return roomId;
       },
       invite: async (_asUserId: string, roomId: string, invitee: string) => {
         invites.push({ roomId, invitee });
@@ -145,6 +182,8 @@ beforeEach(async () => {
   avatars = [];
   faces = {};
   workspaceFiles = {};
+  roomsByAlias = new Map();
+  reclaimedAliases = [];
   await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${OPENCLAW}, ${HERMES})`;
   await rawSql`
     UPDATE stations SET bridge_matrix_id = NULL, matrix_identity_mode = 'bridge', matrix_id = NULL
@@ -173,7 +212,10 @@ describe("provisioning a station", () => {
     expect(registered[0]!.localpart).toBe(`agent_${KRISHNA_HANDLE}`);
     // The display name carries the readability a derived mxid does not have.
     expect(registered[0]!.displayName).toBe("krishna (openclaw @ prov-box)");
-    expect(rooms[0]!.alias).toBe("#agentpod_prov-box_openclaw-krishna:id.agentpod.dev");
+    // Occupant-derived, fix round 3 — the SAME localpart as the mxid above,
+    // not the station-keyed form: a room's address must not collide with a
+    // predecessor's if this occupant is ever replaced.
+    expect(rooms[0]!.alias).toBe(`#agentpod_agent_${KRISHNA_HANDLE}:id.agentpod.dev`);
   });
 
   test("records the room, with the tenant it belongs to", async () => {
@@ -182,7 +224,7 @@ describe("provisioning a station", () => {
     const row = await roomRow(OPENCLAW);
     expect(row!.room_id).toMatch(/^!room/);
     expect(row!.tenant_id).toBeTruthy();
-    expect(row!.alias).toBe("#agentpod_prov-box_openclaw-krishna:id.agentpod.dev");
+    expect(row!.alias).toBe(`#agentpod_agent_${KRISHNA_HANDLE}:id.agentpod.dev`);
   });
 
   test("records the identity it minted, without touching the harness column", async () => {
@@ -507,6 +549,22 @@ describe("occupancy changes — a new occupant must actually get a room", () => 
       SELECT principal_id FROM matrix_rooms WHERE room_id = ${krishnaRoom!.room_id}`;
     expect(krishnaRoomAfter!.principal_id).toBe(KRISHNA_PRINCIPAL);
 
+    // Fix round 3: the alias, not only the DB row, must not collide.
+    // `rooms[0]!.alias` is what THIS call asked the homeserver to create at
+    // — if it were still `bridgeAlias(nodeName, stationKey)`, it would be
+    // IDENTICAL to krishna's own room's alias, and the fake's alias
+    // directory (modelling real M_ROOM_IN_USE handling) would have taken
+    // the "not a member, reclaim" branch: deleting krishna's alias off his
+    // still-live room. It must not have.
+    expect(reclaimedAliases, "no alias was ever stolen from krishna's live room").toEqual([]);
+    expect(rooms[0]!.alias, "occupant-derived, not station-derived").toBe(
+      "#agentpod_agent_mx-provision-successor:id.agentpod.dev"
+    );
+    const [krishnaRoomRow] = await rawSql`SELECT alias FROM matrix_rooms WHERE room_id = ${krishnaRoom!.room_id}`;
+    expect(krishnaRoomRow!.alias, "krishna's own alias is unchanged").toBe(
+      "#agentpod_agent_mx-provision-krishna:id.agentpod.dev"
+    );
+
     // Station A now genuinely carries two rooms — the ordinary case since
     // fix round 1 dropped uniqueness from `matrix_rooms_station_idx`.
     const stationRooms = await rawSql`
@@ -515,6 +573,46 @@ describe("occupancy changes — a new occupant must actually get a room", () => 
 
     // Restore for any test after this one in the file.
     await rawSql`UPDATE stations SET principal_id = ${KRISHNA_PRINCIPAL} WHERE id = ${OPENCLAW}`;
+    await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${successorRoom!.room_id}`;
+  });
+
+  test("harness mode: a new occupant still gets its OWN room — the speaker never changes with occupancy, so only the alias fix keeps this from silently reusing the departed occupant's room", async () => {
+    // Harness mode's speaker is the station's own fixed identity
+    // (`s.harnessMxid`), identical before and after this reassignment — so
+    // this test isolates the alias as the ONLY thing standing between "a
+    // new room" and "M_ROOM_IN_USE answered by the SAME already-joined
+    // creator", which is precisely the harness-mode failure fix round 3
+    // closes: silent, with no error anywhere, because the fake homeserver's
+    // answer is a 200 naming a room that already exists.
+    await rawSql`
+      UPDATE stations SET matrix_identity_mode = 'harness', matrix_id = '@analyst-echo:id.agentpod.dev'
+      WHERE id = ${HERMES}`;
+
+    await provisionStation(HERMES, deps());
+    const [echoRoom] = await rawSql`
+      SELECT room_id, principal_id FROM matrix_rooms WHERE station_id = ${HERMES} AND principal_id = ${ECHO_PRINCIPAL}`;
+    expect(echoRoom).toBeTruthy();
+
+    await rawSql`UPDATE stations SET principal_id = ${SUCCESSOR_PRINCIPAL} WHERE id = ${HERMES}`;
+    rooms = [];
+
+    await provisionStation(HERMES, deps());
+
+    const [successorRoom] = await rawSql`
+      SELECT room_id, principal_id FROM matrix_rooms WHERE station_id = ${HERMES} AND principal_id = ${SUCCESSOR_PRINCIPAL}`;
+    expect(successorRoom, "the new occupant has its OWN bound room — not silently none at all").toBeTruthy();
+    expect(successorRoom!.room_id).not.toBe(echoRoom!.room_id);
+
+    const [echoRoomAfter] = await rawSql`
+      SELECT principal_id, alias FROM matrix_rooms WHERE room_id = ${echoRoom!.room_id}`;
+    expect(echoRoomAfter!.principal_id, "echo's own room is untouched").toBe(ECHO_PRINCIPAL);
+    expect(echoRoomAfter!.alias, "echo's own alias is unchanged").toBe(
+      `#agentpod_agent_${ECHO_HANDLE}:id.agentpod.dev`
+    );
+    expect(rooms[0]!.alias).toBe("#agentpod_agent_mx-provision-successor:id.agentpod.dev");
+
+    // Restore.
+    await rawSql`UPDATE stations SET principal_id = ${ECHO_PRINCIPAL} WHERE id = ${HERMES}`;
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${successorRoom!.room_id}`;
   });
 

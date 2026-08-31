@@ -68,6 +68,38 @@ export function bridgeAlias(nodeName: string, stationKey: string, domain: string
 }
 
 /**
+ * A room's alias, derived from the HANDLE of whoever occupies it — fix
+ * round 3 on Task 5, and the same move `bridgeUserId` already made for the
+ * mxid: an occupant is an identity, a station is an execution location.
+ * `bridgeAlias` above stayed station-derived, and that was the last place
+ * still keyed to the station — which meant a room CREATED for a new
+ * occupant reused its predecessor's exact alias, and the real homeserver's
+ * only answer to "create a room at an alias that already exists" is
+ * `M_ROOM_IN_USE`. `client.ts`'s `ensureRoom` handles that response two
+ * ways, neither of which is "the new occupant gets its own room": if the
+ * new creator happens to already be a member (harness mode, where the
+ * speaker never changes with occupancy) it hands back the OLD room; if not
+ * (bridge mode) it deletes the alias off the old, still-live room and
+ * mints a fresh one. Deriving the alias from the occupant closes the
+ * collision at the source rather than depending on either branch.
+ *
+ * Deliberately the SAME localpart `bridgeLocalpart` builds for the mxid
+ * (`agent_<handle>`), not a new scheme — a reader (or `stations.ts`'s
+ * `stationForOccupantLocalpart`) can tell a principal-derived alias apart
+ * from a station-derived one on sight, since `localpartFor(nodeName,
+ * stationKey)` can never itself produce a string starting `agent_` unless a
+ * node is literally named "agent".
+ *
+ * Used only when a station HAS an occupant — `bridgeAlias` above remains
+ * the address for a room with none, which is the one case a station-keyed
+ * alias cannot collide with a predecessor's, because there is no
+ * predecessor's room to reuse it from.
+ */
+export function bridgeAliasForHandle(handle: string, domain: string): string {
+  return `#agentpod_${bridgeLocalpart(handle)}:${domain}`;
+}
+
+/**
  * Is this mxid one of ours?
  *
  * The first question asked of every inbound event. An Application Service is

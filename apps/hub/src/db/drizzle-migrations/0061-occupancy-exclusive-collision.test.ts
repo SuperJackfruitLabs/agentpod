@@ -38,17 +38,26 @@ beforeAll(async () => {
 describe("migration 0061's dedupe, against data that would otherwise collide", () => {
   test("keeps the most recently adopted station for a colliding principal, clears the rest, and the unique index then creates cleanly", async () => {
     const raw = readFileSync(join(__dirname, "0061_occupancy_exclusive.sql"), "utf8");
-    // The dedupe UPDATE is the file's first statement — everything after the
-    // first `--> statement-breakpoint` is the schema change this proves is
-    // now safe to run, not what this test exercises directly.
-    const dedupeStatement = raw
-      .split("--> statement-breakpoint")[0]!
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("--"))
-      .join("\n")
-      .replace(/"stations"/g, '"tmp_stations_0061"')
-      .trim();
-    expect(dedupeStatement.length, "the migration file's dedupe statement must still be there to adapt").toBeGreaterThan(0);
+    // Selected by CONTENT, not position — fix round 3 (Minor): the earlier
+    // version took `split("--> statement-breakpoint")[0]`, which is the
+    // dedupe UPDATE today only because it happens to come first in the
+    // file. If the statements were ever reordered, that slice would
+    // silently become a different one — a `DROP INDEX` for the real
+    // `matrix_rooms` table, since only `"stations"` is renamed away below,
+    // executed via `tx.unsafe()` inside a transaction this test COMMITS.
+    // Finding the statement whose own SQL starts `UPDATE "stations"` is
+    // immune to the file's statements ever being reordered.
+    const statements = raw.split("--> statement-breakpoint").map((stmt) =>
+      stmt
+        .split("\n")
+        .filter((line) => !line.trim().startsWith("--"))
+        .join("\n")
+        .trim()
+    );
+    const dedupeStatement = statements
+      .find((stmt) => stmt.toUpperCase().startsWith('UPDATE "STATIONS"'))
+      ?.replace(/"stations"/g, '"tmp_stations_0061"');
+    expect(dedupeStatement, "the migration file's dedupe UPDATE must still be there to adapt").toBeTruthy();
 
     await rawSql.begin(async (tx) => {
       // ON COMMIT DROP: cleaned up the instant this transaction ends,
@@ -69,7 +78,7 @@ describe("migration 0061's dedupe, against data that would otherwise collide", (
       // Must not throw — against the real schema at this point in the
       // migration sequence, this exact shape of data would raise 23505 on
       // the very next statement without it.
-      await tx.unsafe(dedupeStatement);
+      await tx.unsafe(dedupeStatement!);
 
       const rows = await tx`SELECT id, principal_id FROM tmp_stations_0061 ORDER BY id`;
       const byId = new Map(rows.map((r) => [r.id as string, r.principal_id as string | null]));

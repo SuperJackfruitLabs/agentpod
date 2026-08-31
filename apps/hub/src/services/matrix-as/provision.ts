@@ -17,7 +17,7 @@ import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
-import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "./names";
+import { bridgeUserId, bridgeAlias, bridgeAliasForHandle, bridgeLocalpart } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { principalHandle, principalForUser } from "../principals";
@@ -175,6 +175,13 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
       });
       return;
     }
+    // Harness mode's SPEAKER is the harness's own fixed identity, unchanged
+    // by who occupies the station — but the ROOM'S ALIAS still has to
+    // follow the occupant (below), or a harness station whose occupant
+    // changes collides on the exact alias its predecessor's room still
+    // holds. Resolved here for that alone; it never becomes the speaker in
+    // this branch.
+    handle = s.principalId ? await principalHandle(s.principalId) : null;
   }
 
   // A name a person can read. The mxid is derived and unlovely; this is what a
@@ -222,7 +229,15 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   // The room is created once. A second one for the same station would split its
   // conversation in two, with each half unaware of the other.
   if (!s.roomId) {
-    const alias = bridgeAlias(s.nodeName, s.stationKey, deps.domain);
+    // Occupant-derived when there is one — fix round 3: the station-keyed
+    // form below is what let a new occupant's room silently collide with
+    // its predecessor's, since two different occupants of the same
+    // station used to produce the identical alias. `bridgeAlias` stays the
+    // address for a room with NO occupant, the one case nothing else could
+    // be holding it.
+    const alias = handle
+      ? bridgeAliasForHandle(handle, deps.domain)
+      : bridgeAlias(s.nodeName, s.stationKey, deps.domain);
 
     // The owner is invited AT creation rather than afterwards, because the flag
     // that makes this a DM rides on the invite's own member event and can only
