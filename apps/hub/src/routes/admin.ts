@@ -16,6 +16,7 @@ import { authMiddleware } from "../auth/middleware";
 import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
 import { adminPrincipalsRouter } from "./admin-principals";
+import { agentsAdminRouter } from "./agents-admin";
 
 // Models
 import {
@@ -55,6 +56,11 @@ adminRouter.route("/grants", adminGrantsRouter);
 // sides and nothing else in this API says what those ids are, so without this
 // the console can offer only a text box for a twenty-hex string.
 adminRouter.route("/principals", adminPrincipalsRouter);
+
+// Creating an agent, and putting it in a station. Mounted at the root of
+// `/api/admin` because it owns two path families — `/agents` and
+// `/stations/:stationId/agent` — not one subtree.
+adminRouter.route("/", agentsAdminRouter);
 
 // =============================================================================
 // Validation Schemas
