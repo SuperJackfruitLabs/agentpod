@@ -9,8 +9,9 @@
  * all — this spawns the real script as a subprocess, the way the runbook
  * does, and checks what an operator would actually see.
  */
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
+import { ensurePgMigrations } from "../tests/helpers/pg-migrations";
 
 const HUB_ROOT = join(import.meta.dir, "..");
 
@@ -30,6 +31,17 @@ async function runScript(env: Record<string, string | undefined> = process.env) 
 }
 
 describe("scripts/seed-agent-principals.ts, run as a script", () => {
+  // The script is spawned as its own process, so it finds whatever schema the
+  // database already has — it does not build one. Every other integration suite
+  // here migrates in `beforeAll`; this file did not, and so it passed only when
+  // some other suite happened to migrate first. That is invisible on a
+  // developer's machine, whose database was migrated weeks ago, and decided by
+  // file ordering on a fresh CI database — where it failed, twice, while the
+  // test asserting the script FAILS kept passing for the same reason.
+  beforeAll(async () => {
+    await ensurePgMigrations();
+  });
+
   test("runs, seeds, and reports what it did", async () => {
     const { stdout, stderr, exitCode } = await runScript();
 
