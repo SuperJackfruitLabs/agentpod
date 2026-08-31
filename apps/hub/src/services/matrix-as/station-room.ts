@@ -26,10 +26,21 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { matrixRooms } from "../../db/schema/matrix";
 import { stations } from "../../db/schema/stations";
+import { nodes } from "../../db/schema/nodes";
+import { roomAliasFor } from "./names";
+import { principalHandle } from "../principals";
 
 export interface StationRoom {
   roomId: string;
   spaceRoomId: string | null;
+  /**
+   * The address this room is actually reachable at, as recorded when it was
+   * created. Read rather than re-derived — a room created before the alias
+   * followed its occupant still answers at the address it was created with,
+   * and deriving one afresh is how `routes/station-matrix.ts` came to hand
+   * out an alias no room held.
+   */
+  alias: string;
 }
 
 export interface StationOccupancy {
@@ -72,7 +83,11 @@ export async function roomForStation(stationId: string): Promise<StationOccupanc
 
   if (principalId) {
     const [own] = await db
-      .select({ roomId: matrixRooms.roomId, spaceRoomId: matrixRooms.spaceRoomId })
+      .select({
+        roomId: matrixRooms.roomId,
+        spaceRoomId: matrixRooms.spaceRoomId,
+        alias: matrixRooms.alias,
+      })
       .from(matrixRooms)
       .where(eq(matrixRooms.principalId, principalId))
       .limit(1);
@@ -80,9 +95,64 @@ export async function roomForStation(stationId: string): Promise<StationOccupanc
   }
 
   const [unbound] = await db
-    .select({ roomId: matrixRooms.roomId, spaceRoomId: matrixRooms.spaceRoomId })
+    .select({
+      roomId: matrixRooms.roomId,
+      spaceRoomId: matrixRooms.spaceRoomId,
+      alias: matrixRooms.alias,
+    })
     .from(matrixRooms)
     .where(and(eq(matrixRooms.stationId, stationId), isNull(matrixRooms.principalId)))
     .limit(1);
   return { principalId: null, room: unbound ?? null };
+}
+
+/**
+ * The address this station's room is reachable at — the one answer to that
+ * question, for anything that reports or logs an alias.
+ *
+ * Fix round 5 on Task 5, and the fourth time in this task that a rule was
+ * fixed one layer inside the entry point that serves it. Round 3 made a
+ * room's alias follow its occupant (`bridgeAliasForHandle`) inside
+ * `provision.ts`, and `routes/station-matrix.ts` went on deriving
+ * `bridgeAlias(nodeName, stationKey)` for its response — an address no room
+ * holds, for precisely the stations that endpoint answers for, since it
+ * 409s unless the station has an occupant. The AS route would even 200 on
+ * it through `stationForAlias`'s legacy fallback, and then create nothing,
+ * because provisioning sees the station already has a room; the directory
+ * lookup fails and the caller is left with a name that goes nowhere.
+ *
+ * A STORED alias beats a derived one whenever there is a room: a room
+ * created before the derivation changed still answers at the address it was
+ * actually created with, and re-deriving would misreport it. The derivation
+ * (`names.ts`'s `roomAliasFor`, which `provision.ts` also uses, so there is
+ * one rule rather than two) is only for a station whose room does not exist
+ * yet — the honest answer to "where it will be", not a claim about where it
+ * is.
+ *
+ * Null only for a station that does not exist.
+ */
+export async function roomAliasForStation(
+  stationId: string,
+  domain: string
+): Promise<string | null> {
+  const occupancy = await roomForStation(stationId);
+  if (occupancy.room) return occupancy.room.alias;
+
+  const [station] = await db
+    .select({
+      nodeName: nodes.name,
+      stationKey: stations.stationKey,
+      principalId: stations.principalId,
+    })
+    .from(stations)
+    .innerJoin(nodes, eq(nodes.id, stations.nodeId))
+    .where(eq(stations.id, stationId))
+    .limit(1);
+  if (!station) return null;
+
+  const handle = station.principalId ? await principalHandle(station.principalId) : null;
+  return roomAliasFor(
+    { handle, nodeName: station.nodeName, stationKey: station.stationKey },
+    domain
+  );
 }

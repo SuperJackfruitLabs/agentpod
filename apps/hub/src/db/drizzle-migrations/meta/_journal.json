@@ -435,6 +435,13 @@
       "when": 1788167041109,
       "tag": "0061_occupancy_exclusive",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788176000000,
+      "tag": "0062_matrix_rooms_rebackfill_after_dedupe",
+      "breakpoints": true
     }
   ]
 }

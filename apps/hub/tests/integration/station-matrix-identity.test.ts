@@ -132,11 +132,15 @@ describe("POST /api/stations/:id/matrix/identity", () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { mxid: string; alias: string; mode: string };
-    // The mxid is built from the occupying agent's principal handle now, not
-    // from where the station runs (`charter` → the-mission decisions on an
-    // agent-is-a-principal); the alias, below, is still station-derived.
+    // The mxid is built from the occupying agent's principal handle, not from
+    // where the station runs (`charter` → the-mission decisions on an
+    // agent-is-a-principal) — and so, since fix round 3, is the room's alias.
+    // This asserted the station-derived `#agentpod_sm-box_hermes-analyst-echo`
+    // until fix round 5, which is an address no room this endpoint can answer
+    // for has ever held: it 409s below unless the station HAS an occupant, and
+    // an occupied station's room is created at `bridgeAliasForHandle`.
     expect(body.mxid).toBe("@agent_station-matrix-it-agent:id.agentpod.dev");
-    expect(body.alias).toBe("#agentpod_sm-box_hermes-analyst-echo:id.agentpod.dev");
+    expect(body.alias).toBe("#agentpod_agent_station-matrix-it-agent:id.agentpod.dev");
     expect(body.mode).toBe("bridge");
     expect(provisioned).toEqual([STATION]);
     // Issuing an identity is the appservice acting in its own namespace. No
@@ -159,6 +163,29 @@ describe("POST /api/stations/:id/matrix/identity", () => {
   test("404s for a station that is not this principal's", async () => {
     const res = await post("/stations/station_does_not_exist/matrix/identity");
     expect(res.status).toBe(404);
+  });
+
+  test("reports the alias the station's room is ACTUALLY reachable at, not one re-derived here", async () => {
+    // A room that already exists, at an address neither derivation would
+    // produce today — an ordinary state on the deployed box, where the 32
+    // live rooms were created before a room's alias followed its occupant.
+    // Re-deriving would misreport every one of them; the stored alias is the
+    // only thing that is true about where the room actually is.
+    const tenant = await resolveTenantForUser(OWNER);
+    const storedAlias = "#agentpod_sm-box_hermes-analyst-echo-legacy:id.agentpod.dev";
+    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    await rawSql`
+      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, principal_id, created_at)
+      VALUES (${"!sm-legacy:" + DOMAIN}, ${tenant}, ${STATION}, ${storedAlias}, ${AGENT_PRINCIPAL}, now())`;
+
+    try {
+      const body = (await (await post(`/stations/${STATION}/matrix/identity`)).json()) as {
+        alias: string;
+      };
+      expect(body.alias).toBe(storedAlias);
+    } finally {
+      await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    }
   });
 });
 

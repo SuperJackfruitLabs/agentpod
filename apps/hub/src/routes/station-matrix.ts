@@ -23,7 +23,8 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { requireIssueCredentials } from "../services/grant-reach";
 import { isGrantReachDenied } from "../services/control-pair";
-import { bridgeUserId, bridgeAlias, bridgeLocalpart } from "../services/matrix-as/names";
+import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
+import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
@@ -112,9 +113,19 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         );
       }
 
+      // The address the room this endpoint just provisioned is ACTUALLY
+      // reachable at, read through the one resolver for that question — not
+      // `bridgeAlias(nodeName, stationKey)` re-derived here, which is what
+      // this returned until fix round 5. An occupied station's room is
+      // addressed by its occupant's handle, and this endpoint 409s below
+      // unless the station HAS an occupant, so the station-derived form was
+      // wrong for every station it can answer for: the AS route 200s on it
+      // through the legacy fallback and then creates nothing (the station
+      // already has a room), and the caller is left with a directory lookup
+      // that fails.
       return c.json({
         mxid: bridgeUserId(handle, deps.domain),
-        alias: bridgeAlias(station.nodeName, station.stationKey, deps.domain),
+        alias: await roomAliasForStation(station.id, deps.domain),
         mode: station.mode,
       });
     })

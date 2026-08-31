@@ -17,7 +17,7 @@ import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
-import { bridgeUserId, bridgeAlias, bridgeAliasForHandle, bridgeLocalpart } from "./names";
+import { bridgeUserId, bridgeLocalpart, roomAliasFor } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
 import { principalHandle, principalForUser } from "../principals";
@@ -231,14 +231,16 @@ export async function provisionStation(stationId: string, deps: ProvisionDeps): 
   // conversation in two, with each half unaware of the other.
   if (!s.roomId) {
     // Occupant-derived when there is one — fix round 3: the station-keyed
-    // form below is what let a new occupant's room silently collide with
-    // its predecessor's, since two different occupants of the same
-    // station used to produce the identical alias. `bridgeAlias` stays the
-    // address for a room with NO occupant, the one case nothing else could
-    // be holding it.
-    const alias = handle
-      ? bridgeAliasForHandle(handle, deps.domain)
-      : bridgeAlias(s.nodeName, s.stationKey, deps.domain);
+    // form is what let a new occupant's room silently collide with its
+    // predecessor's, since two different occupants of the same station
+    // used to produce the identical alias. That choice now lives in
+    // `names.ts`'s `roomAliasFor` rather than inline here, because fix
+    // round 5 found `routes/station-matrix.ts` making the same choice
+    // separately and getting it wrong.
+    const alias = roomAliasFor(
+      { handle, nodeName: s.nodeName, stationKey: s.stationKey },
+      deps.domain
+    );
 
     // The owner is invited AT creation rather than afterwards, because the flag
     // that makes this a DM rides on the invite's own member event and can only

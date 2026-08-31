@@ -100,6 +100,33 @@ export function bridgeAliasForHandle(handle: string, domain: string): string {
 }
 
 /**
+ * The address a station's room GETS — the one place that choice is made.
+ *
+ * Fix round 5 on Task 5. The choice between the two forms above lived
+ * inline in `provision.ts`, and `routes/station-matrix.ts` made its own
+ * choice — the wrong one, `bridgeAlias` unconditionally, so
+ * `POST /api/stations/:id/matrix/identity` handed back an address no room
+ * held for exactly the stations it can answer for at all (it 409s unless
+ * there IS an occupant, and an occupant's room is addressed by
+ * `bridgeAliasForHandle`). That is the same shape of miss as rounds 1-4:
+ * a rule applied at one layer and re-derived, differently, at the entry
+ * point in front of it. There is one rule now and both callers read it
+ * through `station-room.ts`'s `roomAliasForStation`.
+ *
+ * `handle` null means the station has no occupant, and the station-derived
+ * form is the address for a room with none — the one case it cannot
+ * collide with a predecessor's, because there is no predecessor.
+ */
+export function roomAliasFor(
+  station: { handle: string | null; nodeName: string; stationKey: string },
+  domain: string
+): string {
+  return station.handle
+    ? bridgeAliasForHandle(station.handle, domain)
+    : bridgeAlias(station.nodeName, station.stationKey, domain);
+}
+
+/**
  * Is this mxid one of ours?
  *
  * The first question asked of every inbound event. An Application Service is
