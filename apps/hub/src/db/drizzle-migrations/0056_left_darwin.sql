@@ -1,7 +1,7 @@
 ALTER TABLE "principal_identities" DROP CONSTRAINT "principal_identities_system_known";--> statement-breakpoint
-ALTER TABLE "principal_identities" DROP CONSTRAINT "principal_identities_principal_id_user_id_fk";
+ALTER TABLE "principal_identities" DROP CONSTRAINT "principal_identities_principal_id_fkey";
 --> statement-breakpoint
-ALTER TABLE "principal_grants" DROP CONSTRAINT "principal_grants_principal_id_user_id_fk";
+ALTER TABLE "principal_grants" DROP CONSTRAINT "principal_grants_principal_id_fkey";
 --> statement-breakpoint
 -- One row today. Mint a principal for each existing user and carry the
 -- identities and grants that pointed at it. Runs after the old FKs (into
