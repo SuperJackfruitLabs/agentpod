@@ -16,7 +16,17 @@ const { mockConnection, mockAuth, mockFleet, stopPoll, startFleetPoll } = vi.hoi
   return {
     mockConnection: { apiUrl: "https://hub.agentpod.dev", isConnected: true, reachable: true },
     mockAuth: { initials: "RG" },
-    mockFleet: { agents: [], nodes: [], runtimes: [], stats: null, isLoading: false, error: null, loadedAt: null },
+    mockFleet: {
+      agents: [],
+      nodes: [],
+      runtimes: [],
+      stations: [],
+      principals: [],
+      stats: null,
+      isLoading: false,
+      error: null,
+      loadedAt: null,
+    },
     stopPoll,
     startFleetPoll: vi.fn(() => stopPoll),
   };
@@ -40,6 +50,8 @@ beforeEach(() => {
   mockFleet.agents = [];
   mockFleet.nodes = [];
   mockFleet.runtimes = [];
+  mockFleet.stations = [];
+  mockFleet.principals = [];
   startFleetPoll.mockClear();
   stopPoll.mockClear();
 });

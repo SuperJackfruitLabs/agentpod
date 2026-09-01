@@ -14,6 +14,8 @@
    * nothing but a wider component signature.
    */
   import type { FleetAgent, NodeSummary } from "@agentpod/contract";
+  import type { StationRow } from "$lib/api/client";
+  import type { PrincipalSummary } from "$lib/api/grants";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { STATE, STATE_ORDER, stationState, type StateId } from "$lib/fleet/state";
@@ -38,6 +40,10 @@
   let listEl = $state<HTMLElement | null>(null);
 
   const nodesById = $derived(new Map(fleet.nodes.map((n: NodeSummary) => [n.id, n])));
+  const stationsById = $derived(new Map(fleet.stations.map((s: StationRow) => [s.id, s])));
+  const principalsById = $derived(
+    new Map(fleet.principals.map((p: PrincipalSummary) => [p.id, p])),
+  );
 
   function href(agent: FleetAgent): string {
     return `/nodes/${agent.nodeId}/stations/${agent.stationId}`;
@@ -137,9 +143,9 @@
    * - A flag keyed on `workspacePath === null`, labelled "Unoccupied". A
    *   station can perfectly well hold an agent and have no workspace set up;
    *   the two are different facts. Naming one after the other is how Overview
-   *   came to report "5 stopped" for four stopped and one unknown. The real
-   *   signal is a station's `principalId`, which arrives with the attention
-   *   lane's `unoccupied` rule — the flag comes back then, meaning what it says.
+   *   came to report "5 stopped" for four stopped and one unknown. The flag is
+   *   back below, keyed on the real signal (`principalId`) now that the store
+   *   carries the station rows — so it means what it says.
    *
    * - "Last spoke", taken from the node's `lastSeenAt` because a FleetAgent
    *   carries no timestamp. It is node-granular, so grouped by node — the
@@ -151,6 +157,31 @@
    */
   function aside(agent: FleetAgent): string {
     return grouping === "node" ? agent.harness : agent.nodeName;
+  }
+
+  /**
+   * Why nothing can dispatch this row's station, or null when something can.
+   * The same two causes the attention lane's `unoccupied` rule reports, said
+   * in the rail so the fleet's worst non-error state is visible without
+   * reading the lane.
+   *
+   * Silence is deliberate in two places: an agent whose station row hasn't
+   * loaded (the store fetches them per online node), and a principal id the
+   * directory doesn't know — the directory is admin-only and empty for
+   * everyone else, and flagging the whole fleet because a list was
+   * unavailable is the loudest possible false alarm.
+   */
+  function undispatchable(agent: FleetAgent): { word: string; detail: string } | null {
+    const station = stationsById.get(agent.stationId);
+    if (!station) return null;
+    if (station.principalId === null) {
+      return { word: "Unoccupied", detail: "no agent occupies this station" };
+    }
+    const principal = principalsById.get(station.principalId);
+    if (principal?.suspendedAt) {
+      return { word: "Suspended", detail: "its agent is suspended" };
+    }
+    return null;
   }
 
   function cycleGrouping() {
@@ -255,6 +286,7 @@
       {#each group.agents as agent (agent.stationId)}
         {@const state = stationState(agent.status)}
         {@const isCurrent = href(agent) === currentPath}
+        {@const flag = undispatchable(agent)}
         <!--
           `relative` is load-bearing, not styling. StateDot's sr-only label is
           position:absolute; with no positioned ancestor its containing block
@@ -283,10 +315,32 @@
             <StateDot {state} size="sm" />
           </span>
           <span class="min-w-0 truncate px-2 font-mono text-xs text-foreground">{agent.agentName}</span>
-          <span
-            data-testid="roster-aside"
-            class="truncate pr-2 font-mono text-[11px] text-muted-foreground"
-          >{aside(agent)}</span>
+          {#if flag}
+            <!--
+              The flag takes the second column rather than sitting beside it:
+              a 272px rail has room for one trailer, and "nobody can dispatch
+              this" outranks knowing which harness it runs. The sr-only span
+              carries the whole sentence — the visible word alone is half of
+              it, and colour is never the carrier.
+            -->
+            <span
+              data-testid="roster-flag"
+              title={`Dispatchable by nobody — ${flag.detail}`}
+              class="flex items-center gap-1 pr-2 text-[11px] text-status-error"
+            >
+              <span
+                aria-hidden="true"
+                class="inline-block size-1.5 shrink-0 rounded-full bg-status-error"
+              ></span>
+              <span class="sr-only">Dispatchable by nobody — {flag.detail}</span>
+              <span aria-hidden="true">{flag.word}</span>
+            </span>
+          {:else}
+            <span
+              data-testid="roster-aside"
+              class="truncate pr-2 font-mono text-[11px] text-muted-foreground"
+            >{aside(agent)}</span>
+          {/if}
         </a>
       {/each}
     {/each}

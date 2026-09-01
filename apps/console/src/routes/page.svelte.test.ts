@@ -15,6 +15,8 @@ const { mockFleet, goto, updateNode, listActivity, createEnrollmentToken } = vi.
     agents: [] as unknown[],
     nodes: [] as unknown[],
     runtimes: [] as unknown[],
+    stations: [] as unknown[],
+    principals: [] as unknown[],
     isLoading: false,
     error: null as string | null,
     loadedAt: 1 as number | null,
@@ -90,6 +92,8 @@ beforeEach(() => {
   mockFleet.agents = AGENTS;
   mockFleet.nodes = NODES;
   mockFleet.runtimes = [];
+  mockFleet.stations = [];
+  mockFleet.principals = [];
   mockFleet.isLoading = false;
   mockFleet.error = null;
   mockFleet.loadedAt = 1;

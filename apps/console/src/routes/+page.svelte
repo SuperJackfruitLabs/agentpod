@@ -43,7 +43,13 @@
    * Overview ended up contradicting itself.
    */
   const needsYou = $derived(
-    deriveAttention({ agents: fleet.agents, nodes: fleet.nodes, runtimes: fleet.runtimes }).length,
+    deriveAttention({
+      agents: fleet.agents,
+      nodes: fleet.nodes,
+      runtimes: fleet.runtimes,
+      stations: fleet.stations,
+      principals: fleet.principals,
+    }).length,
   );
 
   const needsYouLine = $derived(

@@ -13,7 +13,13 @@ import { render, fireEvent } from "@testing-library/svelte";
 import type { FleetAgent } from "@agentpod/contract";
 
 const { mockFleet, mockPage, goto } = vi.hoisted(() => ({
-  mockFleet: { agents: [] as unknown[], nodes: [] as unknown[], runtimes: [] as unknown[] },
+  mockFleet: {
+    agents: [] as unknown[],
+    nodes: [] as unknown[],
+    runtimes: [] as unknown[],
+    stations: [] as unknown[],
+    principals: [] as unknown[],
+  },
   mockPage: { url: { pathname: "/" } },
   goto: vi.fn(),
 }));
@@ -66,10 +72,32 @@ const NODES = [
 
 const RUNTIMES = [{ id: "rt_1" }, { id: "rt_2" }, { id: "rt_3" }];
 
+/**
+ * Station rows for the same five agents. Only the four fields the rail reads
+ * off them; the rest of StationRow is irrelevant here.
+ */
+const STATIONS = AGENTS.map((a) => ({
+  id: a.stationId,
+  nodeId: a.nodeId,
+  stationKey: `${a.nodeName}/${a.agentName}`,
+  principalId: `prn_${a.agentName}`,
+}));
+
+const PRINCIPALS = AGENTS.map((a) => ({
+  id: `prn_${a.agentName}`,
+  kind: "agent",
+  handle: a.agentName,
+  displayName: a.agentName,
+  userId: null,
+  suspendedAt: null,
+}));
+
 beforeEach(() => {
   mockFleet.agents = AGENTS;
   mockFleet.nodes = NODES;
   mockFleet.runtimes = RUNTIMES;
+  mockFleet.stations = STATIONS;
+  mockFleet.principals = PRINCIPALS;
   mockPage.url = { pathname: "/" };
   goto.mockClear();
 });
@@ -307,4 +335,70 @@ test("the rail scrolls its list internally and never widens the document", () =>
   expect(getByTestId("roster-list").className).toContain("min-h-0");
   expect(getByTestId("roster").className).toContain("min-w-0");
   expect(getByTestId("roster").className).toContain("overflow-hidden");
+});
+
+// --- the undispatchable flag ------------------------------------------------
+
+test("a station with no principal flags the row instead of its harness", () => {
+  mockFleet.stations = STATIONS.map((s) =>
+    s.id === "st_atlas" ? { ...s, principalId: null } : s
+  );
+  const { getAllByTestId, getByTestId } = render(RosterRail);
+
+  const flag = getByTestId("roster-flag");
+  expect(flag.getAttribute("title")).toBe(
+    "Dispatchable by nobody — no agent occupies this station"
+  );
+  // The flag REPLACES the second column's text, so the four remaining rows
+  // are the only ones still carrying a harness.
+  expect(getAllByTestId("roster-aside")).toHaveLength(4);
+});
+
+test("a suspended principal flags the row, and says which of the two it is", () => {
+  mockFleet.principals = PRINCIPALS.map((p) =>
+    p.id === "prn_atlas" ? { ...p, suspendedAt: "2026-08-01T00:00:00Z" } : p
+  );
+  const { getByTestId } = render(RosterRail);
+
+  expect(getByTestId("roster-flag").getAttribute("title")).toBe(
+    "Dispatchable by nobody — its agent is suspended"
+  );
+});
+
+test("an occupied station with a live principal still shows its harness", () => {
+  const { getAllByTestId, queryByTestId } = render(RosterRail);
+
+  expect(queryByTestId("roster-flag")).toBeNull();
+  expect(getAllByTestId("roster-aside")).toHaveLength(5);
+});
+
+test("a principal id the directory does not know is not flagged", () => {
+  // A non-admin has no directory at all. Flagging every row because the list
+  // was unavailable would be the loudest possible false alarm.
+  mockFleet.principals = [];
+  const { queryByTestId, getAllByTestId } = render(RosterRail);
+
+  expect(queryByTestId("roster-flag")).toBeNull();
+  expect(getAllByTestId("roster-aside")).toHaveLength(5);
+});
+
+test("the flag says its state in words, not hue alone", () => {
+  mockFleet.stations = STATIONS.map((s) =>
+    s.id === "st_atlas" ? { ...s, principalId: null } : s
+  );
+  const { getByTestId } = render(RosterRail);
+
+  const flag = getByTestId("roster-flag");
+  expect(flag.textContent).toContain("Dispatchable by nobody");
+  expect(flag.className).toContain("text-status-error");
+});
+
+test("a row with no station row of its own is not flagged", () => {
+  // The store loads stations per node and only for online ones, so an agent
+  // can be on screen before (or without) its row. Silence beats a guess.
+  mockFleet.stations = [];
+  const { queryByTestId, getAllByTestId } = render(RosterRail);
+
+  expect(queryByTestId("roster-flag")).toBeNull();
+  expect(getAllByTestId("roster-aside")).toHaveLength(5);
 });

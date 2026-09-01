@@ -4,6 +4,8 @@
  * data — no fetching here, so it's cheap to test exhaustively.
  */
 import type { FleetAgent, NodeSummary, ProvisionedRuntime } from "@agentpod/contract";
+import type { StationRow } from "$lib/api/client";
+import type { PrincipalSummary } from "$lib/api/grants";
 import type { StateId } from "./state";
 
 export type AttentionKind = "permission" | "unoccupied" | "node-offline" | "drift" | "runtime-error";
@@ -23,10 +25,10 @@ export interface AttentionItem {
 }
 
 // Rule priority, worst first — matches the numbered rules in the task brief.
-// "unoccupied" and "permission" are listed here (and in AttentionKind) for a
-// complete vocabulary, but neither rule is derived below — see the gap notes
-// on each. Keeping their slots in the order means a future implementation
-// only has to fill in the branch, not renumber its neighbours.
+// "permission" is listed here (and in AttentionKind) for a complete
+// vocabulary, but that rule is not derived below — see the gap note on it.
+// Keeping its slot in the order means a future implementation only has to
+// fill in the branch, not renumber its neighbours.
 const KIND_PRIORITY: Record<AttentionKind, number> = {
   unoccupied: 0,
   "node-offline": 1,
@@ -39,19 +41,62 @@ export function deriveAttention(input: {
   agents: FleetAgent[];
   nodes: NodeSummary[];
   runtimes: ProvisionedRuntime[];
+  /**
+   * Station rows, which carry `principalId` — the occupancy fact FleetAgent
+   * does not. Optional so a caller that hasn't been widened still
+   * type-checks; it simply gets no `unoccupied` items.
+   */
+  stations?: StationRow[];
+  /**
+   * The principal directory, for `suspendedAt`. Admin-only (`GET
+   * /api/admin/principals`), so this is legitimately empty for most users —
+   * see the suspended branch below for what that costs.
+   */
+  principals?: PrincipalSummary[];
 }): AttentionItem[] {
   const items: AttentionItem[] = [];
 
-  // Rule 1, "unoccupied", is UNDERIVED: it needs a principal/occupant field
-  // on the station row (or a suspended flag on that principal), and
-  // FleetAgent (GET /api/fleet/agents) carries neither — see task report.
+  const offlineNodeIds = new Set(
+    input.nodes.filter((n) => n.status === "offline").map((n) => n.id),
+  );
+
+  // Rule 1: unoccupied — a station nothing can dispatch. Two different
+  // causes, one item each, because the remedy differs: assign an agent, or
+  // lift a suspension.
+  const principalsById = new Map((input.principals ?? []).map((p) => [p.id, p]));
+  for (const station of input.stations ?? []) {
+    // Offline-node suppression: the node item below already explains every
+    // station on it, and two items for one cause is the scattering this lane
+    // exists to undo.
+    if (offlineNodeIds.has(station.nodeId)) continue;
+
+    let detail: string | null = null;
+    if (station.principalId === null) {
+      detail = "no agent occupies this station";
+    } else {
+      // A principal id the directory doesn't know is treated as live, not
+      // flagged. `principals` is empty for every non-admin, and reporting
+      // the whole fleet as undispatchable because the list was unavailable
+      // would be the loudest possible false alarm. Same ruling as
+      // /agents' stationStatuses.
+      const principal = principalsById.get(station.principalId);
+      if (principal?.suspendedAt) detail = "its agent is suspended";
+    }
+    if (detail === null) continue;
+
+    items.push({
+      kind: "unoccupied",
+      token: "error",
+      what: "Dispatchable by nobody",
+      who: station.stationKey,
+      detail,
+      href: `/nodes/${station.nodeId}/stations/${station.id}`,
+    });
+  }
 
   // Rule 2: node-offline. A station on an offline node already reads
   // "unknown" because of its node, so we report the node once here rather
-  // than once per station on it (the offline-node suppression the brief
-  // calls out — there is currently no per-station rule that would otherwise
-  // duplicate this, since rule 1 is underiveable, but the count below still
-  // reflects every station on the node, not a re-derivation per station).
+  // than once per station on it.
   for (const node of input.nodes) {
     if (node.status !== "offline") continue;
     const stationCount = input.agents.filter((a) => a.nodeId === node.id).length;

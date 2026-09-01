@@ -32,7 +32,13 @@
   let view = $state<"roster" | "stage">("stage");
 
   const items = $derived(
-    deriveAttention({ agents: fleet.agents, nodes: fleet.nodes, runtimes: fleet.runtimes }),
+    deriveAttention({
+      agents: fleet.agents,
+      nodes: fleet.nodes,
+      runtimes: fleet.runtimes,
+      stations: fleet.stations,
+      principals: fleet.principals,
+    }),
   );
 
   // One poll for the whole console: the shell holds a reference for as long
