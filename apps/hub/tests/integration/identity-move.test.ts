@@ -62,7 +62,10 @@ import {
   retireOldIdentity,
   type IdentityMoveDeps,
 } from "../../src/services/matrix-as/identity-move";
-import { mintCredentialAuthorization } from "../../src/services/matrix-credential";
+import {
+  mintCredentialAuthorization,
+  redeemCredentialAuthorization,
+} from "../../src/services/matrix-credential";
 
 const RUN = Math.random().toString(36).slice(2, 8);
 const OWNER = `test-user-identity-move-${RUN}`;
@@ -685,6 +688,45 @@ describe("what a station mid-move looks like", () => {
     await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
     expect((await moveState(STATION)).status).toBe("converged");
     expect(await moveInProgress(STATION)).toBe(false);
+  });
+
+  test("a stalled move stays `waiting` forever, but stops being excused past 15 minutes", async () => {
+    // Ruling 19 (parked finding 16). The happy path now exits via
+    // `converged`, so a REDEEMED authorization that never converges only
+    // happens when something is genuinely broken (a harness that never
+    // restarted, a write to a profile the reader can't see). `moveState`
+    // must keep saying `waiting` — that visibility in the console is the
+    // whole point of §6 — but `moveInProgress`, which `gates.ts` reads to
+    // EXCUSE a fault as "mid-move", must stop excusing it once a harness
+    // restart plus a detect (comfortably under a minute) has had 15 minutes
+    // to happen and plainly hasn't.
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+    const oldMxid = "@agent_old_" + RUN + ":" + DOMAIN;
+    await rawSql`
+      UPDATE stations SET matrix_id = ${oldMxid},
+                          bridge_matrix_id = ${NEW_MXID},
+                          matrix_identity_mode = 'harness'
+       WHERE id = ${STATION}`;
+    await mintCredentialAuthorization(STATION);
+    expect(await redeemCredentialAuthorization(STATION)).toBe(true);
+
+    // Redeemed 5 minutes ago: well within the bound, still excused.
+    await rawSql`
+      UPDATE matrix_credential_authorizations SET used_at = now() - interval '5 minutes'
+       WHERE station_id = ${STATION}`;
+    expect((await moveState(STATION)).status).toBe("waiting");
+    expect(await moveInProgress(STATION)).toBe(true);
+
+    // Redeemed 20 minutes ago: past the bound. `moveState` still reports
+    // `waiting` — nothing about the console's view changed — but the sweep
+    // must stop treating this station's later faults as excused by a move.
+    await rawSql`
+      UPDATE matrix_credential_authorizations SET used_at = now() - interval '20 minutes'
+       WHERE station_id = ${STATION}`;
+    expect((await moveState(STATION)).status).toBe("waiting");
+    expect(await moveInProgress(STATION)).toBe(false);
+
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
   });
 
   test("a gate that finds no room is attributed to the move, exactly as no-agent and no-speaker are", async () => {

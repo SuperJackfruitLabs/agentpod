@@ -67,6 +67,7 @@ import { bridgeUserId } from "./names";
 import { roomForStation, unboundRoomsForStation } from "./station-room";
 import { principalHandle } from "../principals";
 import { linkIdentity } from "../principal-identities";
+import { onStationMatrixIdReported } from "./hooks";
 
 const log = createLogger("identity-move");
 
@@ -532,6 +533,30 @@ export async function onNodeReportedMatrixId(
   return { status: "converged", retired: await retireOldIdentity(stationId, oldMxid, deps) };
 }
 
+/**
+ * Points the hook every detect announces through (`hooks.ts`'s
+ * `onStationMatrixIdReported`) at this file's own convergence listener.
+ *
+ * `index.ts` calls this once, at boot, in place of inlining the
+ * registration — the same move `stationMatrixCredentialRoutesFor`
+ * (`routes/station-matrix-credential.ts`) made for the credential-route mount
+ * decision, and for the same reason. An inline registration inside
+ * `index.ts`'s boot sequence cannot be exercised without booting the whole
+ * hub (DB init, the node sweeper, the kaambaan bridge, the real Matrix
+ * bridge) — nothing in this suite does that — so a deleted or broken
+ * registration would leave every test green while a moved station silently
+ * never converges: the exact defect the whole-branch review was built to
+ * find. Pulling the registration into a function `index.ts` calls rather
+ * than restates means a test can call the SAME function and drive the SAME
+ * registration, instead of reimplementing its shape locally (which is what
+ * `station-matrix-identity.test.ts` used to do here).
+ */
+export function wireConvergenceListener(deps: IdentityMoveDeps): void {
+  onStationMatrixIdReported(async (stationId, mxid) => {
+    await onNodeReportedMatrixId(stationId, mxid, deps);
+  });
+}
+
 // ─── What an operator (and the gate sweep) can see ────────────────────────────
 
 /**
@@ -571,9 +596,14 @@ export type MoveState =
  * `retired-identity`, which is exactly the state from which an operator
  * authorises again.
  */
-async function liveAuthorization(stationId: string): Promise<{ createdAt: Date } | null> {
+async function liveAuthorization(
+  stationId: string
+): Promise<{ createdAt: Date; usedAt: Date | null } | null> {
   const [row] = await db
-    .select({ createdAt: matrixCredentialAuthorizations.createdAt })
+    .select({
+      createdAt: matrixCredentialAuthorizations.createdAt,
+      usedAt: matrixCredentialAuthorizations.usedAt,
+    })
     .from(matrixCredentialAuthorizations)
     .where(
       and(
@@ -614,12 +644,38 @@ export async function moveState(stationId: string): Promise<MoveState> {
 }
 
 /**
+ * How long a REDEEMED authorisation excuses a later fault as "mid-move"
+ * before the sweep should start calling it broken instead.
+ *
+ * Ruling 19 (parked finding 16): `moveState`'s `waiting` has no upper bound,
+ * on purpose — a stalled move staying visible in the console is useful, and
+ * is exactly what §6 asks for. But `moveInProgress` is what `gates.ts` uses
+ * to EXCUSE a fault, and with no bound of its own a station stuck in
+ * `waiting` forever reads as mid-move forever: every later `no-room` or
+ * `no-speaker` gets attributed to a move that isn't happening, and that
+ * station can never again read as a fault. A harness restart plus a detect
+ * is comfortably under a minute; past this, nothing is moving.
+ */
+const STALLED_MOVE_BOUND_MS = 15 * 60 * 1000;
+
+/**
  * Is this station mid-move?
  *
  * Read by `gates.ts` so a gate that cannot be placed during a move is
  * attributable to the move rather than reading as a broken station (§6). A
- * move must not look healthy, and it must not look like a fault either.
+ * move must not look healthy, and it must not look like a fault either — but
+ * only for as long as it is plausibly still a move. `moveState` (above)
+ * answers "what does the console show"; this answers "should the sweep
+ * excuse the fault it just saw", and the two questions get different
+ * answers once a redeemed authorisation is old enough (Ruling 19).
  */
 export async function moveInProgress(stationId: string): Promise<boolean> {
-  return (await moveState(stationId)).status === "waiting";
+  const state = await moveState(stationId);
+  if (state.status !== "waiting") return false;
+
+  const authorization = await liveAuthorization(stationId);
+  // Not yet redeemed: still within its own expiry, which `liveAuthorization`
+  // already enforces — no separate bound needed here.
+  if (!authorization?.usedAt) return true;
+  return Date.now() - authorization.usedAt.getTime() < STALLED_MOVE_BOUND_MS;
 }

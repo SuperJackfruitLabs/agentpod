@@ -9,7 +9,7 @@ import { createPrincipal } from "../../src/services/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
 import type { PreJoinOutcome } from "../../src/services/matrix-as/identity-move";
-import { moveState, onNodeReportedMatrixId } from "../../src/services/matrix-as/identity-move";
+import { moveState, wireConvergenceListener } from "../../src/services/matrix-as/identity-move";
 import { signalNodeToAdopt } from "../../src/services/matrix-as/adopt-signal";
 import { onStationMatrixIdReported } from "../../src/services/matrix-as/hooks";
 import { connectionManager } from "../../src/services/connection-manager";
@@ -532,31 +532,34 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     let retired: Array<{ userId: string; op: string }>;
 
     /**
-     * `index.ts`'s own boot wiring, verbatim in shape: the hook every detect
-     * announces through, pointed at the convergence listener. Registering it
-     * here is what makes this an end-to-end assertion rather than a check that
-     * one function calls another.
+     * `index.ts`'s ACTUAL boot wiring — `wireConvergenceListener`
+     * (`identity-move.ts`), the exact function `index.ts` calls at startup
+     * — not a local restatement of its shape. This used to reimplement the
+     * registration inline with its own `onStationMatrixIdReported(...)`
+     * call, which meant deleting `index.ts`'s real registration left this
+     * suite green while the whole-branch review's Critical silently
+     * returned. Calling the production function here closes that gap: it is
+     * the same code path index.ts runs, fed fake deps instead of a real
+     * homeserver client.
      */
-    function wireConvergenceListener() {
+    function wireConvergence() {
       retired = [];
-      onStationMatrixIdReported(async (stationId, mxid) => {
-        await onNodeReportedMatrixId(stationId, mxid, {
-          domain: DOMAIN,
-          client: {
-            invite: async () => {},
-            join: async () => {},
-            leave: async (userId: string) => {
-              retired.push({ userId, op: "leave" });
-            },
-            // No room row for this station, so the leave path is not reached;
-            // recording and revoking are, and they are what §5 is about.
-            isJoined: async () => true,
-            retireAccount: async (userId: string) => {
-              retired.push({ userId, op: "retire" });
-              return { credentialsRevoked: true, accountDeactivated: false };
-            },
+      wireConvergenceListener({
+        domain: DOMAIN,
+        client: {
+          invite: async () => {},
+          join: async () => {},
+          leave: async (userId: string) => {
+            retired.push({ userId, op: "leave" });
           },
-        });
+          // No room row for this station, so the leave path is not reached;
+          // recording and revoking are, and they are what §5 is about.
+          isJoined: async () => true,
+          retireAccount: async (userId: string) => {
+            retired.push({ userId, op: "retire" });
+            return { credentialsRevoked: true, accountDeactivated: false };
+          },
+        },
       });
     }
 
@@ -591,7 +594,7 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     });
 
     test("the mxid a node reports on matrix.adopt converges the station and retires the old identity", async () => {
-      wireConvergenceListener();
+      wireConvergence();
       connectNodeReporting(NEW_MXID);
 
       try {
@@ -631,7 +634,7 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
       // §3's failure: the credential was written somewhere the harness never
       // loads, so the reader finds nothing. The safe state is the whole point —
       // the station keeps its old identity, and step 6 does NOT run.
-      wireConvergenceListener();
+      wireConvergence();
       connectNodeReporting(null);
 
       try {
@@ -649,7 +652,7 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     });
 
     test("an older node that omits the field is not read as convergence", async () => {
-      wireConvergenceListener();
+      wireConvergence();
       connectNodeReporting(undefined);
 
       try {
@@ -669,7 +672,7 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     test("a node reporting something OTHER than the minted address is not convergence", async () => {
       // A harness that ignored the new credential and came back up as itself.
       // §4's failure table: no convergence, no retirement, station working.
-      wireConvergenceListener();
+      wireConvergence();
       connectNodeReporting(OLD_MXID);
 
       try {

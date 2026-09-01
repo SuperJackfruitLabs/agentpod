@@ -63,8 +63,8 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
-import { onStationsAdopted, onProvisionStation, onStationMatrixIdReported } from './services/matrix-as/hooks.ts';
-import { preJoinNewIdentity, onNodeReportedMatrixId, moveState } from './services/matrix-as/identity-move.ts';
+import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
+import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
 import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
@@ -226,10 +226,10 @@ if (matrixBridge) {
   // What the node reports on every detect, and the only thing that may set
   // the irreversible last step of a move going: `matrix_id = bridge_matrix_id`
   // is convergence (design §1), and until it holds, the station keeps working
-  // under the identity it already has.
-  onStationMatrixIdReported(async (stationId, mxid) => {
-    await onNodeReportedMatrixId(stationId, mxid, identityMove);
-  });
+  // under the identity it already has. The registration itself lives in
+  // `wireConvergenceListener` (`identity-move.ts`) rather than inline here,
+  // so it has a unit test that does not need to boot this whole file to run.
+  wireConvergenceListener(identityMove);
 
   // How a gate reaches a room, however it got here. Shared by the push
   // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
@@ -305,10 +305,11 @@ if (matrixBridge) {
       preJoinNewIdentity: (stationId) => preJoinNewIdentity(stationId, identityMove),
       // Steps 3-5: the node is told to adopt, and whatever identity its
       // profile then reads as is announced through the SAME hook a detect
-      // announces through — the one `onStationMatrixIdReported` above is
-      // wired to. That is the whole of convergence's trigger; §4's "on its
-      // next detect" describes a detect that never happens, because
-      // matrix.adopt restarts the harness rather than the node-agent.
+      // announces through — the one `wireConvergenceListener` above wired
+      // `onNodeReportedMatrixId` to. That is the whole of convergence's
+      // trigger; §4's "on its next detect" describes a detect that never
+      // happens, because matrix.adopt restarts the harness rather than the
+      // node-agent.
       signalNodeToAdopt: (args, signalDeps) => signalNodeToAdopt(args, signalDeps),
       // The four states of §1's invariant, for the console's panel. Same
       // function `moveInProgress` reads, so the operator's view and the gate
