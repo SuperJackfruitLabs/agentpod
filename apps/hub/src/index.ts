@@ -37,6 +37,8 @@ import { runtimeRoutes } from './routes/runtimes.ts';
 import { stationRoutes } from './routes/stations.ts';
 // A node exchanging its credential for a station-scoped agent token
 import { stationTokenRoutes } from './routes/station-token.ts';
+// A node redeeming a human's authorization for a station's Matrix credential
+import { createStationMatrixCredentialRoutes } from './routes/station-matrix-credential.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
@@ -160,6 +162,25 @@ const app = new Hono()
    * it just cannot sit behind a middleware built for a session.
    */
   .route('/api', stationTokenRoutes)
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/matrix-credential — this
+   * route's sibling redeeming a Matrix credential instead of a JWT. Same
+   * self-authenticating Bearer, so it is registered here too, ahead of
+   * `authMiddleware`. Mounted only when a Matrix bridge is configured —
+   * with none, there is no homeserver to register or rotate an identity on,
+   * so the route simply does not exist rather than 500ing on every call.
+   */
+  .route(
+    '/api',
+    matrixBridge
+      ? createStationMatrixCredentialRoutes({
+          credentials: {
+            register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
+            rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
+          },
+        })
+      : new Hono()
+  )
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
