@@ -9,7 +9,7 @@
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
-  import AppShell from "$lib/components/app-shell.svelte";
+  import AppShell from "$lib/components/shell/AppShell.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
   import { Spinner } from "$lib/components/ui/spinner";
 
