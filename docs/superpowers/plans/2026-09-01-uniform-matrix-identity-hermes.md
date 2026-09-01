@@ -268,6 +268,10 @@ type ProfileWriter interface {
 }
 
 func WriterFor(harness string) (ProfileWriter, bool)
+
+// AllWriters returns every registered writer, so the conformance suite covers
+// adapters added later without being edited for each one.
+func AllWriters() []ProfileWriter
 ```
 
 - [ ] **Step 1: Write the conformance suite.** It runs against every registered writer, so Slice 2's adapters inherit it:
@@ -298,9 +302,37 @@ func TestConformance(t *testing.T) {
             // Hermes .env carries other keys; auth.json carries provider
             // credentials. Losing them breaks the agent in a way that has
             // nothing to do with Matrix.
+            dir := seedProfile(t, w.Harness())
+            before := readAllFiles(t, dir)
+            if err := w.Write(dir, "@agent_writer-quill:id.agentpod.dev", "syt_token"); err != nil { t.Fatal(err) }
+            after := readAllFiles(t, dir)
+            for name, content := range before {
+                if !touchedByWriter(w, name) && after[name] != content {
+                    t.Fatalf("%s was modified but is not this writer's file", name)
+                }
+            }
+            if !strings.Contains(after[authoritativeFile(w)], "ANTHROPIC_API_KEY=sk-seeded") {
+                t.Fatal("an unrelated key in the written file was lost")
+            }
         })
-        t.Run(w.Harness()+"/token is not world readable", func(t *testing.T) { /* mode & 0077 == 0 */ })
-        t.Run(w.Harness()+"/idempotent", func(t *testing.T) { /* write twice, same bytes */ })
+        t.Run(w.Harness()+"/token is not world readable", func(t *testing.T) {
+            dir := seedProfile(t, w.Harness())
+            if err := w.Write(dir, "@a:h", "syt_token"); err != nil { t.Fatal(err) }
+            fi, err := os.Stat(filepath.Join(dir, authoritativeFile(w)))
+            if err != nil { t.Fatal(err) }
+            if fi.Mode().Perm()&0o077 != 0 {
+                t.Fatalf("credential file is group/world readable: %v", fi.Mode().Perm())
+            }
+        })
+        t.Run(w.Harness()+"/idempotent", func(t *testing.T) {
+            dir := seedProfile(t, w.Harness())
+            if err := w.Write(dir, "@a:h", "syt_token"); err != nil { t.Fatal(err) }
+            first := readAllFiles(t, dir)
+            if err := w.Write(dir, "@a:h", "syt_token"); err != nil { t.Fatal(err) }
+            if diff := cmp.Diff(first, readAllFiles(t, dir)); diff != "" {
+                t.Fatalf("second write changed the profile: %s", diff)
+            }
+        })
     }
 }
 ```
@@ -391,8 +423,24 @@ test("a station whose room choice is ambiguous refuses the move", async () => {
 
 - [ ] **Step 2: Run and watch fail.**
 - [ ] **Step 3: Implement.** `preJoinNewIdentity` invites as the old user then joins as the new one (invite-only rooms — agentpod#397). `onNodeReportedMatrixId` compares against `bridge_matrix_id` and only on equality calls `retireOldIdentity`.
-- [ ] **Step 4: Run the tests, then the full suite twice.**
-- [ ] **Step 5: Commit.**
+- [ ] **Step 4: A station mid-move must not read as healthy.** Spec §6. The sweep
+  counts non-`sent` outcomes as of 2026-08-31, and a move must be distinguishable
+  from a fault. Write this test first and watch it fail:
+
+```typescript
+test("a gate for a station mid-move is attributed to the move, not to a fault", async () => {
+  await preJoinNewIdentity(STATION);
+  const outcome = await projectGate(GATE, STATION);
+  // Both identities are in the room during a move, so a gate still lands.
+  // What must not happen is a move looking like `no-speaker`, which is the
+  // signature of a broken station.
+  expect(outcome.status).toBe("sent");
+  expect(await moveInProgress(STATION)).toBe(true);
+});
+```
+
+- [ ] **Step 5: Run the tests, then the full suite twice.**
+- [ ] **Step 6: Commit.**
 
 ---
 
@@ -411,10 +459,35 @@ Five things in this codebase have been defined with no caller. A control is part
 - [ ] **Step 1: Write the failing tests.**
 
 ```typescript
-test("a station on a retired identity says so, naming both addresses", ...);
-test("the move control calls authorize-move and then shows 'waiting for the node'", ...);
-test("a 403 from the grant gate is shown verbatim, not replaced with a generic failure", ...);
-test("a converged station shows no control", ...);
+test("a station on a retired identity says so, naming both addresses", () => {
+  render(StationMatrixPanel, { station: { matrixId: OLD, bridgeMatrixId: NEW } });
+  expect(screen.getByText(/retired identity/i)).toBeTruthy();
+  expect(screen.getByText(OLD)).toBeTruthy();
+  expect(screen.getByText(NEW)).toBeTruthy();
+});
+
+test("the move control calls authorize-move, then shows waiting for the node", async () => {
+  const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
+  render(StationMatrixPanel, { station: RETIRED, authorize });
+  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  expect(authorize).toHaveBeenCalledWith(RETIRED.id);
+  expect(screen.getByText(/waiting for the node/i)).toBeTruthy();
+});
+
+test("a 403 from the grant gate is shown verbatim", async () => {
+  // The hub's sentence names which grant refused. Replacing it with a generic
+  // failure is how an operator ends up unable to tell "not permitted" from
+  // "broken".
+  const authorize = vi.fn().mockRejectedValue(new Error("Issuing an agent its own credentials is granting reach, which your grant does not permit for this agent."));
+  render(StationMatrixPanel, { station: RETIRED, authorize });
+  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  expect(await screen.findByText(/granting reach, which your grant does not permit/i)).toBeTruthy();
+});
+
+test("a converged station shows no control", () => {
+  render(StationMatrixPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW } });
+  expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
+});
 ```
 
 - [ ] **Step 2: Run and watch fail.** `cd apps/console && pnpm vitest run`
