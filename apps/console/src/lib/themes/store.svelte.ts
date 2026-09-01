@@ -270,10 +270,11 @@ function applyColorScheme(colorScheme: ColorScheme) {
   // a stale inline value left over from before this change within a live session.
   root.style.removeProperty("--radius");
 
-  // A user who applied a scheme before this change has --status-* inline styles
-  // persisted on <html> from a previous session; removeProperty (not just no
-  // longer setting them) is what actually unsticks them, so the fixed values in
-  // app.css can govern again.
+  // Not a no-op, and not for persistence — inline styles die with the document.
+  // This clears a value set EARLIER IN THIS SESSION: a dev hot-reload, or any
+  // future code that sets one. Dropping the writes above is what stops new
+  // ones; this is what guarantees app.css governs even so, which is the whole
+  // point of taking these six away from the schemes.
   root.style.removeProperty("--status-running");
   root.style.removeProperty("--status-starting");
   root.style.removeProperty("--status-error");
