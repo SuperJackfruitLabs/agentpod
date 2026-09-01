@@ -48,3 +48,6 @@ export * from "./matrix";
 // Better Auth's own `jwks` so the two authorities can be revoked separately
 // (migration 0054).
 export * from "./service-keys";
+
+// A human's authorisation for a station to redeem its own Matrix credential.
+export * from "./matrix-credentials";

@@ -49,6 +49,7 @@ import {
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
+import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
@@ -117,6 +118,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixMissions,
   matrixMissionMembers,
   matrixSpaces,
+  matrixCredentialAuthorizations,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**
