@@ -37,6 +37,7 @@ import { createLogger } from "../../utils/logger";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
+import { moveInProgress } from "./identity-move";
 
 const log = createLogger("matrix-gates");
 
@@ -127,8 +128,17 @@ export type ProjectionOutcome =
    * `no-room`, which means there is nowhere to post at all; this means there
    * is a room but nobody to speak in it as, which must refuse rather than
    * invent an address from `(nodeName, stationKey)`.
+   *
+   * `midMove` — carried by this status and by `no-speaker`, the two that name
+   * a station — says the station is between an authorised identity move and
+   * its convergence (`identity-move.ts`'s `moveInProgress`). Spec §6: a
+   * station mid-move must not read as healthy, and must not read as a FAULT
+   * either, and these two statuses are exactly what a fault looks like.
+   * Optional, so absent means "not attributed" rather than "not moving"; it
+   * is read by `gate-sweep.ts`'s per-gate warning, which is where an operator
+   * meets it.
    */
-  | { status: "no-agent" }
+  | { status: "no-agent"; midMove?: boolean }
   /**
    * The room exists and its station HAS an occupying agent, but the station
    * answers for itself on Matrix and has never reported the account it
@@ -137,7 +147,7 @@ export type ProjectionOutcome =
    * as `@agent_<handle>` anyway is what this status replaced — an mxid the
    * bridge never registered, in a room it never joined.
    */
-  | { status: "no-speaker" };
+  | { status: "no-speaker"; midMove?: boolean };
 
 /**
  * The room a card's work happened in.
@@ -173,6 +183,7 @@ async function roomForCard(
   cardId: string
 ): Promise<{
   roomId: string;
+  stationId: string;
   nodeName: string;
   stationKey: string;
   principalId: string | null;
@@ -220,6 +231,7 @@ async function roomForCard(
 
   return {
     roomId: occupancy.room.roomId,
+    stationId: dispatch.stationId,
     nodeName: station.nodeName,
     stationKey: station.stationKey,
     principalId: occupancy.principalId,
@@ -352,11 +364,13 @@ export async function projectGate(
     // occupying agent could never be re-attempted — the sweep would see the
     // claimed row and conclude it had already been handled.
     await releaseClaim(d.gateId);
+    const midMove = await moveInProgress(found.stationId);
     log.warn("gate's station has no occupying agent; claim released", {
       gateId: d.gateId,
       stationKey: found.stationKey,
+      midMove,
     });
-    return { status: "no-agent" };
+    return { status: "no-agent", midMove };
   }
 
   // …and WHICH virtual user is `names.ts`'s `stationSpeaker`, not
@@ -377,11 +391,17 @@ export async function projectGate(
     // as above — the node agent reports `matrix_id`, so this can become
     // sendable later without anything else changing.
     await releaseClaim(d.gateId);
+    // Attributed to the move when there is one (§6): a station between
+    // authorisation and convergence is waiting, not broken, and a sweep that
+    // reports the two as the same thing is how a move gets mistaken for the
+    // outage it exists to avoid.
+    const midMove = await moveInProgress(found.stationId);
     log.warn("gate's station answers for itself but has reported no Matrix identity; claim released", {
       gateId: d.gateId,
       stationKey: found.stationKey,
+      midMove,
     });
-    return { status: "no-speaker" };
+    return { status: "no-speaker", midMove };
   }
   const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 

@@ -8,6 +8,7 @@ import { setGrant } from "../../src/services/grants";
 import { createPrincipal } from "../../src/services/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
+import type { PreJoinOutcome } from "../../src/services/matrix-as/identity-move";
 import { connectionManager } from "../../src/services/connection-manager";
 import { handleNodeMessage } from "../../src/services/broker";
 import type { GatewayServerMessage } from "@agentpod/contract";
@@ -44,10 +45,23 @@ let canRotate = true;
 /** The homeserver already has this localpart — the normal case on a real deployment. */
 let identityExists = false;
 let logged: string[] = [];
+/**
+ * What the ordered move's step 2 answered — injected, so this file stays about
+ * the ROUTE. The pre-join's own behaviour (invite-then-join, the ambiguous-room
+ * refusal, both identities in the room at once) is proven against a real
+ * homeserver in `identity-move.test.ts`; what belongs here is that the route
+ * runs it BEFORE it mints anything, and refuses the whole move when it refuses.
+ */
+let preJoined: PreJoinOutcome = { status: "joined", roomId: "!r:x", newMxid: "@n:x", oldMxid: "@o:x" };
+let preJoinCalls: string[] = [];
 
 function app() {
   const routes = createStationMatrixRoutes({
     domain: DOMAIN,
+    preJoinNewIdentity: async (stationId: string) => {
+      preJoinCalls.push(stationId);
+      return preJoined;
+    },
     provisionStation: async (stationId: string) => {
       provisioned.push(stationId);
     },
@@ -111,6 +125,8 @@ beforeEach(async () => {
   logged = [];
   canRotate = true;
   identityExists = false;
+  preJoined = { status: "joined", roomId: "!r:x", newMxid: "@n:x", oldMxid: "@o:x" };
+  preJoinCalls = [];
   await rawSql`UPDATE stations SET matrix_identity_mode = 'bridge' WHERE id = ${STATION}`;
 });
 
@@ -358,6 +374,46 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     } finally {
       await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${STATION}`;
     }
+  });
+
+  /**
+   * The ordering the whole slice exists for (design §4). The naive order —
+   * authorise, let the node switch the credential, then move the room — is
+   * what left 14 stations logged in as users their rooms did not contain on
+   * 2026-08-31.
+   */
+  describe("the ordered move", () => {
+    test("the new identity is put in the room BEFORE anything is minted", async () => {
+      await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+      await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+
+      expect(res.status).toBe(200);
+      expect(preJoinCalls).toEqual([STATION]);
+      const rows = await rawSql`
+        SELECT count(*)::int AS n FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+      expect((rows[0] as { n: number }).n).toBe(1);
+    });
+
+    test("a refused pre-join refuses the move: nothing minted, nothing signalled", async () => {
+      // §4's failure table: "step 2 fails → nothing has changed yet". A
+      // station whose room choice is ambiguous is the case that refusal was
+      // written for, and it must not become an authorization a node can
+      // redeem — a credential switched with the room unmoved is the outage.
+      await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+      await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+      preJoined = { status: "ambiguous-room", candidates: ["!a:x", "!b:x"] };
+
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("!a:x");
+      const rows = await rawSql`
+        SELECT count(*)::int AS n FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+      expect((rows[0] as { n: number }).n).toBe(0);
+    });
   });
 
   /**

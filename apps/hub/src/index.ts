@@ -63,7 +63,8 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
-import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
+import { onStationsAdopted, onProvisionStation, onStationMatrixIdReported } from './services/matrix-as/hooks.ts';
+import { preJoinNewIdentity, onNodeReportedMatrixId } from './services/matrix-as/identity-move.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -214,6 +215,21 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // Everything the ordered identity move needs, in one place: the appservice
+  // client that can act as any `@agent_.*` user, and this homeserver's name.
+  // Two call sites read it — the operator's authorise route (step 2) and the
+  // convergence listener below (steps 5 and 6) — and they must be the same
+  // deps or the two halves of one move could act on different homeservers.
+  const identityMove = { domain: matrixBridge.config.domain, client: matrixBridge.client };
+
+  // What the node reports on every detect, and the only thing that may set
+  // the irreversible last step of a move going: `matrix_id = bridge_matrix_id`
+  // is convergence (design §1), and until it holds, the station keeps working
+  // under the identity it already has.
+  onStationMatrixIdReported(async (stationId, mxid) => {
+    await onNodeReportedMatrixId(stationId, mxid, identityMove);
+  });
+
   // How a gate reaches a room, however it got here. Shared by the push
   // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
   // be posted by two slightly different projections.
@@ -280,6 +296,12 @@ if (matrixBridge) {
         // the homeserver admin account this service exists to do away with.
         rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
       },
+      // Step 2 of the ordered move: the new identity goes into the room
+      // before anything switches the credential. Wired here rather than
+      // reached for inside the route, so the route stays testable and so a
+      // hub with no bridge — which is where this route is not mounted at all
+      // — cannot half-perform a move.
+      preJoinNewIdentity: (stationId) => preJoinNewIdentity(stationId, identityMove),
     }),
   );
 

@@ -161,10 +161,17 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
           // to be noticed in a review months later. `already` is skipped
           // deliberately: it is a gate that was delivered, and warning on it
           // every five minutes would bury these three.
+          //
+          // `midMove` is the one distinction that keeps this line honest
+          // (spec §6): a station between an authorised identity move and its
+          // convergence is WAITING, not broken, and a stuck-gate line that
+          // cannot tell the two apart turns every move into an alarm — or,
+          // worse, teaches an operator to ignore the alarm that matters.
           log.warn("a pending gate could not be put in a room", {
             gateId: gate.gateId,
             boardId,
             status: outcome.status,
+            midMove: "midMove" in outcome ? outcome.midMove === true : false,
           });
         }
       } catch (err) {

@@ -28,6 +28,7 @@ import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
 import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
+import { preJoinRefusal, type PreJoinOutcome } from "../services/matrix-as/identity-move";
 import * as broker from "../services/broker";
 import type { AuthUser } from "../auth/middleware";
 
@@ -67,6 +68,18 @@ export interface StationMatrixDeps {
      */
     rotate?: (localpart: string) => Promise<IssuedCredentials>;
   };
+  /**
+   * Step 2 of the ordered move: put the station's new identity in its room
+   * while the old one is still there and still working
+   * (`services/matrix-as/identity-move.ts`).
+   *
+   * **Required, not optional.** This route is mounted only where a bridge
+   * exists, and an optional pre-join is precisely how a station ends up with
+   * its credential switched and its room unmoved — the 2026-08-31 outage, one
+   * missing dependency at a time. The route refuses the whole move when this
+   * refuses, so nothing tells the node to switch anything.
+   */
+  preJoinNewIdentity(stationId: string): Promise<PreJoinOutcome>;
   /** Injected so the tests can prove a token never reaches it. */
   log?: (line: string) => void;
 }
@@ -248,11 +261,17 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * principal-derived identity (`charter` →
      * decisions/2026-08-15-granting-reach-is-changing-an-agent.md; design
      * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md`
-     * §2). This mints a single-use, short-lived, station-scoped authorization
-     * and signals the station's node to redeem it (`matrix.adopt`, over the
-     * existing broker). It does not pre-join the new identity to the room or
-     * handle convergence; those belong to the ordered move in a later task,
-     * deliberately not stubbed here.
+     * §2). It puts the station's new identity in its room first, then mints a
+     * single-use, short-lived, station-scoped authorization and signals the
+     * station's node to redeem it (`matrix.adopt`, over the existing broker).
+     *
+     * **The order is the point** (design §4, and
+     * `services/matrix-as/identity-move.ts`): pre-join, then authorise, then
+     * the node switches the credential. Convergence and the retirement of the
+     * old identity happen later and elsewhere — the node reports the new mxid
+     * on its next detect and `station-registry` announces it — because the one
+     * irreversible step may only run after the new identity has demonstrably
+     * worked.
      *
      * There is no token: the record minted is station-scoped, and the node
      * redeeming it is already authenticated by its own long-term credential
@@ -305,6 +324,29 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
           },
           409
         );
+      }
+
+      // The ordered move, step 2, and it runs BEFORE anything is minted or
+      // signalled (design §4). The naive order — authorise, switch the
+      // credential, then move the room — leaves the harness logged in as a
+      // user the room does not contain, which on 2026-08-31 was 14 mute
+      // stations. Putting the new identity in the room first means the worst
+      // case here is a room with one extra member in it and a station that
+      // never noticed.
+      //
+      // A refusal stops the whole move: §4's failure table says step 2
+      // failing must leave "nothing has changed yet", so no authorization is
+      // minted and the node is never told to adopt anything. Re-authorising
+      // is the retry, and the pre-join is idempotent, so this refusal is
+      // always recoverable by fixing what it names and pressing again.
+      const preJoined = await deps.preJoinNewIdentity(station.id);
+      const refusal = preJoinRefusal(preJoined);
+      if (refusal) {
+        say(
+          `[station-matrix] refused to move ${station.nodeName}/${station.stationKey} ` +
+            `to its own identity: ${preJoined.status}`
+        );
+        return c.json({ error: refusal }, 409);
       }
 
       let authorization: { expiresAt: Date };
