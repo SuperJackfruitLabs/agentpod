@@ -2,13 +2,18 @@
  * A node redeems a human's authorization for a station's Matrix credential.
  *
  * `matrix-credential.ts` (Task 1) is the mint side: a human authorises one
- * station, which produces a short-lived, single-use token. This is the
- * redeem side, and it is `station-token.ts`'s sibling — same shape, same
- * refusals, because the problem is the same one: a node holds no long-lived
- * credential of the station's own, so it exchanges the one it DOES hold
- * (`<nodeId>:<nodeSecret>`, proven once at enrollment) for what the station
- * needs. There, that exchange produces a JWT naming the occupant; here, it
- * produces a Matrix access token for the occupant's own address.
+ * station, which produces a short-lived, single-use, **station-scoped**
+ * record — not a token. There is nothing to hand the node to present here:
+ * the broker signal that tells a node to adopt (`matrix.adopt`) carries no
+ * secret by design, and this route's own caller is already authenticated.
+ * This is the redeem side, and it is `station-token.ts`'s sibling — same
+ * shape, same refusals, because the problem is the same one: a node holds no
+ * long-lived credential of the station's own, so it exchanges the one it DOES
+ * hold (`<nodeId>:<nodeSecret>`, proven once at enrollment) for what the
+ * station needs. There, that exchange produces a JWT naming the occupant;
+ * here, it produces a Matrix access token for the occupant's own address.
+ * Redemption is therefore "this authenticated node, for this station,
+ * against the live authorization record" — no request body at all.
  *
  * **The credential and the node-id-matches-path check are copied from
  * `station-token.ts`, not re-derived** — same `Bearer <nodeId>:<nodeSecret>`
@@ -111,16 +116,13 @@ export function createStationMatrixCredentialRoutes(deps: StationMatrixCredentia
         return c.json({ error: "station has no occupying principal" }, 409);
       }
 
-      const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
-      const token = typeof body.authorization === "string" ? body.authorization : "";
-
-      // Unknown, expired, already redeemed, or minted for a different
-      // station — redeemCredentialAuthorization collapses all four into
-      // `false` and this endpoint answers them identically, for the same
-      // reason the station check above collapses "does not exist" and
+      // No body: nothing to read. Never expired, never redeemed, or never
+      // minted at all — redeemCredentialAuthorization collapses all three
+      // into `false` and this endpoint answers them identically, for the
+      // same reason the station check above collapses "does not exist" and
       // "hosted elsewhere": distinguishing them would tell a caller which
       // guess to try next.
-      if (!token || !(await redeemCredentialAuthorization(stationId, token))) {
+      if (!(await redeemCredentialAuthorization(stationId))) {
         return c.json({ error: "no authorization to redeem" }, 403);
       }
 

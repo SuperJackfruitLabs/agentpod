@@ -10,12 +10,17 @@ import { stations } from "./stations";
  * can never mint itself a credential, only cash in what a human already
  * approved for this exact station.
  *
- * Shape copied from `enrollmentTokens` (`./nodes.ts`) rather than invented: a
- * hashed token, an `expires_at`, and a `used_at` that makes redemption
- * single-use. The redeem statement sets `used_at` in the same UPDATE that
- * checks it is null (see `services/matrix-credential.ts`), so two concurrent
- * redemptions of one authorisation cannot both succeed — a race here would
- * mean two working Matrix credentials for one human approval.
+ * No `token_hash`: unlike `enrollmentTokens` (`./nodes.ts`), which this
+ * table's shape started from, there is no unauthenticated party here to hand
+ * a bearer token to. The node redeeming this record is already authenticated
+ * by its own `<nodeId>:<nodeSecret>` and already proven to host the station
+ * (`routes/station-matrix-credential.ts`), so `station_id` is the only key
+ * redemption needs. What carries over from `enrollmentTokens` is `expires_at`
+ * and `used_at` — `used_at` is what makes redemption single-use; the redeem
+ * statement sets it in the same UPDATE that checks it is null (see
+ * `services/matrix-credential.ts`), so two concurrent redemptions of one
+ * authorisation cannot both succeed — a race here would mean two working
+ * Matrix credentials for one human approval.
  */
 export const matrixCredentialAuthorizations = pgTable(
   "matrix_credential_authorizations",
@@ -27,7 +32,6 @@ export const matrixCredentialAuthorizations = pgTable(
     stationId: text("station_id")
       .notNull()
       .references(() => stations.id, { onDelete: "cascade" }),
-    tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at").notNull(),
     usedAt: timestamp("used_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),

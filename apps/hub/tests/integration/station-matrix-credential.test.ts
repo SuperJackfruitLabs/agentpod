@@ -65,6 +65,12 @@ let otherNodeSecret: string;
 let stationId: string; // occupied by the writer-quill principal
 let otherNodesStation: string;
 let unoccupied: string;
+/** Occupied, but never has `mintCredentialAuthorization` called for it — a
+ * DIFFERENT station than `stationId`, since several tests above mint for
+ * `stationId` without redeeming (leaving it with a live authorization) and
+ * the occupancy-exclusive index (`0061_occupancy_exclusive.sql`) means it
+ * needs its own principal too. */
+let neverAuthorized: string;
 let writerQuillPrincipal: string;
 
 let issued: string[] = [];
@@ -143,6 +149,10 @@ beforeAll(async () => {
     kind: "agent",
     handle: WRITER_QUILL_HANDLE,
   });
+  const neverAuthorizedPrincipal = await createPrincipal({
+    kind: "agent",
+    handle: `never-authorized-${RUN}`,
+  });
 
   stationId = `st_smc_${RUN}`;
   await db.insert(stations).values({
@@ -180,6 +190,19 @@ beforeAll(async () => {
     kind: "leaf",
     displayName: "idle",
   });
+
+  neverAuthorized = `st_smc_never_auth_${RUN}`;
+  await db.insert(stations).values({
+    id: neverAuthorized,
+    tenantId: BOOTSTRAP_TENANT_ID,
+    userId: TEST_USER,
+    nodeId,
+    harness: "hermes",
+    stationKey: "hermes:never-authorized",
+    kind: "leaf",
+    displayName: "never-authorized",
+    principalId: neverAuthorizedPrincipal,
+  });
 });
 
 beforeEach(async () => {
@@ -193,11 +216,12 @@ beforeEach(async () => {
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id IN (${stationId}, ${otherNodesStation}, ${unoccupied})`;
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id IN (${stationId}, ${otherNodesStation}, ${unoccupied}, ${neverAuthorized})`;
     await rawSql`DELETE FROM stations WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM principals WHERE handle = ${WRITER_QUILL_HANDLE}`;
+    await rawSql`DELETE FROM principals WHERE handle = ${`never-authorized-${RUN}`}`;
     await rawSql`DELETE FROM "user" WHERE id = ${TEST_USER}`;
   } catch {
     // cleanup only
@@ -206,17 +230,16 @@ afterAll(async () => {
 
 describe("a node redeems a Matrix credential authorization for one of its stations", () => {
   test("401 when the node credential is wrong", async () => {
-    const { token } = await mintCredentialAuthorization(stationId);
+    await mintCredentialAuthorization(stationId);
     const res = await app().request(URL(), {
       method: "POST",
       headers: { Authorization: `Bearer ${nodeId}:wrong`, "Content-Type": "application/json" },
-      body: JSON.stringify({ authorization: token }),
     });
     expect(res.status).toBe(401);
   });
 
   test("401 when the credential verifies for a DIFFERENT node than the path names", async () => {
-    const { token } = await mintCredentialAuthorization(stationId);
+    await mintCredentialAuthorization(stationId);
     // otherNodeId's own credential is genuinely valid — just not for THIS
     // path's nodeId, so it is refused the same way a wrong secret is.
     const res = await app().request(URL(), {
@@ -225,7 +248,6 @@ describe("a node redeems a Matrix credential authorization for one of its statio
         Authorization: `Bearer ${otherNodeId}:${otherNodeSecret}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ authorization: token }),
     });
     expect(res.status).toBe(401);
   });
@@ -233,10 +255,10 @@ describe("a node redeems a Matrix credential authorization for one of its statio
   test("403 when the station is not hosted by this node", async () => {
     // not 404: see station-token.ts — a station hosted elsewhere and one
     // that does not exist must be indistinguishable to this credential.
-    const { token } = await mintCredentialAuthorization(otherNodesStation);
+    await mintCredentialAuthorization(otherNodesStation);
     const res = await app().request(
       `/api/nodes/${nodeId}/stations/${otherNodesStation}/matrix-credential`,
-      { method: "POST", headers: nodeAuth(), body: JSON.stringify({ authorization: token }) }
+      { method: "POST", headers: nodeAuth() }
     );
     expect(res.status).toBe(403);
     expect(issued).toHaveLength(0);
@@ -245,7 +267,7 @@ describe("a node redeems a Matrix credential authorization for one of its statio
   test("403 for a station that does not exist at all, identically", async () => {
     const res = await app().request(
       `/api/nodes/${nodeId}/stations/st_smc_does_not_exist/matrix-credential`,
-      { method: "POST", headers: nodeAuth(), body: JSON.stringify({ authorization: "whatever" }) }
+      { method: "POST", headers: nodeAuth() }
     );
     expect(res.status).toBe(403);
   });
@@ -253,42 +275,37 @@ describe("a node redeems a Matrix credential authorization for one of its statio
   test("409 when the station has no occupying principal", async () => {
     const res = await app().request(
       `/api/nodes/${nodeId}/stations/${unoccupied}/matrix-credential`,
-      { method: "POST", headers: nodeAuth(), body: JSON.stringify({ authorization: "whatever" }) }
+      { method: "POST", headers: nodeAuth() }
     );
     expect(res.status).toBe(409);
     expect(issued).toHaveLength(0);
   });
 
-  test("403 when there is no authorization to redeem", async () => {
-    const res = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: "mca_never_minted" }),
-    });
+  test("403 when no authorization was ever minted for this station", async () => {
+    // A DIFFERENT station than `stationId`: several tests above mint for
+    // `stationId` without redeeming, which would leave it with a live
+    // authorization and make this assertion accidentally true for the wrong
+    // reason.
+    const res = await app().request(
+      `/api/nodes/${nodeId}/stations/${neverAuthorized}/matrix-credential`,
+      { method: "POST", headers: nodeAuth() }
+    );
     expect(res.status).toBe(403);
     expect(issued).toHaveLength(0);
   });
 
   test("403 when the authorization has already been redeemed", async () => {
-    const { token } = await mintCredentialAuthorization(stationId);
-    expect(await redeemCredentialAuthorization(stationId, token)).toBe(true);
+    await mintCredentialAuthorization(stationId);
+    expect(await redeemCredentialAuthorization(stationId)).toBe(true);
 
-    const res = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: token }),
-    });
+    const res = await app().request(URL(), { method: "POST", headers: nodeAuth() });
     expect(res.status).toBe(403);
     expect(issued).toHaveLength(0);
   });
 
   test("issues a credential for the principal-derived localpart, once", async () => {
-    const { token } = await mintCredentialAuthorization(stationId);
-    const res = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: token }),
-    });
+    await mintCredentialAuthorization(stationId);
+    const res = await app().request(URL(), { method: "POST", headers: nodeAuth() });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { userId: string; accessToken: string };
     // Derived from the OCCUPANT's principal handle, not from
@@ -302,24 +319,17 @@ describe("a node redeems a Matrix credential authorization for one of its statio
       SELECT matrix_identity_mode FROM stations WHERE id = ${stationId}`;
     expect(row!.matrix_identity_mode).toBe("harness");
 
-    // The token redeemed is spent — a replay against the same station gets
-    // no credential from the same authorization.
-    const replay = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: token }),
-    });
+    // The authorization redeemed is spent — a replay against the same
+    // station (this authenticated node, same station, no live record left)
+    // gets no credential.
+    const replay = await app().request(URL(), { method: "POST", headers: nodeAuth() });
     expect(replay.status).toBe(403);
   });
 
   test("rotates rather than failing when the identity already exists", async () => {
     identityExists = true;
-    const { token } = await mintCredentialAuthorization(stationId);
-    const res = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: token }),
-    });
+    await mintCredentialAuthorization(stationId);
+    const res = await app().request(URL(), { method: "POST", headers: nodeAuth() });
     expect(res.status).toBe(200);
     expect(rotated).toEqual(["agent_writer-quill"]);
     expect(issued).toHaveLength(0);
@@ -332,12 +342,8 @@ describe("a node redeems a Matrix credential authorization for one of its statio
     // The audit records the device, deliberately not the credential —
     // routes/station-matrix.ts already does this and this endpoint copies
     // it.
-    const { token } = await mintCredentialAuthorization(stationId);
-    const res = await app().request(URL(), {
-      method: "POST",
-      headers: nodeAuth(),
-      body: JSON.stringify({ authorization: token }),
-    });
+    await mintCredentialAuthorization(stationId);
+    const res = await app().request(URL(), { method: "POST", headers: nodeAuth() });
     const body = (await res.json()) as { accessToken: string };
     expect(auditLines.join("\n")).not.toContain(body.accessToken);
     // …and it still says something, so the act is auditable.

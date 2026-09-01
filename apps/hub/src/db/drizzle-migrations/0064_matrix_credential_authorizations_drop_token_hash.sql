@@ -1,0 +1,1 @@
+ALTER TABLE "matrix_credential_authorizations" DROP COLUMN "token_hash";

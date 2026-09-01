@@ -1,6 +1,13 @@
 /**
  * Integration test: matrix credential authorization — mint + single-use redeem.
  *
+ * There is no token: the node that redeems is already authenticated by its
+ * own `<nodeId>:<nodeSecret>` and already proven to host the station (see
+ * `routes/station-matrix-credential.ts`), so redemption is "this
+ * authenticated node, for this station, against the live record" — nothing
+ * else identifies which record to spend. `redeemCredentialAuthorization`
+ * takes only `stationId`.
+ *
  * Uses the local Docker test-postgres (localhost:5434).
  * DATABASE_URL must be set before any src/ modules are imported.
  */
@@ -16,7 +23,6 @@ import { eq } from "drizzle-orm";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { matrixCredentialAuthorizations } from "../db/schema/matrix-credentials";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
@@ -30,6 +36,9 @@ const TEST_USER = "test-user-matrix-cred-svc-001";
 
 let STATION = "";
 let OTHER_STATION = "";
+/** Never minted for — proves "no live authorization" independent of any
+ * other test's redeem/expiry leftovers on a shared station. */
+let NEVER_AUTHORIZED_STATION = "";
 
 // ─── Setup / Teardown ─────────────────────────────────────────────────────────
 
@@ -72,11 +81,12 @@ beforeAll(async () => {
 
   STATION = await insertStation("matrix-cred-test-station");
   OTHER_STATION = await insertStation("matrix-cred-test-other-station");
+  NEVER_AUTHORIZED_STATION = await insertStation("matrix-cred-test-never-authorized-station");
 });
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id IN (${STATION}, ${OTHER_STATION})`;
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id IN (${STATION}, ${OTHER_STATION}, ${NEVER_AUTHORIZED_STATION})`;
     await rawSql`DELETE FROM stations              WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes                 WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens     WHERE user_id = ${TEST_USER}`;
@@ -88,22 +98,33 @@ afterAll(async () => {
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
+test("mint returns only an expiry — no token, nothing for a node to present", async () => {
+  const result = await mintCredentialAuthorization(STATION);
+  expect(result.expiresAt).toBeInstanceOf(Date);
+  expect(Object.keys(result)).toEqual(["expiresAt"]);
+});
+
 test("a freshly minted authorization redeems exactly once", async () => {
-  const { token } = await mintCredentialAuthorization(STATION);
-  expect(await redeemCredentialAuthorization(STATION, token)).toBe(true);
+  await mintCredentialAuthorization(STATION);
+  expect(await redeemCredentialAuthorization(STATION)).toBe(true);
   // The second attempt is a replay. A replay that succeeded would hand out a
   // second working credential for one human approval.
-  expect(await redeemCredentialAuthorization(STATION, token)).toBe(false);
+  expect(await redeemCredentialAuthorization(STATION)).toBe(false);
 });
 
 test("an expired authorization does not redeem", async () => {
-  const { token } = await mintCredentialAuthorization(STATION, { ttlMs: -1 });
-  expect(await redeemCredentialAuthorization(STATION, token)).toBe(false);
+  await mintCredentialAuthorization(STATION, { ttlMs: -1 });
+  expect(await redeemCredentialAuthorization(STATION)).toBe(false);
+});
+
+test("a station with no live authorization refuses", async () => {
+  // Never minted for at all — not merely spent or expired.
+  expect(await redeemCredentialAuthorization(NEVER_AUTHORIZED_STATION)).toBe(false);
 });
 
 test("an authorization minted for one station does not redeem for another", async () => {
-  const { token } = await mintCredentialAuthorization(STATION);
-  expect(await redeemCredentialAuthorization(OTHER_STATION, token)).toBe(false);
+  await mintCredentialAuthorization(STATION);
+  expect(await redeemCredentialAuthorization(OTHER_STATION)).toBe(false);
 });
 
 test("minting for an unknown station throws a typed error, not a bare one", async () => {
@@ -112,13 +133,4 @@ test("minting for an unknown station throws a typed error, not a bare one", asyn
   expect(mintCredentialAuthorization("station_does_not_exist")).rejects.toBeInstanceOf(
     UnknownStationError
   );
-});
-
-test("the raw token is not stored", async () => {
-  const { token } = await mintCredentialAuthorization(STATION);
-  const [row] = await db
-    .select()
-    .from(matrixCredentialAuthorizations)
-    .where(eq(matrixCredentialAuthorizations.stationId, STATION));
-  expect(row!.tokenHash).not.toBe(token);
 });
