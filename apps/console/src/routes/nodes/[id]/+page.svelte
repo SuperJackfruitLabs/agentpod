@@ -9,10 +9,10 @@
   import ProvisionedNodeControls from "$lib/components/fleet/ProvisionedNodeControls.svelte";
   import PosturePanel from "$lib/components/fleet/PosturePanel.svelte";
   import * as Card from "$lib/components/ui/card";
-  import { Badge } from "$lib/components/ui/badge";
   import Empty from "$lib/components/ui/empty/empty.svelte";
-  import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
-  import PageHeader from "$lib/components/page-header.svelte";
+  import StateDot from "$lib/components/shell/StateDot.svelte";
+  import { nodeState } from "$lib/fleet/state";
+  import { relativeTime } from "$lib/utils/relative-time";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
@@ -100,43 +100,80 @@
     return stations.adopted.some((s) => s.stationKey === key);
   }
 
-  // Pass the raw status through — the shared token map classifies all values
-  // (online→running, error→error, …); collapsing here hid error states.
-  const headerStatus = $derived(
-    node ? { label: node.status, variant: node.status } : undefined,
-  );
+  /**
+   * The node's link state. `nodeState` carries the node's OWN words — a machine
+   * somebody switched off is Offline, not "Error" — while sharing the error
+   * token, so it is as red as a failed agent without being called one.
+   */
+  const linkState = $derived(nodeState(node?.status ?? "unknown"));
 </script>
 
 <svelte:head>
-  <title>{node?.hostname ?? "Node"} · AgentPod</title>
+  <title>{node?.name ?? "Node"} · AgentPod</title>
 </svelte:head>
 
-<PageHeader title={node?.hostname ?? id} status={headerStatus}>
-  {#snippet leading()}
-    <a
-      href="/"
-      class="text-muted-foreground hover:text-foreground transition-colors"
-      aria-label="Back to fleet"
-    >
-      <ArrowLeftIcon class="w-4 h-4" />
-    </a>
-  {/snippet}
-  {#snippet actions()}
+<!--
+  The node, said once. This was a PageHeader carrying a status badge in the old
+  vocabulary; it is the same header language the station page uses now — a dot,
+  a mono name, and one prose line of the facts underneath.
+
+  `relative` is load-bearing: StateDot's label is an sr-only span, which is
+  position:absolute, and without a positioned ancestor it escapes any clipping
+  container and adds to the document's scroll width.
+-->
+<header class="relative border-b border-border bg-background">
+  <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
+    <div class="min-w-0 flex-1">
+      <div class="flex min-w-0 items-center gap-2">
+        <a
+          href="/nodes"
+          class="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+          aria-label="Back to nodes"
+        >
+          <ArrowLeftIcon class="h-4 w-4" />
+        </a>
+        <StateDot state={linkState} />
+        <h1
+          class="truncate font-mono text-[21px] leading-tight font-medium"
+          title={node?.name ?? id}
+        >
+          {node?.name ?? id}
+        </h1>
+      </div>
+      <p class="mt-1 truncate text-sm text-muted-foreground" data-testid="node-summary">
+        {#if node}
+          <!-- Mono for the machine-issued halves only; the joins are prose. -->
+          {#if node.hostname !== node.name}
+            <span class="font-mono">{node.hostname}</span> ·
+          {/if}
+          <span class="font-mono">
+            {node.os} · {node.arch} · {node.cpuCount} CPU{node.cpuCount === 1 ? "" : "s"}
+          </span>
+          · {linkState.label} · last seen {relativeTime(node.lastSeenAt)}
+        {:else}
+          Loading this node…
+        {/if}
+      </p>
+    </div>
+
     {#if node}
-      <span class="text-xs font-mono text-muted-foreground">
-        {node.agentVersion ?? "—"}
-      </span>
-      {#if node.updateAvailable}
-        <span class="text-xs text-status-degraded">
-          Update available · <span class="font-mono tabular-nums">{node.agentVersion} → {node.latestVersion}</span>
-        </span>
-        <Button variant="outline" size="sm" disabled={updating} onclick={handleUpdate}>
-          {updating ? "Updating…" : "Update"}
-        </Button>
-      {/if}
+      <div class="flex shrink-0 flex-wrap items-center gap-2">
+        {#if node.updateAvailable}
+          <!-- Drift wears the `unknown` colour: a node on an old binary is not
+               broken, it is unaccounted for until somebody rolls it. -->
+          <span class="font-mono text-xs whitespace-nowrap text-status-unknown">
+            {node.agentVersion} → {node.latestVersion}
+          </span>
+          <Button variant="outline" size="sm" disabled={updating} onclick={handleUpdate}>
+            {updating ? "Updating…" : "Update"}
+          </Button>
+        {:else}
+          <span class="font-mono text-xs text-muted-foreground">{node.agentVersion ?? "—"}</span>
+        {/if}
+      </div>
     {/if}
-  {/snippet}
-</PageHeader>
+  </div>
+</header>
 
 <div class="container mx-auto max-w-7xl px-4 sm:px-6 py-6 space-y-6">
   <!-- Provisioned runtime controls (destroy / stop / start) -->
@@ -215,35 +252,70 @@
         <Button variant="outline" size="sm" onclick={loadStations}>Rescan</Button>
       </Empty>
     {:else}
-      <div class="flex flex-col gap-2 md:grid md:grid-cols-2 lg:grid-cols-3">
-        {#each stations.detected as s (s.key)}
-          <Card.Root class="transition-colors hover:border-primary/40">
-            <Card.Content class="flex items-center justify-between gap-3 p-4">
-              <div class="flex flex-col gap-1 min-w-0">
-                <span class="text-sm font-semibold truncate">{s.displayName}</span>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <HarnessBadge harness={s.harness} />
-                  <span class="text-xs text-muted-foreground">{s.kind}</span>
-                </div>
-                {#if s.workspacePath}
-                  <code class="text-xs text-muted-foreground font-mono truncate" title={s.workspacePath}>{s.workspacePath}</code>
-                {/if}
-              </div>
-              {#if !isAlreadyAdopted(s.key)}
-                <Button
-                  size="sm"
-                  onclick={() => handleAdopt(s.key)}
-                  disabled={stations.isLoading}
-                  class="shrink-0"
-                >
-                  Add agent
-                </Button>
-              {:else}
-                <Badge variant="secondary" class="shrink-0">Added</Badge>
-              {/if}
-            </Card.Content>
-          </Card.Root>
-        {/each}
+      <!--
+        One table, not fifteen cards. A node with a dozen detected agents used
+        to be a grid of near-identical boxes whose only varying content was the
+        word "Added" — the shape said "browse these", when the only question
+        being asked is which of them to add.
+
+        Four columns do not fit a phone; they scroll in here rather than
+        dragging the document sideways.
+      -->
+      <div data-testid="detected-table-scroller" class="overflow-x-auto rounded-lg border border-border">
+        <table class="w-full min-w-[640px] text-sm">
+          <thead>
+            <tr class="border-b border-border text-left text-xs text-muted-foreground">
+              <th scope="col" class="px-3 py-2 font-medium">Agent</th>
+              <th scope="col" class="px-3 py-2 font-medium">Harness</th>
+              <th scope="col" class="px-3 py-2 font-medium">Kind</th>
+              <th scope="col" class="px-3 py-2 font-medium">Workspace path</th>
+              <!-- `relative`: the sr-only span below is position:absolute and
+                   would otherwise escape this scroller and widen the document. -->
+              <th scope="col" class="relative px-3 py-2 font-medium">
+                <span class="sr-only">Add</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each stations.detected as s (s.key)}
+              <tr data-testid="detected-row" class="relative border-b border-border/50 last:border-b-0">
+                <td class="max-w-[220px] px-3 py-2">
+                  <span class="block truncate font-mono font-medium" title={s.displayName}>
+                    {s.displayName}
+                  </span>
+                </td>
+                <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.harness}</td>
+                <td class="px-3 py-2 font-mono text-xs text-muted-foreground">{s.kind}</td>
+                <td class="max-w-[280px] px-3 py-2">
+                  {#if s.workspacePath}
+                    <span
+                      class="block truncate font-mono text-xs text-muted-foreground"
+                      title={s.workspacePath}
+                    >
+                      {s.workspacePath}
+                    </span>
+                  {:else}
+                    <span class="text-xs text-muted-foreground">—</span>
+                  {/if}
+                </td>
+                <td class="px-3 py-2 text-right">
+                  {#if !isAlreadyAdopted(s.key)}
+                    <Button
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      onclick={() => handleAdopt(s.key)}
+                      disabled={stations.isLoading}
+                    >
+                      Add agent
+                    </Button>
+                  {:else}
+                    <span class="text-xs text-muted-foreground">Added</span>
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
     {/if}
   </section>

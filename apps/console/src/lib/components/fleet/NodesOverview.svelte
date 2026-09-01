@@ -1,4 +1,18 @@
 <script lang="ts">
+  /**
+   * /nodes — the machines, as an ops table.
+   *
+   * The same table the muster draws, with the things only this page can do
+   * attached to it: minting an enrollment token, provisioning a runtime, and
+   * rolling the whole fleet onto a new agent release. Card chrome is gone —
+   * the status badges, the ribbon of per-agent pips and the three skeleton
+   * cards were three different visual languages for "what state is this in",
+   * and the console now has one: a dot and a word from `state.ts`.
+   *
+   * The Link column says Online / Offline, not Running / Error. `nodeState`
+   * carries the node's own words on purpose: a machine somebody closed the lid
+   * on is offline, not errored, and only a process runs.
+   */
   import { onMount } from "svelte";
   import { startPolling } from "$lib/utils/poll";
   import { page } from "$app/state";
@@ -6,25 +20,19 @@
   import { listNodes, createEnrollmentToken, listRuntimes, listRuntimeProviders, updateNode, updateAllNodes, getFleet, type DriverManifest } from "$lib/api/client";
   import { toast } from "svelte-sonner";
   import type { NodeSummary, ProvisionedRuntime, FleetAgent } from "@agentpod/contract";
-  import * as Table from "$lib/components/ui/table";
-  import { Status } from "$lib/components/ui/status";
-  import StatusRibbon from "./StatusRibbon.svelte";
-  import { tokenFor } from "$lib/utils/status-badge";
-  import { Badge } from "$lib/components/ui/badge";
+  import StateDot from "$lib/components/shell/StateDot.svelte";
+  import { nodeState, stationState, STATE } from "$lib/fleet/state";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import PageHeader from "$lib/components/page-header.svelte";
   import EnrollmentCommand from "./EnrollmentCommand.svelte";
-  import { Metric } from "$lib/components/ui/metric";
   import PlusIcon from "@lucide/svelte/icons/plus";
   import ArrowUpCircleIcon from "@lucide/svelte/icons/arrow-up-circle";
-  import Loader2Icon from "@lucide/svelte/icons/loader-2";
   import NewRuntimeDialog from "./NewRuntimeDialog.svelte";
   import ConnectBanner from "./connect-banner.svelte";
 
-  import { chipClass } from "$lib/utils/toggle-chip";
   import { enrollmentCommand } from "$lib/utils/enrollment-command";
-  import { cn } from "$lib/utils";
+  import { relativeTime } from "$lib/utils/relative-time";
 
   let nodes = $state<NodeSummary[]>([]);
   let isLoading = $state(true);
@@ -33,7 +41,7 @@
   let isMinting = $state(false);
   let mintError = $state<string | null>(null);
 
-  // Fleet agents, grouped per node, drive the Agents column (count + ribbon).
+  // Fleet agents, grouped per node, drive the Agents column.
   let fleetAgents = $state<FleetAgent[]>([]);
 
   const agentsByNode = $derived.by(() => {
@@ -87,7 +95,7 @@
         error = null;
       } else if (!background) {
         // Background refreshes keep the last good data on screen; the shell's
-        // hub-unreachable banner carries the staleness signal.
+        // hub pill carries the staleness signal.
         error =
           nodesResult.reason instanceof Error
             ? nodesResult.reason.message
@@ -315,7 +323,7 @@
           </Button>
         {/if}
       </div>
-      {#if mintError}<p class="text-xs text-destructive">{mintError}</p>{/if}
+      {#if mintError}<p class="text-xs text-status-error">{mintError}</p>{/if}
     </div>
   {/snippet}
 </PageHeader>
@@ -329,21 +337,21 @@
     </div>
   {/if}
 
-  <!-- Loading state -->
+  <!-- Loading state: rows, because rows are what arrives -->
   {#if isLoading}
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="space-y-2">
       {#each [1, 2, 3] as _}
-        <Skeleton class="h-36 rounded-lg" />
+        <Skeleton class="h-12 rounded-sm" />
       {/each}
     </div>
 
   <!-- Error state -->
   {:else if error}
     <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
       role="alert"
     >
-      <p class="text-sm text-destructive">{error}</p>
+      <p class="text-sm text-status-error">{error}</p>
       <Button variant="outline" size="sm" onclick={() => loadData()}>Retry</Button>
     </div>
 
@@ -365,122 +373,150 @@
       </div>
     </div>
 
-  <!-- Provisioning cards + nodes table -->
   {:else}
     <div class="space-y-4">
-      <!-- Provisioning cards (runtimes still spinning up) — cards stay here
-           because provisioning is a status story, not a row of facts -->
+      <!--
+        Runtimes the substrate has accepted but no node has come back from yet.
+        A line each, not a tinted card: they are the same "ask in flight" the
+        rest of the console draws as a starting dot, and they stop existing the
+        moment their node enrols.
+      -->
       {#if provisioningRuntimes.length > 0}
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <ul class="divide-y divide-border/50 rounded-lg border border-border" data-testid="provisioning-list">
           {#each provisioningRuntimes as rt (rt.id)}
-            <div class="h-full rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-1">
-              <div class="flex items-start justify-between gap-2">
-                <p class="text-sm font-medium leading-tight truncate">
-                  {rt.name}
-                </p>
-                <Badge variant="secondary" class="shrink-0 gap-1.5">
-                  <Loader2Icon class="h-3 w-3 animate-spin" />
-                  provisioning
-                </Badge>
-              </div>
-              <p class="text-sm text-muted-foreground">
+            <li class="relative flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">
+              <StateDot state={STATE.starting} withLabel size="sm" pulse />
+              <span class="truncate font-mono font-medium" title={rt.name}>{rt.name}</span>
+              <span class="font-mono text-xs text-muted-foreground">
                 {rt.provider} · {rt.resourceTier}
-              </p>
-              {#if rt.harness && rt.harness !== "none"}
-                <Badge variant="outline" class="text-xs border-primary/40 text-primary">
-                  {rt.harness}
-                </Badge>
-              {/if}
-            </div>
+                {#if rt.harness && rt.harness !== "none"}
+                  · {rt.harness}
+                {/if}
+              </span>
+            </li>
           {/each}
-        </div>
+        </ul>
       {/if}
 
-      <!-- Nodes as an ops table: host · status · agents · facts · update -->
-      <div class="overflow-x-auto rounded-lg border">
-        <Table.Root>
-          <Table.Header>
-            <Table.Row>
-              <Table.Head>Host</Table.Head>
-              <Table.Head>Status</Table.Head>
-              <Table.Head>Agents</Table.Head>
-              <Table.Head class="hidden sm:table-cell">CPUs</Table.Head>
-              <Table.Head class="hidden md:table-cell">OS</Table.Head>
-              <Table.Head class="hidden sm:table-cell">Version</Table.Head>
-              <Table.Head><span class="sr-only">Update</span></Table.Head>
-            </Table.Row>
-          </Table.Header>
-          <Table.Body>
+      <!-- Seven columns do not fit a phone; they scroll in here rather than
+           dragging the document sideways. Same shape as the muster's table. -->
+      <div data-testid="nodes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
+        <table class="w-full min-w-[820px] text-sm">
+          <thead>
+            <tr class="border-b border-border text-left text-xs text-muted-foreground">
+              <th scope="col" class="px-3 py-2 font-medium">Node</th>
+              <th scope="col" class="px-3 py-2 font-medium">Link</th>
+              <th scope="col" class="px-3 py-2 font-medium">Agents</th>
+              <th scope="col" class="px-3 py-2 font-medium">Last seen</th>
+              <th scope="col" class="px-3 py-2 font-medium">Node agent</th>
+              <th scope="col" class="px-3 py-2 font-medium">Posture</th>
+              <!--
+                `relative` is load-bearing: an sr-only span is position:absolute,
+                and with no positioned ancestor its containing block is the
+                initial one — so it escapes the overflow-x-auto above and adds
+                to the DOCUMENT's scroll width. Measured at 414px.
+              -->
+              <th scope="col" class="relative px-3 py-2 font-medium">
+                <span class="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
             {#each nodes as node (node.id)}
               {@const nodeAgents = agentsByNode.get(node.id) ?? []}
-              {@const runningCount = nodeAgents.filter((a) => tokenFor(a.status) === "running").length}
-              <Table.Row data-testid="node-row">
-                <Table.Cell>
+              {@const runningCount = nodeAgents.filter((a) => stationState(a.status).id === "running").length}
+              <!--
+                `relative` for the Link cell's StateDot: its label is
+                position:absolute when not shown inline, and an unpositioned
+                ancestor lets it escape the scroller above.
+              -->
+              <tr data-testid="node-row" class="relative border-b border-border/50 last:border-b-0">
+                <!-- Capped and truncating: a node name is free text, and an
+                     uncapped 62-character one took 425px of a 918px table. -->
+                <td class="max-w-[220px] px-3 py-2">
                   <a
                     href="/nodes/{node.id}"
-                    class="text-sm font-medium hover:text-primary transition-colors"
+                    title={node.name}
+                    class="block truncate font-mono text-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
                   >
-                    {node.hostname}
+                    {node.name}
                   </a>
-                  {#if node.provisioned}
-                    <Badge variant="outline" class="ml-2 text-xs border-primary/40 text-primary">
-                      provisioned · {node.provisioned.provider}
-                    </Badge>
-                  {/if}
-                </Table.Cell>
-                <Table.Cell>
-                  <Status form="badge" status={node.status} />
-                </Table.Cell>
-                <Table.Cell>
+                  <span class="block truncate text-xs text-muted-foreground" title={node.hostname}>
+                    {node.hostname}
+                  </span>
+                  <span class="block truncate text-xs text-muted-foreground">
+                    {node.os} · {node.arch} · {node.cpuCount} CPU{node.cpuCount === 1 ? "" : "s"}
+                    {#if node.provisioned}
+                      · provisioned · {node.provisioned.provider}
+                    {/if}
+                  </span>
+                </td>
+
+                <td data-testid="node-link-{node.id}" class="relative px-3 py-2">
+                  <StateDot state={nodeState(node.status)} withLabel size="sm" />
+                </td>
+
+                <td data-testid="node-agents-{node.id}" class="px-3 py-2 font-mono tabular-nums">
                   {#if nodeAgents.length > 0}
-                    <div class="flex items-center gap-2">
-                      <StatusRibbon
-                        size="sm"
-                        items={nodeAgents.map((a) => ({
-                          id: a.stationId,
-                          label: a.agentName,
-                          status: a.status,
-                        }))}
-                      />
-                      <Metric class="text-xs text-muted-foreground">{runningCount}/{nodeAgents.length}</Metric>
-                    </div>
+                    <span title="{runningCount} of {nodeAgents.length} running">
+                      {runningCount}/{nodeAgents.length}
+                    </span>
                   {:else}
-                    <span class="text-xs text-muted-foreground">—</span>
+                    <span class="text-muted-foreground">—</span>
                   {/if}
-                </Table.Cell>
-                <Table.Cell class="hidden sm:table-cell">
-                  <Metric class="text-xs text-muted-foreground">{node.cpuCount}</Metric>
-                </Table.Cell>
-                <Table.Cell class="hidden md:table-cell text-xs text-muted-foreground">
-                  {node.os} · <Metric>{node.arch}</Metric>
-                </Table.Cell>
-                <Table.Cell class="hidden sm:table-cell">
-                  <Metric class="text-xs text-muted-foreground">{node.agentVersion ?? "—"}</Metric>
-                </Table.Cell>
-                <Table.Cell class="text-right">
+                </td>
+
+                <td class="px-3 py-2 font-mono text-xs whitespace-nowrap text-muted-foreground">
+                  {relativeTime(node.lastSeenAt)}
+                </td>
+
+                <td class="px-3 py-2">
                   {#if node.updateAvailable}
-                    <div class="flex items-center justify-end gap-2 whitespace-nowrap">
-                      <span class="text-xs text-status-degraded">
-                        <Metric>{node.agentVersion} → {node.latestVersion}</Metric>
-                      </span>
-                      <button
-                        type="button"
-                        disabled={!!updatingNodes[node.id]}
-                        onclick={() => handleUpdate(node.id)}
-                        class={cn(
-                          chipClass(false),
-                          "text-xs hover:border-primary hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed",
-                        )}
-                      >
-                        {updatingNodes[node.id] ? "Updating…" : "Update"}
-                      </button>
-                    </div>
+                    <!-- Drift is a state worth a colour, and `unknown` is the
+                         one it wears: a node on an old binary is not broken,
+                         it is unaccounted for until somebody rolls it. -->
+                    <span data-testid="node-drift-{node.id}" class="font-mono text-xs whitespace-nowrap text-status-unknown">
+                      {node.agentVersion} → {node.latestVersion}
+                    </span>
+                  {:else}
+                    <span class="font-mono text-xs text-muted-foreground">{node.agentVersion ?? "—"}</span>
                   {/if}
-                </Table.Cell>
-              </Table.Row>
+                </td>
+
+                <td class="px-3 py-2 text-xs">
+                  <!-- A link, not a grade. Posture is a live scan that writes
+                       an audit row, so a column that scanned every node on page
+                       load would be a denial-of-service on your own fleet. -->
+                  {#if node.capabilities?.includes("posture")}
+                    <a
+                      href="/nodes/{node.id}"
+                      class="text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                    >
+                      Scan
+                    </a>
+                  {:else}
+                    <span class="text-muted-foreground" title="This node's agent doesn't report posture">—</span>
+                  {/if}
+                </td>
+
+                <td class="px-3 py-2 text-right">
+                  {#if node.updateAvailable}
+                    <Button
+                      data-testid="node-update-{node.id}"
+                      variant="outline"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      disabled={!!updatingNodes[node.id]}
+                      onclick={() => handleUpdate(node.id)}
+                    >
+                      {updatingNodes[node.id] ? "Updating…" : "Update"}
+                    </Button>
+                  {/if}
+                </td>
+              </tr>
             {/each}
-          </Table.Body>
-        </Table.Root>
+          </tbody>
+        </table>
       </div>
     </div>
   {/if}

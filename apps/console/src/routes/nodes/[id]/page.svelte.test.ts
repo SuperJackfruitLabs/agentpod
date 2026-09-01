@@ -106,17 +106,63 @@ const adoptedStation: StationRow = {
 beforeEach(() => vi.restoreAllMocks());
 afterEach(cleanup);
 
-test("renders hostname and status badge", async () => {
+test("renders the node's name and says whether it is online", async () => {
   vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
   vi.spyOn(api, "listDetected").mockResolvedValue([]);
   vi.spyOn(api, "listStations").mockResolvedValue([]);
 
-  const { getByText, getByRole } = render(NodeDetailPage);
+  const { getByTestId, getByRole } = render(NodeDetailPage);
 
   await waitFor(() => {
     expect(getByRole("heading", { name: "hermes-01" })).toBeTruthy();
-    expect(getByText("online")).toBeTruthy();
+    // The node's OWN word. `nodeState` shares the running token but not the
+    // label — a machine is online, only a process runs.
+    expect(getByTestId("node-summary").textContent).toMatch(/online/i);
   });
+});
+
+test("an offline node reads offline, never 'Error'", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([{ ...mockNode, status: "offline" as const }]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+
+  const { getByTestId } = render(NodeDetailPage);
+
+  await waitFor(() => {
+    expect(getByTestId("node-summary").textContent).toMatch(/offline/i);
+  });
+  expect(getByTestId("node-summary").textContent).not.toMatch(/error/i);
+});
+
+test("detected agents are one table, not a grid of near-identical cards", async () => {
+  // A node with a dozen detections used to be a dozen boxes whose only varying
+  // content was the word "Added". The shape said "browse these"; the only
+  // question actually being asked is which of them to add.
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation, secondDetectedStation]);
+  vi.spyOn(api, "listStations").mockResolvedValue([]);
+
+  const { getAllByTestId, getByTestId, getByText } = render(NodeDetailPage);
+
+  await waitFor(() => expect(getAllByTestId("detected-row").length).toBe(2));
+  // Wide content scrolls in its own box; the document never scrolls sideways.
+  expect(getByTestId("detected-table-scroller").className).toContain("overflow-x-auto");
+  // The workspace path is the long unbroken string on this row — capped, with
+  // the whole thing on hover rather than lost.
+  const path = getByText("/home/user/workspace");
+  expect(path.className).toContain("truncate");
+  expect(path.getAttribute("title")).toBe("/home/user/workspace");
+});
+
+test("an already-added agent says so instead of offering to add it twice", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNode]);
+  vi.spyOn(api, "listDetected").mockResolvedValue([detectedStation]);
+  vi.spyOn(api, "listStations").mockResolvedValue([adoptedStation]);
+
+  const { getByText, queryByText } = render(NodeDetailPage);
+
+  await waitFor(() => expect(getByText("Added")).toBeTruthy());
+  expect(queryByText("Add agent")).toBeNull();
 });
 
 test("detected station card's Adopt button calls adopt(id, [key])", async () => {
