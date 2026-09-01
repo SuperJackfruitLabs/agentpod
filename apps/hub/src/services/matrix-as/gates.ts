@@ -360,7 +360,7 @@ export async function projectGate(
     // than becoming a false `false`. The extra lookup is on the failure path
     // only — `roomForCard` already answered for the ordinary one.
     const stationId = await dispatchedStationId(tenantId, d.boardId, d.cardId);
-    const midMove = stationId ? await moveInProgress(stationId) : undefined;
+    const midMove = stationId ? await moveInProgress(stationId, deps.domain) : undefined;
     log.info("gate has no room to appear in", {
       gateId: d.gateId,
       cardId: d.cardId,
@@ -401,7 +401,7 @@ export async function projectGate(
     // occupying agent could never be re-attempted — the sweep would see the
     // claimed row and conclude it had already been handled.
     await releaseClaim(d.gateId);
-    const midMove = await moveInProgress(found.stationId);
+    const midMove = await moveInProgress(found.stationId, deps.domain);
     log.warn("gate's station has no occupying agent; claim released", {
       gateId: d.gateId,
       stationKey: found.stationKey,
@@ -432,7 +432,7 @@ export async function projectGate(
     // authorisation and convergence is waiting, not broken, and a sweep that
     // reports the two as the same thing is how a move gets mistaken for the
     // outage it exists to avoid.
-    const midMove = await moveInProgress(found.stationId);
+    const midMove = await moveInProgress(found.stationId, deps.domain);
     log.warn("gate's station answers for itself but has reported no Matrix identity; claim released", {
       gateId: d.gateId,
       stationKey: found.stationKey,
@@ -491,7 +491,7 @@ export async function projectGate(
     // The claim has to go, or this gate can never be projected again — the
     // sweep would see a row and conclude it had been handled.
     await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, d.gateId));
-    const midMove = await moveInProgress(found.stationId);
+    const midMove = await moveInProgress(found.stationId, deps.domain);
     log.warn("gate event was not accepted; claim released", {
       gateId: d.gateId,
       stationId: found.stationId,

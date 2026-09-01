@@ -110,7 +110,7 @@ function app() {
       inFlightSignals.push(signalled);
       return signalled;
     },
-    moveState: (stationId: string) => moveState(stationId),
+    moveState: (stationId: string) => moveState(stationId, DOMAIN),
     log: (line: string) => logged.push(line),
   });
 
@@ -578,8 +578,15 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     }
 
     beforeEach(async () => {
+      // The fleet's own shape: `bridge_matrix_id` holds the SAME
+      // station-derived address the harness answers as, because that is what
+      // `provision.ts` writes for a harness station (`stationSpeaker` returns
+      // the harness's own mxid there). It used to be seeded with `NEW_MXID` —
+      // the handle-derived address — which is what the design assumed and
+      // what production has never contained, so this whole flow was proven
+      // only against a database no fleet has.
       await rawSql`
-        UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${NEW_MXID}
+        UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${OLD_MXID}
         WHERE id = ${STATION}`;
       await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
       await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
@@ -603,14 +610,18 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
         await Promise.all(inFlightSignals);
 
         // §1's invariant, now true — and reached without anything in this test
-        // touching `onNodeReportedMatrixId`.
+        // touching `onNodeReportedMatrixId`. The station answers as the
+        // address its occupying principal's handle implies; that, and not
+        // agreement between two columns, is what convergence means.
+        // `bridge_matrix_id` is untouched by the move and still holds the
+        // retired address, exactly as its schema comment says it will.
         const [row] = (await rawSql`
           SELECT matrix_id, bridge_matrix_id FROM stations WHERE id = ${STATION}`) as Array<{
           matrix_id: string;
           bridge_matrix_id: string;
         }>;
         expect(row!.matrix_id).toBe(NEW_MXID);
-        expect(row!.matrix_id).toBe(row!.bridge_matrix_id);
+        expect(row!.bridge_matrix_id).toBe(OLD_MXID);
 
         // Step 6 ran, on the old identity and only on it.
         expect(retired).toContainEqual({ userId: OLD_MXID, op: "retire" });
@@ -728,6 +739,13 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
    * four and nothing could read any of them — the console re-derived three
    * from raw columns and could not see `waiting` at all, because the
    * authorisation it is derived from lives only here.
+   *
+   * **Every fixture below now carries the fleet's own `bridge_matrix_id`** —
+   * the station-derived address, the same one `matrix_id` holds — because
+   * that is what `provision.ts` writes for a harness station. Seeding it with
+   * the handle-derived address is what let this endpoint answer `converged`
+   * in a test and `converged` in production for opposite reasons, and offer
+   * the fleet's 14 harness stations no move at all.
    */
   describe("GET /api/stations/:id/matrix/move-state", () => {
     const OLD_MXID = "@agent_guild_hermes-analyst-echo:id.agentpod.dev";
@@ -749,11 +767,15 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
 
     test("a station running under a retired identity, with nobody having asked it to move", async () => {
       await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-      await rawSql`UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
+      await rawSql`UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${OLD_MXID} WHERE id = ${STATION}`;
       const res = await getState(`/stations/${STATION}/matrix/move-state`);
       expect(await res.json()).toMatchObject({
         status: "retired-identity",
         runningAs: OLD_MXID,
+        // Named by the hub, from the occupying principal's handle. The console
+        // cannot derive this — it holds no handle and no domain — which is
+        // why the hub has to say it rather than leave the browser comparing
+        // two columns that agree on the wrong answer.
         willBecome: NEW_MXID,
       });
     });
@@ -764,7 +786,7 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
       // answer it after a reload.
       await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
       await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-      await rawSql`UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
+      await rawSql`UPDATE stations SET matrix_id = ${OLD_MXID}, bridge_matrix_id = ${OLD_MXID} WHERE id = ${STATION}`;
       connectionManager.unregister(NODE); // offline: authorised, nothing adopts
 
       expect((await post(`/stations/${STATION}/matrix/authorize-move`)).status).toBe(200);
@@ -777,9 +799,12 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
       });
     });
 
-    test("converged means the two columns agree — and says nothing about health", async () => {
+    test("converged means the station answers as its principal — and says nothing about health", async () => {
+      // `bridge_matrix_id` still holds the retired address here, as it does on
+      // every station that has actually moved: the column is what the
+      // appservice minted, and the move never rewrites it.
       await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-      await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID}, bridge_matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
+      await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID}, bridge_matrix_id = ${OLD_MXID} WHERE id = ${STATION}`;
       const res = await getState(`/stations/${STATION}/matrix/move-state`);
       const body = (await res.json()) as Record<string, unknown>;
       expect(body).toEqual({ status: "converged", mxid: NEW_MXID });

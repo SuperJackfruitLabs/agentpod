@@ -224,9 +224,10 @@ if (matrixBridge) {
   const identityMove = { domain: matrixBridge.config.domain, client: matrixBridge.client };
 
   // What the node reports on every detect, and the only thing that may set
-  // the irreversible last step of a move going: `matrix_id = bridge_matrix_id`
-  // is convergence (design §1), and until it holds, the station keeps working
-  // under the identity it already has. The registration itself lives in
+  // the irreversible last step of a move going: convergence is `matrix_id`
+  // becoming the address the station's occupying principal's handle implies
+  // (design §1), and until it holds, the station keeps working under the
+  // identity it already has. The registration itself lives in
   // `wireConvergenceListener` (`identity-move.ts`) rather than inline here,
   // so it has a unit test that does not need to boot this whole file to run.
   wireConvergenceListener(identityMove);
@@ -314,7 +315,7 @@ if (matrixBridge) {
       // The four states of §1's invariant, for the console's panel. Same
       // function `moveInProgress` reads, so the operator's view and the gate
       // sweep's attribution can never disagree about what `waiting` means.
-      moveState: (stationId) => moveState(stationId),
+      moveState: (stationId) => moveState(stationId, matrixBridge.config.domain),
     }),
   );
 
