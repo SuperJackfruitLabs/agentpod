@@ -66,13 +66,14 @@ test("a station the hub says is on a retired identity says so, naming both addre
   expect(moveState).toHaveBeenCalledWith(RETIRED.id);
 });
 
-test("a station whose two columns agree on the OLD address is still offered the move", async () => {
+test("only the hub can call a station converged — the panel never decides that from a row", async () => {
   // The defect, from the console's side. `bridgeMatrixId` is not a prop any
   // more, so the only way this panel can call a station converged is if the
   // HUB says so — and for this station the hub says `retired-identity`,
   // because the address the agent's handle implies is not the one it answers
-  // as. The old panel, handed `{matrixId: OLD, bridgeMatrixId: OLD}`, showed
-  // "identity has switched" and no control at all.
+  // as. The old panel, handed the fleet's real row
+  // (`{matrixId: OLD, bridgeMatrixId: OLD}`), showed "identity has switched"
+  // and no control at all.
   render(MatrixIdentityPanel, { station: RETIRED, moveState: saysRetired() });
 
   expect(await screen.findByRole("button", { name: /move to its own identity/i })).toBeTruthy();
@@ -219,74 +220,106 @@ test("a hub that cannot answer says so rather than offering a move it cannot des
   expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
 });
 
-test("a click's waiting state is not overwritten by a slower answer about how things stood before it", async () => {
-  // Reviewer's finding (fix-wave-2, Ruling 17): this test used to resolve the
-  // mount's `moveState` fetch with `status: "retired-identity"` — a status
-  // the guarded callback never acts on regardless of the `phase !== "idle"`
-  // guard it claimed to pin, since the callback only writes anything when
-  // `s.status === "waiting"`. The reviewer removed the guard and all 13
-  // tests, including this one, still passed.
-  //
-  // The guard's actual job: the operator clicks while the mount's own
-  // `moveState` request is still in flight. That request describes how
-  // things stood BEFORE the click — including a `since` from whatever
-  // authorization existed then — and a `status: "waiting"` reply arriving
-  // mid-click must not be adopted while the click's own request (`authorize`)
-  // is still outstanding. Both promises are held open here so the race is
-  // real: `moveState` settles WHILE `authorize` is still pending.
-  //
-  // The click has to be reachable before the hub has answered anything, which
-  // is why the panel renders the control off the FIRST answer and keeps it
-  // through the second: this test resolves the mount request only after the
-  // button has been pressed, so the first answer here is a rendered one.
-  const STALE_SINCE = "2020-01-01T00:00:00Z";
-  let settleMoveState: (s: unknown) => void = () => {};
-  const moveState = vi.fn().mockReturnValue(
-    new Promise((resolve) => {
-      settleMoveState = resolve;
-    })
-  );
-  let settleAuthorize: (r: { expiresAt: string }) => void = () => {};
-  const authorize = vi.fn().mockReturnValue(
-    new Promise((resolve) => {
-      settleAuthorize = resolve;
-    })
-  );
-  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
+// ─── One panel, many stations: nothing may follow you from the last one ───────
+//
+// `[stationId]/+page.svelte` is ONE page reused across stations, so this
+// component is not remounted when an operator moves from A to B. Everything it
+// learned about A therefore has to be cleared when B arrives, or B is rendered
+// with A's answer until its own turns up.
 
-  // Nothing is offered until the hub has answered — the panel no longer
-  // guesses from a column.
+test("a hub failure on one station does not follow you to the next", async () => {
+  // `unanswered` used to be write-once-true: one unreachable hub, and every
+  // station visited afterwards in the same session claimed the hub could not
+  // be asked — with its move hidden behind that claim.
+  const moveState = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("hub unreachable"))
+    .mockResolvedValueOnce({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+
+  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, moveState });
+  expect(await screen.findByText(/couldn't ask the hub/i)).toBeTruthy();
+
+  await rerender({ station: { id: "station_2", matrixId: OLD }, moveState });
+
+  expect(await screen.findByRole("button", { name: /move to its own identity/i })).toBeTruthy();
+  expect(screen.queryByText(/couldn't ask the hub/i)).toBeNull();
+  expect(moveState).toHaveBeenNthCalledWith(2, "station_2");
+});
+
+test("a station is never rendered with the previous station's answer", async () => {
+  // The serious half. An operator lands on B, reads A's target address in the
+  // sentence, and presses A's move — on B. Nothing may be offered for a
+  // station this panel has not yet been told anything about.
+  const B_TARGET = "@agent_analyst-echo:matrix.example.org";
+  let settleSecond: (s: unknown) => void = () => {};
+  const moveState = vi
+    .fn()
+    .mockResolvedValueOnce({ status: "retired-identity", runningAs: OLD, willBecome: NEW })
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        settleSecond = resolve;
+      })
+    );
+
+  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, moveState });
+  expect(await screen.findByText(NEW)).toBeTruthy();
+
+  await rerender({ station: { id: "station_2", matrixId: OLD }, moveState });
+
+  // The hub has not answered for station_2 yet: no address, no control, and
+  // above all not station_1's.
+  expect(screen.queryByText(NEW)).toBeNull();
   expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
-  settleMoveState({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
-  await vi.waitFor(() =>
-    expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy()
-  );
 
-  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
-  expect(screen.getByRole("button", { name: /authorizing/i })).toBeTruthy();
+  settleSecond({ status: "retired-identity", runningAs: OLD, willBecome: B_TARGET });
+  expect(await screen.findByText(B_TARGET)).toBeTruthy();
+});
 
-  // A SECOND answer to the same question — a stale `waiting`, from before this
-  // click — lands while `authorize` is still outstanding.
-  let settleAgain: (s: unknown) => void = () => {};
-  moveState.mockReturnValueOnce(
-    new Promise((resolve) => {
-      settleAgain = resolve;
-    })
-  );
+test("a click on one station does not leave the next one claiming to be waiting", async () => {
+  // `phase` is per-station too: authorising A must not make B say it is
+  // waiting for a node to redeem an authorisation nobody minted for it.
+  const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
+  const moveState = vi
+    .fn()
+    .mockResolvedValue({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+
+  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
+  await fireEvent.click(await screen.findByRole("button", { name: /move to its own identity/i }));
+  expect(screen.getByText(/waiting for the node/i)).toBeTruthy();
+
   await rerender({ station: { id: "station_2", matrixId: OLD }, authorize, moveState });
-  settleAgain({ status: "waiting", runningAs: OLD, willBecome: NEW, since: STALE_SINCE });
+
+  await screen.findByRole("button", { name: /move to its own identity/i });
+  expect(screen.queryByText(/waiting for the node/i)).toBeNull();
+});
+
+test("an answer about the station you left never lands on the one you are looking at", async () => {
+  // What is left of Ruling 17's guard once the control renders only after an
+  // answer: a click can no longer overtake this panel's own request for the
+  // same station, so the reachable version of "a reply about the past" is a
+  // reply about a DIFFERENT station, arriving after the move to this one. The
+  // effect's cleanup is what drops it — without that, A's late answer would
+  // overwrite the state B's arrival just cleared, which is the same leak by a
+  // slower route.
+  let settleFirst: (s: unknown) => void = () => {};
+  const moveState = vi
+    .fn()
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        settleFirst = resolve;
+      })
+    )
+    .mockResolvedValueOnce({ status: "converged", mxid: NEW });
+
+  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, moveState });
+  await rerender({ station: { id: "station_2", matrixId: NEW }, moveState });
+  expect(await screen.findByText(/identity has switched/i)).toBeTruthy();
+
+  // station_1's answer, arriving late. It must change nothing about station_2.
+  settleFirst({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
   await tick();
 
-  // Still authorizing: the in-flight click outranks a reply about the past.
-  // Without the guard, `phase` would flip to `"waiting"` here — before the
-  // click's own request has even resolved — and this stale `since` would be
-  // what the operator sees.
-  expect(screen.getByRole("button", { name: /authorizing/i })).toBeTruthy();
-  expect(screen.queryByText(/waiting for the node/i)).toBeNull();
-
-  settleAuthorize({ expiresAt: "2026-09-01T12:00:00Z" });
-  await vi.waitFor(() => expect(screen.getByText(/waiting for the node/i)).toBeTruthy());
-  // The click's own answer is what's shown, not the stale one that arrived
-  // mid-flight.
-  expect(screen.queryByText(new Date(STALE_SINCE).toLocaleString())).toBeNull();
+  expect(screen.getByText(/identity has switched/i)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
+  expect(screen.queryByText(/retired identity/i)).toBeNull();
 });

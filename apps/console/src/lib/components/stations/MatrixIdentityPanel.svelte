@@ -155,13 +155,42 @@
     if (!id || station.matrixId === null) return;
     if (askedFor === id) return;
     askedFor = id;
+
+    // **Everything below this line describes ONE station, so a new station
+    // starts from nothing.** The route reuses this component across stations
+    // — `[stationId]/+page.svelte` is one page, not one per station — so
+    // without this reset an operator who opens B after A reads A's answer
+    // until B's arrives: A's `willBecome` in the sentence, and A's move
+    // behind the button. Clicking it authorises B to move to an address
+    // derived from A's agent. `unanswered` was worse still: write-once-true,
+    // so one unreachable hub latched "Couldn't ask the hub" onto every
+    // station visited for the rest of the session.
+    //
+    // `phase` and its two companions go with them for the same reason: a
+    // click on A must not leave B saying it is waiting for a node to redeem
+    // an authorisation nobody minted for it.
+    hubState = null;
+    unanswered = false;
+    phase = "idle";
+    waitingSince = null;
+    expiresAt = null;
+    error = null;
+
     let live = true;
     void moveState(id)
       .then((s) => {
+        // The answer to a question about a station this panel has since
+        // navigated away from. `live` is cleared by the cleanup below when
+        // the effect re-runs, which is the only reason a late reply cannot
+        // overwrite the state the reset above just cleared.
         if (!live) return;
         hubState = s;
         // A click in flight, or one that already set the local waiting state,
-        // outranks a reply about how things stood before it.
+        // outranks a reply about how things stood before it. Ruling 17's
+        // guard, kept: the control now renders only after an answer, so a
+        // click can no longer overtake this panel's own request for the same
+        // station — but it costs one comparison, and any future change that
+        // renders the control earlier restores the race it was written for.
         if (phase !== "idle") return;
         if (s.status === "waiting") {
           waitingSince = s.since;

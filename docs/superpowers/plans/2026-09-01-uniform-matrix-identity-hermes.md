@@ -422,7 +422,16 @@ test("a station whose room choice is ambiguous refuses the move", async () => {
 ```
 
 - [ ] **Step 2: Run and watch fail.**
-- [ ] **Step 3: Implement.** `preJoinNewIdentity` invites as the old user then joins as the new one (invite-only rooms — agentpod#397). `onNodeReportedMatrixId` compares against `bridge_matrix_id` and only on equality calls `retireOldIdentity`.
+- [ ] **Step 3: Implement.** `preJoinNewIdentity` invites as the old user then joins as the new one (invite-only rooms — agentpod#397). `onNodeReportedMatrixId` compares against **the address the occupying principal's handle implies** — `bridgeUserId(handle, domain)` — and only on equality calls `retireOldIdentity`.
+
+  *Corrected 2026-09-01, after the live exit test.* This said "compares against
+  `bridge_matrix_id`", and so did the code written from it. That column is what
+  the appservice minted, and `provision.ts` fills it from `stationSpeaker`,
+  which for a harness station answers the harness's OWN mxid — so on the fleet
+  `matrix_id = bridge_matrix_id` on all 14 harness stations, every comparison
+  read "converged", and the move could not be started for any of them. The
+  target address is the one the handle implies, and only the handle answers
+  it. See spec §1.
 - [ ] **Step 4: A station mid-move must not read as healthy.** Spec §6. The sweep
   counts non-`sent` outcomes as of 2026-08-31, and a move must be distinguishable
   from a fault. Write this test first and watch it fail:
@@ -460,8 +469,13 @@ Five things in this codebase have been defined with no caller. A control is part
 
 ```typescript
 test("a station on a retired identity says so, naming both addresses", () => {
-  render(StationMatrixPanel, { station: { matrixId: OLD, bridgeMatrixId: NEW } });
-  expect(screen.getByText(/retired identity/i)).toBeTruthy();
+  // The panel is told where the station stands by the hub (`matrix/move-state`),
+  // NOT handed `bridgeMatrixId` — see Step 3 below.
+  render(StationMatrixPanel, {
+    station: { id: "station_1", matrixId: OLD },
+    moveState: async () => ({ status: "retired-identity", runningAs: OLD, willBecome: NEW }),
+  });
+  expect(await screen.findByText(/retired identity/i)).toBeTruthy();
   expect(screen.getByText(OLD)).toBeTruthy();
   expect(screen.getByText(NEW)).toBeTruthy();
 });
@@ -484,14 +498,37 @@ test("a 403 from the grant gate is shown verbatim", async () => {
   expect(await screen.findByText(/granting reach, which your grant does not permit/i)).toBeTruthy();
 });
 
-test("a converged station shows no control", () => {
-  render(StationMatrixPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW } });
+test("a converged station shows no control", async () => {
+  render(StationMatrixPanel, {
+    station: { id: "station_1", matrixId: NEW },
+    moveState: async () => ({ status: "converged", mxid: NEW }),
+  });
+  expect(await screen.findByText(/identity has switched/i)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
 });
 ```
 
 - [ ] **Step 2: Run and watch fail.** `cd apps/console && pnpm vitest run`
-- [ ] **Step 3: Implement**, deriving the three states from §1's invariant: `matrix_id IS NULL` (bridge), `= bridge_matrix_id` (converged), `<> bridge_matrix_id` (retired identity).
+- [ ] **Step 3: Implement.** Only ONE state is derivable in the browser:
+  `matrix_id IS NULL` is bridge mode. The rest turn on the address the
+  occupying principal's handle implies, and the console holds neither the
+  handle nor the homeserver's domain — so it asks the hub
+  (`GET /api/stations/:id/matrix/move-state`) and renders the answer:
+  `converged`, `retired-identity`, `waiting`, or `no-agent` (a station nobody
+  occupies has no address to move to and is offered no move).
+
+  *Corrected 2026-09-01, after the live exit test.* This said "deriving the
+  three states from `matrix_id` vs `bridge_matrix_id`". Those two columns hold
+  the same value on every harness station on the fleet, so the panel called all
+  14 of them converged and rendered no control at all — the one operator
+  surface this slice exists for showed nothing to do. A state derived twice, in
+  two places, from a column that answers a different question, is the defect;
+  the hub answers once.
+
+  Also per-station: the route reuses one page across stations, so everything
+  the panel learned about the last one must be cleared when a new
+  `station.id` arrives, or B is rendered with A's target address and A's
+  move.
 - [ ] **Step 4: Run `pnpm vitest run` and `pnpm check`.** 132 pre-existing failures in the same 11 files; `svelte-check` 0 errors.
 - [ ] **Step 5: Commit.**
 
@@ -500,6 +537,8 @@ test("a converged station shows no control", () => {
 ## Verification before this slice is called done
 
 - [ ] hub **0 fail**, run twice with no reset and an explicit `DATABASE_URL`; console `svelte-check` 0 with its 132 pre-existing failures unchanged; `go test ./...` green in `apps/node-agent`
-- [ ] The §1 invariant query answers correctly for a station in each of the three states
+- [ ] The §1 invariant query answers correctly for a station in each of its states —
+      asked of the occupying principal's HANDLE, never of `bridge_matrix_id`, and
+      including the station with no occupant at all, which has no address to move to
 - [ ] Every failure case in §4's table lands where the table says, each proven by a test that fails when its guard is removed
 - [ ] **The exit test, by hand:** move one real Hermes station on the live fleet — **no SQL, no hand-run curl at any point** — and watch it answer in its room afterwards. That is the claim this slice exists to make true, and the room migration on 2026-08-31 is what happens when it is assumed instead of checked.
