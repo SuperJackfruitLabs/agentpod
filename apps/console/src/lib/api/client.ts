@@ -169,6 +169,17 @@ export type StationRow = {
   capabilities: string[] | null;
   matrixId: string | null;
   /**
+   * What the appservice minted for this station — never re-derived from
+   * `(nodeName, stationKey)` here, only read. For a bridge-mode station this
+   * is the whole identity; for a harness-mode station it is the account
+   * `matrixId` is converging toward (or has already reached).
+   *
+   * `matrixId <> bridgeMatrixId` is the fleet's own signal that a station is
+   * running under a retired identity (`db/schema/stations.ts`'s invariant) —
+   * not a status field, because none was added.
+   */
+  bridgeMatrixId: string | null;
+  /**
    * What this agent is FOR — the operator's word, not where it runs. Null when
    * nobody has said, which files it under no Matrix space at all and leaves it
    * in All rooms.
@@ -229,6 +240,24 @@ export const setNodePurpose = (nodeId: string, purpose: string | null) =>
       body: JSON.stringify({ purpose }),
     }
   );
+
+/**
+ * The operator's half of moving a harness-mode station off a retired identity
+ * and onto its own, principal-derived one (`matrix/authorize-move` on the
+ * hub). Puts the new identity in the station's room, mints a single-use
+ * authorization, and signals the node — fire-and-forget on the hub's side, so
+ * this call resolving is not convergence. There is no token in the response
+ * by design: the node redeems the authorization on its own long-term
+ * credential, never one that passed through this browser.
+ *
+ * Refusals carry the hub's own sentence (a 403 names which grant refused, a
+ * 409 names the harness with no writer) — `http()` surfaces it verbatim as
+ * `Error.message`, so callers must not replace it with a generic string.
+ */
+export const authorizeMove = (stationId: string) =>
+  http<{ expiresAt: string }>(`/api/stations/${stationId}/matrix/authorize-move`, {
+    method: "POST",
+  });
 
 export const stationHealth = (stationId: string) =>
   http<StationHealth>(`/api/stations/${stationId}/health`);

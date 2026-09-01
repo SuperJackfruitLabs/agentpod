@@ -18,6 +18,7 @@
   import type { StationRow } from "$lib/api/client";
   import PageHeader from "$lib/components/page-header.svelte";
   import PurposeField from "$lib/components/purpose/PurposeField.svelte";
+  import MatrixIdentityPanel from "$lib/components/stations/MatrixIdentityPanel.svelte";
   import { setStationPurpose } from "$lib/api/client";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
@@ -281,6 +282,22 @@
           onSave={async (purpose) => {
             await setStationPurpose(stationId, purpose);
             await loadStation();
+          }}
+        />
+      </div>
+      <!--
+        The §1 invariant — matrixId vs bridgeMatrixId — is a station-level fact,
+        not a tab's. It sits here, outside the tab bar, precisely so switching
+        tabs can never unmount it out from under an authorization the operator
+        just fired off (design §6; the panel itself renders nothing in bridge
+        mode, so bridge-mode stations show no empty box).
+      -->
+      <div class="mb-4">
+        <MatrixIdentityPanel
+          station={{
+            id: station.id,
+            matrixId: station.matrixId,
+            bridgeMatrixId: station.bridgeMatrixId,
           }}
         />
       </div>
