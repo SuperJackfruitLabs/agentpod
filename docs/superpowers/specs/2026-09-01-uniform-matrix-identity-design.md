@@ -43,6 +43,11 @@ That yields a checkable invariant, with no new column:
 | `matrix_id = bridge_matrix_id` | harness mode, converged |
 | `matrix_id <> bridge_matrix_id` | harness mode, mid-move or on a retired identity |
 
+Verified against infra on 2026-09-01: 18 bridge stations, every one with
+`matrix_id` null; 14 harness stations, every one with it set; all 32 carrying a
+`bridge_matrix_id`. The table describes the fleet rather than proposing a scheme
+for it.
+
 The third row is the fleet's condition today, for all 14 harness stations. The
 invariant is therefore not only a design goal but the progress query — the one that
 was missing on 2026-08-31, when nothing could answer "how far has this got".
@@ -156,7 +161,11 @@ room while the old one is still there. So it goes in first:
 
 1. **Operator authorises** one station. `requireIssueCredentials` runs.
 2. **The appservice joins `@agent_<handle>` to the station's room**, old user still a
-   member and still working. Invite-then-join: these rooms are invite-only, and an
+   member and still working. *Which room:* `matrix_rooms.station_id` stopped being
+   unique when a room began following its principal, so a station may carry more than
+   one row. The room to move is the one selected by the rule the rest of the hub
+   already uses — oldest `created_at`, tie-broken by `room_id` — and if that choice is
+   ever ambiguous the move refuses rather than guessing, exactly as `0062` does. Invite-then-join: these rooms are invite-only, and an
    uninvited join is refused with `403 M_FORBIDDEN ... cannot join a room that is not
    'public'` (agentpod#397).
 3. **The node redeems** the authorisation, writes the profile, restarts the harness.
