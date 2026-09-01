@@ -159,12 +159,54 @@ describe("the gate sweep", () => {
       "no-room": 1,
       "no-agent": 1,
       "no-speaker": 1,
+      failed: 0,
     });
     // Every gate it looked at is accounted for somewhere — nothing falls
     // through the tally unseen, which is the property that failed before.
     const tallied = Object.values(result.byStatus).reduce((a, b) => a + b, 0);
     expect(tallied).toBe(result.checked);
     expect(result.projected, "and `projected` still means delivered, not seen").toBe(1);
+  });
+
+  test("a projection that throws is counted, not just logged", async () => {
+    // Fix round 2. A throw left `byStatus` untouched, so `stuck` stayed 0 and
+    // the tally did not add up to `checked` — the sweep reporting a clean pass
+    // in which nothing was delivered. The live way to reach it: a station
+    // whose identity move left it answering as an mxid its room does not
+    // contain. `stationSpeaker` is non-null there, so the outcome is never
+    // `no-speaker`; the homeserver 403s and `projectGate` throws.
+    const f = fake({
+      pendingGates: async (b) => [gate("gate_boom", b), gate("gate_fine", b)],
+      project: async (_t, d) => {
+        if (d.gateId === "gate_boom") throw new Error("M_FORBIDDEN: sender's membership is not join");
+        return { status: "sent", eventId: "$e", roomId: "!r" };
+      },
+    });
+
+    const warnSpy = spyOn(console, "warn");
+    try {
+      const result = await sweepGates(f.deps);
+
+      expect(result.byStatus.failed).toBe(1);
+      // The invariant that actually catches this class: every gate the sweep
+      // looked at is somewhere in the tally. Before this, a throwing gate was
+      // counted nowhere and the sum silently came up short.
+      const tallied = Object.values(result.byStatus).reduce((a, b) => a + b, 0);
+      expect(tallied).toBe(result.checked);
+      // And it reaches the one-line summary an operator alerts on, rather than
+      // only the per-gate line.
+      const summarised = warnSpy.mock.calls.some(
+        ([line]) =>
+          typeof line === "string" &&
+          line.includes("pending gates the sweep could not deliver") &&
+          line.includes('"failed":1'),
+      );
+      expect(summarised, "a failed projection is in the stuck summary").toBe(true);
+      // Per-gate, one gate failing does not take the rest of the pass with it.
+      expect(result.byStatus.sent).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   test("a gate it could not place reaches the log of a running hub — no-room, no-agent and no-speaker alike", async () => {

@@ -67,6 +67,18 @@ export interface GateSweepDeps {
 export type GateOutcomeStatus = ProjectionOutcome["status"];
 
 /**
+ * …plus the one thing `projectGate` does not RETURN: it throws.
+ *
+ * Deliberately not a `ProjectionOutcome` member. That type describes decisions
+ * `projectGate` made and can explain; a throw is the absence of a decision, and
+ * modelling it as one would put a `failed` branch in front of every caller that
+ * only ever wanted to know what happened to the gate. It is the SWEEP's tally
+ * key, because the sweep is the thing that must be able to say "this pass
+ * delivered nothing" out loud.
+ */
+export type GateSweepStatus = GateOutcomeStatus | "failed";
+
+/**
  * The outcomes a gate can land in that mean it is STUCK — a person is waiting
  * on an approval that is not in any room, and nothing else is looking.
  *
@@ -74,7 +86,7 @@ export type GateOutcomeStatus = ProjectionOutcome["status"];
  * the ordinary healthy answer on a sweep pass and would be pure noise if it
  * warned. These three are the ones that were invisible.
  */
-const STUCK: readonly GateOutcomeStatus[] = ["no-room", "no-agent", "no-speaker"];
+const STUCK: readonly GateSweepStatus[] = ["no-room", "no-agent", "no-speaker", "failed"];
 
 export interface GateSweepResult {
   /** Pending gates seen across every board that answered. */
@@ -96,8 +108,12 @@ export interface GateSweepResult {
    * branch. Counting by status is what makes "a gate cannot be lost" a
    * property the sweep can actually report on rather than one it merely
    * intends.
+   *
+   * `failed` is the same lesson one round later: a gate whose projection THREW
+   * was logged and never counted, so the tally did not add up to `checked` and
+   * `stuck` stayed 0 while nothing was being delivered.
    */
-  byStatus: Record<GateOutcomeStatus, number>;
+  byStatus: Record<GateSweepStatus, number>;
   /** Boards that could not be asked. Named, because an empty sweep and an
    *  unreachable board look identical from the outside. */
   failedBoards: string[];
@@ -107,12 +123,13 @@ export interface GateSweepResult {
 export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> {
   let checked = 0;
   let projected = 0;
-  const byStatus: Record<GateOutcomeStatus, number> = {
+  const byStatus: Record<GateSweepStatus, number> = {
     sent: 0,
     already: 0,
     "no-room": 0,
     "no-agent": 0,
     "no-speaker": 0,
+    failed: 0,
   };
   const failedBoards: string[] = [];
 
@@ -175,6 +192,15 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
           });
         }
       } catch (err) {
+        // **Counted, not merely logged** — fix round 2. A throw used to leave
+        // `byStatus` untouched, so a pass in which every gate threw reported
+        // `stuck: 0` and a tally that did not add up to `checked`: the sweep
+        // saying nothing was wrong while nothing had been delivered. That is
+        // the same defect one level up that this whole tally was added to
+        // close on 2026-08-31, and an identity move that leaves a station
+        // answering as an mxid its room does not contain is a live way to
+        // reach it (`gates.ts`'s send, and `identity-move.ts`).
+        byStatus.failed++;
         log.warn("could not project a gate", {
           gateId: gate.gateId,
           error: err instanceof Error ? err.message : String(err),

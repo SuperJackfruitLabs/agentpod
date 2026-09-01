@@ -517,6 +517,46 @@ live("the ordered move, against a real homeserver", () => {
     expect(sent.every((x) => x.userId === oldMxid && x.roomId === roomId)).toBe(true);
     expect(await moveInProgress(STATION)).toBe(true);
   });
+
+  test("a station answering as an mxid its room does not contain is not silent", async () => {
+    // Fix round 2, and the state this slice itself can create: converged on
+    // paper — `matrix_id` IS `bridge_matrix_id`, so `moveState` says
+    // `converged` and `stationSpeaker` is non-null — while the room contains
+    // only the old identity. Every existing signal reads healthy here:
+    // `no-speaker` cannot happen, the send 403s, and `projectGate` used to
+    // throw with its claim already taken, after which every later pass
+    // answered `already` — the one status the sweep treats as the healthy
+    // answer and deliberately does not warn on. A person waiting on an
+    // approval, and a fleet reporting nothing wrong.
+    const { roomId, oldMxid } = await stationMidFleet("mute");
+    await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
+    expect(await roomMembers(roomId, oldMxid)).not.toContain(NEW_MXID);
+    expect((await moveState(STATION)).status).toBe("converged");
+
+    const cardId = `crd_${RUN}_mute`;
+    const gateId = `gate_${RUN}_mute`;
+    await dispatched(cardId);
+    const project = () =>
+      projectGate(TENANT, delivery(gateId, cardId), {
+        domain: DOMAIN,
+        sendText: (u: string, r: string, b: string) => client!.sendText(u, r, b),
+        sendCustomEvent: (u: string, r: string, t: string, c: Record<string, unknown>) =>
+          client!.sendCustomEvent(u, r, t, c),
+      });
+
+    // The homeserver is the one refusing here, not a fake: the speaker is not
+    // a member, so the send cannot land.
+    await expect(project()).rejects.toThrow(/M_FORBIDDEN/);
+
+    // The claim went back, so this gate is still deliverable the moment
+    // somebody puts the identity in the room.
+    const claims = await rawSql`SELECT gate_id FROM matrix_gate_events WHERE gate_id = ${gateId}`;
+    expect(claims.length, "the claim was released rather than left at pending:<gateId>").toBe(0);
+
+    // And the next pass fails the same way rather than answering `already`,
+    // which is what made this invisible.
+    await expect(project()).rejects.toThrow(/M_FORBIDDEN/);
+  });
 });
 
 // ─── Refusing rather than guessing, and what a move looks like ───────────────

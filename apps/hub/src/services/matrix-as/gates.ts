@@ -407,14 +407,48 @@ export async function projectGate(
 
   // Prose first, deliberately: if only one lands, leave the room with a
   // readable question and no buttons rather than buttons and no context.
-  await deps.sendText(stationUser, found.roomId, gateProseBody(d, deepLink));
+  //
+  // **A send that THROWS gives the claim back** — fix round 2, and the reason
+  // is a state this slice itself created. A station whose identity move left
+  // it answering as an mxid its room does not contain has a non-null
+  // `stationSpeaker`, so the outcome is never `no-speaker`; the homeserver
+  // 403s, `assertOkOrAlready` throws, and this used to throw straight out with
+  // the claim already taken. The row then sat at `pending:<gateId>` forever,
+  // every later pass answered `already` — which the sweep treats as the
+  // healthy answer and deliberately does not warn on — and the gate was
+  // invisible on both sides. A person waiting on an approval, and a fleet
+  // reporting nothing wrong.
+  //
+  // Releasing is the same trade the `!eventId` branch below already makes, and
+  // it is made knowingly: if the prose landed and the custom event threw, the
+  // next pass posts the prose again. A room that reads the question twice is a
+  // cost; a question never asked is the failure this file exists to prevent.
+  //
+  // Re-thrown rather than turned into an outcome, so the push receiver keeps
+  // answering 5xx and kaambaan keeps retrying. Converting a failure into a 200
+  // would quietly retire push's own retry, leaving the sweep as the only path
+  // — and the sweep counts this now (`gate-sweep.ts`), so a throw can no
+  // longer be missing from the tally either.
+  let eventId: string | null;
+  try {
+    await deps.sendText(stationUser, found.roomId, gateProseBody(d, deepLink));
 
-  const eventId = await deps.sendCustomEvent(
-    stationUser,
-    found.roomId,
-    GATE_EVENT_TYPE,
-    gateEventContent(d, deepLink)
-  );
+    eventId = await deps.sendCustomEvent(
+      stationUser,
+      found.roomId,
+      GATE_EVENT_TYPE,
+      gateEventContent(d, deepLink)
+    );
+  } catch (err) {
+    await releaseClaim(d.gateId);
+    log.warn("gate could not be posted into its room; claim released so a later pass retries", {
+      gateId: d.gateId,
+      roomId: found.roomId,
+      stationUser,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   if (!eventId) {
     // The claim has to go, or this gate can never be projected again — the
