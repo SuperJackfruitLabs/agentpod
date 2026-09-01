@@ -84,10 +84,18 @@ test("starts the shared fleet poll on mount and stops it on destroy", () => {
   expect(stopPoll).toHaveBeenCalledTimes(1);
 });
 
-test("reserves the roster column even though task 7 fills it", () => {
+test("the roster column holds the fleet, which is the console's navigation", () => {
+  mockFleet.agents = [
+    {
+      stationId: "st_1", nodeId: "n1", nodeName: "node-alpha", agentName: "hermes",
+      harness: "claude-code", status: "running", workspacePath: "/w", capabilities: [],
+    },
+  ] as never;
   const { getByTestId } = render(AppShell, { props: { children } });
 
-  expect(getByTestId("roster-rail").textContent?.trim()).toBe("");
+  const rail = getByTestId("roster-rail");
+  expect(rail.contains(getByTestId("roster-row"))).toBe(true);
+  expect(getByTestId("roster-row").getAttribute("href")).toBe("/nodes/n1/stations/st_1");
 });
 
 test("the context rail column only exists when a route supplies one", () => {
@@ -151,7 +159,7 @@ test("at and below 900px the roster and the stage are two views, not two columns
   // "hidden". Both columns flip on the same min-[901px] the grid does — see
   // the comment in AppShell for why max-[900px] cannot be paired with it.
   expect(getByTestId("roster-rail").classList.contains("hidden")).toBe(true);
-  expect(getByTestId("roster-rail").classList.contains("min-[901px]:block")).toBe(true);
+  expect(getByTestId("roster-rail").classList.contains("min-[901px]:flex")).toBe(true);
   expect(getByTestId("stage").classList.contains("hidden")).toBe(false);
   expect(getByTestId("stage").classList.contains("flex")).toBe(true);
 

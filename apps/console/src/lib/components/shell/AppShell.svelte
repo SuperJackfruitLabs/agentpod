@@ -14,6 +14,7 @@
   import { deriveAttention } from "$lib/fleet/attention";
   import { fleet, startFleetPoll } from "$lib/stores/fleet.svelte";
   import AttentionLane from "./AttentionLane.svelte";
+  import RosterRail from "./RosterRail.svelte";
   import TopBar from "./TopBar.svelte";
 
   interface Props {
@@ -67,19 +68,25 @@
     )}
   >
     <!--
-      Reserved, and empty until task 7 fills it — the grid is proven before the
-      rail lands. Shown/hidden with the SAME min-[901px] the columns switch on:
-      Tailwind's max-[900px] compiles to `not all and (min-width:900px)`, which
-      is exclusive, so pairing it with min-[901px] leaves exactly 900px in a
+      Shown/hidden with the SAME min-[901px] the columns switch on: Tailwind's
+      max-[900px] compiles to `not all and (min-width:900px)`, which is
+      exclusive, so pairing it with min-[901px] leaves exactly 900px in a
       one-column grid with the roster still in it, stacked above the stage.
+      The display class is picked by the ternary rather than layered, because
+      `hidden` and `flex` both set `display` and neither wins by class order.
+      overflow-hidden here, not overflow-y-auto: the rail scrolls its own row
+      list so its filter header and "Where they run" footer stay put, and so
+      its group headers have a scroll container to stick to.
     -->
     <div
       data-testid="roster-rail"
       class={cn(
-        "min-w-0 overflow-y-auto border-r border-border bg-card",
-        view === "stage" && "hidden min-[901px]:block",
+        "min-h-0 min-w-0 flex-col overflow-hidden border-r border-border bg-card",
+        view === "stage" ? "hidden min-[901px]:flex" : "flex",
       )}
-    ></div>
+    >
+      <RosterRail />
+    </div>
 
     <div
       data-testid="stage"
