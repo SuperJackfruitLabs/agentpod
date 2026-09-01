@@ -189,8 +189,11 @@ test("the node row counts the agents on it", () => {
 test("an offline node reads offline in a word, not only in a colour", () => {
   const { getByTestId } = render(Muster);
 
-  expect(getByTestId("node-link-n_vega").textContent).toContain("Error");
-  expect(getByTestId("node-link-n_orion").textContent).toContain("Running");
+  // A machine that is switched off is offline, not "Error" — nodeState carries
+  // the node's own words over the shared token (bd40c540, which updated
+  // state.test.ts and ActivityFeed's tests but not this one).
+  expect(getByTestId("node-link-n_vega").textContent).toContain("Offline");
+  expect(getByTestId("node-link-n_orion").textContent).toContain("Online");
 });
 
 test("every node row is `relative` — a StateDot's sr-only label must not escape", () => {

@@ -10,6 +10,7 @@
   import { Toaster } from "$lib/components/ui/sonner";
   import * as Tooltip from "$lib/components/ui/tooltip";
   import AppShell from "$lib/components/shell/AppShell.svelte";
+  import { contextRailSlot } from "$lib/stores/context-rail.svelte";
   import CommandPalette from "$lib/components/command-palette.svelte";
   import { Spinner } from "$lib/components/ui/spinner";
 
@@ -88,8 +89,11 @@
         </div>
       </div>
     {:else if showAppShell}
-      <!-- Authenticated routes: wrap in AppShell with bottom navigation -->
-      <AppShell>
+      <!-- Authenticated routes: wrap in AppShell with bottom navigation.
+           The third column belongs to the route, which cannot pass a prop up
+           to its own layout — it registers a snippet instead (see
+           $lib/stores/context-rail). No registration, no column. -->
+      <AppShell contextRail={contextRailSlot.snippet ?? undefined}>
         {@render children()}
       </AppShell>
     {:else}
