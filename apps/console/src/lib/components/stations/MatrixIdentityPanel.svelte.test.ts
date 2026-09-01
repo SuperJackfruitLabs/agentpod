@@ -109,3 +109,82 @@ test("the control survives a successful authorize — re-authorizing is the retr
     true
   );
 });
+
+// ─── "waiting" is the hub's answer, not this component's memory ───────────────
+//
+// Three of the four states are the two columns on the station row. `waiting`
+// is not: it means an authorization is outstanding, and that record lives only
+// in the hub. It used to be local `$state` set by a click, so a reload — or a
+// second operator, or a second tab — saw a station that looked untouched, and
+// §6's "a station stuck there is the signal that a harness did not restart"
+// was not a thing anybody could observe.
+
+test("a station the hub says is waiting shows waiting on first render, with no click", async () => {
+  const moveState = vi.fn().mockResolvedValue({
+    status: "waiting",
+    runningAs: OLD,
+    willBecome: NEW,
+    since: "2026-09-01T09:00:00Z",
+  });
+  render(MatrixIdentityPanel, { station: RETIRED, moveState });
+
+  expect(await screen.findByText(/waiting for the node/i)).toBeTruthy();
+  expect(moveState).toHaveBeenCalledWith(RETIRED.id);
+  // Ruling 9 intact: the control is still there, because re-authorizing is
+  // the retry and a station stuck waiting is the operator who most needs it.
+  expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy();
+});
+
+test("a station nobody has asked to move shows the control and no waiting line", async () => {
+  const moveState = vi.fn().mockResolvedValue({
+    status: "retired-identity",
+    runningAs: OLD,
+    willBecome: NEW,
+  });
+  render(MatrixIdentityPanel, { station: RETIRED, moveState });
+
+  expect(await screen.findByRole("button", { name: /move to its own identity/i })).toBeTruthy();
+  await vi.waitFor(() => expect(moveState).toHaveBeenCalled());
+  expect(screen.queryByText(/waiting for the node/i)).toBeNull();
+});
+
+test("a hub that cannot answer costs the waiting line and nothing else", async () => {
+  // The waiting state is only ever ADDITIONAL information. Turning its
+  // absence into an error banner would make a panel whose control works fine
+  // look broken.
+  const moveState = vi.fn().mockRejectedValue(new Error("hub unreachable"));
+  render(MatrixIdentityPanel, { station: RETIRED, moveState });
+
+  await vi.waitFor(() => expect(moveState).toHaveBeenCalled());
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy();
+});
+
+test("a converged station is not asked about a move it is not in", async () => {
+  const moveState = vi.fn().mockResolvedValue({ status: "converged", mxid: NEW });
+  render(MatrixIdentityPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW }, moveState });
+  // `converged` still means only that the two columns agree — and they are
+  // read here, not fetched. Asking the hub as well would be a second source
+  // for a fact the row already settles.
+  expect(moveState).not.toHaveBeenCalled();
+});
+
+test("a click's waiting state is not overwritten by a slower answer about how things stood before it", async () => {
+  // The fetch is in flight when the operator authorizes. Its reply describes
+  // the world before the click, and adopting it would put the panel back to
+  // idle on a station that was just authorized.
+  let settle: (s: unknown) => void = () => {};
+  const moveState = vi.fn().mockReturnValue(
+    new Promise((resolve) => {
+      settle = resolve;
+    })
+  );
+  const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
+  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
+
+  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  expect(screen.getByText(/waiting for the node/i)).toBeTruthy();
+
+  settle({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+  await vi.waitFor(() => expect(screen.getByText(/waiting for the node/i)).toBeTruthy());
+});

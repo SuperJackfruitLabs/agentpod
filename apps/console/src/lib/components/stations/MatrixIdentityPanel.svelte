@@ -28,10 +28,21 @@
    * So a successful call does not end this panel's job: it moves to "waiting
    * for the node", with the control still live, because re-authorizing IS the
    * retry. A control that vanishes on click is the failure to avoid.
+   *
+   * **And "waiting" is the hub's answer, not this component's memory.** The
+   * three states above are the two columns; waiting is not, because it is
+   * derived from an authorization record that lives only in the hub. It used
+   * to be local `$state` set by a click, which meant a reload — or a second
+   * operator, or a second tab — saw a station that looked untouched. So the
+   * panel asks `matrix/move-state` on mount and adopts `waiting` from it.
    */
 
   import { Button } from "$lib/components/ui/button";
-  import { authorizeMove as defaultAuthorizeMove } from "$lib/api/client";
+  import {
+    authorizeMove as defaultAuthorizeMove,
+    stationMoveState as defaultMoveState,
+    type StationMoveState,
+  } from "$lib/api/client";
 
   interface StationIdentity {
     // Optional: the converged/bridge states never call authorize() and so
@@ -46,9 +57,16 @@
     station: StationIdentity;
     /** Injectable for tests; defaults to the real hub call. */
     authorize?: (stationId: string) => Promise<{ expiresAt: string }>;
+    /**
+     * Where the hub says this station stands. Injectable for the same reason.
+     * Only `waiting` is read from it — the other three states are the two
+     * columns above, and re-deriving them here from a second source would be
+     * two places for the same fact to be wrong.
+     */
+    moveState?: (stationId: string) => Promise<StationMoveState>;
   }
 
-  let { station, authorize = defaultAuthorizeMove }: Props = $props();
+  let { station, authorize = defaultAuthorizeMove, moveState = defaultMoveState }: Props = $props();
 
   type IdentityState = "bridge" | "converged" | "retired";
 
@@ -69,6 +87,54 @@
   let phase = $state<Phase>("idle");
   let error = $state<string | null>(null);
   let expiresAt = $state<string | null>(null);
+  /** When the outstanding authorization was made, per the hub. */
+  let waitingSince = $state<string | null>(null);
+
+  /**
+   * Ask the hub whether this station is already waiting.
+   *
+   * The three states above come off the station row; `waiting` cannot,
+   * because it is derived from an authorization record the browser never
+   * sees. Until this ran, "waiting for the node" existed only as the local
+   * flag a click set — so a reload, a second tab, or a different operator saw
+   * a station that looked as though nobody had touched it, and §6's "a
+   * station stuck there is the signal that a harness did not restart" was not
+   * something anyone could actually observe.
+   *
+   * A failure here is deliberately silent: it costs the operator the waiting
+   * line, and must not put an error banner on a panel whose control still
+   * works. The three column-derived states are unaffected either way.
+   */
+  // Deliberately NOT `$state`: it is a record of what has been asked, not a
+  // thing to render, and a reactive one written inside the effect below would
+  // re-trigger it. The station page passes `station` as a fresh object on
+  // every render, so without this the panel would re-ask the hub on every
+  // unrelated page update.
+  let askedFor: string | null = null;
+
+  $effect(() => {
+    const id = station.id;
+    if (!id || identityState !== "retired") return;
+    if (askedFor === id) return;
+    askedFor = id;
+    let live = true;
+    void moveState(id)
+      .then((s) => {
+        // A click in flight, or one that already set the local waiting state,
+        // outranks a reply about how things stood before it.
+        if (!live || phase !== "idle") return;
+        if (s.status === "waiting") {
+          waitingSince = s.since;
+          phase = "waiting";
+        }
+      })
+      .catch(() => {
+        // See above: no banner for a state that is only ever additional.
+      });
+    return () => {
+      live = false;
+    };
+  });
 
   function fmt(iso: string): string {
     const d = new Date(iso);
@@ -82,6 +148,7 @@
     try {
       const result = await authorize(station.id);
       expiresAt = result.expiresAt;
+      waitingSince = null;
       // Not "done" — the node hasn't redeemed anything yet. The control stays
       // live below rather than being replaced by a spinner the operator can't
       // escape: if the node never answers, pressing it again IS the retry.
@@ -110,7 +177,9 @@
       <p class="text-sm text-muted-foreground" role="status">
         Waiting for the node to redeem this authorization{expiresAt
           ? ` (expires ${fmt(expiresAt)})`
-          : ""}. If the node is offline the authorization simply expires —
+          : waitingSince
+            ? ` (authorized ${fmt(waitingSince)})`
+            : ""}. If the node is offline the authorization simply expires —
         pressing the button again is the retry.
       </p>
     {/if}

@@ -259,6 +259,31 @@ export const authorizeMove = (stationId: string) =>
     method: "POST",
   });
 
+/**
+ * Where the HUB says a station stands in the §1 invariant.
+ *
+ * Three of the four states are derivable in the browser from `matrixId` and
+ * `bridgeMatrixId`, and the fourth is not: `waiting` means an authorization
+ * is outstanding, and that record lives only in the hub. Before this the
+ * panel's "waiting for the node" was component-local state that died on
+ * reload — so the one state §6 asks an operator to WATCH was the one thing a
+ * refresh threw away.
+ *
+ * `converged` still means only that the two columns agree. It is not a health
+ * check, and nothing in this payload is one: whether a station's identity can
+ * actually post in its room is a Matrix fact in neither column, and the hub's
+ * gate sweep is what checks it.
+ */
+export type StationMoveState =
+  | { status: "unknown" }
+  | { status: "bridge" }
+  | { status: "converged"; mxid: string }
+  | { status: "waiting"; runningAs: string; willBecome: string; since: string }
+  | { status: "retired-identity"; runningAs: string; willBecome: string | null };
+
+export const stationMoveState = (stationId: string) =>
+  http<StationMoveState>(`/api/stations/${stationId}/matrix/move-state`);
+
 export const stationHealth = (stationId: string) =>
   http<StationHealth>(`/api/stations/${stationId}/health`);
 
