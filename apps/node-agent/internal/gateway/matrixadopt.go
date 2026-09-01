@@ -152,9 +152,9 @@ type MatrixAdoptDeps struct {
 	// (descriptor/hermes.go, issue #273): that profile is a VIEW onto the
 	// agent the root gateway already runs, not a separately startable thing,
 	// and starting it would put a second gateway on one messaging identity.
-	// Such a station still has matrix_id != bridge_matrix_id, so the console
-	// offers it the move — which is why the refusal has to live here, on the
-	// side that knows what the station is.
+	// Such a station still answers as something other than the address its
+	// agent's handle implies, so the console offers it the move — which is why
+	// the refusal has to live here, on the side that knows what the station is.
 	CapabilitiesFor CapabilityLookupFunc
 
 	// WriterFor resolves the ProfileWriteFunc for a harness; see

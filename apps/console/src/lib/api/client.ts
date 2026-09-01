@@ -169,14 +169,19 @@ export type StationRow = {
   capabilities: string[] | null;
   matrixId: string | null;
   /**
-   * What the appservice minted for this station — never re-derived from
-   * `(nodeName, stationKey)` here, only read. For a bridge-mode station this
-   * is the whole identity; for a harness-mode station it is the account
-   * `matrixId` is converging toward (or has already reached).
+   * What the appservice minted for this station — never re-derived here, only
+   * read, and for a harness-mode station **not** the address it is moving
+   * toward.
    *
-   * `matrixId <> bridgeMatrixId` is the fleet's own signal that a station is
-   * running under a retired identity (`db/schema/stations.ts`'s invariant) —
-   * not a status field, because none was added.
+   * This used to say `matrixId <> bridgeMatrixId` was the fleet's signal that
+   * a station runs under a retired identity. It is not: `provision.ts` fills
+   * the column from `names.ts`'s `stationSpeaker`, which for a harness station
+   * answers the harness's OWN mxid — so on the fleet the two columns agree,
+   * both holding the retired station-derived address, and everything that
+   * compared them read "converged" for exactly the 14 stations that had not
+   * moved. Whether a station is on its principal's address is a question about
+   * the agent's HANDLE, which the browser cannot derive; ask the hub
+   * (`stationMoveState` below).
    */
   bridgeMatrixId: string | null;
   /**
@@ -262,24 +267,34 @@ export const authorizeMove = (stationId: string) =>
 /**
  * Where the HUB says a station stands in the §1 invariant.
  *
- * Three of the four states are derivable in the browser from `matrixId` and
- * `bridgeMatrixId`, and the fourth is not: `waiting` means an authorization
- * is outstanding, and that record lives only in the hub. Before this the
- * panel's "waiting for the node" was component-local state that died on
- * reload — so the one state §6 asks an operator to WATCH was the one thing a
- * refresh threw away.
+ * **Only one of these states is derivable in the browser** — `bridge`, which
+ * is `matrixId === null` and nothing else. Every other one turns on the
+ * address the station's occupying principal's HANDLE implies, and the console
+ * holds neither the handle nor the homeserver domain to build it. The panel
+ * used to derive three of them by comparing `matrixId` with `bridgeMatrixId`,
+ * which answers a different question and answered it wrong for every station
+ * on the fleet (see `StationRow.bridgeMatrixId`).
  *
- * `converged` still means only that the two columns agree. It is not a health
- * check, and nothing in this payload is one: whether a station's identity can
- * actually post in its room is a Matrix fact in neither column, and the hub's
- * gate sweep is what checks it.
+ * `waiting` was never derivable at all: an authorization record lives only in
+ * the hub, so a component-local flag died on reload and the one state §6 asks
+ * an operator to WATCH was the one a refresh threw away.
+ *
+ * `converged` means the station answers as its principal's address, and
+ * nothing more. It is not a health check, and nothing in this payload is one:
+ * whether a station's identity can actually post in its room is a Matrix fact
+ * in no column at all, and the hub's gate sweep is what checks it.
  */
 export type StationMoveState =
   | { status: "unknown" }
   | { status: "bridge" }
   | { status: "converged"; mxid: string }
+  /**
+   * Harness mode, nobody occupying the station: no handle, so no address to
+   * move to and no move to offer. Not `converged`, and not a blank.
+   */
+  | { status: "no-agent"; runningAs: string }
   | { status: "waiting"; runningAs: string; willBecome: string; since: string }
-  | { status: "retired-identity"; runningAs: string; willBecome: string | null };
+  | { status: "retired-identity"; runningAs: string; willBecome: string };
 
 export const stationMoveState = (stationId: string) =>
   http<StationMoveState>(`/api/stations/${stationId}/matrix/move-state`);

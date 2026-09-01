@@ -47,8 +47,10 @@ export function notifyStationsAdopted(stationIds: string[]): void {
  *
  * The other half of the ordered identity move
  * (`matrix-as/identity-move.ts`, design §4 step 5): convergence is the node
- * reporting `bridge_matrix_id`, and it is the ONLY thing that may trigger the
- * one irreversible step. `station-registry` is the place that hears every
+ * reporting the address its occupying principal's handle implies — never what
+ * `bridge_matrix_id` holds, which for a harness station is the address it is
+ * moving OFF — and it is the ONLY thing that may trigger the one irreversible
+ * step. `station-registry` is the place that hears every
  * `detect`, and it must go on knowing nothing about Matrix — so it announces
  * the report and whoever cares listens, exactly as adoption does above.
  *

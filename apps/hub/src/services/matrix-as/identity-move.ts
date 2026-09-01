@@ -17,8 +17,10 @@
  *     while the OLD identity is still a member and still working;
  *  3. the node redeems the authorisation, writes the profile, restarts;
  *  4. the harness comes up as `@agent_<handle>` — *already a member*;
- *  5. the node reports the new mxid and **`onNodeReportedMatrixId`** sees
- *     `matrix_id = bridge_matrix_id`, which is what convergence means (§1);
+ *  5. the node reports the new mxid and **`onNodeReportedMatrixId`** sees that
+ *     `matrix_id` is now the address the occupying principal's handle implies,
+ *     which is what convergence means (§1, and `targetIdentity` below for why
+ *     it is the handle that is asked and not `bridge_matrix_id`);
  *  6. only then does **`retireOldIdentity`** take the old account out of the
  *     room, record it against the same principal, and retire its credential.
  *
@@ -102,8 +104,6 @@ interface MovingStation {
   principalId: string | null;
   /** What the harness reports it answers as today. Null in bridge mode. */
   matrixId: string | null;
-  /** What the appservice minted — the address this move ends at. */
-  bridgeMatrixId: string | null;
 }
 
 async function loadStation(stationId: string): Promise<MovingStation | null> {
@@ -112,12 +112,44 @@ async function loadStation(stationId: string): Promise<MovingStation | null> {
       id: stations.id,
       principalId: stations.principalId,
       matrixId: stations.matrixId,
-      bridgeMatrixId: stations.bridgeMatrixId,
     })
     .from(stations)
     .where(eq(stations.id, stationId))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * The address this station's occupant implies — where the move ends, and the
+ * only thing convergence may be measured against.
+ *
+ * **This used to be `stations.bridge_matrix_id`, and that column cannot answer
+ * the question.** It records the identity the appservice minted, which for a
+ * harness station is written from `names.ts`'s `stationSpeaker` — and
+ * `stationSpeaker` correctly returns the harness's OWN mxid there. So the
+ * column holds "what this station already is", not "what the appservice would
+ * mint for its occupant", and on the live fleet all 14 harness stations carry
+ * `matrix_id = bridge_matrix_id = ` their old station-derived address. Every
+ * comparison against it therefore read "converged" for exactly the stations
+ * this file exists to move, the console offered none of them the move, and
+ * nothing could ever start. Every test passed because every fixture set the
+ * column to the handle-derived value — which is what the design assumed and
+ * what `provision.ts` does not do.
+ *
+ * The question the invariant means to ask is *"is this station on its
+ * principal's address?"*, and only the handle answers that. So it is asked of
+ * the handle, through the same `bridgeUserId` derivation the rest of the
+ * bridge uses. `bridge_matrix_id` keeps its stated meaning and is not
+ * redefined, not backfilled, and no longer read here.
+ *
+ * Null means the station has no occupying principal, so it has no handle and
+ * therefore no address to move to. That is a real answer — such a station is
+ * not movable — and never patched over with the station-derived form, which
+ * is the identity this slice exists to retire.
+ */
+async function targetIdentity(station: MovingStation, domain: string): Promise<string | null> {
+  const handle = station.principalId ? await principalHandle(station.principalId) : null;
+  return handle ? bridgeUserId(handle, domain) : null;
 }
 
 /**
@@ -161,10 +193,16 @@ export type PreJoinOutcome =
   /** It was already a member — a re-run, and the reason the invite is skipped. */
   | { status: "already"; roomId: string; newMxid: string }
   | { status: "unknown-station" }
-  /** No occupying agent, so no handle, so no address to move to. */
+  /**
+   * No occupying agent, so no handle, so no address to move to.
+   *
+   * There is no separate "the appservice never minted one" refusal any more:
+   * the target is the address the occupant's HANDLE implies, and a station
+   * with a handle always has one. That refusal existed only because this read
+   * `bridge_matrix_id`, whose emptiness said nothing about whether the station
+   * could move.
+   */
   | { status: "no-agent" }
-  /** The appservice has never minted this station an identity. */
-  | { status: "no-identity" }
   | { status: "no-room" }
   | { status: "ambiguous-room"; candidates: string[] }
   /**
@@ -184,8 +222,6 @@ export function preJoinRefusal(outcome: PreJoinOutcome): string | null {
       return "This station no longer exists.";
     case "no-agent":
       return "This station has no occupying agent, so there is nothing to move to its own identity.";
-    case "no-identity":
-      return "This station has no Matrix identity of its own yet, so there is nothing to move it to.";
     case "no-room":
       return "This station has no Matrix room, so there is nowhere to put its new identity before the harness switches.";
     case "ambiguous-room":
@@ -222,25 +258,16 @@ export async function preJoinNewIdentity(
   const station = await loadStation(stationId);
   if (!station) return { status: "unknown-station" };
 
-  const handle = station.principalId ? await principalHandle(station.principalId) : null;
-  if (!handle) return { status: "no-agent" };
-
-  // The address the appservice actually minted, not one re-derived here. A
-  // derived address is a claim about what SHOULD exist; this move has to act
-  // on the account that does — `provision.ts` is what registered it.
-  const newMxid = station.bridgeMatrixId;
-  if (!newMxid) return { status: "no-identity" };
-
-  const derived = bridgeUserId(handle, deps.domain);
-  if (derived !== newMxid) {
-    // Not fatal — the minted address is still the real one — but it means the
-    // handle and the account have drifted apart, which is worth a line.
-    log.warn("a station's minted identity is not the one its handle implies", {
-      stationId,
-      minted: newMxid,
-      derived,
-    });
-  }
+  // Where the move ENDS, derived from the occupant's handle — see
+  // `targetIdentity`. This read `station.bridgeMatrixId`, on the reasoning
+  // that acting on the account the appservice really minted beats acting on
+  // one re-derived here. The reasoning was sound and the column was the wrong
+  // one: for a harness station `bridge_matrix_id` holds the station's OWN
+  // address, so the pre-join invited and joined the identity the station is
+  // moving off — a no-op that reports `already` for every station on the
+  // fleet.
+  const newMxid = await targetIdentity(station, deps.domain);
+  if (!newMxid) return { status: "no-agent" };
 
   const choice = await roomToMove(stationId);
   if (choice.status !== "room") return choice;
@@ -361,7 +388,14 @@ export async function retireOldIdentity(
   const station = await loadStation(stationId);
   if (!station) return { status: "unknown-station" };
 
-  if (!oldMxid || oldMxid === station.matrixId || oldMxid === station.bridgeMatrixId) {
+  // The address the station is moving TO, handle-derived (`targetIdentity`).
+  // The guard below compared against `bridge_matrix_id`, which on the fleet IS
+  // the old station-derived address — so the one identity a real retirement is
+  // ever called on was the one this refused to touch, and step 6 could not run
+  // even if everything before it had.
+  const target = await targetIdentity(station, deps.domain);
+
+  if (!oldMxid || oldMxid === station.matrixId || oldMxid === target) {
     log.warn("refusing to retire the identity a station currently answers as", {
       stationId,
       oldMxid,
@@ -384,19 +418,22 @@ export async function retireOldIdentity(
     // across that gap would be a remembered claim about membership rather
     // than a checked one. A stale carried id and a changed room set fail the
     // same way; this question catches both.
-    // `?? bridgeMatrixId` is the bridge-mode fallback: a station with no
-    // `matrix_id` is one the appservice speaks for, and its `bridge_matrix_id`
-    // IS the account in the room.
+    // `?? target` is the bridge-mode fallback: a station with no `matrix_id`
+    // is one the appservice speaks for, and it speaks as the occupant's
+    // handle-derived address — the same thing `names.ts`'s `stationSpeaker`
+    // answers in bridge mode, and what `provision.ts` therefore wrote into
+    // `bridge_matrix_id` for such a station. Read off the handle rather than
+    // off that column so the fallback and the guard above ask one question.
     //
     // **That is safe here only because of the guard above**, and the coupling
     // is load-bearing enough to say out loud: the live-identity check already
-    // refused when `oldMxid === station.bridgeMatrixId`, so by this line the
-    // identity being retired can never be the one this fallback resolves to.
-    // Without that guard this would ask "is the account I am about to remove
-    // still in the room?", get `true`, and take it out — which is the mute
-    // station this whole file exists to prevent. Anyone loosening the guard
-    // above has to give this line its own check.
-    const speaker = station.matrixId ?? station.bridgeMatrixId;
+    // refused when `oldMxid === target`, so by this line the identity being
+    // retired can never be the one this fallback resolves to. Without that
+    // guard this would ask "is the account I am about to remove still in the
+    // room?", get `true`, and take it out — which is the mute station this
+    // whole file exists to prevent. Anyone loosening the guard above has to
+    // give this line its own check.
+    const speaker = station.matrixId ?? target;
     if (!speaker || !(await deps.client.isJoined(speaker, roomId))) {
       log.error(
         "refusing to retire an identity out of a room the station cannot speak in — " +
@@ -496,12 +533,16 @@ export type ConvergenceOutcome =
 /**
  * The node has reported what its harness answers as. Is that convergence?
  *
- * `matrix_id = bridge_matrix_id` is the whole test (§1's invariant), and it is
- * deliberately the ONLY thing that triggers the irreversible step. A harness
- * that never restarts, an adapter that wrote the wrong file, a credential the
- * harness ignored — all of them show up here as "not this address", and all of
- * them leave the station working under its old identity with both accounts in
- * the room.
+ * "Is this the address the occupant's handle implies" is the whole test (§1's
+ * invariant, as `targetIdentity` restates it), and it is deliberately the ONLY
+ * thing that triggers the irreversible step. A harness that never restarts, an
+ * adapter that wrote the wrong file, a credential the harness ignored — all of
+ * them show up here as "not this address", and all of them leave the station
+ * working under its old identity with both accounts in the room.
+ *
+ * Asked of the handle rather than of `bridge_matrix_id`: on the fleet that
+ * column holds the station's own old address, so a harness that had done
+ * nothing at all reported exactly what this used to call convergence.
  *
  * Called before `station-registry` writes the reported value, because the
  * value it is about to overwrite is the only record of who the old identity
@@ -515,8 +556,9 @@ export async function onNodeReportedMatrixId(
   const station = await loadStation(stationId);
   if (!station) return { status: "unknown-station" };
 
-  if (!mxid || !station.bridgeMatrixId || mxid !== station.bridgeMatrixId) {
-    return { status: "not-converged", reported: mxid, expected: station.bridgeMatrixId };
+  const target = await targetIdentity(station, deps.domain);
+  if (!mxid || !target || mxid !== target) {
+    return { status: "not-converged", reported: mxid, expected: target };
   }
 
   const oldMxid = station.matrixId;
@@ -560,18 +602,32 @@ export function wireConvergenceListener(deps: IdentityMoveDeps): void {
 // ─── What an operator (and the gate sweep) can see ────────────────────────────
 
 /**
- * Where a station stands in §1's invariant — the three states §6 renders, and
- * the one the fleet could not answer on 2026-08-31.
+ * Where a station stands in §1's invariant — the states §6 renders, and the
+ * one the fleet could not answer on 2026-08-31.
  *
- * Derived from two existing columns plus the authorisation record; there is no
- * "moving" flag, because a flag is a fourth place for this to be wrong.
+ * Derived from `matrix_id`, the occupant's handle and the authorisation
+ * record; there is no "moving" flag, because a flag is a fourth place for this
+ * to be wrong — and no longer any reading of `bridge_matrix_id`, because that
+ * column answered a different question than the one this asks
+ * (`targetIdentity`).
  */
 export type MoveState =
   | { status: "unknown" }
   /** `matrix_id IS NULL` — the appservice speaks for it, and always did. */
   | { status: "bridge" }
-  /** `matrix_id = bridge_matrix_id` — harness mode, converged. */
+  /** `matrix_id` IS the address the occupant's handle implies — converged. */
   | { status: "converged"; mxid: string }
+  /**
+   * Harness mode with nobody occupying the station: there is no handle, so
+   * there is no address to move to, and this station is not movable at all.
+   *
+   * A real answer rather than an omission, and distinct from
+   * `retired-identity` on purpose: the console must not offer a move it has
+   * no target for, and must not silently render nothing either — a station
+   * answering as an address no principal owns is a thing an operator needs to
+   * be told about, not a blank.
+   */
+  | { status: "no-agent"; runningAs: string }
   /**
    * Authorised and not yet converged. **Waiting, not broken** (Ruling 9): the
    * broker signal is fire-and-forget, so a station sits here from the moment an
@@ -581,12 +637,15 @@ export type MoveState =
    */
   | { status: "waiting"; runningAs: string; willBecome: string; since: Date }
   /**
-   * `matrix_id <> bridge_matrix_id` with no live authorisation behind it: the
-   * station is running under a retired identity and nobody has asked for it to
-   * move. That is the fleet's condition for all 14 harness stations today, and
-   * it is a thing to do, not a fault.
+   * The station answers as something other than its principal's address, with
+   * no live authorisation behind it: it is running under a retired identity
+   * and nobody has asked for it to move. That is the fleet's condition for all
+   * 14 harness stations today, and it is a thing to do, not a fault.
+   *
+   * `willBecome` is never null here — a station with no handle is `no-agent`
+   * above, and reaches this branch not at all.
    */
-  | { status: "retired-identity"; runningAs: string; willBecome: string | null };
+  | { status: "retired-identity"; runningAs: string; willBecome: string };
 
 /**
  * An authorisation counts as a move in flight while it can still lead to one:
@@ -619,28 +678,33 @@ async function liveAuthorization(
   return row ?? null;
 }
 
-export async function moveState(stationId: string): Promise<MoveState> {
+export async function moveState(stationId: string, domain: string): Promise<MoveState> {
   const station = await loadStation(stationId);
   if (!station) return { status: "unknown" };
   if (!station.matrixId) return { status: "bridge" };
-  if (station.matrixId === station.bridgeMatrixId) {
+
+  // The question this whole state machine means to ask — "is this station on
+  // its principal's address?" — and only the handle answers it. Compared
+  // against `bridge_matrix_id` until 2026-09-01, which made every harness
+  // station on the fleet read `converged` while sitting on the very identity
+  // it was supposed to leave: the console offered nobody a move, and no move
+  // could start. See `targetIdentity`.
+  const target = await targetIdentity(station, domain);
+  if (!target) return { status: "no-agent", runningAs: station.matrixId };
+  if (station.matrixId === target) {
     return { status: "converged", mxid: station.matrixId };
   }
 
   const authorization = await liveAuthorization(stationId);
-  if (authorization && station.bridgeMatrixId) {
+  if (authorization) {
     return {
       status: "waiting",
       runningAs: station.matrixId,
-      willBecome: station.bridgeMatrixId,
+      willBecome: target,
       since: authorization.createdAt,
     };
   }
-  return {
-    status: "retired-identity",
-    runningAs: station.matrixId,
-    willBecome: station.bridgeMatrixId,
-  };
+  return { status: "retired-identity", runningAs: station.matrixId, willBecome: target };
 }
 
 /**
@@ -669,8 +733,8 @@ const STALLED_MOVE_BOUND_MS = 15 * 60 * 1000;
  * excuse the fault it just saw", and the two questions get different
  * answers once a redeemed authorisation is old enough (Ruling 19).
  */
-export async function moveInProgress(stationId: string): Promise<boolean> {
-  const state = await moveState(stationId);
+export async function moveInProgress(stationId: string, domain: string): Promise<boolean> {
+  const state = await moveState(stationId, domain);
   if (state.status !== "waiting") return false;
 
   const authorization = await liveAuthorization(stationId);

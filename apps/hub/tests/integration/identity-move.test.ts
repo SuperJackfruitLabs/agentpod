@@ -213,8 +213,18 @@ async function speakerFor(stationId: string): Promise<string | null> {
 
 /**
  * A station as the fleet actually has it today: harness mode, answering as a
- * station-derived address, with the principal-derived one already minted
- * beside it, and one room bound to its occupant.
+ * station-derived address, and one room bound to its occupant.
+ *
+ * **`bridge_matrix_id` is that same station-derived address, because that is
+ * what production writes.** `provision.ts` fills the column from `names.ts`'s
+ * `stationSpeaker`, which for a harness station correctly answers the
+ * harness's OWN mxid — so all 14 harness stations on the fleet carry
+ * `matrix_id = bridge_matrix_id = @agent_<node>_<stationKey>`, and the
+ * principal-derived address appears in neither column. This fixture used to
+ * set the column to `NEW_MXID`, the handle-derived address, which is what the
+ * design ASSUMED and what nothing on the fleet does: every test here passed
+ * while the feature was inert against every real station, because the state
+ * machine read "converged" for all of them.
  *
  * A real room on a real homeserver, created the way `provision.ts` creates
  * one — `preset: "private_chat"`, i.e. invite-only, which is the whole reason
@@ -239,7 +249,7 @@ async function stationMidFleet(label: string): Promise<{ roomId: string; oldMxid
   await rawSql`
     UPDATE stations
        SET matrix_id = ${issued.userId},
-           bridge_matrix_id = ${NEW_MXID},
+           bridge_matrix_id = ${issued.userId},
            matrix_identity_mode = 'harness'
      WHERE id = ${STATION}`;
   await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
@@ -357,7 +367,12 @@ live("the ordered move, against a real homeserver", () => {
 
     const outcome = await preJoinNewIdentity(STATION, deps());
 
-    expect(outcome.status).toBe("joined");
+    // `joined`, and specifically NOT `already`: the address put in the room is
+    // the one the occupant's handle implies, not the one `bridge_matrix_id`
+    // carries — which for this station, as for all 14 on the fleet, is the
+    // address it is already answering as. Targeting the column made the
+    // pre-join a no-op that reported success.
+    expect(outcome).toMatchObject({ status: "joined", newMxid: NEW_MXID, oldMxid });
     const members = await roomMembers(roomId, NEW_MXID);
     expect(members).toContain(NEW_MXID);
     // Nothing is mute at any point: the harness is still logged in as the old
@@ -518,13 +533,13 @@ live("the ordered move, against a real homeserver", () => {
     // stuck.
     expect(outcome.status).toBe("sent");
     expect(sent.every((x) => x.userId === oldMxid && x.roomId === roomId)).toBe(true);
-    expect(await moveInProgress(STATION)).toBe(true);
+    expect(await moveInProgress(STATION, DOMAIN)).toBe(true);
   });
 
   test("a station answering as an mxid its room does not contain is not silent", async () => {
     // Fix round 2, and the state this slice itself can create: converged on
-    // paper — `matrix_id` IS `bridge_matrix_id`, so `moveState` says
-    // `converged` and `stationSpeaker` is non-null — while the room contains
+    // paper — `matrix_id` IS the address the handle implies, so `moveState`
+    // says `converged` and `stationSpeaker` is non-null — while the room contains
     // only the old identity. Every existing signal reads healthy here:
     // `no-speaker` cannot happen, the send 403s, and `projectGate` used to
     // throw with its claim already taken, after which every later pass
@@ -534,7 +549,7 @@ live("the ordered move, against a real homeserver", () => {
     const { roomId, oldMxid } = await stationMidFleet("mute");
     await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
     expect(await roomMembers(roomId, oldMxid)).not.toContain(NEW_MXID);
-    expect((await moveState(STATION)).status).toBe("converged");
+    expect((await moveState(STATION, DOMAIN)).status).toBe("converged");
 
     const cardId = `crd_${RUN}_mute`;
     const gateId = `gate_${RUN}_mute`;
@@ -577,7 +592,7 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
              (${"!amb-b-" + RUN}, ${TENANT}, ${STATION}, ${"#amb-b-" + RUN}, now() - interval '1 day')`;
     await rawSql`
       UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          bridge_matrix_id = ${NEW_MXID},
+                          bridge_matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
 
@@ -616,8 +631,15 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
       VALUES (${"!amb2-a-" + RUN}, ${TENANT}, ${STATION}, ${"#amb2-a-" + RUN}, now() - interval '2 days'),
              (${"!amb2-b-" + RUN}, ${TENANT}, ${STATION}, ${"#amb2-b-" + RUN}, now() - interval '1 day')`;
     const stale = `@agent_stale_${RUN}:${DOMAIN}`;
+    // Converged, in the shape production converges in: `matrix_id` is the
+    // principal's address and `bridge_matrix_id` still holds the retired,
+    // station-derived one — the column records what the appservice minted and
+    // nothing erases it. Retirement is therefore called on the very address
+    // that column carries, which the live-identity guard refused outright
+    // while it compared against `bridge_matrix_id`: step 6 could not run on
+    // any real station.
     await rawSql`
-      UPDATE stations SET matrix_id = ${NEW_MXID}, bridge_matrix_id = ${NEW_MXID},
+      UPDATE stations SET matrix_id = ${NEW_MXID}, bridge_matrix_id = ${stale},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
 
@@ -657,37 +679,120 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
 });
 
 describe("what a station mid-move looks like", () => {
+  test("a station whose minted column holds its OWN address still needs a move", async () => {
+    // The defect the live exit test found, in one assertion.
+    //
+    // On the fleet, `provision.ts` writes `bridge_matrix_id` from
+    // `stationSpeaker`, and for a harness station that correctly answers the
+    // harness's own mxid. So all 14 of them carry
+    // `matrix_id = bridge_matrix_id = ` the OLD station-derived address, while
+    // the principal's handle implies a different one entirely. A state machine
+    // that compares the two columns therefore reads "converged" for every
+    // station it exists to move: the console offered nobody the move, and
+    // nothing could ever start.
+    //
+    // The question is "is this station on its PRINCIPAL's address?", and only
+    // the handle answers it. Nothing here is a Matrix claim — it is what the
+    // hub says about rows — so no homeserver is involved.
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    const fleetMxid = `@agent_im-box-${RUN}_hermes-echo-${RUN}:${DOMAIN}`;
+    await rawSql`
+      UPDATE stations SET matrix_id = ${fleetMxid},
+                          bridge_matrix_id = ${fleetMxid},
+                          matrix_identity_mode = 'harness'
+       WHERE id = ${STATION}`;
+
+    const state = await moveState(STATION, DOMAIN);
+
+    expect(state.status).toBe("retired-identity");
+    expect(state).toMatchObject({ runningAs: fleetMxid, willBecome: NEW_MXID });
+    // And nothing about the two columns agreeing may be read as convergence:
+    // a node reporting the address it always had has done nothing, and must
+    // not set the irreversible step going.
+    const reported = await onNodeReportedMatrixId(STATION, fleetMxid, {
+      domain: DOMAIN,
+      client: {
+        invite: async () => {
+          throw new Error("nothing may be moved for a station that has not converged");
+        },
+        join: async () => {
+          throw new Error("nothing may be moved for a station that has not converged");
+        },
+        leave: async () => {
+          throw new Error("nothing may be retired for a station that has not converged");
+        },
+        isJoined: async () => {
+          throw new Error("nothing may be retired for a station that has not converged");
+        },
+        retireAccount: async () => {
+          throw new Error("nothing may be retired for a station that has not converged");
+        },
+      },
+    });
+    expect(reported).toEqual({
+      status: "not-converged",
+      reported: fleetMxid,
+      expected: NEW_MXID,
+    });
+  });
+
+  test("a station with no occupying agent has no address to move to, and says so", async () => {
+    // A station nobody occupies has no handle, so there is no address its
+    // principal implies and no move to offer — but it is not `converged`
+    // either, and it must not crash the question. `bridge` is reserved for
+    // `matrix_id IS NULL`, so this needs a state of its own.
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+    const orphanMxid = `@agent_orphan_${RUN}:${DOMAIN}`;
+    await rawSql`
+      UPDATE stations SET matrix_id = ${orphanMxid}, bridge_matrix_id = ${orphanMxid},
+                          principal_id = NULL, matrix_identity_mode = 'harness'
+       WHERE id = ${STATION}`;
+
+    try {
+      expect(await moveState(STATION, DOMAIN)).toEqual({
+        status: "no-agent",
+        runningAs: orphanMxid,
+      });
+      // …and the gate sweep must not read that as a move in flight, or every
+      // later fault on an unoccupied station gets excused by one.
+      expect(await moveInProgress(STATION, DOMAIN)).toBe(false);
+    } finally {
+      await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${STATION}`;
+    }
+  });
+
   test("a station between authorisation and convergence is waiting, not broken", async () => {
     // Ruling 9: the operator's feedback is asynchronous by design, so this
     // state has to be DERIVABLE — it is what the console renders, and what
     // was missing on 2026-08-31 when nothing could answer "how far has this
-    // got". Derived from two existing columns and the authorisation record;
-    // there is no "moving" flag to go stale.
+    // got". Derived from `matrix_id`, the occupant's handle and the
+    // authorisation record; there is no "moving" flag to go stale.
     await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
     await rawSql`
       UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          bridge_matrix_id = ${NEW_MXID},
+                          bridge_matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
 
     // Nobody has asked for a move: this is the fleet's condition for all 14
     // harness stations today. A thing to do, not a fault.
-    expect((await moveState(STATION)).status).toBe("retired-identity");
+    expect((await moveState(STATION, DOMAIN)).status).toBe("retired-identity");
 
     await mintCredentialAuthorization(STATION);
-    expect((await moveState(STATION)).status).toBe("waiting");
+    expect((await moveState(STATION, DOMAIN)).status).toBe("waiting");
 
     // An authorisation that expires unredeemed is §4's "nothing happened",
     // and the station drops back to the state an operator authorises from —
     // which is what keeps re-authorising available as the retry.
     await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
     await mintCredentialAuthorization(STATION, { ttlMs: -1 });
-    expect((await moveState(STATION)).status).toBe("retired-identity");
+    expect((await moveState(STATION, DOMAIN)).status).toBe("retired-identity");
 
     // And convergence ends the move without anything having to say so.
     await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
-    expect((await moveState(STATION)).status).toBe("converged");
-    expect(await moveInProgress(STATION)).toBe(false);
+    expect((await moveState(STATION, DOMAIN)).status).toBe("converged");
+    expect(await moveInProgress(STATION, DOMAIN)).toBe(false);
   });
 
   test("a stalled move stays `waiting` forever, but stops being excused past 15 minutes", async () => {
@@ -704,7 +809,7 @@ describe("what a station mid-move looks like", () => {
     const oldMxid = "@agent_old_" + RUN + ":" + DOMAIN;
     await rawSql`
       UPDATE stations SET matrix_id = ${oldMxid},
-                          bridge_matrix_id = ${NEW_MXID},
+                          bridge_matrix_id = ${oldMxid},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
     await mintCredentialAuthorization(STATION);
@@ -714,8 +819,8 @@ describe("what a station mid-move looks like", () => {
     await rawSql`
       UPDATE matrix_credential_authorizations SET used_at = now() - interval '5 minutes'
        WHERE station_id = ${STATION}`;
-    expect((await moveState(STATION)).status).toBe("waiting");
-    expect(await moveInProgress(STATION)).toBe(true);
+    expect((await moveState(STATION, DOMAIN)).status).toBe("waiting");
+    expect(await moveInProgress(STATION, DOMAIN)).toBe(true);
 
     // Redeemed 20 minutes ago: past the bound. `moveState` still reports
     // `waiting` — nothing about the console's view changed — but the sweep
@@ -723,8 +828,8 @@ describe("what a station mid-move looks like", () => {
     await rawSql`
       UPDATE matrix_credential_authorizations SET used_at = now() - interval '20 minutes'
        WHERE station_id = ${STATION}`;
-    expect((await moveState(STATION)).status).toBe("waiting");
-    expect(await moveInProgress(STATION)).toBe(false);
+    expect((await moveState(STATION, DOMAIN)).status).toBe("waiting");
+    expect(await moveInProgress(STATION, DOMAIN)).toBe(false);
 
     await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
   });
@@ -739,7 +844,7 @@ describe("what a station mid-move looks like", () => {
     await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
     await rawSql`
       UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          bridge_matrix_id = ${NEW_MXID},
+                          bridge_matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
 
