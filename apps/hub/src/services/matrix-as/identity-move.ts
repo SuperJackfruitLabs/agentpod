@@ -291,13 +291,28 @@ export type RetireOutcome =
       /**
        * `live-identity` — the mxid asked about is the one the station answers
        * as now, so retiring it is the outage this file exists to prevent.
-       * `ambiguous-room` — see `roomToMove`.
+       *
+       * `speaker-absent` — the identity the station answers as is NOT in the
+       * room this retirement resolved. Taking the old one out would leave that
+       * room with nobody in it who can speak for the station, which is the
+       * 2026-08-31 shape exactly: mute, with no error anywhere. Fix round 1 —
+       * the only guard here used to be `live-identity`, which is a claim about
+       * who SPEAKS and not about who is IN THE ROOM, and the two come apart
+       * whenever the station's room set changed between the pre-join and
+       * convergence, or convergence arrived on a path where the pre-join never
+       * ran at all.
        */
-      reason: "live-identity" | "ambiguous-room";
+      reason: "live-identity" | "speaker-absent";
+      /** The room the refusal was about, when there was one. */
+      roomId?: string;
     }
   | {
       status: "retired";
-      /** Null when the station has no room to leave — recording still happens. */
+      /**
+       * Null when there was no room to leave — either the station has none, or
+       * its room set is ambiguous and this refuses to guess. Recording and
+       * revoking still happen in both cases; neither needs a room.
+       */
       roomId: string | null;
       /** Each step's own truth: a failure here is logged, never fatal. */
       left: boolean;
@@ -321,10 +336,16 @@ export type RetireOutcome =
  * has exactly one `matrix` principal identity today, so before this ran
  * nothing could resolve any station's old address at all.
  *
- * **Never retires the identity a station is currently answering as.** That
- * guard is the difference between this and the migration that caused the
- * outage. It is checked against the database rather than trusted from the
- * caller, because the caller is the one that could be wrong.
+ * **Two guards, and they are not the same guard.** The identity a station
+ * currently answers as is never retired — checked against the database rather
+ * than trusted from the caller, because the caller is what could be wrong. And
+ * the room is never left unless the identity the station answers as is
+ * verifiably IN it, asked of the homeserver at the moment of the leave. The
+ * first is about who speaks; the second is about who is present; and a station
+ * goes mute in the gap between them. Fix round 1 added the second after a
+ * review found that a convergence arriving on a path where the pre-join never
+ * ran would take the old identity out of a room the new one had never been
+ * invited to — the 2026-08-31 outage, reachable again.
  *
  * Each of the three steps is attempted even if an earlier one failed, and each
  * reports its own outcome. Aborting on the first failure would leave the old
@@ -348,11 +369,34 @@ export async function retireOldIdentity(
   }
 
   const choice = await roomToMove(stationId);
-  if (choice.status === "ambiguous-room") return { status: "refused", reason: "ambiguous-room" };
   const roomId = choice.status === "room" ? choice.roomId : null;
 
   let left = false;
   if (roomId) {
+    // **Asked of the homeserver, immediately before the leave.** The whole
+    // point of this flow is that the room contains a working identity at every
+    // moment, and the only way to know that is to ask — our own state cannot
+    // say it. This is deliberately stronger than carrying the room id through
+    // from `preJoinNewIdentity`: the pre-join happens in the operator's
+    // request and this runs on a node's detect minutes or hours later, so
+    // nothing in this process survives between them, and a room id carried
+    // across that gap would be a remembered claim about membership rather
+    // than a checked one. A stale carried id and a changed room set fail the
+    // same way; this question catches both.
+    const speaker = station.matrixId ?? station.bridgeMatrixId;
+    if (!speaker || !(await deps.client.isJoined(speaker, roomId))) {
+      log.error(
+        "refusing to retire an identity out of a room the station cannot speak in — " +
+          "leaving would make it mute",
+        { stationId, roomId, oldMxid, speaker }
+      );
+      // Nothing else runs either: the credential this would revoke is the one
+      // an operator would put the harness back on to recover, and a
+      // `principal_identities` row saying an identity is retired while it is
+      // still the live one is a lie that outlives the incident.
+      return { status: "refused", reason: "speaker-absent", roomId };
+    }
+
     try {
       await deps.client.leave(oldMxid, roomId);
       left = true;
@@ -363,6 +407,17 @@ export async function retireOldIdentity(
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  } else if (choice.status === "ambiguous-room") {
+    // Fix round 1's Minor. An ambiguous room set means this cannot choose
+    // which room to take the old identity OUT of — and that is all it means.
+    // Recording who the identity was and revoking its credential need no room
+    // at all, and refusing them here left an agent's history unattributable
+    // and a live credential on a node over a question about somewhere else.
+    log.warn(
+      "cannot choose which room a retired identity should leave; recording and " +
+        "revoking it anyway, since neither needs a room",
+      { stationId, oldMxid, candidates: choice.candidates }
+    );
   }
 
   let recorded = false;

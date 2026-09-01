@@ -68,7 +68,11 @@ believes, which is exactly why a passing membership assertion against one is
 worth nothing.
 
 The file skips those tests with a loud warning naming what went unproven when
-`MATRIX_TEST_HOMESERVER_URL` and `MATRIX_TEST_AS_TOKEN` are unset. To run them,
+`MATRIX_TEST_HOMESERVER_URL` and `MATRIX_TEST_AS_TOKEN` are unset. **Setting
+either one is intent, so a run that asks for a homeserver and cannot reach or
+authenticate against it FAILS rather than skipping** — a skip is the right
+answer to "nobody asked" and the wrong answer to "somebody asked and it did not
+work". To run them,
 stand up the same homeserver the fleet runs (`deploy/tuwunel/`):
 
 ```sh

@@ -81,13 +81,29 @@ const HS_URL = (process.env.MATRIX_TEST_HOMESERVER_URL ?? "").replace(/\/+$/, ""
 const AS_TOKEN = process.env.MATRIX_TEST_AS_TOKEN ?? "";
 
 /**
+ * Did this run ASK for a homeserver?
+ *
+ * Either variable set is intent — a typo in one of the two names is a run that
+ * meant to prove membership and would otherwise prove nothing.
+ */
+const REQUESTED = Boolean(HS_URL || AS_TOKEN);
+
+/**
  * Ask the homeserver for its own name by registering a throwaway identity in
  * the appservice's namespace and reading the domain off the mxid it hands
  * back. A homeserver that will not do that cannot serve any test in this file,
  * so the probe and the capability check are the same act.
+ *
+ * Returns why it could not, rather than a bare null. Fix round 1: this used to
+ * swallow everything and answer null, which made the skip predicate "the probe
+ * worked" rather than "no homeserver was requested" — so a run pointed at a
+ * dead port, or carrying a bad token, downgraded silently to eight green skips
+ * and exit 0. That is the same shape as the failure this whole file exists to
+ * catch: a thing that did not happen, reported as nothing at all.
  */
-async function probeHomeserver(): Promise<string | null> {
-  if (!HS_URL || !AS_TOKEN) return null;
+async function probeHomeserver(): Promise<{ domain: string } | { failed: string }> {
+  if (!HS_URL) return { failed: "MATRIX_TEST_HOMESERVER_URL is not set" };
+  if (!AS_TOKEN) return { failed: "MATRIX_TEST_AS_TOKEN is not set" };
   try {
     const res = await fetch(`${HS_URL}/_matrix/client/v3/register`, {
       method: "POST",
@@ -97,20 +113,28 @@ async function probeHomeserver(): Promise<string | null> {
         username: `agent_probe_${RUN}`,
       }),
     });
-    const body = (await res.json()) as { user_id?: string };
+    const body = (await res.json()) as { user_id?: string; errcode?: string; error?: string };
     const domain = body.user_id?.split(":")[1];
-    return domain ?? null;
-  } catch {
-    return null;
+    if (domain) return { domain };
+    return {
+      failed:
+        `${HS_URL} answered ${res.status} ${body.errcode ?? ""} ${body.error ?? ""}`.trim() +
+        " — it registered no appservice user, so no membership assertion here can run",
+    };
+  } catch (err) {
+    return {
+      failed: `${HS_URL} could not be reached: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
-const LIVE_DOMAIN = await probeHomeserver();
+const PROBE = await probeHomeserver();
+const LIVE_DOMAIN = "domain" in PROBE ? PROBE.domain : null;
 /** The domain the database fixture uses either way, so the DB-only tests are identical. */
 const DOMAIN = LIVE_DOMAIN ?? "hs.test";
 const NEW_MXID = bridgeUserId(HANDLE, DOMAIN);
 
-if (!LIVE_DOMAIN) {
+if (!LIVE_DOMAIN && !REQUESTED) {
   console.warn(
     "\n[identity-move] NO REAL HOMESERVER — the membership half of the ordered move was NOT proven.\n" +
       "  Unproven here: that the new identity joins before the credential switches and the old one\n" +
@@ -122,6 +146,7 @@ if (!LIVE_DOMAIN) {
 }
 
 const live = LIVE_DOMAIN ? describe : describe.skip;
+const requested = REQUESTED ? describe : describe.skip;
 
 const client: MatrixClient | null = LIVE_DOMAIN
   ? createMatrixClient({ homeserverUrl: HS_URL, asToken: AS_TOKEN, domain: DOMAIN })
@@ -260,6 +285,46 @@ afterAll(async () => {
   }
 });
 
+/** kaambaan's record that this fleet ran the card. Not the thing under test. */
+async function dispatched(cardId: string): Promise<void> {
+  await rawSql`
+    INSERT INTO bridge_dispatches (external_source, external_run_id, tenant_id, board_id,
+                                   external_card_id, agent_key, station_id, lease_epoch,
+                                   outcome, started_at, updated_at)
+    VALUES ('kaambaan', ${"run_" + cardId}, ${TENANT}, ${BOARD}, ${cardId}, 'test',
+            ${STATION}, 1, 'produced', now(), now())`;
+}
+
+function delivery(gateId: string, cardId: string): GatePendingDelivery {
+  return {
+    event: "gate.pending",
+    boardId: BOARD,
+    cardId,
+    gateId,
+    stageKey: "review",
+    returnStageKey: "build",
+    cardTitle: "Ship the fix",
+    producedBy: "agt_x",
+    options: [{ id: "approve", label: "Approve" }],
+    ts: "2026-09-01T00:00:00.000Z",
+  };
+}
+
+// ─── A requested homeserver must actually answer ─────────────────────────────
+
+requested("a homeserver was asked for on this run", () => {
+  test("...and it answered, so the membership assertions below really ran", () => {
+    // Setting `MATRIX_TEST_HOMESERVER_URL` / `MATRIX_TEST_AS_TOKEN` is an
+    // explicit intent to prove membership against the real thing. A run that
+    // asked and could not reach or authenticate against a homeserver must FAIL
+    // here rather than skip eight tests green: a skip is the right answer to
+    // "nobody asked", and the wrong answer to "somebody asked and it did not
+    // work". §7 — checked against the real thing, or it does not count — is
+    // not satisfied by a run that quietly checked nothing.
+    expect("domain" in PROBE ? null : (PROBE as { failed: string }).failed).toBeNull();
+  });
+});
+
 // ─── The ordering, against a real homeserver ─────────────────────────────────
 
 live("the ordered move, against a real homeserver", () => {
@@ -383,6 +448,75 @@ live("the ordered move, against a real homeserver", () => {
     expect(await roomMembers(roomId, NEW_MXID)).toContain(oldMxid);
     expect(await accountIsActive(oldMxid)).toBe(true);
   });
+
+  test("the old identity is not taken out of a room the station cannot speak in", async () => {
+    // Fix round 1's Important. Convergence can arrive on a path where the
+    // pre-join never ran — a node reporting the new mxid because somebody set
+    // the credential by hand, or a station whose room set changed in between —
+    // and the "is this the live identity?" guard says nothing about that,
+    // because it is a claim about who SPEAKS, not about who is IN THE ROOM.
+    // Retiring here removes the last member that can talk: mute, no error.
+    const { roomId, oldMxid } = await stationMidFleet("orphan");
+    // Converged, with NO pre-join: `@agent_<handle>` was never invited and is
+    // not in this room.
+    await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
+    expect(await roomMembers(roomId, oldMxid)).not.toContain(NEW_MXID);
+
+    const outcome = await retireOldIdentity(STATION, oldMxid, deps());
+
+    expect(outcome.status).toBe("refused");
+    expect(outcome).toMatchObject({ reason: "speaker-absent" });
+    // Everything is exactly as it was: the room still has a member, and the
+    // credential an operator would put the harness back on still works.
+    expect(await roomMembers(roomId, oldMxid)).toContain(oldMxid);
+    expect(await accountIsActive(oldMxid)).toBe(true);
+    expect(await identitiesFor(AGENT_PRINCIPAL)).toEqual([]);
+  });
+
+  test("a gate for a station mid-move lands in the room, as the identity that holds it", async () => {
+    // Fix round 1's third Important. This used to assert `sent` against
+    // recorders that accept any user id, while explaining it with "both
+    // identities are in the room, so a gate still lands" — a claim the test
+    // could not see, in exactly the fake shape that let three defects through
+    // on 2026-08-31. It sends for real now: a real room, mid-move, with the
+    // hub choosing the speaker itself. If it chose an mxid that is not in the
+    // room the homeserver refuses and this throws, which is the whole point.
+    const { roomId, oldMxid } = await stationMidFleet("gate");
+    await preJoinNewIdentity(STATION, deps());
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+    await mintCredentialAuthorization(STATION);
+
+    const cardId = `crd_${RUN}_gate`;
+    const gateId = `gate_${RUN}_gate`;
+    await dispatched(cardId);
+
+    const sent: Array<{ userId: string; roomId: string }> = [];
+    const outcome = await projectGate(TENANT, delivery(gateId, cardId), {
+      domain: DOMAIN,
+      sendText: async (userId: string, room: string, body: string) => {
+        sent.push({ userId, roomId: room });
+        return client!.sendText(userId, room, body);
+      },
+      sendCustomEvent: async (
+        userId: string,
+        room: string,
+        eventType: string,
+        content: Record<string, unknown>
+      ) => {
+        sent.push({ userId, roomId: room });
+        return client!.sendCustomEvent(userId, room, eventType, content);
+      },
+    });
+
+    // Sent, by a homeserver that would have refused an mxid the room does not
+    // contain — so the gate genuinely landed, as the identity the harness
+    // actually holds. What must NOT happen is a move reading as `no-speaker`,
+    // which is the signature of a broken station and what the sweep counts as
+    // stuck.
+    expect(outcome.status).toBe("sent");
+    expect(sent.every((x) => x.userId === oldMxid && x.roomId === roomId)).toBe(true);
+    expect(await moveInProgress(STATION)).toBe(true);
+  });
 });
 
 // ─── Refusing rather than guessing, and what a move looks like ───────────────
@@ -424,76 +558,62 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
     expect(outcome).toHaveProperty("candidates");
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
   });
-});
 
-describe("what a station mid-move looks like", () => {
-  /** kaambaan's record that this fleet ran the card. Not the thing under test. */
-  async function dispatched(cardId: string): Promise<void> {
-    await rawSql`
-      INSERT INTO bridge_dispatches (external_source, external_run_id, tenant_id, board_id,
-                                     external_card_id, agent_key, station_id, lease_epoch,
-                                     outcome, started_at, updated_at)
-      VALUES ('kaambaan', ${"run_" + cardId}, ${TENANT}, ${BOARD}, ${cardId}, 'test',
-              ${STATION}, 1, 'produced', now(), now())`;
-  }
-
-  function delivery(gateId: string, cardId: string): GatePendingDelivery {
-    return {
-      event: "gate.pending",
-      boardId: BOARD,
-      cardId,
-      gateId,
-      stageKey: "review",
-      returnStageKey: "build",
-      cardTitle: "Ship the fix",
-      producedBy: "agt_x",
-      options: [{ id: "approve", label: "Approve" }],
-      ts: "2026-09-01T00:00:00.000Z",
-    };
-  }
-
-  test("a gate for a station mid-move is attributed to the move, not to a fault", async () => {
-    // A room and an old identity, exactly as the fleet has today. No
-    // homeserver needed: the claim here is about what the hub REPORTS, and
-    // the send is fake because a gate's delivery is not what is under test.
+  test("but retirement still records the identity and revokes its credential", async () => {
+    // Fix round 1's Minor. An ambiguous room set says only that this cannot
+    // choose which room the old identity should LEAVE. Recording who it was —
+    // the thing that keeps a room's history attributable — and revoking its
+    // credential need no room at all, and refusing them over a question about
+    // somewhere else left an unattributable history and a live credential on
+    // a node. No membership is asserted here, so no homeserver is involved.
     await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
     await rawSql`
-      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, principal_id, alias, created_at)
-      VALUES (${"!mid-" + RUN}, ${TENANT}, ${STATION}, ${AGENT_PRINCIPAL}, ${"#mid-" + RUN}, now())`;
+      INSERT INTO matrix_rooms (room_id, tenant_id, station_id, alias, created_at)
+      VALUES (${"!amb2-a-" + RUN}, ${TENANT}, ${STATION}, ${"#amb2-a-" + RUN}, now() - interval '2 days'),
+             (${"!amb2-b-" + RUN}, ${TENANT}, ${STATION}, ${"#amb2-b-" + RUN}, now() - interval '1 day')`;
+    const stale = `@agent_stale_${RUN}:${DOMAIN}`;
     await rawSql`
-      UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          bridge_matrix_id = ${NEW_MXID},
+      UPDATE stations SET matrix_id = ${NEW_MXID}, bridge_matrix_id = ${NEW_MXID},
                           matrix_identity_mode = 'harness'
        WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-    await mintCredentialAuthorization(STATION);
 
-    const cardId = `crd_${RUN}_mid`;
-    const gateId = `gate_${RUN}_mid`;
-    await dispatched(cardId);
-
-    const sent: Array<{ userId: string }> = [];
-    const outcome = await projectGate(TENANT, delivery(gateId, cardId), {
+    const revoked: string[] = [];
+    const outcome = await retireOldIdentity(STATION, stale, {
       domain: DOMAIN,
-      sendText: async (userId: string) => {
-        sent.push({ userId });
-        return `$prose-${gateId}`;
-      },
-      sendCustomEvent: async (userId: string) => {
-        sent.push({ userId });
-        return `$gate-${gateId}`;
+      client: {
+        invite: async () => {
+          throw new Error("unreachable");
+        },
+        join: async () => {
+          throw new Error("unreachable");
+        },
+        leave: async () => {
+          throw new Error("left a room it had refused to choose");
+        },
+        isJoined: async () => {
+          throw new Error("asked about membership in a room it had refused to choose");
+        },
+        deactivateUser: async (userId: string) => {
+          revoked.push(userId);
+          return { credentialsRevoked: true, accountDeactivated: false };
+        },
       },
     });
 
-    // Both identities are in the room during a move, so a gate still lands —
-    // as the identity the harness actually holds. What must not happen is a
-    // move looking like `no-speaker`, which is the signature of a broken
-    // station and what the sweep counts as stuck.
-    expect(outcome.status).toBe("sent");
-    expect(sent.every((s) => s.userId === `@agent_old_${RUN}:${DOMAIN}`)).toBe(true);
-    expect(await moveInProgress(STATION)).toBe(true);
-  });
+    expect(outcome).toMatchObject({ status: "retired", roomId: null, left: false, recorded: true });
+    expect(revoked).toEqual([stale]);
+    expect(await identitiesFor(AGENT_PRINCIPAL)).toContainEqual({
+      system: "matrix",
+      externalId: stale,
+    });
 
+    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${AGENT_PRINCIPAL}`;
+  });
+});
+
+describe("what a station mid-move looks like", () => {
   test("a station between authorisation and convergence is waiting, not broken", async () => {
     // Ruling 9: the operator's feedback is asynchronous by design, so this
     // state has to be DERIVABLE — it is what the console renders, and what
