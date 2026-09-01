@@ -84,7 +84,7 @@ export interface IdentityMoveClient {
   join(userId: string, roomId: string): Promise<void>;
   leave(userId: string, roomId: string): Promise<void>;
   isJoined(userId: string, roomId: string): Promise<boolean>;
-  deactivateUser(
+  retireAccount(
     userId: string
   ): Promise<{ credentialsRevoked: boolean; accountDeactivated: boolean }>;
 }
@@ -321,7 +321,7 @@ export type RetireOutcome =
       /**
        * Whether the ACCOUNT itself is gone, as opposed to its credentials.
        * False is an ordinary answer on tuwunel — see `client.ts`'s
-       * `deactivateUser`.
+       * `retireAccount`.
        */
       accountDeactivated: boolean;
     };
@@ -383,6 +383,18 @@ export async function retireOldIdentity(
     // across that gap would be a remembered claim about membership rather
     // than a checked one. A stale carried id and a changed room set fail the
     // same way; this question catches both.
+    // `?? bridgeMatrixId` is the bridge-mode fallback: a station with no
+    // `matrix_id` is one the appservice speaks for, and its `bridge_matrix_id`
+    // IS the account in the room.
+    //
+    // **That is safe here only because of the guard above**, and the coupling
+    // is load-bearing enough to say out loud: the live-identity check already
+    // refused when `oldMxid === station.bridgeMatrixId`, so by this line the
+    // identity being retired can never be the one this fallback resolves to.
+    // Without that guard this would ask "is the account I am about to remove
+    // still in the room?", get `true`, and take it out — which is the mute
+    // station this whole file exists to prevent. Anyone loosening the guard
+    // above has to give this line its own check.
     const speaker = station.matrixId ?? station.bridgeMatrixId;
     if (!speaker || !(await deps.client.isJoined(speaker, roomId))) {
       log.error(
@@ -443,7 +455,7 @@ export async function retireOldIdentity(
   let credentialsRevoked = false;
   let accountDeactivated = false;
   try {
-    const done = await deps.client.deactivateUser(oldMxid);
+    const done = await deps.client.retireAccount(oldMxid);
     credentialsRevoked = done.credentialsRevoked;
     accountDeactivated = done.accountDeactivated;
   } catch (err) {

@@ -64,7 +64,8 @@ import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation, onStationMatrixIdReported } from './services/matrix-as/hooks.ts';
-import { preJoinNewIdentity, onNodeReportedMatrixId } from './services/matrix-as/identity-move.ts';
+import { preJoinNewIdentity, onNodeReportedMatrixId, moveState } from './services/matrix-as/identity-move.ts';
+import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -302,6 +303,17 @@ if (matrixBridge) {
       // hub with no bridge — which is where this route is not mounted at all
       // — cannot half-perform a move.
       preJoinNewIdentity: (stationId) => preJoinNewIdentity(stationId, identityMove),
+      // Steps 3-5: the node is told to adopt, and whatever identity its
+      // profile then reads as is announced through the SAME hook a detect
+      // announces through — the one `onStationMatrixIdReported` above is
+      // wired to. That is the whole of convergence's trigger; §4's "on its
+      // next detect" describes a detect that never happens, because
+      // matrix.adopt restarts the harness rather than the node-agent.
+      signalNodeToAdopt: (args, signalDeps) => signalNodeToAdopt(args, signalDeps),
+      // The four states of §1's invariant, for the console's panel. Same
+      // function `moveInProgress` reads, so the operator's view and the gate
+      // sweep's attribution can never disagree about what `waiting` means.
+      moveState: (stationId) => moveState(stationId),
     }),
   );
 

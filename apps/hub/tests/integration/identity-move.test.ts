@@ -590,7 +590,7 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
         join: async () => refuse(),
         leave: async () => refuse(),
         isJoined: async () => refuse(),
-        deactivateUser: async () => refuse(),
+        retireAccount: async () => refuse(),
       },
     });
 
@@ -634,7 +634,7 @@ describe("a station whose room choice is ambiguous refuses the move", () => {
         isJoined: async () => {
           throw new Error("asked about membership in a room it had refused to choose");
         },
-        deactivateUser: async (userId: string) => {
+        retireAccount: async (userId: string) => {
           revoked.push(userId);
           return { credentialsRevoked: true, accountDeactivated: false };
         },
@@ -685,5 +685,57 @@ describe("what a station mid-move looks like", () => {
     await rawSql`UPDATE stations SET matrix_id = ${NEW_MXID} WHERE id = ${STATION}`;
     expect((await moveState(STATION)).status).toBe("converged");
     expect(await moveInProgress(STATION)).toBe(false);
+  });
+
+  test("a gate that finds no room is attributed to the move, exactly as no-agent and no-speaker are", async () => {
+    // Spec §6 names `no-room` alongside `no-speaker` as an outcome that must
+    // be attributable to a move; only `no-agent` and `no-speaker` carried
+    // `midMove`. A station whose room set changes while its identity is
+    // moving lands here, and the sweep's stuck-gate line could not tell that
+    // from a broken station — which is the noise §6 asks it to avoid.
+    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
+    await rawSql`
+      UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
+                          bridge_matrix_id = ${NEW_MXID},
+                          matrix_identity_mode = 'harness'
+       WHERE id = ${STATION}`;
+
+    const cardId = `crd_${RUN}_noroom`;
+    await dispatched(cardId);
+
+    // Nothing may be sent on this path — there is nowhere to send it — so a
+    // deps object that throws proves the outcome is reached before any client
+    // call rather than after a swallowed one.
+    const noSend = {
+      domain: DOMAIN,
+      sendText: async () => {
+        throw new Error("nothing may be sent when there is no room");
+      },
+      sendCustomEvent: async () => {
+        throw new Error("nothing may be sent when there is no room");
+      },
+    };
+
+    // Nobody has authorised anything: this is an ordinary missing room.
+    expect(await projectGate(TENANT, delivery(`gate_${RUN}_noroom_a`, cardId), noSend)).toEqual({
+      status: "no-room",
+      midMove: false,
+    });
+
+    await mintCredentialAuthorization(STATION);
+    expect(await projectGate(TENANT, delivery(`gate_${RUN}_noroom_b`, cardId), noSend)).toEqual({
+      status: "no-room",
+      midMove: true,
+    });
+
+    // A card this fleet never dispatched has no station behind it, so there is
+    // nothing to ask — and `midMove` is absent rather than a false `false`,
+    // which would claim an attribution nobody made.
+    expect(
+      await projectGate(TENANT, delivery(`gate_${RUN}_noroom_c`, `crd_${RUN}_never`), noSend)
+    ).toEqual({ status: "no-room" });
+
+    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
   });
 });

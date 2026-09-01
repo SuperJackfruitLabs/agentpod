@@ -121,7 +121,15 @@ export interface GateProjectionDeps {
 export type ProjectionOutcome =
   | { status: "sent"; eventId: string; roomId: string }
   | { status: "already" }
-  | { status: "no-room" }
+  /**
+   * There is no room to post into at all. `midMove` for the same reason
+   * `no-agent` and `no-speaker` carry it (spec §6 names all three): a station
+   * whose room set changed while its identity was moving produces this, and a
+   * stuck-gate line that cannot tell a move from a fault turns every move into
+   * an alarm. Absent means "not attributed" — there is no station behind this
+   * card at all, so there is nothing to ask.
+   */
+  | { status: "no-room"; midMove?: boolean }
   /**
    * The room exists, but its station currently has no occupying agent — no
    * handle, and therefore no mxid to post the gate as. Distinct from
@@ -129,8 +137,8 @@ export type ProjectionOutcome =
    * is a room but nobody to speak in it as, which must refuse rather than
    * invent an address from `(nodeName, stationKey)`.
    *
-   * `midMove` — carried by this status and by `no-speaker`, the two that name
-   * a station — says the station is between an authorised identity move and
+   * `midMove` — carried by this status, by `no-speaker` and by `no-room`, the
+   * three §6 names — says the station is between an authorised identity move and
    * its convergence (`identity-move.ts`'s `moveInProgress`). Spec §6: a
    * station mid-move must not read as healthy, and must not read as a FAULT
    * either, and these two statuses are exactly what a fault looks like.
@@ -148,6 +156,35 @@ export type ProjectionOutcome =
    * bridge never registered, in a room it never joined.
    */
   | { status: "no-speaker"; midMove?: boolean };
+
+/**
+ * Which station this fleet dispatched a card to, if any.
+ *
+ * Split out of `roomForCard` so the no-room path can still name a station:
+ * `roomForCard` answers null for three different reasons, and only one of them
+ * ("nothing here ever ran this card") means there is nobody to attribute an
+ * outcome to. Without this, a gate whose station's room went missing mid-move
+ * was indistinguishable from a gate on somebody else's work.
+ */
+async function dispatchedStationId(
+  tenantId: string,
+  boardId: string,
+  cardId: string
+): Promise<string | null> {
+  const [dispatch] = await db
+    .select({ stationId: bridgeDispatches.stationId })
+    .from(bridgeDispatches)
+    .where(
+      and(
+        eq(bridgeDispatches.tenantId, tenantId),
+        eq(bridgeDispatches.externalSource, "kaambaan"),
+        eq(bridgeDispatches.boardId, boardId),
+        eq(bridgeDispatches.externalCardId, cardId)
+      )
+    )
+    .limit(1);
+  return dispatch?.stationId ?? null;
+}
 
 /**
  * The room a card's work happened in.
@@ -190,19 +227,8 @@ async function roomForCard(
   identityMode: string;
   harnessMxid: string | null;
 } | null> {
-  const [dispatch] = await db
-    .select({ stationId: bridgeDispatches.stationId })
-    .from(bridgeDispatches)
-    .where(
-      and(
-        eq(bridgeDispatches.tenantId, tenantId),
-        eq(bridgeDispatches.externalSource, "kaambaan"),
-        eq(bridgeDispatches.boardId, boardId),
-        eq(bridgeDispatches.externalCardId, cardId)
-      )
-    )
-    .limit(1);
-  if (!dispatch) return null;
+  const stationId = await dispatchedStationId(tenantId, boardId, cardId);
+  if (!stationId) return null;
 
   const [station] = await db
     .select({
@@ -218,7 +244,7 @@ async function roomForCard(
     })
     .from(stations)
     .innerJoin(nodes, eq(nodes.id, stations.nodeId))
-    .where(eq(stations.id, dispatch.stationId))
+    .where(eq(stations.id, stationId))
     .limit(1);
   if (!station) return null;
 
@@ -226,12 +252,12 @@ async function roomForCard(
   // through — see `station-room.ts`. It, not this function, decides
   // whether an occupied station's room is real yet, or falls back to the
   // plain `stationId` join for a station with no occupant at all.
-  const occupancy = await roomForStation(dispatch.stationId);
+  const occupancy = await roomForStation(stationId);
   if (!occupancy.room) return null;
 
   return {
     roomId: occupancy.room.roomId,
-    stationId: dispatch.stationId,
+    stationId,
     nodeName: station.nodeName,
     stationKey: station.stationKey,
     principalId: occupancy.principalId,
@@ -329,8 +355,19 @@ export async function projectGate(
 ): Promise<ProjectionOutcome> {
   const found = await roomForCard(tenantId, d.boardId, d.cardId);
   if (!found) {
-    log.info("gate has no room to appear in", { gateId: d.gateId, cardId: d.cardId });
-    return { status: "no-room" };
+    // Attributed to a move where there IS a station to attribute it to. A card
+    // this fleet never dispatched has none, and `midMove` stays absent rather
+    // than becoming a false `false`. The extra lookup is on the failure path
+    // only — `roomForCard` already answered for the ordinary one.
+    const stationId = await dispatchedStationId(tenantId, d.boardId, d.cardId);
+    const midMove = stationId ? await moveInProgress(stationId) : undefined;
+    log.info("gate has no room to appear in", {
+      gateId: d.gateId,
+      cardId: d.cardId,
+      stationId,
+      midMove,
+    });
+    return midMove === undefined ? { status: "no-room" } : { status: "no-room", midMove };
   }
 
   // Claim the gate before sending. See this function's doc comment.
@@ -454,8 +491,13 @@ export async function projectGate(
     // The claim has to go, or this gate can never be projected again — the
     // sweep would see a row and conclude it had been handled.
     await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, d.gateId));
-    log.warn("gate event was not accepted; claim released", { gateId: d.gateId });
-    return { status: "no-room" };
+    const midMove = await moveInProgress(found.stationId);
+    log.warn("gate event was not accepted; claim released", {
+      gateId: d.gateId,
+      stationId: found.stationId,
+      midMove,
+    });
+    return { status: "no-room", midMove };
   }
 
   await db

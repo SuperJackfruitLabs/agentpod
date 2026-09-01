@@ -146,6 +146,12 @@ export interface MatrixClient {
    * Retire an identity: revoke every credential it holds, then ask the
    * homeserver to deactivate the account itself.
    *
+   * **Named for what it does, not for what it asks.** This was
+   * `deactivateUser`, which names the one half the appservice cannot perform
+   * and will not be able to — see below — while its docs and its return value
+   * were already honest about that. A method whose name promises more than it
+   * delivers is how a caller comes to believe an account is gone.
+   *
    * **Two halves, because only one of them works on this homeserver.**
    * `logout/all` as the user is accepted (the same call `rotateCredentials`
    * already relies on), and it is the half that matters operationally — §5 of
@@ -164,7 +170,7 @@ export interface MatrixClient {
    * runs after the room has already moved, and a station that is working must
    * not be broken by the cleanup behind it.
    */
-  deactivateUser(
+  retireAccount(
     userId: string
   ): Promise<{ credentialsRevoked: boolean; accountDeactivated: boolean }>;
   /** A user's account data of the given type, or null when it was never set. */
@@ -723,7 +729,7 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
 
     isJoined,
 
-    async deactivateUser(userId) {
+    async retireAccount(userId) {
       // Impersonated, exactly as `rotateCredentials` does it: an appservice may
       // act as any user in its own namespace, so no admin account is involved.
       const out = await call("/_matrix/client/v3/logout/all", {

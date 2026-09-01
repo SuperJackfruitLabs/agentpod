@@ -47,6 +47,24 @@ export class UnknownStationError extends Error {
  * Returns only the expiry — there is no token to hand back. The record
  * itself, keyed by `stationId`, is what `redeemCredentialAuthorization`
  * checks against.
+ *
+ * **At most one unredeemed authorization per station.** Re-authorising is how
+ * an operator retries (Ruling 9: the broker signal is fire-and-forget, so a
+ * node that was offline is retried by pressing the button again), and the
+ * whole-branch review's Critical made retries routine rather than rare — so an
+ * insert-every-time version accumulates live rows for every press. A station's
+ * unredeemed row is therefore REFRESHED rather than duplicated: the operator
+ * still gets a full window (an expiry that did not move would make the second
+ * press useless, which is the opposite of a retry), and the audit trail keeps
+ * one row per move rather than one per impatient click.
+ *
+ * Redeemed rows are never touched. They are the history of moves that actually
+ * happened, and a retry after a redemption legitimately needs a new record.
+ *
+ * Two operators pressing at the exact same instant can still both insert; that
+ * is the residual and it is harmless, because `redeemCredentialAuthorization`
+ * is scoped by `station_id` alone and consumes every live row for the station
+ * in one statement — one credential is issued either way.
  */
 export async function mintCredentialAuthorization(
   stationId: string,
@@ -62,6 +80,21 @@ export async function mintCredentialAuthorization(
 
   const ttlMs = opts?.ttlMs ?? CREDENTIAL_AUTHORIZATION_TTL_MS;
   const expiresAt = new Date(Date.now() + ttlMs);
+
+  // An unredeemed row is this station's live authorization whether it has
+  // expired or not — an expired one is `retired-identity` again, and reviving
+  // it is exactly what pressing the button means. Only `usedAt` is final.
+  const refreshed = await db
+    .update(matrixCredentialAuthorizations)
+    .set({ expiresAt })
+    .where(
+      and(
+        eq(matrixCredentialAuthorizations.stationId, stationId),
+        isNull(matrixCredentialAuthorizations.usedAt)
+      )
+    )
+    .returning({ id: matrixCredentialAuthorizations.id });
+  if (refreshed.length > 0) return { expiresAt };
 
   await db.insert(matrixCredentialAuthorizations).values({
     id: prefixedId("mcauth"),
