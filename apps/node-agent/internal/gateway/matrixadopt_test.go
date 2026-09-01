@@ -349,8 +349,9 @@ func TestAdoptNeverLogsTheTokenOnFailure(t *testing.T) {
 // `lifecycle` withheld (descriptor/hermes.go) because it is a VIEW onto the
 // agent the root gateway already runs, not a separately startable one —
 // starting it would put a second gateway on one messaging identity. Such a
-// station still has matrix_id != bridge_matrix_id, so the console offers it
-// the move; this verb used to call restart without ever asking.
+// station still answers as something other than the address its agent's handle
+// implies, so the console offers it the move; this verb used to call restart
+// without ever asking.
 //
 // The refusal is before the fetch, so a live single-use authorization is not
 // spent on a station that could never converge.

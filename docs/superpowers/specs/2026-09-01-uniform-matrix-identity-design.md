@@ -28,29 +28,52 @@ says why they are distinct:
   this one, so nothing on the host can erase it."*
 - `matrix_id` — what the harness reports and the node agent owns.
 
-For a bridge-mode station only the first matters. For a harness-mode station today
-they disagree: the appservice minted `@agent_writer-quill` while the harness runs
-as `@agent_guild_hermes-writer-quill`.
+For a bridge-mode station only the first matters.
 
-**Uniform means they converge.** The account `@agent_<handle>` is minted once, by
-the appservice, exactly as now. Mode decides only who holds its credential.
+**This section said, until 2026-09-01, that for a harness-mode station the two
+columns disagree — "the appservice minted `@agent_writer-quill` while the harness
+runs as `@agent_guild_hermes-writer-quill`". They do not disagree, and that
+sentence is what made the first implementation of this design inert against every
+station on the fleet.** `provision.ts` fills `bridge_matrix_id` from `names.ts`'s
+`stationSpeaker`, and for a harness station `stationSpeaker` correctly answers the
+harness's OWN mxid. So the column holds *what this station already is*, not *what
+the appservice would mint for its occupant*: all 14 harness stations carry
+`matrix_id = bridge_matrix_id = @agent_guild_hermes-writer-quill`, and
+`@agent_writer-quill` appears in neither column.
 
-That yields a checkable invariant, with no new column:
+**Uniform means a station answers as the address its occupying principal's handle
+implies.** The account `@agent_<handle>` is minted once, by the appservice,
+exactly as now. Mode decides only who holds its credential.
+
+That yields a checkable invariant, with no new column — but the comparison is
+against the handle, not against the other column:
 
 | state | meaning |
 |---|---|
 | `matrix_id IS NULL` | bridge mode — the appservice speaks for it |
-| `matrix_id = bridge_matrix_id` | harness mode, converged |
-| `matrix_id <> bridge_matrix_id` | harness mode, mid-move or on a retired identity |
+| `matrix_id = bridgeUserId(handle)` | harness mode, converged |
+| `matrix_id <> bridgeUserId(handle)` | harness mode, mid-move or on a retired identity |
+| no occupying principal | no handle, so no address to move to: not movable |
+
+where `bridgeUserId(handle)` is `names.ts`'s derivation, `@agent_<clean(handle)>`,
+the same one the rest of the bridge uses. `bridge_matrix_id` keeps the meaning its
+schema comment gives it — the identity the appservice minted, which nothing on the
+host can erase — and is **not** redefined, backfilled, or read by the state
+machine. Redefining it would fight its stated purpose; comparing against it
+answers a different question than the one being asked.
 
 Verified against infra on 2026-09-01: 18 bridge stations, every one with
 `matrix_id` null; 14 harness stations, every one with it set; all 32 carrying a
-`bridge_matrix_id`. The table describes the fleet rather than proposing a scheme
+`bridge_matrix_id`, and every harness one carrying its own station-derived address
+in both columns. The table describes the fleet rather than proposing a scheme
 for it.
 
-The third row is the fleet's condition today, for all 14 harness stations. The
-invariant is therefore not only a design goal but the progress query — the one that
-was missing on 2026-08-31, when nothing could answer "how far has this got".
+The third row is the fleet's condition today, for all 14 harness stations — and
+under the two-column comparison every one of them read as the second row instead,
+so the console offered no station a move and nothing could ever start. The
+invariant is not only a design goal but the progress query — the one that was
+missing on 2026-08-31, when nothing could answer "how far has this got" — which
+makes asking it of the right thing the whole of the difference.
 
 ### Two consequences
 
@@ -120,8 +143,8 @@ On the deployed fleet Hermes reads its identity from `.env` as `MATRIX_USER_ID`;
 `auth.json` holds only `credential_pool`/`providers`, and `config.yaml` has no matrix
 section. A writer that chose `auth.json` because it is first would produce a file the
 harness never loads — and the reader would then find the new mxid there first and
-report it. The hub would see `matrix_id = bridge_matrix_id`, conclude the station had
-converged, and move the room. That is the 2026-08-31 outage reproduced with a green
+report it. The hub would see the station answering as the address its handle
+implies, conclude it had converged, and move the room. That is the 2026-08-31 outage reproduced with a green
 signal in front of it.
 
 **Each adapter names the authoritative location for its harness** — the file that
@@ -172,8 +195,8 @@ room while the old one is still there. So it goes in first:
    immediately.
 5. **The node reports the new mxid** in its answer to `matrix.adopt`, read back
    out of the profile it just wrote through the same reader a detect uses
-   (`descriptor.MatrixIDFromProfile`); the hub observes
-   `matrix_id = bridge_matrix_id`.
+   (`descriptor.MatrixIDFromProfile`); the hub observes that `matrix_id` is now
+   the address the occupying principal's handle implies (§1).
 
    *Corrected 2026-09-01, whole-branch review.* This said "on its next detect",
    and there is no next detect: step 3 restarts the **harness**, not the
@@ -251,9 +274,12 @@ An authorisation endpoint with no button would be the sixth.
 
 On a station's page in the console:
 
-- A station whose `matrix_id <> bridge_matrix_id` shows that it is **running under a
-  retired identity**, naming what it is now and what it will become. That is the 14,
-  visible for the first time.
+- A station whose `matrix_id` is not the address its agent's handle implies shows
+  that it is **running under a retired identity**, naming what it is now and what it
+  will become. That is the 14, visible for the first time. The console cannot derive
+  that address — it holds neither the handle nor the homeserver's domain — so the
+  hub answers the question through `matrix/move-state` and the panel renders the
+  answer rather than re-deriving it from columns.
 - One control, **Move to its own identity**, performing step 1 and surfacing the
   hub's own 403 verbatim when `mayGrantReach` refuses.
 - Then **waiting for the node** until convergence. A station stuck there is the
