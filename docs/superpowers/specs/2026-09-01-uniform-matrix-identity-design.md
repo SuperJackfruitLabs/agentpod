@@ -108,7 +108,9 @@ for the same account.
 ## 3. The writers, and the lie they can tell
 
 Six harnesses hold profiles: `hermes`, `openclaw`, `opencode`, `pi`, `codex`,
-`claudecode`. All six get adapters in this slice.
+`claudecode`. **Slice 1 ships the Hermes adapter only** — see Delivery below — but it
+ships the adapter *interface* and the conformance suite with it, so slice 2 satisfies
+a contract rather than inventing one.
 
 `MatrixIDFromProfile` reads `auth.json`, then `config.yaml`, then `.env`, taking the
 first that yields an mxid. **That precedence is a discovery heuristic and a writer
@@ -138,15 +140,12 @@ Every adapter passes the same suite:
 - **Permissions.** The token is written no wider than the harness needs.
 - **Idempotence.** Writing the same credential twice leaves the same state.
 
-### On five untested adapters
+### An unknown harness refuses
 
-Only Hermes has live harness-mode stations, so five adapters ship without ever
-running against a real agent — the shape that produced writers-with-no-caller in the
-previous slice. Two things make that honest rather than hopeful: the conformance
-suite is a shared contract every adapter must satisfy, and refusal is the default, so
-the worst case for an unrecognised profile is a refusal an operator reads rather than
-a silent mis-write. Each is verified against a real agent the first time a station of
-that harness moves.
+Until a harness has an adapter, a station running it cannot move — the flow refuses
+at step 1 with a message naming the harness, and the station stays exactly as it is.
+Refusal is the default for an unrecognised profile shape too, so the worst case is
+always something an operator reads rather than a file the harness silently ignores.
 
 ---
 
@@ -266,6 +265,42 @@ state §4 claims, and each has a test that fails when its guard is removed.
 **The exit test.** Move one real Hermes station, **with no SQL and no hand-run curl at
 any point**, and watch it answer in its room afterwards. That is the only claim that
 matters, and it is what this design exists to make true.
+
+---
+
+## Delivery
+
+Two slices. The split is by *harness*, not by layer: slice 1 is the whole path working
+end to end for one harness, rather than every layer half-built for six.
+
+### Slice 1 — the path, proven on Hermes
+
+Everything in §1-§7, with the Hermes adapter as the only writer:
+
+- the invariant and the states it names (§1)
+- the authorisation record and the pull endpoint (§2)
+- the adapter **interface** and the **conformance suite** (§3), plus the Hermes adapter
+- the ordered move, and every failure case landing safe (§4)
+- recording and deactivating the retired identity (§5)
+- the console control and the fleet view (§6)
+- the exit test: **one real Hermes station moved with no SQL and no hand-run curl**
+
+This reaches the uniform end state for all 14 harness-mode stations on the fleet
+today, because all 14 are Hermes. Nothing else currently needs it.
+
+### Slice 2 — the remaining adapters
+
+`openclaw`, `opencode`, `pi`, `codex`, `claudecode`. Each names its harness's
+authoritative profile location and passes the conformance suite slice 1 established.
+
+Held back deliberately: none of these has a harness-mode station today, so each would
+otherwise ship having never run against a real agent — the shape that produced five
+things-with-no-caller in the previous slice. In its own slice each can be built when
+there is something to point it at, and verified against a real agent of that harness
+rather than against a contract alone.
+
+The two slices are independent after slice 1 lands. Slice 2 can be taken one harness
+at a time, in whatever order a real need appears.
 
 ---
 
