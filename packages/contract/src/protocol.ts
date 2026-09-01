@@ -58,6 +58,7 @@ export const VERB_PARAMS = {
   }),
   // Node-level: no station key. One scan describes one machine.
   "posture.scan": z.object({}),
+  "matrix.adopt": z.object({ key: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -87,4 +88,5 @@ export const VERB_RESULTS = {
   "changeset.status": ChangesetStatus,
   "changeset.diff": ChangesetDiff,
   "posture.scan": PostureReport,
+  "matrix.adopt": z.object({ accepted: z.boolean() }),
 } as const;
