@@ -289,3 +289,71 @@ describe("POST /api/stations/:id/matrix/credentials", () => {
     expect(rotated).toHaveLength(0);
   });
 });
+
+/**
+ * The operator's half of the pull described in
+ * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md` §2: a
+ * human authorises one station's move, and the node redeems that
+ * authorisation for the credential itself (Task 2). This route mints only —
+ * it never returns the token, because the token goes to the node, never
+ * through the operator.
+ */
+describe("POST /api/stations/:id/matrix/authorize-move", () => {
+  test("403 when the caller's grant does not permit granting reach", async () => {
+    // The gate from charter → decisions/2026-08-15-granting-reach-is-changing-an-agent.md.
+    // It is the whole reason the node cannot self-serve, so it is asserted here.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+
+    const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+
+    expect(res.status).toBe(403);
+  });
+
+  test("authorising mints an authorization and returns no credential", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+
+    const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { expiresAt: string };
+    expect(body.expiresAt).toBeTruthy();
+    // The token goes to the node over Task 2's endpoint, never through the
+    // operator — so it must not be reachable in this response body at all.
+    expect(JSON.stringify(body)).not.toContain("accessToken");
+    expect(JSON.stringify(body)).not.toContain("token");
+  });
+
+  test("409 when the station has no occupying agent", async () => {
+    // With no occupant, `requireIssueCredentials`'s own scope check (a grant
+    // names a PRINCIPAL, and there isn't one here) would refuse with 403
+    // before this route ever got a chance to say why — so this proves the
+    // occupancy 409 with the control pair off, the same way the identity
+    // route's occupancy checks are proven independent of the reach gate.
+    delete process.env.ENFORCE_CONTROL_PAIR;
+    await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
+
+    try {
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+      expect(res.status).toBe(409);
+    } finally {
+      await rawSql`UPDATE stations SET principal_id = ${AGENT_PRINCIPAL} WHERE id = ${STATION}`;
+      process.env.ENFORCE_CONTROL_PAIR = "true";
+    }
+  });
+
+  test("409 when the station's harness has no profile writer", async () => {
+    // Slice 2 adds the rest. Until then an unsupported harness refuses by name
+    // and the station is left exactly as it was.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+    await rawSql`UPDATE stations SET harness = 'openclaw' WHERE id = ${STATION}`;
+
+    try {
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toContain("openclaw");
+    } finally {
+      await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${STATION}`;
+    }
+  });
+});

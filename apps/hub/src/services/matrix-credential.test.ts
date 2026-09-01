@@ -23,6 +23,7 @@ import { mintEnrollmentToken, enrollNode } from "./enrollment";
 import {
   mintCredentialAuthorization,
   redeemCredentialAuthorization,
+  UnknownStationError,
 } from "./matrix-credential";
 
 const TEST_USER = "test-user-matrix-cred-svc-001";
@@ -103,6 +104,14 @@ test("an expired authorization does not redeem", async () => {
 test("an authorization minted for one station does not redeem for another", async () => {
   const { token } = await mintCredentialAuthorization(STATION);
   expect(await redeemCredentialAuthorization(OTHER_STATION, token)).toBe(false);
+});
+
+test("minting for an unknown station throws a typed error, not a bare one", async () => {
+  // An operator-facing caller needs to tell "unknown station" apart from a
+  // real failure without string-matching a message.
+  expect(mintCredentialAuthorization("station_does_not_exist")).rejects.toBeInstanceOf(
+    UnknownStationError
+  );
 });
 
 test("the raw token is not stored", async () => {

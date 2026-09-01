@@ -27,7 +27,23 @@ import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
 import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
+import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
 import type { AuthUser } from "../auth/middleware";
+
+/**
+ * Harnesses whose node-agent can write a Matrix credential into a profile.
+ *
+ * The writers themselves live in the Go node-agent
+ * (`apps/node-agent/internal/descriptor/` — Task 5 of this slice adds the
+ * registry there) and the hub cannot see into that binary, so this is the
+ * hub's own copy of "which harnesses can this ever work for" — kept in sync
+ * by hand until a harness's adapter ships alongside it.
+ *
+ * Slice 1 ships the Hermes adapter only (all 14 harness-mode stations on the
+ * fleet today are Hermes); slice 2 adds `openclaw`, `opencode`, `pi`,
+ * `codex`, `claudecode` here, one at a time, alongside each adapter.
+ */
+const HARNESSES_WITH_PROFILE_WRITER: ReadonlySet<string> = new Set(["hermes"]);
 
 export interface IssuedCredentials {
   userId: string;
@@ -67,6 +83,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         stationKey: stations.stationKey,
         mode: stations.matrixIdentityMode,
         principalId: stations.principalId,
+        harness: stations.harness,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -221,5 +238,72 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         deviceId: issued.deviceId,
         mode: "harness",
       });
+    })
+
+    /**
+     * POST /api/stations/:id/matrix/authorize-move
+     *
+     * The operator's half of moving a harness-mode station onto its own,
+     * principal-derived identity (`charter` →
+     * decisions/2026-08-15-granting-reach-is-changing-an-agent.md; design
+     * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md`
+     * §2). This mints a single-use, short-lived authorization for the node to
+     * redeem over Task 2's endpoint — it MINTS ONLY. It does not pre-join the
+     * new identity to the room or send the broker signal; those belong to the
+     * ordered move in a later task, deliberately not stubbed here.
+     *
+     * Never returns the token: the response carries only `expiresAt`.
+     */
+    .post("/stations/:id/matrix/authorize-move", async (c) => {
+      const user = c.get("user") as AuthUser;
+      const station = await ownedStation(user.id, c.req.param("id"));
+      if (!station) return c.json({ error: "Not Found" }, 404);
+
+      try {
+        await requireIssueCredentials(user.id, {
+          nodeId: station.nodeId,
+          stationKey: station.stationKey,
+        });
+      } catch (e) {
+        if (!isGrantReachDenied(e)) throw e;
+        return c.json(
+          {
+            error:
+              "Authorizing this station to redeem its own Matrix credential is granting it " +
+              "reach, which your grant does not permit for this agent.",
+          },
+          403
+        );
+      }
+
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so there is nothing to move to its own identity.",
+          },
+          409
+        );
+      }
+
+      if (!HARNESSES_WITH_PROFILE_WRITER.has(station.harness)) {
+        return c.json(
+          {
+            error: `${station.harness} has no Matrix profile writer yet, so this station cannot move to its own identity.`,
+          },
+          409
+        );
+      }
+
+      let authorization: { token: string; expiresAt: Date };
+      try {
+        authorization = await mintCredentialAuthorization(station.id);
+      } catch (e) {
+        if (!(e instanceof UnknownStationError)) throw e;
+        return c.json({ error: "Not Found" }, 404);
+      }
+
+      return c.json({ expiresAt: authorization.expiresAt });
     });
 }

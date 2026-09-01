@@ -23,6 +23,21 @@ const sha256 = async (s: string): Promise<string> =>
 export const CREDENTIAL_AUTHORIZATION_TTL_MS = 15 * 60 * 1000;
 
 /**
+ * Thrown by `mintCredentialAuthorization` when `stationId` names no station.
+ *
+ * A typed error rather than a bare `Error`, so an operator-facing caller can
+ * catch this specifically instead of string-matching a message to tell
+ * "unknown station" apart from a real failure — the same reasoning
+ * `TenantIsolationError` (`db/tenant-scope.ts`) already follows.
+ */
+export class UnknownStationError extends Error {
+  constructor(stationId: string) {
+    super(`cannot authorize a Matrix credential for unknown station ${stationId}`);
+    this.name = "UnknownStationError";
+  }
+}
+
+/**
  * Mint an authorization for a station to redeem a Matrix credential.
  * The raw token is returned once; only its SHA-256 hash is persisted.
  */
@@ -35,7 +50,7 @@ export async function mintCredentialAuthorization(
     .from(stations)
     .where(eq(stations.id, stationId));
   if (!station) {
-    throw new Error(`cannot authorize a Matrix credential for unknown station ${stationId}`);
+    throw new UnknownStationError(stationId);
   }
 
   const ttlMs = opts?.ttlMs ?? CREDENTIAL_AUTHORIZATION_TTL_MS;
