@@ -45,19 +45,36 @@ test("the move control calls authorize-move, then shows waiting for the node", a
 });
 
 test("a 403 from the grant gate is shown verbatim", async () => {
-  // The hub's sentence names which grant refused. Replacing it with a generic
-  // failure is how an operator ends up unable to tell "not permitted" from
-  // "broken".
+  // The hub's own sentence (station-matrix.ts's authorize-move route) names
+  // which grant refused. Replacing it with a generic failure is how an
+  // operator ends up unable to tell "not permitted" from "broken".
   const authorize = vi
     .fn()
     .mockRejectedValue(
       new Error(
-        "Issuing an agent its own credentials is granting reach, which your grant does not permit for this agent."
+        "Authorizing this station to redeem its own Matrix credential is granting it " +
+          "reach, which your grant does not permit for this agent."
       )
     );
   render(MatrixIdentityPanel, { station: RETIRED, authorize });
   await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
-  expect(await screen.findByText(/granting reach, which your grant does not permit/i)).toBeTruthy();
+  expect(
+    await screen.findByText(/redeem its own matrix credential is granting it reach/i)
+  ).toBeTruthy();
+});
+
+test("a 409 naming the harness with no profile writer is shown verbatim", async () => {
+  // The hub's 409 for this route names the harness, not a generic "conflict" —
+  // the same station-matrix.ts route, for a harness the node-agent has no
+  // adapter for.
+  const authorize = vi
+    .fn()
+    .mockRejectedValue(
+      new Error("codex has no Matrix profile writer yet, so this station cannot move to its own identity.")
+    );
+  render(MatrixIdentityPanel, { station: RETIRED, authorize });
+  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  expect(await screen.findByText(/codex has no matrix profile writer yet/i)).toBeTruthy();
 });
 
 test("a converged station shows no control", () => {

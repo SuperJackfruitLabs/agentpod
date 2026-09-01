@@ -16,8 +16,11 @@
    * unable to post (a gate `failed` outcome, `M_FORBIDDEN`, is how that shows
    * up, counted by the sweep). This panel says only what the two columns know:
    * that the identity switched. Judging whether it can actually speak is the
-   * gate/sweep's job, not this one's — overclaiming here would recreate, in
-   * the console, exactly the silence this slice exists to remove.
+   * hub's own gate sweep's job — its logs, its tally of non-`sent` outcomes —
+   * not this component's, and not any console view, because the console has
+   * none for that yet (§6 called for one; no task built it). Pointing an
+   * operator at a UI element that doesn't exist would recreate, in the
+   * console, exactly the silence this slice exists to remove.
    *
    * **The move is fire-and-forget.** `authorize-move` puts the new identity in
    * the room and signals the node, but the node adopts on its own time — or
@@ -121,8 +124,9 @@
     <p class="text-sm text-muted-foreground">
       This agent's identity has switched to
       <code class="font-mono break-all">{station.matrixId}</code>. Whether it can
-      actually post in its room is a separate fact this page doesn't track —
-      see the gate/sweep signal for that.
+      actually post in its room is a separate fact neither column carries — the
+      hub's own gate sweep is the one thing that checks it, in its logs and its
+      tally of non-<code class="font-mono">sent</code> outcomes, not here.
     </p>
   </div>
 {/if}
