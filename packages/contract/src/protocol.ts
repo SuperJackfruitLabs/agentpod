@@ -58,7 +58,14 @@ export const VERB_PARAMS = {
   }),
   // Node-level: no station key. One scan describes one machine.
   "posture.scan": z.object({}),
-  "matrix.adopt": z.object({ key: z.string() }),
+  // key is the station key (e.g. "hermes:writer-quill") — what the node
+  // uses to resolve the profile directory. stationId is the station's
+  // database id — what the hub's redemption endpoint
+  // (POST /api/nodes/:nodeId/stations/:stationId/matrix-credential) is
+  // keyed by. Neither can stand in for the other; both are non-secret, so
+  // sending both keeps this on the broker's own constraint that a
+  // credential never rides along here.
+  "matrix.adopt": z.object({ key: z.string(), stationId: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.

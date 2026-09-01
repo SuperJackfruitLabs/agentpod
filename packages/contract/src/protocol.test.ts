@@ -46,8 +46,14 @@ it("acp.attach takes a sessionId; acp.close returns ok", () => {
 it("station capabilities accept acp", () => {
   expect(Capability.parse("acp")).toBe("acp");
 });
-it("matrix.adopt carries a station key and nothing else", () => {
-  expect(VERB_PARAMS["matrix.adopt"].parse({ key: "hermes:writer-quill" })).toEqual({ key: "hermes:writer-quill" });
+it("matrix.adopt carries a station key AND its database id — the node needs the key, the hub's redemption endpoint needs the id", () => {
+  expect(
+    VERB_PARAMS["matrix.adopt"].parse({ key: "hermes:writer-quill", stationId: "station_abc123" })
+  ).toEqual({ key: "hermes:writer-quill", stationId: "station_abc123" });
+});
+it("matrix.adopt strips unknown fields — a credential cannot ride along on this channel", () => {
   // A token on this channel would put a credential on the broker.
-  expect(VERB_PARAMS["matrix.adopt"].parse({ key: "k", token: "secret" })).toEqual({ key: "k" });
+  expect(
+    VERB_PARAMS["matrix.adopt"].parse({ key: "k", stationId: "s", token: "secret" })
+  ).toEqual({ key: "k", stationId: "s" });
 });

@@ -67,7 +67,7 @@ func TestAdoptRefusesUnsupportedHarness(t *testing.T) {
 		func(string) error { restartCalled = true; return nil },
 	)
 
-	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"openclaw:writer-quill"}`), nil)
+	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"openclaw:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
 		t.Fatal("want an error when the harness has no profile writer")
 	}
@@ -110,7 +110,7 @@ func TestAdoptWritesThenRestarts(t *testing.T) {
 		},
 	)
 
-	res, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil)
+	res, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -123,6 +123,80 @@ func TestAdoptWritesThenRestarts(t *testing.T) {
 	want := []string{"write", "restart"}
 	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] {
 		t.Fatalf("calls = %v, want %v (write before restart — a restart before the write reloads the OLD identity)", calls, want)
+	}
+}
+
+// TestAdoptFetchesByStationIdNotKey is Defect 2's regression test. The node
+// knows station KEYS (hermes:writer-quill) and uses them to resolve a
+// profile directory; the hub's redemption endpoint
+// (POST /api/nodes/:nodeId/stations/:stationId/matrix-credential) is keyed
+// by the station's DATABASE id instead — a different, unrelated string.
+// Building the hub URL from the key would 403/404 against a hub that has no
+// station by that name.
+func TestAdoptFetchesByStationIdNotKey(t *testing.T) {
+	var fetchedWith string
+
+	h := NewMatrixAdoptHandler(
+		matrixAdoptPassthrough(),
+		WorkspaceFunc(func(key string) (string, error) {
+			if key != "hermes:writer-quill" {
+				t.Errorf("profile lookup used %q, want the station KEY", key)
+			}
+			return "/profiles/writer-quill", nil
+		}),
+		func(key string) (string, error) {
+			if key != "hermes:writer-quill" {
+				t.Errorf("harness lookup used %q, want the station KEY", key)
+			}
+			return "hermes", nil
+		},
+		func(string) (ProfileWriteFunc, bool) {
+			return func(string, string, string) error { return nil }, true
+		},
+		func(_ context.Context, id string) (MatrixCredential, error) {
+			fetchedWith = id
+			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: "syt_secret"}, nil
+		},
+		func(string) error { return nil },
+	)
+
+	_, _, err := h.Handle(
+		t.Context(),
+		"matrix.adopt",
+		json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_db_id_789"}`),
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if fetchedWith != "station_db_id_789" {
+		t.Errorf(
+			"fetch was called with %q, want the station's database id %q — the hub's "+
+				"redemption endpoint is keyed by id, not by the station key",
+			fetchedWith, "station_db_id_789",
+		)
+	}
+}
+
+// TestAdoptRefusesMissingStationId: params with a key but no stationId are
+// bad params, refused before any lookup — the same posture as a missing key.
+func TestAdoptRefusesMissingStationId(t *testing.T) {
+	h := NewMatrixAdoptHandler(
+		matrixAdoptPassthrough(),
+		WorkspaceFunc(func(string) (string, error) { t.Fatal("resolver should not be called"); return "", nil }),
+		func(string) (string, error) { t.Fatal("harnessFor should not be called"); return "", nil },
+		func(string) (ProfileWriteFunc, bool) { t.Fatal("writerFor should not be called"); return nil, false },
+		func(context.Context, string) (MatrixCredential, error) {
+			t.Fatal("fetch should not be called")
+			return MatrixCredential{}, nil
+		},
+		func(string) error { t.Fatal("restart should not be called"); return nil },
+	)
+
+	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil)
+	if err == nil {
+		t.Fatal("want an error when stationId is missing")
 	}
 }
 
@@ -146,7 +220,7 @@ func TestAdoptDoesNotRestartWhenTheWriteFails(t *testing.T) {
 		func(string) error { restartCalled = true; return nil },
 	)
 
-	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil)
+	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
 		t.Fatal("want an error when the write fails")
 	}
@@ -187,7 +261,7 @@ func TestAdoptNeverLogsTheToken(t *testing.T) {
 		func(string) error { return nil },
 	)
 
-	if _, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil); err != nil {
+	if _, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 
@@ -227,7 +301,7 @@ func TestAdoptNeverLogsTheTokenOnFailure(t *testing.T) {
 		func(string) error { return nil },
 	)
 
-	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil)
+	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
 		t.Fatal("want an error when the write fails")
 	}

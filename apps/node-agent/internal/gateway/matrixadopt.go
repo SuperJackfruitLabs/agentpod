@@ -23,8 +23,9 @@ type MatrixCredential struct {
 	DeviceID    string `json:"deviceId"`
 }
 
-// CredentialFetcher redeems this node's authority to fetch key's new Matrix
-// credential from the hub.
+// CredentialFetcher redeems this node's authority to fetch a station's new
+// Matrix credential from the hub. stationId is the station's DATABASE id —
+// what the hub's redemption endpoint is keyed by — not the station key.
 //
 // A refusal — no live authorization for the station, or one already spent —
 // is the hub's ordinary 403 for this endpoint, and comes back here as a
@@ -32,7 +33,7 @@ type MatrixCredential struct {
 // distinguish it from a network error or a 5xx: either way there is no
 // credential to write, so it refuses the same way. See station-matrix-
 // credential.ts for why this is the endpoint's normal shape, not a fault.
-type CredentialFetcher func(ctx context.Context, key string) (MatrixCredential, error)
+type CredentialFetcher func(ctx context.Context, stationId string) (MatrixCredential, error)
 
 // NewHTTPCredentialFetcher returns the production CredentialFetcher: it POSTs
 // to the hub's redemption endpoint, authenticated with this node's own
@@ -40,12 +41,14 @@ type CredentialFetcher func(ctx context.Context, key string) (MatrixCredential, 
 // gateway.Run already dials the websocket with.
 //
 // hub, nodeID and nodeSecret are captured at construction so the returned
-// func needs nothing but a station key at call time, the same shape
-// LifecycleFunc and WorkspaceFunc already take.
+// func needs nothing but a station's database id at call time, the same
+// shape LifecycleFunc and WorkspaceFunc already take (there, keyed by
+// station key — here, by database id, because that's what the hub's URL
+// needs).
 func NewHTTPCredentialFetcher(hub, nodeID, nodeSecret string) CredentialFetcher {
 	base := strings.TrimSuffix(hub, "/")
-	return func(ctx context.Context, key string) (MatrixCredential, error) {
-		u := base + "/api/nodes/" + url.PathEscape(nodeID) + "/stations/" + url.PathEscape(key) + "/matrix-credential"
+	return func(ctx context.Context, stationId string) (MatrixCredential, error) {
+		u := base + "/api/nodes/" + url.PathEscape(nodeID) + "/stations/" + url.PathEscape(stationId) + "/matrix-credential"
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
 		if err != nil {
 			return MatrixCredential{}, fmt.Errorf("matrix.adopt: building request: %w", err)
@@ -150,11 +153,18 @@ func (h *matrixAdoptHandler) Handle(
 		return h.inner.Handle(ctx, verb, params, emit)
 	}
 
+	// key is the station key (e.g. "hermes:writer-quill") — what harnessFor
+	// and resolver.Workspace use, exactly as every other verb in this
+	// package does. stationId is the station's DATABASE id — what the hub's
+	// redemption endpoint is keyed by. Neither can stand in for the other
+	// (Defect 2 of task-6b): a URL built from the key is a URL the hub
+	// cannot resolve.
 	var p struct {
-		Key string `json:"key"`
+		Key       string `json:"key"`
+		StationID string `json:"stationId"`
 	}
-	if err := json.Unmarshal(params, &p); err != nil || p.Key == "" {
-		return nil, false, fmt.Errorf("matrix.adopt: bad params: missing key")
+	if err := json.Unmarshal(params, &p); err != nil || p.Key == "" || p.StationID == "" {
+		return nil, false, fmt.Errorf("matrix.adopt: bad params: missing key or stationId")
 	}
 
 	harness, err := h.harnessFor(p.Key)
@@ -176,7 +186,7 @@ func (h *matrixAdoptHandler) Handle(
 		return nil, false, fmt.Errorf("matrix.adopt: %q: profile dir: %w", p.Key, err)
 	}
 
-	cred, err := h.fetch(ctx, p.Key)
+	cred, err := h.fetch(ctx, p.StationID)
 	if err != nil {
 		return nil, false, fmt.Errorf("matrix.adopt: %q: %w", p.Key, err)
 	}
