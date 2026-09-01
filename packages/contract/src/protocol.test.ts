@@ -46,3 +46,40 @@ it("acp.attach takes a sessionId; acp.close returns ok", () => {
 it("station capabilities accept acp", () => {
   expect(Capability.parse("acp")).toBe("acp");
 });
+it("matrix.adopt carries a station key AND its database id — the node needs the key, the hub's redemption endpoint needs the id", () => {
+  expect(
+    VERB_PARAMS["matrix.adopt"].parse({ key: "hermes:writer-quill", stationId: "station_abc123" })
+  ).toEqual({ key: "hermes:writer-quill", stationId: "station_abc123" });
+});
+it("matrix.adopt strips unknown fields — a credential cannot ride along on this channel", () => {
+  // A token on this channel would put a credential on the broker.
+  expect(
+    VERB_PARAMS["matrix.adopt"].parse({ key: "k", stationId: "s", token: "secret" })
+  ).toEqual({ key: "k", stationId: "s" });
+});
+it("matrix.adopt's RESULT carries the mxid the node read back — the move has no other trigger", () => {
+  // The whole-branch review's Critical: `matrix.adopt` restarts the harness,
+  // not the node-agent, so no detect ever follows it and nothing else on the
+  // node→hub channel carries an mxid. This field is the trigger.
+  expect(
+    VERB_RESULTS["matrix.adopt"].parse({
+      accepted: true,
+      matrixId: "@agent_writer-quill:id.agentpod.dev",
+    })
+  ).toEqual({ accepted: true, matrixId: "@agent_writer-quill:id.agentpod.dev" });
+});
+it("matrix.adopt's result accepts a null mxid, and one from a node that predates the field", () => {
+  // null: the write landed somewhere the real reader does not look — the §3
+  // failure. Absent: an older node. Both are "nothing converged", never a
+  // parse failure that would lose the `accepted` half too.
+  expect(VERB_RESULTS["matrix.adopt"].parse({ accepted: true, matrixId: null })).toEqual({
+    accepted: true,
+    matrixId: null,
+  });
+  expect(VERB_RESULTS["matrix.adopt"].parse({ accepted: true })).toEqual({ accepted: true });
+});
+it("matrix.adopt's result strips unknown fields — the credential does not come back either", () => {
+  expect(
+    VERB_RESULTS["matrix.adopt"].parse({ accepted: true, matrixId: "@a:h", accessToken: "syt_x" })
+  ).toEqual({ accepted: true, matrixId: "@a:h" });
+});

@@ -169,6 +169,17 @@ export type StationRow = {
   capabilities: string[] | null;
   matrixId: string | null;
   /**
+   * What the appservice minted for this station — never re-derived from
+   * `(nodeName, stationKey)` here, only read. For a bridge-mode station this
+   * is the whole identity; for a harness-mode station it is the account
+   * `matrixId` is converging toward (or has already reached).
+   *
+   * `matrixId <> bridgeMatrixId` is the fleet's own signal that a station is
+   * running under a retired identity (`db/schema/stations.ts`'s invariant) —
+   * not a status field, because none was added.
+   */
+  bridgeMatrixId: string | null;
+  /**
    * What this agent is FOR — the operator's word, not where it runs. Null when
    * nobody has said, which files it under no Matrix space at all and leaves it
    * in All rooms.
@@ -229,6 +240,49 @@ export const setNodePurpose = (nodeId: string, purpose: string | null) =>
       body: JSON.stringify({ purpose }),
     }
   );
+
+/**
+ * The operator's half of moving a harness-mode station off a retired identity
+ * and onto its own, principal-derived one (`matrix/authorize-move` on the
+ * hub). Puts the new identity in the station's room, mints a single-use
+ * authorization, and signals the node — fire-and-forget on the hub's side, so
+ * this call resolving is not convergence. There is no token in the response
+ * by design: the node redeems the authorization on its own long-term
+ * credential, never one that passed through this browser.
+ *
+ * Refusals carry the hub's own sentence (a 403 names which grant refused, a
+ * 409 names the harness with no writer) — `http()` surfaces it verbatim as
+ * `Error.message`, so callers must not replace it with a generic string.
+ */
+export const authorizeMove = (stationId: string) =>
+  http<{ expiresAt: string }>(`/api/stations/${stationId}/matrix/authorize-move`, {
+    method: "POST",
+  });
+
+/**
+ * Where the HUB says a station stands in the §1 invariant.
+ *
+ * Three of the four states are derivable in the browser from `matrixId` and
+ * `bridgeMatrixId`, and the fourth is not: `waiting` means an authorization
+ * is outstanding, and that record lives only in the hub. Before this the
+ * panel's "waiting for the node" was component-local state that died on
+ * reload — so the one state §6 asks an operator to WATCH was the one thing a
+ * refresh threw away.
+ *
+ * `converged` still means only that the two columns agree. It is not a health
+ * check, and nothing in this payload is one: whether a station's identity can
+ * actually post in its room is a Matrix fact in neither column, and the hub's
+ * gate sweep is what checks it.
+ */
+export type StationMoveState =
+  | { status: "unknown" }
+  | { status: "bridge" }
+  | { status: "converged"; mxid: string }
+  | { status: "waiting"; runningAs: string; willBecome: string; since: string }
+  | { status: "retired-identity"; runningAs: string; willBecome: string | null };
+
+export const stationMoveState = (stationId: string) =>
+  http<StationMoveState>(`/api/stations/${stationId}/matrix/move-state`);
 
 export const stationHealth = (stationId: string) =>
   http<StationHealth>(`/api/stations/${stationId}/health`);

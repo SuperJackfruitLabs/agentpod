@@ -27,7 +27,28 @@ import { bridgeUserId, bridgeLocalpart } from "../services/matrix-as/names";
 import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
+import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
+import {
+  preJoinRefusal,
+  type MoveState,
+  type PreJoinOutcome,
+} from "../services/matrix-as/identity-move";
 import type { AuthUser } from "../auth/middleware";
+
+/**
+ * Harnesses whose node-agent can write a Matrix credential into a profile.
+ *
+ * The writers themselves live in the Go node-agent
+ * (`apps/node-agent/internal/descriptor/` — Task 5 of this slice adds the
+ * registry there) and the hub cannot see into that binary, so this is the
+ * hub's own copy of "which harnesses can this ever work for" — kept in sync
+ * by hand until a harness's adapter ships alongside it.
+ *
+ * Slice 1 ships the Hermes adapter only (all 14 harness-mode stations on the
+ * fleet today are Hermes); slice 2 adds `openclaw`, `opencode`, `pi`,
+ * `codex`, `claudecode` here, one at a time, alongside each adapter.
+ */
+const HARNESSES_WITH_PROFILE_WRITER: ReadonlySet<string> = new Set(["hermes"]);
 
 export interface IssuedCredentials {
   userId: string;
@@ -50,6 +71,38 @@ export interface StationMatrixDeps {
      */
     rotate?: (localpart: string) => Promise<IssuedCredentials>;
   };
+  /**
+   * Step 2 of the ordered move: put the station's new identity in its room
+   * while the old one is still there and still working
+   * (`services/matrix-as/identity-move.ts`).
+   *
+   * **Required, not optional.** This route is mounted only where a bridge
+   * exists, and an optional pre-join is precisely how a station ends up with
+   * its credential switched and its room unmoved — the 2026-08-31 outage, one
+   * missing dependency at a time. The route refuses the whole move when this
+   * refuses, so nothing tells the node to switch anything.
+   */
+  preJoinNewIdentity(stationId: string): Promise<PreJoinOutcome>;
+  /**
+   * Steps 3-5 of the ordered move: tell the node to redeem the authorisation,
+   * and take back the identity its profile then reads as
+   * (`services/matrix-as/adopt-signal.ts`).
+   *
+   * **Required, for the reason `preJoinNewIdentity` is.** This is the only
+   * thing that ever closes a move: `matrix.adopt` restarts the harness rather
+   * than the node-agent, so the detect §4 step 5 relied on never happens. An
+   * optional version is a hub that authorises moves which can never converge.
+   */
+  signalNodeToAdopt(
+    args: { nodeId: string; stationId: string; stationKey: string },
+    deps: { say: (line: string) => void }
+  ): Promise<unknown>;
+  /**
+   * Where a station stands in §1's invariant, for the GET below. Injected like
+   * everything else here so this file stays a route rather than a second place
+   * that knows what convergence means.
+   */
+  moveState(stationId: string): Promise<MoveState>;
   /** Injected so the tests can prove a token never reaches it. */
   log?: (line: string) => void;
 }
@@ -67,6 +120,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         stationKey: stations.stationKey,
         mode: stations.matrixIdentityMode,
         principalId: stations.principalId,
+        harness: stations.harness,
       })
       .from(stations)
       .innerJoin(nodes, eq(nodes.id, stations.nodeId))
@@ -221,5 +275,157 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         deviceId: issued.deviceId,
         mode: "harness",
       });
+    })
+
+    /**
+     * POST /api/stations/:id/matrix/authorize-move
+     *
+     * The operator's half of moving a harness-mode station onto its own,
+     * principal-derived identity (`charter` →
+     * decisions/2026-08-15-granting-reach-is-changing-an-agent.md; design
+     * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md`
+     * §2). It puts the station's new identity in its room first, then mints a
+     * single-use, short-lived, station-scoped authorization and signals the
+     * station's node to redeem it (`matrix.adopt`, over the existing broker).
+     *
+     * **The order is the point** (design §4, and
+     * `services/matrix-as/identity-move.ts`): pre-join, then authorise, then
+     * the node switches the credential. Convergence and the retirement of the
+     * old identity happen later and elsewhere — the node reports the new mxid
+     * on its next detect and `station-registry` announces it — because the one
+     * irreversible step may only run after the new identity has demonstrably
+     * worked.
+     *
+     * There is no token: the record minted is station-scoped, and the node
+     * redeeming it is already authenticated by its own long-term credential
+     * (`routes/station-matrix-credential.ts`). The response below carries
+     * only `expiresAt`.
+     *
+     * The broker signal is sent but never awaited into the response: a node
+     * that is offline, slow, or never answers must not turn a successful
+     * authorization into a failed HTTP call — the record above is already
+     * committed and can be signalled again (including by calling this route
+     * again). A failed signal is only logged.
+     */
+    .post("/stations/:id/matrix/authorize-move", async (c) => {
+      const user = c.get("user") as AuthUser;
+      const station = await ownedStation(user.id, c.req.param("id"));
+      if (!station) return c.json({ error: "Not Found" }, 404);
+
+      try {
+        await requireIssueCredentials(user.id, {
+          nodeId: station.nodeId,
+          stationKey: station.stationKey,
+        });
+      } catch (e) {
+        if (!isGrantReachDenied(e)) throw e;
+        return c.json(
+          {
+            error:
+              "Authorizing this station to redeem its own Matrix credential is granting it " +
+              "reach, which your grant does not permit for this agent.",
+          },
+          403
+        );
+      }
+
+      const handle = await occupyingHandle(station);
+      if (!handle) {
+        return c.json(
+          {
+            error:
+              "This station has no occupying agent, so there is nothing to move to its own identity.",
+          },
+          409
+        );
+      }
+
+      if (!HARNESSES_WITH_PROFILE_WRITER.has(station.harness)) {
+        return c.json(
+          {
+            error: `${station.harness} has no Matrix profile writer yet, so this station cannot move to its own identity.`,
+          },
+          409
+        );
+      }
+
+      // The ordered move, step 2, and it runs BEFORE anything is minted or
+      // signalled (design §4). The naive order — authorise, switch the
+      // credential, then move the room — leaves the harness logged in as a
+      // user the room does not contain, which on 2026-08-31 was 14 mute
+      // stations. Putting the new identity in the room first means the worst
+      // case here is a room with one extra member in it and a station that
+      // never noticed.
+      //
+      // A refusal stops the whole move: §4's failure table says step 2
+      // failing must leave "nothing has changed yet", so no authorization is
+      // minted and the node is never told to adopt anything. Re-authorising
+      // is the retry, and the pre-join is idempotent, so this refusal is
+      // always recoverable by fixing what it names and pressing again.
+      const preJoined = await deps.preJoinNewIdentity(station.id);
+      const refusal = preJoinRefusal(preJoined);
+      if (refusal) {
+        say(
+          `[station-matrix] refused to move ${station.nodeName}/${station.stationKey} ` +
+            `to its own identity: ${preJoined.status}`
+        );
+        return c.json({ error: refusal }, 409);
+      }
+
+      let authorization: { expiresAt: Date };
+      try {
+        authorization = await mintCredentialAuthorization(station.id);
+      } catch (e) {
+        if (!(e instanceof UnknownStationError)) throw e;
+        return c.json({ error: "Not Found" }, 404);
+      }
+
+      // Signal the node now that the authorization exists. Deliberately not
+      // awaited into the response — see this route's own comment above for
+      // why a failed or slow signal must not turn a successful authorization
+      // into a failed HTTP call.
+      //
+      // `signalNodeToAdopt` also carries the move's ONLY trigger back: the
+      // node reports the identity its profile now reads as, and that goes
+      // into the same hook every detect announces through. Before it, nothing
+      // ever closed the loop — `matrix.adopt` restarts the harness, not the
+      // node-agent, so no detect follows it (see `adopt-signal.ts`).
+      void deps.signalNodeToAdopt(
+        { nodeId: station.nodeId, stationId: station.id, stationKey: station.stationKey },
+        { say }
+      );
+
+      return c.json({ expiresAt: authorization.expiresAt });
+    })
+
+    /**
+     * GET /api/stations/:id/matrix/move-state
+     *
+     * Where this station stands in §1's invariant, as the hub sees it —
+     * `services/matrix-as/identity-move.ts`'s `moveState`.
+     *
+     * **Why a route at all.** `moveState` already computed all four states and
+     * nothing outside the hub could read any of them: its only production
+     * consumer was `moveInProgress`, which throws away everything but
+     * `status === "waiting"`. The console re-derived `bridge`, `converged` and
+     * `retired-identity` from the two raw columns and could not see `waiting`
+     * at all, because the authorisation record it is derived from lives only
+     * here — so §6's "a station stuck there is the signal that a harness did
+     * not restart" was not deliverable, and the panel's own "waiting for the
+     * node" was component-local state that died on reload.
+     *
+     * Read-only, and no new gate: it exposes two columns the station API
+     * already returns plus whether an authorisation is outstanding. It carries
+     * no credential and no authorisation token, because there is none to carry.
+     *
+     * `converged` still means ONLY that the two columns agree — never that the
+     * station is healthy. Whether its identity can actually post in its room is
+     * a Matrix fact in neither column, and the gate sweep is what checks it.
+     */
+    .get("/stations/:id/matrix/move-state", async (c) => {
+      const user = c.get("user") as AuthUser;
+      const station = await ownedStation(user.id, c.req.param("id"));
+      if (!station) return c.json({ error: "Not Found" }, 404);
+      return c.json(await deps.moveState(station.id));
     });
 }

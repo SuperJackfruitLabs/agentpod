@@ -56,6 +56,72 @@ variable by the time the assignment runs (and in a full run it is evaluated once
 for the whole process). **The `DATABASE_URL` on the command line is what actually
 points the suite at the test database** — the preamble is a no-op fallback.
 
+## Hub Matrix homeserver (membership tests only)
+
+`tests/integration/identity-move.test.ts` asserts things about Matrix room
+**membership** — who is in a room, and when. Those assertions are checked
+against a real homeserver or they are skipped, never re-pointed at a fake: on
+2026-08-31 three defects reached production behind green fakes, including one
+that accepted a bare join into an invite-only room where the real server answers
+`403 M_FORBIDDEN`. A fake can be written to agree with whatever the code
+believes, which is exactly why a passing membership assertion against one is
+worth nothing.
+
+The file skips those tests with a loud warning naming what went unproven when
+`MATRIX_TEST_HOMESERVER_URL` and `MATRIX_TEST_AS_TOKEN` are unset. **Setting
+either one is intent, so a run that asks for a homeserver and cannot reach or
+authenticate against it FAILS rather than skipping** — a skip is the right
+answer to "nobody asked" and the wrong answer to "somebody asked and it did not
+work". To run them,
+stand up the same homeserver the fleet runs (`deploy/tuwunel/`):
+
+```sh
+mkdir -p hs/data hs/appservices
+cat > hs/tuwunel.toml <<'EOF'
+[global]
+server_name = "hs.test"
+database_path = "/var/lib/tuwunel"
+port = 6167
+address = ["0.0.0.0"]
+allow_registration = true
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+allow_federation = false
+appservice_dir = "/etc/tuwunel/appservices"
+trusted_servers = []
+EOF
+cat > hs/appservices/agentpod.yaml <<'EOF'
+id: agentpod-test
+url: null
+as_token: agentpod-test-as-token
+hs_token: agentpod-test-hs-token
+sender_localpart: ai-bridge
+namespaces:
+  users:
+    - exclusive: true
+      regex: "@agent_.*"
+  aliases:
+    - exclusive: true
+      regex: "#agentpod_.*"
+  rooms: []
+rate_limited: false
+EOF
+docker run -d --name agentpod-test-hs -p 6167:6167 \
+  -v "$PWD/hs/data:/var/lib/tuwunel" \
+  -v "$PWD/hs/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro" \
+  -v "$PWD/hs/appservices:/etc/tuwunel/appservices:ro" \
+  -e TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml \
+  ghcr.io/matrix-construct/tuwunel:latest
+
+cd apps/hub && MATRIX_TEST_HOMESERVER_URL=http://127.0.0.1:6167 \
+  MATRIX_TEST_AS_TOKEN=agentpod-test-as-token \
+  DATABASE_URL="postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod" bun test
+```
+
+`url: null` means the homeserver pushes no transactions at the appservice,
+which is right for these tests: they drive the client half and never wait to be
+called back. The homeserver's own name is read back off a registration by the
+test rather than configured twice.
+
 ## Conventions
 
 - **TDD.** Write the failing test first; watch it fail for the right reason.

@@ -106,8 +106,16 @@ export interface MatrixClient {
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   /**
-   * Join a room as a virtual user. The AS owns the whole `@agent_.*`
-   * namespace, so this needs no invite.
+   * Join a room as a virtual user.
+   *
+   * **An invite is still required for an invite-only room.** This used to say
+   * the AS owning the whole `@agent_.*` namespace meant a join needed no
+   * invite, and that is false: namespace ownership lets the appservice *act
+   * as* a user, it does not exempt that user from a room's join rules. Every
+   * room `ensureRoom` creates is `preset: "private_chat"`, and a bare join is
+   * refused `403 M_FORBIDDEN — cannot join a room that is not 'public'`
+   * (agentpod#397, reproduced against a real tuwunel). `identity-move.ts`
+   * invites as the old member first, which is what makes its join land.
    *
    * Idempotent by the ordinary meaning of the Matrix endpoint: joining a room
    * you are already in succeeds rather than erroring, which is what makes it
@@ -134,6 +142,37 @@ export interface MatrixClient {
    * collapse into "already left".
    */
   isJoined(userId: string, roomId: string): Promise<boolean>;
+  /**
+   * Retire an identity: revoke every credential it holds, then ask the
+   * homeserver to deactivate the account itself.
+   *
+   * **Named for what it does, not for what it asks.** This was
+   * `deactivateUser`, which names the one half the appservice cannot perform
+   * and will not be able to — see below — while its docs and its return value
+   * were already honest about that. A method whose name promises more than it
+   * delivers is how a caller comes to believe an account is gone.
+   *
+   * **Two halves, because only one of them works on this homeserver.**
+   * `logout/all` as the user is accepted (the same call `rotateCredentials`
+   * already relies on), and it is the half that matters operationally — §5 of
+   * the uniform-identity design asks that "an unused credential on a node
+   * stops being a live login", and after this the token in a harness's
+   * profile is dead.
+   *
+   * `POST /account/deactivate` is then attempted and, on tuwunel today, is
+   * refused: probed against 1.9.0 on 2026-09-01, masquerading answers `401
+   * M_MISSING_TOKEN`, and with an appservice-minted user token it answers a
+   * User-Interactive Auth challenge whose `flows` list is EMPTY — a challenge
+   * with no satisfiable flow. tuwunel implements no Synapse admin API either
+   * (`/_synapse/admin/v1/deactivate` → 403). So the account row survives,
+   * holding no usable credential, and this returns that fact rather than
+   * claiming a deactivation it did not get. Neither half throws: retirement
+   * runs after the room has already moved, and a station that is working must
+   * not be broken by the cleanup behind it.
+   */
+  retireAccount(
+    userId: string
+  ): Promise<{ credentialsRevoked: boolean; accountDeactivated: boolean }>;
   /** A user's account data of the given type, or null when it was never set. */
   getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
   /**
@@ -689,6 +728,44 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     },
 
     isJoined,
+
+    async retireAccount(userId) {
+      // Impersonated, exactly as `rotateCredentials` does it: an appservice may
+      // act as any user in its own namespace, so no admin account is involved.
+      const out = await call("/_matrix/client/v3/logout/all", {
+        method: "POST",
+        body: {},
+        userId,
+      });
+      const credentialsRevoked = out.status >= 200 && out.status < 300;
+      if (!credentialsRevoked) {
+        log.warn("could not revoke a retired identity's credentials", {
+          userId,
+          status: out.status,
+          errcode: String(out.body.errcode ?? ""),
+        });
+      }
+
+      const gone = await call("/_matrix/client/v3/account/deactivate", {
+        method: "POST",
+        body: { erase: false },
+        userId,
+      });
+      const accountDeactivated = gone.status >= 200 && gone.status < 300;
+      if (!accountDeactivated) {
+        // Expected on tuwunel — see this method's doc comment. Info, not warn:
+        // a refusal that is structural gets reported once as a fact, not
+        // raised as an alarm on every retirement forever, which is the lesson
+        // `migrate-agent-mxids-run.ts` recorded about `M_EXCLUSIVE`.
+        log.info("this homeserver does not let the appservice deactivate an account", {
+          userId,
+          status: gone.status,
+          errcode: String(gone.body.errcode ?? ""),
+        });
+      }
+
+      return { credentialsRevoked, accountDeactivated };
+    },
 
     async getAccountData(userId, type) {
       const res = await call(

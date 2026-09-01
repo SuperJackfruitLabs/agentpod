@@ -58,6 +58,14 @@ export const VERB_PARAMS = {
   }),
   // Node-level: no station key. One scan describes one machine.
   "posture.scan": z.object({}),
+  // key is the station key (e.g. "hermes:writer-quill") — what the node
+  // uses to resolve the profile directory. stationId is the station's
+  // database id — what the hub's redemption endpoint
+  // (POST /api/nodes/:nodeId/stations/:stationId/matrix-credential) is
+  // keyed by. Neither can stand in for the other; both are non-secret, so
+  // sending both keeps this on the broker's own constraint that a
+  // credential never rides along here.
+  "matrix.adopt": z.object({ key: z.string(), stationId: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -87,4 +95,32 @@ export const VERB_RESULTS = {
   "changeset.status": ChangesetStatus,
   "changeset.diff": ChangesetDiff,
   "posture.scan": PostureReport,
+  /**
+   * `matrixId` is what closes the move.
+   *
+   * Design §4 step 5 said "the node reports the new mxid on its next detect",
+   * and there is no next detect: `matrix.adopt` restarts the HARNESS, not the
+   * node-agent, so the websocket that carries a detect never reopens, and
+   * nothing else on this channel carries an mxid. Without it a station works
+   * after a move and `stations.matrix_id` stays stale forever — no
+   * convergence, no retirement, the old credential still live.
+   *
+   * So the node reads the identity back out of the profile it just wrote,
+   * through the SAME reader a detect would have used
+   * (`descriptor.MatrixIDFromProfile`), and returns it here. That is not a
+   * weaker signal than the designed one: it is the designed one, taken at the
+   * only moment the node is guaranteed to be talking to the hub about this
+   * station — and it re-verifies the write through the real reader, which is
+   * the assertion the conformance suite already treats as load-bearing.
+   *
+   * Nullable and optional: null when the reader could not find an identity in
+   * the profile (a write that landed somewhere the reader does not look —
+   * exactly the failure §3 exists to catch), absent from a node that predates
+   * this field, which the hub reads as "nothing reported" and leaves the
+   * station unconverged rather than guessing.
+   */
+  "matrix.adopt": z.object({
+    accepted: z.boolean(),
+    matrixId: z.string().nullable().optional(),
+  }),
 } as const;

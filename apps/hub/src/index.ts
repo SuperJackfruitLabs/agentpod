@@ -37,6 +37,8 @@ import { runtimeRoutes } from './routes/runtimes.ts';
 import { stationRoutes } from './routes/stations.ts';
 // A node exchanging its credential for a station-scoped agent token
 import { stationTokenRoutes } from './routes/station-token.ts';
+// A node redeeming a human's authorization for a station's Matrix credential
+import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
@@ -62,6 +64,8 @@ import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
+import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
+import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -160,6 +164,18 @@ const app = new Hono()
    * it just cannot sit behind a middleware built for a session.
    */
   .route('/api', stationTokenRoutes)
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/matrix-credential — this
+   * route's sibling redeeming a Matrix credential instead of a JWT. Same
+   * self-authenticating Bearer, so it is registered here too, ahead of
+   * `authMiddleware`. Mounted only when a Matrix bridge is configured —
+   * with none, there is no homeserver to register or rotate an identity on,
+   * so the route simply does not exist rather than 500ing on every call.
+   * The mount decision itself lives in `stationMatrixCredentialRoutesFor`
+   * (`station-matrix-credential.ts`) rather than inline here, so it has a
+   * unit test that does not need to boot this whole file to run.
+   */
+  .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
@@ -200,6 +216,21 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // Everything the ordered identity move needs, in one place: the appservice
+  // client that can act as any `@agent_.*` user, and this homeserver's name.
+  // Two call sites read it — the operator's authorise route (step 2) and the
+  // convergence listener below (steps 5 and 6) — and they must be the same
+  // deps or the two halves of one move could act on different homeservers.
+  const identityMove = { domain: matrixBridge.config.domain, client: matrixBridge.client };
+
+  // What the node reports on every detect, and the only thing that may set
+  // the irreversible last step of a move going: `matrix_id = bridge_matrix_id`
+  // is convergence (design §1), and until it holds, the station keeps working
+  // under the identity it already has. The registration itself lives in
+  // `wireConvergenceListener` (`identity-move.ts`) rather than inline here,
+  // so it has a unit test that does not need to boot this whole file to run.
+  wireConvergenceListener(identityMove);
+
   // How a gate reaches a room, however it got here. Shared by the push
   // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
   // be posted by two slightly different projections.
@@ -266,6 +297,24 @@ if (matrixBridge) {
         // the homeserver admin account this service exists to do away with.
         rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
       },
+      // Step 2 of the ordered move: the new identity goes into the room
+      // before anything switches the credential. Wired here rather than
+      // reached for inside the route, so the route stays testable and so a
+      // hub with no bridge — which is where this route is not mounted at all
+      // — cannot half-perform a move.
+      preJoinNewIdentity: (stationId) => preJoinNewIdentity(stationId, identityMove),
+      // Steps 3-5: the node is told to adopt, and whatever identity its
+      // profile then reads as is announced through the SAME hook a detect
+      // announces through — the one `wireConvergenceListener` above wired
+      // `onNodeReportedMatrixId` to. That is the whole of convergence's
+      // trigger; §4's "on its next detect" describes a detect that never
+      // happens, because matrix.adopt restarts the harness rather than the
+      // node-agent.
+      signalNodeToAdopt: (args, signalDeps) => signalNodeToAdopt(args, signalDeps),
+      // The four states of §1's invariant, for the console's panel. Same
+      // function `moveInProgress` reads, so the operator's view and the gate
+      // sweep's attribution can never disagree about what `waiting` means.
+      moveState: (stationId) => moveState(stationId),
     }),
   );
 

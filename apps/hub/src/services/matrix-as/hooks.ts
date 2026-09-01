@@ -43,6 +43,55 @@ export function notifyStationsAdopted(stationIds: string[]): void {
 }
 
 /**
+ * The node has told the hub what a station's harness answers as on Matrix.
+ *
+ * The other half of the ordered identity move
+ * (`matrix-as/identity-move.ts`, design §4 step 5): convergence is the node
+ * reporting `bridge_matrix_id`, and it is the ONLY thing that may trigger the
+ * one irreversible step. `station-registry` is the place that hears every
+ * `detect`, and it must go on knowing nothing about Matrix — so it announces
+ * the report and whoever cares listens, exactly as adoption does above.
+ *
+ * **Awaited, and announced BEFORE the registry writes the new value.** Both
+ * matter. The value about to be overwritten is the only record of which
+ * identity the station is moving off — nothing else in the database remembers
+ * it — so a fire-and-forget listener would race its own caller and read the
+ * new value as though it were the old one. The listener is cheap in the
+ * ordinary case (one row read, then nothing) and does real work exactly once
+ * in a station's life.
+ */
+type MatrixIdReport = (stationId: string, mxid: string) => Promise<void>;
+
+let matrixIdListener: MatrixIdReport | null = null;
+
+/** Register the one listener. Boot wiring, same as `onStationsAdopted`. */
+export function onStationMatrixIdReported(fn: MatrixIdReport | null): void {
+  matrixIdListener = fn;
+}
+
+/**
+ * Announce what a station reported, and wait for the answer.
+ *
+ * Never throws: a detect must not fail because a homeserver would not take an
+ * old identity out of a room. The station is already working under its new
+ * address by the time this runs — that is what convergence means.
+ */
+export async function stationReportedMatrixId(
+  stationId: string,
+  mxid: string | null | undefined
+): Promise<void> {
+  if (!matrixIdListener || !mxid) return;
+  try {
+    await matrixIdListener(stationId, mxid);
+  } catch (err) {
+    log.error("could not act on a station's reported Matrix identity", {
+      stationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * Provisioning ONE station, on demand, and waiting for the answer.
  *
  * The adoption hook above is fire-and-forget because adoption has already
