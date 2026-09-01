@@ -10,6 +10,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md` — read §1–§7 and Delivery before starting. This plan implements **Slice 1** only.
 
+**Slice 2 was closed on 2026-09-01 without being built** — none of the five remaining
+harnesses can hold a per-station Matrix identity. See the spec's Delivery section for why,
+and for the one condition that would reopen it.
+
 ## Global Constraints
 
 - **The credential never travels over the broker.** The broker carries a signal naming a station; the credential is fetched by the node over HTTP. Keep that separation.
