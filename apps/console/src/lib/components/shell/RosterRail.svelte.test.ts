@@ -183,24 +183,28 @@ test("aria-current follows the URL, so a deep link and a click agree", () => {
 
 // --- the flag / last-spoke column -------------------------------------------
 
-test("an agent with nothing set up in it renders the unoccupied flag", () => {
+test("the second column carries the harness when grouped by node", () => {
   const { getAllByTestId } = render(RosterRail);
 
-  const flags = getAllByTestId("roster-flag");
-  expect(flags).toHaveLength(1);
-  // The word, not the hue alone (constraint 6) — carried in `title`.
-  expect(flags[0].getAttribute("title")).toContain("Unoccupied");
-  expect(flags[0].closest("[data-testid='roster-row']")?.textContent).toContain("boreas");
+  const asides = getAllByTestId("roster-aside");
+  expect(asides).toHaveLength(5);
+  // Grouped by node (the default), the node name is already the group header,
+  // so repeating it per row would be the noise this column exists to avoid.
+  const text = asides.map((el) => el.textContent?.trim());
+  expect(text).not.toContain("");
+  // Two harnesses inside the one node — which is the whole reason this column
+  // carries the harness here and not the node name.
+  expect(text).toContain("claude-code");
+  expect(text).toContain("codex");
 });
 
-test("every other agent shows how long since we last heard from it", () => {
-  const { getAllByTestId } = render(RosterRail);
+test("it carries the node once grouping no longer implies it", async () => {
+  const { getByTestId, getAllByTestId } = render(RosterRail);
 
-  const times = getAllByTestId("roster-time");
-  expect(times).toHaveLength(4);
-  // orion was seen just now; vega has never reported, so there is no time to show.
-  expect(times[0].textContent?.trim()).toBe("just now");
-  expect(times[3].textContent?.trim()).toBe("—");
+  await fireEvent.click(getByTestId("roster-grouping")); // by node -> by state
+
+  const asides = getAllByTestId("roster-aside");
+  expect(asides.some((el) => el.textContent?.includes("orion"))).toBe(true);
 });
 
 // --- keyboard ---------------------------------------------------------------

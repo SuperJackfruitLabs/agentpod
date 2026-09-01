@@ -19,7 +19,6 @@
   import { STATE, STATE_ORDER, stationState, type StateId } from "$lib/fleet/state";
   import { fleet } from "$lib/stores/fleet.svelte";
   import { cn } from "$lib/utils";
-  import { relativeTime } from "$lib/utils/relative-time";
   import StateDot, { STATE_BG_CLASS } from "./StateDot.svelte";
 
   type Grouping = "node" | "state" | "name";
@@ -130,34 +129,28 @@
   const currentPath = $derived(page.url.pathname);
 
   /**
-   * The flag slot: waiting / suspended / unoccupied.
+   * What the second column says.
    *
-   * Only "unoccupied" can be derived today. "waiting" needs a live ACP
-   * session status and "suspended" needs the principal behind the station —
-   * GET /api/fleet/agents reports neither, and there is no endpoint to join
-   * them from (same gap that leaves attention.ts's `permission` and
-   * `unoccupied` rules underived). The nearest existing fact to "nobody is
-   * in this station" is that nothing is set up in it to work on, so that is
-   * what this reports, and the title says exactly that rather than implying
-   * knowledge of an occupant we do not have.
-   */
-  function flagFor(agent: FleetAgent): { title: string } | null {
-    if (agent.workspacePath === null) {
-      return { title: "Unoccupied — no workspace is set up on this station" };
-    }
-    return null;
-  }
-
-  /**
-   * How long since we last heard from the agent.
+   * Two things were tried here first and both said more than the data knows,
+   * which is the exact defect this redesign exists to remove:
    *
-   * FleetAgent has no timestamp of its own. Its live health arrives on the
-   * parent node's push, so the node's lastSeenAt IS the age of what this row
-   * is showing — for an offline node it is the honest "and it has been this
-   * long".
+   * - A flag keyed on `workspacePath === null`, labelled "Unoccupied". A
+   *   station can perfectly well hold an agent and have no workspace set up;
+   *   the two are different facts. Naming one after the other is how Overview
+   *   came to report "5 stopped" for four stopped and one unknown. The real
+   *   signal is a station's `principalId`, which arrives with the attention
+   *   lane's `unoccupied` rule — the flag comes back then, meaning what it says.
+   *
+   * - "Last spoke", taken from the node's `lastSeenAt` because a FleetAgent
+   *   carries no timestamp. It is node-granular, so grouped by node — the
+   *   default — every row in a group repeated one identical value, dressed up
+   *   as per-agent precision.
+   *
+   * So it carries the field that actually varies within the current grouping:
+   * inside a node the harnesses differ, and everywhere else the node does.
    */
-  function lastSpoke(agent: FleetAgent): string {
-    return relativeTime(nodesById.get(agent.nodeId)?.lastSeenAt ?? null);
+  function aside(agent: FleetAgent): string {
+    return grouping === "node" ? agent.harness : agent.nodeName;
   }
 
   function cycleGrouping() {
@@ -261,7 +254,6 @@
       </h2>
       {#each group.agents as agent (agent.stationId)}
         {@const state = stationState(agent.status)}
-        {@const flag = flagFor(agent)}
         {@const isCurrent = href(agent) === currentPath}
         <!--
           `relative` is load-bearing, not styling. StateDot's sr-only label is
@@ -291,21 +283,10 @@
             <StateDot {state} size="sm" />
           </span>
           <span class="min-w-0 truncate px-2 font-mono text-xs text-foreground">{agent.agentName}</span>
-          {#if flag}
-            <span class="flex items-center pr-2">
-              <span
-                data-testid="roster-flag"
-                title={flag.title}
-                class="inline-block size-1.5 rounded-full border border-muted-foreground"
-              ></span>
-              <span class="sr-only">{flag.title}</span>
-            </span>
-          {:else}
-            <span
-              data-testid="roster-time"
-              class="pr-2 font-mono text-[11px] tabular-nums text-muted-foreground"
-            >{lastSpoke(agent)}</span>
-          {/if}
+          <span
+            data-testid="roster-aside"
+            class="truncate pr-2 font-mono text-[11px] text-muted-foreground"
+          >{aside(agent)}</span>
         </a>
       {/each}
     {/each}
