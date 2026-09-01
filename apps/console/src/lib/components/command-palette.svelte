@@ -170,6 +170,27 @@
         <KeyRoundIcon class="mr-2 size-4" />
         Create an enrolment token
       </Command.Item>
+      <!-- /agents is where an agent is created and where one is assigned to
+           a station, and it is no longer in any navigation: the roster rail
+           replaced it as a destination, and this palette's page-navigation
+           entries went with the old sidebar. Without these two it is
+           reachable only by typing the URL. -->
+      <Command.Item
+        data-testid="palette-create-agent"
+        value="create a new agent principal handle"
+        onSelect={() => run(() => goto("/agents?action=create"))}
+      >
+        <PlusCircleIcon class="mr-2 size-4" />
+        Create an agent
+      </Command.Item>
+      <Command.Item
+        data-testid="palette-assign-agent"
+        value="assign an agent to a station occupy"
+        onSelect={() => run(() => goto("/agents"))}
+      >
+        <PlusCircleIcon class="mr-2 size-4" />
+        Assign an agent to a station
+      </Command.Item>
       <Command.Item
         data-testid="palette-new-runtime"
         value="new runtime provision"

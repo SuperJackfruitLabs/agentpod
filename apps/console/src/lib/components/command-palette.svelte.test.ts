@@ -250,3 +250,14 @@ test("the Authority verbs go to the page that holds them", async () => {
 
   expect(goto).toHaveBeenCalledWith("/admin/grants");
 });
+
+// /agents is the only place an agent is created or assigned to a station, and
+// the roster rail replaced it as a destination — so nothing links to it any
+// more. These two entries are its whole reachability.
+test("the palette is how you reach agent creation and assignment", async () => {
+  commandPalette.open();
+  const { findByTestId } = render(CommandPalette);
+
+  expect(await findByTestId("palette-create-agent")).toBeTruthy();
+  expect(await findByTestId("palette-assign-agent")).toBeTruthy();
+});

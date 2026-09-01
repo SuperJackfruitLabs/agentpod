@@ -124,7 +124,11 @@
             {/if}
           </div>
           {#if subtitle}
-            <p class="mt-0.5 truncate font-mono text-xs text-muted-foreground">{subtitle}</p>
+            <!-- Sans, not mono: this is prose. Mono is for strings a machine minted
+                 and a person must compare character by character — handles, station
+                 keys, ids, versions. Setting "Fleet event log" in it is what made
+                 every page header read like a config file. -->
+            <p class="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p>
           {/if}
         </div>
       </div>

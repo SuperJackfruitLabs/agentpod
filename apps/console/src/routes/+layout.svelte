@@ -78,7 +78,7 @@
 <!-- Tooltip Provider - required for all Tooltip components -->
 <Tooltip.Provider>
   <!-- Toast notifications - positioned to avoid bottom nav on mobile -->
-  <Toaster richColors position="bottom-right" class="mb-16 md:mb-0" />
+  <Toaster richColors position="bottom-right" />
 
   <div class="min-h-screen bg-background text-foreground">
     {#if shouldShowLoading}
