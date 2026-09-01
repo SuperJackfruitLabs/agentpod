@@ -349,8 +349,32 @@ harnesses have a Matrix client — the same mistake as §1's original invariant,
 written from the schema rather than from the column's contents.
 
 **Four of them have no Matrix client at all.** `opencode` and `pi` hardcode
-`MatrixId: nil`; `codex` and `claudecode` have no such field. A credential written into
-their profiles would never be read by anything.
+`MatrixId: nil`; `codex` and `claudecode` have no such field. Checked against the products'
+own documentation rather than inferred from our descriptors, since inferring from our
+code's shape is what produced both of this document's earlier errors:
+
+- **opencode's docs are explicit** — no native Matrix, Slack, Discord or Telegram support,
+  and its "agent" is *an AI configuration*: a system prompt, a model and a permission set,
+  operating as `primary` or `subagent`. It is not a chat identity and has no messaging
+  credentials. Matrix reaches opencode only through an **external** bridge
+  (`opencode-chat-bridge`, which fronts ACP-compatible agents) — the same architecture as
+  our own bridge mode.
+- **`codex` and `claudecode` are leaf coding harnesses** driven over ACP, with no chat
+  channel in the product or the descriptor.
+
+**A hazard this makes concrete.** opencode *does* have an `auth.json` — at
+`~/.local/share/opencode/auth.json`, holding **per-provider OAuth tokens** (`access`,
+`refresh`, `expires`, `type`). Our reader probes `auth.json` for a `user_id`, finds none,
+and correctly returns nil. But a writer that followed the reader's search order would have
+written Matrix credentials **into a provider credential store**. That is not a hypothetical
+argument for §3's "writing must not be a heuristic" and "refusal is the default" — it is
+the file it would have corrupted.
+
+**So bridge mode is the right answer for these four, not a fallback.** An agent with no
+Matrix client needs something to hold an identity on its behalf; that is exactly what the
+appservice does in bridge mode, and it is what `opencode-chat-bridge` does for opencode
+elsewhere. There is no adapter that would improve on it, and all 18 of these stations
+already run that way.
 
 **`openclaw` has Matrix, but its identity is instance-scoped where ours is
 station-scoped.** Matrix is configured under `channels.matrix` — one `user_id` and
