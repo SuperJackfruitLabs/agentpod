@@ -74,6 +74,26 @@ func runCmd() {
 	})
 
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
+	h = gateway.NewMatrixAdoptHandler(
+		h,
+		resolver,
+		func(key string) (string, error) {
+			d, err := reg.For(key)
+			if err != nil {
+				return "", err
+			}
+			return d.Harness(), nil
+		},
+		gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
+			w, ok := descriptor.WriterFor(harness)
+			if !ok {
+				return nil, false
+			}
+			return w.Write, true
+		}),
+		gateway.NewHTTPCredentialFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
+		func(key string) error { return lifecycleFn(key, "restart") },
+	)
 	h = gateway.NewChangesetHandler(h, resolver)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
