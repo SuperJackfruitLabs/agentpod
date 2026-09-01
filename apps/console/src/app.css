@@ -637,6 +637,7 @@
   --status-stopped: var(--muted-foreground);
   --status-error: oklch(0.577 0.245 27.325);
   --status-sleeping: oklch(0.606 0.25 292.717);
+  --status-unknown: oklch(0.769 0.188 70.08);
 }
 
 .dark {
@@ -677,6 +678,7 @@
   --status-stopped: var(--muted-foreground);
   --status-error: oklch(0.704 0.191 22.216);
   --status-sleeping: oklch(0.702 0.183 293.541);
+  --status-unknown: oklch(0.828 0.189 84.429);
 }
 
 @theme inline {
@@ -721,6 +723,7 @@
   --color-status-stopped: var(--status-stopped);
   --color-status-error: var(--status-error);
   --color-status-sleeping: var(--status-sleeping);
+  --color-status-unknown: var(--status-unknown);
 }
 
 /* ============================================

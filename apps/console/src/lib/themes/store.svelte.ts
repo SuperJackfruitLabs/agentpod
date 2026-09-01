@@ -254,12 +254,8 @@ function applyColorScheme(colorScheme: ColorScheme) {
     "sidebar-accent-foreground": "--sidebar-accent-foreground",
     "sidebar-border": "--sidebar-border",
     "sidebar-ring": "--sidebar-ring",
-    // Fleet status tokens derive from the scheme's accent colors
-    "cyber-emerald": "--status-running",
-    "cyber-amber": "--status-degraded",
-    "cyber-red": "--status-error",
-    "cyber-cyan": "--status-starting",
-    "cyber-magenta": "--status-sleeping",
+    // Fleet status tokens are NOT here: colour means state, so a scheme may not
+    // recolour it — --status-* is fixed in app.css and never scheme-derived.
   };
 
   // Apply each style property
@@ -273,6 +269,18 @@ function applyColorScheme(colorScheme: ColorScheme) {
   // Radius is a fixed design token (app.css), not a per-scheme value; guard against
   // a stale inline value left over from before this change within a live session.
   root.style.removeProperty("--radius");
+
+  // A user who applied a scheme before this change has --status-* inline styles
+  // persisted on <html> from a previous session; removeProperty (not just no
+  // longer setting them) is what actually unsticks them, so the fixed values in
+  // app.css can govern again.
+  root.style.removeProperty("--status-running");
+  root.style.removeProperty("--status-starting");
+  root.style.removeProperty("--status-error");
+  root.style.removeProperty("--status-sleeping");
+  root.style.removeProperty("--status-stopped");
+  root.style.removeProperty("--status-unknown");
+  root.style.removeProperty("--status-degraded");
 }
 
 function applyFontPairing(fontPairing: FontPairing) {
