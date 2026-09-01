@@ -339,19 +339,72 @@ Everything in §1-§7, with the Hermes adapter as the only writer:
 This reaches the uniform end state for all 14 harness-mode stations on the fleet
 today, because all 14 are Hermes. Nothing else currently needs it.
 
-### Slice 2 — the remaining adapters
+### Slice 2 — closed on 2026-09-01. There is no second adapter to build.
 
-`openclaw`, `opencode`, `pi`, `codex`, `claudecode`. Each names its harness's
-authoritative profile location and passes the conformance suite slice 1 established.
+Slice 2 was going to add adapters for `openclaw`, `opencode`, `pi`, `codex` and
+`claudecode`. Investigating it against the real fleet showed **none of the five can hold
+a per-station Matrix credential**, so every one of those adapters would have written a
+file nothing reads. That was written from the descriptor *list* rather than from which
+harnesses have a Matrix client — the same mistake as §1's original invariant, which was
+written from the schema rather than from the column's contents.
 
-Held back deliberately: none of these has a harness-mode station today, so each would
-otherwise ship having never run against a real agent — the shape that produced five
-things-with-no-caller in the previous slice. In its own slice each can be built when
-there is something to point it at, and verified against a real agent of that harness
-rather than against a contract alone.
+**Four of them have no Matrix client at all.** `opencode` and `pi` hardcode
+`MatrixId: nil`; `codex` and `claudecode` have no such field. Checked against the products'
+own documentation rather than inferred from our descriptors, since inferring from our
+code's shape is what produced both of this document's earlier errors:
 
-The two slices are independent after slice 1 lands. Slice 2 can be taken one harness
-at a time, in whatever order a real need appears.
+- **opencode's docs are explicit** — no native Matrix, Slack, Discord or Telegram support,
+  and its "agent" is *an AI configuration*: a system prompt, a model and a permission set,
+  operating as `primary` or `subagent`. It is not a chat identity and has no messaging
+  credentials. Matrix reaches opencode only through an **external** bridge
+  (`opencode-chat-bridge`, which fronts ACP-compatible agents) — the same architecture as
+  our own bridge mode.
+- **`codex` and `claudecode` are leaf coding harnesses** driven over ACP, with no chat
+  channel in the product or the descriptor.
+
+**A hazard this makes concrete.** opencode *does* have an `auth.json` — at
+`~/.local/share/opencode/auth.json`, holding **per-provider OAuth tokens** (`access`,
+`refresh`, `expires`, `type`). Our reader probes `auth.json` for a `user_id`, finds none,
+and correctly returns nil. But a writer that followed the reader's search order would have
+written Matrix credentials **into a provider credential store**. That is not a hypothetical
+argument for §3's "writing must not be a heuristic" and "refusal is the default" — it is
+the file it would have corrupted.
+
+**So bridge mode is the right answer for these four, not a fallback.** An agent with no
+Matrix client needs something to hold an identity on its behalf; that is exactly what the
+appservice does in bridge mode, and it is what `opencode-chat-bridge` does for opencode
+elsewhere. There is no adapter that would improve on it, and all 18 of these stations
+already run that way.
+
+**`openclaw` has Matrix, but its identity is instance-scoped where ours is
+station-scoped.** Matrix is configured under `channels.matrix` — one `user_id` and
+`access_token` per openclaw *instance*, not per agent. ashram runs **one instance hosting
+ten agents**, so an adapter writing `channels.matrix` would give all ten the same mxid:
+the "two answerers on one address" failure `matrix_identity_mode` exists to prevent,
+created deliberately.
+
+Per-agent identities were proposed upstream as multi-account support —
+`channels.matrix.accounts` keyed by account with its own `userId`/`accessToken`, routed
+by `bindings[].match.accountId` — in **openclaw/openclaw#12040 (February 2026), closed as
+not planned**. The issue states the current position directly: each agent needs a separate
+openclaw instance to have its own Matrix identity.
+
+### The precise condition that would reopen this
+
+An openclaw adapter becomes buildable for **an openclaw instance hosting exactly one
+station**, because then instance-scoped and station-scoped identity coincide. It stays
+impossible for a multi-agent instance unless upstream reverses #12040.
+
+So this is a *shape* mismatch, not a missing feature — worth stating precisely, because
+"openclaw has no credential file" (the first conclusion, from finding no `auth.json` or
+`.env` under an agent directory) was true and misleading: openclaw does support Matrix,
+just not at the granularity this design needs.
+
+Nothing is broken meanwhile. All 18 non-Hermes stations run in bridge mode, where the
+appservice speaks for them, and an unsupported harness already refuses by name at step 1.
+The `ProfileWriter` interface and its conformance suite from slice 1 remain, so if a
+harness ever gains per-agent Matrix credentials the adapter is a small, well-specified
+piece of work with its contract already waiting.
 
 ---
 
