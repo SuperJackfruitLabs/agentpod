@@ -24,9 +24,20 @@ type hermesEnvWriter struct{}
 func (hermesEnvWriter) Harness() string { return "hermes" }
 
 // Write updates MATRIX_USER_ID and MATRIX_ACCESS_TOKEN in profileDir/.env in
-// place, leaving every other line byte-identical. It refuses when .env is
-// absent: that is not a Hermes profile this writer recognises, and refusing
-// is the default rather than creating one from nothing.
+// place, leaving every other line byte-identical. It refuses in two distinct
+// cases, both leaving the profile untouched:
+//
+//   - .env is absent: this is not a Hermes profile this writer recognises at
+//     all.
+//   - .env exists but is missing either credential key: fix round 1 on Task
+//     5 ruled this out of the append path an earlier version took. Every
+//     station this slice moves is already harness-mode and therefore already
+//     carries both keys — that is precisely where the reader found its
+//     current identity — so a profile missing one is not "values gone
+//     stale", it is a shape with no station behind it yet (a freshly
+//     provisioned home, or a harness never Matrix-enabled), and this writer
+//     has no case that exercises filling it in. Bridge-to-harness conversion
+//     can add that path deliberately, with its own test, when it exists.
 //
 // SECURITY: accessToken is written only into the .env file's own bytes. It
 // never appears in a returned error, and the temp file used to make the
@@ -67,15 +78,30 @@ func (hermesEnvWriter) Write(profileDir, mxid, accessToken string) error {
 			sawToken = true
 		}
 	}
-	// Both keys are expected on the deployed fleet, but a profile missing one
-	// (e.g. a freshly provisioned home with no prior Matrix credential) gets
-	// it appended rather than silently dropped.
-	if !sawUserID {
-		lines = append(lines, "MATRIX_USER_ID="+mxid)
-	}
-	if !sawToken {
-		lines = append(lines, "MATRIX_ACCESS_TOKEN="+accessToken)
+
+	// Distinct from the file-absent refusal above, so an operator can tell
+	// "no .env at all" apart from "a .env this writer does not consider an
+	// update target". See the doc comment for why this is a refusal and not
+	// an append.
+	if !sawUserID || !sawToken {
+		return fmt.Errorf(
+			"hermes: %s/.env is missing %s; refusing to write a credential into a profile that has never held one",
+			profileDir, missingCredentialKeys(sawUserID, sawToken),
+		)
 	}
 
 	return atomicWriteFile(path, []byte(strings.Join(lines, "\n")), 0o600)
+}
+
+// missingCredentialKeys names which of the two credential keys Write did not
+// find, for the refusal error above.
+func missingCredentialKeys(sawUserID, sawToken bool) string {
+	switch {
+	case !sawUserID && !sawToken:
+		return "MATRIX_USER_ID and MATRIX_ACCESS_TOKEN"
+	case !sawUserID:
+		return "MATRIX_USER_ID"
+	default:
+		return "MATRIX_ACCESS_TOKEN"
+	}
 }

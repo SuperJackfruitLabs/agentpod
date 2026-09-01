@@ -35,6 +35,28 @@ func TestConformance(t *testing.T) {
 				t.Fatal("refusal created files")
 			}
 		})
+		t.Run(w.Harness()+"/refuses when credential keys are absent", func(t *testing.T) {
+			// A profile whose shape this writer's harness recognises (so the
+			// file-absent refusal above must not be what fires) but which has
+			// never held a Matrix credential. Fix round 1 on Task 5: every
+			// station this slice moves is already harness-mode, and therefore
+			// already carries both keys — that is precisely where the reader
+			// found its current identity. So an absent key here is not a stale
+			// value to update, it is a shape with no station behind it yet
+			// (or a harness never Matrix-enabled at all), and appending one in
+			// would be speculative behaviour on the exact seam this task
+			// polices. Refusal must leave the file untouched, the same as the
+			// file-absent case.
+			dir := seedRecognisedProfileWithoutCredential(t, w.Harness())
+			before := readAllFiles(t, dir)
+			if err := w.Write(dir, "@a:h", "syt_token"); err == nil {
+				t.Fatal("expected a refusal, got a silent write")
+			}
+			after := readAllFiles(t, dir)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("refusal modified the profile:\nbefore: %#v\nafter:  %#v", before, after)
+			}
+		})
 		t.Run(w.Harness()+"/adjacent config survives", func(t *testing.T) {
 			// Hermes .env carries other keys; auth.json carries provider
 			// credentials. Losing them breaks the agent in a way that has
@@ -87,7 +109,8 @@ func TestConformance(t *testing.T) {
 }
 
 // seedProfile creates a realistic on-disk profile for harness, including
-// adjacent, non-Matrix configuration the writer must leave alone.
+// adjacent, non-Matrix configuration the writer must leave alone. Both
+// Matrix credential keys are present (with stale values) — the update case.
 func seedProfile(t *testing.T, harness string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -110,6 +133,30 @@ func seedProfile(t *testing.T, harness string) string {
 		}
 	default:
 		t.Fatalf("seedProfile: no seed defined for harness %q; add one alongside its writer", harness)
+	}
+
+	return dir
+}
+
+// seedRecognisedProfileWithoutCredential builds a profile shape the writer's
+// harness recognises — its authoritative file exists — but which has never
+// held a Matrix credential: neither key is present at all. This is distinct
+// from seedProfile's "keys present, values stale" shape; see the fix-round-1
+// conformance case that uses it.
+func seedRecognisedProfileWithoutCredential(t *testing.T, harness string) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	switch harness {
+	case "hermes":
+		env := "" +
+			"# hermes profile env, never Matrix-enabled\n" +
+			"ANTHROPIC_API_KEY=sk-seeded\n"
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+			t.Fatalf("seed .env: %v", err)
+		}
+	default:
+		t.Fatalf("seedRecognisedProfileWithoutCredential: no seed defined for harness %q; add one alongside its writer", harness)
 	}
 
 	return dir
