@@ -41,6 +41,30 @@ if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
   })) as unknown as typeof window.matchMedia;
 }
 
+// jsdom 25 installs no Storage implementation on Node 22+, so `localStorage`
+// exists as a property of globalThis whose value is undefined. The theme store
+// reads it at module-initialisation time (src/lib/themes/store.svelte.ts), so
+// on a newer Node every test that transitively imports a themed component dies
+// with "Cannot read properties of undefined (reading 'getItem')" — 132 of them.
+// CI pins Node 20, where jsdom still provides it, which is why this only ever
+// bites in a developer's checkout. An in-memory Storage is enough: tests assert
+// on what the store does with a value, never on persistence across reloads.
+if (typeof window !== "undefined" && !window.localStorage) {
+  const store = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return store.size;
+    },
+    key: (i: number) => Array.from(store.keys())[i] ?? null,
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+  Object.defineProperty(window, "localStorage", { value: storage, configurable: true });
+  Object.defineProperty(globalThis, "localStorage", { value: storage, configurable: true });
+}
+
 // Unmount components, then let bits-ui's 24ms body-scroll-lock cleanup timer
 // fire while the DOM still exists. Without the flush, the last dialog-using
 // test in a file races vitest's environment teardown and crashes with
