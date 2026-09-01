@@ -21,6 +21,7 @@
 import { test, expect, vi } from "vitest";
 import { render, cleanup, screen, fireEvent } from "@testing-library/svelte";
 import { afterEach } from "vitest";
+import { tick } from "svelte";
 import MatrixIdentityPanel from "./MatrixIdentityPanel.svelte";
 
 afterEach(cleanup);
@@ -170,21 +171,53 @@ test("a converged station is not asked about a move it is not in", async () => {
 });
 
 test("a click's waiting state is not overwritten by a slower answer about how things stood before it", async () => {
-  // The fetch is in flight when the operator authorizes. Its reply describes
-  // the world before the click, and adopting it would put the panel back to
-  // idle on a station that was just authorized.
-  let settle: (s: unknown) => void = () => {};
+  // Reviewer's finding (fix-wave-2, Ruling 17): this test used to resolve the
+  // mount's `moveState` fetch with `status: "retired-identity"` — a status
+  // the guarded callback never acts on regardless of the `phase !== "idle"`
+  // guard it claimed to pin, since the callback only writes anything when
+  // `s.status === "waiting"`. The reviewer removed the guard and all 13
+  // tests, including this one, still passed.
+  //
+  // The guard's actual job: the operator clicks while the mount's own
+  // `moveState` request is still in flight. That request describes how
+  // things stood BEFORE the click — including a `since` from whatever
+  // authorization existed then — and a `status: "waiting"` reply arriving
+  // mid-click must not be adopted while the click's own request (`authorize`)
+  // is still outstanding. Both promises are held open here so the race is
+  // real: `moveState` settles WHILE `authorize` is still pending.
+  const STALE_SINCE = "2020-01-01T00:00:00Z";
+  let settleMoveState: (s: unknown) => void = () => {};
   const moveState = vi.fn().mockReturnValue(
     new Promise((resolve) => {
-      settle = resolve;
+      settleMoveState = resolve;
     })
   );
-  const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
+  let settleAuthorize: (r: { expiresAt: string }) => void = () => {};
+  const authorize = vi.fn().mockReturnValue(
+    new Promise((resolve) => {
+      settleAuthorize = resolve;
+    })
+  );
   render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
 
   await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
-  expect(screen.getByText(/waiting for the node/i)).toBeTruthy();
+  expect(screen.getByRole("button", { name: /authorizing/i })).toBeTruthy();
 
-  settle({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+  // The hub answers the MOUNT's question — a stale `waiting`, from before
+  // this click — while `authorize` is still outstanding.
+  settleMoveState({ status: "waiting", runningAs: OLD, willBecome: NEW, since: STALE_SINCE });
+  await tick();
+
+  // Still authorizing: the in-flight click outranks a reply about the past.
+  // Without the guard, `phase` would flip to `"waiting"` here — before the
+  // click's own request has even resolved — and this stale `since` would be
+  // what the operator sees.
+  expect(screen.getByRole("button", { name: /authorizing/i })).toBeTruthy();
+  expect(screen.queryByText(/waiting for the node/i)).toBeNull();
+
+  settleAuthorize({ expiresAt: "2026-09-01T12:00:00Z" });
   await vi.waitFor(() => expect(screen.getByText(/waiting for the node/i)).toBeTruthy());
+  // The click's own answer is what's shown, not the stale one that arrived
+  // mid-flight.
+  expect(screen.queryByText(new Date(STALE_SINCE).toLocaleString())).toBeNull();
 });
