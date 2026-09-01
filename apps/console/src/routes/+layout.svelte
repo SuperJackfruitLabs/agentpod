@@ -3,7 +3,7 @@
   import { onMount, onDestroy } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
-  import { initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
+  import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
   import { auth, initAuth } from "$lib/stores/auth.svelte";
   import { themeStore } from "$lib/themes/store.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
@@ -65,12 +65,24 @@
     }
   });
 
-  // Auth guard - redirect to login if not authenticated
+  // Auth guard — redirect to login if we are not, or cannot be, authenticated.
+  //
+  // The second half is the point. `initAuth` returns early without setting
+  // `isInitialized` when there is no auth client, and there is no auth client
+  // exactly when `initConnection` could not reach a hub. So a visitor whose
+  // hub is unreachable — or who has never configured one — used to fall
+  // through this guard entirely and get the full shell, signed out, with
+  // every pane reporting a failure. /login is also the connect-to-hub screen,
+  // which is precisely where that person needs to be.
   $effect(() => {
-    if (!isInitializing && auth.isInitialized) {
-      if (!auth.isAuthenticated && !isPublicRoute) {
-        goto("/login");
-      }
+    if (isInitializing || isPublicRoute) return;
+
+    const definitelyNotAuthenticated = auth.isInitialized
+      ? !auth.isAuthenticated
+      : !connection.isConnected;
+
+    if (definitelyNotAuthenticated) {
+      goto("/login");
     }
   });
 </script>
