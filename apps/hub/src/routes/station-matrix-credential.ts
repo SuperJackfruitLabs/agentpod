@@ -44,6 +44,7 @@ import { redeemCredentialAuthorization } from "../services/matrix-credential";
 import { bridgeLocalpart } from "../services/matrix-as/names";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import type { IssuedCredentials } from "./station-matrix";
+import type { MatrixBridge } from "../services/matrix-as/index";
 
 export interface StationMatrixCredentialDeps {
   credentials: {
@@ -166,4 +167,32 @@ export function createStationMatrixCredentialRoutes(deps: StationMatrixCredentia
       });
     }
   );
+}
+
+/**
+ * The whole mount decision `index.ts` needs, as one function instead of an
+ * inline ternary inside its top-level route chain.
+ *
+ * Pulled out so it has a unit test of its own: an inline `matrixBridge ? … :
+ * new Hono()` in `index.ts` cannot be exercised without booting the entire
+ * hub (DB, sweepers, the kaambaan bridge, the real Matrix bridge) — nothing
+ * in this suite does that, so a swapped ternary arm or an `&&` typo would
+ * silently make this route vanish or throw, and nothing would catch it.
+ * `index.ts` calls this function rather than inlining the ternary again, so
+ * the test below exercises the exact code path it runs.
+ *
+ * Null rather than a no-op object is what `createMatrixBridge` returns for
+ * "not configured" (`services/matrix-as/index.ts`), so `null` here means the
+ * same thing it means there: no homeserver to register or rotate an
+ * identity on, so the route does not exist — a 404, not a 500 on every call.
+ */
+export function stationMatrixCredentialRoutesFor(matrixBridge: MatrixBridge | null) {
+  return matrixBridge
+    ? createStationMatrixCredentialRoutes({
+        credentials: {
+          register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
+          rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
+        },
+      })
+    : new Hono();
 }

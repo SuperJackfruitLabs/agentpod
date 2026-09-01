@@ -38,7 +38,7 @@ import { stationRoutes } from './routes/stations.ts';
 // A node exchanging its credential for a station-scoped agent token
 import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
-import { createStationMatrixCredentialRoutes } from './routes/station-matrix-credential.ts';
+import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
@@ -169,18 +169,11 @@ const app = new Hono()
    * `authMiddleware`. Mounted only when a Matrix bridge is configured —
    * with none, there is no homeserver to register or rotate an identity on,
    * so the route simply does not exist rather than 500ing on every call.
+   * The mount decision itself lives in `stationMatrixCredentialRoutesFor`
+   * (`station-matrix-credential.ts`) rather than inline here, so it has a
+   * unit test that does not need to boot this whole file to run.
    */
-  .route(
-    '/api',
-    matrixBridge
-      ? createStationMatrixCredentialRoutes({
-          credentials: {
-            register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
-            rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
-          },
-        })
-      : new Hono()
-  )
+  .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
