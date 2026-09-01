@@ -193,28 +193,69 @@ edit a grant, suspend a principal. Destructive entries are marked.
 
 ## Personalisation
 
-Themes stay. They are personalisation, not a substitute for a design decision.
+Themes stay, and they stay *whole*. The console already ships 20 colour schemes
+across six categories, 15 font pairings over 20 locally bundled families, and
+user-saved custom themes. **None of that is removed.** Personalisation is the
+point of that system and it keeps working.
 
-**A theme moves the ground and the type. It never touches the six state
-hues.** If a theme could recolour `error`, Law 1 would be false the moment
-someone picked one, and the design would lose the only thing holding it
-together.
+What changes is exactly one thing, and it is the thing that makes Law 1 true.
 
-- **Schemes** redefine eleven neutral tokens only: `ground, surface, surface-2,
-  raised, line, line-soft, ink, ink-dim, ink-faint, sel, sel-line`. Five ship:
-  Ink (default), Slate, Umber, Harbor, Carbon. Each defines a light and a dark
-  variant.
-- **Mode** is system / light / dark. System is the default and follows
-  `prefers-color-scheme`.
-- **Type pairings**: Archivo · IBM Plex Mono (default), Inter · JetBrains Mono
-  (what the console ships today, so nothing familiar is taken away), Instrument
-  Sans · Spline Sans Mono.
-- Custom user themes continue to work, and are constrained to the same eleven
-  neutrals.
+### A scheme may no longer recolour state
 
-The existing theme store keeps its persistence and its public API. What changes
-is the token set it writes and the fact that it can no longer write state
-colours.
+Today the fleet status colours are derived from the active scheme through a
+three-hop chain:
+
+```
+scheme.cyber-emerald  →  --status-running  →  --color-status-running  →  bg-status-running
+scheme.cyber-amber    →  --status-degraded
+scheme.cyber-red      →  --status-error
+scheme.cyber-cyan     →  --status-starting
+scheme.cyber-magenta  →  --status-sleeping
+```
+
+`applyColorScheme()` writes the first hop as inline styles on `<html>`. So
+picking a theme today silently redefines what "error" looks like — and on some
+of the twenty schemes, running and error land close enough together to be hard
+to tell apart at a 6px dot.
+
+**Sever the first hop.** The `--status-*` tokens become fixed values defined
+once in `app.css` for light and once for dark, and `applyColorScheme()` stops
+writing them. Schemes keep every other token they have — background, card,
+primary, accent, border, the chart colours, the `cyber-*` values themselves for
+anything that legitimately wants them. They simply no longer own the six
+colours that carry meaning.
+
+### The token set
+
+| Token | Replaces | Applies to |
+|---|---|---|
+| `--status-running` | unchanged | station `running`, node `online`, runtime `online` |
+| `--status-starting` | unchanged | runtime `provisioning`/`starting`/`stopping`, session `starting` |
+| `--status-unknown` | **new** | station `unknown` — anything the hub cannot answer |
+| `--status-error` | unchanged | station `error`, node `offline`, runtime `error` |
+| `--status-sleeping` | unchanged | runtime `asleep` only |
+| `--status-stopped` | unchanged | station `stopped`, runtime `stopped` |
+
+`--status-degraded` is retired as a *station* state — no station is ever
+degraded — but the token stays defined so nothing that still references it
+breaks mid-migration. It is removed in the final cleanup task.
+
+### Chrome stays structural
+
+The new shell draws its chrome from the neutral tokens (`background`, `card`,
+`border`, `muted-foreground`) and never uses `primary` or `accent`
+decoratively. A vivid scheme therefore tints the ground the fleet stands on
+without putting a competing hue next to a status dot.
+
+### Type
+
+Archivo is added as a bundled family and a new pairing, **Archivo · IBM Plex
+Mono**, becomes the default (IBM Plex Mono is already bundled). The current
+default, `classic-inter` (Inter · JetBrains Mono), stays in the list, so
+nothing familiar is taken away — it is one click in Settings.
+
+The existing store keeps its persistence keys, its public API, its custom-theme
+support and its `auto` mode.
 
 ---
 
@@ -233,6 +274,24 @@ colours.
   page body never scrolls horizontally.
 
 ---
+
+## Delivery
+
+**The console is never left broken between tasks.** It is deployed by hand to
+Cloudflare Pages and there is no staging environment, so every task must end
+with a console that builds, passes its suite, and works end to end. The new
+shell therefore wraps the existing pages first, and pages are migrated into the
+new language one at a time behind it. At no point does a route stop rendering
+because its replacement is half-built.
+
+Order, chosen so that stopping early still leaves something coherent:
+
+1. Foundation — tokens, state vocabulary, Archivo.
+2. The shell — top bar, attention lane, roster rail, three columns, responsive.
+   Existing pages render inside it unchanged.
+3. The muster (home), then the station page, then Activity.
+4. Nodes, Runtimes, Grants.
+5. Palette verbs, then cleanup of the retired nav.
 
 ## Out of scope
 
