@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 // The store touches matchMedia at module init — ES imports are hoisted ahead
@@ -68,5 +70,20 @@ describe("status tokens are fixed, not scheme-derived", () => {
 
     const root = document.documentElement;
     expect(root.style.getPropertyValue("--radius")).toBe("");
+  });
+  // The store not WRITING the tokens is only half of it. `--status-stopped`
+  // was declared as `var(--muted-foreground)`, which is a token every scheme
+  // sets — so a theme still owned one of the six, and under Cyberpunk the
+  // "stopped" segment went near-black. Caught by looking at the running app,
+  // not by any assertion, so this pins the stylesheet itself. jsdom cannot
+  // resolve app.css (css:false), so read the file the way fonts.test.ts does.
+  it("declares every --status-* as a literal, never as another scheme's token", () => {
+    const appCss = readFileSync(join(__dirname, "../../app.css"), "utf-8");
+    const declarations = [...appCss.matchAll(/--status-[a-z]+:\s*([^;]+);/g)];
+
+    expect(declarations.length).toBeGreaterThan(0);
+    for (const [whole, value] of declarations) {
+      expect(value, `${whole.trim()} must not depend on a scheme-owned token`).not.toContain("var(");
+    }
   });
 });
