@@ -8,6 +8,9 @@ import { setGrant } from "../../src/services/grants";
 import { createPrincipal } from "../../src/services/principals";
 import { createStationMatrixRoutes } from "../../src/routes/station-matrix";
 import { MatrixUserInUse } from "../../src/services/matrix-as/client";
+import { connectionManager } from "../../src/services/connection-manager";
+import { handleNodeMessage } from "../../src/services/broker";
+import type { GatewayServerMessage } from "@agentpod/contract";
 
 /**
  * Registering an agent's Matrix identity, without an admin credential on a node.
@@ -355,5 +358,67 @@ describe("POST /api/stations/:id/matrix/authorize-move", () => {
     } finally {
       await rawSql`UPDATE stations SET harness = 'hermes' WHERE id = ${STATION}`;
     }
+  });
+
+  /**
+   * Defect 3: minting used to be the whole route — nothing ever told the
+   * node to move. `broker.request`'s own contract (never rejects; "node
+   * offline" is an ordinary `{ok:false}`) is exercised for real here via
+   * `connectionManager` and `handleNodeMessage`, not mocked: registering a
+   * fake sender under `NODE` and replying synchronously to `matrix.adopt`
+   * is enough to drive the whole round trip without a real websocket.
+   */
+  describe("signalling the node", () => {
+    let sentReqs: Array<{ id: string; verb: string; params: unknown }>;
+
+    /** A fake node connection that ACKs matrix.adopt synchronously. */
+    function connectRespondingNode() {
+      sentReqs = [];
+      const send = (msg: GatewayServerMessage) => {
+        if (msg.type !== "req") return;
+        sentReqs.push({ id: msg.id, verb: msg.verb, params: msg.params });
+        if (msg.verb === "matrix.adopt") {
+          handleNodeMessage(NODE, { type: "res", id: msg.id, ok: true, data: { accepted: true } });
+        }
+      };
+      connectionManager.register(NODE, send);
+    }
+
+    afterAll(() => {
+      connectionManager.unregister(NODE);
+    });
+
+    test("sends matrix.adopt with the station's key AND its database id — not the key alone", async () => {
+      await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+      connectRespondingNode();
+
+      try {
+        const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+        expect(res.status).toBe(200);
+
+        const adopts = sentReqs.filter((r) => r.verb === "matrix.adopt");
+        expect(adopts).toHaveLength(1);
+        // The node's profile-directory lookup needs the station KEY; the
+        // hub's redemption endpoint is keyed by the station's database ID.
+        // Sending only one or the other leaves the node unable to build a
+        // URL the hub can resolve.
+        expect(adopts[0]!.params).toEqual({ key: "hermes:analyst-echo", stationId: STATION });
+      } finally {
+        connectionManager.unregister(NODE);
+      }
+    });
+
+    test("an offline node does not fail the authorization — the record still stands", async () => {
+      await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: true });
+      // Deliberately not connected: connectionManager has no sender for
+      // NODE, so broker.request resolves {ok:false, error:"node offline"}.
+      connectionManager.unregister(NODE);
+
+      const res = await post(`/stations/${STATION}/matrix/authorize-move`);
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { expiresAt: string };
+      expect(body.expiresAt).toBeTruthy();
+    });
   });
 });

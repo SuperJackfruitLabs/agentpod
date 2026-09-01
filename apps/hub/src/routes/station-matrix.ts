@@ -28,6 +28,7 @@ import { roomAliasForStation } from "../services/matrix-as/station-room";
 import { isMatrixUserInUse } from "../services/matrix-as/client";
 import { principalHandle } from "../services/principals";
 import { mintCredentialAuthorization, UnknownStationError } from "../services/matrix-credential";
+import * as broker from "../services/broker";
 import type { AuthUser } from "../auth/middleware";
 
 /**
@@ -247,12 +248,22 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
      * principal-derived identity (`charter` →
      * decisions/2026-08-15-granting-reach-is-changing-an-agent.md; design
      * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md`
-     * §2). This mints a single-use, short-lived authorization for the node to
-     * redeem over Task 2's endpoint — it MINTS ONLY. It does not pre-join the
-     * new identity to the room or send the broker signal; those belong to the
-     * ordered move in a later task, deliberately not stubbed here.
+     * §2). This mints a single-use, short-lived, station-scoped authorization
+     * and signals the station's node to redeem it (`matrix.adopt`, over the
+     * existing broker). It does not pre-join the new identity to the room or
+     * handle convergence; those belong to the ordered move in a later task,
+     * deliberately not stubbed here.
      *
-     * Never returns the token: the response carries only `expiresAt`.
+     * There is no token: the record minted is station-scoped, and the node
+     * redeeming it is already authenticated by its own long-term credential
+     * (`routes/station-matrix-credential.ts`). The response below carries
+     * only `expiresAt`.
+     *
+     * The broker signal is sent but never awaited into the response: a node
+     * that is offline, slow, or never answers must not turn a successful
+     * authorization into a failed HTTP call — the record above is already
+     * committed and can be signalled again (including by calling this route
+     * again). A failed signal is only logged.
      */
     .post("/stations/:id/matrix/authorize-move", async (c) => {
       const user = c.get("user") as AuthUser;
@@ -296,13 +307,37 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
         );
       }
 
-      let authorization: { token: string; expiresAt: Date };
+      let authorization: { expiresAt: Date };
       try {
         authorization = await mintCredentialAuthorization(station.id);
       } catch (e) {
         if (!(e instanceof UnknownStationError)) throw e;
         return c.json({ error: "Not Found" }, 404);
       }
+
+      // Signal the node now that the authorization exists. Deliberately not
+      // awaited into the response — see this route's own comment above for
+      // why a failed or slow signal must not turn a successful authorization
+      // into a failed HTTP call. `broker.request` never rejects (its own
+      // contract: offline resolves `{ok:false, error:"node offline"}`), so
+      // this needs no catch, only a look at the result once it settles.
+      //
+      // Both `key` and `stationId` travel — the node's profile-directory
+      // lookup needs the station KEY, but the hub's redemption endpoint is
+      // keyed by the station's database ID, and neither can stand in for the
+      // other (Defect 2). Both are non-secret, so this stays within the
+      // broker's own constraint: the credential itself never rides along.
+      void broker
+        .request(station.nodeId, "matrix.adopt", { key: station.stationKey, stationId: station.id })
+        .then((result) => {
+          if (!result.ok) {
+            say(
+              `[station-matrix] authorised ${station.id} but could not signal node ` +
+                `${station.nodeId} to adopt it (${result.error ?? "unknown error"}) — the ` +
+                `authorization stands and can be signalled again`
+            );
+          }
+        });
 
       return c.json({ expiresAt: authorization.expiresAt });
     });
