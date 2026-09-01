@@ -170,10 +170,21 @@ room while the old one is still there. So it goes in first:
 3. **The node redeems** the authorisation, writes the profile, restarts the harness.
 4. **The harness comes up as `@agent_<handle>` — already a member** — and works
    immediately.
-5. **The node reports the new mxid** on its next detect; the hub observes
+5. **The node reports the new mxid** in its answer to `matrix.adopt`, read back
+   out of the profile it just wrote through the same reader a detect uses
+   (`descriptor.MatrixIDFromProfile`); the hub observes
    `matrix_id = bridge_matrix_id`.
-6. **Only then** the old user leaves, is recorded in `principal_identities`, and is
-   deactivated on the homeserver.
+
+   *Corrected 2026-09-01, whole-branch review.* This said "on its next detect",
+   and there is no next detect: step 3 restarts the **harness**, not the
+   node-agent, so the websocket whose open is the hub's only trigger for
+   `refreshAdoptedCapabilities` never reopens, and no node→hub message carries
+   an mxid. As written, step 5 never happened and step 6 never ran. Reading the
+   profile back is not a weaker signal than a detect — it is the same reader on
+   the same file — and it re-verifies the write, which is what §3's round-trip
+   case already treats as load-bearing.
+6. **Only then** the old user leaves, is recorded in `principal_identities`, and its
+   credentials are revoked on the homeserver.
 
 This extends `migrate-agent-mxids`'s own principle — *"Join first. Leaving first
 would leave the room with no agent in it"* — across the credential switch rather than
@@ -208,8 +219,22 @@ members — but the account and its credential need not.
 
 Step 6 records the old mxid in `principal_identities` against the same principal, so
 a reader of the room's history can still resolve who `@agent_guild_hermes-writer-quill`
-was, and then deactivates the account on the homeserver. History stays readable and
-attributable; an unused credential on a node stops being a live login.
+was, and then **revokes the account's credentials** on the homeserver. History stays
+readable and attributable; an unused credential on a node stops being a live login.
+
+*Corrected 2026-09-01: this said "deactivates the account", and the appservice
+cannot.* Probed against tuwunel 1.9.0 while this was built: masquerading on
+`/account/deactivate` answers `401 M_MISSING_TOKEN`; an appservice-minted user
+token gets a User-Interactive Auth challenge whose `flows` list is empty, so no
+flow can satisfy it; and tuwunel implements no Synapse admin API
+(`/_synapse/admin/v1/deactivate` → 403). Deactivation needs a human's own
+credential, which is the thing this bridge exists not to hold — the same shape
+as the `m.direct` limitation recorded on 2026-08-30. What ships is `logout/all`
+as the user, which works and is the half that matters operationally: after it,
+the token in a harness's profile is dead. The deactivation call is still
+attempted, so it starts working if a homeserver ever permits it, and the
+outcome is reported as `accountDeactivated: false` rather than claimed. A
+retired account therefore remains **registered** and holds no usable session.
 
 Note the fleet has exactly **one** `matrix` principal identity today — the operator's.
 No harness station's mxid is recorded against its principal, so the plane cannot
