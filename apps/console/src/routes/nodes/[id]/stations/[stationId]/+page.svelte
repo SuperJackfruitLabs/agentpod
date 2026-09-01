@@ -286,20 +286,19 @@
         />
       </div>
       <!--
-        The §1 invariant — matrixId vs bridgeMatrixId — is a station-level fact,
-        not a tab's. It sits here, outside the tab bar, precisely so switching
-        tabs can never unmount it out from under an authorization the operator
-        just fired off (design §6; the panel itself renders nothing in bridge
-        mode, so bridge-mode stations show no empty box).
+        The §1 invariant — is this agent on its principal's address? — is a
+        station-level fact, not a tab's. It sits here, outside the tab bar,
+        precisely so switching tabs can never unmount it out from under an
+        authorization the operator just fired off (design §6; the panel itself
+        renders nothing in bridge mode, so bridge-mode stations show no empty
+        box).
+
+        `bridgeMatrixId` is deliberately not passed: it is what the appservice
+        minted, not what this agent's handle implies, and the panel asks the
+        hub for the states that turn on the difference.
       -->
       <div class="mb-4">
-        <MatrixIdentityPanel
-          station={{
-            id: station.id,
-            matrixId: station.matrixId,
-            bridgeMatrixId: station.bridgeMatrixId,
-          }}
-        />
+        <MatrixIdentityPanel station={{ id: station.id, matrixId: station.matrixId }} />
       </div>
     {/if}
     {@render stationPanels()}

@@ -2,15 +2,28 @@
  * MatrixIdentityPanel.svelte.test.ts
  *
  * The §1 invariant (`db/schema/stations.ts`, design
- * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md` §6) has
- * no status column — it's read off two existing ones:
+ * `docs/superpowers/specs/2026-09-01-uniform-matrix-identity-design.md` §6)
+ * asks one question — **is this agent on its principal's address?** — and only
+ * the agent's handle answers it.
+ *
+ * These tests used to be written the other way round, against two columns:
  *
  *   matrixId === null              → bridge mode, nothing to do
- *   matrixId === bridgeMatrixId    → converged (NOT "healthy" — room
- *                                     membership lives in neither column, so
- *                                     this panel only says the identity switched)
- *   matrixId !== bridgeMatrixId    → running under a retired identity, and
- *                                     the one control this panel exists for
+ *   matrixId === bridgeMatrixId    → converged
+ *   matrixId !== bridgeMatrixId    → running under a retired identity
+ *
+ * and every fixture set `bridgeMatrixId` to the handle-derived address, which
+ * is what the design assumed and what production does not do. `provision.ts`
+ * writes `bridge_matrix_id` from `stationSpeaker`, and for a harness station
+ * that is the harness's OWN mxid — so on the fleet all 14 harness stations
+ * have both columns holding the same retired, station-derived address, this
+ * panel called every one of them converged, and the move it exists to offer
+ * could never be started by anyone. The tests passed throughout, because the
+ * fixtures were the assumption rather than the fleet.
+ *
+ * So the states now come from the hub (`matrix/move-state`), which is the only
+ * place that can build the address a handle implies. `matrixId === null` is
+ * still answered here, because that half of the invariant really is a column.
  *
  * The move itself is fire-and-forget on the hub's side (Task 3): authorizing
  * only signals the node, and convergence is observed later. So the control
@@ -28,19 +41,48 @@ afterEach(cleanup);
 
 const OLD = "@agent_guild_hermes-writer-quill:matrix.example.org";
 const NEW = "@agent_writer-quill:matrix.example.org";
-const RETIRED = { id: "station_1", matrixId: OLD, bridgeMatrixId: NEW };
 
-test("a station on a retired identity says so, naming both addresses", () => {
-  render(MatrixIdentityPanel, { station: { matrixId: OLD, bridgeMatrixId: NEW } });
-  expect(screen.getByText(/retired identity/i)).toBeTruthy();
+/**
+ * A station exactly as the fleet has it: answering as the station-derived
+ * address, with `bridge_matrix_id` holding that SAME address — which is why
+ * nothing in this component may be handed that column any more. All the panel
+ * gets is the station's id and what its harness reports.
+ */
+const RETIRED = { id: "station_1", matrixId: OLD };
+
+/** The hub's answer for such a station: a move is available, and here is its target. */
+const saysRetired = () =>
+  vi.fn().mockResolvedValue({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+
+test("a station the hub says is on a retired identity says so, naming both addresses", async () => {
+  const moveState = saysRetired();
+  render(MatrixIdentityPanel, { station: RETIRED, moveState });
+
+  expect(await screen.findByText(/retired identity/i)).toBeTruthy();
   expect(screen.getByText(OLD)).toBeTruthy();
+  // The address it is moving to comes from the hub, which derived it from the
+  // agent's handle. The browser could not have built this string.
   expect(screen.getByText(NEW)).toBeTruthy();
+  expect(moveState).toHaveBeenCalledWith(RETIRED.id);
+});
+
+test("a station whose two columns agree on the OLD address is still offered the move", async () => {
+  // The defect, from the console's side. `bridgeMatrixId` is not a prop any
+  // more, so the only way this panel can call a station converged is if the
+  // HUB says so — and for this station the hub says `retired-identity`,
+  // because the address the agent's handle implies is not the one it answers
+  // as. The old panel, handed `{matrixId: OLD, bridgeMatrixId: OLD}`, showed
+  // "identity has switched" and no control at all.
+  render(MatrixIdentityPanel, { station: RETIRED, moveState: saysRetired() });
+
+  expect(await screen.findByRole("button", { name: /move to its own identity/i })).toBeTruthy();
+  expect(screen.queryByText(/identity has switched/i)).toBeNull();
 });
 
 test("the move control calls authorize-move, then shows waiting for the node", async () => {
   const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
-  render(MatrixIdentityPanel, { station: RETIRED, authorize });
-  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState: saysRetired() });
+  await fireEvent.click(await screen.findByRole("button", { name: /move to its own identity/i }));
   expect(authorize).toHaveBeenCalledWith(RETIRED.id);
   expect(screen.getByText(/waiting for the node/i)).toBeTruthy();
 });
@@ -57,8 +99,8 @@ test("a 403 from the grant gate is shown verbatim", async () => {
           "reach, which your grant does not permit for this agent."
       )
     );
-  render(MatrixIdentityPanel, { station: RETIRED, authorize });
-  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState: saysRetired() });
+  await fireEvent.click(await screen.findByRole("button", { name: /move to its own identity/i }));
   expect(
     await screen.findByText(/redeem its own matrix credential is granting it reach/i)
   ).toBeTruthy();
@@ -73,36 +115,57 @@ test("a 409 naming the harness with no profile writer is shown verbatim", async 
     .mockRejectedValue(
       new Error("codex has no Matrix profile writer yet, so this station cannot move to its own identity.")
     );
-  render(MatrixIdentityPanel, { station: RETIRED, authorize });
-  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState: saysRetired() });
+  await fireEvent.click(await screen.findByRole("button", { name: /move to its own identity/i }));
   expect(await screen.findByText(/codex has no matrix profile writer yet/i)).toBeTruthy();
 });
 
-test("a converged station shows no control", () => {
-  render(MatrixIdentityPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW } });
+test("a converged station shows no control", async () => {
+  const moveState = vi.fn().mockResolvedValue({ status: "converged", mxid: NEW });
+  render(MatrixIdentityPanel, { station: { id: "station_1", matrixId: NEW }, moveState });
+  expect(await screen.findByText(/identity has switched/i)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
 });
 
-// ─── The two states the brief's table names but doesn't spell a test for ──────
+// ─── The states the brief's table names but doesn't spell a test for ──────────
 
-test("a bridge-mode station (matrixId null) renders nothing", () => {
+test("a bridge-mode station (matrixId null) renders nothing, and asks nothing", () => {
+  // The one state a raw column really does settle: `matrix_id IS NULL` means
+  // the appservice speaks for the station. No round trip, no box.
+  const moveState = vi.fn();
   const { container } = render(MatrixIdentityPanel, {
-    station: { matrixId: null, bridgeMatrixId: NEW },
+    station: { id: "station_1", matrixId: null },
+    moveState,
   });
   expect(container.textContent?.trim()).toBe("");
+  expect(moveState).not.toHaveBeenCalled();
 });
 
-test("a converged station never claims to be healthy", () => {
-  render(MatrixIdentityPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW } });
+test("a converged station never claims to be healthy", async () => {
+  const moveState = vi.fn().mockResolvedValue({ status: "converged", mxid: NEW });
+  render(MatrixIdentityPanel, { station: { id: "station_1", matrixId: NEW }, moveState });
+  await screen.findByText(/identity has switched/i);
   for (const word of [/healthy/i, /\bok\b/i, /✓/]) {
     expect(screen.queryByText(word)).toBeNull();
   }
 });
 
+test("a station with no occupying agent is told so, and offered no move", async () => {
+  // No agent means no handle means no address to move to. The hub says so
+  // rather than the panel guessing, and a station answering as an mxid no
+  // principal owns is a thing an operator must see rather than a blank.
+  const moveState = vi.fn().mockResolvedValue({ status: "no-agent", runningAs: OLD });
+  render(MatrixIdentityPanel, { station: RETIRED, moveState });
+
+  expect(await screen.findByText(/no agent occupies it/i)).toBeTruthy();
+  expect(screen.getByText(OLD)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
+});
+
 test("the control survives a successful authorize — re-authorizing is the retry", async () => {
   const authorize = vi.fn().mockResolvedValue({ expiresAt: "2026-09-01T12:00:00Z" });
-  render(MatrixIdentityPanel, { station: RETIRED, authorize });
-  await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
+  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState: saysRetired() });
+  await fireEvent.click(await screen.findByRole("button", { name: /move to its own identity/i }));
   // Waiting is not a dead end: the control that just fired is still there.
   expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy();
   expect(screen.getByRole("button", { name: /move to its own identity/i })).not.toHaveProperty(
@@ -111,14 +174,7 @@ test("the control survives a successful authorize — re-authorizing is the retr
   );
 });
 
-// ─── "waiting" is the hub's answer, not this component's memory ───────────────
-//
-// Three of the four states are the two columns on the station row. `waiting`
-// is not: it means an authorization is outstanding, and that record lives only
-// in the hub. It used to be local `$state` set by a click, so a reload — or a
-// second operator, or a second tab — saw a station that looked untouched, and
-// §6's "a station stuck there is the signal that a harness did not restart"
-// was not a thing anybody could observe.
+// ─── The hub is the source, not this component's memory ───────────────────────
 
 test("a station the hub says is waiting shows waiting on first render, with no click", async () => {
   const moveState = vi.fn().mockResolvedValue({
@@ -137,11 +193,7 @@ test("a station the hub says is waiting shows waiting on first render, with no c
 });
 
 test("a station nobody has asked to move shows the control and no waiting line", async () => {
-  const moveState = vi.fn().mockResolvedValue({
-    status: "retired-identity",
-    runningAs: OLD,
-    willBecome: NEW,
-  });
+  const moveState = saysRetired();
   render(MatrixIdentityPanel, { station: RETIRED, moveState });
 
   expect(await screen.findByRole("button", { name: /move to its own identity/i })).toBeTruthy();
@@ -149,25 +201,22 @@ test("a station nobody has asked to move shows the control and no waiting line",
   expect(screen.queryByText(/waiting for the node/i)).toBeNull();
 });
 
-test("a hub that cannot answer costs the waiting line and nothing else", async () => {
-  // The waiting state is only ever ADDITIONAL information. Turning its
-  // absence into an error banner would make a panel whose control works fine
-  // look broken.
+test("a hub that cannot answer says so rather than offering a move it cannot describe", async () => {
+  // This used to assert that a failed fetch "costs the waiting line and
+  // nothing else", with the control still rendered — which was defensible
+  // while three states came off the row. They do not: without the hub's
+  // answer this panel does not know whether there is a move to offer, or what
+  // address it would end at, and a control built on that guess is the defect
+  // this whole change removes. Saying nothing at all would be the other half
+  // of the same silence, so it says what it could not find out.
   const moveState = vi.fn().mockRejectedValue(new Error("hub unreachable"));
   render(MatrixIdentityPanel, { station: RETIRED, moveState });
 
+  expect(await screen.findByText(/couldn't ask the hub/i)).toBeTruthy();
   await vi.waitFor(() => expect(moveState).toHaveBeenCalled());
+  // Not an alarm — nothing is broken, one question went unanswered.
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy();
-});
-
-test("a converged station is not asked about a move it is not in", async () => {
-  const moveState = vi.fn().mockResolvedValue({ status: "converged", mxid: NEW });
-  render(MatrixIdentityPanel, { station: { matrixId: NEW, bridgeMatrixId: NEW }, moveState });
-  // `converged` still means only that the two columns agree — and they are
-  // read here, not fetched. Asking the hub as well would be a second source
-  // for a fact the row already settles.
-  expect(moveState).not.toHaveBeenCalled();
+  expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
 });
 
 test("a click's waiting state is not overwritten by a slower answer about how things stood before it", async () => {
@@ -185,6 +234,11 @@ test("a click's waiting state is not overwritten by a slower answer about how th
   // mid-click must not be adopted while the click's own request (`authorize`)
   // is still outstanding. Both promises are held open here so the race is
   // real: `moveState` settles WHILE `authorize` is still pending.
+  //
+  // The click has to be reachable before the hub has answered anything, which
+  // is why the panel renders the control off the FIRST answer and keeps it
+  // through the second: this test resolves the mount request only after the
+  // button has been pressed, so the first answer here is a rendered one.
   const STALE_SINCE = "2020-01-01T00:00:00Z";
   let settleMoveState: (s: unknown) => void = () => {};
   const moveState = vi.fn().mockReturnValue(
@@ -198,14 +252,29 @@ test("a click's waiting state is not overwritten by a slower answer about how th
       settleAuthorize = resolve;
     })
   );
-  render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
+  const { rerender } = render(MatrixIdentityPanel, { station: RETIRED, authorize, moveState });
+
+  // Nothing is offered until the hub has answered — the panel no longer
+  // guesses from a column.
+  expect(screen.queryByRole("button", { name: /move to its own identity/i })).toBeNull();
+  settleMoveState({ status: "retired-identity", runningAs: OLD, willBecome: NEW });
+  await vi.waitFor(() =>
+    expect(screen.getByRole("button", { name: /move to its own identity/i })).toBeTruthy()
+  );
 
   await fireEvent.click(screen.getByRole("button", { name: /move to its own identity/i }));
   expect(screen.getByRole("button", { name: /authorizing/i })).toBeTruthy();
 
-  // The hub answers the MOUNT's question — a stale `waiting`, from before
-  // this click — while `authorize` is still outstanding.
-  settleMoveState({ status: "waiting", runningAs: OLD, willBecome: NEW, since: STALE_SINCE });
+  // A SECOND answer to the same question — a stale `waiting`, from before this
+  // click — lands while `authorize` is still outstanding.
+  let settleAgain: (s: unknown) => void = () => {};
+  moveState.mockReturnValueOnce(
+    new Promise((resolve) => {
+      settleAgain = resolve;
+    })
+  );
+  await rerender({ station: { id: "station_2", matrixId: OLD }, authorize, moveState });
+  settleAgain({ status: "waiting", runningAs: OLD, willBecome: NEW, since: STALE_SINCE });
   await tick();
 
   // Still authorizing: the in-flight click outranks a reply about the past.
