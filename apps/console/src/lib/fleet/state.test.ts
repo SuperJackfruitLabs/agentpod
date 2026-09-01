@@ -40,16 +40,16 @@ describe("stationState", () => {
 
 describe("nodeState", () => {
   it("maps online to running", () => {
-    expect(nodeState("online")).toBe(STATE.running);
+    expect(nodeState("online")).toMatchObject({ token: "running", label: "Online" });
   });
 
   it("maps offline to error", () => {
-    expect(nodeState("offline")).toBe(STATE.error);
+    expect(nodeState("offline")).toMatchObject({ token: "error", label: "Offline" });
   });
 
   it("falls back to unknown for anything else", () => {
-    expect(nodeState("bogus")).toBe(STATE.unknown);
-    expect(nodeState("")).toBe(STATE.unknown);
+    expect(nodeState("bogus")).toMatchObject({ token: "unknown", label: "Unknown" });
+    expect(nodeState("")).toMatchObject({ token: "unknown", label: "Unknown" });
   });
 });
 

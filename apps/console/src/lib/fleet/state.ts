@@ -45,15 +45,24 @@ export function stationState(status: string): StateInfo {
   }
 }
 
-/** NodeSummary.status ("online" | "offline") → StateInfo. */
+/**
+ * NodeSummary.status ("online" | "offline") → StateInfo.
+ *
+ * The token is shared with a station's — an unreachable node is as red as a
+ * failed agent — but the WORD is the node's own. A machine that is switched
+ * off is offline, not "Error", and a machine answering is online, not
+ * "Running"; only a process runs. Rendering the generic label here put
+ * "Error" against a laptop somebody had simply closed, which is the same
+ * species of lie as reporting an unknown station as stopped.
+ */
 export function nodeState(status: string): StateInfo {
   switch (status) {
     case "online":
-      return STATE.running;
+      return { ...STATE.running, label: "Online" };
     case "offline":
-      return STATE.error;
+      return { ...STATE.error, label: "Offline" };
     default:
-      return STATE.unknown;
+      return { ...STATE.unknown, label: "Unknown" };
   }
 }
 

@@ -1,6 +1,7 @@
 <script module lang="ts">
   import type { ActivityRow } from "$lib/api/client";
   import { STATE, type StateId, type StateInfo } from "$lib/fleet/state";
+  import { fleet } from "$lib/stores/fleet.svelte";
 
   // Tailwind's JIT scanner needs full class names present verbatim in source,
   // so this is a literal lookup rather than `text-status-${token}`. Same
@@ -98,14 +99,23 @@
   });
 
   /**
-   * The subject the row is about. A station key is what a person recognises;
-   * the node id is the fallback when the hub recorded a node-level verb.
-   * Node ids are long and opaque, so they truncate to their first 9 chars —
-   * enough to tell two nodes apart, short enough not to own the row.
+   * The subject the row is about.
+   *
+   * A station key is what a person recognises. For a node-level verb the hub
+   * records only a node id, which is opaque — this used to print its first
+   * nine characters, so the feed read "posture.scan n_super3f" where the
+   * fleet snapshot two components away knows the machine is called
+   * "superchotu". The id survives as the fallback for a node the snapshot has
+   * not loaded (or has since dropped), because a truncated id still tells two
+   * rows apart, and that is better than "—".
    */
+  function nodeName(nodeId: string): string {
+    return fleet.nodes.find((n) => n.id === nodeId)?.name ?? nodeId.slice(0, 9);
+  }
+
   function subject(row: ActivityRow): string {
     if (row.stationKey) return row.stationKey;
-    if (row.nodeId) return row.nodeId.slice(0, 9);
+    if (row.nodeId) return nodeName(row.nodeId);
     return "—";
   }
 </script>
@@ -161,7 +171,7 @@
                no free-text detail of its own — see the task report. -->
           {#if group.head.stationKey && group.head.nodeId}
             <span class="shrink-0 font-mono text-muted-foreground/60">
-              on {group.head.nodeId.slice(0, 9)}
+              on {nodeName(group.head.nodeId)}
             </span>
           {/if}
 

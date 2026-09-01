@@ -10,8 +10,23 @@
  * styles are unavailable here — and that class guards a real layout bug
  * (see the comment on that test).
  */
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 import { render } from "@testing-library/svelte";
+
+// A node-level row records only a node id. The feed resolves it against the
+// shared fleet snapshot so the row names the machine rather than nine
+// characters of hash.
+vi.mock("$lib/stores/fleet.svelte", () => ({
+  fleet: {
+    agents: [],
+    stats: null,
+    nodes: [{ id: "n_super3f2a", name: "superchotu" }],
+    runtimes: [],
+    isLoading: false,
+    error: null,
+    loadedAt: 1,
+  },
+}));
 import type { ActivityRow } from "$lib/api/client";
 import ActivityFeed from "./ActivityFeed.svelte";
 
@@ -169,4 +184,23 @@ test("the feed scrolls horizontally inside itself, never the page", () => {
   const { getByTestId } = render(ActivityFeed, { props: { rows: [row(0)] } });
 
   expect(getByTestId("activity-feed").className).toContain("overflow-x-auto");
+});
+
+test("a node-level row names the node instead of showing its id", () => {
+  const { getByTestId } = render(ActivityFeed, {
+    rows: [row(0, { verb: "posture.scan", stationKey: undefined, nodeId: "n_super3f2a" })],
+  });
+
+  expect(getByTestId("activity-feed").textContent).toContain("superchotu");
+  expect(getByTestId("activity-feed").textContent).not.toContain("n_super3f");
+});
+
+test("a node the snapshot has never heard of still tells rows apart", () => {
+  const { getByTestId } = render(ActivityFeed, {
+    rows: [row(0, { verb: "posture.scan", stationKey: undefined, nodeId: "n_ghost99xyz" })],
+  });
+
+  // Better a truncated id than an em-dash: two unknown nodes must not look
+  // like the same node.
+  expect(getByTestId("activity-feed").textContent).toContain("n_ghost99");
 });
