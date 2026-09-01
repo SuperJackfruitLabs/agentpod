@@ -57,6 +57,42 @@ func TestConformance(t *testing.T) {
 				t.Fatalf("refusal modified the profile:\nbefore: %#v\nafter:  %#v", before, after)
 			}
 		})
+		t.Run(w.Harness()+"/refuses a half-configured credential", func(t *testing.T) {
+			// The other half of Ruling 5, and the deferred minor the
+			// whole-branch review sent back here: the suite covered only
+			// "both keys absent", so a future refactor of the two-key
+			// condition into a one-key one would leave a profile carrying a
+			// stale user id and a fresh token (or the reverse) with nothing
+			// red. Behaviour is already correct — this is what exercises it,
+			// which is the whole point of the ruling this case sits on:
+			// unexercised behaviour on this seam is what shipped an outage.
+			for _, present := range credentialKeys(w) {
+				present := present
+				t.Run("only "+present, func(t *testing.T) {
+					dir := seedRecognisedProfileWithOneCredentialKey(t, w.Harness(), present)
+					before := readAllFiles(t, dir)
+					err := w.Write(dir, "@a:h", "syt_token")
+					if err == nil {
+						t.Fatal("expected a refusal, got a silent write")
+					}
+					// The refusal names the key it did NOT find, so an
+					// operator reads which half of the pair is missing
+					// rather than "something is wrong with this profile".
+					for _, key := range credentialKeys(w) {
+						if key == present {
+							continue
+						}
+						if !strings.Contains(err.Error(), key) {
+							t.Errorf("refusal %q should name the missing key %q", err.Error(), key)
+						}
+					}
+					after := readAllFiles(t, dir)
+					if !reflect.DeepEqual(before, after) {
+						t.Fatalf("refusal modified the profile:\nbefore: %#v\nafter:  %#v", before, after)
+					}
+				})
+			}
+		})
 		t.Run(w.Harness()+"/adjacent config survives", func(t *testing.T) {
 			// Hermes .env carries other keys; auth.json carries provider
 			// credentials. Losing them breaks the agent in a way that has
@@ -157,6 +193,48 @@ func seedRecognisedProfileWithoutCredential(t *testing.T, harness string) string
 		}
 	default:
 		t.Fatalf("seedRecognisedProfileWithoutCredential: no seed defined for harness %q; add one alongside its writer", harness)
+	}
+
+	return dir
+}
+
+// credentialKeys names the two credential keys w's authoritative file
+// carries, in the order a refusal should be able to name either of them.
+func credentialKeys(w ProfileWriter) []string {
+	switch w.Harness() {
+	case "hermes":
+		return []string{"MATRIX_USER_ID", "MATRIX_ACCESS_TOKEN"}
+	default:
+		return nil
+	}
+}
+
+// seedRecognisedProfileWithOneCredentialKey builds a profile whose
+// authoritative file carries exactly ONE of the two credential keys — the
+// half-configured shape. Distinct from both seedProfile ("both present,
+// values stale") and seedRecognisedProfileWithoutCredential ("neither
+// present"), and the case a one-key condition would wrongly accept.
+func seedRecognisedProfileWithOneCredentialKey(t *testing.T, harness, present string) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	switch harness {
+	case "hermes":
+		lines := []string{"# hermes profile env, half configured", "ANTHROPIC_API_KEY=sk-seeded"}
+		switch present {
+		case "MATRIX_USER_ID":
+			lines = append(lines, "MATRIX_USER_ID=@agent_old-identity:id.agentpod.dev")
+		case "MATRIX_ACCESS_TOKEN":
+			lines = append(lines, "MATRIX_ACCESS_TOKEN=syt_old-token")
+		default:
+			t.Fatalf("seedRecognisedProfileWithOneCredentialKey: hermes has no key %q", present)
+		}
+		env := strings.Join(lines, "\n") + "\n"
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0o600); err != nil {
+			t.Fatalf("seed .env: %v", err)
+		}
+	default:
+		t.Fatalf("seedRecognisedProfileWithOneCredentialKey: no seed defined for harness %q; add one alongside its writer", harness)
 	}
 
 	return dir

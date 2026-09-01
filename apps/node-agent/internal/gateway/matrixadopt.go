@@ -91,55 +91,104 @@ type ProfileWriteFunc func(profileDir, mxid, accessToken string) error
 // state.
 type WriterLookupFunc func(harness string) (write ProfileWriteFunc, ok bool)
 
+// CapabilityLookupFunc resolves the capability list a station key currently
+// advertises — the same list `detect` reports to the hub. Backed in
+// production by the descriptor registry; see MatrixAdoptDeps.CapabilitiesFor
+// for what this handler does with it.
+type CapabilityLookupFunc func(key string) ([]string, error)
+
+// MatrixIDReadFunc reads back the Matrix identity a profile now names,
+// returning nil when it names none. It is descriptor.MatrixIDFromProfile,
+// resolved by the caller — the same separation ProfileWriteFunc keeps.
+//
+// This is the READER, not a second copy of what was written, and the
+// difference is the point: a writer that put the credential in a file the
+// harness never loads is invisible to anything that reports back what it
+// meant to write, and visible immediately to this. Design §3 calls that
+// failure "the outage reproduced with a green signal in front of it".
+type MatrixIDReadFunc func(profileDir string) *string
+
 // matrixAdoptHandler wraps an inner Handler and adds the matrix.adopt verb:
 // fetch this station's new Matrix credential from the hub, write it into the
-// harness's profile, then restart the harness so it picks the identity up.
+// harness's profile, restart the harness so it picks the identity up, and
+// report back the identity the profile now reads as.
 //
 // Order is the entire point of this file: write, THEN restart. A restart
 // before the write reloads the OLD identity — the harness comes back up
 // reporting the mxid it always had, which reads to the hub as "this station
 // has not converged" rather than as any kind of error. Nothing in any log
 // says so; the move just silently never finishes.
+//
+// **And the read-back is what closes the move at all.** Design §4 step 5 said
+// the node reports the new mxid "on its next detect", and there is no next
+// detect: this verb restarts the HARNESS, not the node-agent, so the
+// websocket whose open triggers a capability refresh never reopens. Without
+// the value returned here the hub never sees convergence, never retires the
+// old identity, and leaves its credential live forever.
 type matrixAdoptHandler struct {
-	inner      Handler
-	resolver   WorkspaceResolver // profile dir == workspace dir for every writer this slice ships
-	harnessFor func(key string) (string, error)
-	writerFor  WriterLookupFunc
-	fetch      CredentialFetcher
-	restart    func(key string) error
+	inner Handler
+	deps  MatrixAdoptDeps
+}
+
+// MatrixAdoptDeps is everything the matrix.adopt verb needs, named rather
+// than positional: seven collaborators in a fixed order is a call site where
+// two same-typed funcs can be swapped silently.
+type MatrixAdoptDeps struct {
+	// Resolver resolves a station key to its profile directory — the same
+	// WorkspaceResolver term.open and changeset.* already use. For every
+	// harness this slice's writers cover, the profile a writer targets IS the
+	// station's workspace.
+	Resolver WorkspaceResolver
+
+	// HarnessFor resolves a station key to its harness name, so the right
+	// writer can be looked up before anything reaches the network.
+	HarnessFor func(key string) (string, error)
+
+	// CapabilitiesFor resolves what a station key can actually be asked to do.
+	//
+	// This verb ends in a restart, and `lifecycle` is exactly the capability
+	// that says a station may be restarted. A Hermes profile that shares the
+	// root gateway's Matrix identity has it deliberately withheld
+	// (descriptor/hermes.go, issue #273): that profile is a VIEW onto the
+	// agent the root gateway already runs, not a separately startable thing,
+	// and starting it would put a second gateway on one messaging identity.
+	// Such a station still has matrix_id != bridge_matrix_id, so the console
+	// offers it the move — which is why the refusal has to live here, on the
+	// side that knows what the station is.
+	CapabilitiesFor CapabilityLookupFunc
+
+	// WriterFor resolves the ProfileWriteFunc for a harness; see
+	// WriterLookupFunc.
+	WriterFor WriterLookupFunc
+
+	// Fetch redeems this node's authority for the station's new credential
+	// over HTTP; see NewHTTPCredentialFetcher for the production
+	// implementation.
+	Fetch CredentialFetcher
+
+	// Restart performs the "restart" lifecycle action for key — reused from
+	// the existing lifecycle verb path, not reimplemented; see
+	// cmd/agentpod-node/run.go's lifecycleFn.
+	Restart func(key string) error
+
+	// ReadIdentity reads the profile back through the real reader; see
+	// MatrixIDReadFunc.
+	ReadIdentity MatrixIDReadFunc
 }
 
 // NewMatrixAdoptHandler wraps inner with the matrix.adopt verb.
-//
-//   - resolver resolves a station key to its profile directory — the same
-//     WorkspaceResolver term.open and changeset.* already use. For every
-//     harness this slice's writers cover, the profile a writer targets IS
-//     the station's workspace.
-//   - harnessFor resolves a station key to its harness name, so the right
-//     writer can be looked up before anything reaches the network.
-//   - writerFor resolves the ProfileWriteFunc for a harness; see
-//     WriterLookupFunc.
-//   - fetch redeems this node's authority for key's new credential over
-//     HTTP; see NewHTTPCredentialFetcher for the production implementation.
-//   - restart performs the "restart" lifecycle action for key — reused from
-//     the existing lifecycle verb path, not reimplemented; see
-//     cmd/agentpod-node/run.go's lifecycleFn.
-func NewMatrixAdoptHandler(
-	inner Handler,
-	resolver WorkspaceResolver,
-	harnessFor func(key string) (string, error),
-	writerFor WriterLookupFunc,
-	fetch CredentialFetcher,
-	restart func(key string) error,
-) Handler {
-	return &matrixAdoptHandler{
-		inner:      inner,
-		resolver:   resolver,
-		harnessFor: harnessFor,
-		writerFor:  writerFor,
-		fetch:      fetch,
-		restart:    restart,
+func NewMatrixAdoptHandler(inner Handler, deps MatrixAdoptDeps) Handler {
+	return &matrixAdoptHandler{inner: inner, deps: deps}
+}
+
+// hasCapability reports whether caps contains want.
+func hasCapability(caps []string, want string) bool {
+	for _, c := range caps {
+		if c == want {
+			return true
+		}
 	}
+	return false
 }
 
 // Handle intercepts "matrix.adopt" and delegates every other verb to inner.
@@ -167,7 +216,7 @@ func (h *matrixAdoptHandler) Handle(
 		return nil, false, fmt.Errorf("matrix.adopt: bad params: missing key or stationId")
 	}
 
-	harness, err := h.harnessFor(p.Key)
+	harness, err := h.deps.HarnessFor(p.Key)
 	if err != nil {
 		return nil, false, fmt.Errorf("matrix.adopt: %q: %w", p.Key, err)
 	}
@@ -176,17 +225,41 @@ func (h *matrixAdoptHandler) Handle(
 	// way to store would spend a live, single-use authorization for
 	// nothing — the human would have to re-authorise the move from scratch
 	// for a station that was never going to converge.
-	write, ok := h.writerFor(harness)
+	write, ok := h.deps.WriterFor(harness)
 	if !ok {
 		return nil, false, fmt.Errorf("matrix.adopt: %q: harness %q has no Matrix profile writer", p.Key, harness)
 	}
 
-	profileDir, err := h.resolver.Workspace(p.Key)
+	// The same posture, one refusal over: a station this node may not restart
+	// cannot complete a move, because the restart is how the harness picks the
+	// new credential up. Refusing here — before the fetch — leaves the
+	// authorization unspent and the station exactly as it was, rather than
+	// writing a credential into a profile whose process nothing may cycle.
+	//
+	// Restarting anyway is the worse half: `lifecycle` is withheld from a
+	// Hermes profile sharing the root gateway's identity precisely so nothing
+	// starts a second gateway on that identity (issue #273), and this verb
+	// would have done it through a path that never asked.
+	caps, err := h.deps.CapabilitiesFor(p.Key)
+	if err != nil {
+		return nil, false, fmt.Errorf("matrix.adopt: %q: capabilities: %w", p.Key, err)
+	}
+	if !hasCapability(caps, "lifecycle") {
+		return nil, false, fmt.Errorf(
+			"matrix.adopt: %q: this station has no \"lifecycle\" capability, so its harness "+
+				"cannot be restarted to pick up a new identity — a Hermes profile sharing the "+
+				"root gateway's Matrix identity is a view onto that agent rather than a "+
+				"separately startable one (issue #273), and the root station is where it moves",
+			p.Key,
+		)
+	}
+
+	profileDir, err := h.deps.Resolver.Workspace(p.Key)
 	if err != nil {
 		return nil, false, fmt.Errorf("matrix.adopt: %q: profile dir: %w", p.Key, err)
 	}
 
-	cred, err := h.fetch(ctx, p.StationID)
+	cred, err := h.deps.Fetch(ctx, p.StationID)
 	if err != nil {
 		return nil, false, fmt.Errorf("matrix.adopt: %q: %w", p.Key, err)
 	}
@@ -198,7 +271,7 @@ func (h *matrixAdoptHandler) Handle(
 		return nil, false, fmt.Errorf("matrix.adopt: %q: writing profile: %w", p.Key, err)
 	}
 
-	if err := h.restart(p.Key); err != nil {
+	if err := h.deps.Restart(p.Key); err != nil {
 		// The credential IS written at this point — the profile now names
 		// the new identity even though the running process has not picked
 		// it up yet. Said plainly so an operator does not read this as "the
@@ -206,9 +279,28 @@ func (h *matrixAdoptHandler) Handle(
 		return nil, false, fmt.Errorf("matrix.adopt: %q: wrote the credential but could not restart: %w", p.Key, err)
 	}
 
-	log.Printf("gateway: matrix.adopt converged station %q to %s", p.Key, cred.UserID)
+	// The move's only trigger, and the write's only real verification: read
+	// the profile back through the reader a detect would have used. A writer
+	// that put the credential where the harness does not look reports nil (or
+	// the OLD mxid) here, which the hub reads as "not converged" — the safe
+	// state §4 promises — instead of the green signal echoing cred.UserID
+	// back would have produced.
+	var reported any
+	if mxid := h.deps.ReadIdentity(profileDir); mxid != nil {
+		reported = *mxid
+		log.Printf("gateway: matrix.adopt restarted station %q, profile now reads as %s", p.Key, *mxid)
+	} else {
+		// Not an error: the credential is written and the harness restarted,
+		// so the station is no worse off than before. But the hub will not
+		// see convergence, so say why here rather than let it be silent.
+		log.Printf(
+			"gateway: matrix.adopt wrote and restarted station %q but its profile reads as no "+
+				"Matrix identity — the hub will not see this move converge",
+			p.Key,
+		)
+	}
 
-	return map[string]any{"accepted": true}, false, nil
+	return map[string]any{"accepted": true, "matrixId": reported}, false, nil
 }
 
 // HandleFrame forwards inbound terminal/ACP input frames to the inner

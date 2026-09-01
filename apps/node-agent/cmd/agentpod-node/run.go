@@ -74,26 +74,53 @@ func runCmd() {
 	})
 
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
-	h = gateway.NewMatrixAdoptHandler(
-		h,
-		resolver,
-		func(key string) (string, error) {
+	h = gateway.NewMatrixAdoptHandler(h, gateway.MatrixAdoptDeps{
+		Resolver: resolver,
+		HarnessFor: func(key string) (string, error) {
 			d, err := reg.For(key)
 			if err != nil {
 				return "", err
 			}
 			return d.Harness(), nil
 		},
-		gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
+		// The capability list `detect` would report for this key. Asked of the
+		// descriptor rather than remembered, for the same reason the hub reads
+		// `matrix_id` off a detect: a station's capabilities are a fact about
+		// the host right now, and the one this verb needs — `lifecycle` — is
+		// withheld dynamically (descriptor/hermes.go, issue #273).
+		CapabilitiesFor: func(key string) ([]string, error) {
+			d, err := reg.For(key)
+			if err != nil {
+				return nil, err
+			}
+			stations, err := d.Detect()
+			if err != nil {
+				return nil, fmt.Errorf("capability lookup: detect: %w", err)
+			}
+			for _, s := range stations {
+				if s.Key == key {
+					return s.Capabilities, nil
+				}
+			}
+			return nil, fmt.Errorf("capability lookup: no station with key %q", key)
+		},
+		WriterFor: gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
 			w, ok := descriptor.WriterFor(harness)
 			if !ok {
 				return nil, false
 			}
 			return w.Write, true
 		}),
-		gateway.NewHTTPCredentialFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
-		func(key string) error { return lifecycleFn(key, "restart") },
-	)
+		Fetch:   gateway.NewHTTPCredentialFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
+		Restart: func(key string) error { return lifecycleFn(key, "restart") },
+		// The REAL reader, the one a detect uses — not a copy of what was
+		// just written. See MatrixIDReadFunc. The domain argument is ignored
+		// by the reader (it validates the mxid's shape, not its homeserver),
+		// which is why every other call site passes whatever it has.
+		ReadIdentity: func(profileDir string) *string {
+			return descriptor.MatrixIDFromProfile(profileDir, "")
+		},
+	})
 	h = gateway.NewChangesetHandler(h, resolver)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)

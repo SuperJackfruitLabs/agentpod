@@ -28,17 +28,24 @@ func fakeWriter(calls *[]string, err error) ProfileWriteFunc {
 }
 
 func TestMatrixAdoptPassesOtherVerbsThrough(t *testing.T) {
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { return "", errors.New("should not be called") }),
-		func(string) (string, error) { return "", errors.New("should not be called") },
-		func(string) (ProfileWriteFunc, bool) { t.Fatal("writerFor should not be called for other verbs"); return nil, false },
-		func(context.Context, string) (MatrixCredential, error) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:   WorkspaceFunc(func(string) (string, error) { return "", errors.New("should not be called") }),
+		HarnessFor: func(string) (string, error) { return "", errors.New("should not be called") },
+		CapabilitiesFor: func(string) ([]string, error) {
+			t.Fatal("capabilitiesFor should not be called for other verbs")
+			return nil, nil
+		},
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
+			t.Fatal("writerFor should not be called for other verbs")
+			return nil, false
+		},
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			t.Fatal("fetch should not be called for other verbs")
 			return MatrixCredential{}, nil
 		},
-		func(string) error { t.Fatal("restart should not be called for other verbs"); return nil },
-	)
+		Restart:      func(string) error { t.Fatal("restart should not be called for other verbs"); return nil },
+		ReadIdentity: func(string) *string { t.Fatal("readIdentity should not be called for other verbs"); return nil },
+	})
 	got, _, err := h.Handle(t.Context(), "health", json.RawMessage(`{}`), nil)
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
@@ -55,17 +62,18 @@ func TestAdoptRefusesUnsupportedHarness(t *testing.T) {
 	fetchCalled := false
 	restartCalled := false
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { return "/profiles/foo", nil }),
-		func(string) (string, error) { return "openclaw", nil },
-		func(harness string) (ProfileWriteFunc, bool) { return nil, false }, // no writer registered
-		func(context.Context, string) (MatrixCredential, error) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(string) (string, error) { return "/profiles/foo", nil }),
+		HarnessFor:      func(string) (string, error) { return "openclaw", nil },
+		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
+		WriterFor:       func(harness string) (ProfileWriteFunc, bool) { return nil, false }, // no writer registered
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			fetchCalled = true
 			return MatrixCredential{}, nil
 		},
-		func(string) error { restartCalled = true; return nil },
-	)
+		Restart:      func(string) error { restartCalled = true; return nil },
+		ReadIdentity: func(string) *string { return nil },
+	})
 
 	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"openclaw:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
@@ -91,24 +99,29 @@ func TestAdoptRefusesUnsupportedHarness(t *testing.T) {
 func TestAdoptWritesThenRestarts(t *testing.T) {
 	var calls []string
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(key string) (string, error) { return "/profiles/writer-quill", nil }),
-		func(string) (string, error) { return "hermes", nil },
-		func(harness string) (ProfileWriteFunc, bool) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(key string) (string, error) { return "/profiles/writer-quill", nil }),
+		HarnessFor:      func(string) (string, error) { return "hermes", nil },
+		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
+		WriterFor: func(harness string) (ProfileWriteFunc, bool) {
 			if harness != "hermes" {
 				return nil, false
 			}
 			return fakeWriter(&calls, nil), true
 		},
-		func(context.Context, string) (MatrixCredential, error) {
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: "syt_secret"}, nil
 		},
-		func(string) error {
+		Restart: func(string) error {
 			calls = append(calls, "restart")
 			return nil
 		},
-	)
+		ReadIdentity: func(string) *string {
+			calls = append(calls, "read")
+			mxid := "@agent_writer-quill:id.agentpod.dev"
+			return &mxid
+		},
+	})
 
 	res, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err != nil {
@@ -117,11 +130,15 @@ func TestAdoptWritesThenRestarts(t *testing.T) {
 
 	accepted, ok := res.(map[string]any)
 	if !ok || accepted["accepted"] != true {
-		t.Errorf("result = %#v, want {accepted:true}", res)
+		t.Errorf("result = %#v, want accepted:true", res)
 	}
 
-	want := []string{"write", "restart"}
-	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] {
+	// Write, restart, THEN read back. The read is last on purpose: it answers
+	// "what does this profile say now", and asking it before the restart would
+	// still be a fact about the file rather than about the running harness —
+	// but asking it before the WRITE would answer about the old identity.
+	want := []string{"write", "restart", "read"}
+	if len(calls) != len(want) || calls[0] != want[0] || calls[1] != want[1] || calls[2] != want[2] {
 		t.Fatalf("calls = %v, want %v (write before restart — a restart before the write reloads the OLD identity)", calls, want)
 	}
 }
@@ -136,29 +153,35 @@ func TestAdoptWritesThenRestarts(t *testing.T) {
 func TestAdoptFetchesByStationIdNotKey(t *testing.T) {
 	var fetchedWith string
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(key string) (string, error) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver: WorkspaceFunc(func(key string) (string, error) {
 			if key != "hermes:writer-quill" {
 				t.Errorf("profile lookup used %q, want the station KEY", key)
 			}
 			return "/profiles/writer-quill", nil
 		}),
-		func(key string) (string, error) {
+		HarnessFor: func(key string) (string, error) {
 			if key != "hermes:writer-quill" {
 				t.Errorf("harness lookup used %q, want the station KEY", key)
 			}
 			return "hermes", nil
 		},
-		func(string) (ProfileWriteFunc, bool) {
+		CapabilitiesFor: func(key string) ([]string, error) {
+			if key != "hermes:writer-quill" {
+				t.Errorf("capability lookup used %q, want the station KEY", key)
+			}
+			return []string{"lifecycle"}, nil
+		},
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
 			return func(string, string, string) error { return nil }, true
 		},
-		func(_ context.Context, id string) (MatrixCredential, error) {
+		Fetch: func(_ context.Context, id string) (MatrixCredential, error) {
 			fetchedWith = id
 			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: "syt_secret"}, nil
 		},
-		func(string) error { return nil },
-	)
+		Restart:      func(string) error { return nil },
+		ReadIdentity: func(string) *string { return nil },
+	})
 
 	_, _, err := h.Handle(
 		t.Context(),
@@ -182,17 +205,18 @@ func TestAdoptFetchesByStationIdNotKey(t *testing.T) {
 // TestAdoptRefusesMissingStationId: params with a key but no stationId are
 // bad params, refused before any lookup — the same posture as a missing key.
 func TestAdoptRefusesMissingStationId(t *testing.T) {
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { t.Fatal("resolver should not be called"); return "", nil }),
-		func(string) (string, error) { t.Fatal("harnessFor should not be called"); return "", nil },
-		func(string) (ProfileWriteFunc, bool) { t.Fatal("writerFor should not be called"); return nil, false },
-		func(context.Context, string) (MatrixCredential, error) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(string) (string, error) { t.Fatal("resolver should not be called"); return "", nil }),
+		HarnessFor:      func(string) (string, error) { t.Fatal("harnessFor should not be called"); return "", nil },
+		CapabilitiesFor: func(string) ([]string, error) { t.Fatal("capabilitiesFor should not be called"); return nil, nil },
+		WriterFor:       func(string) (ProfileWriteFunc, bool) { t.Fatal("writerFor should not be called"); return nil, false },
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			t.Fatal("fetch should not be called")
 			return MatrixCredential{}, nil
 		},
-		func(string) error { t.Fatal("restart should not be called"); return nil },
-	)
+		Restart:      func(string) error { t.Fatal("restart should not be called"); return nil },
+		ReadIdentity: func(string) *string { t.Fatal("readIdentity should not be called"); return nil },
+	})
 
 	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill"}`), nil)
 	if err == nil {
@@ -207,18 +231,19 @@ func TestAdoptDoesNotRestartWhenTheWriteFails(t *testing.T) {
 	var calls []string
 	restartCalled := false
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
-		func(string) (string, error) { return "hermes", nil },
-		func(string) (ProfileWriteFunc, bool) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
+		HarnessFor:      func(string) (string, error) { return "hermes", nil },
+		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
 			return fakeWriter(&calls, errors.New("profile has never held a credential")), true
 		},
-		func(context.Context, string) (MatrixCredential, error) {
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: "syt_secret"}, nil
 		},
-		func(string) error { restartCalled = true; return nil },
-	)
+		Restart:      func(string) error { restartCalled = true; return nil },
+		ReadIdentity: func(string) *string { t.Fatal("readIdentity should not be called after a failed write"); return nil },
+	})
 
 	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
@@ -248,18 +273,22 @@ func TestAdoptNeverLogsTheToken(t *testing.T) {
 		log.SetFlags(prevFlags)
 	}()
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
-		func(string) (string, error) { return "hermes", nil },
-		func(string) (ProfileWriteFunc, bool) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
+		HarnessFor:      func(string) (string, error) { return "hermes", nil },
+		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
 			return func(profileDir, mxid, accessToken string) error { return nil }, true
 		},
-		func(context.Context, string) (MatrixCredential, error) {
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: secretToken, DeviceID: "DEV1"}, nil
 		},
-		func(string) error { return nil },
-	)
+		Restart: func(string) error { return nil },
+		ReadIdentity: func(string) *string {
+			mxid := "@agent_writer-quill:id.agentpod.dev"
+			return &mxid
+		},
+	})
 
 	if _, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil); err != nil {
 		t.Fatalf("Handle: %v", err)
@@ -286,20 +315,21 @@ func TestAdoptNeverLogsTheTokenOnFailure(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(prevOutput)
 
-	h := NewMatrixAdoptHandler(
-		matrixAdoptPassthrough(),
-		WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
-		func(string) (string, error) { return "hermes", nil },
-		func(string) (ProfileWriteFunc, bool) {
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:        WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
+		HarnessFor:      func(string) (string, error) { return "hermes", nil },
+		CapabilitiesFor: func(string) ([]string, error) { return []string{"lifecycle"}, nil },
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
 			return func(profileDir, mxid, accessToken string) error {
 				return errors.New("profile has never held a credential")
 			}, true
 		},
-		func(context.Context, string) (MatrixCredential, error) {
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
 			return MatrixCredential{UserID: "@agent_writer-quill:id.agentpod.dev", AccessToken: secretToken}, nil
 		},
-		func(string) error { return nil },
-	)
+		Restart:      func(string) error { return nil },
+		ReadIdentity: func(string) *string { return nil },
+	})
 
 	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_test_id"}`), nil)
 	if err == nil {
@@ -310,5 +340,55 @@ func TestAdoptNeverLogsTheTokenOnFailure(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), secretToken) {
 		t.Errorf("the access token appeared in the log output: %q", buf.String())
+	}
+}
+
+// TestAdoptRefusesAStationWithNoLifecycleCapability is the #273 guard.
+//
+// A Hermes profile that shares the root gateway's Matrix identity has
+// `lifecycle` withheld (descriptor/hermes.go) because it is a VIEW onto the
+// agent the root gateway already runs, not a separately startable one —
+// starting it would put a second gateway on one messaging identity. Such a
+// station still has matrix_id != bridge_matrix_id, so the console offers it
+// the move; this verb used to call restart without ever asking.
+//
+// The refusal is before the fetch, so a live single-use authorization is not
+// spent on a station that could never converge.
+func TestAdoptRefusesAStationWithNoLifecycleCapability(t *testing.T) {
+	fetchCalled, restartCalled := false, false
+
+	h := NewMatrixAdoptHandler(matrixAdoptPassthrough(), MatrixAdoptDeps{
+		Resolver:   WorkspaceFunc(func(string) (string, error) { return "/profiles/writer-quill", nil }),
+		HarnessFor: func(string) (string, error) { return "hermes", nil },
+		// Everything a Hermes profile view gets EXCEPT lifecycle.
+		CapabilitiesFor: func(string) ([]string, error) {
+			return []string{"files", "logs", "health"}, nil
+		},
+		WriterFor: func(string) (ProfileWriteFunc, bool) {
+			return func(string, string, string) error {
+				t.Fatal("the profile was written for a station that may not be restarted")
+				return nil
+			}, true
+		},
+		Fetch: func(context.Context, string) (MatrixCredential, error) {
+			fetchCalled = true
+			return MatrixCredential{}, nil
+		},
+		Restart:      func(string) error { restartCalled = true; return nil },
+		ReadIdentity: func(string) *string { return nil },
+	})
+
+	_, _, err := h.Handle(t.Context(), "matrix.adopt", json.RawMessage(`{"key":"hermes:writer-quill","stationId":"station_db_id"}`), nil)
+	if err == nil {
+		t.Fatal("want a refusal for a station with no lifecycle capability")
+	}
+	if !strings.Contains(err.Error(), "lifecycle") {
+		t.Errorf("error %q should name the capability it refused on", err.Error())
+	}
+	if restartCalled {
+		t.Error("restart was called on a station whose lifecycle capability is deliberately withheld (issue #273)")
+	}
+	if fetchCalled {
+		t.Error("a live single-use authorization was spent on a station that could never converge")
 	}
 }
