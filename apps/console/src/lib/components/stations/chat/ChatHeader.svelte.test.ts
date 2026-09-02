@@ -162,8 +162,10 @@ test("a live session offers New session alongside End session", async () => {
 });
 
 test("New session is disabled while a create is in flight", () => {
-  const { getByRole } = setup({ creating: true });
-  expect((getByRole("button", { name: "New session" }) as HTMLButtonElement).disabled).toBe(true);
+  // Looked up by testid, not by name: while creating, the label is the point —
+  // it reads "Starting…" so a 5-7 second wait is not an apparently dead click.
+  const { getByTestId } = setup({ creating: true });
+  expect((getByTestId("chat-new-session") as HTMLButtonElement).disabled).toBe(true);
 });
 
 // ─── Session switcher ───────────────────────────────────────────────────────
@@ -476,4 +478,42 @@ test("the preamble adds no second live region", () => {
   const u = setup({ preamble: { text: "pi v0.84.1", summary: "pi v0.84.1", more: 0 } });
 
   expect(u.getAllByRole("status")).toHaveLength(1);
+});
+
+// --- starting a session -----------------------------------------------------
+//
+// Reported from use: "a new session starts only after the first message is
+// sent, not when the button is clicked." Both halves were true. The controls
+// lived inside `{#if session}`, so a station with NO session rendered no
+// button at all and the only way to start one was to send a message —
+// `prompt()` creates one lazily. And `creating` merely disabled the button, so
+// the 5-7 seconds the hub spends spawning the agent's ACP process looked like
+// a dead click.
+
+test("a station with no session still offers a way to start one", async () => {
+  const { getByTestId, onNew } = setup({ session: null, sessions: [], selectedId: null });
+
+  const start = getByTestId("chat-start-session");
+  expect(start.textContent?.trim()).toBe("Start session");
+
+  await fireEvent.click(start);
+  expect(onNew).toHaveBeenCalledTimes(1);
+});
+
+test("the button says it is starting, rather than just going grey", () => {
+  const { getByTestId } = setup({ session: null, sessions: [], selectedId: null, creating: true });
+
+  const start = getByTestId("chat-start-session");
+  expect(start.textContent?.trim()).toBe("Starting…");
+  expect((start as HTMLButtonElement).disabled).toBe(true);
+});
+
+test("an existing session still says New session", () => {
+  const { getByTestId } = setup();
+  expect(getByTestId("chat-new-session").textContent?.trim()).toBe("New session");
+});
+
+test("New session also reports that it is starting", () => {
+  const { getByTestId } = setup({ creating: true });
+  expect(getByTestId("chat-new-session").textContent?.trim()).toBe("Starting…");
 });

@@ -285,16 +285,43 @@
       {/each}
     </div>
 
-    {#if session}
-      <div class="ml-auto flex items-center gap-1">
+    <div class="ml-auto flex items-center gap-1">
+      {#if session}
         {#if status !== "ended"}
           <Button variant="ghost" size="sm" onclick={() => (confirmEndOpen = true)}>
             End session
           </Button>
         {/if}
-        <Button variant="outline" size="sm" disabled={creating} onclick={onNew}>New session</Button>
-      </div>
-    {/if}
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="chat-new-session"
+          disabled={creating}
+          onclick={onNew}
+        >
+          {creating ? "Starting…" : "New session"}
+        </Button>
+      {:else}
+        <!--
+          A station with no session used to render no button at all, because this
+          whole group sat inside `{#if session}`. The only way to start one was to
+          send a message — `prompt()` creates a session when none is attached — so
+          the very first message silently paid for it. That is not cheap: against
+          the live fleet the create POST takes 5-7 seconds while the node spawns
+          the agent's ACP process. The wait is the same either way; what was
+          missing was any way to spend it BEFORE typing.
+        -->
+        <Button
+          variant="outline"
+          size="sm"
+          data-testid="chat-start-session"
+          disabled={creating}
+          onclick={onNew}
+        >
+          {creating ? "Starting…" : "Start session"}
+        </Button>
+      {/if}
+    </div>
   </div>
 
   <!-- Session metadata, not conversation. Rendered ONLY when the agent actually
