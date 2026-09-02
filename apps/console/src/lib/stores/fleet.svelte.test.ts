@@ -83,6 +83,7 @@ const station: StationRow = {
   capabilities: [],
   matrixId: null,
   bridgeMatrixId: null,
+  matrixIdentityMode: "bridge",
   purpose: null,
   principalId: "prn_builder",
   adoptedAt: "2026-06-22T00:00:00Z",

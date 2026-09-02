@@ -52,22 +52,37 @@
   const admin = $derived(isAdmin ?? auth.user?.role === "admin");
 
   /**
-   * Which credential this agent speaks with, in prose.
+   * The address this station actually answers on.
    *
-   * The hub's own column is `stations.matrix_identity_mode`, which no console
-   * endpoint returns (`GET /api/nodes/:id/stations` hands back the row
-   * `StationRow` models, and that has no mode field). `matrix_id IS NULL` is
-   * the one part of the same fact a returned column really does settle —
-   * MatrixIdentityPanel decides bridge mode from exactly this and nothing
-   * else — so it is what the sentence is derived from. Recorded as a gap in
-   * the task report; no hub or contract change was made for it.
+   * There are two columns and they are not interchangeable. `matrixId` is what
+   * the HARNESS reports — the node agent owns it, and it is null for a station
+   * that answers through the bridge. `bridgeMatrixId` is what the Application
+   * Service minted, which is the address a bridge-mode station is reachable at.
+   *
+   * Reading only `matrixId` is why every openclaw station on ashram showed
+   * "—" here while Supermessage was quite happily talking to
+   * `@agent_annapurna:id.agentpod.dev`. The hub was already sending it: the
+   * stations route is a bare `db.select()`, so the whole row arrives, and this
+   * panel was picking the wrong half of it.
+   */
+  const matrixAddress = $derived(station?.matrixId ?? station?.bridgeMatrixId ?? null);
+
+  /**
+   * Who answers for this station, from the column that records it.
+   *
+   * Previously inferred from `matrixId === null`, which happens to be right for
+   * a settled fleet and wrong exactly when it matters: a HARNESS-mode station
+   * that has not yet reported its own mxid also has a null `matrixId`, and was
+   * therefore described as one the bridge speaks for — the opposite of the
+   * truth, on the station whose identity is mid-flight. `matrixIdentityMode` is
+   * the hub's own answer and it is in the payload.
    */
   const credentialMode = $derived(
     station === null
       ? null
-      : station.matrixId === null
-        ? "The bridge speaks for it"
-        : "Held by the agent itself",
+      : station.matrixIdentityMode === "harness"
+        ? "Held by the agent itself"
+        : "The bridge speaks for it",
   );
 
   // ─── Who may dispatch it ──────────────────────────────────────────────────
@@ -150,7 +165,7 @@
         <div>
           <dt class="text-xs text-muted-foreground">Matrix address</dt>
           <dd class="font-mono break-all" data-testid="rail-mxid">
-            {station.matrixId ?? "—"}
+            {matrixAddress ?? "—"}
           </dd>
         </div>
         <div>

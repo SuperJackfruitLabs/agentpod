@@ -185,6 +185,13 @@ export type StationRow = {
    */
   bridgeMatrixId: string | null;
   /**
+   * Who answers for this station on Matrix — `bridge` (the appservice speaks
+   * for it) or `harness` (it runs its own client). The hub has always sent it;
+   * it was simply never typed here, so the console inferred the answer from a
+   * null `matrixId` instead of reading it.
+   */
+  matrixIdentityMode: "bridge" | "harness";
+  /**
    * What this agent is FOR — the operator's word, not where it runs. Null when
    * nobody has said, which files it under no Matrix space at all and leaves it
    * in All rooms.

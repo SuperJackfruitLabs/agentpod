@@ -304,6 +304,16 @@
 
   const tabs = $derived.by<TabDef[]>(() => [
     ...(hasAcp ? [{ id: "chat" as const, label: "Chat", icon: MessageSquareIcon }] : []),
+    // Second, not last.
+    //
+    // On a wide screen this is not a tab at all — it is the context rail, on
+    // screen permanently beside whatever else you are doing. Its importance
+    // does not change when the viewport narrows; only the room does. Appending
+    // it after Activity put "which agent is this, and who may dispatch it"
+    // behind a horizontal scroll past seven other tabs, which is the opposite
+    // of what the rail does for free. It is the frame for the rest, so it sits
+    // where you reach it without hunting: immediately after the conversation.
+    ...(narrow ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
     { id: "health" as const, label: "Health", icon: HeartPulseIcon },
     { id: "logs" as const, label: "Logs", icon: ScrollTextIcon },
     { id: "files" as const, label: "Files", icon: FolderIcon },
@@ -324,8 +334,6 @@
     ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity" as const, label: "Activity", icon: ActivityIcon },
-    // Only while the shell has no third column to put it in.
-    ...(narrow ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
   ]);
 
   function handleTabChange(tabId: string) {

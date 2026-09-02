@@ -35,6 +35,7 @@ function station(over: Partial<StationRow> = {}): StationRow {
     capabilities: ["acp"],
     matrixId: null,
     bridgeMatrixId: null,
+    matrixIdentityMode: "bridge",
     purpose: null,
     principalId: null,
     adoptedAt: "2026-06-22T00:00:00Z",
@@ -66,7 +67,7 @@ test("a harness-mode station says the credential is held by the agent itself", a
   vi.spyOn(api, "stationMoveState").mockResolvedValue({ status: "unknown" });
 
   const { getByTestId } = render(ContextRail, {
-    props: { station: station({ matrixId: "@hermes:example.org" }), node },
+    props: { station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }), node },
   });
 
   expect(getByTestId("rail-credential-mode").textContent).toContain("Held by the agent itself");
@@ -206,4 +207,43 @@ test("the rail root is positioned, so an sr-only descendant can't widen the docu
   const { getByTestId } = render(ContextRail, { props: { station: station(), node } });
 
   expect(getByTestId("station-context").className).toContain("relative");
+});
+
+// --- the address a bridge-mode station answers on ---------------------------
+//
+// Reported from the fleet: every openclaw station on ashram showed "—" for its
+// Matrix address while Supermessage was talking to
+// @agent_annapurna:id.agentpod.dev quite happily. Two columns, and this panel
+// read the wrong one. `matrixId` is what the HARNESS reports, null for a bridge
+// station; `bridgeMatrixId` is what the appservice minted. The hub sends both —
+// the stations route is a bare db.select().
+
+test("a bridge-mode station shows the address the appservice minted for it", () => {
+  const { getByTestId } = render(ContextRail, {
+    props: {
+      station: station({
+        matrixId: null,
+        bridgeMatrixId: "@agent_annapurna:id.agentpod.dev",
+        matrixIdentityMode: "bridge",
+      }),
+      node,
+    },
+  });
+
+  expect(getByTestId("rail-mxid").textContent?.trim()).toBe("@agent_annapurna:id.agentpod.dev");
+});
+
+// The subtler half: credential mode was inferred from `matrixId === null`,
+// which is right on a settled fleet and wrong exactly when it matters — a
+// harness station that has not yet reported its mxid was described as one the
+// bridge speaks for, the opposite of the truth, on the station mid-move.
+test("a harness station that has not reported yet is not called a bridge station", () => {
+  const { getByTestId } = render(ContextRail, {
+    props: {
+      station: station({ matrixId: null, bridgeMatrixId: null, matrixIdentityMode: "harness" }),
+      node,
+    },
+  });
+
+  expect(getByTestId("rail-credential-mode").textContent).toContain("Held by the agent itself");
 });
