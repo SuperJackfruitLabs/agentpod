@@ -24,21 +24,35 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 }
 
 // jsdom has no matchMedia. The theme store resolves the "system" colour scheme
-// with it at module-initialisation time (src/lib/themes/store.svelte.ts), so any
-// test that transitively imports a themed component (Terminal, the monaco
-// editor, the station page) crashes during module evaluation without it. Report
-// light mode and no listeners — tests never assert on the resolved scheme.
+// with it at module-initialisation time (src/lib/themes/store.svelte.ts), and
+// components use it for structural breakpoints, so any test that transitively
+// imports a themed component crashes during module evaluation without it.
+//
+// It answers as a nominal 1280px-wide desktop rather than returning `matches:
+// false` to everything. A blanket false is not a neutral default — it makes
+// "(min-width: 701px)" false and "(max-width: 1240px)" false at the same time,
+// so two components asking about the same viewport get opposite answers, and
+// whichever one asks with min-width silently renders its phone layout in every
+// test. Tests that want a narrow viewport stub matchMedia themselves.
+const TEST_VIEWPORT_WIDTH = 1280;
 if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
-  window.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof window.matchMedia;
+  window.matchMedia = ((query: string) => {
+    const min = /\(min-width:\s*(\d+)px\)/.exec(query);
+    const max = /\(max-width:\s*(\d+)px\)/.exec(query);
+    let matches = false;
+    if (min) matches = TEST_VIEWPORT_WIDTH >= Number(min[1]);
+    else if (max) matches = TEST_VIEWPORT_WIDTH <= Number(max[1]);
+    return {
+      matches,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    };
+  }) as unknown as typeof window.matchMedia;
 }
 
 // jsdom 25 installs no Storage implementation on Node 22+, so `localStorage`
