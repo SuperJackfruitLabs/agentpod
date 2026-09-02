@@ -440,3 +440,25 @@ export function findOAuthClient(
 export function isRegisteredRedirect(client: OAuthClient, redirectUri: string): boolean {
   return client.redirectUris.includes(redirectUri);
 }
+
+/**
+ * Where a browser with no hub session is sent to get one, before it can be
+ * asked to authorize anything.
+ *
+ * The hub serves no sign-in page of its own — Better Auth's `/api/auth/*`
+ * routes are an API, not a UI — so this names the console that does. It is a
+ * setting rather than a derivation from `allowedOrigins` because that list is
+ * an allowlist of many origins with no notion of which one a person signs in
+ * at, and picking one out of it by position is how a hub ends up sending its
+ * operators to a Vite dev server.
+ *
+ * The default is the production console, which shares the session cookie's
+ * `.agentpod.dev` domain — signing in there is what makes the hub's own
+ * first-party cookie exist. A hub deployed anywhere else sets HUB_SIGN_IN_URL.
+ *
+ * Nothing the caller sends reaches this value: it is config, so the no-session
+ * redirect can never be steered by a query parameter. That matters because it
+ * is the one redirect `GET /api/auth/authorize` will perform for a caller it
+ * has not yet authenticated.
+ */
+export const signInUrl = getEnv('HUB_SIGN_IN_URL', 'https://console.agentpod.dev/login');

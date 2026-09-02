@@ -13,6 +13,8 @@ import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
 import { servicePublicJwks } from './auth/service-signing.ts';
+// GET /api/auth/authorize — the cross-domain handoff's front door (see below)
+import { authorizeRoutes } from './routes/auth-authorize.ts';
 import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
@@ -148,6 +150,23 @@ const app = new Hono()
       return upstream;
     }
   })
+  /**
+   * GET /api/auth/authorize — the door a browser on another registrable domain
+   * walks through to get a hub token
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, beside the jwks route above, for both of the reasons that
+   * route is: Hono matches in registration order, so the Better Auth catch-all
+   * immediately below would otherwise swallow every `/api/auth/*` path this
+   * hub adds of its own; and `authMiddleware` further down 401s anything that
+   * is not a session or the static API_TOKEN, before a route's own logic runs.
+   *
+   * This route authenticates itself — it reads the caller's Better Auth
+   * session and answers a browser that has none with a redirect to sign in
+   * rather than a 401, which is the entire point of it. `stationTokenRoutes`
+   * below sits ahead of the middleware for the same structural reason.
+   */
+  .route('/', authorizeRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
