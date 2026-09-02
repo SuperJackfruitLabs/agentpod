@@ -32,6 +32,8 @@ import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
 import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
 // Fleet aggregate read (Overview home — control-plane P1)
 import { fleetRoutes } from './routes/fleet.ts';
+// GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
+import { dispatchableRoutes } from './routes/fleet-dispatchable.ts';
 import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 // Runtime provisioning routes
 import { runtimeRoutes } from './routes/runtimes.ts';
@@ -195,6 +197,24 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  /**
+   * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
+   * may dispatch, for kaambaan's agent picker
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, ahead of `authMiddleware`, for the same reason
+   * `stationTokenRoutes` above is: the credential it takes is a hub JWT in
+   * `Authorization: Bearer`, which is neither a Better Auth session nor the
+   * static API_TOKEN, so the middleware would 401 it before the route's own
+   * verification ever ran. The route verifies the token itself, against the
+   * key set `/api/auth/jwks` publishes.
+   *
+   * It shares a prefix with `.route('/api/fleet', fleetRoutes)` further down
+   * and does not collide with it today — that router serves `/agents` and
+   * `/stats` — but it stays above it regardless, so that a wildcard added
+   * there later cannot quietly pull this path behind the middleware.
+   */
+  .route('/', dispatchableRoutes)
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
