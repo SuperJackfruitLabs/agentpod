@@ -50,6 +50,7 @@ import {
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
+import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { stations } from "./schema/stations";
@@ -251,6 +252,19 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "check the signature that tells it, which is backwards. The tenant a token names travels " +
       "INSIDE it, as the `tenant` claim " +
       "(fixtures/ecosystem-identity/token_claims.json).",
+  },
+
+  oauth_codes: {
+    table: oauthCodes,
+    reason:
+      "A 60-second claim ticket for the cross-domain handoff, exempt for the same reason `user` " +
+      "and `principal_identities` are: it records that a PERSON authorized a plane to be handed " +
+      "a token, and a person is not inside a fleet — they reach one. Which tenant the resulting " +
+      "token names is answered where it has always been answered, by buildTokenPayload from the " +
+      "principal at mint time; putting a tenant on the ticket would mean deciding that before " +
+      "the exchange asks, and would imply a code could mean different things in different " +
+      "fleets. Isolation is not weakened: the code carries no authority of its own, and the " +
+      "token it is exchanged for is the same one GET /api/auth/token already issues.",
   },
 
   verification: {

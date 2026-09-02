@@ -51,3 +51,8 @@ export * from "./service-keys";
 
 // A human's authorisation for a station to redeem its own Matrix credential.
 export * from "./matrix-credentials";
+
+// One-time authorization codes for the cross-domain token handoff — the only
+// way a plane on its own domain can reach an issuer behind a SameSite=Lax
+// cookie (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+export * from "./oauth";
