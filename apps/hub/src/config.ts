@@ -349,3 +349,116 @@ export function sessionCookieOptions(
     secure: env.COOKIE_SECURE === 'true',
   };
 }
+
+// ─── The OAuth client registry (who may RECEIVE a token) ─────────────────────
+
+/**
+ * A plane that may be handed a hub token by the cross-domain authorize flow.
+ *
+ * This is deliberately NOT `allowedOrigins`. They answer different questions:
+ * `allowedOrigins` says who may *call* the hub from a browser (CORS / CSRF /
+ * CSWSH), while this says who may *be handed a credential* for whoever is
+ * signed in. Being permitted to make a request must not by itself confer the
+ * right to receive a token, so the two lists are separate and this one is
+ * empty until a deployment opts in.
+ */
+export interface OAuthClient {
+  /** Registry key, named in the `client` query param. */
+  id: string;
+  /** Exact redirect URIs. Full-string compare — no prefix, no origin matching. */
+  redirectUris: string[];
+}
+
+/**
+ * Parse `HUB_OAUTH_CLIENTS`:
+ *
+ *   kaambaan|https://kaambaan.dev/hub/callback,supermessage|https://…
+ *
+ * Several URIs for one client: repeat the client key.
+ *
+ * Exported because `oauthClients` below is computed at module scope and cannot
+ * be re-derived after import — the same reason `sessionCookieOptions` takes an
+ * env rather than reading `process.env` directly.
+ *
+ * A malformed entry is SKIPPED, never thrown: this runs at module scope, so a
+ * typo in an operator's env file would otherwise be a raw stack trace out of an
+ * import that stops the hub booting entirely — for a feature it may not even
+ * use. Skipping is safe in the direction that matters: an entry that does not
+ * parse is simply not in the registry, and authorize refuses what it cannot
+ * find. It never widens anything.
+ */
+export function parseOAuthClients(raw: string | undefined): OAuthClient[] {
+  const byId = new Map<string, OAuthClient>();
+  for (const entry of (raw ?? '').split(',')) {
+    if (!entry.trim()) continue;
+    const parts = entry.split('|');
+    // Exactly one separator. "too|many|pipes" is ambiguous about where the id
+    // ends, and guessing is how a wrong destination gets registered.
+    if (parts.length !== 2) continue;
+    const id = parts[0]!.trim();
+    const redirectUri = parts[1]!.trim();
+    if (!id || !redirectUri) continue;
+    const existing = byId.get(id);
+    if (existing) {
+      if (!existing.redirectUris.includes(redirectUri)) {
+        existing.redirectUris.push(redirectUri);
+      }
+    } else {
+      byId.set(id, { id, redirectUris: [redirectUri] });
+    }
+  }
+  return [...byId.values()];
+}
+
+/**
+ * Empty when HUB_OAUTH_CLIENTS is unset: a hub that has not opted in refuses
+ * every authorize, which is the right posture for a deployment that never
+ * asked for this door.
+ */
+export const oauthClients: OAuthClient[] = parseOAuthClients(process.env.HUB_OAUTH_CLIENTS);
+
+/**
+ * Look up a registered client by its exact id. `registry` exists for tests;
+ * callers pass the id alone and get the hub's own registry.
+ */
+export function findOAuthClient(
+  id: string | null | undefined,
+  registry: readonly OAuthClient[] = oauthClients,
+): OAuthClient | null {
+  if (!id) return null;
+  return registry.find((client) => client.id === id) ?? null;
+}
+
+/**
+ * True only for an EXACT match against that client's registered URIs.
+ *
+ * Full-string equality, on purpose. Prefix or origin matching is how an
+ * authorize endpoint becomes an open redirector that mints credentials:
+ * `https://k.dev/hub/callback/../../evil` shares an origin and a prefix with
+ * the registered URI and is not it.
+ */
+export function isRegisteredRedirect(client: OAuthClient, redirectUri: string): boolean {
+  return client.redirectUris.includes(redirectUri);
+}
+
+/**
+ * Where a browser with no hub session is sent to get one, before it can be
+ * asked to authorize anything.
+ *
+ * The hub serves no sign-in page of its own — Better Auth's `/api/auth/*`
+ * routes are an API, not a UI — so this names the console that does. It is a
+ * setting rather than a derivation from `allowedOrigins` because that list is
+ * an allowlist of many origins with no notion of which one a person signs in
+ * at, and picking one out of it by position is how a hub ends up sending its
+ * operators to a Vite dev server.
+ *
+ * The default is the production console, which shares the session cookie's
+ * `.agentpod.dev` domain — signing in there is what makes the hub's own
+ * first-party cookie exist. A hub deployed anywhere else sets HUB_SIGN_IN_URL.
+ *
+ * Nothing the caller sends reaches this value: it is config, so the no-session
+ * redirect can never be steered by a query parameter. That matters because it
+ * is the one redirect `GET /api/auth/authorize` will perform for a caller it
+ * has not yet authenticated.
+ */
+export const signInUrl = getEnv('HUB_SIGN_IN_URL', 'https://console.agentpod.dev/login');

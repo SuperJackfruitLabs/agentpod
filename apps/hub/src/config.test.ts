@@ -3,7 +3,15 @@
  * No DB connection required — pure functions only.
  */
 import { describe, it, expect, afterEach } from "bun:test";
-import { allowedOrigins, isAllowedOrigin, getEnvInt } from "./config";
+import {
+  allowedOrigins,
+  isAllowedOrigin,
+  getEnvInt,
+  parseOAuthClients,
+  oauthClients,
+  findOAuthClient,
+  isRegisteredRedirect,
+} from "./config";
 
 describe("allowedOrigins (single canonical list)", () => {
   it("contains expected default origins", () => {
@@ -133,5 +141,167 @@ describe("config module evaluation", () => {
     expect(proc.stderr.toString()).not.toMatch(/FLY_VOLUME_SIZE_GB/);
     expect(proc.exitCode).toBe(0);
     expect(JSON.parse(proc.stdout.toString())).toEqual({ volumeSizeGb: 3 });
+  });
+});
+
+// ─── The OAuth client registry ───────────────────────────────────────────────
+
+/**
+ * The registry answers "who may be handed a token", which is a different
+ * question from `allowedOrigins`' "who may call us" — so it is parsed and
+ * tested separately, and starts empty.
+ */
+describe("parseOAuthClients", () => {
+  it("is empty for an unset variable", () => {
+    expect(parseOAuthClients(undefined)).toEqual([]);
+  });
+
+  it("is empty for a present but empty variable", () => {
+    // Same deployment reality as getEnvInt's "" case: an uncommented but
+    // unfilled line must mean "not opted in", not "everything".
+    expect(parseOAuthClients("")).toEqual([]);
+    expect(parseOAuthClients("   ")).toEqual([]);
+  });
+
+  it("parses one client with one redirect URI", () => {
+    expect(parseOAuthClients("kaambaan|https://kaambaan.dev/hub/callback")).toEqual([
+      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+    ]);
+  });
+
+  it("parses several clients", () => {
+    expect(
+      parseOAuthClients(
+        "kaambaan|https://kaambaan.dev/hub/callback,supermessage|https://supermessage.dev/hub/callback",
+      ),
+    ).toEqual([
+      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+      { id: "supermessage", redirectUris: ["https://supermessage.dev/hub/callback"] },
+    ]);
+  });
+
+  it("merges repeated client keys into one entry with several URIs", () => {
+    expect(
+      parseOAuthClients(
+        "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|http://localhost:5174/hub/callback",
+      ),
+    ).toEqual([
+      {
+        id: "kaambaan",
+        redirectUris: [
+          "https://kaambaan.dev/hub/callback",
+          "http://localhost:5174/hub/callback",
+        ],
+      },
+    ]);
+  });
+
+  it("does not repeat a URI registered twice for the same client", () => {
+    expect(
+      parseOAuthClients(
+        "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|https://kaambaan.dev/hub/callback",
+      ),
+    ).toEqual([
+      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+    ]);
+  });
+
+  it("trims whitespace around every part", () => {
+    expect(
+      parseOAuthClients(" kaambaan | https://kaambaan.dev/hub/callback , "),
+    ).toEqual([{ id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] }]);
+  });
+
+  it("skips a malformed entry rather than throwing, and does not widen the rest", () => {
+    // A typo in deployment config must not stop the hub booting — but it must
+    // not silently become a wildcard either. The good entries survive; the bad
+    // one simply is not in the registry, so authorize refuses it.
+    const clients = parseOAuthClients(
+      [
+        "nopipe",                                   // no separator at all
+        "|https://nobody.example/hub/callback",     // empty id
+        "emptyuri|",                                // empty URI
+        "  |  ",                                    // both empty
+        "too|many|pipes",                           // ambiguous
+        "kaambaan|https://kaambaan.dev/hub/callback",
+      ].join(","),
+    );
+    expect(clients).toEqual([
+      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+    ]);
+  });
+});
+
+describe("findOAuthClient", () => {
+  const registry = parseOAuthClients("kaambaan|https://kaambaan.dev/hub/callback");
+
+  it("finds a registered client by exact id", () => {
+    expect(findOAuthClient("kaambaan", registry)?.id).toBe("kaambaan");
+  });
+
+  it("returns null for an unknown, empty or absent id", () => {
+    expect(findOAuthClient("supermessage", registry)).toBeNull();
+    expect(findOAuthClient("KAAMBAAN", registry)).toBeNull();
+    expect(findOAuthClient("", registry)).toBeNull();
+    expect(findOAuthClient(null, registry)).toBeNull();
+    expect(findOAuthClient(undefined, registry)).toBeNull();
+  });
+
+  it("returns null against the default (empty) registry — a hub that has not opted in", () => {
+    expect(oauthClients).toEqual([]);
+    expect(findOAuthClient("kaambaan")).toBeNull();
+  });
+});
+
+describe("isRegisteredRedirect", () => {
+  const client = parseOAuthClients(
+    "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|http://localhost:5174/hub/callback",
+  )[0]!;
+
+  it("accepts an exactly registered URI", () => {
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback")).toBe(true);
+    expect(isRegisteredRedirect(client, "http://localhost:5174/hub/callback")).toBe(true);
+  });
+
+  it("refuses anything that is not the whole string", () => {
+    // Prefix matching is how open redirectors are built: every one of these
+    // sends the code to somewhere the operator never registered.
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback/x")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback?a=1")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback#f")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callbac")).toBe(false);
+    expect(isRegisteredRedirect(client, "http://kaambaan.dev/hub/callback")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://evil.dev/hub/callback")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://kaambaan.dev.evil.dev/hub/callback")).toBe(false);
+    expect(isRegisteredRedirect(client, " https://kaambaan.dev/hub/callback ")).toBe(false);
+    expect(isRegisteredRedirect(client, "")).toBe(false);
+  });
+});
+
+/**
+ * The exported `oauthClients` is computed at module scope, so the only honest
+ * test that it reads HUB_OAUTH_CLIENTS at all is a fresh process — this file
+ * has already imported config.ts with the variable unset.
+ */
+describe("oauthClients at module scope", () => {
+  it("reads HUB_OAUTH_CLIENTS on import", () => {
+    const proc = Bun.spawnSync({
+      cmd: [
+        process.execPath,
+        "-e",
+        `const { oauthClients } = await import(${JSON.stringify(`${import.meta.dir}/config.ts`)});` +
+          `console.log(JSON.stringify(oauthClients));`,
+      ],
+      env: {
+        ...process.env,
+        HUB_OAUTH_CLIENTS: "kaambaan|https://kaambaan.dev/hub/callback",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(proc.exitCode).toBe(0);
+    expect(JSON.parse(proc.stdout.toString())).toEqual([
+      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+    ]);
   });
 });

@@ -13,6 +13,8 @@ import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
 import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
 import { servicePublicJwks } from './auth/service-signing.ts';
+// GET /api/auth/authorize — the cross-domain handoff's front door (see below)
+import { authorizeRoutes } from './routes/auth-authorize.ts';
 import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
@@ -30,6 +32,8 @@ import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
 import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
 // Fleet aggregate read (Overview home — control-plane P1)
 import { fleetRoutes } from './routes/fleet.ts';
+// GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
+import { dispatchableRoutes } from './routes/fleet-dispatchable.ts';
 import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 // Runtime provisioning routes
 import { runtimeRoutes } from './routes/runtimes.ts';
@@ -148,6 +152,23 @@ const app = new Hono()
       return upstream;
     }
   })
+  /**
+   * GET /api/auth/authorize — the door a browser on another registrable domain
+   * walks through to get a hub token
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, beside the jwks route above, for both of the reasons that
+   * route is: Hono matches in registration order, so the Better Auth catch-all
+   * immediately below would otherwise swallow every `/api/auth/*` path this
+   * hub adds of its own; and `authMiddleware` further down 401s anything that
+   * is not a session or the static API_TOKEN, before a route's own logic runs.
+   *
+   * This route authenticates itself — it reads the caller's Better Auth
+   * session and answers a browser that has none with a redirect to sign in
+   * rather than a 401, which is the entire point of it. `stationTokenRoutes`
+   * below sits ahead of the middleware for the same structural reason.
+   */
+  .route('/', authorizeRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
@@ -176,6 +197,24 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  /**
+   * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
+   * may dispatch, for kaambaan's agent picker
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, ahead of `authMiddleware`, for the same reason
+   * `stationTokenRoutes` above is: the credential it takes is a hub JWT in
+   * `Authorization: Bearer`, which is neither a Better Auth session nor the
+   * static API_TOKEN, so the middleware would 401 it before the route's own
+   * verification ever ran. The route verifies the token itself, against the
+   * key set `/api/auth/jwks` publishes.
+   *
+   * It shares a prefix with `.route('/api/fleet', fleetRoutes)` further down
+   * and does not collide with it today — that router serves `/agents` and
+   * `/stats` — but it stays above it regardless, so that a wildcard added
+   * there later cannot quietly pull this path behind the middleware.
+   */
+  .route('/', dispatchableRoutes)
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)

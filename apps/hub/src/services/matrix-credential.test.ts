@@ -112,6 +112,29 @@ test("a freshly minted authorization redeems exactly once", async () => {
   expect(await redeemCredentialAuthorization(STATION)).toBe(false);
 });
 
+test("concurrent redemptions of one authorization produce exactly one winner", async () => {
+  // The sequential replay test above passes even against a read-then-write
+  // body: the first call finishes before the second begins. This one does not.
+  // `redeemCredentialAuthorization` is a single conditional UPDATE precisely so
+  // that 25 simultaneous claims settle in the database rather than in whichever
+  // order the event loop happened to interleave them — and a second winner here
+  // means a second working Matrix credential for one human approval, which is
+  // the whole failure the authorization exists to prevent.
+  //
+  // Written because nothing pinned this. The behaviour was checked by hand when
+  // the function was written and then trusted by later work as if a test held
+  // it; a plan for another feature cited it as "proven under 25 concurrent
+  // redemptions" and its implementer found no such test.
+  await mintCredentialAuthorization(STATION);
+
+  const results = await Promise.all(
+    Array.from({ length: 25 }, () => redeemCredentialAuthorization(STATION))
+  );
+
+  expect(results.filter(Boolean).length).toBe(1);
+  expect(results.filter((r) => r === false).length).toBe(24);
+});
+
 test("an expired authorization does not redeem", async () => {
   await mintCredentialAuthorization(STATION, { ttlMs: -1 });
   expect(await redeemCredentialAuthorization(STATION)).toBe(false);
