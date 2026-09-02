@@ -444,3 +444,40 @@ test("refresh re-reads folders that are already expanded", async () => {
     expect(spy).toHaveBeenCalledWith("station_1", mockDir.path);
   });
 });
+
+// --- the phone layout -------------------------------------------------------
+//
+// Reported from a real phone: the Files tab rendered a column of anonymous
+// folder icons with every filename clipped away. The pane split is horizontal
+// (28% / 72%), so at 414px the tree resolved to ~110px — a chevron, an icon,
+// and nothing else. Below the split's usable width there is ONE pane.
+
+function narrowViewport() {
+  // jsdom has no layout, so the component reads matchMedia rather than a width.
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false, // "(min-width: 701px)" does NOT match => phone
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }));
+}
+
+test("on a phone the tree gets the whole width instead of a 110px sliver", async () => {
+  narrowViewport();
+  const { findByTestId, queryByTestId } = render(FileBrowser, { stationId: "st_1", canWrite: true });
+
+  expect(await findByTestId("file-browser-tree-only")).toBeTruthy();
+  expect(queryByTestId("file-browser-file-only")).toBeNull();
+});
+
+test("on a phone the empty preview does not tell you to press a key you do not have", async () => {
+  narrowViewport();
+  const { findByTestId } = render(FileBrowser, { stationId: "st_1", canWrite: true });
+
+  const tree = await findByTestId("file-browser-tree-only");
+  expect(tree.ownerDocument.body.textContent).not.toContain("⌘P");
+});

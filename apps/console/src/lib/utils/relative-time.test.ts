@@ -4,7 +4,7 @@
  * Unit tests for relativeTime(dateStr) — widened to accept `string | null`
  * so file-preview.svelte's local copy (which handled `null` → "—")
  * can be deleted in favor of this shared util. Existing callers
- * (RecentActivity, activity page) never pass null and keep their behavior.
+ * (ActivityFeed, the nodes table) never pass null and keep their behavior.
  *
  * Run: cd apps/console && pnpm test relative-time
  */

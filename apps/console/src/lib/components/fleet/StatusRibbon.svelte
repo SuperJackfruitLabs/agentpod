@@ -32,7 +32,7 @@
     size?: "lg" | "sm" | "xs";
     /** When provided (lg only in practice), cells become buttons. */
     onSelect?: (id: string) => void;
-    /** data-testid for each cell (FleetHeatmap keeps its legacy "heatmap-cell"). */
+    /** data-testid for each cell; callers that had one before keep their own. */
     cellTestId?: string;
     class?: string;
   }

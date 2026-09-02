@@ -24,7 +24,7 @@ import type { StationHealth } from "@agentpod/contract";
 // The page reads the legacy `$app/stores` page store, so the stub has to be a
 // real (writable) store: tests drive ?tab= through it.
 
-const { pageStore, setUrl, goto } = vi.hoisted(() => {
+const { pageStore, setUrl, setStation, goto } = vi.hoisted(() => {
   const base = "http://localhost/nodes/node_1/stations/station_1";
   let value = {
     url: new URL(base),
@@ -47,6 +47,15 @@ const { pageStore, setUrl, goto } = vi.hoisted(() => {
     },
     setUrl(search: string) {
       value = { ...value, url: new URL(base + search) };
+      for (const fn of subscribers) fn(value);
+    },
+    /** A client-side move to a different agent — what a roster-rail click does. */
+    setStation(stationId: string) {
+      value = {
+        ...value,
+        url: new URL(`http://localhost/nodes/node_1/stations/${stationId}`),
+        params: { id: "node_1", stationId },
+      };
       for (const fn of subscribers) fn(value);
     },
   };
@@ -81,8 +90,46 @@ vi.mock("$lib/api/acp", () => ({
 }));
 
 import * as acpApi from "$lib/api/acp";
-// Mounted through the Tooltip.Provider host (PageHeader's tabs need it).
+import { contextRailSlot, setContextRail } from "$lib/stores/context-rail.svelte";
+// Mounted through a Tooltip.Provider host (panels below the tab bar need one).
 import StationPage from "./page-test-host.svelte";
+
+// ─── viewport ───────────────────────────────────────────────────────────────
+// The Identity tab appears only where the shell has no third column, which the
+// page decides with matchMedia("(max-width: 1240px)") — a JS query, because a
+// Tailwind max-[1240px]: variant compiles to an exclusive media query that
+// leaves 1240px itself in neither branch. vitest-setup's stub answers `false`
+// to everything and registers no listeners, so a test that cares supplies one
+// that does.
+
+const realMatchMedia = window.matchMedia;
+let mediaListeners: Array<(e: MediaQueryListEvent) => void> = [];
+let mediaMatches = false;
+
+function narrowViewport(matches: boolean) {
+  mediaMatches = matches;
+  mediaListeners = [];
+  window.matchMedia = ((query: string) => ({
+    get matches() {
+      return mediaMatches;
+    },
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => mediaListeners.push(fn),
+    removeEventListener: (_: string, fn: (e: MediaQueryListEvent) => void) => {
+      mediaListeners = mediaListeners.filter((l) => l !== fn);
+    },
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
+/** Resize, as the browser reports it. */
+function setNarrow(matches: boolean) {
+  mediaMatches = matches;
+  for (const fn of mediaListeners) fn({ matches } as MediaQueryListEvent);
+}
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -98,7 +145,7 @@ function station(capabilities: StationRow["capabilities"]): StationRow {
     displayName: "Workspace",
     workspacePath: "/home/user/workspace",
     capabilities,
-    matrixId: null, bridgeMatrixId: null, purpose: null,
+    matrixId: null, bridgeMatrixId: null, matrixIdentityMode: "bridge" as const, purpose: null,
     principalId: null,
     adoptedAt: "2026-06-22T00:00:00Z",
     createdAt: "2026-06-22T00:00:00Z",
@@ -120,11 +167,20 @@ beforeEach(() => {
   vi.restoreAllMocks();
   goto.mockClear();
   vi.mocked(acpApi.listAcpSessions).mockClear();
+  setStation("station_1");
   setUrl("");
+  // The rail is a module-level slot shared with the layout; a page left
+  // registered by one test would be read by the next.
+  setContextRail(null);
+  window.matchMedia = realMatchMedia;
   vi.spyOn(api, "stationHealth").mockResolvedValue(health);
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setContextRail(null);
+  window.matchMedia = realMatchMedia;
+});
 
 const tabNames = (tabs: HTMLElement[]) => tabs.map((t) => t.getAttribute("aria-label"));
 const selected = (tabs: HTMLElement[]) =>
@@ -316,4 +372,141 @@ test("the Changes panel mounts and asks the station what changed", async () => {
   render(StationPage);
 
   await waitFor(() => expect(status).toHaveBeenCalledWith("station_1"));
+});
+
+// ─── the header ─────────────────────────────────────────────────────────────
+
+test("the header shows the station key in a font-mono element, and the agent's name in another", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getByTestId } = render(StationPage);
+
+  await waitFor(() => expect(getByTestId("station-key").textContent).toBe("claude://workspace"));
+  // Constraint 3: a station key is machine-issued, so it is mono — but the
+  // line it sits in is prose, so the joins around it are not.
+  expect(getByTestId("station-key").className).toContain("font-mono");
+  expect(getByTestId("station-handle").className).toContain("font-mono");
+  expect(getByTestId("station-handle").textContent).toContain("Workspace");
+  expect(getByTestId("station-summary").textContent).toContain("last spoke");
+});
+
+test("the header carries the state as a word, never as a colour alone", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health"])]);
+
+  const { getByTestId } = render(StationPage);
+
+  // Nothing in the shared fleet snapshot knows this station, and "Unknown" is
+  // its own state — never rendered as "Stopped".
+  await waitFor(() => expect(getByTestId("station-summary").textContent).toContain("Unknown"));
+});
+
+test("Restart and a destructive Stop ride in the header, for a station that has lifecycle", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "lifecycle"])]);
+  const call = vi.spyOn(api, "lifecycle").mockResolvedValue(health);
+
+  const { getByRole, findByRole } = render(StationPage);
+
+  await waitFor(() => expect(getByRole("button", { name: "Restart" })).toBeTruthy());
+  await fireEvent.click(getByRole("button", { name: "Stop" }));
+
+  // Stopping an agent is destructive, so it is confirmed rather than fired.
+  const confirm = await findByRole("button", { name: "Stop agent" });
+  expect(call).not.toHaveBeenCalled();
+  await fireEvent.click(confirm);
+  await waitFor(() => expect(call).toHaveBeenCalledWith("station_1", "stop"));
+});
+
+test("a station without the lifecycle capability gets no Restart or Stop", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getAllByRole, queryByRole } = render(StationPage);
+
+  await waitFor(() => expect(getAllByRole("tab").length).toBeGreaterThan(0));
+  expect(queryByRole("button", { name: "Restart" })).toBeNull();
+  expect(queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
+// ─── the context rail ───────────────────────────────────────────────────────
+
+test("the page hands its rail to the shell while it is mounted, and takes it back", async () => {
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { unmount } = render(StationPage);
+
+  await waitFor(() => expect(contextRailSlot.snippet).not.toBeNull());
+  unmount();
+  // A snippet outliving its owner would be rendered against state that is gone.
+  await waitFor(() => expect(contextRailSlot.snippet).toBeNull());
+});
+
+test("below 1240px the rail becomes an Identity tab, and the shell is given nothing", async () => {
+  narrowViewport(true);
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getAllByRole } = render(StationPage);
+
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Identity"));
+  // Registering it as well would mount ContextRail twice and ask the hub for
+  // the grants twice.
+  expect(contextRailSlot.snippet).toBeNull();
+});
+
+test("the Identity tab disappears again when the viewport grows past 1240px", async () => {
+  narrowViewport(true);
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "acp"])]);
+
+  const { getAllByRole } = render(StationPage);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Identity"));
+
+  setNarrow(false);
+
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).not.toContain("Identity"));
+  await waitFor(() => expect(contextRailSlot.snippet).not.toBeNull());
+});
+
+// ─── moving between agents ──────────────────────────────────────────────────
+
+test("clicking a different agent loads that agent — the route is one page, not one per station", async () => {
+  // The regression this guards: [stationId] changing does not remount the
+  // page, so an onMount-only fetch left the previous agent's header, tabs and
+  // panels on screen under the new URL. Reachable from the node page only by
+  // accident; with the roster rail it is the ordinary move.
+  const rows = vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "logs", "acp"]),
+    { ...station(["health"]), id: "station_2", displayName: "scribe", stationKey: "pi://scratch" },
+  ]);
+
+  const { getByTestId, getAllByRole } = render(StationPage);
+  await waitFor(() => expect(getByTestId("station-handle").textContent).toContain("Workspace"));
+  expect(tabNames(getAllByRole("tab"))).toContain("Chat");
+
+  setStation("station_2");
+
+  await waitFor(() => expect(getByTestId("station-handle").textContent).toContain("scribe"));
+  expect(getByTestId("station-key").textContent).toBe("pi://scratch");
+  // …and its capabilities came with it: no acp on this one, so no Chat tab and
+  // Health leads instead.
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Chat");
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Health"));
+  expect(rows.mock.calls.length).toBeGreaterThan(1);
+});
+
+test("a reply about the agent we have just navigated away from is dropped", async () => {
+  // Two fetches in flight at once is the normal case for a fast double-click
+  // down the roster; the slower one must not win.
+  let resolveFirst: (rows: StationRow[]) => void = () => {};
+  vi.spyOn(api, "listStations")
+    .mockReturnValueOnce(new Promise<StationRow[]>((r) => (resolveFirst = r)))
+    .mockResolvedValue([
+      { ...station(["health"]), id: "station_2", displayName: "scribe", stationKey: "pi://scratch" },
+    ]);
+
+  const { getByTestId } = render(StationPage);
+  setStation("station_2");
+  await waitFor(() => expect(getByTestId("station-handle").textContent).toContain("scribe"));
+
+  resolveFirst([station(["health", "acp"])]);
+  await new Promise((r) => setTimeout(r, 20));
+
+  expect(getByTestId("station-handle").textContent).toContain("scribe");
 });

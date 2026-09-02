@@ -103,8 +103,90 @@ test("lists a principal's grant values", async () => {
     grants: [{ principalId: JO, mayDispatch: [QUILL], mayGrantReach: false }],
   });
 
-  expect(await findByText("Jo")).toBeTruthy();
+  // The handle names the row; the person's name and login are the prose under it.
+  expect(await findByText("jo")).toBeTruthy();
+  expect(await findByText(/Jo · jo@example.com/)).toBeTruthy();
+  // QUILL is not in this fixture's directory, so there is no handle to show and
+  // the bare id survives — see the handle tests below for the joined case.
   expect(await findByText(QUILL)).toBeTruthy();
+});
+
+// ── Handles, not hashes ──────────────────────────────────────────────────────
+//
+// An authorization surface printing `prn_` + 20 hex characters is one nobody
+// reads, and a permission nobody reads is a permission nobody revokes. Every
+// id on this page is joined to the directory first; it survives as a `title`.
+
+test("names a principal by its handle, never by its prn_ id", async () => {
+  const { findByTestId } = setup({
+    principals: [
+      { id: QUILL, kind: "agent", handle: "quill", displayName: "Quill", userId: null, suspendedAt: null },
+    ] satisfies PrincipalSummary[],
+  });
+
+  const label = await findByTestId("principal-handle");
+  expect(label.textContent!.trim()).toBe("quill");
+  expect(label.textContent).not.toContain("prn_");
+  // Still one hover away: this is the exact string the hub compares by equality,
+  // and "is this even the same principal?" is the question a broken grant asks.
+  expect(label.getAttribute("title")).toBe(QUILL);
+});
+
+test("a grant's values read as the handles of the agents they name", async () => {
+  // This is the row that used to be a wall of hashes: a grant's VALUES are
+  // principal ids too, and they are the half an operator actually reads.
+  const { findByTestId } = setup({
+    principals: [
+      JO_PRINCIPAL,
+      { id: QUILL, kind: "agent", handle: "quill", displayName: "Quill", userId: null, suspendedAt: null },
+    ] satisfies PrincipalSummary[],
+    grants: [{ principalId: JO, mayDispatch: [QUILL], mayGrantReach: false }],
+  });
+
+  const value = await findByTestId("grant-value");
+  expect(value.textContent).toContain("quill");
+  expect(value.textContent).not.toContain("prn_");
+  expect(value.getAttribute("title")).toBe(QUILL);
+});
+
+test("a granted id the directory does not know still shows in full, and says so", async () => {
+  // The one grant worth reading character by character is the one naming
+  // something this hub has never heard of. Replacing it with "unknown" alone
+  // would delete the only evidence of what was actually granted.
+  const { findByTestId } = setup({
+    principals: [JO_PRINCIPAL],
+    grants: [{ principalId: JO, mayDispatch: [QUILL], mayGrantReach: false }],
+  });
+
+  const value = await findByTestId("grant-value");
+  expect(value.textContent).toContain(QUILL);
+  expect(value.textContent).toMatch(/unknown/i);
+});
+
+test("groups principals by kind", async () => {
+  const { findByTestId, queryByTestId } = setup({
+    principals: [
+      JO_PRINCIPAL,
+      { id: QUILL, kind: "agent", handle: "quill", displayName: "Quill", userId: null, suspendedAt: null },
+    ] satisfies PrincipalSummary[],
+  });
+
+  expect((await findByTestId("grant-group-human")).textContent).toMatch(/people/i);
+  expect((await findByTestId("grant-group-agent")).textContent).toMatch(/agents/i);
+  // A group with nobody in it is not rendered — an empty "Services" heading
+  // reads as a load that half-failed.
+  expect(queryByTestId("grant-group-service")).toBeNull();
+});
+
+test("an orphaned grant lands in its own group, not among the people", async () => {
+  const { findByTestId } = setup({
+    grants: [
+      { principalId: "prn_0000000000000000dead", mayDispatch: [QUILL], mayGrantReach: false },
+    ],
+  });
+
+  const group = await findByTestId("grant-group-unknown");
+  expect(group.textContent).toContain("prn_0000000000000000dead");
 });
 
 test("keys a row on the principal, not on the Better Auth user behind it", async () => {
@@ -138,7 +220,7 @@ test("shows a principal with no grant rather than hiding them", async () => {
   // thing to discover by having dispatch fail.
   const { findByText } = setup({ grants: [] });
 
-  expect(await findByText("Jo")).toBeTruthy();
+  expect(await findByText("jo")).toBeTruthy();
   // Exact: the enforced banner also explains what having no grant costs.
   expect(await findByText("No grant.")).toBeTruthy();
 });

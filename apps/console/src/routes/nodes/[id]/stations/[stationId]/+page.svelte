@@ -1,6 +1,20 @@
 <script lang="ts">
+  /**
+   * The station page — where you talk to an agent.
+   *
+   * It used to open on two settings cards (the purpose editor and the Matrix
+   * identity panel) stacked above whichever tab was selected, so the Chat tab
+   * — the whole point of an ACP-capable station — began below the fold. Both
+   * cards moved to the shell's context rail, which is where facts ABOUT an
+   * agent belong; the stage is now the conversation and nothing else.
+   *
+   * The panels themselves are re-hosted, not rewritten: the transcript, the
+   * file tree, the terminal, the log tail, the diff viewer, the config editor,
+   * the cleanup panel and the identity panel are the same components with the
+   * same props they always had.
+   */
   import { onMount } from "svelte";
-  import type { Snippet } from "svelte";
+  import type { Component, Snippet } from "svelte";
   import { page } from "$app/stores";
   import { goto } from "$app/navigation";
   import HealthPanel from "$lib/components/stations/HealthPanel.svelte";
@@ -13,18 +27,20 @@
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
-  import { listStations } from "$lib/api/client";
+  import { lifecycle, listStations, setStationPurpose } from "$lib/api/client";
   import { myReach } from "$lib/api/my-grant";
   import type { StationRow } from "$lib/api/client";
-  import PageHeader from "$lib/components/page-header.svelte";
-  import PurposeField from "$lib/components/purpose/PurposeField.svelte";
-  import MatrixIdentityPanel from "$lib/components/stations/MatrixIdentityPanel.svelte";
-  import { setStationPurpose } from "$lib/api/client";
+  import ContextRail from "$lib/components/shell/ContextRail.svelte";
+  import StateDot from "$lib/components/shell/StateDot.svelte";
+  import { stationState } from "$lib/fleet/state";
+  import { fleet, refreshFleet } from "$lib/stores/fleet.svelte";
+  import { setContextRail } from "$lib/stores/context-rail.svelte";
+  import { relativeTime } from "$lib/utils/relative-time";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
-  import HarnessBadge from "$lib/components/fleet/HarnessBadge.svelte";
+  import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
   import * as Dialog from "$lib/components/ui/dialog";
-  import ArrowLeftIcon from "@lucide/svelte/icons/arrow-left";
+  import { cn } from "$lib/utils";
   import HeartPulseIcon from "@lucide/svelte/icons/heart-pulse";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
   import FolderIcon from "@lucide/svelte/icons/folder";
@@ -33,11 +49,22 @@
   import Trash2Icon from "@lucide/svelte/icons/trash-2";
   import ActivityIcon from "@lucide/svelte/icons/activity";
   import MessageSquareIcon from "@lucide/svelte/icons/message-square";
+  import IdCardIcon from "@lucide/svelte/icons/id-card";
+  import LockIcon from "@lucide/svelte/icons/lock";
 
   const nodeId = $derived($page.params.id as string);
   const stationId = $derived($page.params.stationId as string);
 
-  type Tab = "chat" | "health" | "logs" | "files" | "terminal" | "changes" | "cleanup" | "activity";
+  type Tab =
+    | "chat"
+    | "health"
+    | "logs"
+    | "files"
+    | "terminal"
+    | "changes"
+    | "cleanup"
+    | "activity"
+    | "identity";
   const VALID_TABS: readonly Tab[] = [
     "chat",
     "health",
@@ -47,6 +74,7 @@
     "changes",
     "cleanup",
     "activity",
+    "identity",
   ];
 
   // The active tab lives in the URL (?tab=logs) so station views are
@@ -57,16 +85,15 @@
   const activeTab = $derived.by<Tab>(() => {
     const t = $page.url.searchParams?.get("tab");
     const wanted = VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
-    // The active tab must be one the tab bar actually renders. PageHeader gives
-    // the tablist a roving tabindex keyed on it, so a tab that isn't there (a
-    // ?tab=chat deep link while capabilities load, ?tab=terminal on a station
-    // without one) would leave the WHOLE tablist untabbable.
+    // The active tab must be one the tab bar actually renders. The tablist has
+    // a roving tabindex keyed on it, so a tab that isn't there (a ?tab=chat
+    // deep link while capabilities load, ?tab=identity after a resize past
+    // 1240px) would leave the WHOLE tablist untabbable.
     return tabs.some((tab) => tab.id === wanted) ? wanted : defaultTab;
   });
 
-  /** Base id PageHeader builds its tab/panel ids from — kept in one place so
-   *  the tablist's aria-controls and the tabpanels' ids/aria-labelledby
-   *  can't drift apart. */
+  /** Base id the tab buttons and the tabpanels build their ids from — kept in
+   *  one place so aria-controls and aria-labelledby can't drift apart. */
   const tabsId = "page-tabs";
 
   /** Heavy tabs (SSE stream / file tree / terminal session) the user has
@@ -139,35 +166,161 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("cleanup")
   );
 
+  /** Which station the loaded row describes, so a reload of the SAME agent
+   *  (after saving its purpose) can be told from a move to a different one. */
+  let loadedFor: string | null = null;
+
   async function loadStation() {
+    const id = stationId;
     stationLoad = "loading";
     stationLoadError = null;
+    if (loadedFor !== id) {
+      // A different agent. Its facts must not be shown under the previous
+      // one's name for the length of a fetch — and a heavy tab remembered for
+      // the agent we just left is not a tab this one has visited.
+      station = null;
+      visitedHeavyTabs = new Set();
+      actionError = null;
+    }
     try {
       const rows = await listStations(nodeId);
-      station = rows.find((r) => r.id === stationId) ?? null;
+      // A reply about a station we have since navigated away from. Without
+      // this a slow first fetch overwrites a fast second one.
+      if (stationId !== id) return;
+      station = rows.find((r) => r.id === id) ?? null;
+      loadedFor = id;
       // A resolved fetch with no matching row means the station is gone —
       // a dead deep link must say so instead of rendering a broken shell.
       stationLoad = station ? "loaded" : "notFound";
     } catch (e) {
+      if (stationId !== id) return;
       stationLoad = "error";
       stationLoadError = e instanceof Error ? e.message : "Couldn't load this agent.";
     }
   }
 
-  onMount(() => {
+  /**
+   * Load whichever agent the URL names — on arrival AND on every move between
+   * agents.
+   *
+   * `[stationId]/+page.svelte` is ONE page reused across every station, so a
+   * change of station id does not remount it and an `onMount` fetch would only
+   * ever run for the first agent visited. That was survivable while the only
+   * way in was the node page (a different route, so a real remount); with the
+   * roster rail as the console's navigation, agent-to-agent is the ordinary
+   * move, and without this the URL changed while the previous agent's header,
+   * tabs, panels and rail stayed on screen.
+   */
+  $effect(() => {
+    void nodeId;
+    void stationId;
     void loadStation();
-    void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
   });
 
-  const tabs = $derived.by(() => [
-    ...(hasAcp ? [{ id: "chat", label: "Chat", icon: MessageSquareIcon }] : []),
-    { id: "health", label: "Health", icon: HeartPulseIcon },
-    { id: "logs", label: "Logs", icon: ScrollTextIcon },
-    { id: "files", label: "Files", icon: FolderIcon },
+  /**
+   * Below 1240px the shell renders no context column, so the rail's content
+   * becomes a tab instead of disappearing.
+   *
+   * A JS media query, not a Tailwind `max-[1240px]:` variant: Tailwind
+   * compiles those to `not all and (min-width:1240px)`, which is exclusive and
+   * leaves 1240px itself in neither branch — the boundary bug this redesign
+   * already hit once at 900px.
+   */
+  let narrow = $state(false);
+
+  onMount(() => {
+    void myReach().then((r) => (mayGrantReach = r.mayGrantReach));
+
+    const mq = window.matchMedia("(max-width: 1240px)");
+    narrow = mq.matches;
+    const onChange = (e: MediaQueryListEvent) => (narrow = e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  });
+
+  // ─── The header's facts ───────────────────────────────────────────────────
+
+  /**
+   * This station in the shared fleet snapshot.
+   *
+   * The shell already polls it for the roster and the attention lane, so the
+   * header's live state costs no request of its own — and reading the same
+   * snapshot the rail on the left is drawn from is what stops the two from
+   * disagreeing about whether this agent is running.
+   */
+  const fleetAgent = $derived(fleet.agents.find((a) => a.stationId === stationId) ?? null);
+  const node = $derived(fleet.nodes.find((n) => n.id === nodeId) ?? null);
+  const liveState = $derived(stationState(fleetAgent?.status ?? "unknown"));
+  const nodeName = $derived(fleetAgent?.nodeName ?? node?.name ?? nodeId);
+
+  /**
+   * How long since anything was heard about this agent.
+   *
+   * The node's `lastSeenAt`, because a station has no timestamp of its own on
+   * the fleet endpoint — a station's health only reaches the hub on its node's
+   * push, so the node's last-seen IS the age of what this header shows. It is
+   * node-granular: two agents on one node always read the same age. Same
+   * substitution the roster rail makes, and recorded as a gap in both reports.
+   */
+  const lastSpoke = $derived(relativeTime(node?.lastSeenAt ?? null));
+
+  // ─── Lifecycle, from the header ───────────────────────────────────────────
+
+  let pendingAction = $state<"stop" | "restart" | null>(null);
+  let confirmOpen = $state(false);
+  let actionInFlight = $state<"stop" | "restart" | null>(null);
+  let actionError = $state<string | null>(null);
+
+  function askFor(action: "stop" | "restart") {
+    pendingAction = action;
+    confirmOpen = true;
+  }
+
+  async function runLifecycle(action: "stop" | "restart") {
+    actionInFlight = action;
+    actionError = null;
+    try {
+      await lifecycle(stationId, action);
+      // The header's dot comes from the shared snapshot, which is polled every
+      // 30s — without this the state it shows would lag the button that just
+      // changed it. `quiet` so the whole console doesn't flash a loading state.
+      void refreshFleet(true);
+    } catch (e) {
+      actionError = e instanceof Error ? e.message : `Couldn't ${action} the agent.`;
+    } finally {
+      actionInFlight = null;
+    }
+  }
+
+  // ─── Tabs ─────────────────────────────────────────────────────────────────
+
+  interface TabDef {
+    id: Tab;
+    label: string;
+    icon: Component;
+    disabled?: boolean;
+    disabledReason?: string;
+  }
+
+  const tabs = $derived.by<TabDef[]>(() => [
+    ...(hasAcp ? [{ id: "chat" as const, label: "Chat", icon: MessageSquareIcon }] : []),
+    // Second, not last.
+    //
+    // On a wide screen this is not a tab at all — it is the context rail, on
+    // screen permanently beside whatever else you are doing. Its importance
+    // does not change when the viewport narrows; only the room does. Appending
+    // it after Activity put "which agent is this, and who may dispatch it"
+    // behind a horizontal scroll past seven other tabs, which is the opposite
+    // of what the rail does for free. It is the frame for the rest, so it sits
+    // where you reach it without hunting: immediately after the conversation.
+    ...(narrow ? [{ id: "identity" as const, label: "Identity", icon: IdCardIcon }] : []),
+    { id: "health" as const, label: "Health", icon: HeartPulseIcon },
+    { id: "logs" as const, label: "Logs", icon: ScrollTextIcon },
+    { id: "files" as const, label: "Files", icon: FolderIcon },
     ...(hasTerminal
       ? [
           {
-            id: "terminal",
+            id: "terminal" as const,
             label: "Terminal",
             icon: TerminalIcon,
             // A shell changes what an agent is, so it sits behind mayGrantReach.
@@ -178,9 +331,9 @@
           },
         ]
       : []),
-    ...(hasChangeset ? [{ id: "changes", label: "Changes", icon: GitCompareIcon }] : []),
-    ...(hasCleanup ? [{ id: "cleanup", label: "Cleanup", icon: Trash2Icon }] : []),
-    { id: "activity", label: "Activity", icon: ActivityIcon },
+    ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
+    ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
+    { id: "activity" as const, label: "Activity", icon: ActivityIcon },
   ]);
 
   function handleTabChange(tabId: string) {
@@ -192,7 +345,79 @@
     }
     void goto(url, { noScroll: true, keepFocus: true });
   }
+
+  /** Roving tabindex: only the selected tab is in the tab order, arrows move
+   *  focus between them (WAI-ARIA tabs pattern). */
+  let tabRefs = $state<(HTMLButtonElement | null)[]>([]);
+
+  function focusTabAt(index: number) {
+    const count = tabs.length;
+    if (count === 0) return;
+    tabRefs[((index % count) + count) % count]?.focus();
+  }
+
+  function handleTablistKeydown(event: KeyboardEvent) {
+    const currentIndex = tabs.findIndex((tab) => tab.id === activeTab);
+    const focusedIndex = tabRefs.findIndex((el) => el === document.activeElement);
+    const fromIndex = focusedIndex >= 0 ? focusedIndex : Math.max(currentIndex, 0);
+
+    switch (event.key) {
+      case "ArrowRight":
+        event.preventDefault();
+        focusTabAt(fromIndex + 1);
+        break;
+      case "ArrowLeft":
+        event.preventDefault();
+        focusTabAt(fromIndex - 1);
+        break;
+      case "Home":
+        event.preventDefault();
+        focusTabAt(0);
+        break;
+      case "End":
+        event.preventDefault();
+        focusTabAt(tabs.length - 1);
+        break;
+      case "Enter":
+      case " ": {
+        const index = tabRefs.findIndex((el) => el === (event.target as HTMLElement));
+        if (index >= 0 && !tabs[index].disabled) {
+          event.preventDefault();
+          handleTabChange(tabs[index].id);
+        }
+        break;
+      }
+    }
+  }
+
+  // ─── The context rail ─────────────────────────────────────────────────────
+
+  async function savePurpose(purpose: string | null) {
+    await setStationPurpose(stationId, purpose);
+    await loadStation();
+  }
+
+  /**
+   * Hand the rail to the shell for as long as this page is mounted.
+   *
+   * Not registered while `narrow`: below 1240px the shell renders no third
+   * column, and the Identity tab already mounts the same component — two
+   * copies would ask the hub for the grants twice.
+   */
+  $effect(() => {
+    setContextRail(narrow ? null : stationRail);
+    return () => setContextRail(null);
+  });
 </script>
+
+{#snippet stationRail()}
+  <ContextRail
+    {station}
+    {node}
+    agentVersion={fleetAgent?.agentVersion ?? null}
+    onSavePurpose={savePurpose}
+  />
+{/snippet}
 
 {#snippet keepAlivePanel(id: Tab, content: Snippet)}
   {#if visitedHeavyTabs.has(id)}
@@ -209,7 +434,11 @@
 
 {#snippet mountedPanel(id: Tab, content: Snippet)}
   {#if activeTab === id}
-    <div role="tabpanel" id="{tabsId}-panel-{id}" aria-labelledby="{tabsId}-tab-{id}">
+    <div
+      role="tabpanel"
+      id="{tabsId}-panel-{id}"
+      aria-labelledby="{tabsId}-tab-{id}"
+    >
       {@render content()}
     </div>
   {/if}
@@ -219,100 +448,158 @@
   <title>{station?.displayName ?? "Agent"} · AgentPod</title>
 </svelte:head>
 
-<!-- Themed header: station name, harness badge, back link, and tab bar -->
-<PageHeader
-  title={station?.displayName ?? (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
-  subtitle={station?.workspacePath ?? undefined}
-  tabs={stationLoad === "notFound" || stationLoad === "error" ? [] : tabs}
-  activeTab={activeTab}
-  onTabChange={handleTabChange}
-  sticky={true}
-  {tabsId}
->
-  {#snippet leading()}
-    <Button
-      variant="ghost"
-      size="icon"
-      href="/nodes/{nodeId}"
-      class="h-8 w-8 border border-border/30 hover:border-primary hover:text-primary"
-      aria-label="Back to node"
-    >
-      <ArrowLeftIcon class="h-4 w-4" />
-    </Button>
-    {#if station?.harness}
-      <HarnessBadge harness={station.harness} class="shrink-0" />
-    {/if}
-  {/snippet}
-</PageHeader>
-
-<!-- Panel content -->
-<div class="container mx-auto flex max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 md:py-6 min-h-0">
-  {#if stationLoad === "notFound"}
-    <div
-      class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
-      data-testid="station-not-found"
-    >
-      <p class="text-sm font-medium">Agent not found</p>
-      <p class="max-w-sm text-sm text-muted-foreground">
-        This agent is no longer on the node — it may have been removed or renamed.
-      </p>
-      <Button href="/nodes/{nodeId}" variant="outline" size="sm">Back to node</Button>
-    </div>
-  {:else if stationLoad === "error"}
-    <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
-      role="alert"
-    >
-      <p class="text-sm text-destructive">{stationLoadError}</p>
-      <Button variant="outline" size="sm" onclick={() => loadStation()}>Retry</Button>
-    </div>
-  {:else if stationLoad === "loaded"}
-    {#if station}
-      <PostureBanner {nodeId} stationKey={station.stationKey} />
-      <!--
-        What this agent is FOR, which is not where it runs. It groups the
-        agent's Matrix room under that purpose's space — the thing that keeps a
-        roster of a hundred agents readable — and it overrides whatever its node
-        supplied when it was adopted.
-      -->
-      <div class="mb-4 rounded-lg border p-4">
-        <PurposeField
-          id="station-purpose"
-          value={station.purpose ?? null}
-          onSave={async (purpose) => {
-            await setStationPurpose(stationId, purpose);
-            await loadStation();
-          }}
-        />
+<!--
+  h-full/min-h-0, never a growing column: the shell's stage is capped so this
+  page's panes (the transcript, the file tree, the terminal, the log tail) own
+  their own scrolling. A page that scrolled as a whole would take the header
+  and the tab bar off screen with it and put the composer below the fold.
+-->
+<div class="flex min-h-0 flex-1 flex-col" data-testid="station-page">
+  <!-- `relative`: StateDot's sr-only word is position:absolute, and with no
+       positioned ancestor inside the stage's scroller it escapes every
+       overflow-hidden between here and the document. -->
+  <header class="relative shrink-0 border-b border-border bg-background">
+    <div class="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
+      <div class="min-w-0 flex-1">
+        <div class="flex min-w-0 items-center gap-2">
+          <StateDot state={liveState} />
+          <h1
+            class="truncate font-mono text-[21px] leading-tight font-medium"
+            data-testid="station-handle"
+            title={station?.displayName ?? stationId}
+          >
+            {station?.displayName ??
+              (stationLoad === "loaded" || stationLoad === "loading" ? stationId : "Agent")}
+          </h1>
+        </div>
+        <p class="mt-1 truncate text-sm text-muted-foreground" data-testid="station-summary">
+          {#if station}
+            <!-- Mono for the machine-issued halves only; the joins are prose. -->
+            <span class="font-mono" data-testid="station-key">{station.stationKey}</span>
+            on <a class="font-mono underline-offset-2 hover:underline" href="/nodes/{nodeId}"
+              >{nodeName}</a
+            >
+            · {liveState.label} · last spoke {lastSpoke === "—" ? "unknown" : lastSpoke}
+          {:else if stationLoad === "loading"}
+            Loading this agent…
+          {/if}
+        </p>
       </div>
-      <!--
-        The §1 invariant — is this agent on its principal's address? — is a
-        station-level fact, not a tab's. It sits here, outside the tab bar,
-        precisely so switching tabs can never unmount it out from under an
-        authorization the operator just fired off (design §6; the panel itself
-        renders nothing in bridge mode, so bridge-mode stations show no empty
-        box).
 
-        `bridgeMatrixId` is deliberately not passed: it is what the appservice
-        minted, not what this agent's handle implies, and the panel asks the
-        hub for the states that turn on the difference.
-      -->
-      <div class="mb-4">
-        <MatrixIdentityPanel station={{ id: station.id, matrixId: station.matrixId }} />
+      {#if canLifecycle}
+        <div class="flex shrink-0 items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={actionInFlight !== null}
+            onclick={() => askFor("restart")}
+          >
+            {actionInFlight === "restart" ? "Restarting…" : "Restart"}
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={actionInFlight !== null}
+            onclick={() => askFor("stop")}
+          >
+            {actionInFlight === "stop" ? "Stopping…" : "Stop"}
+          </Button>
+        </div>
+      {/if}
+    </div>
+
+    {#if actionError}
+      <p class="px-4 pb-2 text-sm text-status-error sm:px-6" role="alert">{actionError}</p>
+    {/if}
+
+    {#if stationLoad !== "notFound" && stationLoad !== "error"}
+      <!-- svelte-ignore a11y_interactive_supports_focus -- the roving tabindex lives on the tab buttons, not the tablist -->
+      <div
+        class="scrollbar-hide flex gap-1 overflow-x-auto px-4 sm:px-6"
+        role="tablist"
+        onkeydown={handleTablistKeydown}
+      >
+        {#each tabs as tab, i (tab.id)}
+          {@const TabIcon = tab.icon}
+          <button
+            bind:this={tabRefs[i]}
+            type="button"
+            role="tab"
+            id="{tabsId}-tab-{tab.id}"
+            aria-controls="{tabsId}-panel-{tab.id}"
+            aria-selected={activeTab === tab.id}
+            aria-disabled={tab.disabled ? "true" : undefined}
+            aria-label={tab.label}
+            title={tab.disabled ? tab.disabledReason : tab.label}
+            tabindex={activeTab === tab.id ? 0 : -1}
+            class={cn(
+              "flex items-center gap-2 border-b-2 px-2.5 py-2 text-sm whitespace-nowrap transition-colors",
+              tab.disabled
+                ? "cursor-not-allowed border-transparent text-muted-foreground/50"
+                : activeTab === tab.id
+                  ? "border-foreground font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+            )}
+            onclick={() => !tab.disabled && handleTabChange(tab.id)}
+          >
+            {#if tab.disabled}
+              <LockIcon class="h-3.5 w-3.5" aria-hidden="true" />
+            {:else}
+              <TabIcon class="h-4 w-4" aria-hidden="true" />
+            {/if}
+            {tab.label}
+          </button>
+        {/each}
       </div>
     {/if}
-    {@render stationPanels()}
-  {:else}
-    <!-- Panels wait for the capability list: which tab is the default depends on
-         it (chat for acp stations, health otherwise), so rendering one earlier
-         would mount — and fetch for — a panel the user never asked for. The
-         shape of the wait is still shown, so the page isn't a bare header. -->
-    <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-busy="true">
-      <span class="sr-only">Loading this agent…</span>
-      <Skeleton class="h-8 w-48 rounded-lg" />
-      <Skeleton class="h-[320px] w-full rounded-lg" />
-    </div>
-  {/if}
+  </header>
+
+  <!-- The panel region is the page's one scroller: panels with a scroller of
+       their own (chat, logs, files, terminal) fill it exactly and never
+       overflow; the shorter ones (health, activity, changes, cleanup) scroll
+       here, under a header that stays put. -->
+  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6" data-testid="station-panes">
+    {#if stationLoad === "notFound"}
+      <div
+        class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
+        data-testid="station-not-found"
+      >
+        <p class="text-sm font-medium">Agent not found</p>
+        <p class="max-w-sm text-sm text-muted-foreground">
+          This agent is no longer on the node — it may have been removed or renamed.
+        </p>
+        <Button href="/nodes/{nodeId}" variant="outline" size="sm">Back to node</Button>
+      </div>
+    {:else if stationLoad === "error"}
+      <div
+        class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+        role="alert"
+      >
+        <p class="text-sm text-destructive">{stationLoadError}</p>
+        <Button variant="outline" size="sm" onclick={() => loadStation()}>Retry</Button>
+      </div>
+    {:else if stationLoad === "loaded"}
+      {#if station}
+        <!-- A posture failure naming THIS station is the one thing that outranks
+             whatever tab you came for. The wrapper's margin applies only when
+             the banner actually renders something. -->
+        <div class="shrink-0 [&>*]:mb-3">
+          <PostureBanner {nodeId} stationKey={station.stationKey} />
+        </div>
+      {/if}
+      {@render stationPanels()}
+    {:else}
+      <!-- Panels wait for the capability list: which tab is the default depends on
+           it (chat for acp stations, health otherwise), so rendering one earlier
+           would mount — and fetch for — a panel the user never asked for. The
+           shape of the wait is still shown, so the page isn't a bare header. -->
+      <div class="flex flex-col gap-3" data-testid="station-panels-loading" aria-busy="true">
+        <span class="sr-only">Loading this agent…</span>
+        <Skeleton class="h-8 w-48 rounded-lg" />
+        <Skeleton class="h-[320px] w-full rounded-lg" />
+      </div>
+    {/if}
+  </div>
 </div>
 
 {#snippet stationPanels()}
@@ -323,7 +610,7 @@
            socket) at construction, so a different station gets a fresh panel
            rather than a live socket pointed at the wrong agent. -->
       {#key stationId}
-        <div class="flex-1 min-h-[320px]">
+        <div class="min-h-0 flex-1">
           <ChatPanel {stationId} />
         </div>
       {/key}
@@ -337,14 +624,14 @@
 
   {@render keepAlivePanel("logs", logsContent)}
   {#snippet logsContent()}
-    <div class="flex-1 min-h-[320px]">
+    <div class="min-h-0 flex-1">
       <LogTail {stationId} />
     </div>
   {/snippet}
 
   {@render keepAlivePanel("files", filesContent)}
   {#snippet filesContent()}
-    <div class="flex-1 min-h-[320px]">
+    <div class="min-h-0 flex-1">
       <FileBrowser
         bind:this={fileBrowser}
         {stationId}
@@ -357,7 +644,7 @@
   {#if hasTerminal}
     {@render keepAlivePanel("terminal", terminalContent)}
     {#snippet terminalContent()}
-      <div class="flex-1 min-h-[320px]">
+      <div class="min-h-0 flex-1">
         <Terminal {stationId} />
       </div>
     {/snippet}
@@ -387,7 +674,35 @@
       <ActivityPanel {stationId} />
     </div>
   {/snippet}
+
+  {#if narrow}
+    <!-- The rail's content, for the widths where the shell has no room for a
+         third column. Same component, so the two can never say different
+         things about the same agent. -->
+    {@render mountedPanel("identity", identityContent)}
+    {#snippet identityContent()}
+      {@render stationRail()}
+    {/snippet}
+  {/if}
 {/snippet}
+
+<ConfirmDialog
+  open={confirmOpen}
+  title="{pendingAction === 'stop' ? 'Stop' : 'Restart'} agent"
+  message="This will {pendingAction ?? 'restart'} the agent process."
+  confirmLabel={pendingAction === "stop" ? "Stop agent" : "Restart agent"}
+  destructive={pendingAction === "stop"}
+  onConfirm={() => {
+    confirmOpen = false;
+    const action = pendingAction;
+    pendingAction = null;
+    if (action) void runLifecycle(action);
+  }}
+  onCancel={() => {
+    confirmOpen = false;
+    pendingAction = null;
+  }}
+/>
 
 <!-- ── ConfigEditor dialog (opened via "Edit (diff)" in the FileBrowser) ── -->
 <Dialog.Root
