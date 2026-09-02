@@ -1,5 +1,5 @@
 /**
- * Route test: `GET /api/auth/authorize`.
+ * Route tests: `GET /api/auth/authorize` and `POST /api/auth/token/exchange`.
  *
  * Most of this file is about ONE property, asserted the only way that proves
  * it: **a refusal carries no `Location` header at all.** A test that checked
@@ -31,13 +31,20 @@ process.env.NODE_ENV = "test";
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { eq } from "drizzle-orm";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { createLocalJWKSet, jwtVerify } from "jose";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { db, rawSql } from "../db/drizzle";
 import { oauthCodes } from "../db/schema/oauth";
 import { createPrincipal, suspendPrincipal } from "../services/principals";
-import { signInUrl, type OAuthClient } from "../config";
+import { auth } from "../auth/drizzle-auth";
+import { TOKEN_TTL } from "../auth/jwt-claims";
+import { mintCode } from "../services/oauth-codes";
+import { config, signInUrl, type OAuthClient } from "../config";
 import { createAuthorizeRoutes } from "./auth-authorize";
 
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -470,5 +477,512 @@ describe("registration order in src/index.ts", () => {
 
   test("the authorize route is registered above authMiddleware", () => {
     expect(authorizeAt).toBeLessThan(authMiddlewareAt);
+  });
+});
+
+// ─── POST /api/auth/token/exchange ────────────────────────────────────────────
+
+/**
+ * The other half of the handoff: the plane's back end trades the code for the
+ * token, server-to-server.
+ *
+ * Two properties carry the weight here, and both are asserted by breaking
+ * something rather than by reading a status code:
+ *
+ * 1. **The code is consumed whether or not the verifier is right.** The test
+ *    for it is not "a wrong verifier gets a 400" — that would pass an
+ *    implementation that checked the verifier first and left the code sitting
+ *    there for the next attempt. It is "a wrong verifier, then the RIGHT one,
+ *    and the right one fails too".
+ * 2. **The token is the one `GET /api/auth/token` already issues.** Asserted by
+ *    minting both for the same person in the same test and comparing the
+ *    claims, which needs a real Better Auth session — so that block signs a
+ *    user up rather than injecting one.
+ */
+
+/** RFC 7636's own example verifier. `CHALLENGE` above is its S256. */
+const VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
+const EXCHANGE = "/api/auth/token/exchange";
+
+/** The claims of a token, without verifying it — for comparing two tokens. */
+function claimsOf(token: string): Record<string, unknown> {
+  return JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString());
+}
+
+async function exchange(
+  app: ReturnType<typeof appFor>,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  return app.request(EXCHANGE, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: typeof body === "string" ? body : JSON.stringify(body),
+  });
+}
+
+/** A code issued the way a real one is: through the authorize route. */
+async function freshCode(overrides: Record<string, string | null> = {}): Promise<string> {
+  const res = await authorize(signedIn, { ...overrides, code_challenge: CHALLENGE });
+  return new URL(res.headers.get("location") ?? "").searchParams.get("code")!;
+}
+
+describe("the verifier, and what a wrong one costs", () => {
+  test("CHALLENGE really is the S256 of VERIFIER", () => {
+    // Guard the guard: every test below would still pass against an
+    // implementation that compared nothing, if these two were unrelated.
+    expect(createHash("sha256").update(VERIFIER).digest("base64url")).toBe(CHALLENGE);
+  });
+
+  test("the right verifier trades the code for a token", async () => {
+    const code = await freshCode();
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+    const body = (await res.json()) as { token: string; expiresIn: number };
+
+    expect(res.status).toBe(200);
+    expect(typeof body.token).toBe("string");
+    expect(body.expiresIn).toBe(300);
+  });
+
+  test("a wrong verifier is refused", async () => {
+    const code = await freshCode();
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: "not-the-verifier-that-started-this-flow-xxxxx",
+      redirect_uri: REDIRECT,
+    });
+
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { token?: string }).token).toBeUndefined();
+  });
+
+  test("a wrong verifier CONSUMES the code — the right one then fails too", async () => {
+    // The property this endpoint's whole ordering exists for. If the verifier
+    // were checked before the redemption, whoever stole a code out of a URL
+    // could sit and guess at the verifier for the next sixty seconds.
+    const code = await freshCode();
+
+    const wrong = await exchange(signedIn, {
+      code,
+      code_verifier: "wrong-verifier-wrong-verifier-wrong-verifier",
+      redirect_uri: REDIRECT,
+    });
+    const thenRight = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(wrong.status).toBe(400);
+    expect(thenRight.status).toBe(400);
+    expect(((await thenRight.json()) as { token?: string }).token).toBeUndefined();
+
+    const [row] = await db.select().from(oauthCodes).where(eq(oauthCodes.code, code));
+    expect(row!.redeemedAt).not.toBe(null);
+  });
+});
+
+describe("a code is spent once", () => {
+  test("replaying a consumed code is refused", async () => {
+    const code = await freshCode();
+
+    const first = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+    const second = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(400);
+    expect(((await second.json()) as { token?: string }).token).toBeUndefined();
+  });
+
+  test("an expired code is refused", async () => {
+    // Minted directly, with a TTL already in the past: the alternative is
+    // sleeping for the real sixty seconds.
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: LIVE_USER,
+      ttlMs: -1_000,
+    });
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("a code this hub never issued is refused", async () => {
+    const res = await exchange(signedIn, {
+      code: "Zm9yZ2VkLWNvZGUtdGhhdC13YXMtbmV2ZXItbWludGVkLWhlcmU",
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("two concurrent exchanges of one code produce exactly one token", async () => {
+    const code = await freshCode();
+
+    const both = await Promise.all([
+      exchange(signedIn, { code, code_verifier: VERIFIER, redirect_uri: REDIRECT }),
+      exchange(signedIn, { code, code_verifier: VERIFIER, redirect_uri: REDIRECT }),
+    ]);
+
+    expect(both.filter((r) => r.status === 200)).toHaveLength(1);
+    expect(both.filter((r) => r.status === 400)).toHaveLength(1);
+  });
+});
+
+describe("the redirect_uri must be the one the code was issued for", () => {
+  test("a right verifier with a different registered URI is refused", async () => {
+    const code = await freshCode({ redirect_uri: REDIRECT });
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: SECOND_REDIRECT,
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("and that refusal spends nothing — the right URI still works", async () => {
+    // A code that leaked must not be burnable by someone guessing at the URI:
+    // the redemption never matched the row at all, so it consumed nothing.
+    const code = await freshCode({ redirect_uri: REDIRECT });
+
+    const wrongUri = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: SECOND_REDIRECT,
+    });
+    const rightUri = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(wrongUri.status).toBe(400);
+    expect(rightUri.status).toBe(200);
+  });
+
+  test("a URI no registered client owns is refused", async () => {
+    const code = await freshCode();
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: "https://attacker.example/hub/callback",
+    });
+
+    expect(res.status).toBe(400);
+  });
+
+  test("another client's registered URI is refused", async () => {
+    const code = await freshCode();
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: "https://supermessage.dev/hub/callback",
+    });
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("a body that is not a request", () => {
+  test("a body that is not JSON is refused", async () => {
+    const res = await exchange(signedIn, "not json at all");
+
+    expect(res.status).toBe(400);
+  });
+
+  test.each([
+    ["code", { code_verifier: VERIFIER, redirect_uri: REDIRECT }],
+    ["code_verifier", { code: "x", redirect_uri: REDIRECT }],
+    ["redirect_uri", { code: "x", code_verifier: VERIFIER }],
+  ])("a body missing %s is refused", async (_field, body) => {
+    const res = await exchange(signedIn, body);
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("the principal behind the code", () => {
+  test("a suspended principal is refused in buildTokenPayload's own words", async () => {
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: SUSPENDED_USER,
+    });
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+    const body = (await res.json()) as { error_description?: string };
+
+    expect(res.status).toBe(400);
+    expect(body.error_description).toContain("suspended");
+  });
+
+  test("a user who maps to no principal is refused", async () => {
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: UNMAPPED_USER,
+    });
+
+    const res = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+    const body = (await res.json()) as { error_description?: string };
+
+    expect(res.status).toBe(400);
+    expect(body.error_description).toContain("no principal resolved");
+  });
+});
+
+// ─── No CORS: this is server-to-server ────────────────────────────────────────
+
+describe("a browser cannot use this endpoint", () => {
+  /**
+   * Mounted under a CORS middleware configured exactly as `src/index.ts`
+   * configures it — including the part that matters: its `origin` function
+   * returns an allowed origin for EVERY request, so every response the hub
+   * sends normally carries `access-control-allow-origin`. Testing the bare
+   * sub-app would prove nothing, because nothing there sets the header in the
+   * first place.
+   */
+  const ORIGIN = "https://console.agentpod.dev";
+  const mounted = new Hono()
+    .use(
+      "*",
+      cors({
+        origin: () => ORIGIN,
+        credentials: true,
+        exposeHeaders: ["Content-Length"],
+      })
+    )
+    .route("/", signedIn);
+
+  test("the harness really does add CORS headers", async () => {
+    // Guard the guard: if this middleware stopped setting the header, the
+    // assertion below would pass against an endpoint that had no defence.
+    const res = await mounted.request(`/api/auth/authorize?${new URLSearchParams(VALID)}`);
+
+    expect(res.headers.get("access-control-allow-origin")).toBe(ORIGIN);
+  });
+
+  test("the exchange response carries no access-control-allow-origin", async () => {
+    const code = await freshCode();
+    const res = await mounted.request(EXCHANGE, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code, code_verifier: VERIFIER, redirect_uri: REDIRECT }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("access-control-allow-origin")).toBe(null);
+    expect(res.headers.get("access-control-allow-credentials")).toBe(null);
+    expect(res.headers.get("access-control-expose-headers")).toBe(null);
+  });
+
+  test("a refusal carries no access-control-allow-origin either", async () => {
+    const res = await mounted.request(EXCHANGE, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: "nope", code_verifier: VERIFIER, redirect_uri: REDIRECT }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get("access-control-allow-origin")).toBe(null);
+  });
+
+  test("a request carrying an Origin header is refused outright", async () => {
+    // Stripping the header stops a browser READING the answer. This stops it
+    // making the request at all — which matters because the request itself
+    // spends the code, and only a browser sends Origin on a POST.
+    const code = await freshCode();
+    const res = await exchange(
+      signedIn,
+      { code, code_verifier: VERIFIER, redirect_uri: REDIRECT },
+      { origin: "https://console.agentpod.dev" }
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  test("and that refusal spends nothing", async () => {
+    const code = await freshCode();
+
+    await exchange(
+      signedIn,
+      { code, code_verifier: VERIFIER, redirect_uri: REDIRECT },
+      { origin: "https://console.agentpod.dev" }
+    );
+    const after = await exchange(signedIn, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+
+    expect(after.status).toBe(200);
+  });
+});
+
+// ─── The token itself ─────────────────────────────────────────────────────────
+
+describe("the token is the one GET /api/auth/token already issues", () => {
+  /**
+   * The only block here that needs a real Better Auth session, because the
+   * whole point is to call the endpoint this exchange is supposed to be
+   * indistinguishable from. A session is a signed cookie, so it is signed up
+   * for rather than faked — and taken away again in `afterAll`, including the
+   * `signup_enabled` row Better Auth's first-user hook writes if this happens
+   * to be the first user in the database.
+   */
+  let sessionUser = "";
+  let cookie = "";
+
+  beforeAll(async () => {
+    const res = await auth.api.signUpEmail({
+      body: {
+        email: `exchange-${RUN}@example.test`,
+        password: "exchange-test-password",
+        name: "Exchange Test",
+      },
+      asResponse: true,
+    });
+    cookie = res.headers
+      .getSetCookie()
+      .map((c) => c.split(";")[0])
+      .join("; ");
+    sessionUser = ((await res.json()) as { user: { id: string } }).user.id;
+
+    await createPrincipal({
+      kind: "human",
+      handle: `${HANDLE_PREFIX}-session`,
+      userId: sessionUser,
+    });
+  });
+
+  afterAll(async () => {
+    try {
+      await rawSql`DELETE FROM oauth_codes WHERE user_id = ${sessionUser}`;
+      await rawSql`DELETE FROM system_settings WHERE key = 'signup_enabled' AND updated_by = ${sessionUser}`;
+      await rawSql`DELETE FROM session WHERE user_id = ${sessionUser}`;
+      await rawSql`DELETE FROM account WHERE user_id = ${sessionUser}`;
+      await rawSql`DELETE FROM "user" WHERE id = ${sessionUser}`;
+    } catch {
+      // cleanup only
+    }
+  });
+
+  test("every claim matches, for the same person, minted both ways", async () => {
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: sessionUser,
+    });
+
+    const exchanged = (await (
+      await exchange(signedIn, {
+        code,
+        code_verifier: VERIFIER,
+        redirect_uri: REDIRECT,
+      })
+    ).json()) as { token: string };
+
+    const direct = (await auth.api.getToken({
+      headers: new Headers({ cookie }),
+    })) as { token: string };
+
+    const a = claimsOf(exchanged.token);
+    const b = claimsOf(direct.token);
+
+    expect(a.sub).toBe(b.sub as string);
+    expect(a.tenant).toBe(b.tenant as string);
+    expect(a.mayDispatch).toEqual(b.mayDispatch as string[]);
+    expect(a.principalKind).toBe(b.principalKind as string);
+    expect(a.mayGrantReach).toBe(b.mayGrantReach as boolean);
+    expect(a.iss).toBe(b.iss as string);
+    expect(a.aud).toBe(b.aud as string);
+    // The claim names themselves, so a claim added on one path and not the
+    // other is a failure rather than something nobody looks at.
+    expect(Object.keys(a).sort()).toEqual(Object.keys(b).sort());
+  });
+
+  test("signed by the same key, and it verifies against the published JWKS", async () => {
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: sessionUser,
+    });
+
+    const { token } = (await (
+      await exchange(signedIn, { code, code_verifier: VERIFIER, redirect_uri: REDIRECT })
+    ).json()) as { token: string };
+    const direct = (await auth.api.getToken({
+      headers: new Headers({ cookie }),
+    })) as { token: string };
+
+    const kid = (t: string) =>
+      JSON.parse(Buffer.from(t.split(".")[0]!, "base64url").toString()).kid;
+    expect(kid(token)).toBe(kid(direct.token));
+
+    const jwks = createLocalJWKSet((await auth.api.getJwks()) as never);
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: config.publicUrl,
+      audience: config.publicUrl,
+    });
+
+    expect(payload.sub).toBeTruthy();
+  });
+
+  test("lives exactly as long as TOKEN_TTL, and expiresIn says so", async () => {
+    const { code } = await mintCode({
+      clientId: "kaambaan",
+      redirectUri: REDIRECT,
+      codeChallenge: CHALLENGE,
+      userId: sessionUser,
+    });
+
+    const body = (await (
+      await exchange(signedIn, { code, code_verifier: VERIFIER, redirect_uri: REDIRECT })
+    ).json()) as { token: string; expiresIn: number };
+
+    const claims = claimsOf(body.token) as { iat: number; exp: number };
+
+    expect(TOKEN_TTL).toBe("5m");
+    expect(claims.exp - claims.iat).toBe(300);
+    expect(body.expiresIn).toBe(claims.exp - claims.iat);
   });
 });

@@ -1,6 +1,7 @@
 /**
- * `GET /api/auth/authorize` — the door a browser on another registrable domain
- * can actually walk through.
+ * `GET /api/auth/authorize` and `POST /api/auth/token/exchange` — the door a
+ * browser on another registrable domain can actually walk through, and the
+ * counter where the ticket it comes back with is cashed.
  *
  * The hub's session cookie is `SameSite=Lax`, so a cross-site `fetch` never
  * carries it and `GET /api/auth/token` — the hub's only way to hand a browser
@@ -28,9 +29,20 @@
  * nobody. The only path that produces a code is the one where every question
  * has been answered.
  *
- * This route authenticates itself and therefore sits ahead of `authMiddleware`
- * in `index.ts`, beside the jwks route — see the comment there.
+ * The exchange is the same story from the other side. It is called by the
+ * plane's own back end, server-to-server, and everything about it follows from
+ * two facts: the code arrived through a URL, so it must be worth nothing after
+ * one use — which is why it is spent BEFORE the verifier is checked, not after
+ * — and the token must never be readable by a page, which is why the hub's
+ * global CORS headers are removed from its responses and a request carrying an
+ * `Origin` is refused outright.
+ *
+ * Both routes authenticate themselves and therefore sit ahead of
+ * `authMiddleware` in `index.ts`, beside the jwks route — see the comment
+ * there.
  */
+
+import { createHash, timingSafeEqual } from "node:crypto";
 
 import { Hono } from "hono";
 import { html } from "hono/html";
@@ -44,8 +56,8 @@ import {
   type OAuthClient,
 } from "../config";
 import { auth } from "../auth/drizzle-auth";
-import { buildTokenPayload } from "../auth/jwt-claims";
-import { mintCode } from "../services/oauth-codes";
+import { buildTokenPayload, type TokenPayload } from "../auth/jwt-claims";
+import { mintCode, redeemCode } from "../services/oauth-codes";
 
 /** S256 of a verifier: 32 bytes, base64url, unpadded — 43 characters. */
 const CODE_CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -141,6 +153,43 @@ function refusalPage(reason: string, detail: string) {
         </main>
       </body>
     </html>`;
+}
+
+/**
+ * The exchange's path, in one place: a middleware and a route both name it, and
+ * they must name the same string or the CORS strip below silently stops
+ * applying to the endpoint it exists for.
+ */
+const EXCHANGE_PATH = "/api/auth/token/exchange";
+
+/**
+ * The response headers `src/index.ts`'s global `cors()` puts on everything.
+ *
+ * It sets them BEFORE calling `next()`, and Hono carries headers already on
+ * `c.res` over onto whatever a handler returns — so a route cannot avoid them
+ * by what it returns, only by removing them on the way out. Stripping them
+ * matters because that middleware's `origin` function answers with an allowed
+ * origin for *every* request, including one with no `Origin` at all: left
+ * alone, this endpoint would be callable from a browser on the console's own
+ * origin, with credentials, and this is the endpoint that hands out tokens.
+ */
+const CORS_RESPONSE_HEADERS = [
+  "access-control-allow-origin",
+  "access-control-allow-credentials",
+  "access-control-expose-headers",
+];
+
+/**
+ * Compare the presented challenge with the stored one without leaking, in the
+ * timing, how much of it was right.
+ *
+ * Belt and braces — the code is already spent by the time this runs, so there
+ * is no second attempt to inform. It costs a line.
+ */
+function sameChallenge(presented: string, stored: string): boolean {
+  const a = Buffer.from(presented);
+  const b = Buffer.from(stored);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 export function createAuthorizeRoutes(deps: AuthorizeDeps = {}): Hono {
@@ -312,7 +361,169 @@ export function createAuthorizeRoutes(deps: AuthorizeDeps = {}): Hono {
     destination.searchParams.set("state", state);
 
     return c.redirect(destination.toString(), 302);
-  });
+  })
+
+    // ── POST /api/auth/token/exchange ────────────────────────────────────────
+    //
+    // Strip the hub's global CORS headers from every response on this path.
+    // Registered ahead of the route so it wraps it; see CORS_RESPONSE_HEADERS
+    // for why removing them on the way out is the only place it can be done.
+    .use(EXCHANGE_PATH, async (c, next) => {
+      await next();
+      for (const header of CORS_RESPONSE_HEADERS) c.res.headers.delete(header);
+    })
+
+    /**
+     * Trade a one-time code for exactly the token `GET /api/auth/token` issues.
+     *
+     * Called by the consuming plane's back end, never by a browser: the code
+     * came back through a redirect the browser can see, but the token must not
+     * be somewhere a page can read it.
+     */
+    .post(EXCHANGE_PATH, async (c) => {
+      // A browser cannot READ this response — the CORS headers are gone — but
+      // it could still SEND the request, and the request is what spends the
+      // code. `Origin` is the header a browser always attaches to a cross-site
+      // POST and that a server-to-server caller never sends unless it decides
+      // to (a Cloudflare Worker's `fetch` does not), so its presence is the one
+      // reliable signal that the caller is a page rather than a plane.
+      //
+      // Checked before anything is redeemed, and it depends on nothing the
+      // caller can only learn by guessing, so it is not a retry oracle: an
+      // attacker with a stolen code was always able to leave the header off.
+      // What it buys is that a page cannot burn an operator's code.
+      if (c.req.header("origin")) {
+        return c.json(
+          {
+            error: "invalid_request",
+            error_description:
+              "This endpoint is server-to-server. A request carrying an Origin header is a browser, and a browser must not spend an authorization code.",
+          },
+          403
+        );
+      }
+
+      const body = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+      const code = typeof body?.code === "string" ? body.code : "";
+      const verifier = typeof body?.code_verifier === "string" ? body.code_verifier : "";
+      const redirectUri = typeof body?.redirect_uri === "string" ? body.redirect_uri : "";
+
+      if (!code || !verifier || !redirectUri) {
+        return c.json(
+          {
+            error: "invalid_request",
+            error_description:
+              "code, code_verifier and redirect_uri are all required, as JSON.",
+          },
+          400
+        );
+      }
+
+      // `redeemCode` matches on the client the code was issued to, and the
+      // body names no client — the spec's body is the three fields above, and
+      // a plane's back end sends what the spec says. The registry answers it
+      // instead: a redirect URI belongs to whichever client registered it.
+      //
+      // A URI registered by two clients (nothing forbids it) is why this is a
+      // list and not a `find`: each is tried, and a mismatched client consumes
+      // nothing, so the loop cannot spend a code it then fails to return. In
+      // every real deployment there is exactly one candidate.
+      //
+      // This lookup is not the security boundary. The row's own `redirect_uri`
+      // is, and it is compared inside the same UPDATE that spends the code.
+      const candidates = clients.filter((client) => isRegisteredRedirect(client, redirectUri));
+
+      let redeemed: Awaited<ReturnType<typeof redeemCode>> = null;
+      for (const client of candidates) {
+        redeemed = await redeemCode({ code, clientId: client.id, redirectUri });
+        if (redeemed) break;
+      }
+
+      if (!redeemed) {
+        // Deliberately one sentence for all of: unknown code, already
+        // redeemed, expired, wrong redirect URI, unregistered redirect URI. A
+        // caller who does not hold a live code learns nothing about which of
+        // those it was, and the legitimate caller does not need to be told.
+        return c.json(
+          {
+            error: "invalid_grant",
+            error_description:
+              "That code is not redeemable: it is unknown, already spent, expired, or was not issued for this redirect_uri.",
+          },
+          400
+        );
+      }
+
+      // ── The verifier, checked AFTER the code is already spent ──────────────
+      //
+      // This ordering is the point of the endpoint. Checked first, a wrong
+      // verifier would leave the code sitting there redeemable, and whoever
+      // read it out of an address bar, a history entry or a `Referer` would
+      // have the rest of the TTL to guess at the verifier. Spent first, they
+      // get exactly one attempt — and PKCE means one attempt is none.
+      //
+      // The verifier's own shape is deliberately not validated: any check that
+      // could refuse before the redemption is the retry hole above, and one
+      // that runs after adds nothing a 43-character digest comparison has not
+      // already settled.
+      const presented = createHash("sha256").update(verifier).digest("base64url");
+      if (!sameChallenge(presented, redeemed.codeChallenge)) {
+        return c.json(
+          {
+            error: "invalid_grant",
+            error_description:
+              "code_verifier does not match the code_challenge this code was issued for. The code has been consumed.",
+          },
+          400
+        );
+      }
+
+      // ── The token, from the path GET /api/auth/token already takes ─────────
+      //
+      // `auth.api.signJWT` is the jwt plugin's own signer, holding the options
+      // the plugin was registered with in `drizzle-auth.ts` — so the signing
+      // key, `TOKEN_TTL`, the issuer and the audience are that endpoint's by
+      // construction rather than by being copied here. Only the payload is
+      // assembled, and it is assembled the way `getJwtToken` assembles it:
+      // `iat`, then the configured `definePayload` (`buildTokenPayload`), then
+      // `sub`.
+      //
+      // **`sub` is the Better Auth user id, not `buildTokenPayload`'s principal
+      // id.** The plugin overwrites `sub` after calling `definePayload`
+      // (`sub: getSubject?.(session) ?? session.user.id`, and this hub
+      // configures no `getSubject`), so that is what `GET /api/auth/token`
+      // actually issues today. Matching it is the requirement — the exchange
+      // must return the same token, not a better one. Changing which id `sub`
+      // carries is a change to the token itself and belongs to whoever owns
+      // that decision, on both paths at once.
+      let payload: TokenPayload;
+      try {
+        payload = await buildTokenPayload({ user: { id: redeemed.userId } });
+      } catch (e) {
+        const message = (e as Error).message;
+        // The same translation the authorize route does, and for the same
+        // reason: buildTokenPayload's refusals come through in its own words.
+        // Reachable here even though authorize checked too — sixty seconds is
+        // long enough to suspend somebody.
+        if (message.startsWith("refusing to mint a token")) {
+          return c.json({ error: "invalid_grant", error_description: message }, 400);
+        }
+        throw e;
+      }
+
+      const { token } = await auth.api.signJWT({
+        body: { payload: { iat: Math.floor(Date.now() / 1000), ...payload, sub: redeemed.userId } },
+      });
+
+      // Read back off the token rather than derived from `TOKEN_TTL`: the
+      // caller is told what this token actually says, so the number cannot
+      // drift from the claim if the TTL is ever changed somewhere else.
+      const claims = JSON.parse(
+        Buffer.from(token.split(".")[1] ?? "", "base64url").toString()
+      ) as { iat: number; exp: number };
+
+      return c.json({ token, expiresIn: claims.exp - claims.iat });
+    });
 }
 
 /** The hub's own authorize routes, reading the hub's own registry. */
