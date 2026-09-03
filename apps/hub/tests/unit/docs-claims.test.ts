@@ -151,7 +151,7 @@ describe("environment variables an operator is told to set", () => {
 describe("environment variables the hub names in a boot message", () => {
   /**
    * The scope is deliberate. `config.ts` reads thirty-odd variables, many of
-   * them vestigial (`TRAEFIK_*`, `OPENCODE_REGISTRY_*`, `METAMCP_*`) and
+   * them vestigial (`TRAEFIK_*`, `OPENCODE_REGISTRY_*`) and
    * consumed by nothing — demanding an operator-facing line for each of those
    * would push the docs *away* from the truth, not towards it.
    *

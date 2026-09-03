@@ -43,6 +43,3 @@ export * from "./workflow";
 
 // Session forking types
 export * from "./session-fork";
-
-// MCP server types (MetaMCP integration)
-export * from "./mcp";

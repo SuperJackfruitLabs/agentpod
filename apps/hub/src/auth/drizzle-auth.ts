@@ -277,7 +277,8 @@ export const auth = betterAuth({
       defaultCookieAttributes: {
         sameSite: cookieOpts.sameSite,
       },
-      // Cookie prefix — keeps MetaMCP SSO compatibility.
+      // Cookie prefix. Load-bearing: live session cookies carry it, so a rename
+      // signs everyone out. Chosen for an SSO integration since removed.
       cookiePrefix: "better-auth",
       // Generate unique session IDs.
       generateId: () => crypto.randomUUID(),
