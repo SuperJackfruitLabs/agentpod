@@ -16,7 +16,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
-import { KaambaanClient, fetchAdapter } from "./kaambaan";
+import { KaambaanApiError, KaambaanClient, fetchAdapter } from "./kaambaan";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -70,6 +70,31 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
       try {
         result = await opts.run();
       } catch (err) {
+        // **An authentication failure is not retryable, and retrying hides it.**
+        //
+        // A 401 means kaambaan does not recognise this agent's credential; a 403 means it
+        // refuses the act. Neither improves by being asked again, and the loop's own backoff
+        // turns a misconfiguration into an error line every thirty seconds forever — which is
+        // exactly what it did. On 2026-09-04 the hub was found polling a board with a token
+        // whose agent had been deleted three days earlier: 8,640 identical 401s a day, and no
+        // signal that anything was wrong beyond noise nobody reads.
+        //
+        // Halts on the same terms as `foreign-run` below: stop, say why once, and let
+        // `onFault` surface it. An operator has to change something, so make them look.
+        if (err instanceof KaambaanApiError && (err.status === 401 || err.status === 403)) {
+          log("halting: kaambaan refused this agent's credential", {
+            status: err.status,
+            path: err.path,
+            hint:
+              "the token no longer resolves to an agent on that board — re-mint it, or remove " +
+              "this agent from KAAMBAAN_BRIDGE_AGENTS",
+          });
+          // Deliberately NOT reported through `onFault`, which takes a DispatchResult: this
+          // is not a dispatch outcome, and inventing a status member for it from a catch
+          // block would put a fault into the enum every switch has to answer for. The halt
+          // is the signal — the agent stops claiming, and the line above says why.
+          return;
+        }
         log("a claim cycle threw", { error: String(err) });
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
