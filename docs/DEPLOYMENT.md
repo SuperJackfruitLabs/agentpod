@@ -143,10 +143,6 @@ ALLOWED_ORIGINS=https://console.<your-domain>
 COOKIE_DOMAIN=.<your-domain>
 COOKIE_SECURE=true
 
-# ── Feature flags ─────────────────────────────────────────────────────────────
-# Disable MetaMCP integration (not part of fleet console).
-METAMCP_ENABLED=false
-
 # ── Provisioning ──────────────────────────────────────────────────────────────
 # Enable the Docker provisioner.
 ENABLE_DOCKER_PROVISIONING=true
