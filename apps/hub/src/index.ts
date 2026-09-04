@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
 import { describeDatabase } from './utils/describe-database.ts';
@@ -100,7 +101,12 @@ const matrixBridge = createMatrixBridge();
 
 const app = new Hono()
   // Middleware
-  .use('*', logger())
+  //
+  // The print function is not decoration. The homeserver authenticates appservice
+  // transactions with `?access_token=…`, and Hono's logger prints the whole path — so every
+  // Matrix event wrote a live credential into journald in clear. Redacting here closes the
+  // recurrence; rotating the token alone would not (estate BACKLOG, 2026-09-01).
+  .use('*', logger((message, ...rest) => console.log(redactUrlSecrets(message), ...rest)))
   // CORS configuration - allow credentials for Better Auth cookies
   .use('*', cors({
     // Origin list lives in config.ts (corsAllowedOrigins) so station-terminal.ts
