@@ -65,7 +65,17 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const controller = new AbortController();
 
   const done = (async () => {
+    let cycle = 0;
     while (!controller.signal.aborted) {
+      // **Liveness, not decoration.** Twice now a bridge agent has stopped and left nothing
+      // behind: a 401 retried into noise, then a cycle that never came back. Both were invisible
+      // because a loop that is neither erroring nor idling logs nothing at all, and a silent
+      // agent is indistinguishable from a quiet board.
+      //
+      // One line per cycle at DEBUG-ish volume — a cycle is at minimum five seconds — is a cheap
+      // price for being able to answer "is it still going round?" without attaching a debugger
+      // to production, which is exactly the question that could not be answered on 2026-09-08.
+      log("cycle", { n: ++cycle });
       let result: DispatchResult;
       try {
         // NOT bounded by a deadline, and that is deliberate. `runOnce` drives the claimed run
