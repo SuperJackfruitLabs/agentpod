@@ -23,28 +23,6 @@ const DEFAULT_POLL_MS = 5_000;
 /** How long to wait after an error, so a broken board is not hammered. */
 const DEFAULT_BACKOFF_MS = 30_000;
 
-/**
- * The longest a single claim cycle may take before the loop stops waiting on it.
- *
- * A cycle awaits several things that can hang — the kaambaan call, the station readiness probe
- * over the node broker, an ACP session. Any one of them blocking forever takes the whole agent
- * with it, and produces **nothing in the log**: the loop is neither erroring nor idle, it is
- * simply never coming back. That is what happened on 2026-09-08, and it is the same failure
- * shape as the 401 retried eight thousand times a day — a fault that makes no sound.
- *
- * This is a liveness floor, not a policy on how long work may take: a claimed run is worked
- * through heartbeats, not inside one cycle.
- */
-const DEFAULT_CYCLE_TIMEOUT_MS = 120_000;
-
-/** Distinguishes a cycle that exceeded its deadline from one that threw. */
-class CycleTimeout extends Error {
-  constructor(readonly ms: number) {
-    super(`a claim cycle exceeded ${ms}ms`);
-    this.name = "CycleTimeout";
-  }
-}
-
 export interface AgentLoopOptions {
   /** One work cycle. Injected so the loop's control flow is testable alone. */
   run: () => Promise<DispatchResult>;
@@ -52,8 +30,6 @@ export interface AgentLoopOptions {
   backoffMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   onFault?: (result: DispatchResult) => void;
-  /** Longest a single cycle may take. Defaults to two minutes. */
-  cycleTimeoutMs?: number;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -62,17 +38,6 @@ export interface LoopHandle {
   stop(): Promise<void>;
   /** Resolves when the loop exits on its own — a fault, or a stop. */
   done: Promise<void>;
-}
-
-/** Resolve with the promise, or reject with `CycleTimeout` when it takes too long. */
-function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
-  return Promise.race([
-    p.finally(() => clearTimeout(timer)),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new CycleTimeout(ms)), ms);
-    }),
-  ]);
 }
 
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
@@ -103,16 +68,14 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
     while (!controller.signal.aborted) {
       let result: DispatchResult;
       try {
-        // Bounded, because everything this awaits is a call to something else. The underlying
-        // promise is not cancellable from here — `fetchAdapter` carries its own AbortSignal for
-        // that — so this restores the LOOP's liveness rather than the call's.
-        result = await withDeadline(opts.run(), opts.cycleTimeoutMs ?? DEFAULT_CYCLE_TIMEOUT_MS);
+        // NOT bounded by a deadline, and that is deliberate. `runOnce` drives the claimed run
+        // to completion — it creates the session, prompts, streams activities and heartbeats —
+        // so a legitimate cycle lasts as long as the agent's work, and `permissionWaitMs`
+        // alone defaults to thirty minutes. A cycle deadline here would abandon real work
+        // mid-run. What must be fast is the READINESS PROBE, and that is bounded where it is
+        // made, in `dispatch.ts`.
+        result = await opts.run();
       } catch (err) {
-        if (err instanceof CycleTimeout) {
-          log("a claim cycle exceeded its deadline; backing off", { ms: err.ms });
-          await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
-          continue;
-        }
         // **An authentication failure is not retryable, and retrying hides it.**
         //
         // A 401 means kaambaan does not recognise this agent's credential; a 403 means it
