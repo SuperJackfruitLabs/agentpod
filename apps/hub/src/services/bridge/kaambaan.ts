@@ -58,8 +58,26 @@ export type Fetcher = (
  * the gate sweep reach a board through the same adapter — two of these would be
  * two places for a header or a status to be handled differently.
  */
+/**
+ * How long a single kaambaan call may take before it is abandoned.
+ *
+ * Generous, because a claim is allowed to be slow: it wakes a Durable Object, which can cold
+ * start. It exists to bound the pathological case, not to police the normal one — measured
+ * from infra, an ordinary refusal returns in about a third of a second.
+ */
+export const KAAMBAAN_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * A bare `fetch` here had no timeout, so a request that was sent and never answered blocked the
+ * bridge's claim loop **forever, and silently** — no log line, no error, no retry. Observed on
+ * 2026-09-08: one cycle at 05:52:30 and then nothing, with the connection to Cloudflare still
+ * ESTABLISHED and both queues empty.
+ *
+ * `AbortSignal.timeout` actually cancels the request rather than merely giving up waiting on it,
+ * so a hung call releases its socket instead of leaking one per cycle.
+ */
 export const fetchAdapter: Fetcher = async (url, init) => {
-  const res = await fetch(url, init);
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(KAAMBAAN_REQUEST_TIMEOUT_MS) });
   return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
 };
 
