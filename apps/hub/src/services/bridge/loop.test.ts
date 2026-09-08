@@ -236,3 +236,64 @@ describe("a credential kaambaan will not accept", () => {
     expect(calls).toBeGreaterThan(1);
   });
 });
+
+describe("a cycle that never comes back", () => {
+  /**
+   * Observed on the live fleet, 2026-09-08. The bridge logged one cycle at 05:52:30 and then
+   * nothing at all — not an error, not an idle poll, nothing — while the process stayed healthy
+   * and its connection to Cloudflare stayed ESTABLISHED with both queues empty. A call had been
+   * sent and never answered, and `fetchAdapter` had no timeout, so the agent was gone.
+   *
+   * A hang is the worst of the three failure shapes: an error logs, a refusal halts, but a hang
+   * is indistinguishable from an idle fleet.
+   */
+  test("does not block the loop forever", async () => {
+    let calls = 0;
+    const handle = startAgentLoop({
+      run: () => {
+        calls++;
+        if (calls >= 3) {
+          handle.stop();
+          return Promise.resolve({ status: "idle" } as DispatchResult);
+        }
+        return new Promise<DispatchResult>(() => {}); // never settles
+      },
+      log: () => {},
+      sleep: async () => {},
+      cycleTimeoutMs: 20,
+    });
+    await handle.done;
+    expect(calls).toBeGreaterThan(1); // it got past the hang
+  });
+
+  test("says so, rather than failing silently", async () => {
+    const lines: string[] = [];
+    const handle = startAgentLoop({
+      run: () => new Promise<DispatchResult>(() => {}),
+      log: (m) => {
+        lines.push(m);
+        if (lines.length >= 2) handle.stop();
+      },
+      sleep: async () => {},
+      cycleTimeoutMs: 10,
+    });
+    await handle.done;
+    expect(lines.some((l) => l.includes("exceeded its deadline"))).toBe(true);
+  });
+
+  test("a cycle that finishes in time is untouched by the deadline", async () => {
+    let calls = 0;
+    const handle = startAgentLoop({
+      run: async (): Promise<DispatchResult> => {
+        calls++;
+        if (calls >= 2) handle.stop();
+        return { status: "idle" } as DispatchResult;
+      },
+      log: () => {},
+      sleep: async () => {},
+      cycleTimeoutMs: 5_000,
+    });
+    await handle.done;
+    expect(calls).toBe(2);
+  });
+});
