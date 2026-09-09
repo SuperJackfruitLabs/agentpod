@@ -195,3 +195,33 @@ export async function listPrincipals(): Promise<
     suspendedAt: r.suspendedAt,
   }));
 }
+
+/**
+ * The Better Auth user a principal acts as, or null.
+ *
+ * The inverse of `principalForUser`, and the reason it is needed: a hub token's `sub` is a
+ * `prn_…`, while every station-scoped call in this hub resolves on a Better Auth id —
+ * `getStation(userId, …)`, `requireLive(userId, …)`. Handing a principal id to those is exactly
+ * the defect that killed every bridge-mode room on 2026-08-31 (agentpod#399, #400): it matched
+ * no row, for any room, for any sender, and the suite stayed green because the fakes accepted
+ * any id.
+ *
+ * So a hub token is translated to a Better Auth id **once, at the edge**, and everything below
+ * that layer keeps the meaning of `user.id` it already had.
+ *
+ * Null for an agent or a service, which have no Better Auth identity by construction. That is a
+ * refusal at the caller, not an error here.
+ */
+export async function userIdForPrincipal(principalId: string): Promise<string | null> {
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
+      and(
+        eq(principalIdentities.principalId, principalId),
+        eq(principalIdentities.system, "better-auth")
+      )
+    )
+    .limit(1);
+  return identity?.externalId ?? null;
+}

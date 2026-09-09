@@ -30,8 +30,7 @@
 import { Hono } from "hono";
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 
-import { auth } from "../auth/drizzle-auth";
-import { servicePublicJwks } from "../auth/service-signing";
+import { ALG, publishedJwks } from "../auth/hub-token";
 import { config } from "../config";
 import { listPrincipals as defaultListPrincipals } from "../services/principals";
 
@@ -44,7 +43,6 @@ import { listPrincipals as defaultListPrincipals } from "../services/principals"
  * and "the token says which algorithm to check it with" is the shape of every
  * classic JWT confusion bug.
  */
-const ALG = "EdDSA";
 
 /**
  * The key set `GET /api/auth/jwks` publishes: Better Auth's keys plus this
@@ -68,10 +66,9 @@ const ALG = "EdDSA";
  * mean a service key minted a second ago (they are created lazily, on first
  * use) verifying as a forgery until it expired.
  */
-async function publishedJwks(): Promise<JSONWebKeySet> {
-  const betterAuth = (await auth.api.getJwks()) as unknown as JSONWebKeySet;
-  return { keys: [...(betterAuth.keys ?? []), ...(await servicePublicJwks())] } as JSONWebKeySet;
-}
+// `publishedJwks` now lives in `auth/hub-token.ts`, shared with `authMiddleware`, so a key
+// this hub publishes cannot be accepted in one place and refused in the other.
+
 
 /**
  * What the route needs from the rest of the hub.
