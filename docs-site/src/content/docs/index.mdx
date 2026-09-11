@@ -1,0 +1,36 @@
+---
+title: AgentPod
+description: A fleet and facilities console for the machines your agents live on.
+template: splash
+hero:
+  tagline: Your agents run somewhere. AgentPod is how you see that place, and reach into it.
+  actions:
+    - text: What AgentPod is
+      link: /start/what-it-is/
+      icon: right-arrow
+    - text: Enroll your first node
+      link: /start/first-node/
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Attach, don't migrate" icon="puzzle">
+    Point AgentPod at agent runtimes you already run. It detects them in place — Claude
+    Code, Codex, OpenCode, Hermes, OpenClaw and Pi — rather than asking you to move
+    anything.
+  </Card>
+  <Card title="Reaches machines you can't" icon="random">
+    Every node dials *out* to the hub over a WebSocket. No inbound ports, no port
+    forwarding, and laptops behind NAT or CGNAT work the same as a VPS.
+  </Card>
+  <Card title="Files, logs, terminal, health" icon="laptop">
+    Read a workspace, tail a log, open a shell, check what's running, plan a cleanup —
+    on any station in the fleet, from one place.
+  </Card>
+  <Card title="Self-hostable" icon="setting">
+    The hub is a Bun service with a Postgres database. The console is a static site. You
+    run all of it.
+  </Card>
+</CardGrid>
