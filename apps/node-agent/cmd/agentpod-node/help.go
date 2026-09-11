@@ -19,6 +19,7 @@ var commands = []struct {
 		name: "fleet", group: "Fleet",
 		oneline: "Act on the fleet as a signed-in principal (whoami, nodes, agents, stats)",
 		detail: "apn fleet <verb> — act on the fleet as a PRINCIPAL, not as this machine.\n\n" +
+			"  apn fleet login            sign in and store a hub token\n" +
 			"  apn fleet whoami [--json]   who the stored token says you are\n" +
 			"  apn fleet logout            forget the stored token\n" +
 			"  apn fleet nodes             the fleet's nodes\n" +

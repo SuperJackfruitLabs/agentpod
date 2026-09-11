@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -150,5 +152,42 @@ func TestMaybeShowHelpCoversEveryRegisteredCommand(t *testing.T) {
 				t.Errorf("maybeShowHelp(%q, [--json]) wrote output, want none:\n%s", c.name, buf.String())
 			}
 		})
+	}
+}
+
+// TestFleetHelpListsEveryVerb guards the gap that shipped: `login` was
+// implemented and dispatched in fleet.go, but `apn fleet` help listed six
+// verbs and not that one — so the single command a new operator needs first
+// was the one command help would not tell them about.
+//
+// The verbs are read out of fleet.go's own switch rather than restated here,
+// because a list maintained by hand beside the list it mirrors is the thing
+// that drifted in the first place.
+func TestFleetHelpListsEveryVerb(t *testing.T) {
+	src, err := os.ReadFile("fleet.go")
+	if err != nil {
+		t.Fatalf("read fleet.go: %v", err)
+	}
+
+	verbs := regexp.MustCompile(`(?m)^\tcase "([a-z]+)":`).FindAllStringSubmatch(string(src), -1)
+	if len(verbs) < 5 {
+		t.Fatalf("found only %d fleet verbs in fleet.go — the pattern stopped matching", len(verbs))
+	}
+
+	// Matched against the VERB LIST, not the whole help text. The detail block
+	// also mentions verbs in prose ("the file `apn fleet login` writes"), and a
+	// plain substring check is satisfied by that sentence — which is exactly how
+	// a missing verb passed an earlier version of this test.
+	listed := map[string]bool{}
+	for _, line := range strings.Split(commandHelp("fleet"), "\n") {
+		if m := regexp.MustCompile(`^  apn fleet ([a-z]+)`).FindStringSubmatch(line); m != nil {
+			listed[m[1]] = true
+		}
+	}
+
+	for _, v := range verbs {
+		if !listed[v[1]] {
+			t.Errorf("fleet verb %q is dispatched in fleet.go but not listed in `apn fleet` help", v[1])
+		}
 	}
 }
