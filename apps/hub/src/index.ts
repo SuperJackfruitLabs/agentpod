@@ -67,6 +67,8 @@ import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startKaambaanBridge } from './services/bridge/loop.ts';
+import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
+import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
@@ -221,6 +223,20 @@ const app = new Hono()
    * there later cannot quietly pull this path behind the middleware.
    */
   .route('/', dispatchableRoutes)
+  /**
+   * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
+   *
+   * The same position and the same reason as `dispatchableRoutes` above: `authMiddleware`
+   * refuses any non-human principal, which is correct for the operator API and wrong for a
+   * surface whose entire purpose is letting an agent see itself. What an agent may reach is
+   * decided by which tools it is offered, not by which routes exist — see `mcp/tools.ts`.
+   */
+  .all('/mcp', async (c) => {
+    const caller = await resolveMcpCaller(c.req.raw);
+    if (!caller) return mcpUnauthorized();
+    return handleMcpRequest(c.req.raw, caller);
+  })
+
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)

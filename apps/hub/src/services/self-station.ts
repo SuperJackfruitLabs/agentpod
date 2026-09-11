@@ -34,6 +34,15 @@ export interface SelfStation {
   harness: string | null;
   matrixId: string | null;
   identityMode: string | null;
+  /**
+   * The station's OWNER — a Better Auth id, not a principal id.
+   *
+   * Carried because the session machinery scopes on it: `listSessions(userId, stationId)` and
+   * `requireLive(userId, …)` both resolve on `acp_sessions.user_id`, which holds the station's
+   * owner. Handing those a `prn_` is precisely what killed every bridge-mode room on 2026-08-31
+   * (#399, #400), and it is why the translation happens here, once, rather than in each caller.
+   */
+  ownerUserId: string;
 }
 
 /**
@@ -56,6 +65,7 @@ export async function stationForPrincipal(principalId: string): Promise<SelfStat
       harness: stations.harness,
       matrixId: stations.matrixId,
       identityMode: stations.matrixIdentityMode,
+      ownerUserId: stations.userId,
     })
     .from(stations)
     .leftJoin(nodes, eq(nodes.id, stations.nodeId))

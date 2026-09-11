@@ -6,8 +6,8 @@
  * handler can forget. This derivation is the alternative — a surface with no id to tamper with.
  * So the tests that matter are the ones proving it cannot be made to answer for another station.
  */
-import { beforeAll, describe, expect, test } from "bun:test";
-import { eq } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { eq, like } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
@@ -67,6 +67,22 @@ beforeAll(async () => {
 
   myStationId = await station("mine", mine);
   theirStationId = await station("theirs", theirs);
+});
+
+/**
+ * Clean up after itself, because other tests assert over THE WHOLE FLEET.
+ *
+ * `matrix-as-provision.test.ts` has a "covers every adopted station" case that iterates every
+ * adopted station in the database. Rows left behind here become stations it tries to provision
+ * and fails on — a test failing in a file that has nothing to do with this one, which is the
+ * worst kind to debug. Found exactly that way on 2026-09-11.
+ *
+ * The `like` sweep also removes rows from earlier runs of this file, so a database that already
+ * accumulated them is repaired rather than merely not added to.
+ */
+afterAll(async () => {
+  await db.delete(stations).where(like(stations.id, "station_selfscope_%"));
+  await db.delete(nodes).where(like(nodes.id, "nod_selfscope_%"));
 });
 
 describe("stationForPrincipal", () => {
