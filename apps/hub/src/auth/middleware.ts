@@ -14,6 +14,8 @@ import { auth, type Session, type User } from "./drizzle-auth";
 import { BOOTSTRAP_TENANT_ID } from "./tenant";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
+import { userIdForPrincipal } from "../services/principals";
+import { verifyHubToken } from "./hub-token";
 
 const log = createLogger("auth-middleware");
 
@@ -41,7 +43,7 @@ export interface AuthUser {
   email?: string;
   name?: string;
   image?: string;
-  authType: "better_auth" | "api_key";
+  authType: "better_auth" | "api_key" | "hub_token";
   /**
    * The isolation boundary this caller acts in.
    *
@@ -173,6 +175,53 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
       return next();
     }
     
+    // ── A token this hub issued ──────────────────────────────────────────────
+    //
+    // The hub is the issuer for the whole suite and, until now, was the one plane that would
+    // not read its own tokens: a client finishing the authorization-code flow got a credential
+    // that opened exactly one endpoint. This is that asymmetry closed.
+    //
+    // **Human principals only, and the refusal is explicit.** `mayDispatch` is the authority to
+    // ask an agent to work; it was never the authority to operate the fleet. Most routes under
+    // this middleware have never had to consider a non-human caller, and widening what a hub
+    // token reaches must not silently widen who may hold one. When a route is audited and found
+    // correct for an agent, it can opt in — from a position where the default was closed.
+    const hubClaims = await verifyHubToken(bearerToken);
+    if (hubClaims) {
+      if (hubClaims.principalKind !== "human") {
+        log.warn("Refused a non-human hub token", { kind: hubClaims.principalKind });
+        return c.json(
+          {
+            error: "Forbidden",
+            message:
+              `This endpoint takes a human principal. That token names a ${hubClaims.principalKind}.`,
+          },
+          403
+        );
+      }
+
+      // Translated to a Better Auth id HERE, once, because everything below resolves on one —
+      // `getStation(userId, …)`, `requireLive(userId, …)`. Passing a `prn_` down is the defect
+      // that killed every bridge-mode room on 2026-08-31 (#399, #400).
+      const userId = await userIdForPrincipal(hubClaims.sub);
+      if (!userId) {
+        log.warn("Hub token names a principal with no Better Auth identity", { sub: hubClaims.sub });
+        return c.json(
+          {
+            error: "Forbidden",
+            message: "That principal has no account on this hub.",
+          },
+          403
+        );
+      }
+
+      c.set("user", { id: userId, authType: "hub_token", tenantId: BOOTSTRAP_TENANT_ID });
+      c.set("session", null);
+      c.set("betterAuthUser", null);
+      log.debug("Authenticated via hub-issued token", { principal: hubClaims.sub, userId });
+      return next();
+    }
+
     // Try to validate as a Better Auth session token
     try {
       const session = await auth.api.getSession({
