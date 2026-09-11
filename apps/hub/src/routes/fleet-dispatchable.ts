@@ -139,8 +139,8 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
     if (claims.principalKind !== "human") {
       return c.json(
         refuse(
-          "Only a human principal may enumerate dispatchable agents. This token names a " +
-            `${typeof claims.principalKind === "string" ? claims.principalKind : "principal of unknown kind"}.`
+          "Only a human principal may enumerate dispatchable agents. This token's principal kind is " +
+            `${typeof claims.principalKind === "string" ? claims.principalKind : "not stated"}.`
         ),
         401
       );
