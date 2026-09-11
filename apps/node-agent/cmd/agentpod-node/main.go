@@ -33,6 +33,19 @@ func main() {
 		fmt.Println(helpText(version))
 		os.Exit(0)
 	}
+	// `apn node <verb>` is the explicit spelling of the machine-scoped verbs; the bare forms
+	// stay because the estate's own documents name them (`apn enroll`, `apn update`), and a
+	// runbook that stops working is worse than a CLI with two spellings. Stripping the prefix
+	// here rather than dispatching separately means the two spellings CANNOT diverge: there is
+	// one switch, and `node` is only ever a word removed before it.
+	if os.Args[1] == "node" {
+		if len(os.Args) < 3 {
+			fmt.Println(commandHelp("node"))
+			os.Exit(0)
+		}
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	}
+
 	switch os.Args[1] {
 	case "help", "-h", "--help":
 		if os.Args[1] == "help" && len(os.Args) > 2 {
@@ -99,6 +112,9 @@ func main() {
 			os.Exit(0)
 		}
 		runCmd() // implemented in Task 9
+	case "fleet":
+		// Acting as a principal, not as this machine. See fleet.go.
+		fleetCmd(os.Args[2:])
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)
