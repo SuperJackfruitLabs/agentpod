@@ -260,8 +260,14 @@ jobs:
         working-directory: docs-site
         run: npm run build
 
+      # wrangler invoked directly rather than through cloudflare/wrangler-action.
+      # The action picks a package manager by looking at the REPO ROOT, finds
+      # pnpm-lock.yaml, and shells out to pnpm to install wrangler — which this job
+      # does not have, because docs-site is deliberately npm. kaambaan's identical
+      # job failed exactly this way on its first real run, with "Unable to locate
+      # executable file: pnpm", before it ever reached Cloudflare.
       - name: Deploy
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          command: pages deploy docs-site/dist --project-name=agentpod-docs --branch=main
+        working-directory: docs-site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 pages deploy dist --project-name=agentpod-docs --branch=main
