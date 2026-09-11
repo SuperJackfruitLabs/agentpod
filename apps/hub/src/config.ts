@@ -424,7 +424,53 @@ export function findOAuthClient(
  * the registered URI and is not it.
  */
 export function isRegisteredRedirect(client: OAuthClient, redirectUri: string): boolean {
-  return client.redirectUris.includes(redirectUri);
+  if (client.redirectUris.includes(redirectUri)) return true;
+  // The one exception, and it is narrow by construction — see `LOOPBACK_MARKER`.
+  return client.redirectUris.includes(LOOPBACK_MARKER) && isLoopbackRedirect(redirectUri);
+}
+
+/**
+ * The literal a client registers instead of a URI to say "I am a native app on this machine".
+ *
+ * Registered as `apn|loopback`. A marker rather than a pattern language: `127.0.0.1:*` invites
+ * somebody to write `*.agentpod.dev` next, and a registry that accepts one wildcard has already
+ * lost the property that makes exact matching safe.
+ */
+export const LOOPBACK_MARKER = 'loopback';
+
+/**
+ * A redirect back to a listener on this machine, for a CLI that cannot pin a port.
+ *
+ * RFC 8252 §7.3's native-app rule, and every clause below is load-bearing:
+ *
+ * - **`http` only, and loopback only.** `127.0.0.1` and `[::1]` exactly. Never `localhost`,
+ *   which is a NAME — it resolves through DNS and `/etc/hosts`, so an attacker who can answer
+ *   for it receives the code. This is the clause people skip.
+ * - **Any port.** The whole reason the exception exists: a CLI binds an ephemeral one.
+ * - **The path is exactly `/callback`.** `URL` normalises `..` before we look, so
+ *   `/callback/../evil` arrives as `/evil` and is refused — but the equality is what refuses it,
+ *   not the normalisation.
+ * - **No query, no fragment, no userinfo.** `http://evil@127.0.0.1/callback` is a URL whose
+ *   host a human reads as the wrong thing, and a credential destination must not be ambiguous
+ *   to a person reading it in a browser bar.
+ *
+ * What does NOT change: a `redirect_uri` failing this still renders 400 and sends no `Location`.
+ * An authorize endpoint that redirects where it was not told to is a credential-minting open
+ * redirector, and that property is older than this exception.
+ */
+export function isLoopbackRedirect(redirectUri: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(redirectUri);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'http:') return false;
+  if (u.hostname !== '127.0.0.1' && u.hostname !== '[::1]' && u.hostname !== '::1') return false;
+  if (u.pathname !== '/callback') return false;
+  if (u.search !== '' || u.hash !== '') return false;
+  if (u.username !== '' || u.password !== '') return false;
+  return true;
 }
 
 /**

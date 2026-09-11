@@ -48,6 +48,8 @@ func fleetCmd(args []string) {
 		return
 	}
 	switch args[0] {
+	case "login":
+		fleetLogin(args[1:])
 	case "whoami":
 		fleetWhoami(args[1:])
 	case "logout":
