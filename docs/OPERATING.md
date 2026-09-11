@@ -99,6 +99,74 @@ single-use (`enrollment_tokens.used_at`) and scoped to the operator account
 
 ---
 
+## 1a. Two modes: acting as a machine, or as yourself
+
+`apn` is the node agent, and every verb above acts on **the machine it runs on**, authenticating
+as that machine with the `<nodeId>:<nodeSecret>` written by `apn enroll`. On a laptop, in CI, or
+inside an agent's workspace there is nothing to act *as* — which is where `apn fleet` comes in.
+
+| mode | acts as | credential |
+|---|---|---|
+| `apn node …` | this machine | `<nodeId>:<nodeSecret>` from the node's config |
+| `apn fleet …` | you, or an agent | a hub token |
+
+`apn node <verb>` is the explicit spelling; the bare forms keep working, so `apn status` and
+`apn node status` are the same command and every existing runbook still reads correctly.
+
+### Signing in
+
+```sh
+apn fleet login          # opens a browser, stores a token
+apn fleet whoami         # who that token says you are, and when it expires
+apn fleet logout
+```
+
+`login` is authorization-code with PKCE against the hub, and the browser only ever performs a
+top-level navigation — which is what makes it work at all, since the hub's session cookie is
+`SameSite=Lax` and would not be sent on a cross-site fetch. The token is exchanged by `apn`
+itself, so it never enters a URL, your shell history, or a `Referer`.
+
+The hub must have the CLI registered — `apn|loopback` in `HUB_OAUTH_CLIENTS`, see
+[DEPLOYMENT.md](./DEPLOYMENT.md#the-oauth-client-registry). Without
+it, authorize refuses, which is the correct posture for a hub that has not opted in.
+
+### Reading the fleet
+
+```sh
+apn fleet nodes
+apn fleet agents
+apn fleet stats
+apn fleet activity
+```
+
+Output is the hub's own JSON, passed through rather than reformatted — a client that summarises a
+payload it does not fully model silently drops the field somebody needed.
+
+### Settings
+
+| Variable | Meaning |
+|---|---|
+| `AGENTPOD_TOKEN` | A hub token, used instead of the stored one. What CI and an agent harness set. |
+| `AGENTPOD_HUB` | The hub to talk to. Defaults to `https://hub.agentpod.dev`. |
+| `AGENTPOD_LOGIN_TIMEOUT` | How long `login` waits for the browser. Defaults to five minutes — right for a person, wrong for anything scripted. |
+| `BROWSER` | The command `login` opens. May carry arguments. `BROWSER=none` opens nothing and leaves the printed URL as the whole interface, which is what you want over SSH. |
+
+```sh
+AGENTPOD_TOKEN=… apn fleet nodes
+```
+
+### The rule worth knowing
+
+**A fleet command never falls back to the node's credential.** With no token it fails and tells
+you to sign in; it does not quietly act as the machine. A node secret says *"I am this host"* and
+is not an authority to operate the fleet — so the fleet verbs are present on every enrolled
+station and useless there without a token the node does not have.
+
+Two failures that look alike and are not: **401 means sign in**, **403 means your principal may
+not do this**. `apn` reports them differently on purpose. In particular a hub token naming an
+**agent** is refused from the operator API with 403 — agents reach the hub through its MCP
+endpoint, not these verbs.
+
 ## 2. Adopt stations
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.

@@ -526,6 +526,47 @@ duplicate `key`.
 
 ---
 
+### The OAuth client registry
+
+A plane on its own domain cannot read the hub's session cookie: it is `SameSite=Lax`, and
+`kaambaan.dev` is a different site from `agentpod.dev`. The authorization-code flow
+(`GET /api/auth/authorize` → `POST /api/auth/token/exchange`) exists so a browser can *navigate*
+to the hub — which `Lax` permits — and hand the plane's server a one-time code.
+
+| Variable | Meaning |
+|---|---|
+| `HUB_OAUTH_CLIENTS` | Who may **receive** a token. Comma-separated `client\|redirect_uri`; repeat the client key for several URIs. **Empty by default**, and a hub that has not opted in refuses every authorize. |
+
+**This is deliberately not `ALLOWED_ORIGINS`.** They answer different questions: that list says
+who may *call* the hub from a browser; this one says who may *be handed a credential for whoever
+is signed in*. Being permitted to make a request must not by itself confer the right to receive a
+token, which is why the two are separate and this one starts empty.
+
+Redirect matching is **full-string equality**. Prefix or origin matching is how an authorize
+endpoint becomes a credential-minting open redirector: `https://k.dev/hub/callback/../../evil`
+shares an origin and a prefix with the registered URI and is not it.
+
+**One exception, for native apps.** A client may register the literal `loopback` instead of a URI
+— `apn|loopback` — which permits `http://127.0.0.1:<any port>/callback` and `[::1]`, and nothing
+else. A CLI cannot pin a port, so it cannot register an exact URI. Everything about that rule is
+narrow on purpose:
+
+- **`localhost` is refused.** It is a *name*, resolved through DNS and `/etc/hosts`, so whoever
+  can answer for it receives the authorization code. Only the IP literals are accepted.
+- the path must be exactly `/callback`; no query, no fragment, no userinfo, no scheme but `http`
+- it is **opt-in per client** — kaambaan registering a machine-local port would be a compromise,
+  not a feature
+
+A malformed entry is skipped rather than thrown, so a typo cannot stop the hub booting for a
+feature it may not use — but a skipped entry is simply not in the registry, and authorize refuses
+what it cannot find. The refusal names this variable.
+
+Example, registering the web plane and the CLI:
+
+```
+HUB_OAUTH_CLIENTS=kaambaan|https://kaambaan.dev/hub/callback,apn|loopback
+```
+
 ## 5. Hub — build + deploy
 
 ```bash
