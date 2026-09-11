@@ -35,6 +35,7 @@
     "@agentpod/types": "workspace:*",
     "@hono/zod-validator": "^0.9.0",
     "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@opencode-ai/sdk": "^1.18.18",
     "@trpc/client": "^11.18.0",
     "@trpc/server": "^11.18.0",
