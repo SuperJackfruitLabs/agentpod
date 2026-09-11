@@ -116,8 +116,12 @@ func fleetLogin(args []string) {
 	go func() { _ = srv.Serve(ln) }()
 	defer srv.Close()
 
+	// `client`, NOT `client_id`. The hub reads `c.req.query("client")`, and a name it does not
+	// recognise resolves to the empty string — which then fails as "this hub does not know that
+	// client", a message that sounds like a registry problem and is actually a spelling one.
+	// Exactly the hazard the ecosystem-identity corpus names: a claim's NAME is a contract.
 	authorize := hub + "/api/auth/authorize?" + url.Values{
-		"client_id":             {clientID},
+		"client":                {clientID},
 		"redirect_uri":          {redirectURI},
 		"response_type":         {"code"},
 		"state":                 {state},
@@ -170,11 +174,13 @@ func fleetLogin(args []string) {
 
 // exchange trades the code and verifier for a token, from this process rather than the browser.
 func exchange(hub, code, verifier, redirectURI string) (string, error) {
+	// No client id: the exchange identifies the client by which registered redirect URI the
+	// code was issued for. Sending one anyway would be a field the endpoint ignores, which is
+	// how a reader later concludes it matters.
 	body, err := json.Marshal(map[string]string{
 		"code":          code,
 		"code_verifier": verifier,
 		"redirect_uri":  redirectURI,
-		"client_id":     clientID,
 	})
 	if err != nil {
 		return "", err
