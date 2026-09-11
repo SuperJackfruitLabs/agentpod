@@ -39,8 +39,18 @@ import (
 // authorize, which is the correct posture for a deployment that never asked for this door.
 const clientID = "apn"
 
-// loginTimeout bounds the wait for a human. Generous: it may include signing in.
-const loginTimeout = 5 * time.Minute
+// loginTimeout bounds the wait for a human. Generous by default, because it may include
+// signing in — and overridable, because five minutes is the wrong wait for anything scripted.
+const defaultLoginTimeout = 5 * time.Minute
+
+func loginTimeout() time.Duration {
+	if v := strings.TrimSpace(os.Getenv("AGENTPOD_LOGIN_TIMEOUT")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			return d
+		}
+	}
+	return defaultLoginTimeout
+}
 
 func randomURLSafe(n int) (string, error) {
 	b := make([]byte, n)
@@ -121,8 +131,8 @@ func fleetLogin(args []string) {
 	var got loginResult
 	select {
 	case got = <-results:
-	case <-time.After(loginTimeout):
-		fmt.Fprintf(os.Stderr, "Timed out after %s waiting for the browser.\n", loginTimeout)
+	case <-time.After(loginTimeout()):
+		fmt.Fprintf(os.Stderr, "Timed out after %s waiting for the browser.\n", loginTimeout())
 		os.Exit(1)
 	}
 	if got.err != nil {
@@ -207,8 +217,20 @@ func exchange(hub, code, verifier, redirectURI string) (string, error) {
 }
 
 // openBrowser is best effort. A failure is not fatal: the URL was printed above, and a headless
-// host is a normal place to run this.
+// host — a server, a container, CI — is a normal place to run this.
+//
+// `$BROWSER` is honoured first, and is the conventional escape hatch on Unix: it may name a
+// command with arguments, so `BROWSER="firefox --private-window"` works. `BROWSER=none` opens
+// nothing and leaves the printed URL as the whole interface, which is what you want over SSH.
 func openBrowser(u string) {
+	if b := strings.TrimSpace(os.Getenv("BROWSER")); b != "" {
+		if b == "none" {
+			return
+		}
+		fields := strings.Fields(b)
+		_ = exec.Command(fields[0], append(fields[1:], u)...).Start()
+		return
+	}
 	var cmd string
 	var args []string
 	switch runtime.GOOS {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeHub stands in for the hub's authorize + exchange pair.
@@ -20,14 +22,14 @@ import (
 // from the CLI's own output: that the redirect is loopback, that PKCE is S256 and the verifier
 // really hashes to the challenge, and that the exchange carries no Origin.
 type fakeHub struct {
-	t          *testing.T
-	challenge  string
-	state      string
-	redirect   string
-	sawOrigin  bool
-	issued     string
-	exchanges  int
-	failExchg  bool
+	t         *testing.T
+	challenge string
+	state     string
+	redirect  string
+	sawOrigin bool
+	issued    string
+	exchanges int
+	failExchg bool
 }
 
 func newFakeHub(t *testing.T, issued string) (*httptest.Server, *fakeHub) {
@@ -99,6 +101,17 @@ func jwtish(sub, kind string) string {
 	return "aGRy." + base64.RawURLEncoding.EncodeToString(p) + ".c2ln"
 }
 
+// runLogin runs `apn fleet …` and, for `login`, PLAYS THE BROWSER ITSELF.
+//
+// The first version of this test set `BROWSER=true` and trusted the platform to open a browser
+// that would follow the redirect. That passes on a developer's Mac, where `open` really works,
+// and hangs for five minutes in CI, where nothing opens anything — the fake hub's authorize
+// endpoint was simply never called. A test whose result depends on a desktop being present is
+// not testing the thing it claims to.
+//
+// So: `BROWSER=none` stops the CLI opening anything, the test scrapes the authorize URL the CLI
+// prints, and fetches it with a client that follows redirects — which is exactly what a browser
+// contributes to this flow and nothing more.
 func runLogin(t *testing.T, bin, hub, home string, args ...string) (string, int) {
 	t.Helper()
 	cmd := exec.Command(bin, append([]string{"fleet"}, args...)...)
@@ -107,15 +120,52 @@ func runLogin(t *testing.T, bin, hub, home string, args ...string) (string, int)
 		"XDG_CONFIG_HOME=" + home,
 		"PATH=" + os.Getenv("PATH"),
 		"AGENTPOD_HUB=" + hub,
-		// Stop the real browser opening during tests.
-		"BROWSER=true",
+		"BROWSER=none",
+		// Short, so a broken flow fails in seconds instead of stalling the package for five
+		// minutes and then panicking the whole binary on the 10-minute deadline.
+		"AGENTPOD_LOGIN_TIMEOUT=20s",
 	}
-	out, err := cmd.CombinedOutput()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read as it comes, so the authorize URL can be acted on while the CLI is still waiting.
+	var buf strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			line := sc.Text()
+			buf.WriteString(line + "\n")
+			if u := strings.TrimSpace(line); strings.Contains(u, "/api/auth/authorize?") {
+				go visitAsBrowser(u)
+			}
+		}
+	}()
+
+	<-done
+	err = cmd.Wait()
 	code := 0
 	if ee, ok := err.(*exec.ExitError); ok {
 		code = ee.ExitCode()
 	}
-	return string(out), code
+	return buf.String(), code
+}
+
+// visitAsBrowser is the only thing a browser does for this flow: GET the URL and follow the
+// redirect back to the loopback listener.
+func visitAsBrowser(u string) {
+	res, err := (&http.Client{Timeout: 15 * time.Second}).Get(u)
+	if err == nil {
+		_ = res.Body.Close()
+	}
 }
 
 func TestLoginStoresATokenAndWhoamiReadsIt(t *testing.T) {
