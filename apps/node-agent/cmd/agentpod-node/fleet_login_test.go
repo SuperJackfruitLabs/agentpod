@@ -45,8 +45,23 @@ func newFakeHub(t *testing.T, issued string) (*httptest.Server, *fakeHub) {
 		if q.Get("code_challenge_method") != "S256" {
 			h.t.Errorf("PKCE method = %q, want S256", q.Get("code_challenge_method"))
 		}
-		if q.Get("client_id") != "apn" {
-			h.t.Errorf("client_id = %q", q.Get("client_id"))
+
+		// **Refuse the way the real hub refuses**, rather than merely asserting.
+		//
+		// The first version of this fake read `client_id`, because that is what the CLI sent —
+		// so the test agreed with the bug and the flow "worked" against a hub that does not
+		// exist. The real hub reads `client`, and an unknown name resolves to "" and fails as
+		// "this hub does not know that client": a message that sounds like a registry problem
+		// and is actually a spelling one. Caught on 2026-09-11 against the live hub, after the
+		// tests were green.
+		//
+		// A fake that only asserts is a fake that can be taught the implementation's mistakes.
+		// This one answers like the thing it stands in for, so getting the name wrong fails the
+		// flow instead of an assertion inside it.
+		if q.Get("client") != "apn" {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte("this hub does not know that client"))
+			return
 		}
 		u, err := url.Parse(h.redirect)
 		if err != nil || u.Hostname() != "127.0.0.1" || u.Path != "/callback" {
