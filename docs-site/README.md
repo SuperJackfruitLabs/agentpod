@@ -36,3 +36,40 @@ code with no check."* Publishing doubles that surface, and these are the pages s
 read.
 
 Run it with `cd apps/hub && bun test tests/unit/docs-claims.test.ts`.
+
+## Publishing
+
+Deployed by the `deploy-docs` job in `.github/workflows/ci.yml`, on every push to `main`
+that passes the `hub` job — which is where `docs-claims` runs. A page that names a tool or
+capability the code does not have should never reach the site.
+
+### One-time setup
+
+1. **Create the Pages project.** `agentpod-docs`, as a **direct-upload** project — do not
+   connect it to the Git repo, or Cloudflare will race the CI job and deploy an unbuilt
+   tree.
+
+   ```sh
+   npx wrangler pages project create agentpod-docs --production-branch=main
+   ```
+
+2. **Add the repo secret.** `CLOUDFLARE_API_TOKEN`, scoped to **Cloudflare Pages: Edit**.
+   This repository has no Cloudflare secret today — the `worker` job only runs tests — so
+   this is a new one rather than a widening.
+
+3. **Point the domain — and note this differs from kaambaan.** `agentpod.dev` is
+   registered at **Porkbun and is not on Cloudflare's nameservers**, so adding a custom
+   domain to the Pages project does *not* create the DNS record for you. Two steps:
+
+   - Add `docs.agentpod.dev` as a custom domain on the Pages project. Cloudflare will show
+     the `<project>.pages.dev` hostname it expects and report the domain as pending.
+   - At Porkbun, create a `CNAME` for `docs` pointing at that `<project>.pages.dev`
+     hostname. Validation completes once it resolves.
+
+### Checking it
+
+The site is static with no runtime, so it either served the built tree or it did not:
+
+```sh
+curl -sI https://docs.agentpod.dev/start/what-it-is/
+```
