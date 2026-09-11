@@ -68,6 +68,13 @@ const CODE_FILES = [
   "apps/hub/src/utils/validate-config.ts",
   "apps/console/vite.config.js",
   "apps/console/src/lib/api/client.ts",
+  // The CLI reads env vars too, and OPERATING.md is where an operator is told
+  // to set them. Added 2026-09-12 with `apn fleet`: without it, documenting
+  // AGENTPOD_TOKEN failed as "a variable nothing reads" — which was the test
+  // being right about its list and wrong about the codebase.
+  "apps/node-agent/cmd/agentpod-node/fleet.go",
+  "apps/node-agent/cmd/agentpod-node/fleet_login.go",
+  "apps/node-agent/internal/fleetcred/fleetcred.go",
   // A shell script an operator runs is code that reads env vars, and the ones
   // OPERATING.md §7e tells them to export are read here rather than by the hub.
   "scripts/onboard-agent.sh",
@@ -174,6 +181,18 @@ describe("environment variables the hub names in a boot message", () => {
     ]) {
       // A SCREAMING_SNAKE name inside a string literal in these files is,
       // without exception today, a variable being named to an operator.
+      //
+      // **"In these files" is load-bearing, and the list does not generalise.**
+      // Tried and reverted on 2026-09-12: adding `routes/auth-authorize.ts`,
+      // which refuses with "Fix HUB_OAUTH_CLIENTS.", catches nothing and
+      // introduces a false positive. `scanEnvNames` matches a name that is the
+      // WHOLE string literal, so a setting named inside a sentence is invisible
+      // to it, while `"S256"` — a PKCE method constant — reads as a variable.
+      //
+      // The consequence worth knowing: a variable this hub names only in the
+      // PROSE of a refusal is one nothing makes anybody document.
+      // HUB_OAUTH_CLIENTS went undocumented through three PRs and a production
+      // deploy that way, and was written up by hand rather than by this test.
       //
       // Comments are stripped first (#323): this could not tell a backticked
       // name in a JSDoc line from a string literal, so a comment about an
