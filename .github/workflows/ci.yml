@@ -217,3 +217,57 @@ jobs:
       - name: Run tests
         working-directory: cloudflare/worker-v2
         run: npx vitest run
+
+  # The published documentation site, to Cloudflare Pages at docs.agentpod.dev.
+  #
+  # npm and a package-lock, following the precedent the `worker` job above already
+  # sets: docs-site sits outside the pnpm workspace (apps/*, packages/*), so copying
+  # the pnpm setup the hub and console jobs use would find no lockfile.
+  #
+  # Gated on `hub`, which is where the docs-claims test lives — the check that these
+  # pages name no MCP tool, apn command or gated capability the code does not have.
+  # Publishing a page that lies is worse than not publishing it.
+  #
+  # Requires a CLOUDFLARE_API_TOKEN repo secret with Cloudflare Pages: Edit, and a
+  # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md —
+  # note that agentpod.dev is NOT on Cloudflare, so the DNS record is manual.
+  deploy-docs:
+    needs: [hub]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-docs
+      cancel-in-progress: false
+    environment:
+      name: docs
+      url: https://docs.agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Build
+        working-directory: docs-site
+        run: npm run build
+
+      # wrangler invoked directly rather than through cloudflare/wrangler-action.
+      # The action picks a package manager by looking at the REPO ROOT, finds
+      # pnpm-lock.yaml, and shells out to pnpm to install wrangler — which this job
+      # does not have, because docs-site is deliberately npm. kaambaan's identical
+      # job failed exactly this way on its first real run, with "Unable to locate
+      # executable file: pnpm", before it ever reached Cloudflare.
+      - name: Deploy
+        working-directory: docs-site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx --yes wrangler@4 pages deploy dist --project-name=agentpod-docs --branch=main

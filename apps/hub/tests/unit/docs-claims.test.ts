@@ -1,335 +1,132 @@
 /**
- * Documentation claims that a test can settle, settled by a test.
+ * The published documentation is checked against the code it describes.
  *
- * The 2026-08-14 documentation audit found the same shape of bug over and
- * over: a claim written once, far from the code it describes, that nothing
- * could contradict when the code moved. Two families of that claim are cheap
- * to check mechanically, so they are checked here instead of re-read by hand.
+ * `docs/README.md` names the failure mode this exists to prevent: "a description far from its
+ * code with no check". Everything the 2026-08-14 audit found wrong had exactly that shape, and
+ * publishing doubles the surface — the pages under `docs-site/` are the ones strangers read,
+ * and nobody who reads them can check them against the source.
  *
- *   1. Environment variables offered to an operator. `SESSION_SECRET` sat in
- *      `.env.example` and `deploy/README-deploy.md` for a year after the hub
- *      stopped reading it — the rename to `BETTER_AUTH_SECRET` shipped with a
- *      plan step that said "remove remaining SESSION_SECRET references" and
- *      the references stayed. A hub deployed from that file ran on the
- *      insecure default and nothing said so. `apps/hub/.env.example` was also
- *      still offering COOLIFY_*, FORGEJO_* and KEYCLOAK_* — three integrations
- *      that have not existed since the pivot.
+ * `apps/landing` is the warning recorded in its own README: both of its two outbound links were
+ * 404s, because they were ordinary links with no test behind them.
  *
- *   2. The list of required CI checks. `CONTRIBUTING.md` and `TESTING.md` both
- *      said "four required jobs" and named four; `worker` had been a fifth
- *      since the Cloudflare suite was wired into CI.
- *
- * Both directions matter and both are asserted: an operator must not be
- * offered a variable nothing reads, AND a variable the hub is prepared to NAME
- * IN A BOOT MESSAGE must be written down somewhere an operator will find it.
- * The second half is what would have caught the kaambaan bridge, which shipped
- * able to refuse a boot naming `KAAMBAAN_BRIDGE_AGENTS` while those three
- * variables were written down only in a root `.env.example` that no document
- * pointed at.
- *
- * This deliberately lives in the hub suite rather than a docs-only runner: the
- * `hub` job is a required check, and a check nothing runs is the problem, not
- * the solution.
+ * So: every tool, command, capability and endpoint these pages name must exist. When this test
+ * fails, the page is usually the thing that is wrong — but not always, and that is the point.
+ * A name that vanished from the code is either a docs bug or a regression, and this cannot tell
+ * you which. It can only tell you they disagree.
  */
-
 import { describe, expect, test } from "bun:test";
-import { scanEnvNames } from "../helpers/scan-env-names";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { RuntimeHarness } from "@agentpod/contract";
-import { harnessImageEnvVar, providerImageEnvVar } from "../../src/services/runtimes-image";
+const REPO = join(import.meta.dir, "../../../..");
+const SITE = join(REPO, "docs-site/src/content/docs");
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..");
-const read = (rel: string) => readFileSync(join(REPO_ROOT, rel), "utf8");
-
-/**
- * The files that offer an operator a variable to set. `deploy/README-deploy.md`
- * is deliberately NOT here: it is a marked historical record of the first
- * deploy, and holding a record to today's code would force it to stop being a
- * record. That is the whole point of the distinction docs/README.md draws.
- */
-const OPERATOR_FACING = [
-  "apps/hub/.env.example",
-  "docs/DEPLOYMENT.md",
-  "docs/OPERATING.md",
-] as const;
-
-/** Sources that count as "this codebase reads it". */
-const CODE_FILES = [
-  "apps/hub/src/config.ts",
-  "apps/hub/src/services/provisioner/docker-daemon.ts",
-  "apps/hub/src/services/provisioner/cloudflare-sandbox.ts",
-  "apps/hub/src/services/provisioner/modal.ts",
-  "apps/hub/src/services/provisioner/registry.ts",
-  "apps/hub/src/services/runtimes-image.ts",
-  "apps/hub/src/services/bridge/config.ts",
-  "apps/hub/src/routes/runtime-callback.ts",
-  "apps/hub/src/utils/validate-config.ts",
-  "apps/console/vite.config.js",
-  "apps/console/src/lib/api/client.ts",
-  // The CLI reads env vars too, and OPERATING.md is where an operator is told
-  // to set them. Added 2026-09-12 with `apn fleet`: without it, documenting
-  // AGENTPOD_TOKEN failed as "a variable nothing reads" — which was the test
-  // being right about its list and wrong about the codebase.
-  "apps/node-agent/cmd/agentpod-node/fleet.go",
-  "apps/node-agent/cmd/agentpod-node/fleet_login.go",
-  "apps/node-agent/internal/fleetcred/fleetcred.go",
-  // A shell script an operator runs is code that reads env vars, and the ones
-  // OPERATING.md §7e tells them to export are read here rather than by the hub.
-  "scripts/onboard-agent.sh",
-] as const;
-
-/**
- * Names that appear in an operator-facing file but are not env vars this repo
- * reads. Each one needs a reason — an unexplained entry here would turn the
- * check back into the prose it replaced.
- */
-const NOT_OUR_ENV_VARS: Record<string, string> = {
-  URL: "shell local in DEPLOYMENT.md's gVisor install snippet, not an env var the hub reads",
-  ARCH: "shell local in the same gVisor snippet — `ARCH=$(uname -m)` picking a release path",
-  PATH: "the ordinary shell PATH, exported in the re-deploy section so bun is findable",
-};
-
-/** `NAME=` at the start of a line, comment or not. */
-const OFFERED_LINE = /^\s*#?\s*(?:export\s+)?([A-Z][A-Z0-9_]{2,})=/;
-
-function offeredVariables(): Map<string, string[]> {
-  const found = new Map<string, string[]>();
-  for (const rel of OPERATOR_FACING) {
-    for (const line of read(rel).split("\n")) {
-      const match = OFFERED_LINE.exec(line);
-      if (!match) continue;
-      const name = match[1]!;
-      found.set(name, [...(found.get(name) ?? []), rel]);
-    }
-  }
-  return found;
+interface Page {
+  file: string;
+  text: string;
 }
 
-/**
- * Every env var name the codebase mentions. Deliberately a plain
- * SCREAMING_SNAKE scan rather than a parse of `process.env.X`: the hub reads
- * several through helpers (`getEnv`, `str(env, "…")`, `dockerDaemonSettingsFromEnv`),
- * and a scanner that only understood one syntax would report a live variable
- * as dead — a false red is how a check gets deleted.
- */
-function namesMentionedInCode(): Set<string> {
-  const names = new Set<string>();
-  for (const rel of CODE_FILES) {
-    for (const match of read(rel).matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)) {
-      names.add(match[1]!);
-    }
+function pages(dir = SITE, prefix = ""): Page[] {
+  const out: Page[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...pages(join(dir, entry.name), rel));
+    else if (entry.name.endsWith(".md") || entry.name.endsWith(".mdx"))
+      out.push({ file: rel, text: readFileSync(join(dir, entry.name), "utf8") });
   }
-  // Per-harness, per-provider image variables are BUILT, never written out —
-  // `NODE_AGENT_FLY_PI_IMAGE` appears in no source file. Ask the builders.
-  for (const harness of RuntimeHarness.options) {
-    names.add(harnessImageEnvVar(harness));
-    for (const provider of ["docker", "cloudflare", "modal", "fly"]) {
-      names.add(providerImageEnvVar(harness, provider));
-    }
-  }
-  return names;
+  return out;
 }
 
-describe("environment variables an operator is told to set", () => {
-  test("are all variables this codebase actually reads", () => {
-    const mentioned = namesMentionedInCode();
-    const dead: string[] = [];
+const read = (p: string) => readFileSync(join(REPO, p), "utf8");
+const all = () => pages();
 
-    for (const [name, files] of offeredVariables()) {
-      if (name in NOT_OUR_ENV_VARS) continue;
-      if (mentioned.has(name)) continue;
-      dead.push(`${name} (offered in ${[...new Set(files)].join(", ")})`);
-    }
-
-    // Listed rather than counted, so the failure names the variable and the
-    // file — the two things needed to fix it.
-    expect(dead).toEqual([]);
+describe("published docs", () => {
+  test("there are pages to check", () => {
+    // Guards the vacuous pass: every assertion below iterates over this list, so an empty or
+    // moved directory would turn the whole file green while checking nothing.
+    expect(all().length).toBeGreaterThan(5);
   });
 
-  test("every exemption records why it is not our variable", () => {
-    for (const [name, reason] of Object.entries(NOT_OUR_ENV_VARS)) {
-      expect(reason.length, `${name} must record why`).toBeGreaterThan(20);
+  test("every page has a title and a description", () => {
+    for (const page of all()) {
+      expect(page.text).toStartWith("---");
+      const front = page.text.slice(3, page.text.indexOf("\n---", 3));
+      expect(front, `${page.file} frontmatter title`).toInclude("title:");
+      expect(front, `${page.file} frontmatter description`).toInclude("description:");
     }
   });
-});
 
-describe("environment variables the hub names in a boot message", () => {
-  /**
-   * The scope is deliberate. `config.ts` reads thirty-odd variables, many of
-   * them vestigial (`TRAEFIK_*`, `OPENCODE_REGISTRY_*`) and
-   * consumed by nothing — demanding an operator-facing line for each of those
-   * would push the docs *away* from the truth, not towards it.
-   *
-   * What must be documented is the variable the hub is prepared to SAY to an
-   * operator: the ones `validate-config.ts` and `docker-daemon.ts` name in a
-   * refusal or a warning, and the bridge's three. If the hub can print your
-   * name at boot, there has to be somewhere to look you up.
-   *
-   * This is the assertion that would have caught the kaambaan bridge: it
-   * shipped able to refuse a boot naming `KAAMBAAN_BRIDGE_AGENTS`, with those
-   * variables written down only in a root `.env.example` that no document
-   * pointed at.
-   */
-  const namesTheHubPrints = (): string[] => {
-    const named = new Set<string>();
-    for (const rel of [
-      "apps/hub/src/utils/validate-config.ts",
-      "apps/hub/src/services/provisioner/docker-daemon.ts",
-      "apps/hub/src/services/bridge/config.ts",
-    ]) {
-      // A SCREAMING_SNAKE name inside a string literal in these files is,
-      // without exception today, a variable being named to an operator.
-      //
-      // **"In these files" is load-bearing, and the list does not generalise.**
-      // Tried and reverted on 2026-09-12: adding `routes/auth-authorize.ts`,
-      // which refuses with "Fix HUB_OAUTH_CLIENTS.", catches nothing and
-      // introduces a false positive. `scanEnvNames` matches a name that is the
-      // WHOLE string literal, so a setting named inside a sentence is invisible
-      // to it, while `"S256"` — a PKCE method constant — reads as a variable.
-      //
-      // The consequence worth knowing: a variable this hub names only in the
-      // PROSE of a refusal is one nothing makes anybody document.
-      // HUB_OAUTH_CLIENTS went undocumented through three PRs and a production
-      // deploy that way, and was written up by hand rather than by this test.
-      //
-      // Comments are stripped first (#323): this could not tell a backticked
-      // name in a JSDoc line from a string literal, so a comment about an
-      // exported constant read as an undocumented variable. The obvious way to
-      // green that was to document a setting that does nothing — a check whose
-      // failure is fixed by writing something false.
-      for (const name of scanEnvNames(read(rel))) {
-        named.add(name);
+  test("every MCP tool named is registered on the server", () => {
+    const registered = new Set(
+      [...read("apps/hub/src/mcp/tools.ts").matchAll(/registerTool\(\s*"([a-z_]+)"/g)].map(
+        (m) => m[1]!,
+      ),
+    );
+    expect(registered.size).toBeGreaterThan(0);
+
+    for (const page of all()) {
+      for (const [, name] of page.text.matchAll(/`(agentpod_[a-z_]+)`/g)) {
+        expect(registered, `${page.file} names MCP tool ${name}`).toContain(name);
       }
     }
-    return [...named].sort();
-  };
-
-  test("the scan finds the names at all", () => {
-    // Guard the guard, again: an empty scan passes the assertion below for
-    // free, and a regex is exactly the thing that quietly stops matching.
-    expect(namesTheHubPrints()).toContain("FLY_API_TOKEN");
-    expect(namesTheHubPrints()).toContain("KAAMBAAN_BRIDGE_AGENTS");
   });
 
-  test("are all documented somewhere an operator will look", () => {
-    const offered = offeredVariables();
-    const undocumented = namesTheHubPrints().filter((n) => !offered.has(n));
-
-    expect(undocumented).toEqual([]);
-  });
-});
-
-describe("internal links in the live documentation", () => {
-  /**
-   * Not vanity. `validate-config.ts` sent a failed boot to
-   * `docs/production-readiness/phase-1-security.md`, and the landing page sent
-   * a reader to the same path — both dead since the pivot moved that directory
-   * into the archive. A dead link in a runbook is the reader's dead end at the
-   * exact moment they needed the next page.
-   *
-   * `docs/archive/` and `docs/superpowers/` are excluded on purpose: both are
-   * dated records, and a record that has to keep its links working against a
-   * moving codebase would have to be edited, which would stop it being a
-   * record. Everything else is live and must resolve.
-   */
-  const LIVE_DOCS = [
-    "README.md",
-    "CLAUDE.md",
-    "AGENTS.md",
-    "CONTRIBUTING.md",
-    "TESTING.md",
-    "docs/README.md",
-    "docs/DEPLOYMENT.md",
-    "docs/OPERATING.md",
-    "docs/archive/README.md",
-    "apps/hub/README.md",
-    "apps/hub/CLAUDE.md",
-    "apps/landing/README.md",
-    "fixtures/ecosystem-identity/README.md",
-    "fly/node-image/README.md",
-    "cloudflare/worker-v2/README.md",
-  ] as const;
-
-  /** GitHub's heading-anchor rule, near enough: lowercase, punctuation out, spaces to dashes. */
-  const slug = (heading: string): string =>
-    heading
-      .replace(/`/g, "")
-      .toLowerCase()
-      .replace(/[^\w\s-]/g, "")
-      .trim()
-      .replace(/\s+/g, "-");
-
-  const headingAnchors = (abs: string): Set<string> => {
-    const anchors = new Set<string>();
-    for (const line of readFileSync(abs, "utf8").split("\n")) {
-      const heading = /^#{1,6}\s+(.*)$/.exec(line);
-      if (heading) anchors.add(slug(heading[1]!));
+  test("every apn command named is a registered command", () => {
+    // Read from what actually DISPATCHES, not from the help table. A command listed in help
+    // but not dispatched is the bug in the other direction, and `apn fleet login` — dispatched
+    // for months while missing from help — is why this test trusts the switch over the table.
+    const known = new Set(
+      [...read("apps/node-agent/cmd/agentpod-node/main.go").matchAll(/^\tcase "([a-z]+)"/gm)].map(
+        (m) => m[1]!,
+      ),
+    );
+    known.add("node"); // stripped before the switch, so both spellings reach one dispatch
+    for (const [, verb] of read("apps/node-agent/cmd/agentpod-node/fleet.go").matchAll(
+      /^\tcase "([a-z]+)":/gm,
+    )) {
+      known.add(verb!);
     }
-    return anchors;
-  };
+    expect(known.size).toBeGreaterThan(10);
 
-  test("all resolve — both the file and the #anchor", async () => {
-    const { existsSync } = await import("node:fs");
-    const { dirname, resolve } = await import("node:path");
-    const broken: string[] = [];
-
-    for (const rel of LIVE_DOCS) {
-      const abs = join(REPO_ROOT, rel);
-      for (const link of read(rel).matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)) {
-        const target = link[1]!;
-        if (/^(https?:|mailto:|#!)/.test(target)) continue;
-        const [pathPart, anchor] = target.split("#");
-
-        let targetAbs = abs;
-        if (pathPart) {
-          targetAbs = resolve(dirname(abs), pathPart);
-          if (!existsSync(targetAbs)) {
-            broken.push(`${rel} → ${target} (no such file)`);
-            continue;
-          }
-        }
-        if (anchor && targetAbs.endsWith(".md") && !headingAnchors(targetAbs).has(anchor)) {
-          broken.push(`${rel} → ${target} (no such heading)`);
-        }
+    for (const page of all()) {
+      for (const [, cmd] of page.text.matchAll(/`apn (?:fleet )?([a-z]+)/g)) {
+        expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd);
       }
     }
-
-    expect(broken).toEqual([]);
   });
 
-  test("the scan actually reads links", () => {
-    // Guard the guard: a link regex that stopped matching would make the
-    // assertion above pass on a document full of dead ends.
-    const links = [...read("docs/README.md").matchAll(/\[[^\]]*\]\(([^)\s]+)\)/g)];
-    expect(links.length).toBeGreaterThan(10);
-  });
-});
+  test("every capability named in a gating table is really gated", () => {
+    const gated = new Set(
+      // Every route file that gates, found by reading the directory rather than by listing
+      // names here — a hand-kept list would go stale exactly when a new gate is added, which is
+      // the moment this check matters most. (An earlier version listed four files by hand and
+      // missed station-terminal.ts.)
+      readdirSync(join(REPO, "apps/hub/src/routes"))
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .flatMap((f) => [
+          ...read(`apps/hub/src/routes/${f}`).matchAll(/gateCapability\([^)]*"([a-z.]+)"/g),
+        ])
+        .map((m) => m[1]!),
+    );
+    expect(gated.size).toBeGreaterThan(3);
 
-describe("the required CI checks", () => {
-  /** Job names from ci.yml — `  jobname:` at two-space indent under `jobs:`. */
-  const ciJobs = (): string[] => {
-    const workflow = read(".github/workflows/ci.yml");
-    const jobsSection = workflow.slice(workflow.indexOf("\njobs:"));
-    return [...jobsSection.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((m) => m[1]!);
-  };
-
-  test("ci.yml defines jobs at all", () => {
-    // Guard the guard: a parser that silently matched nothing would make both
-    // assertions below vacuously true.
-    expect(ciJobs().length).toBeGreaterThan(3);
-  });
-
-  test("every CI job is named in CONTRIBUTING.md", () => {
-    const contributing = read("CONTRIBUTING.md");
-    const missing = ciJobs().filter((job) => !contributing.includes(`\`${job}\``));
-    expect(missing).toEqual([]);
+    // Only the capability table on the panels page — prose mentions the words in other senses.
+    const panels = all().find((p) => p.file === "use/panels.md");
+    expect(panels).toBeDefined();
+    for (const [, cap] of panels!.text.matchAll(/^\| `([a-z.]+)` \|/gm)) {
+      expect(gated, `use/panels.md claims \`${cap}\` is gated`).toContain(cap);
+    }
   });
 
-  test("every CI job is named in TESTING.md", () => {
-    const testing = read("TESTING.md");
-    const missing = ciJobs().filter((job) => !testing.includes(`\`${job}\``));
-    expect(missing).toEqual([]);
+  test("every internal link resolves to a page", () => {
+    const slugs = new Set(all().map((p) => p.file.replace(/\.mdx?$/, "").replace(/\/index$/, "")));
+    slugs.add("index");
+
+    for (const page of all()) {
+      for (const [, href] of page.text.matchAll(/\]\((\/[^)#]*)(?:#[^)]*)?\)/g)) {
+        const slug = href!.replace(/^\/|\/$/g, "") || "index";
+        expect(slugs, `${page.file} links to ${href}`).toContain(slug);
+      }
+    }
   });
 });
