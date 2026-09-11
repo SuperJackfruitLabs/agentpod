@@ -155,10 +155,24 @@ and it entrenches the asymmetry.
 control pair would mean nothing. It is also precisely *"give agents long-lived human
 tokens"* from the layer reference's Do-not table.
 
-**Recommendation: A, with the route audit treated as the deliverable rather than a
-follow-up.** B is available if the CLI is wanted before the audit is affordable, but it
-should then be labelled interim in the code, with A named as its end — the pattern
-`a-grant-names-an-agent-per-plane` uses for a deliberate interim.
+**DECIDED 2026-09-09: A′, a smaller first step than A, and built in agentpod#414.**
+
+`authMiddleware` accepts a hub-issued JWT as a third bearer form — and **refuses any
+non-human principal there**, with a 403, before a route sees it. Same end state as A, and
+strictly less exposure on the way: no agent reaches anything it could not reach before, so
+the route audit stops being a gate in front of the CLI and becomes what it always was, work
+worth doing on its own. A route audited and found correct for an agent opts in later, from a
+default that was closed.
+
+One thing the build surfaced that this spec did not anticipate. A hub token's `sub` is a
+`prn_…`, and **every station-scoped call in the hub resolves on a Better Auth id** —
+`getStation(userId, …)`, `requireLive(userId, …)`. Handing those a principal id is exactly
+the defect that killed every bridge-mode room on 2026-08-31 (#399, #400). So the token is
+translated **once, at the edge**, through `principal_identities`' `better-auth` row, and a
+principal with no such row is refused rather than admitted as itself. Nothing below the
+middleware sees a changed `user.id`.
+
+B and C are recorded above as rejected, not deferred.
 
 ### The registry entry, either way
 
