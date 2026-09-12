@@ -5,13 +5,15 @@
 /* ============================================
    PAPER MODERNISM THEME
    Editorial elegance meets contemporary design
-   Playfair Display + IBM Plex Sans
+   Bricolage Grotesque + IBM Plex Sans
    Warm beige with navy and burnt sienna
    ============================================ */
 
 :root {
   /* Typography - Editorial pairing */
-  --font-display: 'Playfair Display', Georgia, serif;
+  /* Matched to the landing page (src/pages/index.astro). Was Playfair Display,
+     which made the blog read as a different site from the page linking to it. */
+  --font-display: 'Bricolage Grotesque', 'Trebuchet MS', sans-serif;
   --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Courier New', monospace;
   

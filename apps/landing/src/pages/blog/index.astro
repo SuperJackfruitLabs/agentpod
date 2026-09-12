@@ -53,7 +53,7 @@ function formatDate(dateString: string): string {
             <article 
               class={`card group cursor-pointer animate-fade-in-up delay-${Math.min(index + 1, 6) * 100}`}
             >
-              <a href={`/blog/${post.id}`} class="block">
+              <a href={`/blog/${post.id.replace(/\.mdx?$/, "")}`} class="block">
                 <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
                   <div class="flex items-center gap-4 text-sm text-foreground-muted">
                     <time datetime={post.data.date}>{formattedDate}</time>
