@@ -23,17 +23,24 @@
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
   
-  /* Dark mode colors - Rich editorial palette */
-  --deep-charcoal: oklch(0.15 0.015 260);     /* Rich dark charcoal with blue undertone */
-  --charcoal-lighter: oklch(0.19 0.012 260);  /* Slightly lighter charcoal for cards */
-  --cream: oklch(0.92 0.015 85);              /* Warm cream text */
-  --cream-muted: oklch(0.68 0.012 85);        /* Muted cream for secondary text */
-  --cream-subtle: oklch(0.48 0.01 85);        /* Subtle cream for borders */
+  /* Palette, matched to the landing page (src/pages/index.astro) on 2026-09-12.
+     The blog was charcoal and burnt sienna while the page linking to it was navy and
+     cyan, so it read as a different site. These are the landing page's own hex values,
+     copied verbatim rather than re-expressed, so they cannot drift by rounding.
+
+     The variable NAMES still say charcoal and sienna. They are wrong and deliberately
+     left: renaming them means touching every rule in the 883 lines below for no visual
+     gain. Read them as "ground" and "accent". */
+  --deep-charcoal: #101c2b;     /* Rich dark charcoal with blue undertone */
+  --charcoal-lighter: #18293c;  /* Slightly lighter charcoal for cards */
+  --cream: #eef4fa;              /* Warm cream text */
+  --cream-muted: #93a8bf;        /* Muted cream for secondary text */
+  --cream-subtle: #2c4560;        /* Subtle cream for borders */
   
-  --accent-sienna: oklch(0.62 0.16 35);       /* Brighter burnt sienna (pops on dark) */
-  --accent-sienna-light: oklch(0.72 0.14 35); /* Light sienna for accents */
-  --accent-sienna-dark: oklch(0.48 0.14 35);  /* Darker sienna for hover */
-  --accent-gold: oklch(0.68 0.12 75);         /* Warm gold */
+  --accent-sienna: #5fb3d4;       /* Brighter burnt sienna (pops on dark) */
+  --accent-sienna-light: #8ccde4; /* Light sienna for accents */
+  --accent-sienna-dark: #3d8fae;  /* Darker sienna for hover */
+  --accent-gold: #63c9a0;         /* Warm gold */
   
   /* Semantic colors */
   --background: var(--deep-charcoal);
@@ -41,11 +48,11 @@
   --foreground: var(--cream);
   --foreground-muted: var(--cream-muted);
   
-  --card: oklch(0.18 0.012 260);
-  --card-hover: oklch(0.21 0.015 260);
-  --card-border: oklch(0.28 0.015 260);
+  --card: #18293c;
+  --card-hover: #21374e;
+  --card-border: #2c4560;
   
-  --border: oklch(0.26 0.012 260);
+  --border: #2c4560;
   --border-emphasis: var(--cream-subtle);
   
   /* Status colors - vibrant for dark background */
@@ -58,6 +65,30 @@
   --shadow-md: 0 4px 8px oklch(0.05 0 0 / 0.5), 0 2px 4px oklch(0.05 0 0 / 0.3);
   --shadow-lg: 0 12px 24px oklch(0.05 0 0 / 0.6), 0 4px 8px oklch(0.05 0 0 / 0.4);
 }
+/* Light, matched to the landing page's own light block.
+   The landing page answers prefers-color-scheme; this did not, so a visitor on a light
+   system got a light page and then a dark blog — the same mismatch the palette change
+   above was meant to remove. Values are the landing page's, copied verbatim. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --deep-charcoal: #fbfcfe;
+    --charcoal-lighter: #eef3f8;
+    --cream: #101c29;
+    --cream-muted: #4b6076;
+    --cream-subtle: #ccdae7;
+
+    --accent-sienna: #1d6c8c;
+    --accent-sienna-light: #2a89ad;
+    --accent-sienna-dark: #14536b;
+    --accent-gold: #1c7a5b;
+
+    --card: #ffffff;
+    --card-hover: #eef3f8;
+    --card-border: #ccdae7;
+    --border: #ccdae7;
+  }
+}
+
 
 @theme inline {
   --color-background: var(--background);

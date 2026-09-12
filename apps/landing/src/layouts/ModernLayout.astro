@@ -10,7 +10,14 @@ const {
   title, 
   description = "Your AI agents, anywhere. Run powerful AI agents in secure, portable sandboxes. Access from any device." 
 } = Astro.props;
-const canonicalURL = new URL(Astro.url.pathname, Astro.site);
+// `build.format: 'file'` means the pathname carries `.html` at build time, so the
+// canonical was announcing https://agentpod.dev/blog.html — a URL that resolves only
+// because Cloudflare matches extensionless, and not the one anybody links to. Strip it,
+// and strip a trailing `index` so the home page canonicalises to `/`.
+const canonicalURL = new URL(
+  Astro.url.pathname.replace(/\.html$/, '').replace(/\/index$/, '/') || '/',
+  Astro.site,
+);
 ---
 
 <!doctype html>

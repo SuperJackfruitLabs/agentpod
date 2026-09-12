@@ -1,121 +1,58 @@
 ---
+/**
+ * The blog's header.
+ *
+ * Rewritten 2026-09-12 to match the landing page. It previously carried a "Join Waitlist"
+ * button pointing at `#waitlist`, and nav links to `#features`, `#how-it-works` and
+ * `/developers` — an anchor to a form that discarded the address, and three destinations
+ * that no longer exist. The blog was the last place any of them survived.
+ *
+ * Deliberately plain markup with its own styles rather than the app's utility classes: the
+ * landing page is standalone, and this has to look like it.
+ */
 interface Props {
   variant?: 'transparent' | 'solid';
 }
-
 const { variant = 'transparent' } = Astro.props;
 ---
 
-<header class:list={[
-  "fixed top-0 left-0 right-0 z-50 transition-all duration-300 border-b",
-  variant === 'transparent' ? "bg-background/80 backdrop-blur-md border-transparent" : "bg-background/95 backdrop-blur-md border-border"
-]} id="header">
-  <nav class="container-wide mx-auto px-6 h-20 flex items-center justify-between" aria-label="Main navigation">
-    <a href="/" class="flex items-center gap-3 group" aria-label="AgentPod home">
-      <div class="w-10 h-10 rounded-sm bg-accent-sienna flex items-center justify-center shadow-sm" aria-hidden="true">
-        <span class="font-bold text-base" style="font-family: var(--font-display); color: var(--deep-charcoal);">A</span>
-      </div>
-      <span class="font-semibold text-xl text-foreground group-hover:text-accent-sienna transition-colors" style="font-family: var(--font-display); letter-spacing: -0.02em;">
-        AgentPod
-      </span>
-    </a>
-    
-    <div class="hidden md:flex items-center gap-1">
-      <a href="#features" class="nav-link">Features</a>
-      <a href="#how-it-works" class="nav-link">How it works</a>
-      <a href="/blog" class="nav-link">Blog</a>
-      <a href="https://github.com/rakeshgangwar/agentpod" target="_blank" rel="noopener noreferrer" class="nav-link" aria-label="Visit AgentPod on GitHub (opens in new tab)">
-        GitHub
-      </a>
-    </div>
-    
-    <div class="flex items-center gap-3">
-      <a href="https://docs.agentpod.dev" class="btn-ghost hidden sm:inline-flex">
-        For Developers
-      </a>
-      <a href="#waitlist" class="btn btn-primary">
-        Join Waitlist
-      </a>
-      
-      <button 
-        id="mobile-menu-button" 
-        class="md:hidden p-2 text-foreground hover:text-accent-sienna transition-colors"
-        aria-label="Toggle mobile menu"
-        aria-expanded="false"
-        aria-controls="mobile-menu"
-      >
-        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-          <path id="menu-icon" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 12h16M4 18h16" />
-          <path id="close-icon" class="hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
-  </nav>
-  
-  <div 
-    id="mobile-menu" 
-    class="hidden md:hidden bg-background/98 backdrop-blur-lg border-b border-border"
-    role="navigation"
-    aria-label="Mobile navigation"
-  >
-    <div class="container-wide mx-auto px-6 py-4 space-y-2">
-      <a href="#features" class="block nav-link py-3">Features</a>
-      <a href="#how-it-works" class="block nav-link py-3">How it works</a>
-      <a href="/blog" class="block nav-link py-3">Blog</a>
-      <a href="https://github.com/rakeshgangwar/agentpod" target="_blank" rel="noopener noreferrer" class="block nav-link py-3" aria-label="Visit AgentPod on GitHub (opens in new tab)">
-        GitHub
-      </a>
-      <a href="https://docs.agentpod.dev" class="block nav-link py-3">For Developers</a>
-    </div>
+<header class:list={['mast', variant]}>
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="AgentPod home">agent<span>pod</span></a>
+    <nav aria-label="Main navigation">
+      <a href="https://docs.agentpod.dev">Docs</a>
+      <a href="/blog">Blog</a>
+      <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
+    </nav>
   </div>
 </header>
 
-<script>
-  const header = document.getElementById('header');
-  const mobileMenuButton = document.getElementById('mobile-menu-button');
-  const mobileMenu = document.getElementById('mobile-menu');
-  const menuIcon = document.getElementById('menu-icon');
-  const closeIcon = document.getElementById('close-icon');
-  
-  if (header) {
-    window.addEventListener('scroll', () => {
-      const currentScroll = window.scrollY;
-      
-      if (currentScroll > 50) {
-        header.classList.add('bg-background/95', 'border-border');
-        header.classList.remove('border-transparent');
-      } else {
-        header.classList.remove('bg-background/95', 'border-border');
-        header.classList.add('border-transparent');
-      }
-    });
+<style>
+  .mast {
+    border-bottom: 1px solid var(--border);
+    background: var(--background);
   }
-  
-  if (mobileMenuButton && mobileMenu && menuIcon && closeIcon) {
-    mobileMenuButton.addEventListener('click', () => {
-      const isOpen = mobileMenu.classList.contains('hidden');
-      
-      if (isOpen) {
-        mobileMenu.classList.remove('hidden');
-        menuIcon.classList.add('hidden');
-        closeIcon.classList.remove('hidden');
-        mobileMenuButton.setAttribute('aria-expanded', 'true');
-      } else {
-        mobileMenu.classList.add('hidden');
-        menuIcon.classList.remove('hidden');
-        closeIcon.classList.add('hidden');
-        mobileMenuButton.setAttribute('aria-expanded', 'false');
-      }
-    });
-    
-    const mobileLinks = mobileMenu.querySelectorAll('a');
-    mobileLinks.forEach(link => {
-      link.addEventListener('click', () => {
-        mobileMenu.classList.add('hidden');
-        menuIcon.classList.remove('hidden');
-        closeIcon.classList.add('hidden');
-        mobileMenuButton.setAttribute('aria-expanded', 'false');
-      });
-    });
+  .mast.transparent { border-bottom-color: transparent; }
+  .wrap {
+    width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 26px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
   }
-</script>
+  .brand {
+    font-family: var(--font-display);
+    font-weight: 800;
+    font-size: 21px;
+    letter-spacing: -0.02em;
+    color: var(--foreground);
+    text-decoration: none;
+  }
+  .brand span { color: var(--accent-sienna); }
+  nav { display: flex; gap: 22px; font-size: 15px; }
+  nav a { color: var(--foreground-muted); text-decoration: none; }
+  nav a:hover, nav a:focus-visible { color: var(--foreground); }
+</style>
