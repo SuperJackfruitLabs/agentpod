@@ -1,0 +1,133 @@
+---
+title: "From a Sandbox to a Fleet: What AgentPod Became"
+date: "2026-09-12"
+author: "Rakesh Gangwar"
+excerpt: "AgentPod started as a desktop app for keeping coding agents off your laptop. It is now a console for the machines they already live on. Here is what changed, why, and how the new setup fits together."
+tags: ["architecture", "migration", "fleet", "harnesses"]
+---
+
+Nine months ago AgentPod was a desktop application that spun up Docker sandboxes so a
+coding agent could work somewhere other than your laptop. The [first post on this
+blog](/blog/why-agentpod) makes that argument, and it still reads honestly — it is kept
+as the record of why any of this started.
+
+It is also describing a product you cannot install today. There is no desktop app. There
+is no mobile app. OpenCode is not the foundation. The thing that survived was the
+question underneath, and the answer moved outward.
+
+## What was actually wrong
+
+The old design fused two jobs into one binary: a rich cross-platform client, and a Docker
+sandbox substrate. And it hard-wired a single harness. OpenCode was not a supported option
+— it was load-bearing. Roughly 2,300 references, its own database tables, its own routes
+and config sync, and a base image that baked the CLI in.
+
+That was a reasonable bet in December 2025. It stopped being one almost immediately,
+because the harness ecosystem did not consolidate — it multiplied. Claude Code, Codex,
+Gemini CLI, Goose, Aider, Cline, plus always-on personal runtimes like Hermes and OpenClaw.
+
+The deeper problem was the premise. "Get the agent off your laptop and into a sandbox we
+provision" assumes the interesting agents are the ones you have not started yet. By mid
+2026 that was plainly false. People already had agents running — on a VPS, on a laptop, on
+a box under a desk — under half a dozen different harnesses. Nobody needed somewhere new
+to put them. They needed somewhere to **see the places they already were**.
+
+## The repositioning, in one line
+
+> AgentPod is being repositioned from an OpenCode-only sandbox application into a
+> facilities console for an agent workforce.
+>
+> — `docs/superpowers/specs/2026-06-21-agentpod-fleet-console-design.md`
+
+The design that spec came from was not written from first principles. Three live servers
+were inspected directly first, and the details mattered: Hermes runs each profile as its
+own OS process supervised by a gateway rather than by systemd, which is the sort of thing
+you only learn by looking, and the sort of thing a "we provision everything" product never
+has to handle.
+
+## What it is now
+
+Three tiers, and the direction of the arrows is the whole design.
+
+```
+   Operator (web console)
+            │  HTTPS + WSS
+            ▼
+   ┌───────────────────────────┐    outbound WSS tunnels
+   │       AgentPod Hub        │◄────────┬────────────┬──────────────┐
+   │  (Bun + Hono + Postgres)  │         │            │              │
+   │                           │     node-agent   node-agent    node-agent
+   │                           │     (VPS)        (laptop)      (provisioned)
+   └───────────────────────────┘
+```
+
+**node-agent** is a single static Go binary installed per host. It dials *out* to the hub
+and holds the connection open. Nothing ever dials in. That one property is why a laptop on
+hotel Wi-Fi, or a host behind CGNAT with no routable address, is in the fleet on exactly
+the same terms as a VPS — and it is the thing the old architecture could not have done,
+because it assumed it owned the substrate.
+
+**The hub** is the registry, the connection broker, and where authentication and audit
+live. You host it.
+
+**The console** is a static site: node list, station tree, then the panels.
+
+## Attach first, provision second
+
+The old product provisioned. The new one **attaches**, and provisions only when there is
+nothing to attach to.
+
+AgentPod ships a descriptor per harness — six of them: Hermes, OpenClaw, Claude Code,
+Codex, OpenCode, Pi. A descriptor knows how to ask *that* harness what it is running,
+where its config and logs live, and how to start and stop it. It wraps each one's native
+interface rather than reinventing it, which is why adding a harness is a descriptor and
+not a schema change.
+
+Detection is not adoption. `apn detect` reports what a host has and changes nothing; a
+station only comes under management when you adopt it. A machine may run agents that are
+none of AgentPod's business, and finding one is not consent to manage it.
+
+When there genuinely is nothing to attach to, provisioning still exists — Docker,
+Cloudflare, Modal and Fly — but it is now one feature rather than the premise.
+
+## What you get per runtime
+
+Files, logs, a real terminal, the harness's own config, health, lifecycle, a disk cleanup
+that shows you the plan before applying it, and the changeset an agent has actually
+produced in its working tree.
+
+Each is gated on a capability the station declares, and a request for one it has not
+declared is refused **at the hub**, before anything reaches the machine. That ordering is
+deliberate: a refusal that never leaves the hub cannot be turned into a way of probing
+what is on the host.
+
+## What was given up
+
+Worth stating plainly, because a migration post that only lists wins is marketing.
+
+The desktop and mobile clients are gone. "Code from your phone" was a real promise and it
+is not one AgentPod makes any more — that concern moved to a separate chat client, because
+conversational driving turned out to be a different product with different constraints.
+
+AgentPod also deliberately does **not** orchestrate work. What an agent should do next
+lives in [kaambaan](https://docs.kaambaan.dev); AgentPod answers "where does this thing
+live, and is it healthy". Splitting those was the other half of the repositioning, and it
+is why the two are separate products rather than tabs in one app.
+
+## Starting
+
+One command on the machine you want to manage:
+
+```bash
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
+  | sudo bash -s -- https://hub.example.com <TOKEN>
+```
+
+Or, before you trust a machine at all, a check that needs no hub, no account and no
+network:
+
+```bash
+apn scan
+```
+
+The [documentation](https://docs.agentpod.dev) covers the rest.
