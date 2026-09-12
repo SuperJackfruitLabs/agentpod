@@ -266,8 +266,23 @@ jobs:
       # does not have, because docs-site is deliberately npm. kaambaan's identical
       # job failed exactly this way on its first real run, with "Unable to locate
       # executable file: pnpm", before it ever reached Cloudflare.
+      # Run from a scratch directory, NOT from docs-site and NOT from the repo root.
+      # Both were tried against the live account and both are wrong:
+      #
+      #   - in docs-site, wrangler's project detection SCAFFOLDS the project — it
+      #     added an @astrojs/cloudflare adapter and a wrangler devDependency, wrote
+      #     wrangler.jsonc, and rewrote astro.config.mjs and tsconfig.json. The Astro
+      #     build then failed on the Cloudflare vite plugin it had just installed.
+      #   - at the repo root it refuses outright: "application detection logic has
+      #     been run in the root of a workspace".
+      #
+      # From a neutral cwd with an absolute path it is clean, and leaves the checkout
+      # untouched. Verified by deploying both sites this way.
       - name: Deploy
-        working-directory: docs-site
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx --yes wrangler@4 pages deploy dist --project-name=agentpod-docs --branch=main
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/docs-site/dist" \
+            --project-name=agentpod-docs --branch=main
