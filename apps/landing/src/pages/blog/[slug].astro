@@ -7,8 +7,11 @@ import Footer from "../../components/modern/Footer.astro";
 
 export async function getStaticPaths() {
   const blogPosts = await getCollection("blog");
+  // `post.id` carries the file extension in Astro 5's content collections, so this
+  // published posts at `/blog/why-agentpod.mdx`. Cloudflare's extensionless matching
+  // made that resolve, which is why it went unnoticed — but it is the URL people copy.
   return blogPosts.map((post) => ({
-    params: { slug: post.id },
+    params: { slug: post.id.replace(/\.mdx?$/, '') },
     props: { post },
   }));
 }

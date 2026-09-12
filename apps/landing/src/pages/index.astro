@@ -1,307 +1,398 @@
 ---
-import ModernLayout from "../layouts/ModernLayout.astro";
-import Header from "../components/modern/Header.astro";
-import Footer from "../components/modern/Footer.astro";
+/**
+ * agentpod.dev.
+ *
+ * Rewritten on 2026-09-12. The previous page was audited against the code and
+ * could not be published: its waitlist form discarded the address and told the
+ * visitor "we'll be in touch"; it offered .msi, .deb, .rpm and .AppImage
+ * installers that are not built (releases are raw Go binaries for linux and
+ * darwin, and there is no Windows target at all); it listed iOS and Android apps
+ * as "coming soon" when no mobile app exists; and its features table sold
+ * "container flavors", a concept dropped from the schema in migration 0023.
+ *
+ * Everything here is checked against the code. The harness list is
+ * `registerDescriptors` in cmd/agentpod-node/registry.go; the capabilities are the
+ * hub's `gateCapability` calls plus the console's station panels; the provisioning
+ * substrates are the driver files in services/provisioner/; the install command is
+ * what install.sh actually accepts. If those move, this page is wrong.
+ *
+ * The hero is a fleet panel rather than a headline over a gradient, because the
+ * product's thesis is that machines you cannot reach are still reachable: every
+ * node dials OUT, so a laptop behind CGNAT is in the fleet on the same terms as a
+ * VPS. Showing that is the argument.
+ */
+const harnesses = ['Hermes', 'OpenClaw', 'Claude Code', 'Codex', 'OpenCode', 'Pi'];
+const substrates = ['Docker', 'Cloudflare', 'Modal', 'Fly'];
+
+const nodes = [
+  {
+    name: 'workhorse',
+    kind: 'VPS · Ubuntu',
+    state: 'online',
+    stations: [
+      { name: 'hermes', detail: 'coder-kai · hanuman' },
+      { name: 'claude-code', detail: 'billing-api' },
+    ],
+  },
+  {
+    name: 'mba-priya',
+    kind: 'laptop · behind CGNAT',
+    state: 'online',
+    stations: [{ name: 'codex', detail: 'design-system' }],
+  },
+  {
+    name: 'pod-7f3a',
+    kind: 'provisioned · Docker',
+    state: 'idle',
+    stations: [{ name: 'opencode', detail: 'nightly-sweep' }],
+  },
+];
 ---
 
-<ModernLayout title="AgentPod — Your AI Agents, Anywhere">
-  <a href="#main-content" class="skip-link">Skip to main content</a>
-  
-  <Header slot="header" />
-  
-  <div id="main-content"></div>
-  
-  <!-- HERO -->
-  <section class="relative min-h-[90vh] flex items-center justify-center overflow-hidden pt-32 pb-20">
-    <div class="relative container-wide mx-auto px-6">
-      <div class="max-w-4xl">
-        <div class="badge badge-accent mb-8 animate-fade-in">
-          <span class="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-          <span>Now in Early Access</span>
-        </div>
-        
-        <h1 class="display-xl mb-8 text-foreground animate-fade-in-up delay-100">
-          Your AI Agents,<br />
-          <span class="text-accent-sienna">Anywhere</span>
-        </h1>
-        
-        <p class="subheadline max-w-2xl mb-12 animate-fade-in-up delay-200">
-          Run powerful AI agents in secure, portable sandboxes. 
-          Access from any device. Keep your computer safe.
-        </p>
-        
-        <div class="flex flex-col sm:flex-row gap-4 mb-12 animate-fade-in-up delay-300">
-          <a href="#waitlist" class="btn btn-primary">
-            Join the Waitlist
-          </a>
-          <a href="/developers" class="btn btn-secondary">
-            Self-Host Now
-          </a>
-        </div>
-        
-        <p class="text-sm text-foreground-muted animate-fade-in delay-400">
-          Powered by <a href="https://opencode.ai" target="_blank" rel="noopener noreferrer" class="text-foreground hover:text-accent-sienna transition-colors font-medium border-b border-current">OpenCode</a> — 75+ AI models supported
-        </p>
-      </div>
-    </div>
-    
-    <div class="absolute right-0 top-1/4 w-1/3 h-1/2 bg-accent-gold opacity-5 blur-3xl pointer-events-none"></div>
-  </section>
-
-  <!-- FEATURES -->
-  <section id="features" class="py-32 relative" aria-labelledby="features-heading">
-    <div class="container-wide mx-auto px-6">
-      <div class="max-w-3xl mb-20">
-        <span class="eyebrow reveal">Why AgentPod</span>
-        <h2 class="headline mt-4 mb-6 reveal reveal-delay-1">
-          AI agents are powerful. But running them on your main computer is risky, and accessing them on-the-go is impossible.
-        </h2>
-        <div class="divider-short reveal reveal-delay-2"></div>
-      </div>
-      
-      <div class="grid md:grid-cols-3 gap-8">
-        <div class="card-feature reveal reveal-delay-1">
-          <div class="mb-6">
-            <svg class="w-8 h-8 text-accent-sienna" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <h3 class="text-xl font-semibold mb-3" style="font-family: var(--font-display);">Access Anywhere</h3>
-          <p class="text-foreground-muted leading-relaxed">
-            Your AI workspace travels with you. Desktop, tablet, or phone — your agents are always within reach.
-          </p>
-        </div>
-        
-        <div class="card-feature reveal reveal-delay-2">
-          <div class="mb-6">
-            <svg class="w-8 h-8 text-accent-sienna" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-          </div>
-          <h3 class="text-xl font-semibold mb-3" style="font-family: var(--font-display);">Sandboxed & Safe</h3>
-          <p class="text-foreground-muted leading-relaxed">
-            Agents run in isolated containers, not on your computer. Execute commands freely without risk.
-          </p>
-        </div>
-        
-        <div class="card-feature reveal reveal-delay-3">
-          <div class="mb-6">
-            <svg class="w-8 h-8 text-accent-sienna" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <h3 class="text-xl font-semibold mb-3" style="font-family: var(--font-display);">Full AI Power</h3>
-          <p class="text-foreground-muted leading-relaxed">
-            75+ AI models. Claude, GPT, Copilot, Ollama, and more. One interface, infinite possibilities.
-          </p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- HOW IT WORKS -->
-  <section id="how-it-works" class="py-32 bg-background-subtle relative" aria-labelledby="how-it-works-heading">
-    <div class="container-wide mx-auto px-6">
-      <div class="text-center max-w-2xl mx-auto mb-20">
-        <span class="eyebrow reveal">The Process</span>
-        <h2 class="headline mt-4 reveal reveal-delay-1">
-          How It Works
-        </h2>
-      </div>
-      
-      <div class="grid md:grid-cols-3 gap-16">
-        <div class="relative reveal reveal-delay-1">
-          <div class="section-number">01</div>
-          <div class="relative pt-8">
-            <h3 class="text-2xl font-semibold mb-4" style="font-family: var(--font-display);">Create a Pod</h3>
-            <p class="text-foreground-muted leading-relaxed">
-              Spin up an isolated AI workspace in seconds. Choose your tools, languages, and AI models.
-            </p>
-          </div>
-        </div>
-        
-        <div class="relative reveal reveal-delay-2">
-          <div class="section-number">02</div>
-          <div class="relative pt-8">
-            <h3 class="text-2xl font-semibold mb-4" style="font-family: var(--font-display);">Connect from Anywhere</h3>
-            <p class="text-foreground-muted leading-relaxed">
-              Access your pod from any device. Desktop app, mobile app, or browser — your choice.
-            </p>
-          </div>
-        </div>
-        
-        <div class="relative reveal reveal-delay-3">
-          <div class="section-number">03</div>
-          <div class="relative pt-8">
-            <h3 class="text-2xl font-semibold mb-4" style="font-family: var(--font-display);">Let AI Work for You</h3>
-            <p class="text-foreground-muted leading-relaxed">
-              Chat with your AI agent, run tasks, and get things done — all in a safe, sandboxed environment.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- USE CASES -->
-  <section class="py-32 relative">
-    <div class="container-wide mx-auto px-6">
-      <div class="max-w-3xl mb-16">
-        <span class="eyebrow reveal">Possibilities</span>
-        <h2 class="headline mt-4 reveal reveal-delay-1">
-          What Can You Do?
-        </h2>
-        <p class="subheadline mt-6 reveal reveal-delay-2">
-          AgentPod adapts to how you work.
-        </p>
-      </div>
-      
-      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="card reveal reveal-delay-1">
-          <h4 class="font-semibold mb-2 text-lg" style="font-family: var(--font-display);">Code from your phone</h4>
-          <p class="text-sm text-foreground-muted leading-relaxed">Review PRs, fix bugs, or build features — from anywhere.</p>
-        </div>
-        <div class="card reveal reveal-delay-2">
-          <h4 class="font-semibold mb-2 text-lg" style="font-family: var(--font-display);">Automate tasks</h4>
-          <p class="text-sm text-foreground-muted leading-relaxed">Let AI handle repetitive work while you focus on what matters.</p>
-        </div>
-        <div class="card reveal reveal-delay-3">
-          <h4 class="font-semibold mb-2 text-lg" style="font-family: var(--font-display);">Experiment safely</h4>
-          <p class="text-sm text-foreground-muted leading-relaxed">Test risky commands in sandboxes, not on your main machine.</p>
-        </div>
-        <div class="card reveal reveal-delay-4">
-          <h4 class="font-semibold mb-2 text-lg" style="font-family: var(--font-display);">Multiple projects</h4>
-          <p class="text-sm text-foreground-muted leading-relaxed">Each pod is isolated. Switch contexts without conflicts.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- WAITLIST -->
-  <section id="waitlist" class="py-32 bg-background-subtle relative" aria-labelledby="waitlist-heading">
-    <div class="container-narrow mx-auto px-6">
-      <div class="text-center">
-        <span class="eyebrow reveal">Get Access</span>
-        <h2 class="headline mt-4 mb-6 reveal reveal-delay-1">
-          Join the Waitlist
-        </h2>
-        <p class="subheadline mb-12 reveal reveal-delay-2">
-          We're building the hosted version. Be first in line.
-        </p>
-        
-        <form 
-          id="waitlist-form" 
-          class="flex flex-col sm:flex-row gap-4 max-w-md mx-auto reveal reveal-delay-3" 
-          action="#" 
-          method="POST"
-          aria-labelledby="waitlist-heading"
-        >
-          <div class="flex-1">
-            <label for="email" class="sr-only">Email address</label>
-            <input 
-              type="email" 
-              id="email"
-              name="email" 
-              placeholder="you@example.com" 
-              required
-              aria-required="true"
-              aria-describedby="email-error"
-              class="input w-full"
-            />
-            <span id="email-error" class="sr-only" role="alert"></span>
-          </div>
-          <button type="submit" class="btn btn-primary whitespace-nowrap">
-            <span id="submit-text">Join Waitlist</span>
-            <span id="loading-text" class="hidden">Joining...</span>
-          </button>
-        </form>
-        
-        <div id="form-message" class="mt-6 text-sm" role="status" aria-live="polite"></div>
-        
-        <p class="text-sm text-foreground-muted mt-8 reveal reveal-delay-4">
-          Can't wait? <a href="/developers" class="text-foreground hover:text-accent-sienna transition-colors font-medium border-b border-current">Self-host now</a> — it's open source.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <!-- OPEN SOURCE -->
-  <section class="py-32 relative">
-    <div class="container-narrow mx-auto px-6 text-center">
-      <div class="badge badge-accent mb-6 reveal">
-        Open Source
-      </div>
-      
-      <h2 class="headline mb-6 reveal reveal-delay-1">
-        Built in the Open
-      </h2>
-      <p class="subheadline mb-12 reveal reveal-delay-2">
-        AgentPod is MIT licensed. Self-host on your own infrastructure, 
-        contribute to the project, or just peek under the hood.
-      </p>
-      
-      <div class="flex flex-col sm:flex-row gap-4 justify-center reveal reveal-delay-3">
-        <a 
-          href="https://github.com/rakeshgangwar/agentpod" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          class="btn btn-secondary"
-          aria-label="View AgentPod on GitHub (opens in new tab)"
-        >
-          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path fill-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clip-rule="evenodd" />
-          </svg>
-          <span>View on GitHub</span>
-        </a>
-        <a href="/developers" class="btn btn-ghost">
-          Read the Docs
-        </a>
-      </div>
-    </div>
-  </section>
-
-  <Footer slot="footer" />
-</ModernLayout>
-
-<script>
-  const revealElements = document.querySelectorAll('.reveal');
-  
-  const revealObserver = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('revealed');
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentPod — the console for the machines your agents live on</title>
+    <meta
+      name="description"
+      content="A fleet and facilities console for agent runtimes. Attach to the agents you already run, reach machines behind NAT, and manage files, logs, terminals, health and cleanup from one place. Self-hostable."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <style>
+      :root {
+        --ink: #101c2b;
+        --raised: #18293c;
+        --raised-2: #21374e;
+        --line: #2c4560;
+        --text: #eef4fa;
+        --muted: #93a8bf;
+        --cyan: #5fb3d4;
+        --green: #63c9a0;
+        --display: 'Bricolage Grotesque', 'Trebuchet MS', sans-serif;
+        --body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
       }
-    });
-  }, {
-    threshold: 0.1,
-    rootMargin: '0px 0px -80px 0px'
-  });
-  
-  revealElements.forEach(el => revealObserver.observe(el));
-  
-  const waitlistForm = document.getElementById('waitlist-form') as HTMLFormElement;
-  const formMessage = document.getElementById('form-message');
-  const submitText = document.getElementById('submit-text');
-  const loadingText = document.getElementById('loading-text');
-  
-  if (waitlistForm && formMessage && submitText && loadingText) {
-    waitlistForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      
-      submitText.classList.add('hidden');
-      loadingText.classList.remove('hidden');
-      const submitButton = waitlistForm.querySelector<HTMLButtonElement>('button[type="submit"]');
-      if (submitButton) submitButton.disabled = true;
-      
-      setTimeout(() => {
-        formMessage.textContent = '✓ Thanks! We\'ll be in touch soon.';
-        formMessage.className = 'mt-6 text-sm text-success font-medium';
-        waitlistForm.reset();
-        
-        submitText.classList.remove('hidden');
-        loadingText.classList.add('hidden');
-        if (submitButton) submitButton.disabled = false;
-      }, 1500);
-    });
-  }
-</script>
+
+      /* Light, for a visitor whose system asks for it. The docs site follows the
+         reader's preference, so a dark-only page here would mean a dark landing
+         page and light docs — the mismatch worth avoiding. */
+      @media (prefers-color-scheme: light) {
+        :root {
+          --ink: #fbfcfe;
+          --raised: #eef3f8;
+          --raised-2: #e0e9f2;
+          --line: #ccdae7;
+          --text: #101c29;
+          --muted: #4b6076;
+          --cyan: #1d6c8c;
+          --green: #1c7a5b;
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--ink);
+        color: var(--text);
+        font-family: var(--body);
+        font-size: 17px;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .wrap { width: 100%; max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+      header.mast .wrap {
+        display: flex; align-items: center; justify-content: space-between;
+        padding-top: 26px; padding-bottom: 26px; gap: 20px;
+      }
+      .brand {
+        font-family: var(--display); font-weight: 800; font-size: 21px;
+        letter-spacing: -0.02em; color: var(--text); text-decoration: none;
+      }
+      .brand span { color: var(--cyan); }
+      nav { display: flex; gap: 22px; font-size: 15px; }
+      nav a { color: var(--muted); text-decoration: none; }
+      nav a:hover, nav a:focus-visible { color: var(--text); }
+
+      .hero .wrap {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center;
+        padding-top: 48px; padding-bottom: 84px;
+      }
+      h1 {
+        font-family: var(--display); font-weight: 800;
+        font-size: clamp(2.3rem, 4.8vw, 3.7rem); line-height: 1.05;
+        letter-spacing: -0.035em; margin: 0 0 20px; text-wrap: balance;
+      }
+      h1 em { font-style: normal; color: var(--cyan); }
+      .lede { font-size: 1.14rem; color: var(--muted); margin: 0 0 30px; max-width: 31em; }
+      .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+      .btn {
+        display: inline-block; padding: 13px 22px; border-radius: 9px;
+        font-weight: 600; font-size: 15px; text-decoration: none;
+        border: 1px solid transparent;
+      }
+      .btn-primary { background: var(--cyan); color: var(--ink); }
+      .btn-primary:hover { filter: brightness(1.1); }
+      .btn-ghost { border-color: var(--line); color: var(--text); }
+      .btn-ghost:hover { border-color: var(--cyan); }
+
+      /* ── the fleet panel: this page's signature ─────────────────── */
+      .fleet {
+        background: var(--raised); border: 1px solid var(--line);
+        border-radius: 15px; overflow: hidden;
+      }
+      .fleet-head {
+        display: flex; align-items: center; gap: 9px; padding: 13px 16px;
+        border-bottom: 1px solid var(--line); font-size: 14px; color: var(--muted);
+      }
+      .fleet-head b { color: var(--text); font-weight: 600; }
+      .fleet-body { padding: 6px 0; }
+      .node { padding: 11px 16px; border-bottom: 1px solid var(--line); }
+      .node:last-child { border-bottom: 0; }
+      .node-row { display: flex; align-items: center; gap: 9px; }
+      .led { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+      .led.online { background: var(--green); }
+      .led.idle { background: var(--muted); }
+      .node-name { font-weight: 600; font-size: 15px; }
+      .node-kind { color: var(--muted); font-size: 13px; margin-left: auto; }
+      .stations { margin: 8px 0 0 16px; padding-left: 12px; border-left: 1px solid var(--line); }
+      .station { display: flex; gap: 10px; font-size: 13.5px; padding: 3px 0; }
+      .station .s-name { font-family: var(--mono); color: var(--cyan); }
+      .station .s-detail { color: var(--muted); }
+      .fleet-foot {
+        border-top: 1px solid var(--line); padding: 11px 16px;
+        font-size: 12.5px; color: var(--muted);
+      }
+
+      section.band { border-top: 1px solid var(--line); }
+      section.band .wrap { padding-top: 68px; padding-bottom: 68px; }
+      h2 {
+        font-family: var(--display); font-weight: 600;
+        font-size: clamp(1.55rem, 3vw, 2.05rem); letter-spacing: -0.025em;
+        margin: 0 0 14px; text-wrap: balance;
+      }
+      .sub { color: var(--muted); margin: 0 0 36px; max-width: 62ch; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; }
+      .cell h3 {
+        font-family: var(--display); font-size: 1.1rem; font-weight: 600;
+        margin: 0 0 8px; letter-spacing: -0.015em;
+      }
+      .cell p { margin: 0; color: var(--muted); font-size: 15.5px; }
+
+      pre {
+        background: var(--raised); border: 1px solid var(--line); border-radius: 10px;
+        padding: 15px 17px; overflow-x: auto; margin: 0 0 14px;
+        font-family: var(--mono); font-size: 13.5px; line-height: 1.65; color: var(--text);
+      }
+      pre .c { color: var(--muted); }
+      .note { color: var(--muted); font-size: 14.5px; margin: 0; }
+
+      .chips { display: flex; gap: 9px; flex-wrap: wrap; list-style: none; margin: 0; padding: 0; }
+      .chips li {
+        font-family: var(--mono); font-size: 13px; color: var(--text);
+        border: 1px solid var(--line); border-radius: 7px; padding: 7px 13px;
+        background: var(--raised);
+      }
+
+      footer { border-top: 1px solid var(--line); }
+      footer .wrap {
+        display: flex; justify-content: space-between; gap: 20px; flex-wrap: wrap;
+        padding-top: 32px; padding-bottom: 44px; font-size: 14.5px; color: var(--muted);
+      }
+      footer a { color: var(--muted); }
+      footer a:hover { color: var(--text); }
+      .fnav { display: flex; gap: 20px; flex-wrap: wrap; }
+
+      @media (max-width: 860px) {
+        .hero .wrap { grid-template-columns: 1fr; gap: 40px; padding-bottom: 56px; }
+        .grid { grid-template-columns: 1fr; gap: 28px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * { transition: none !important; animation: none !important; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header class="mast">
+      <div class="wrap">
+        <a class="brand" href="/">agent<span>pod</span></a>
+        <nav>
+          <a href="https://docs.agentpod.dev">Docs</a>
+          <a href="/blog">Blog</a>
+          <a href="https://github.com/SuperJackfruitLabs/agentpod">Source</a>
+        </nav>
+      </div>
+    </header>
+
+    <div class="hero">
+      <div class="wrap">
+        <div>
+          <h1>The console for the machines your agents <em>live on</em>.</h1>
+          <p class="lede">
+            Your agents run somewhere — a server, a laptop, a container you spun up last week.
+            AgentPod is where you see those places and reach into them: files, logs, a terminal,
+            health, cleanup. Point it at what you already run.
+          </p>
+          <div class="actions">
+            <a class="btn btn-primary" href="https://docs.agentpod.dev/start/first-node/">Enroll a node</a>
+            <a class="btn btn-ghost" href="https://docs.agentpod.dev">Read the docs</a>
+          </div>
+        </div>
+
+        <!-- Signature element. See the note at the top of this file. -->
+        <div class="fleet" role="img"
+          aria-label="A fleet: three nodes — a VPS, a laptop behind CGNAT, and a provisioned Docker container — each listing the harness stations running on it. All are reachable because every node dials out to the hub.">
+          <div class="fleet-head">
+            <b>Fleet</b><span>3 nodes · 4 stations</span>
+          </div>
+          <div class="fleet-body">
+            {nodes.map((n) => (
+              <div class="node">
+                <div class="node-row">
+                  <span class={`led ${n.state}`} aria-hidden="true"></span>
+                  <span class="node-name">{n.name}</span>
+                  <span class="node-kind">{n.kind}</span>
+                </div>
+                <div class="stations">
+                  {n.stations.map((s) => (
+                    <div class="station">
+                      <span class="s-name">{s.name}</span>
+                      <span class="s-detail">{s.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div class="fleet-foot">
+            Every node dials <strong>out</strong>. No inbound ports — which is why the laptop is
+            in the fleet on the same terms as the VPS.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Attach to what you already run</h2>
+        <p class="sub">
+          AgentPod does not run your agents and does not ask you to move them. It ships a
+          descriptor per harness that knows how to ask that harness what it is running, where its
+          config and logs live, and how to start and stop it — wrapping each one's native
+          interface rather than reinventing it.
+        </p>
+        <ul class="chips">{harnesses.map((h) => <li>{h}</li>)}</ul>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>What you can do to a runtime</h2>
+        <p class="sub">
+          Each operation is gated on a capability the station declares. A request for one it has
+          not declared is refused at the hub, before anything reaches the machine.
+        </p>
+        <div class="grid">
+          <div class="cell">
+            <h3>Files, logs, terminal</h3>
+            <p>Browse and edit the workspace, tail logs live, open a real shell — brokered through
+              the hub, executed by the local agent.</p>
+          </div>
+          <div class="cell">
+            <h3>Health and lifecycle</h3>
+            <p>What a station reports about itself, and start, stop or restart. Every action is
+              written to the audit trail before it is dispatched, not after.</p>
+          </div>
+          <div class="cell">
+            <h3>Cleanup and changesets</h3>
+            <p>Plan a disk reclaim and inspect the plan before applying it. See what an agent has
+              actually changed in its working tree.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Enrolling a machine</h2>
+        <p class="sub">
+          One command on the target host. It downloads the right binary, installs a service, and
+          enrolls with your hub.
+        </p>
+        <pre><code><span class="c"># linux and macOS, amd64 and arm64</span>
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install.sh \
+  | sudo bash -s -- https://hub.example.com &lt;TOKEN&gt;</code></pre>
+        <p class="note">
+          Without root, pass <code>--user</code> to install under your login session instead.
+          Binaries are published for linux and darwin on amd64 and arm64.
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Check a machine before you trust it</h2>
+        <p class="sub">
+          <code>apn scan</code> checks the agent runtimes on a host for the two ways they get
+          taken over: a listener bound to every interface, and credential files other users can
+          read. It needs no hub, no account and no network, and exits 0, 1 or 2 so it works in
+          cron.
+        </p>
+        <pre><code>apn scan</code></pre>
+        <p class="note">
+          A check that cannot determine an answer says so. It is never reported as a pass.
+        </p>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>Or let it provision the machine</h2>
+        <p class="sub">
+          When there is nothing to attach to yet, AgentPod can create the runtime and enroll it for
+          you, on any of these.
+        </p>
+        <ul class="chips">{substrates.map((s) => <li>{s}</li>)}</ul>
+      </div>
+    </section>
+
+    <section class="band">
+      <div class="wrap">
+        <h2>You host all of it</h2>
+        <p class="sub">
+          The hub is a Bun service over Postgres. The console is a static site. The node agent is a
+          single Go binary. There is no account here to sign up for — clone it, run it, and the
+          fleet is yours.
+        </p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://docs.agentpod.dev">Read the docs</a>
+          <a class="btn btn-ghost" href="https://github.com/SuperJackfruitLabs/agentpod">View the source</a>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <span>AgentPod · self-hosted · MIT</span>
+        <span class="fnav">
+          <a href="https://docs.agentpod.dev">Documentation</a>
+          <a href="/blog">Blog</a>
+          <a href="https://github.com/SuperJackfruitLabs/agentpod">GitHub</a>
+          <a href="https://docs.kaambaan.dev">kaambaan</a>
+          <a href="https://docs.supermessage.dev">supermessage</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>
