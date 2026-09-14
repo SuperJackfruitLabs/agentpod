@@ -60,15 +60,24 @@ export interface CryptoRequest {
   body: string;
 }
 
-/** The parts of an appservice transaction the crypto machine cares about. */
+/**
+ * The parts of an appservice transaction one agent's machine cares about.
+ *
+ * Note the shape: this is **already narrowed to a single agent**. MSC3202
+ * delivers one-time-key counts and fallback types keyed by user and then by
+ * device, because an appservice holds many users where a client holds one —
+ * so the caller picks out this agent's entry before calling. `OlmMachine`
+ * itself only ever speaks for one user, and handing it another agent's counts
+ * would have it stop replenishing keys and quietly become unreachable.
+ */
 export interface CryptoTransaction {
   /** MSC2409: to-device events — olm key exchange arrives here. */
   toDevice?: unknown[];
-  /** MSC3202: which users' device lists changed. */
+  /** MSC3202: which users' device lists changed. Flat, as in `/sync`. */
   deviceLists?: { changed?: string[]; left?: string[] };
-  /** MSC3202: how many one-time keys the server still holds, per algorithm. */
+  /** This agent's device's remaining one-time keys, per algorithm. */
   otkCounts?: Record<string, number>;
-  /** MSC3202: fallback key algorithms the server has no unused key for. */
+  /** Algorithms this agent's device has no unused fallback key for. */
   unusedFallbackKeys?: string[];
 }
 
