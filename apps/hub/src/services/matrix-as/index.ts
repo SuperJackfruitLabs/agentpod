@@ -34,8 +34,12 @@ import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
-import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
-import { createCryptoTransport } from "./crypto-transport";
+import { createAgentCrypto, DEVICE_ID, feedAgents, type AgentCrypto } from "./crypto";
+import {
+  createCryptoTransport,
+  createDeviceEnsurer,
+  createSigningKeyUploader,
+} from "./crypto-transport";
 import { withEncryption } from "./crypto-send";
 
 const log = createLogger("matrix-bridge");
@@ -270,6 +274,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         send: createCryptoTransport({
           homeserverUrl: cfg.homeserverUrl,
           asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
+        }),
+        ensureDevice: createDeviceEnsurer({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
+        }),
+        uploadSigningKeys: createSigningKeyUploader({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
         }),
       })
     : null;

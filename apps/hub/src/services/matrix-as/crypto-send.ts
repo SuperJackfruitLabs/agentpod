@@ -103,9 +103,12 @@ export function withEncryption(
     eventType: string,
     content: Record<string, unknown>,
   ): Promise<string | null> {
-    // Everyone in the room needs the key before anyone can read the message.
-    await crypto.trackUsers(asUserId, await membersOf(roomId, asUserId));
-    const envelope = await crypto.encrypt(asUserId, roomId, eventType, content);
+    // Everyone in the room needs the megolm session before anyone can read
+    // the message, so the member list is fetched per send rather than cached:
+    // somebody who joined a moment ago and is missing from a stale list does
+    // not get a broken message, they get nothing at all.
+    const members = await membersOf(roomId, asUserId);
+    const envelope = await crypto.encrypt(asUserId, roomId, members, eventType, content);
     return client.sendCustomEvent(asUserId, roomId, 'm.room.encrypted', envelope);
   }
 

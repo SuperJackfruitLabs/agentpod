@@ -88,6 +88,23 @@ export interface CryptoTransaction {
 export interface AgentCryptoDeps {
   /** Where each agent's crypto store lives. One directory per user. */
   storeDir: string;
+  /**
+   * Create this agent's device on the homeserver, before any key is uploaded
+   * to it.
+   *
+   * MSC4190, and not optional: an appservice user registered through
+   * `m.login.application_service` gets a server-assigned device id, and
+   * uploading keys for a *different* device id — the fixed one below — is
+   * refused with a bare `403 M_FORBIDDEN` that says nothing about devices.
+   * That is how this was first written, and only an end-to-end run against a
+   * real homeserver found it; every unit test passed, because a fake
+   * transport answers whatever it is asked.
+   *
+   * It also needs `io.element.msc4190: true` in the registration, without
+   * which the endpoint answers `404 Device management not enabled for
+   * appservice`.
+   */
+  ensureDevice: (userId: string, deviceId: string) => Promise<void>;
   /** This homeserver's name, e.g. `id.agentpod.dev`. */
   domain: string;
   /**
@@ -100,15 +117,30 @@ export interface AgentCryptoDeps {
    * that goes wrong with it is silent.
    */
   send: (userId: string, request: CryptoRequest) => Promise<string>;
+  /**
+   * Publish the agent's cross-signing keys.
+   *
+   * Separate from `send` because this one request is not a `CryptoRequest`:
+   * `bootstrapCrossSigning` hands back a bare JSON body with no request id and
+   * no type, and the machine does not want to be told when it has been sent.
+   */
+  uploadSigningKeys: (userId: string, body: string) => Promise<void>;
 }
 
 export interface AgentCrypto {
   /** Feed a transaction to the agent's machine and flush what it produces. */
   receive(userId: string, tx: CryptoTransaction): Promise<void>;
-  /** Encrypt content for a room the agent is in. */
+  /**
+   * Encrypt content for a room the agent is in.
+   *
+   * `members` is everyone currently joined, and is not optional: megolm
+   * encrypts once and shares the session key with each recipient device, so a
+   * member missing from this list simply cannot read the result.
+   */
   encrypt(
     userId: string,
     roomId: string,
+    members: string[],
     eventType: string,
     content: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
@@ -127,6 +159,18 @@ export interface AgentCrypto {
 import { EncryptionSettings, RoomId } from '@matrix-org/matrix-sdk-crypto-nodejs';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createLogger } from '../../utils/logger';
+
+const log = createLogger('matrix-as:crypto');
+
+/**
+ * The device every agent speaks through.
+ *
+ * Fixed rather than generated, and asserted to the homeserver via MSC4190. A
+ * device id that changed per restart would leave a trail of abandoned devices
+ * that every other client in the room must still encrypt to, forever.
+ */
+export const DEVICE_ID = 'AGENTPOD';
 
 export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   const machines = new Map<string, Promise<OlmMachine>>();
@@ -148,10 +192,56 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
     const built = (async () => {
       const dir = join(deps.storeDir, localpart);
       await mkdir(dir, { recursive: true });
-      return OlmMachine.initialize(new UserId(userId), new DeviceId('AGENTPOD'), dir);
+      // Before the machine, not after: the machine's first act is to want its
+      // keys uploaded, and there is nothing to upload them to until the
+      // device exists.
+      await deps.ensureDevice(userId, DEVICE_ID);
+      const machine = await OlmMachine.initialize(
+        new UserId(userId),
+        new DeviceId(DEVICE_ID),
+        dir,
+      );
+      await publishIdentity(userId, machine);
+      return machine;
     })();
     machines.set(userId, built);
     return built;
+  }
+
+  /**
+   * Give the agent a cross-signing identity, and publish it.
+   *
+   * Not optional, and not a nicety for the verification UI. Room keys are
+   * shared under the SDK's default `IdentityBasedStrategy`, which refuses to
+   * send a megolm key to a user who has published no identity — the sender
+   * emits `m.room_key.withheld` instead, the recipient stores a key it cannot
+   * use, and every message from then on decrypts to nothing. There is no error
+   * on the sending side at all: the send succeeds, and only the reader can
+   * tell that anything is wrong.
+   *
+   * Done once per agent and then never again, because the store is persistent:
+   * a second bootstrap against a server that already holds the identity needs
+   * user-interactive auth, which an appservice has no way to satisfy.
+   */
+  async function publishIdentity(userId: string, machine: OlmMachine): Promise<void> {
+    const status = await machine.crossSigningStatus();
+    if (status.hasMaster && status.hasSelfSigning && status.hasUserSigning) return;
+
+    const reqs = await machine.bootstrapCrossSigning(false);
+    if (reqs.uploadKeysReq) {
+      const body = await deps.send(userId, reqs.uploadKeysReq as CryptoRequest);
+      await machine.markRequestAsSent(
+        (reqs.uploadKeysReq as CryptoRequest).id ?? '',
+        0,
+        body,
+      );
+    }
+    await deps.uploadSigningKeys(userId, reqs.uploadSigningKeysReq);
+    if (reqs.uploadSignaturesReq) {
+      const req = reqs.uploadSignaturesReq as unknown as CryptoRequest;
+      const body = await deps.send(userId, req);
+      await machine.markRequestAsSent(req.id ?? '', 4, body);
+    }
   }
 
   /**
@@ -205,20 +295,58 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       await flush(userId, machine);
     },
 
-    async encrypt(userId, roomId, eventType, content) {
+    async encrypt(userId, roomId, members, eventType, content) {
       const machine = await machineFor(userId);
       const room = new RoomId(roomId);
+      const recipients = members.map((m) => new UserId(m));
 
-      // The key has to reach every device in the room before the event can be
-      // read by any of them, and `shareRoomKey` is what produces the to-device
-      // messages that do it. Skipping this when a session already exists is
-      // the SDK's job, not ours — it returns nothing when there is nothing to
-      // share.
-      const missing = await machine.getMissingSessions([new UserId(userId)]);
+      // The three steps before an event can be encrypted at all, in the only
+      // order that works. The first version of this did the first and the
+      // third and the machine answered "Session wasn't created nor shared" —
+      // which is accurate and says nothing about which step is missing.
+      //
+      // 1. Know the recipients' devices — and actually go and ask.
+      //
+      // `updateTrackedUsers` only *marks* them as worth tracking; the
+      // keys/query that discovers their devices comes out of the outbox, so
+      // without this flush the next two steps run against a machine that has
+      // never heard of the recipient. It then shares the room key with
+      // nobody, encrypts happily, and the recipient receives an event it has
+      // no session for — which looks exactly like a homeserver that dropped
+      // the to-device message.
+      await machine.updateTrackedUsers(recipients);
+      await flush(userId, machine);
+
+      // 2. Have an olm session with each of them, claiming a one-time key
+      //    where there is none. Olm is what carries the megolm key in step 3.
+      const missing = await machine.getMissingSessions(recipients);
       if (missing) {
         const req = missing as unknown as { id: string; type: RequestType; body: string };
         const response = await deps.send(userId, { id: req.id, type: req.type, body: req.body });
         await machine.markRequestAsSent(req.id, req.type, response);
+      }
+
+      // 3. Share the megolm session itself, device by device. The SDK returns
+      //    nothing here when every recipient already has it, so this is not a
+      //    cost paid per message.
+      const shares = await machine.shareRoomKey(room, recipients, new EncryptionSettings());
+      for (const share of shares) {
+        const req = share as unknown as {
+          id: string;
+          eventType: string;
+          txnId: string;
+          body: string;
+        };
+        const response = await deps.send(userId, {
+          id: req.id,
+          // `shareRoomKey` returns ToDeviceRequests, which carry no `type`
+          // field of their own — the request type is implied by the class.
+          type: 3 as unknown as RequestType,
+          body: req.body,
+          eventType: req.eventType,
+          txnId: req.txnId,
+        });
+        await machine.markRequestAsSent(req.id, 3 as unknown as RequestType, response);
       }
 
       const encrypted = await machine.encryptRoomEvent(
@@ -238,7 +366,15 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
           new RoomId(roomId),
         );
         return JSON.parse(decrypted.event) as Record<string, unknown>;
-      } catch {
+      } catch (err) {
+        // Logged rather than swallowed silently: the message names the actual
+        // cause ("withheld code: m.no_olm", "unknown megolm session"), and
+        // without it an agent that reads nothing looks identical to an agent
+        // nobody is talking to.
+        log.debug('could not decrypt an event for an agent', {
+          userId,
+          reason: err instanceof Error ? err.message : String(err),
+        });
         // A missing key is expected rather than exceptional: it happens for
         // every event sent before this agent joined, and for anything sent
         // while it was offline and the sender has since forgotten the session.

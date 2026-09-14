@@ -52,6 +52,17 @@ const ENDPOINTS: Record<number, { method: 'POST' | 'PUT'; path: (r: CryptoReques
 export interface CryptoTransportDeps {
   homeserverUrl: string;
   asToken: string;
+  /**
+   * The device every agent speaks through, named on every crypto request.
+   *
+   * `?user_id=` alone is not enough here, and the homeserver says so in a way
+   * that is easy to misread: `403 M_FORBIDDEN — user must be authenticated
+   * and device identified`. Crypto requests belong to a *device*, not just a
+   * user, and an appservice acting for an agent that owns two devices has to
+   * say which one. MSC4326; found by an end-to-end run, because every unit
+   * test answers whatever it is asked.
+   */
+  deviceId: string;
 }
 
 /**
@@ -62,6 +73,21 @@ export interface CryptoTransportDeps {
  * request, and is particular about it: a keys/upload answered with anything
  * lacking `one_time_key_counts` is rejected outright.
  */
+/**
+ * The bytes to actually send for a request.
+ *
+ * Every request type but one sends its `body` verbatim. `SignatureUpload` is
+ * the exception: the binding hands back `{"signed_keys": {…}}`, while
+ * `/keys/signatures/upload` takes that inner map as the whole body and answers
+ * a bare `400 M_BAD_JSON` when it does not get it — an error that names
+ * neither the offending field nor the request.
+ */
+function bodyFor(request: CryptoRequest): string | undefined {
+  if ((request.type as unknown as number) !== 4) return request.body;
+  const parsed = JSON.parse(request.body ?? '{}') as { signed_keys?: unknown };
+  return JSON.stringify(parsed.signed_keys ?? parsed);
+}
+
 export function createCryptoTransport(deps: CryptoTransportDeps) {
   return async function send(userId: string, request: CryptoRequest): Promise<string> {
     const route = ENDPOINTS[request.type as unknown as number];
@@ -74,6 +100,7 @@ export function createCryptoTransport(deps: CryptoTransportDeps) {
 
     const url = new URL(route.path(request), deps.homeserverUrl);
     url.searchParams.set('user_id', userId);
+    url.searchParams.set('device_id', deps.deviceId);
 
     const res = await fetch(url, {
       method: route.method,
@@ -81,7 +108,7 @@ export function createCryptoTransport(deps: CryptoTransportDeps) {
         Authorization: `Bearer ${deps.asToken}`,
         'Content-Type': 'application/json',
       },
-      body: request.body,
+      body: bodyFor(request),
     });
 
     const text = await res.text();
@@ -108,4 +135,84 @@ function safeErrcode(body: string): string {
   } catch {
     return 'unparseable';
   }
+}
+
+/**
+ * Create an agent's device, so there is something to upload keys to.
+ *
+ * MSC4190. Idempotent: creating a device that exists answers 200, and both
+ * that and 201 are success. Needs `io.element.msc4190: true` in the
+ * registration — without it the homeserver answers 404 "Device management not
+ * enabled for appservice", which is the kind of error that reads like a wrong
+ * URL rather than a missing switch.
+ */
+export function createDeviceEnsurer(deps: CryptoTransportDeps) {
+  const done = new Set<string>();
+  return async function ensureDevice(userId: string, deviceId: string): Promise<void> {
+    const key = `${userId}/${deviceId}`;
+    if (done.has(key)) return;
+
+    const url = new URL(
+      `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`,
+      deps.homeserverUrl,
+    );
+    url.searchParams.set('user_id', userId);
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${deps.asToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ display_name: 'agentpod bridge' }),
+    });
+
+    if (!res.ok) {
+      throw new Error(
+        `could not create device ${deviceId} for ${userId}: ${res.status}` +
+          (res.status === 404 ? ' — is io.element.msc4190 set in the registration?' : ''),
+      );
+    }
+    done.add(key);
+  };
+}
+
+/**
+ * Publish an agent's cross-signing keys.
+ *
+ * `POST /keys/device_signing/upload` normally demands user-interactive auth,
+ * which an appservice cannot perform. MSC3967 waives it when the account has
+ * no cross-signing identity yet, which is exactly and only when this is
+ * called — see `publishIdentity` in `crypto.ts`. A 401 here therefore means
+ * the identity already exists on the server while the local store has lost
+ * it, and the store is the thing to restore.
+ */
+export function createSigningKeyUploader(deps: CryptoTransportDeps) {
+  return async function uploadSigningKeys(userId: string, body: string): Promise<void> {
+    const url = new URL('/_matrix/client/v3/keys/device_signing/upload', deps.homeserverUrl);
+    url.searchParams.set('user_id', userId);
+    url.searchParams.set('device_id', deps.deviceId);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${deps.asToken}`,
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
+
+    if (!res.ok) {
+      // The body carries the signing keys; only the code is safe to log.
+      const errcode = await res
+        .json()
+        .then((j: unknown) => (j as { errcode?: string })?.errcode ?? '')
+        .catch(() => '');
+      throw new Error(
+        `could not publish cross-signing keys for ${userId}: ${res.status} ${errcode}` +
+          (res.status === 401
+            ? ' — the server already holds an identity for this agent; restore its crypto store'
+            : ''),
+      );
+    }
+    log.info('published cross-signing identity', { userId });
+  };
 }

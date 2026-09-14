@@ -858,6 +858,26 @@ Verified end to end rather than by reading: a store was created, backed up,
 restored from the repository, and its contents and `PRAGMA integrity_check`
 confirmed on the restored copy.
 
+**If a store is lost and there is no backup, the agent's device must be
+deleted before it can work again.** A Matrix device's identity keys are
+write-once: a new store uploads new keys for the same device id, the
+homeserver keeps the *first* set, and from then on every one-time key the
+agent publishes is signed by a key no one can verify. Senders then fail to
+establish an olm session and withhold the room key with `m.no_olm`. Nothing
+errors — the agent simply stops being able to read anything new, which looks
+exactly like a bridge that has stopped delivering.
+
+```sh
+# as the appservice, for the stranded agent
+curl -X DELETE "$HS/_matrix/client/v3/devices/AGENTPOD?user_id=$AGENT" \
+     -H "Authorization: Bearer $AS_TOKEN"
+```
+
+The bridge recreates the device and republishes on the next send. The agent's
+old encrypted history stays unreadable; only new messages recover. This was
+found by an end-to-end run, where a re-run against a reused test user failed
+with `m.no_olm` while every key on the server looked correct.
+
 ### 7c. Backups, and restoring one
 
 `backup-database` writes a **RocksDB checkpoint while the server keeps running** —
