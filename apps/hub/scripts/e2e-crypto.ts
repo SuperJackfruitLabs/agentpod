@@ -220,8 +220,8 @@ async function main() {
     const body = (decrypted as any)?.content?.body;
     check('BOB DECRYPTED ALICE’S MESSAGE', body === SECRET, body ? `"${body}"` : 'no key');
   } finally {
-    cryptoA.close();
-    cryptoB.close();
+    await cryptoA.close();
+    await cryptoB.close();
     await rm(dirA, { recursive: true, force: true });
     await rm(dirB, { recursive: true, force: true });
   }

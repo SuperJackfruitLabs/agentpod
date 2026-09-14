@@ -152,8 +152,11 @@ export interface AgentCrypto {
   ): Promise<Record<string, unknown> | null>;
   /** Tell the machine which users share a room, so it can target keys. */
   trackUsers(userId: string, members: string[]): Promise<void>;
-  /** For tests and shutdown. */
-  close(): void;
+  /**
+   * Close every machine. Awaited, because a machine left to the garbage
+   * collector is dropped during process teardown and panics there.
+   */
+  close(): Promise<void>;
 }
 
 import { EncryptionSettings, RoomId } from '@matrix-org/matrix-sdk-crypto-nodejs';
@@ -385,8 +388,29 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       }
     },
 
-    close() {
+    async close() {
+      // Every machine is closed, not merely dropped.
+      //
+      // Clearing the map alone leaves the `OlmMachine`s to the garbage
+      // collector, which runs them during process teardown — by which point
+      // napi's tokio runtime is gone, and the drop panics inside it with
+      // `called Option::unwrap() on a None value`. The panic cannot be caught
+      // from JavaScript and aborts the process with SIGABRT: in CI the whole
+      // test run failed with exit 134 *after* printing that all 1887 tests
+      // had passed.
+      const open = [...machines.values()];
       machines.clear();
+      await Promise.all(
+        open.map(async (pending) => {
+          try {
+            (await pending).close();
+          } catch (err) {
+            log.warn('closing an agent crypto machine failed', {
+              reason: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }),
+      );
     },
   };
 }

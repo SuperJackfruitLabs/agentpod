@@ -110,7 +110,7 @@ describe("agent crypto", () => {
     // first thing it wants is to put them there. If this is empty the agent
     // is encrypting to nobody and nobody can encrypt to it.
     expect(seen.length).toBeGreaterThan(0);
-    crypto.close();
+    await crypto.close();
   });
 
   test("each agent gets its own store, because a shared one is a shared identity", async () => {
@@ -123,7 +123,7 @@ describe("agent crypto", () => {
 
     const entries = (await readdir(root)).sort();
     expect(entries).toEqual(["agent_alice", "agent_bob"]);
-    crypto.close();
+    await crypto.close();
   });
 
   test("an undecryptable event returns null rather than throwing", async () => {
@@ -149,7 +149,7 @@ describe("agent crypto", () => {
     });
 
     expect(result).toBeNull();
-    crypto.close();
+    await crypto.close();
   });
 
   test("the same agent reuses one machine rather than rebuilding it", async () => {
@@ -165,7 +165,7 @@ describe("agent crypto", () => {
     // rotate the device on every message, and leave a trail of dead devices
     // that every other client must still encrypt to.
     expect(seen.length).toBe(afterFirst);
-    crypto.close();
+    await crypto.close();
   });
 });
 
