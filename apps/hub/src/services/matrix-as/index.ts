@@ -36,6 +36,7 @@ import { createSession, promptSession,
 import { createLogger } from "../../utils/logger";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
 import { createCryptoTransport } from "./crypto-transport";
+import { withEncryption } from "./crypto-send";
 
 const log = createLogger("matrix-bridge");
 
@@ -250,33 +251,6 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       }
     : undefined;
 
-  const inboundDeps = {
-    domain: cfg.domain,
-    gates,
-    client,
-    acp: {
-      createSession: async (input: { stationId: string; userId: string; mode: string }) => {
-        const session = await createSession({
-          stationId: input.stationId,
-          userId: input.userId,
-          mode: input.mode as never,
-        });
-        return { id: session.id };
-      },
-      promptSession,
-      answerPermission,
-    },
-    // The joint between inbound and outbound. Without it a session is created,
-    // prompted, and answers into a stream nobody is listening to — which is
-    // exactly what happened the first time this ran against the real fleet.
-    attach: (sessionId: string, roomId: string, agentUser: string) =>
-      attachRoomToSession(sessionId, roomId, agentUser, {
-        client,
-        readerFor: readerForRoom,
-      }),
-    noteTrigger: noteTurnTrigger,
-  };
-
   /**
    * The crypto, or null for a plaintext bridge.
    *
@@ -304,8 +278,58 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     log.info("matrix bridge crypto is on", { storeDir: cfg.cryptoStoreDir });
   }
 
+  /**
+   * The client every agent speaks through.
+   *
+   * Wrapped once, here, so nothing downstream has to remember to encrypt.
+   * `outbound.ts`, the gate sweeper, the mission runner and everything else
+   * keep calling `sendText` — the difference is decided by the room, not by
+   * the caller, which is the only arrangement where a new send site cannot
+   * accidentally ship plaintext into an encrypted room.
+   */
+  const speakingClient = crypto
+    ? withEncryption(client, crypto, {
+        homeserverUrl: cfg.homeserverUrl,
+        asToken: cfg.asToken,
+      })
+    : client;
+
+  const inboundDeps = {
+    domain: cfg.domain,
+    // Absent for a plaintext bridge, which is the default. The
+    // handler then treats an encrypted event as nothing to act on
+    // rather than pretending to read it.
+    decrypt: crypto
+      ? async (roomId: string, asUserId: string, event: any) =>
+          (await crypto.decrypt(asUserId, roomId, event)) as any
+      : undefined,
+    gates,
+    client: speakingClient,
+    acp: {
+      createSession: async (input: { stationId: string; userId: string; mode: string }) => {
+        const session = await createSession({
+          stationId: input.stationId,
+          userId: input.userId,
+          mode: input.mode as never,
+        });
+        return { id: session.id };
+      },
+      promptSession,
+      answerPermission,
+    },
+    // The joint between inbound and outbound. Without it a session is created,
+    // prompted, and answers into a stream nobody is listening to — which is
+    // exactly what happened the first time this ran against the real fleet.
+    attach: (sessionId: string, roomId: string, agentUser: string) =>
+      attachRoomToSession(sessionId, roomId, agentUser, {
+        client,
+        readerFor: readerForRoom,
+      }),
+    noteTrigger: noteTurnTrigger,
+  };
+
   return {
-    client,
+    client: speakingClient,
     config: cfg,
     provisionDeps,
 
