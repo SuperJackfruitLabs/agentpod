@@ -52,6 +52,19 @@ export interface MatrixBridgeConfig {
   domain: string;
   asToken: string;
   hsToken: string;
+  /**
+   * Where each agent's crypto store lives, or "" for a plaintext bridge.
+   *
+   * Opt-in rather than defaulted to a path, because a store that appears by
+   * accident is worse than no store: agents would start advertising device
+   * keys the deployment has no backup for, and the rooms they encrypt with
+   * them cannot be un-encrypted afterwards.
+   *
+   * **Whatever this points at must be backed up.** Losing it loses every
+   * agent's keys to every encrypted room they are in, unrecoverably, and the
+   * nightly tuwunel backup does not cover it.
+   */
+  cryptoStoreDir: string;
 }
 
 /** What the deployment says. Read once, at boot, like every other switch here. */
@@ -101,6 +114,7 @@ export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
     domain: env.MATRIX_SERVER_NAME ?? "id.agentpod.dev",
     asToken: env.MATRIX_AS_TOKEN ?? "",
     hsToken: env.MATRIX_HS_TOKEN ?? "",
+    cryptoStoreDir: env.MATRIX_CRYPTO_STORE_DIR ?? "",
   };
 }
 

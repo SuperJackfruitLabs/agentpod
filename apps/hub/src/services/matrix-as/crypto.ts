@@ -253,3 +253,61 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
 
 export { EncryptionSettings };
 export type { RequestType };
+
+/**
+ * Narrow a whole-appservice transaction to the agents it actually concerns,
+ * and feed each one's machine.
+ *
+ * This is where MSC3202's nesting earns itself. The homeserver sends one
+ * transaction describing *every* user in the namespace; an `OlmMachine`
+ * speaks for exactly one. Feeding agent A the counts belonging to agent B
+ * does not throw — it makes A believe its key pool is full when it is empty,
+ * so it stops replenishing and becomes unreachable without ever reporting a
+ * fault. That is the failure this function exists to prevent.
+ *
+ * Every agent mentioned anywhere in the transaction is fed, including those
+ * mentioned only by a device-list change: a machine that is never told its
+ * peer rotated a device keeps encrypting to a device that is gone.
+ *
+ * `toDevice` is passed to each of them whole. The events carry no routing of
+ * their own in MSC3202, and olm ignores what is not addressed to it — so
+ * handing every agent the full list is correct, if wasteful, where trying to
+ * pre-sort it would risk dropping a key someone needed.
+ */
+export async function feedAgents(
+  crypto: AgentCrypto,
+  tx: {
+    toDevice: unknown[];
+    deviceLists: { changed: string[]; left: string[] };
+    otkCounts: Record<string, Record<string, Record<string, number>>>;
+    unusedFallbackKeys: Record<string, Record<string, string[]>>;
+  },
+  isOurs: (userId: string) => boolean,
+): Promise<void> {
+  const agents = new Set<string>();
+  for (const user of Object.keys(tx.otkCounts)) if (isOurs(user)) agents.add(user);
+  for (const user of Object.keys(tx.unusedFallbackKeys)) if (isOurs(user)) agents.add(user);
+  for (const user of tx.deviceLists.changed) if (isOurs(user)) agents.add(user);
+
+  for (const userId of agents) {
+    // Flattened per device, then merged: MSC3202 reports counts per device,
+    // and this agent has exactly one — `AGENTPOD`, asserted rather than
+    // generated. Merging rather than indexing by that name means a device id
+    // changing here does not silently stop the counts arriving.
+    const otk: Record<string, number> = {};
+    for (const perDevice of Object.values(tx.otkCounts[userId] ?? {})) {
+      for (const [algorithm, count] of Object.entries(perDevice)) otk[algorithm] = count;
+    }
+    const fallback = new Set<string>();
+    for (const list of Object.values(tx.unusedFallbackKeys[userId] ?? {})) {
+      for (const algorithm of list) fallback.add(algorithm);
+    }
+
+    await crypto.receive(userId, {
+      toDevice: tx.toDevice,
+      deviceLists: tx.deviceLists,
+      otkCounts: otk,
+      unusedFallbackKeys: [...fallback],
+    });
+  }
+}

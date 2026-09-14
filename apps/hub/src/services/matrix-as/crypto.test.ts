@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentCrypto, type CryptoRequest } from "./crypto";
+import { createAgentCrypto, feedAgents, type CryptoRequest } from "./crypto";
 
 /**
  * The crypto state machine, driven the way the bridge drives it.
@@ -156,5 +156,99 @@ describe("agent crypto", () => {
     // that every other client must still encrypt to.
     expect(seen.length).toBe(afterFirst);
     crypto.close();
+  });
+});
+
+describe("narrowing a transaction to the agents in it", () => {
+  const isOurs = (u: string) => u.startsWith("@agent_");
+
+  /** A crypto double that records who was fed what. */
+  function spy() {
+    const fed: Array<{ userId: string; otk: Record<string, number>; fallback: string[] }> = [];
+    return {
+      fed,
+      crypto: {
+        receive: async (userId: string, tx: any) => {
+          fed.push({ userId, otk: tx.otkCounts, fallback: tx.unusedFallbackKeys });
+        },
+        encrypt: async () => ({}),
+        decrypt: async () => null,
+        trackUsers: async () => {},
+        close: () => {},
+      },
+    };
+  }
+
+  test("each agent is fed its OWN key counts, never another's", async () => {
+    // The whole reason the per-user nesting is carried through. Feeding one
+    // agent another's counts does not throw — it makes the first believe its
+    // key pool is full when it is empty, so it stops replenishing and goes
+    // quietly unreachable.
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto as any,
+      {
+        toDevice: [],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: {
+          [ALICE]: { AGENTPOD: { signed_curve25519: 5 } },
+          [BOB]: { AGENTPOD: { signed_curve25519: 47 } },
+        },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+
+    const alice = fed.find((f) => f.userId === ALICE);
+    const bob = fed.find((f) => f.userId === BOB);
+    expect(alice?.otk).toEqual({ signed_curve25519: 5 });
+    expect(bob?.otk).toEqual({ signed_curve25519: 47 });
+  });
+
+  test("an agent named only by a device-list change is still fed", async () => {
+    // A machine never told that a peer rotated a device keeps encrypting to a
+    // device that is gone, and the recipient can read none of it.
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto as any,
+      {
+        toDevice: [],
+        deviceLists: { changed: [ALICE], left: [] },
+        otkCounts: {},
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed.map((f) => f.userId)).toEqual([ALICE]);
+  });
+
+  test("users outside our namespace are not fed", async () => {
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto as any,
+      {
+        toDevice: [],
+        deviceLists: { changed: ["@a-human:id.agentpod.dev"], left: [] },
+        otkCounts: { "@another-human:id.agentpod.dev": { D: { signed_curve25519: 1 } } },
+        unusedFallbackKeys: {},
+      },
+      isOurs,
+    );
+    expect(fed).toHaveLength(0);
+  });
+
+  test("fallback key types are merged across devices", async () => {
+    const { fed, crypto } = spy();
+    await feedAgents(
+      crypto as any,
+      {
+        toDevice: [],
+        deviceLists: { changed: [], left: [] },
+        otkCounts: {},
+        unusedFallbackKeys: { [ALICE]: { AGENTPOD: ["signed_curve25519"], OLD: ["signed_curve25519"] } },
+      },
+      isOurs,
+    );
+    expect(fed[0]?.fallback).toEqual(["signed_curve25519"]);
   });
 });
