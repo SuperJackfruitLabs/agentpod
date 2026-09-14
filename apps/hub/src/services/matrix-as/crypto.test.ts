@@ -1,0 +1,160 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createAgentCrypto, type CryptoRequest } from "./crypto";
+
+/**
+ * The crypto state machine, driven the way the bridge drives it.
+ *
+ * These exercise the **real** `OlmMachine` — a native Rust binding generating
+ * real keys — rather than a mock of it. A mocked crypto layer tests that the
+ * mock agrees with itself, which for the one subsystem whose failures are
+ * silent is worse than no test.
+ *
+ * There is no homeserver here. `send` is a spy that records what the machine
+ * wanted to send and hands back the emptiest response the machine will accept,
+ * which is enough to prove the plumbing without standing up Matrix.
+ */
+
+const DOMAIN = "id.agentpod.dev";
+const ALICE = `@agent_alice:${DOMAIN}`;
+const BOB = `@agent_bob:${DOMAIN}`;
+
+const dirs: string[] = [];
+async function storeDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "agentpod-crypto-"));
+  dirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  while (dirs.length) await rm(dirs.pop()!, { recursive: true, force: true });
+});
+
+/**
+ * A `send` that remembers what was asked and answers the emptiest thing the
+ * machine will accept.
+ *
+ * Not `{}` — the first version of this returned that and every test failed
+ * with `missing field one_time_key_counts`. The machine deserialises each
+ * response into the strongly-typed reply for its request, so a keys/upload
+ * needs its counts and a keys/query needs its (empty) device map. Carrying
+ * the union of those fields answers every request type without this fixture
+ * having to know which one it is holding — `RequestType` is an ambient const
+ * enum and cannot be compared at runtime under `verbatimModuleSyntax`.
+ */
+function recorder() {
+  const seen: CryptoRequest[] = [];
+  return {
+    seen,
+    send: async (_userId: string, request: CryptoRequest) => {
+      seen.push(request);
+      return answer(request.body);
+    },
+  };
+}
+
+/**
+ * The emptiest response the machine will accept — which is not `{}`, and not
+ * a constant either. Both were tried and both looped forever.
+ *
+ * A keys/query answered with `device_keys: {}` means "answered for nobody",
+ * so the machine asks again on the next pass, and the next. The flush loop's
+ * stuck-guard caught it at ten passes, which is the only reason this is a
+ * fixture bug rather than a hang. Echoing the queried users back — with no
+ * devices, which is true of a user that has never logged in — is what closes
+ * the question.
+ *
+ * Likewise `one_time_key_counts` must be non-zero: answering an upload with a
+ * count of zero tells the machine its key pool is still empty, so it uploads
+ * again.
+ */
+function answer(body: string): string {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    /* not every request body is JSON we care about */
+  }
+  const queried = parsed.device_keys as Record<string, unknown> | undefined;
+  const deviceKeys: Record<string, unknown> = {};
+  for (const user of Object.keys(queried ?? {})) deviceKeys[user] = {};
+
+  return JSON.stringify({
+    one_time_key_counts: { signed_curve25519: 50 },
+    device_keys: deviceKeys,
+    one_time_keys: {},
+    failures: {},
+  });
+}
+
+describe("agent crypto", () => {
+  test("an agent's first transaction uploads its device keys", async () => {
+    const { seen, send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send });
+
+    await crypto.receive(ALICE, {});
+
+    // A machine that has never run has no keys on the server, so the very
+    // first thing it wants is to put them there. If this is empty the agent
+    // is encrypting to nobody and nobody can encrypt to it.
+    expect(seen.length).toBeGreaterThan(0);
+    crypto.close();
+  });
+
+  test("each agent gets its own store, because a shared one is a shared identity", async () => {
+    const root = await storeDir();
+    const { send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: root, domain: DOMAIN, send });
+
+    await crypto.receive(ALICE, {});
+    await crypto.receive(BOB, {});
+
+    const entries = (await readdir(root)).sort();
+    expect(entries).toEqual(["agent_alice", "agent_bob"]);
+    crypto.close();
+  });
+
+  test("an undecryptable event returns null rather than throwing", async () => {
+    const { send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send });
+
+    // Every agent sees these: events sent before it joined, or while it was
+    // offline and the sender has since forgotten the session. Throwing would
+    // fail the whole appservice transaction, which the homeserver then retries
+    // forever — one unreadable message would wedge the bridge.
+    const result = await crypto.decrypt(ALICE, `!room:${DOMAIN}`, {
+      type: "m.room.encrypted",
+      sender: BOB,
+      event_id: "$nope",
+      origin_server_ts: 1,
+      content: {
+        algorithm: "m.megolm.v1.aes-sha2",
+        ciphertext: "not a real ciphertext",
+        sender_key: "nope",
+        session_id: "nope",
+        device_id: "NOPE",
+      },
+    });
+
+    expect(result).toBeNull();
+    crypto.close();
+  });
+
+  test("the same agent reuses one machine rather than rebuilding it", async () => {
+    const { seen, send } = recorder();
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send });
+
+    await crypto.receive(ALICE, {});
+    const afterFirst = seen.length;
+    await crypto.receive(ALICE, {});
+
+    // The second transaction has nothing new to say: keys are already
+    // uploaded. A machine rebuilt per transaction would re-upload every time,
+    // rotate the device on every message, and leave a trail of dead devices
+    // that every other client must still encrypt to.
+    expect(seen.length).toBe(afterFirst);
+    crypto.close();
+  });
+});
