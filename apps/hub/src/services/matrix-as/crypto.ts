@@ -58,6 +58,10 @@ export interface CryptoRequest {
   id: string;
   type: RequestType;
   body: string;
+  /** `ToDeviceRequest` and `RoomMessageRequest` carry these; others do not. */
+  eventType?: string;
+  txnId?: string;
+  roomId?: string;
 }
 
 /**

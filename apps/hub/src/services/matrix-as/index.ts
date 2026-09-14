@@ -34,6 +34,8 @@ import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
+import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
+import { createCryptoTransport } from "./crypto-transport";
 
 const log = createLogger("matrix-bridge");
 
@@ -143,6 +145,12 @@ export interface MatrixBridge {
   onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
+  /**
+   * Feed the encryption side-channels of one transaction to the agents it
+   * concerns. Null when no crypto store is configured — a plaintext bridge
+   * never calls it, and the route checks for exactly that.
+   */
+  onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
 }
 
 /**
@@ -269,10 +277,45 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     noteTrigger: noteTurnTrigger,
   };
 
+  /**
+   * The crypto, or null for a plaintext bridge.
+   *
+   * Built once here rather than per transaction: an `OlmMachine` generates
+   * keys and opens a store on construction, and rebuilding one per
+   * transaction would rotate every agent's device on every message.
+   *
+   * `isOurs` is the namespace the registration claims. Anyone else in a
+   * transaction — a human, an agent on another server — is described *to* our
+   * machines but never has one of their own, because we hold no keys for
+   * them and could not act as them if we did.
+   */
+  const crypto: AgentCrypto | null = cfg.cryptoStoreDir
+    ? createAgentCrypto({
+        storeDir: cfg.cryptoStoreDir,
+        domain: cfg.domain,
+        send: createCryptoTransport({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+        }),
+      })
+    : null;
+
+  if (crypto) {
+    log.info("matrix bridge crypto is on", { storeDir: cfg.cryptoStoreDir });
+  }
+
   return {
     client,
     config: cfg,
     provisionDeps,
+
+    onCryptoTransaction: crypto
+      ? async (tx) => {
+          await feedAgents(crypto, tx, (userId) =>
+            userId.startsWith("@agent_") && userId.endsWith(`:${cfg.domain}`),
+          );
+        }
+      : null,
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);

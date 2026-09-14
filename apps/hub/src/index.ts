@@ -341,6 +341,10 @@ if (matrixBridge) {
       domain: matrixBridge.config.domain,
       onEvent: (event) => matrixBridge.onEvent(event),
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
+      // Null unless a crypto store is configured, in which case the route
+      // skips the step entirely — a deployment that has not opted in pays
+      // nothing and behaves exactly as it did.
+      onCryptoTransaction: matrixBridge.onCryptoTransaction ?? undefined,
     }),
   );
 
