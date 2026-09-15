@@ -217,44 +217,6 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     };
   };
 
-  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
-
-  /**
-   * Answering a gate, wired only when a board is configured.
-   *
-   * `KAAMBAAN_BASE_URL` absent means no board, which means no gate could have
-   * been projected in the first place — so leaving this undefined is the
-   * honest state rather than a half-built path that fails at the last step.
-   */
-  const kaambaanBaseUrl = (process.env.KAAMBAAN_BASE_URL ?? "").trim();
-  const gates = kaambaanBaseUrl
-    ? {
-        handle: (
-          event: { sender: string; content: Record<string, unknown> },
-          roomId: string
-        ) =>
-          handleGateDecision(event, roomId, {
-            // The subject comes from here and from nowhere else. This is the
-            // control that makes minting an assertion for another principal
-            // safe to have at all — see `mintPrincipalAssertion`.
-            principalForMatrixId: async (mxid: string) => {
-              const identity = await resolveMatrixId(mxid);
-              return identity?.kind === "principal" ? identity.principalId : null;
-            },
-            projectionFor: projectionForGate,
-            resolveGate: (input) =>
-              resolveGateAtKaambaan(input, {
-                baseUrl: kaambaanBaseUrl,
-                mint: (principalId) => mintPrincipalAssertion({ principalId }),
-              }),
-            reply: async (roomId: string, body: string) => {
-              const room = await roomAgentUser(roomId, cfg.domain);
-              return room ? client.sendText(room, roomId, body) : null;
-            },
-          }),
-      }
-    : undefined;
-
   /**
    * The crypto, or null for a plaintext bridge.
    *
@@ -312,6 +274,45 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       })
     : client;
 
+
+  const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
+
+  /**
+   * Answering a gate, wired only when a board is configured.
+   *
+   * `KAAMBAAN_BASE_URL` absent means no board, which means no gate could have
+   * been projected in the first place — so leaving this undefined is the
+   * honest state rather than a half-built path that fails at the last step.
+   */
+  const kaambaanBaseUrl = (process.env.KAAMBAAN_BASE_URL ?? "").trim();
+  const gates = kaambaanBaseUrl
+    ? {
+        handle: (
+          event: { sender: string; content: Record<string, unknown> },
+          roomId: string
+        ) =>
+          handleGateDecision(event, roomId, {
+            // The subject comes from here and from nowhere else. This is the
+            // control that makes minting an assertion for another principal
+            // safe to have at all — see `mintPrincipalAssertion`.
+            principalForMatrixId: async (mxid: string) => {
+              const identity = await resolveMatrixId(mxid);
+              return identity?.kind === "principal" ? identity.principalId : null;
+            },
+            projectionFor: projectionForGate,
+            resolveGate: (input) =>
+              resolveGateAtKaambaan(input, {
+                baseUrl: kaambaanBaseUrl,
+                mint: (principalId) => mintPrincipalAssertion({ principalId }),
+              }),
+            reply: async (roomId: string, body: string) => {
+              const room = await roomAgentUser(roomId, cfg.domain);
+              return room ? speakingClient.sendText(room, roomId, body) : null;
+            },
+          }),
+      }
+    : undefined;
+
   const inboundDeps = {
     domain: cfg.domain,
     // Absent for a plaintext bridge, which is the default. The
@@ -340,7 +341,11 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     // exactly what happened the first time this ran against the real fleet.
     attach: (sessionId: string, roomId: string, agentUser: string) =>
       attachRoomToSession(sessionId, roomId, agentUser, {
-        client,
+        // `speakingClient`, not `client`. This is the path an agent's answers
+        // travel, and it was the one still sending them in the clear: the
+        // first encrypted exchange with an agent had the human's question
+        // encrypted and the agent's reply in plaintext, in the same room.
+        client: speakingClient,
         readerFor: readerForRoom,
       }),
     noteTrigger: noteTurnTrigger,
