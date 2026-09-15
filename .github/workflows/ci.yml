@@ -89,6 +89,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Migrate before the suite, not inside it.
+      #
+      # Integration suites call `ensurePgMigrations()` in `beforeAll`, which is
+      # idempotent — but on a cold CI database the *first* caller runs every
+      # migration, and a `beforeAll` gets bun's default five seconds. Whichever
+      # file happened to go first then failed as an unnamed 5000ms timeout,
+      # which reads like flake and is not: three runs were lost to it on
+      # 2026-09-15, in two different suites, purely by file ordering.
+      #
+      # Running the same helper the tests use — rather than `db:migrate` —
+      # keeps one definition of "migrated", including the pgvector extension
+      # that must exist before the migrations that use it.
+      - name: Migrate the test database
+        working-directory: apps/hub
+        run: bun -e 'import("./tests/helpers/pg-migrations").then((m) => m.ensurePgMigrations())'
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
+
       - name: Run tests
         working-directory: apps/hub
         run: bun test
