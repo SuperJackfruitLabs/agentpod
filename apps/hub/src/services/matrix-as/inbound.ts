@@ -49,6 +49,16 @@ export interface InboundEvent {
 export interface InboundDeps {
   domain: string;
   /**
+   * Turn an `m.room.encrypted` event back into the event it was.
+   *
+   * Optional, and absent for a plaintext bridge — which is every deployment
+   * until a crypto store is configured. Returning null means the key never
+   * arrived, which is ordinary rather than exceptional: it happens for
+   * everything sent before this agent joined, and for anything sent while it
+   * was offline that the sender has since forgotten.
+   */
+  decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<InboundEvent | null>;
+  /**
    * Answering a kaambaan approval gate.
    *
    * Optional so a deployment with no board wired up behaves exactly as before,
@@ -119,7 +129,35 @@ async function roomContext(roomId: string) {
   return row ?? null;
 }
 
-export async function handleRoomMessage(event: InboundEvent, deps: InboundDeps): Promise<void> {
+/**
+ * The event as it was written, decrypting first when it arrived encrypted.
+ *
+ * Returns null when there is nothing to act on — either the key is missing,
+ * or the room is one we hold no agent for and therefore cannot decrypt for
+ * anybody.
+ *
+ * Deliberately ahead of the `m.room.message` check below: an encrypted event
+ * has type `m.room.encrypted` on the wire whatever it turns out to be, so a
+ * type check that runs first would discard every encrypted message in the
+ * room as uninteresting — silently, and while looking like it worked.
+ */
+async function asPlaintext(
+  event: InboundEvent,
+  deps: InboundDeps
+): Promise<InboundEvent | null> {
+  if (event.type !== "m.room.encrypted") return event;
+  if (!deps.decrypt || !event.room_id) return null;
+
+  const room = await roomContext(event.room_id);
+  if (!room?.stationUserId) return null;
+
+  return deps.decrypt(event.room_id, room.stationUserId, event);
+}
+
+export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDeps): Promise<void> {
+  const event = await asPlaintext(rawEvent, deps);
+  if (!event) return;
+
   if (event.type !== "m.room.message") return;
   if (!event.room_id) return;
 

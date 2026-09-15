@@ -826,6 +826,58 @@ systemctl start tuwunel
 
 Only one process may hold the RocksDB lock, which is why this needs the stop.
 
+### 7b-bis. The agents' crypto stores
+
+When the bridge runs with `MATRIX_CRYPTO_STORE_DIR` set, each agent keeps an
+olm/megolm store under `/var/lib/agentpod/crypto/<localpart>/`. These hold the
+**only** copy of that agent's device keys and of every megolm session it has
+been given. Lose one and every encrypted room that agent is in becomes
+permanently unreadable to it — there is no server-side copy to fall back on,
+because that is the point of end-to-end encryption.
+
+`backup-infra.sh` covers them, and **not by copying the files**. Each store is
+SQLite with a write-ahead log, so the directory holds a `.sqlite3` beside a
+`-wal` and a `-shm`; handing those three live files to restic can catch them
+at different instants and produce a set that does not reconstitute. A crypto
+store that half-restores is worse than one that is missing, because an agent
+holds keys for some rooms and not others with no way to tell which.
+
+So the backup takes SQLite's own online snapshot first:
+
+```sh
+sqlite3 "$db" ".backup '$CRYPTO_DUMP/$agent.sqlite3'"
+```
+
+which is consistent against a database being written to — the same reason
+tuwunel gets a checkpoint rather than a file copy.
+
+The staging copies are plaintext key material outside the encrypted
+repository, so the script's `trap` removes them on exit, success or failure.
+
+Verified end to end rather than by reading: a store was created, backed up,
+restored from the repository, and its contents and `PRAGMA integrity_check`
+confirmed on the restored copy.
+
+**If a store is lost and there is no backup, the agent's device must be
+deleted before it can work again.** A Matrix device's identity keys are
+write-once: a new store uploads new keys for the same device id, the
+homeserver keeps the *first* set, and from then on every one-time key the
+agent publishes is signed by a key no one can verify. Senders then fail to
+establish an olm session and withhold the room key with `m.no_olm`. Nothing
+errors — the agent simply stops being able to read anything new, which looks
+exactly like a bridge that has stopped delivering.
+
+```sh
+# as the appservice, for the stranded agent
+curl -X DELETE "$HS/_matrix/client/v3/devices/AGENTPOD?user_id=$AGENT" \
+     -H "Authorization: Bearer $AS_TOKEN"
+```
+
+The bridge recreates the device and republishes on the next send. The agent's
+old encrypted history stays unreadable; only new messages recover. This was
+found by an end-to-end run, where a re-run against a reused test user failed
+with `m.no_olm` while every key on the server looked correct.
+
 ### 7c. Backups, and restoring one
 
 `backup-database` writes a **RocksDB checkpoint while the server keeps running** —

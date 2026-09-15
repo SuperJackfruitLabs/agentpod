@@ -4,3 +4,8 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+  # The Rust crypto state machine that lets agents into encrypted rooms.
+  # Its native library arrives through a postinstall (`node download-lib.js`),
+  # which pnpm 10 blocks by default — so without this the package installs
+  # and then fails to load at runtime rather than at install time.
+  - "@matrix-org/matrix-sdk-crypto-nodejs"

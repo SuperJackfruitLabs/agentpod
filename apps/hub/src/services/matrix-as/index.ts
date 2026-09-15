@@ -34,6 +34,13 @@ import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
+import { createAgentCrypto, DEVICE_ID, feedAgents, type AgentCrypto } from "./crypto";
+import {
+  createCryptoTransport,
+  createDeviceEnsurer,
+  createSigningKeyUploader,
+} from "./crypto-transport";
+import { withEncryption } from "./crypto-send";
 
 const log = createLogger("matrix-bridge");
 
@@ -52,6 +59,19 @@ export interface MatrixBridgeConfig {
   domain: string;
   asToken: string;
   hsToken: string;
+  /**
+   * Where each agent's crypto store lives, or "" for a plaintext bridge.
+   *
+   * Opt-in rather than defaulted to a path, because a store that appears by
+   * accident is worse than no store: agents would start advertising device
+   * keys the deployment has no backup for, and the rooms they encrypt with
+   * them cannot be un-encrypted afterwards.
+   *
+   * **Whatever this points at must be backed up.** Losing it loses every
+   * agent's keys to every encrypted room they are in, unrecoverably, and the
+   * nightly tuwunel backup does not cover it.
+   */
+  cryptoStoreDir: string;
 }
 
 /** What the deployment says. Read once, at boot, like every other switch here. */
@@ -101,6 +121,7 @@ export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
     domain: env.MATRIX_SERVER_NAME ?? "id.agentpod.dev",
     asToken: env.MATRIX_AS_TOKEN ?? "",
     hsToken: env.MATRIX_HS_TOKEN ?? "",
+    cryptoStoreDir: env.MATRIX_CRYPTO_STORE_DIR ?? "",
   };
 }
 
@@ -129,6 +150,12 @@ export interface MatrixBridge {
   onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
+  /**
+   * Feed the encryption side-channels of one transaction to the agents it
+   * concerns. Null when no crypto store is configured — a plaintext bridge
+   * never calls it, and the route checks for exactly that.
+   */
+  onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
 }
 
 /**
@@ -228,10 +255,71 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       }
     : undefined;
 
+  /**
+   * The crypto, or null for a plaintext bridge.
+   *
+   * Built once here rather than per transaction: an `OlmMachine` generates
+   * keys and opens a store on construction, and rebuilding one per
+   * transaction would rotate every agent's device on every message.
+   *
+   * `isOurs` is the namespace the registration claims. Anyone else in a
+   * transaction — a human, an agent on another server — is described *to* our
+   * machines but never has one of their own, because we hold no keys for
+   * them and could not act as them if we did.
+   */
+  const crypto: AgentCrypto | null = cfg.cryptoStoreDir
+    ? createAgentCrypto({
+        storeDir: cfg.cryptoStoreDir,
+        domain: cfg.domain,
+        send: createCryptoTransport({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
+        }),
+        ensureDevice: createDeviceEnsurer({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
+        }),
+        uploadSigningKeys: createSigningKeyUploader({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceId: DEVICE_ID,
+        }),
+      })
+    : null;
+
+  if (crypto) {
+    log.info("matrix bridge crypto is on", { storeDir: cfg.cryptoStoreDir });
+  }
+
+  /**
+   * The client every agent speaks through.
+   *
+   * Wrapped once, here, so nothing downstream has to remember to encrypt.
+   * `outbound.ts`, the gate sweeper, the mission runner and everything else
+   * keep calling `sendText` — the difference is decided by the room, not by
+   * the caller, which is the only arrangement where a new send site cannot
+   * accidentally ship plaintext into an encrypted room.
+   */
+  const speakingClient = crypto
+    ? withEncryption(client, crypto, {
+        homeserverUrl: cfg.homeserverUrl,
+        asToken: cfg.asToken,
+      })
+    : client;
+
   const inboundDeps = {
     domain: cfg.domain,
+    // Absent for a plaintext bridge, which is the default. The
+    // handler then treats an encrypted event as nothing to act on
+    // rather than pretending to read it.
+    decrypt: crypto
+      ? async (roomId: string, asUserId: string, event: any) =>
+          (await crypto.decrypt(asUserId, roomId, event)) as any
+      : undefined,
     gates,
-    client,
+    client: speakingClient,
     acp: {
       createSession: async (input: { stationId: string; userId: string; mode: string }) => {
         const session = await createSession({
@@ -256,9 +344,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   };
 
   return {
-    client,
+    client: speakingClient,
     config: cfg,
     provisionDeps,
+
+    onCryptoTransaction: crypto
+      ? async (tx) => {
+          await feedAgents(crypto, tx, (userId) =>
+            userId.startsWith("@agent_") && userId.endsWith(`:${cfg.domain}`),
+          );
+        }
+      : null,
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);
