@@ -168,8 +168,17 @@ async function asPlaintext(
   if (!handle) return null;
 
   const plain = await deps.decrypt(event.room_id, bridgeUserId(handle, deps.domain), event);
-  if (!plain && !retrying) remember(event);
-  return plain;
+  if (!plain) {
+    if (!retrying) remember(event);
+    return null;
+  }
+
+  // The envelope kept, the payload taken. A megolm plaintext carries `type`
+  // and `content` and need not carry `sender`, `event_id` or `room_id` — those
+  // belong to the event that wrapped it, and everything below this line reads
+  // them. Returning the payload alone would bail one line later on a missing
+  // `room_id`, which looks exactly like a message nobody sent.
+  return { ...event, ...plain } as InboundEvent;
 }
 
 /**
