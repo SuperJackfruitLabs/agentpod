@@ -39,7 +39,9 @@
  * and an agent whose identity already matches its store is re-published
  * harmlessly.
  */
-import { readdir } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { OlmMachine, UserId, DeviceId } from '@matrix-org/matrix-sdk-crypto-nodejs';
 import { createAgentCrypto } from '../src/services/matrix-as/crypto';
 import {
   createCryptoTransport,
@@ -55,8 +57,8 @@ const STORE = process.env.MATRIX_CRYPTO_STORE_DIR ?? '/var/lib/agentpod/crypto';
 const STALE = process.env.MATRIX_CRYPTO_STALE_DIR ?? '/var/lib/agentpod/crypto.stale-20260915';
 
 const mode = process.argv[2];
-if (mode !== 'devices' && mode !== 'identities') {
-  console.error('usage: crypto-repair-identities.ts devices|identities');
+if (mode !== 'devices' && mode !== 'identities' && mode !== 'reset') {
+  console.error('usage: crypto-repair-identities.ts devices|identities|reset [agent…]');
   process.exit(2);
 }
 if (!TOKEN) {
@@ -81,6 +83,17 @@ async function agents(): Promise<string[]> {
   return [...seen].sort();
 }
 
+const send = createCryptoTransport({
+  homeserverUrl: HS,
+  asToken: TOKEN,
+  deviceIdFor: (u: string) => deviceIdFor(u),
+});
+const uploadSigningKeys = createSigningKeyUploader({
+  homeserverUrl: HS,
+  asToken: TOKEN,
+  deviceIdFor: (u: string) => deviceIdFor(u),
+});
+
 const deviceIdFor = createDeviceProvisioner({
   homeserverUrl: HS,
   asToken: TOKEN,
@@ -97,7 +110,10 @@ const failed: string[] = [];
 for (const localpart of list) {
   const userId = `@${localpart}:${DOMAIN}`;
   try {
-    if (mode === 'devices') {
+    if (mode === 'reset') {
+      await resetIdentity(userId, localpart);
+      console.log(`  ok    ${localpart}`);
+    } else if (mode === 'devices') {
       const id = await deviceIdFor(userId);
       console.log(`  ok    ${localpart} — device ${id}`);
     } else {
@@ -129,4 +145,51 @@ console.log(`\n${ok} ok, ${failed.length} failed`);
 if (failed.length) {
   console.log(`failed: ${failed.join(', ')}`);
   process.exit(1);
+}
+
+/**
+ * Mint a brand-new identity for one agent and sign its device with it.
+ *
+ * For the case the `identities` pass cannot reach: the machine believes it has
+ * already signed its device, so `bootstrapCrossSigning(false)` produces no
+ * signature to send, while the homeserver holds no signature at all. Only a
+ * reset breaks that tie — it regenerates the keys, which makes both uploads
+ * real again.
+ *
+ * Needs `io.element.msc4190: true`, because replacing a published identity is
+ * exactly what the flag permits and its absence forbids.
+ */
+async function resetIdentity(userId: string, localpart: string): Promise<void> {
+  const dir = join(STORE, localpart);
+  const deviceId = (await readFile(join(dir, 'device'), 'utf8')).trim();
+  const machine = await OlmMachine.initialize(
+    new UserId(userId),
+    new DeviceId(deviceId),
+    dir,
+  );
+  try {
+    const reqs = await machine.bootstrapCrossSigning(true);
+    await uploadSigningKeys(userId, reqs.uploadSigningKeysReq);
+
+    if (reqs.uploadKeysReq) {
+      const req = reqs.uploadKeysReq as unknown as { id: string; body: string };
+      const body = await send(userId, { id: req.id, type: 0 as never, body: req.body });
+      await machine.markRequestAsSent(req.id, 0 as never, body);
+    }
+
+    if (reqs.uploadSignaturesReq) {
+      const req = reqs.uploadSignaturesReq as unknown as { id: string; body: string };
+      const body = await send(userId, { id: req.id, type: 4 as never, body: req.body });
+      // `/keys/signatures/upload` answers 200 even when it rejects a
+      // signature: the reason is in `failures`, which is the difference
+      // between a device that is signed and one that merely believes it is.
+      const failures = (JSON.parse(body) as { failures?: Record<string, unknown> }).failures ?? {};
+      if (Object.keys(failures).length) {
+        throw new Error(`signature refused: ${JSON.stringify(failures).slice(0, 200)}`);
+      }
+      await machine.markRequestAsSent(req.id, 4 as never, body);
+    }
+  } finally {
+    machine.close();
+  }
 }
