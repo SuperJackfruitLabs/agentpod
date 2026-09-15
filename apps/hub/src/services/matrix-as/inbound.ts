@@ -143,7 +143,8 @@ async function roomContext(roomId: string) {
  */
 async function asPlaintext(
   event: InboundEvent,
-  deps: InboundDeps
+  deps: InboundDeps,
+  { retrying = false } = {}
 ): Promise<InboundEvent | null> {
   if (event.type !== "m.room.encrypted") return event;
   if (!deps.decrypt || !event.room_id) return null;
@@ -151,7 +152,79 @@ async function asPlaintext(
   const room = await roomContext(event.room_id);
   if (!room?.stationUserId) return null;
 
-  return deps.decrypt(event.room_id, room.stationUserId, event);
+  const plain = await deps.decrypt(event.room_id, room.stationUserId, event);
+  if (!plain && !retrying) remember(event);
+  return plain;
+}
+
+/**
+ * Messages that arrived before the key that opens them.
+ *
+ * **A message is not lost because its key is late.** The room key travels as a
+ * to-device message and the event travels in the room, and nothing makes the
+ * first arrive before the second: a client that has just started a megolm
+ * session sends both at once, and they can land in either order, in different
+ * appservice transactions. The first version dropped an event it could not
+ * decrypt on the spot and never looked at it again — so an agent could hold the
+ * key seconds later and still never answer the message that key was for. That
+ * is what happened on the first real encrypted message sent to an agent: it
+ * decrypted perfectly when asked again, and the station never saw it.
+ *
+ * So an undecryptable event waits here and is tried again whenever new keys
+ * arrive, which `onCryptoTransaction` signals. Bounded in both directions: an
+ * event that stays unreadable is dropped after `PENDING_TTL_MS` with one
+ * warning, and the map cannot outgrow `PENDING_MAX` — a room whose keys we
+ * genuinely lack must not become a memory leak that also hides newer failures.
+ */
+const pending = new Map<string, { event: InboundEvent; first: number }>();
+const PENDING_TTL_MS = 5 * 60_000;
+const PENDING_MAX = 200;
+
+function remember(event: InboundEvent): void {
+  const id = event.event_id;
+  if (!id || pending.has(id)) return;
+  if (pending.size >= PENDING_MAX) {
+    const oldest = pending.keys().next().value;
+    if (oldest) pending.delete(oldest);
+  }
+  pending.set(id, { event, first: Date.now() });
+}
+
+/**
+ * Try the waiting messages again, now that more keys are in hand.
+ *
+ * Called after each transaction's crypto half, which is the only moment new
+ * keys can have arrived.
+ */
+export async function retryPendingDecrypts(deps: InboundDeps): Promise<void> {
+  if (pending.size === 0) return;
+
+  for (const [id, held] of [...pending]) {
+    if (Date.now() - held.first > PENDING_TTL_MS) {
+      pending.delete(id);
+      // The one line worth an operator's attention: an agent that cannot read
+      // a message is indistinguishable, from the outside, from an agent that
+      // is ignoring one.
+      log.warn("gave up decrypting a message for an agent", {
+        eventId: id,
+        roomId: held.event.room_id,
+        sender: held.event.sender,
+        waitedMs: Date.now() - held.first,
+      });
+      continue;
+    }
+
+    const plain = await asPlaintext(held.event, deps, { retrying: true });
+    if (!plain) continue;
+
+    pending.delete(id);
+    log.info("decrypted a message once its key arrived", {
+      eventId: id,
+      roomId: held.event.room_id,
+      waitedMs: Date.now() - held.first,
+    });
+    await handleRoomMessage(plain, deps);
+  }
 }
 
 export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDeps): Promise<void> {
