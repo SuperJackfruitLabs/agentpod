@@ -89,22 +89,18 @@ export interface AgentCryptoDeps {
   /** Where each agent's crypto store lives. One directory per user. */
   storeDir: string;
   /**
-   * Create this agent's device on the homeserver, before any key is uploaded
-   * to it.
+   * The device this agent's crypto runs as, created on first use.
    *
-   * MSC4190, and not optional: an appservice user registered through
-   * `m.login.application_service` gets a server-assigned device id, and
-   * uploading keys for a *different* device id — the fixed one below — is
-   * refused with a bare `403 M_FORBIDDEN` that says nothing about devices.
-   * That is how this was first written, and only an end-to-end run against a
-   * real homeserver found it; every unit test passed, because a fake
-   * transport answers whatever it is asked.
+   * Must be stable for the life of the agent's store: the keys in that store
+   * belong to one device, and handing the machine a different id makes every
+   * key it holds unusable. `createDeviceProvisioner` takes one from an
+   * appservice login and remembers it beside the store.
    *
-   * It also needs `io.element.msc4190: true` in the registration, without
-   * which the endpoint answers `404 Device management not enabled for
-   * appservice`.
+   * This used to be a fixed `AGENTPOD` asserted through MSC4190, until
+   * enabling MSC4190 turned appservice login off for the whole appservice and
+   * broke every credential mint and rotation with it (#435).
    */
-  ensureDevice: (userId: string, deviceId: string) => Promise<void>;
+  deviceIdFor: (userId: string) => Promise<string>;
   /** This homeserver's name, e.g. `id.agentpod.dev`. */
   domain: string;
   /**
@@ -166,14 +162,6 @@ import { createLogger } from '../../utils/logger';
 
 const log = createLogger('matrix-as:crypto');
 
-/**
- * The device every agent speaks through.
- *
- * Fixed rather than generated, and asserted to the homeserver via MSC4190. A
- * device id that changed per restart would leave a trail of abandoned devices
- * that every other client in the room must still encrypt to, forever.
- */
-export const DEVICE_ID = 'AGENTPOD';
 
 export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   const machines = new Map<string, Promise<OlmMachine>>();
@@ -183,9 +171,10 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
    *
    * The store path is per-user because two agents sharing a store would share
    * an identity, and megolm's whole premise is that they do not. The device
-   * id is fixed rather than generated: MSC4190 lets an appservice assert its
-   * own device id, and a device id that changed on every restart would leave
-   * a trail of abandoned devices that other clients must still encrypt to.
+   * comes from `deviceIdFor`, which issues one at first use and returns the
+   * same id forever — a device that changed per restart would leave a trail of
+   * abandoned devices that other clients must still encrypt to, and would
+   * throw away every megolm session the agent had been given.
    */
   function machineFor(userId: string): Promise<OlmMachine> {
     let existing = machines.get(userId);
@@ -198,10 +187,10 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       // Before the machine, not after: the machine's first act is to want its
       // keys uploaded, and there is nothing to upload them to until the
       // device exists.
-      await deps.ensureDevice(userId, DEVICE_ID);
+      const deviceId = await deps.deviceIdFor(userId);
       const machine = await OlmMachine.initialize(
         new UserId(userId),
-        new DeviceId(DEVICE_ID),
+        new DeviceId(deviceId),
         dir,
       );
       await publishIdentity(userId, machine);

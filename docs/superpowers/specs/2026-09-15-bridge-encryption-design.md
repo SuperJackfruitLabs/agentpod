@@ -1,5 +1,15 @@
 # Encrypted appservice: letting agents into encrypted rooms
 
+> **Amended 2026-09-15, after deployment.** The device acquisition described
+> below — a fixed `AGENTPOD` device asserted through MSC4190 — was replaced.
+> Enabling MSC4190 switches appservice login off for the whole appservice,
+> which broke station provisioning and every per-agent credential mint and
+> rotation ([#435](https://github.com/SuperJackfruitLabs/agentpod/issues/435)).
+> The bridge now takes its device from an appservice login and keeps the id
+> beside the store. Everything else here — the machine, the transport, the
+> per-agent stores, cross-signing — stands. See `OPERATING.md` §7b-ter.
+
+
 **Status:** spec. Nothing implemented.
 
 supermessage creates every room unencrypted, and the reason is here rather

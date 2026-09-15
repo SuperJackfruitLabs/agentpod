@@ -34,10 +34,10 @@ import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
-import { createAgentCrypto, DEVICE_ID, feedAgents, type AgentCrypto } from "./crypto";
+import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
 import {
   createCryptoTransport,
-  createDeviceEnsurer,
+  createDeviceProvisioner,
   createSigningKeyUploader,
 } from "./crypto-transport";
 import { withEncryption } from "./crypto-send";
@@ -268,25 +268,28 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
    * them and could not act as them if we did.
    */
   const crypto: AgentCrypto | null = cfg.cryptoStoreDir
-    ? createAgentCrypto({
-        storeDir: cfg.cryptoStoreDir,
-        domain: cfg.domain,
-        send: createCryptoTransport({
+    ? (() => {
+        // One provisioner, shared by everything that has to name a device:
+        // it caches per agent, so the login happens once rather than once
+        // per request that mentions them.
+        const deviceIdFor = createDeviceProvisioner({
           homeserverUrl: cfg.homeserverUrl,
           asToken: cfg.asToken,
-          deviceId: DEVICE_ID,
-        }),
-        ensureDevice: createDeviceEnsurer({
+          storeDir: cfg.cryptoStoreDir,
+        });
+        const wire = {
           homeserverUrl: cfg.homeserverUrl,
           asToken: cfg.asToken,
-          deviceId: DEVICE_ID,
-        }),
-        uploadSigningKeys: createSigningKeyUploader({
-          homeserverUrl: cfg.homeserverUrl,
-          asToken: cfg.asToken,
-          deviceId: DEVICE_ID,
-        }),
-      })
+          deviceIdFor,
+        };
+        return createAgentCrypto({
+          storeDir: cfg.cryptoStoreDir,
+          domain: cfg.domain,
+          send: createCryptoTransport(wire),
+          deviceIdFor,
+          uploadSigningKeys: createSigningKeyUploader(wire),
+        });
+      })()
     : null;
 
   if (crypto) {

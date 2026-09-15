@@ -11,6 +11,8 @@
  * with one voice — except that here the result is not a confusing transcript
  * but an agent whose keys belong to somebody else.
  */
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { CryptoRequest } from './crypto';
 import { createLogger } from '../../utils/logger';
 
@@ -53,7 +55,7 @@ export interface CryptoTransportDeps {
   homeserverUrl: string;
   asToken: string;
   /**
-   * The device every agent speaks through, named on every crypto request.
+   * The device this agent speaks through, named on every crypto request.
    *
    * `?user_id=` alone is not enough here, and the homeserver says so in a way
    * that is easy to misread: `403 M_FORBIDDEN — user must be authenticated
@@ -61,18 +63,13 @@ export interface CryptoTransportDeps {
    * user, and an appservice acting for an agent that owns two devices has to
    * say which one. MSC4326; found by an end-to-end run, because every unit
    * test answers whatever it is asked.
+   *
+   * Per agent rather than one fixed id for all of them, because the device is
+   * now issued by the homeserver at login — see `createDeviceProvisioner`.
    */
-  deviceId: string;
+  deviceIdFor: (userId: string) => Promise<string>;
 }
 
-/**
- * Build the `send` that `createAgentCrypto` needs.
- *
- * Returns the response body as a string, which is what `markRequestAsSent`
- * wants — the machine parses it into the strongly-typed reply for that
- * request, and is particular about it: a keys/upload answered with anything
- * lacking `one_time_key_counts` is rejected outright.
- */
 /**
  * The bytes to actually send for a request.
  *
@@ -88,6 +85,14 @@ function bodyFor(request: CryptoRequest): string | undefined {
   return JSON.stringify(parsed.signed_keys ?? parsed);
 }
 
+/**
+ * Build the `send` that `createAgentCrypto` needs.
+ *
+ * Returns the response body as a string, which is what `markRequestAsSent`
+ * wants — the machine parses it into the strongly-typed reply for that
+ * request, and is particular about it: a keys/upload answered with anything
+ * lacking `one_time_key_counts` is rejected outright.
+ */
 export function createCryptoTransport(deps: CryptoTransportDeps) {
   return async function send(userId: string, request: CryptoRequest): Promise<string> {
     const route = ENDPOINTS[request.type as unknown as number];
@@ -100,7 +105,7 @@ export function createCryptoTransport(deps: CryptoTransportDeps) {
 
     const url = new URL(route.path(request), deps.homeserverUrl);
     url.searchParams.set('user_id', userId);
-    url.searchParams.set('device_id', deps.deviceId);
+    url.searchParams.set('device_id', await deps.deviceIdFor(userId));
 
     const res = await fetch(url, {
       method: route.method,
@@ -138,41 +143,83 @@ function safeErrcode(body: string): string {
 }
 
 /**
- * Create an agent's device, so there is something to upload keys to.
+ * Get the device an agent's crypto runs as, creating one the first time.
  *
- * MSC4190. Idempotent: creating a device that exists answers 200, and both
- * that and 201 are success. Needs `io.element.msc4190: true` in the
- * registration — without it the homeserver answers 404 "Device management not
- * enabled for appservice", which is the kind of error that reads like a wrong
- * URL rather than a missing switch.
+ * **The device comes from an appservice login, and its id is written next to
+ * the keys it belongs to.** An earlier version used one fixed id (`AGENTPOD`)
+ * created through MSC4190's `PUT /devices/{id}`; enabling MSC4190 for that
+ * turns appservice login off for the whole appservice, which is how minting
+ * and rotating every agent credential broke at once (#435). Login gives a
+ * device without that trade, and is what the harness agents already use.
+ *
+ * The access token the login returns is deliberately dropped: crypto requests
+ * go out as the appservice with `?user_id=&device_id=`, verified against
+ * tuwunel 1.8.3 with MSC4190 off, so there is no reason to keep a per-agent
+ * secret on disk. The token is never logged or written.
+ *
+ * `device` lives inside the agent's crypto store directory because the two are
+ * useless apart: a store restored without its device id would log in again,
+ * get a *different* device, and hold keys that device never uploaded. That is
+ * why `backup-infra.sh` copies this file alongside the database.
  */
-export function createDeviceEnsurer(deps: CryptoTransportDeps) {
-  const done = new Set<string>();
-  return async function ensureDevice(userId: string, deviceId: string): Promise<void> {
-    const key = `${userId}/${deviceId}`;
-    if (done.has(key)) return;
+export function createDeviceProvisioner(deps: {
+  homeserverUrl: string;
+  asToken: string;
+  /** Where each agent's crypto store lives; the device id goes inside it. */
+  storeDir: string;
+}) {
+  const cache = new Map<string, Promise<string>>();
 
-    const url = new URL(
-      `/_matrix/client/v3/devices/${encodeURIComponent(deviceId)}`,
-      deps.homeserverUrl,
-    );
-    url.searchParams.set('user_id', userId);
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${deps.asToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ display_name: 'agentpod bridge' }),
-    });
+  return function deviceIdFor(userId: string): Promise<string> {
+    const existing = cache.get(userId);
+    if (existing) return existing;
 
-    if (!res.ok) {
-      throw new Error(
-        `could not create device ${deviceId} for ${userId}: ${res.status}` +
-          (res.status === 404 ? ' — is io.element.msc4190 set in the registration?' : ''),
-      );
-    }
-    done.add(key);
+    const resolved = (async () => {
+      const localpart = userId.slice(1).split(':')[0] ?? userId;
+      const dir = join(deps.storeDir, localpart);
+      const file = join(dir, 'device');
+
+      const saved = await readFile(file, 'utf8').catch(() => '');
+      if (saved.trim()) return saved.trim();
+
+      const res = await fetch(new URL('/_matrix/client/v3/login', deps.homeserverUrl), {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${deps.asToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          type: 'm.login.application_service',
+          identifier: { type: 'm.id.user', user: localpart },
+        }),
+      });
+
+      const body = (await res.json().catch(() => ({}))) as {
+        device_id?: string;
+        errcode?: string;
+      };
+      if (!res.ok || !body.device_id) {
+        throw new Error(
+          `could not get a device for ${userId}: ${res.status} ${body.errcode ?? ''}`.trim() +
+            (body.errcode === 'M_APPSERVICE_LOGIN_UNSUPPORTED'
+              ? ' — the registration has io.element.msc4190 enabled, which disables' +
+                ' appservice login; the bridge takes its device from login now, so' +
+                ' that flag must be off'
+              : ''),
+        );
+      }
+
+      await mkdir(dir, { recursive: true });
+      await writeFile(file, body.device_id, { mode: 0o600 });
+      log.info('agent crypto device created', { userId, deviceId: body.device_id });
+      return body.device_id;
+    })();
+
+    cache.set(userId, resolved);
+    // A failed login must not be cached as the answer forever: the next
+    // transaction should try again rather than throw the same stale error.
+    void resolved.catch(() => cache.delete(userId));
+    return resolved;
   };
 }
 
@@ -190,7 +237,7 @@ export function createSigningKeyUploader(deps: CryptoTransportDeps) {
   return async function uploadSigningKeys(userId: string, body: string): Promise<void> {
     const url = new URL('/_matrix/client/v3/keys/device_signing/upload', deps.homeserverUrl);
     url.searchParams.set('user_id', userId);
-    url.searchParams.set('device_id', deps.deviceId);
+    url.searchParams.set('device_id', await deps.deviceIdFor(userId));
     const res = await fetch(url, {
       method: 'POST',
       headers: {
