@@ -176,6 +176,29 @@ async function main() {
     await cryptoB.receive(BOB, {});
     check('both agents uploaded device keys', true);
 
+    // Cross-signed, not merely present. Under the SDK's default
+    // identity-based strategy a device that its owner has not signed is sent
+    // `m.room_key.withheld` instead of the room key, so an unsigned agent is
+    // one nobody can talk to — and nothing else here would notice.
+    const keys = await api('POST', '/_matrix/client/v3/keys/query', {
+      as: ALICE,
+      device: await deviceA(ALICE),
+      body: { device_keys: { [ALICE]: [], [BOB]: [] } },
+    });
+    const signedBy = (user: string) => {
+      const ssk: string[] = Object.values(
+        (keys.body?.self_signing_keys?.[user]?.keys ?? {}) as Record<string, string>,
+      );
+      const devices = (keys.body?.device_keys?.[user] ?? {}) as Record<string, any>;
+      return Object.values(devices).some((d) =>
+        Object.keys((d.signatures?.[user] ?? {}) as Record<string, string>).some((sig) =>
+          ssk.includes(sig.split(':')[1] ?? ''),
+        ),
+      );
+    };
+    check('alice published an identity and signed her device', signedBy(ALICE));
+    check('bob published an identity and signed his device', signedBy(BOB));
+
     const SECRET = `e2e-${Date.now()}-the-quick-brown-fox`;
 
     const envelope = await cryptoA.encrypt(ALICE, roomId, [ALICE, BOB], 'm.room.message', {

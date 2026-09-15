@@ -217,9 +217,24 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
    */
   async function publishIdentity(userId: string, machine: OlmMachine): Promise<void> {
     const status = await machine.crossSigningStatus();
-    if (status.hasMaster && status.hasSelfSigning && status.hasUserSigning) return;
+    const held = status.hasMaster && status.hasSelfSigning && status.hasUserSigning;
 
     const reqs = await machine.bootstrapCrossSigning(false);
+
+    // **The identity before the device keys, and that order is load-bearing.**
+    // With MSC4190 off, tuwunel waives user-interactive auth on
+    // `/keys/device_signing/upload` only while the account has uploaded
+    // nothing — send this device's keys first and the very next call answers
+    // `401` with an empty `flows` list and a session id, a challenge with no
+    // way to satisfy it. Sent only when this machine has just minted an
+    // identity; re-publishing one the server already holds is refused the same
+    // way.
+    if (!held) {
+      await deps.uploadSigningKeys(userId, reqs.uploadSigningKeysReq);
+    }
+
+    // Then the device's own keys, so the signature below has something on the
+    // server to attach to.
     if (reqs.uploadKeysReq) {
       const body = await deps.send(userId, reqs.uploadKeysReq as CryptoRequest);
       await machine.markRequestAsSent(
@@ -228,7 +243,16 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         body,
       );
     }
-    await deps.uploadSigningKeys(userId, reqs.uploadSigningKeysReq);
+
+    // The signature saying "this device is mine" — **always**, including when
+    // the identity already existed.
+    //
+    // This is what other clients check before sharing a room key: under the
+    // SDK's default identity-based strategy an unsigned device is sent
+    // `m.room_key.withheld` instead. An earlier version returned early
+    // whenever the keys were already held, so a machine that kept its identity
+    // across a device change never signed the new device and went quietly
+    // unreadable — 9 of 16 agents, after the move off MSC4190.
     if (reqs.uploadSignaturesReq) {
       const req = reqs.uploadSignaturesReq as unknown as CryptoRequest;
       const body = await deps.send(userId, req);
