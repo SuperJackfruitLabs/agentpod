@@ -80,6 +80,23 @@ describe("acting as a station", () => {
     await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
   });
 
+  test("registering an agent inhibits login, or MSC4190 refuses the whole call", async () => {
+    // A homeserver whose appservice registration enables MSC4190 manages
+    // devices itself and will not issue one at registration: without this the
+    // register fails with `400 M_APPSERVICE_LOGIN_UNSUPPORTED` and the station
+    // never gets an identity. Found in production, where turning MSC4190 on
+    // for bridge encryption left 16 of 30 stations unprovisioned at the next
+    // boot. Provisioning wants an identity and never a token, so there is
+    // nothing here that wanted a login.
+    replies = [{ status: 200, body: { user_id: USER } }];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    const register = calls.find((c) => c.url.includes("/register"));
+    expect(register).toBeTruthy();
+    expect((register!.body as Record<string, unknown>).inhibit_login).toBe(true);
+  });
+
   test("sets the display name even when the user already existed", async () => {
     // A station that was renamed must stop introducing itself by its old name.
     // Setting the name only on creation would mean the rename never lands,

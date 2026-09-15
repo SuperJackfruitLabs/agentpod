@@ -878,6 +878,43 @@ old encrypted history stays unreadable; only new messages recover. This was
 found by an end-to-end run, where a re-run against a reused test user failed
 with `m.no_olm` while every key on the server looked correct.
 
+### 7b-ter. MSC4190 and per-agent credentials — pick one
+
+`io.element.msc4190: true` in `/etc/tuwunel/appservices/agentpod.yaml` is what
+lets the bridge create an agent's crypto device (`PUT /_matrix/client/v3/devices/{id}`).
+Without it that call answers `404 Device management not enabled for appservice`
+and no agent can take part in an encrypted room.
+
+**Enabling it also switches appservice login off for the whole appservice**, and
+tuwunel says so plainly once you ask it:
+
+```
+M_APPSERVICE_LOGIN_UNSUPPORTED: Appservice has MSC4190 device management
+enabled; appservice login is unsupported.
+```
+
+Two things used that login:
+
+| Call | Effect now | Fixed? |
+|---|---|---|
+| `ensureUser` — provisioning an agent identity | was failing every boot | **yes**, it now sends `inhibit_login: true`; it never wanted a token |
+| `registerWithCredentials` / `rotateCredentials` — minting or rotating an agent's *own* access token | still refused | **no** — there is no appservice path to a user token under MSC4190 |
+
+The 14 stations that already hold credentials keep working: existing tokens are
+unaffected. What cannot be done while MSC4190 is on is **minting a credential
+for a new station, or rotating an existing one** — including rotating one that
+has leaked, which is the case that matters.
+
+> **How this was found.** Turning the flag on and restarting left provisioning
+> at `provisioned: 14, failed: 16`, against `32, 0` the boot before. Nothing
+> else reported a fault; the stations were simply not provisioned.
+
+Until this is resolved, **rotating an agent credential requires turning the flag
+off, rotating, and turning it back on** — agents cannot use encrypted rooms in
+between. Tracked as an open decision: either the bridge stops using MSC4190 and
+takes its device id from an appservice login instead, or per-agent credentials
+move to something that is not appservice login.
+
 ### 7c. Backups, and restoring one
 
 `backup-database` writes a **RocksDB checkpoint while the server keeps running** —

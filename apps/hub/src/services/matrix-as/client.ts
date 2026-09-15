@@ -26,6 +26,20 @@ export interface MatrixClientDeps {
 /** The two "it was already done" answers, which are successes for us. */
 const ALREADY: Record<string, true> = { M_USER_IN_USE: true, M_ROOM_IN_USE: true };
 
+/**
+ * Appended when a homeserver refuses appservice login.
+ *
+ * Minting or rotating an agent's own access token needs appservice login, and
+ * a registration with MSC4190 enabled turns that off for the whole
+ * appservice. Both features are wanted and the homeserver offers a choice of
+ * one; the bare errcode says none of that, and whoever meets it is usually
+ * rotating a credential rather than reading MSCs.
+ */
+const CREDENTIALS_NEED_LOGIN =
+  " — the appservice registration has MSC4190 device management enabled, which" +
+  " disables appservice login on this homeserver. Bridge encryption needs" +
+  " MSC4190; per-agent credentials need login. See OPERATING.md.";
+
 export interface MatrixClient {
   ensureUser(localpart: string, displayName: string): Promise<void>;
   /**
@@ -359,7 +373,18 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     async ensureUser(localpart, displayName) {
       const res = await call("/_matrix/client/v3/register", {
         method: "POST",
-        body: { type: "m.login.application_service", username: localpart },
+        body: {
+          type: "m.login.application_service",
+          username: localpart,
+          // Required once the registration enables MSC4190, and harmless
+          // before it: a homeserver with appservice device management on
+          // refuses to issue a device at registration and fails the whole
+          // call with `400 M_APPSERVICE_LOGIN_UNSUPPORTED`. Provisioning
+          // wants an identity, never a token, so there is nothing to inhibit
+          // that this path wanted. Turning MSC4190 on without this left 16 of
+          // 30 stations unprovisioned at the next boot.
+          inhibit_login: true,
+        },
       });
       assertOkOrAlready(`register ${localpart}`, res);
 
@@ -393,8 +418,10 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         if (String(res.body.errcode ?? "") === "M_USER_IN_USE") {
           throw new MatrixUserInUse(localpart);
         }
+        const errcode = String(res.body.errcode ?? "");
         throw new Error(
-          `matrix register ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+          `matrix register ${localpart} failed: ${res.status} ${errcode}`.trim() +
+            (errcode === "M_APPSERVICE_LOGIN_UNSUPPORTED" ? CREDENTIALS_NEED_LOGIN : "")
         );
       }
 
@@ -439,8 +466,10 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         },
       });
       if (res.status < 200 || res.status >= 300) {
+        const errcode = String(res.body.errcode ?? "");
         throw new Error(
-          `matrix login ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+          `matrix login ${localpart} failed: ${res.status} ${errcode}`.trim() +
+            (errcode === "M_APPSERVICE_LOGIN_UNSUPPORTED" ? CREDENTIALS_NEED_LOGIN : "")
         );
       }
 
