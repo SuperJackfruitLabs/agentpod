@@ -28,7 +28,7 @@ const BOB = `@agent_bob:${DOMAIN}`;
  * one is a network call — an end-to-end run found that skipping it makes the
  * key upload fail with a bare 403 that never mentions devices.
  */
-const ensureDevice = async () => {};
+const deviceIdFor = async () => 'DEVICEFORTEST';
 const uploadSigningKeys = async () => {};
 
 const dirs: string[] = [];
@@ -102,7 +102,7 @@ function answer(body: string): string {
 describe("agent crypto", () => {
   test("an agent's first transaction uploads its device keys", async () => {
     const { seen, send } = recorder();
-    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, ensureDevice, uploadSigningKeys });
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
 
     await crypto.receive(ALICE, {});
 
@@ -116,7 +116,7 @@ describe("agent crypto", () => {
   test("each agent gets its own store, because a shared one is a shared identity", async () => {
     const root = await storeDir();
     const { send } = recorder();
-    const crypto = createAgentCrypto({ storeDir: root, domain: DOMAIN, send, ensureDevice, uploadSigningKeys });
+    const crypto = createAgentCrypto({ storeDir: root, domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
 
     await crypto.receive(ALICE, {});
     await crypto.receive(BOB, {});
@@ -128,7 +128,7 @@ describe("agent crypto", () => {
 
   test("an undecryptable event returns null rather than throwing", async () => {
     const { send } = recorder();
-    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, ensureDevice, uploadSigningKeys });
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
 
     // Every agent sees these: events sent before it joined, or while it was
     // offline and the sender has since forgotten the session. Throwing would
@@ -154,7 +154,7 @@ describe("agent crypto", () => {
 
   test("the same agent reuses one machine rather than rebuilding it", async () => {
     const { seen, send } = recorder();
-    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, ensureDevice, uploadSigningKeys });
+    const crypto = createAgentCrypto({ storeDir: await storeDir(), domain: DOMAIN, send, deviceIdFor, uploadSigningKeys });
 
     await crypto.receive(ALICE, {});
     const afterFirst = seen.length;

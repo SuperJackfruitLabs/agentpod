@@ -858,63 +858,48 @@ Verified end to end rather than by reading: a store was created, backed up,
 restored from the repository, and its contents and `PRAGMA integrity_check`
 confirmed on the restored copy.
 
-**If a store is lost and there is no backup, the agent's device must be
-deleted before it can work again.** A Matrix device's identity keys are
-write-once: a new store uploads new keys for the same device id, the
-homeserver keeps the *first* set, and from then on every one-time key the
-agent publishes is signed by a key no one can verify. Senders then fail to
-establish an olm session and withhold the room key with `m.no_olm`. Nothing
-errors — the agent simply stops being able to read anything new, which looks
-exactly like a bridge that has stopped delivering.
+**If a store is lost and there is no backup, the agent gets a new device.** A
+Matrix device's identity keys are write-once: a store that comes back without
+its `device` file logs in again, is issued a *different* device, and holds keys
+that device never uploaded. Senders then fail to start olm sessions and
+withhold the room key with `m.no_olm` — nothing errors, the agent simply stops
+being able to read anything new.
 
-```sh
-# as the appservice, for the stranded agent
-curl -X DELETE "$HS/_matrix/client/v3/devices/AGENTPOD?user_id=$AGENT" \
-     -H "Authorization: Bearer $AS_TOKEN"
-```
+That is why the backup copies `device` beside the database, and why the two
+must be restored together. With both gone, delete the agent's crypto store
+directory and let it log in afresh; its old encrypted history stays unreadable
+and only new messages recover.
 
-The bridge recreates the device and republishes on the next send. The agent's
-old encrypted history stays unreadable; only new messages recover. This was
-found by an end-to-end run, where a re-run against a reused test user failed
-with `m.no_olm` while every key on the server looked correct.
+### 7b-ter. Why MSC4190 is off
 
-### 7b-ter. MSC4190 and per-agent credentials — pick one
-
-`io.element.msc4190: true` in `/etc/tuwunel/appservices/agentpod.yaml` is what
-lets the bridge create an agent's crypto device (`PUT /_matrix/client/v3/devices/{id}`).
-Without it that call answers `404 Device management not enabled for appservice`
-and no agent can take part in an encrypted room.
-
-**Enabling it also switches appservice login off for the whole appservice**, and
-tuwunel says so plainly once you ask it:
+`io.element.msc4190` lets an appservice create a device for a virtual user
+(`PUT /_matrix/client/v3/devices/{id}`), which is how the bridge first gave
+each agent a crypto device. **Enabling it also switches appservice login off
+for the entire appservice**, and tuwunel says so once asked:
 
 ```
 M_APPSERVICE_LOGIN_UNSUPPORTED: Appservice has MSC4190 device management
 enabled; appservice login is unsupported.
 ```
 
-Two things used that login:
+That broke two things at once: station provisioning (`ensureUser`, which never
+wanted a token and now sends `inhibit_login: true`), and minting or rotating an
+agent's own credential — which has no replacement under MSC4190 and is how the
+14 harness-mode stations are given a Matrix account at all.
 
-| Call | Effect now | Fixed? |
-|---|---|---|
-| `ensureUser` — provisioning an agent identity | was failing every boot | **yes**, it now sends `inhibit_login: true`; it never wanted a token |
-| `registerWithCredentials` / `rotateCredentials` — minting or rotating an agent's *own* access token | still refused | **no** — there is no appservice path to a user token under MSC4190 |
+**So the flag is off, and the bridge takes its device from an appservice login
+instead** — the same mechanism harness credentials already use. The device id
+is written to `device` inside the agent's crypto store; the access token the
+login returns is discarded, because crypto requests still go out as the
+appservice with `?user_id=&device_id=`. Verified against tuwunel 1.8.3 with the
+flag off: MSC3202 bookkeeping and MSC4203 to-device delivery both keep working,
+and the end-to-end test passes.
 
-The 14 stations that already hold credentials keep working: existing tokens are
-unaffected. What cannot be done while MSC4190 is on is **minting a credential
-for a new station, or rotating an existing one** — including rotating one that
-has leaked, which is the case that matters.
+> **`org.matrix.msc3202` must stay on.** It is a separate switch, and it is
+> what carries device-list changes and one-time-key counts to the bridge.
+> To-device delivery (MSC4203) rides along with it.
 
-> **How this was found.** Turning the flag on and restarting left provisioning
-> at `provisioned: 14, failed: 16`, against `32, 0` the boot before. Nothing
-> else reported a fault; the stations were simply not provisioned.
-
-Until this is resolved, **rotating an agent credential requires turning the flag
-off, rotating, and turning it back on** — agents cannot use encrypted rooms in
-between. Tracked as an open decision in
-[#435](https://github.com/SuperJackfruitLabs/agentpod/issues/435), which
-carries the verified options — including that **password login still works
-under MSC4190**, so minting and rotating by password is a way to have both.
+Closed by [#435](https://github.com/SuperJackfruitLabs/agentpod/issues/435).
 
 ### 7c. Backups, and restoring one
 

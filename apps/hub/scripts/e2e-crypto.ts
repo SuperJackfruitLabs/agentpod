@@ -19,10 +19,10 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAgentCrypto, DEVICE_ID } from '../src/services/matrix-as/crypto';
+import { createAgentCrypto } from '../src/services/matrix-as/crypto';
 import {
   createCryptoTransport,
-  createDeviceEnsurer,
+  createDeviceProvisioner,
   createSigningKeyUploader,
 } from '../src/services/matrix-as/crypto-transport';
 
@@ -150,16 +150,25 @@ async function main() {
   // Separate stores, as in production: one per agent, never shared.
   const dirA = await mkdtemp(join(tmpdir(), 'e2e-a-'));
   const dirB = await mkdtemp(join(tmpdir(), 'e2e-b-'));
-  const send = createCryptoTransport({ homeserverUrl: HS, asToken: TOKEN, deviceId: DEVICE_ID });
-  const ensureDevice = createDeviceEnsurer({ homeserverUrl: HS, asToken: TOKEN, deviceId: DEVICE_ID });
-  const uploadSigningKeys = createSigningKeyUploader({
-    homeserverUrl: HS,
-    asToken: TOKEN,
-    deviceId: DEVICE_ID,
+  // Each agent gets its device the way production does: an appservice login,
+  // remembered beside its store.
+  const deviceA = createDeviceProvisioner({ homeserverUrl: HS, asToken: TOKEN, storeDir: dirA });
+  const deviceB = createDeviceProvisioner({ homeserverUrl: HS, asToken: TOKEN, storeDir: dirB });
+  const wire = { homeserverUrl: HS, asToken: TOKEN };
+  const cryptoA = createAgentCrypto({
+    storeDir: dirA,
+    domain: DOMAIN,
+    send: createCryptoTransport({ ...wire, deviceIdFor: deviceA }),
+    deviceIdFor: deviceA,
+    uploadSigningKeys: createSigningKeyUploader({ ...wire, deviceIdFor: deviceA }),
   });
-  const common = { domain: DOMAIN, send, ensureDevice, uploadSigningKeys };
-  const cryptoA = createAgentCrypto({ storeDir: dirA, ...common });
-  const cryptoB = createAgentCrypto({ storeDir: dirB, ...common });
+  const cryptoB = createAgentCrypto({
+    storeDir: dirB,
+    domain: DOMAIN,
+    send: createCryptoTransport({ ...wire, deviceIdFor: deviceB }),
+    deviceIdFor: deviceB,
+    uploadSigningKeys: createSigningKeyUploader({ ...wire, deviceIdFor: deviceB }),
+  });
 
   try {
     // Both must publish device keys before either can encrypt to the other.
@@ -201,7 +210,7 @@ async function main() {
     // instead, but the machine cannot tell the difference.
     const sync = await api('GET', '/_matrix/client/v3/sync?timeout=8000', {
       as: BOB,
-      device: DEVICE_ID,
+      device: await deviceB(BOB),
     });
     const toDevice = sync.body?.to_device?.events ?? [];
     check('bob received to-device traffic', toDevice.length > 0, `${toDevice.length} event(s)`);
