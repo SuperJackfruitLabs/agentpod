@@ -34,6 +34,7 @@ import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
+import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
 import {
   createCryptoTransport,
@@ -358,8 +359,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
 
     onCryptoTransaction: crypto
       ? async (tx) => {
-          await feedAgents(crypto, tx, (userId) =>
-            userId.startsWith("@agent_") && userId.endsWith(`:${cfg.domain}`),
+          // Our namespace, minus the agents that keep their own keys. A
+          // harness-mode station reads its own rooms; a machine built here for
+          // one of those takes an identity it then cannot use.
+          const notHarness = await bridgeModeOnly();
+          await feedAgents(
+            crypto,
+            tx,
+            (userId) =>
+              userId.startsWith("@agent_") &&
+              userId.endsWith(`:${cfg.domain}`) &&
+              notHarness(userId),
           );
           // New keys have just landed, which is the only thing that can turn a
           // message we could not read into one we can. Anything still waiting
