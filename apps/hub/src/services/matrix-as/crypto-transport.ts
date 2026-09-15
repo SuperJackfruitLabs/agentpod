@@ -256,7 +256,9 @@ export function createSigningKeyUploader(deps: CryptoTransportDeps) {
       throw new Error(
         `could not publish cross-signing keys for ${userId}: ${res.status} ${errcode}` +
           (res.status === 401
-            ? ' — the server already holds an identity for this agent; restore its crypto store'
+            ? ' — 401 here is an unanswerable UIA challenge: either the server already' +
+              ' holds an identity for this agent (restore its crypto store), or this' +
+              ' account has already uploaded device keys, which closes the waiver'
             : ''),
       );
     }
