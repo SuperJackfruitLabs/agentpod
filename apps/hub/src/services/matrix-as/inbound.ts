@@ -150,11 +150,35 @@ async function asPlaintext(
   if (!deps.decrypt || !event.room_id) return null;
 
   const room = await roomContext(event.room_id);
-  if (!room?.stationUserId) return null;
+  if (!room) return null;
 
-  const plain = await deps.decrypt(event.room_id, room.stationUserId, event);
-  if (!plain && !retrying) remember(event);
-  return plain;
+  // Only a bridge-mode room. A harness holds its own keys and reads its own
+  // messages; the bridge has no store for that identity and asking it to
+  // decrypt would fail on every message forever.
+  if (room.identityMode !== "bridge") return null;
+
+  // **The agent's mxid, not `stationUserId`.** That column is
+  // `stations.userId` — the *owner's* AgentPod account id, which is what the
+  // ACP permission path below correctly wants and what this path took by its
+  // name. The keys belong to the agent, so decryption was being asked for an
+  // identity that holds no crypto store at all: the first real encrypted
+  // message to an agent failed with `400 M_EXCLUSIVE`, the appservice having
+  // tried to log in as a Better Auth id outside its namespace.
+  const handle = room.principalId ? await principalHandle(room.principalId) : null;
+  if (!handle) return null;
+
+  const plain = await deps.decrypt(event.room_id, bridgeUserId(handle, deps.domain), event);
+  if (!plain) {
+    if (!retrying) remember(event);
+    return null;
+  }
+
+  // The envelope kept, the payload taken. A megolm plaintext carries `type`
+  // and `content` and need not carry `sender`, `event_id` or `room_id` — those
+  // belong to the event that wrapped it, and everything below this line reads
+  // them. Returning the payload alone would bail one line later on a missing
+  // `room_id`, which looks exactly like a message nobody sent.
+  return { ...event, ...plain } as InboundEvent;
 }
 
 /**
