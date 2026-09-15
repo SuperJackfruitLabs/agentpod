@@ -176,10 +176,11 @@ async function main() {
     await cryptoB.receive(BOB, {});
     check('both agents uploaded device keys', true);
 
-    // Cross-signed, not merely present. Under the SDK's default
-    // identity-based strategy a device that its owner has not signed is sent
-    // `m.room_key.withheld` instead of the room key, so an unsigned agent is
-    // one nobody can talk to — and nothing else here would notice.
+    // Cross-signed, not merely present. Key delivery does not depend on this —
+    // the default strategy is `AllDevices` — but verifiability does: an agent
+    // that publishes an identity and leaves its device unsigned presents as
+    // verifiable and then fails verification, and it would stop receiving keys
+    // outright under `IdentityBasedStrategy`. Nothing else here would notice.
     const keys = await api('POST', '/_matrix/client/v3/keys/query', {
       as: ALICE,
       device: await deviceA(ALICE),
