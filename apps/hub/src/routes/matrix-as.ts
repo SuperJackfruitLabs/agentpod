@@ -66,6 +66,52 @@ export interface MatrixAsDeps {
  * 1.8.2 is what started sending them; before that they are simply absent and
  * everything below reads as "nothing changed".
  */
+/**
+ * The crypto half of a transaction, under both the names it can arrive with.
+ *
+ * **The homeserver does not use the stable names, and this cost a working
+ * bridge.** MSC3202 and MSC4203 are unstable, so tuwunel (via ruma) puts their
+ * fields on the wire prefixed — `org.matrix.msc3202.device_one_time_keys_count`,
+ * `de.sorunome.msc2409.to_device` (that MSC2409-era key is what MSC4203 kept).
+ * The first version of this file read `to_device` and `device_lists`, which are
+ * what the *merged* spec will call them one day and what nothing sends today.
+ *
+ * Nothing failed. Every transaction parsed, every field defaulted to empty, and
+ * the bridge encrypted outbound messages perfectly while receiving no room keys
+ * and no one-time-key counts at all — so agents could speak and never listen,
+ * and would in time run out of one-time keys and become unreachable. The
+ * end-to-end test missed it because its recipient read `/sync` directly rather
+ * than going through an appservice transaction.
+ *
+ * Both names are read, preferring the unstable one, so this keeps working when
+ * the MSCs land and the homeserver switches.
+ */
+type CryptoFields = {
+  to_device: unknown[];
+  device_lists: { changed?: string[]; left?: string[] };
+  device_one_time_keys_count: Record<string, Record<string, Record<string, number>>>;
+  device_unused_fallback_key_types: Record<string, Record<string, string[]>>;
+};
+
+/** The unstable name each field actually arrives under. */
+const UNSTABLE: Record<keyof CryptoFields, string> = {
+  to_device: "de.sorunome.msc2409.to_device",
+  device_lists: "org.matrix.msc3202.device_lists",
+  device_one_time_keys_count: "org.matrix.msc3202.device_one_time_keys_count",
+  device_unused_fallback_key_types:
+    "org.matrix.msc3202.device_unused_fallback_key_types",
+};
+
+export type CryptoTransactionBody = Partial<CryptoFields> & Record<string, unknown>;
+
+function cryptoField<K extends keyof CryptoFields>(
+  body: CryptoTransactionBody,
+  field: K
+): CryptoFields[K] | undefined {
+  const unstable = body[UNSTABLE[field]] as CryptoFields[K] | undefined;
+  return unstable ?? (body[field] as CryptoFields[K] | undefined);
+}
+
 export interface AppserviceCryptoTransaction {
   /** `to_device` — olm key exchange arrives here and nowhere else. */
   toDevice: unknown[];
@@ -161,13 +207,9 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
 
         const txnId = c.req.param("txnId");
 
-        let body: {
+        let body: CryptoTransactionBody & {
           events?: MatrixEvent[];
           ephemeral?: MatrixEvent[];
-          to_device?: unknown[];
-          device_lists?: { changed?: string[]; left?: string[] };
-          device_one_time_keys_count?: Record<string, Record<string, Record<string, number>>>;
-          device_unused_fallback_key_types?: Record<string, Record<string, string[]>>;
         };
         try {
           body = await c.req.json();
@@ -188,14 +230,16 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
         // arrived in this very transaction's `to_device`.
         if (deps.onCryptoTransaction) {
           try {
+            const deviceLists = cryptoField(body, "device_lists") ?? {};
             await deps.onCryptoTransaction({
-              toDevice: body.to_device ?? [],
+              toDevice: cryptoField(body, "to_device") ?? [],
               deviceLists: {
-                changed: body.device_lists?.changed ?? [],
-                left: body.device_lists?.left ?? [],
+                changed: deviceLists.changed ?? [],
+                left: deviceLists.left ?? [],
               },
-              otkCounts: body.device_one_time_keys_count ?? {},
-              unusedFallbackKeys: body.device_unused_fallback_key_types ?? {},
+              otkCounts: cryptoField(body, "device_one_time_keys_count") ?? {},
+              unusedFallbackKeys:
+                cryptoField(body, "device_unused_fallback_key_types") ?? {},
             });
           } catch (err) {
             // Same reasoning as the event handlers: a throw here is reported to
