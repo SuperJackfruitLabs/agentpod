@@ -911,9 +911,10 @@ has leaked, which is the case that matters.
 
 Until this is resolved, **rotating an agent credential requires turning the flag
 off, rotating, and turning it back on** — agents cannot use encrypted rooms in
-between. Tracked as an open decision: either the bridge stops using MSC4190 and
-takes its device id from an appservice login instead, or per-agent credentials
-move to something that is not appservice login.
+between. Tracked as an open decision in
+[#435](https://github.com/SuperJackfruitLabs/agentpod/issues/435), which
+carries the verified options — including that **password login still works
+under MSC4190**, so minting and rotating by password is a way to have both.
 
 ### 7c. Backups, and restoring one
 
