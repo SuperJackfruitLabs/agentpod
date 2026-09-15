@@ -20,7 +20,7 @@ import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
-import { handleRoomMessage } from "./inbound";
+import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
 import {
   handleGateDecision,
   projectionForGate,
@@ -356,6 +356,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           await feedAgents(crypto, tx, (userId) =>
             userId.startsWith("@agent_") && userId.endsWith(`:${cfg.domain}`),
           );
+          // New keys have just landed, which is the only thing that can turn a
+          // message we could not read into one we can. Anything still waiting
+          // gets another try here rather than staying unread forever.
+          await retryPendingDecrypts(inboundDeps);
         }
       : null,
 

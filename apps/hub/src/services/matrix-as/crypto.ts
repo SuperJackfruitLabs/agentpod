@@ -203,13 +203,19 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   /**
    * Give the agent a cross-signing identity, and publish it.
    *
-   * Not optional, and not a nicety for the verification UI. Room keys are
-   * shared under the SDK's default `IdentityBasedStrategy`, which refuses to
-   * send a megolm key to a user who has published no identity — the sender
-   * emits `m.room_key.withheld` instead, the recipient stores a key it cannot
-   * use, and every message from then on decrypts to nothing. There is no error
-   * on the sending side at all: the send succeeds, and only the reader can
-   * tell that anything is wrong.
+   * **Not required for key delivery — that claim was tested and is false.**
+   * `new EncryptionSettings()` defaults to `CollectStrategy.AllDevices` (0),
+   * so room keys go to every unblacklisted device whether or not its owner has
+   * an identity. An earlier version of this comment said the opposite and
+   * blamed identity-based sharing for withheld keys; the withholding was
+   * always `m.no_olm`, a missing olm session, and had nothing to do with
+   * trust.
+   *
+   * It is still worth doing, for two reasons that are about people rather than
+   * delivery: an agent with a published identity can be verified in Element or
+   * supermessage instead of showing as an unverifiable device forever, and if
+   * this deployment ever moves to `IdentityBasedStrategy` — which MSC4153
+   * recommends — an agent without one silently stops receiving keys.
    *
    * Done once per agent and then never again, because the store is persistent:
    * a second bootstrap against a server that already holds the identity needs
@@ -247,12 +253,13 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
     // The signature saying "this device is mine" — **always**, including when
     // the identity already existed.
     //
-    // This is what other clients check before sharing a room key: under the
-    // SDK's default identity-based strategy an unsigned device is sent
-    // `m.room_key.withheld` instead. An earlier version returned early
+    // An identity whose device is unsigned is worse than no identity at all: it
+    // presents as a verifiable agent and fails verification. It also becomes a
+    // delivery problem the day this deployment moves to `IdentityBasedStrategy`,
+    // which shares only with signed devices. An earlier version returned early
     // whenever the keys were already held, so a machine that kept its identity
-    // across a device change never signed the new device and went quietly
-    // unreadable — 9 of 16 agents, after the move off MSC4190.
+    // across a device change never signed the new device — 9 of 16 agents, after
+    // the move off MSC4190.
     if (reqs.uploadSignaturesReq) {
       const req = reqs.uploadSignaturesReq as unknown as CryptoRequest;
       const body = await deps.send(userId, req);
