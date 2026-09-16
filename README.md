@@ -1,94 +1,148 @@
 # AgentPod
 
-AgentPod is a **fleet/facilities console for agent runtimes** — a single place to manage the environments that AI agents live in, wherever they run. For each runtime it manages the **filesystem, logs, terminal, config, health, lifecycle, cleanup, and provisioning**, across machines, harnesses, and network boundaries. It is **attach-first**: you point it at runtimes you already run, or let it provision new ones.
+[![CI](https://github.com/SuperJackfruitLabs/agentpod/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/SuperJackfruitLabs/agentpod/actions/workflows/ci.yml)
+[![Node-agent release](https://img.shields.io/github/v/release/SuperJackfruitLabs/agentpod?label=node-agent)](https://github.com/SuperJackfruitLabs/agentpod/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-## Architecture — three tiers
+**The fleet and facilities console for agent runtimes.** AgentPod manages the machines and
+workspaces your agents live in: files, logs, terminals, configuration, health, lifecycle,
+cleanup, and provisioning. Attach to runtimes you already run, or provision new ones.
 
+[Documentation](https://docs.agentpod.dev) · [Node-agent downloads](https://github.com/SuperJackfruitLabs/agentpod/releases/latest) · [Self-hosting](docs/DEPLOYMENT.md) · [Operations](docs/OPERATING.md)
+
+![AgentPod console showing the agent roster, fleet status, nodes needing attention, and activity](docs/assets/fleet-demo.png)
+
+*Current console rendered locally with synthetic demo nodes, agents, and activity. No live fleet
+or credentials are shown; this image illustrates the UI, not a deployment health check.*
+
+## Highlights
+
+- **Attach across hosts and harnesses.** Detect Hermes, OpenClaw, Claude Code, Codex,
+  OpenCode, and Pi using harness-specific descriptors. Capabilities depend on the harness.
+- **Reach hosts behind NAT.** Each node dials out to the hub over WSS; nodes need no inbound ports.
+- **Operate from one console.** Inspect stations, browse files, tail logs, open terminals,
+  and manage supported lifecycle and cleanup actions. The roster and attention lane surface
+  offline nodes, unavailable stations, and node version drift.
+- **Control agent access.** Principals, station occupancy, and dispatch grants connect runtime
+  operations to agent identity. Optional Matrix and Superpipeline integrations connect the
+  runtime plane to communication and work orchestration.
+- **Roll updates deliberately.** Update a node with `apn update`, or request an individual or
+  fleet update from the hub. Node agents do not upgrade on a timer.
+
+AgentPod owns runtime management. [Superpipeline](https://github.com/SuperJackfruitLabs/superpipeline)
+owns boards, cards, runs, and approval gates; [Supermessage](https://github.com/SuperJackfruitLabs/supermessage)
+is the Matrix client.
+
+## Architecture
+
+```text
+Operator → SvelteKit console → Hub (HTTPS + WSS)
+                               ↑ outbound WSS connections
+                         node-agent on each host
+                               ↓
+                         harness stations
 ```
-   Operator (Svelte web console)
-            │  HTTPS + WSS
-            ▼
-   ┌──────────────────────────┐     outbound WSS tunnels (NAT-friendly)
-   │      AgentPod Hub         │◄──────────┬──────────────┬───────────────┐
-   │   (Bun + Hono + Postgres) │           │              │               │
-   │ • node/station registry   │       node-agent     node-agent      node-agent
-   │ • connection broker       │       (VPS/server)  (laptop)       (provisioned)
-   │ • enrollment + auth       │       ├ Hermes          ├ Claude Code
-   │ • provisioning drivers    │       │  ├ coder-kai     └ Codex
-   │ • audit + activity log    │       └ OpenClaw
-   └──────────────────────────┘          ├ hanuman
-                                         └ kubera
-```
 
-| Tier | Technology | Role |
-|------|-----------|------|
-| **node-agent** | Go (static binary) | Installed per host; dials *out* to the hub over WSS. Runs harness descriptors, executes contract verbs locally. No inbound ports — works behind NAT/CGNAT. |
-| **hub** | Bun + Hono, Drizzle + Postgres | Registry, connection broker, enrollment, auth (Better Auth), audit, provisioning drivers. Self-hostable. |
-| **console** | SvelteKit (adapter-static SPA) | Fleet-first UI: node list → station tree → capability panels (filesystem, logs, terminal, config, health, lifecycle, cleanup). |
+| Component | Technology | Responsibility |
+| --- | --- | --- |
+| [`apps/node-agent`](apps/node-agent) | Go daemon | Detect harnesses; execute local station capabilities; enroll with and connect to the hub |
+| [`apps/hub`](apps/hub) | Bun, Hono, Drizzle, Postgres + pgvector | Registry, broker, authentication, audit, provisioning, integrations |
+| [`apps/console`](apps/console) | SvelteKit, Svelte 5, static SPA | Fleet roster, node and station panels, runtime and access management |
+| [`packages/contract`](packages/contract) | TypeScript, Zod | Shared node/hub/console schemas |
+| [`docs-site`](docs-site) | Astro, Starlight | User and integration documentation; separate npm project |
 
-## Harnesses detected
+The descriptor registry is [`registry.go`](apps/node-agent/cmd/agentpod-node/registry.go).
+See the [documentation map](docs/README.md) for current runbooks and historical designs.
 
-AgentPod ships descriptors for: **Hermes**, **OpenClaw**, **Claude Code**, **Codex**, **OpenCode**, **Pi**.
-The list is `registerDescriptors` in `apps/node-agent/cmd/agentpod-node/registry.go`.
+## Run locally
 
-Each descriptor wraps the harness's native CLI/API to enumerate runtimes, locate config/logs/workspace, and implement lifecycle — without reinventing each harness's introspection.
-
-## Quickstart
-
-> Full instructions: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) (production) · [docs/OPERATING.md](./docs/OPERATING.md) (day-2 ops)
-
-**1. Run the hub**
+Requires **Bun**, **Node.js 20+**, the repository-pinned **pnpm 10.18.2**, and a dedicated
+**Postgres database with pgvector**. Building the node-agent from source also requires the
+Go version in [`go.mod`](apps/node-agent/go.mod). The docs site requires Node.js 22.12+.
 
 ```bash
-# Prereqs: Postgres + bun
-cd apps/hub
-cp .env.example .env   # fill in DATABASE_URL, BETTER_AUTH_SECRET, ENCRYPTION_KEY, API_TOKEN
-bun run src/index.ts   # auto-migrates on first start
+git clone https://github.com/SuperJackfruitLabs/agentpod.git
+cd agentpod
+corepack enable
+pnpm install --frozen-lockfile
+cp apps/hub/.env.example apps/hub/.env
 ```
 
-**2. Build + deploy the console**
+Set `DATABASE_URL` in `apps/hub/.env` to your local pgvector database. The example's credentials
+are for local development; use the [deployment guide](docs/DEPLOYMENT.md) for production secrets,
+origins, cookies, and provisioning configuration. Hub migrations run on startup.
+
+Start the hub and console in separate terminals, from the repository root:
 
 ```bash
-cd apps/console
-PUBLIC_HUB_URL=https://<your-hub> pnpm build   # emits apps/console/build/
-# Deploy build/ to Cloudflare Pages at console.<your-domain>
-# (wrangler pages deploy ../console/build, or Git-integrated Pages project)
+pnpm --filter @agentpod/hub dev
 ```
-
-> The console must be served from a subdomain of the hub's registrable domain (e.g. `console.<your-domain>` when the hub is `hub.<your-domain>`). This keeps them **same-site** so the Better Auth session cookie is sent. Opening a raw `*.pages.dev` URL breaks auth — always use the custom domain. For local development any static server works (`npx serve build`).
-
-
-**3. Enroll a node-agent**
 
 ```bash
-# On the target host — downloads the prebuilt binary and installs a systemd service:
-curl -fsSL https://github.com/rakeshgangwar/agentpod/releases/latest/download/install.sh \
-  | sudo bash -s -- https://<your-hub> <token-from-console>
-systemctl status agentpod-node   # node appears online in the console
+PUBLIC_HUB_URL=http://localhost:3001 pnpm --filter @agentpod/console dev
 ```
 
-> Binaries are published for linux/darwin × amd64/arm64 on every `v*` tag by `.github/workflows/release-node-agent.yml`.
->
-> **From source (repo checkout):** `cd apps/node-agent && go build -o agentpod-node ./cmd/agentpod-node`, then `sudo bash scripts/install-node-agent.sh https://<your-hub> <token>`.
+Open `http://localhost:5173`. The first registered account becomes admin and public signup
+closes; admins can manage users. AgentPod currently resolves requests to one bootstrap tenant,
+not independently managed organizations. Principals and grants are implemented within that boundary.
 
-See [docs/OPERATING.md](./docs/OPERATING.md) for enrolling nodes, adopting stations, driving terminals/files/logs, and provisioning runtimes.
+### Enroll a host
 
-## Status
+Create an enrollment token in the console, then follow
+[Enroll your first node](https://docs.agentpod.dev/start/first-node/). The
+[release assets](https://github.com/SuperJackfruitLabs/agentpod/releases/latest) include the installer,
+checksums, and node-agent binaries for **Linux and macOS, amd64 and arm64**. These are node-agent
+releases; the hub and console run from source or deployed builds.
 
-**Single-operator** — one admin account; signup closes after the first user. Releases are
-tagged `v0.1.x`; see [CHANGELOG.md](./CHANGELOG.md) and `git tag` for where that has got to
-(this line used to name a version and was 26 releases stale).
+On an enrolled host, `apn status`, `apn logs`, and `apn restart` manage the service. See
+[CLI documentation](https://docs.agentpod.dev/use/cli/) and the [operations guide](docs/OPERATING.md)
+for enrollment, adoption, service installation, and updates.
 
-The **tenant-isolation boundary has landed** — a `tenants` table, a `tenant_id` on every
-scoped table, and a `tenantScope()` helper that refuses to build a query without one
-(`apps/hub/src/db/tenant-scope.ts`, pinned by `tests/unit/tenant-scope.test.ts`). Everything
-today runs under the single bootstrap tenant `fleet_00000000000000000000`. What is still
-ahead is what *uses* the boundary: orgs, principals, billing.
+### Deploy your own instance
 
-## Legacy / OpenCode era
+Follow [Deployment](docs/DEPLOYMENT.md) for the full setup. Build the console with its intended
+hub URL; it is embedded at build time:
 
-The previous OpenCode-based product is frozen at tag **`v0.0.4-opencode`**. Archived docs are under [`docs/archive/`](./docs/archive/).
+```bash
+PUBLIC_HUB_URL=https://hub.example.com pnpm --filter @agentpod/console build
+```
+
+The output is `apps/console/build/`. Serve it on a same-site custom domain such as
+`console.example.com` and configure the hub's allowed origins and cookie settings. A raw
+`*.pages.dev` preview is not interchangeable with that authenticated deployment.
+
+## Development and validation
+
+Branch from `main` and submit a scoped PR. See [contributing](CONTRIBUTING.md),
+[project instructions](CLAUDE.md), and [TESTING.md](TESTING.md) for tier-specific requirements.
+Run these commands from the repository root:
+
+```bash
+(cd packages/contract && bun test)
+(cd apps/node-agent && go test -race ./...)
+pnpm --filter @agentpod/console check
+pnpm --filter @agentpod/console test
+pnpm --filter @agentpod/console build
+```
+
+Hub tests need the separate pgvector test database described in [TESTING.md](TESTING.md),
+including its migration preparation. Always pass an explicit test URL: Bun otherwise loads
+`apps/hub/.env`, which may point to a development database.
+
+```bash
+(cd apps/hub && DATABASE_URL=postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod bun test)
+```
+
+CI additionally checks contract fixtures and provider wrappers and runs the separate
+`cloudflare/worker-v2` suite. The workflow is the [complete check list](.github/workflows/ci.yml).
+
+## Project status
+
+Active development. [Releases](https://github.com/SuperJackfruitLabs/agentpod/releases) describe
+node-agent builds; [CHANGELOG.md](CHANGELOG.md) records changes. Source on `main` may be newer
+than the latest release. The previous OpenCode-based product is archived under
+[`docs/archive`](docs/archive); it is not the current three-tier product.
 
 ## License
 
-MIT
+[MIT](LICENSE).
