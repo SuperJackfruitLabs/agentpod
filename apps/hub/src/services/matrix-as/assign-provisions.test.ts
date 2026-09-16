@@ -32,7 +32,7 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, beforeEach } from "bun:test";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 
@@ -205,6 +205,25 @@ beforeAll(async () => {
     cpuCount: 1,
   });
   nodeId = enrolled.nodeId;
+});
+
+// Both hooks are module-level singletons, so a test that registers one leaves it
+// registered for every test after it. The first test registers the adoption
+// listener against its OWN fake homeserver; without this reset every later
+// `adopt()` fired a fire-and-forget provision into that stale homeserver.
+//
+// That made the harness-mode test fail about one run in five. When the stale
+// provision read the station after the test had switched it to harness mode,
+// it created the room itself; `assign` then found a room, skipped
+// `ensureRoom`, and the test's own homeserver recorded nothing. Caught by
+// logging both provisioning calls on a failing run: 13ms apart, the first with
+// no principal and no room, the second finding the room the first had made.
+//
+// Each test registers the hooks it needs in its own body, so starting from
+// none hides nothing.
+beforeEach(() => {
+  onProvisionStation(null);
+  onStationsAdopted(null);
 });
 
 afterAll(async () => {
