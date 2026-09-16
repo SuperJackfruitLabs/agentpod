@@ -63,7 +63,7 @@ It is **not a harness**, and it does not run your agents. Claude Code, Codex, He
 the rest do that. AgentPod manages the ground they stand on.
 
 It is **not an orchestrator**. Deciding what work an agent should do next is a different
-job in a different plane — that is what [kaambaan](https://docs.kaambaan.dev) is for.
+job in a different plane — that is what [superpipeline](https://docs.superpipeline.dev) is for.
 AgentPod answers "where does this agent live, and is it healthy", not "what should it work
 on".
 

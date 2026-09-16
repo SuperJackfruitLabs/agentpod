@@ -3,7 +3,7 @@
  *
  * Stateless: a fresh `McpServer` per request, tools bound to the authenticated principal. There
  * is no MCP-session state worth keeping — every tool is a thin call into a service the HTTP
- * routes already use, and those services are the authority. kaambaan's server is the model and
+ * routes already use, and those services are the authority. superpipeline's server is the model and
  * this follows it deliberately, so the suite has one shape rather than two.
  *
  * **It adds no authority.** Every tool calls a service a route calls, through the same checks. A
@@ -34,7 +34,7 @@ None of them take a station id: they answer for the station you occupy, and ther
 
 You will not find the fleet here. Enumerating other agents, nodes or stations is not something an agent token may do, deliberately.
 
-This is the execution side. Your WORK — claiming cards, reporting progress, finishing — lives in kaambaan's MCP server, not this one.`;
+This is the execution side. Your WORK — claiming cards, reporting progress, finishing — lives in superpipeline's MCP server, not this one.`;
 
 const HUMAN_INSTRUCTIONS = `AgentPod's hub. This token names a human principal, and the self-scoped tools (which answer "what station am I running on?") have no meaning for you — a person occupies no station.
 

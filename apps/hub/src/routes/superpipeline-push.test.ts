@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { createKaambaanPushRoutes, type KaambaanPushDeps } from "./kaambaan-push";
+import { createSuperpipelinePushRoutes, type SuperpipelinePushDeps } from "./superpipeline-push";
 
 /**
  * The signed door a board pushes a gate through.
  *
  * Everything here is about refusing. The projection itself needs a database and
  * is covered where it lives; what this file protects is that nothing reaches it
- * without kaambaan's signature over the exact bytes it sent.
+ * without superpipeline's signature over the exact bytes it sent.
  */
 
 const SECRET = "s3cret";
@@ -34,7 +34,7 @@ async function sign(secret: string, raw: string): Promise<string> {
   return `sha256=${[...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
 }
 
-function deps(over: Partial<KaambaanPushDeps> = {}): KaambaanPushDeps & { projected: unknown[] } {
+function deps(over: Partial<SuperpipelinePushDeps> = {}): SuperpipelinePushDeps & { projected: unknown[] } {
   const projected: unknown[] = [];
   return {
     secret: SECRET,
@@ -47,16 +47,16 @@ function deps(over: Partial<KaambaanPushDeps> = {}): KaambaanPushDeps & { projec
     },
     projected,
     ...over,
-  } as KaambaanPushDeps & { projected: unknown[] };
+  } as SuperpipelinePushDeps & { projected: unknown[] };
 }
 
-async function post(d: KaambaanPushDeps, raw: string, signature?: string) {
-  const app = createKaambaanPushRoutes(d);
-  return app.request("/bridge/kaambaan/push", {
+async function post(d: SuperpipelinePushDeps, raw: string, signature?: string) {
+  const app = createSuperpipelinePushRoutes(d);
+  return app.request("/bridge/superpipeline/push", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(signature ? { "X-Kaambaan-Signature": signature } : {}),
+      ...(signature ? { "X-Superpipeline-Signature": signature } : {}),
     },
     body: raw,
   });
@@ -101,7 +101,7 @@ describe("the signed push receiver", () => {
 
   test("acknowledges an event it does not handle instead of making the board retry", async () => {
     // work.available and gate.resolved arrive here too. A non-2xx would make
-    // kaambaan retry something this build will never like.
+    // superpipeline retry something this build will never like.
     const raw = JSON.stringify({ event: "work.available", boardId: "brd_7c1f" });
     const res = await post(deps(), raw, await sign(SECRET, raw));
     expect(res.status).toBe(200);

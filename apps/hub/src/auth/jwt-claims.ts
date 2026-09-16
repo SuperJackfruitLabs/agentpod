@@ -8,7 +8,7 @@
  * against the shared fixture. `fixtures/ecosystem-identity/token_claims.json` is
  * the source of truth; `tests/unit/jwt-issuer.test.ts` holds this to it.
  *
- * A rename here is a silent authorization failure in kaambaan, and it fails in
+ * A rename here is a silent authorization failure in superpipeline, and it fails in
  * the direction that looks like the caller simply having no permission — which
  * is the hardest kind of bug to notice.
  */

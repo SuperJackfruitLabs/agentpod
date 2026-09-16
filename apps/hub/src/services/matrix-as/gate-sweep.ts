@@ -3,7 +3,7 @@
  *
  * `charter → decisions/2026-08-30-a-gate-closes-over-chat.md` §5 settles the
  * delivery semantics: "push, made durable, with a reconciliation sweep beneath
- * it". Push is the fast path and it is at-least-once *within a cap* — kaambaan
+ * it". Push is the fast path and it is at-least-once *within a cap* — superpipeline
  * retries five times with backoff and then dead-letters the delivery. A gate
  * that exhausts its attempts is silent on both sides: the card is blocked on an
  * approval, and neither product is looking for one that never rang.
@@ -40,7 +40,7 @@
  * room refuses the post.
  */
 
-import { KaambaanClient, fetchAdapter, type Fetcher } from "../bridge/kaambaan";
+import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge/superpipeline";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge/config";
 import { createLogger } from "../../utils/logger";
 import { isGatePending } from "./gates";
@@ -49,7 +49,7 @@ import type { GatePendingDelivery, ProjectionOutcome } from "./gates";
 const log = createLogger("gate-sweep");
 
 export interface GateSweepDeps {
-  /** The kaambaan boards this hub works, from the bridge's own configuration. */
+  /** The superpipeline boards this hub works, from the bridge's own configuration. */
   boards(): Promise<string[]>;
   /**
    * Which fleet a board's gates belong to, or null when this hub never worked
@@ -223,7 +223,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
  * The board-facing half of the sweep, built from the bridge's own configuration.
  *
  * The boards this hub works and the credential for each are already in
- * `KAAMBAAN_BRIDGE_AGENTS` — the sweep needs no configuration of its own, and
+ * `SUPERPIPELINE_BRIDGE_AGENTS` — the sweep needs no configuration of its own, and
  * giving it any would create a second place for the board list to be wrong.
  *
  * **A board is read with its own board's token.** An agent's `kbn_` credential
@@ -249,7 +249,7 @@ export function bridgeGateSweepDeps(
     pendingGates: async (boardId) => {
       const token = tokenForBoard.get(boardId);
       if (!token) return [];
-      return new KaambaanClient({
+      return new SuperpipelineClient({
         baseUrl: config.baseUrl,
         boardId,
         token,
@@ -275,7 +275,7 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  *
  * Null rather than a timer over an empty list: most hubs run no bridge at all,
  * and a subsystem that is off should not be constructed — the same rule
- * `startKaambaanBridge` follows. It also means any error logged from in here
+ * `startSuperpipelineBridge` follows. It also means any error logged from in here
  * belongs to something the operator actually turned on.
  */
 export function startGateSweeper(

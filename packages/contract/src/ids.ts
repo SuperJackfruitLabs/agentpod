@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 /**
- * Identifier grammars — AgentPod's, and the kaambaan ones AgentPod consumes.
+ * Identifier grammars — AgentPod's, and the superpipeline ones AgentPod consumes.
  *
  * Before this module there was **no id-shape validator anywhere in AgentPod**:
  * every id field in this package is a bare `z.string()`, every id column is
  * `text().primaryKey()` with no CHECK, and no route validates a path param.
  * Prefixes existed only as minting conventions and schema comments.
  *
- * That is the same hole that let kaambaan declare `mem_` while its API minted
+ * That is the same hole that let superpipeline declare `mem_` while its API minted
  * `mbr_` for as long as both existed. Nothing validated a minted id against a
  * schema, so nothing could notice.
  *
@@ -24,38 +24,38 @@ import { z } from "zod";
  * executable, and cross-checked against the peer repo.
  */
 
-// ─── kaambaan ────────────────────────────────────────────────────────────────
+// ─── superpipeline ────────────────────────────────────────────────────────────────
 
 /**
- * kaambaan's id grammar, mirrored: `<prefix>_<base62, at least 6>`.
+ * superpipeline's id grammar, mirrored: `<prefix>_<base62, at least 6>`.
  *
  * Deliberately **not** narrowed to the 16 lowercase hex characters
- * `newId()` actually produces (kaambaan apps/api/src/ids.ts). AgentPod does not
+ * `newId()` actually produces (superpipeline apps/api/src/ids.ts). AgentPod does not
  * mint these and must not be stricter than the minter's own declared contract —
- * kaambaan's test suite asserts `run_Aa0Bb1` parses, so a hub that rejected it
- * would make the seam unusable in one direction over a shape kaambaan considers
+ * superpipeline's test suite asserts `run_Aa0Bb1` parses, so a hub that rejected it
+ * would make the seam unusable in one direction over a shape superpipeline considers
  * legal.
  *
- * Source: kaambaan packages/contract/src/ids.ts:7-10.
+ * Source: superpipeline packages/contract/src/ids.ts:7-10.
  */
-const kaambaanId = (prefix: string) =>
+const superpipelineId = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}_[A-Za-z0-9]{6,}$`), `expected a "${prefix}_…" id`);
 
-export const KaambaanTenantId = kaambaanId("tnt");
-export const KaambaanUserId = kaambaanId("usr");
+export const SuperpipelineTenantId = superpipelineId("tnt");
+export const SuperpipelineUserId = superpipelineId("usr");
 /** `mbr`, not `mem` — the drift this corpus exists to make impossible. */
-export const KaambaanMembershipId = kaambaanId("mbr");
-export const KaambaanAgentId = kaambaanId("agt");
+export const SuperpipelineMembershipId = superpipelineId("mbr");
+export const SuperpipelineAgentId = superpipelineId("agt");
 /**
  * The run join key, and `run_` belongs to it alone.
  *
- * kaambaan mints the work run; AgentPod executes it and never mints a rival id
+ * superpipeline mints the work run; AgentPod executes it and never mints a rival id
  * for the same attempt (see `Run.externalRunId` in ./run.ts). AgentPod used to
  * reserve this same prefix for `acp_runs.id`, which made the two id spaces
  * indistinguishable strings; AgentPod's own key is now `AcpRunId` below, and
  * the corpus asserts that neither grammar accepts the other's ids.
  */
-export const KaambaanRunId = kaambaanId("run");
+export const SuperpipelineRunId = superpipelineId("run");
 
 // ─── AgentPod ────────────────────────────────────────────────────────────────
 
@@ -66,7 +66,7 @@ export const KaambaanRunId = kaambaanId("run");
  * 20 — comes from a helper duplicated verbatim in two services
  * (apps/hub/src/services/enrollment.ts:11-12 and .../runtimes.ts:54-55).
  *
- * Note the length disagreement with kaambaan, which slices the same source to 16.
+ * Note the length disagreement with superpipeline, which slices the same source to 16.
  * Neither repo records a reason. Pinning both here is what makes the difference
  * visible rather than incidental.
  */
@@ -79,8 +79,8 @@ const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
  * `<prefix>_<hyphenated UUID>` — the second family, inlined at each mint site
  * rather than shared (station-registry.ts:50, acp-sessions.ts:641, audit.ts:94).
  *
- * The hyphen matters across the seam: kaambaan's declared alphabet is base62
- * with no separator, so kaambaan's own contract would reject every AgentPod
+ * The hyphen matters across the seam: superpipeline's declared alphabet is base62
+ * with no separator, so superpipeline's own contract would reject every AgentPod
  * station id it was ever handed. That is a live disagreement, recorded in the
  * corpus under `openDisagreements`.
  *
@@ -94,12 +94,12 @@ const uuidSuffixedId = (prefix: string) =>
 /**
  * AgentPod's **local** isolation boundary — `tenants.id`, and deliberately not `tnt_`.
  *
- * Neither AgentPod nor kaambaan owns the organisation. Principal, Team, Role and
+ * Neither AgentPod nor superpipeline owns the organisation. Principal, Team, Role and
  * authority belong to an Organization plane that does not exist yet, and both
  * products have to run standalone in the meantime, so each keeps a local tenant
  * and records an *optional* external mapping — `tenants.external_id` +
  * `tenants.external_source` — to the same real organisation elsewhere. Minting
- * kaambaan's `tnt_` for rows in a different database would be the `run_`
+ * superpipeline's `tnt_` for rows in a different database would be the `run_`
  * collision committed on purpose rather than by accident.
  *
  * **Why `fleet` rather than an abbreviation of `tenant`.** `ten_`, `tn_` and
@@ -114,8 +114,8 @@ const uuidSuffixedId = (prefix: string) =>
  * stations and runtimes of one fleet.
  *
  * **Why the 20-hex family and not the hyphenated one.** This is the one AgentPod
- * id designed from the start to cross the repo seam: kaambaan's tenant row will
- * record it as an external id, and the Organization plane will map it. kaambaan's
+ * id designed from the start to cross the repo seam: superpipeline's tenant row will
+ * record it as an external id, and the Organization plane will map it. superpipeline's
  * declared alphabet is base62 with no separator, so every id in AgentPod's
  * hyphenated family — `station_`, `acps_`, `attempt_` — is rejected by the peer's
  * own contract on arrival, which the corpus already records as a live
@@ -130,8 +130,8 @@ export const TenantId = truncatedUuidId("fleet");
 /**
  * A suite principal — a human, an agent, or a service.
  *
- * 20-hex family, not the hyphenated one: this id crosses the kaambaan seam on
- * every grant, and kaambaan's own id schema (`^<prefix>_[A-Za-z0-9]{6,}$`) has
+ * 20-hex family, not the hyphenated one: this id crosses the superpipeline seam on
+ * every grant, and superpipeline's own id schema (`^<prefix>_[A-Za-z0-9]{6,}$`) has
  * no hyphen in its alphabet. `agentpod.station` already mints a hyphenated
  * UUID and is a known scar recorded in the corpus; this does not add a second.
  *
@@ -143,7 +143,7 @@ export const PrincipalId = truncatedUuidId("prn");
 /**
  * An organisation. Minted by the hub, which IS the Organization plane until
  * the plane is extracted into its own service — see `TenantId`'s doc comment
- * for why AgentPod and kaambaan each keep a local tenant in the meantime.
+ * for why AgentPod and superpipeline each keep a local tenant in the meantime.
  */
 export const OrganizationId = truncatedUuidId("org");
 
@@ -163,18 +163,18 @@ export const AuditEntryId = uuidSuffixedId("audit");
 /**
  * `acp_runs.id` — one **attempt** on a station, and deliberately not `run_`.
  *
- * The prefix was `run_`, colliding head-on with the id kaambaan mints for a work
+ * The prefix was `run_`, colliding head-on with the id superpipeline mints for a work
  * run: the schema file declared `"run_" + uuid-ish` six lines above the comment
  * "We never mint a rival id", and a `run_…` in an AgentPod row could not be told
- * from a kaambaan one without reading a second column. AgentPod moved rather
- * than kaambaan because AgentPod is the executor: kaambaan mints these ids and
+ * from a superpipeline one without reading a second column. AgentPod moved rather
+ * than superpipeline because AgentPod is the executor: superpipeline mints these ids and
  * has live production data, while nothing here has ever inserted an `acp_runs`
  * row at any commit, so the rename cost nothing — and would stop being free the
  * moment the bridge writes its first run.
  *
  * `attempt` is not a euphemism for `run`. A run here is a **prompt-turn** — it
  * opens when a prompt is submitted and closes when the agent yields — while
- * kaambaan's work run is a claimed card, which takes as many prompt-turns as the
+ * superpipeline's work run is a claimed card, which takes as many prompt-turns as the
  * work takes. One work run is therefore executed as a series of attempts, and
  * the counts never matched: the two were never the same entity, whatever the
  * shared prefix implied.
@@ -200,7 +200,7 @@ export const AcpRunId = uuidSuffixedId("attempt");
  * directly (apps/hub/src/routes/admin.ts:432) — the same grammar by coincidence,
  * not by shared code.
  *
- * kaambaan's principal is `usr_<16 hex>`. The two cannot be exchanged and no
+ * superpipeline's principal is `usr_<16 hex>`. The two cannot be exchanged and no
  * mapping exists in either repo. Per ecosystem decision 2, that mapping must be
  * minted by an explicit link when it arrives — never inferred from a matching
  * email or a lookalike localpart.

@@ -8,7 +8,7 @@
  * token, because an agent's authority is its own rather than a projection of
  * whoever dispatched it.
  *
- * Off unless `ENABLE_KAAMBAAN_BRIDGE=true`. A hub that has not opted in
+ * Off unless `ENABLE_SUPERPIPELINE_BRIDGE=true`. A hub that has not opted in
  * constructs nothing here and behaves exactly as it does today.
  */
 
@@ -16,7 +16,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
-import { KaambaanApiError, KaambaanClient, fetchAdapter } from "./kaambaan";
+import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -88,7 +88,7 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
       } catch (err) {
         // **An authentication failure is not retryable, and retrying hides it.**
         //
-        // A 401 means kaambaan does not recognise this agent's credential; a 403 means it
+        // A 401 means superpipeline does not recognise this agent's credential; a 403 means it
         // refuses the act. Neither improves by being asked again, and the loop's own backoff
         // turns a misconfiguration into an error line every thirty seconds forever — which is
         // exactly what it did. On 2026-09-04 the hub was found polling a board with a token
@@ -97,13 +97,13 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
         //
         // Halts on the same terms as `foreign-run` below: stop, say why once, and let
         // `onFault` surface it. An operator has to change something, so make them look.
-        if (err instanceof KaambaanApiError && (err.status === 401 || err.status === 403)) {
-          log("halting: kaambaan refused this agent's credential", {
+        if (err instanceof SuperpipelineApiError && (err.status === 401 || err.status === 403)) {
+          log("halting: superpipeline refused this agent's credential", {
             status: err.status,
             path: err.path,
             hint:
               "the token no longer resolves to an agent on that board — re-mint it, or remove " +
-              "this agent from KAAMBAAN_BRIDGE_AGENTS",
+              "this agent from SUPERPIPELINE_BRIDGE_AGENTS",
           });
           // Deliberately NOT reported through `onFault`, which takes a DispatchResult: this
           // is not a dispatch outcome, and inventing a status member for it from a catch
@@ -176,7 +176,7 @@ export interface BridgeHandle {
  * Called from `src/index.ts` after the sweeper, mirroring
  * `registerEnabledProvisioners()`: a subsystem that is off is not constructed.
  */
-export async function startKaambaanBridge(
+export async function startSuperpipelineBridge(
   deps: { acp?: AcpPort; log?: (m: string, meta?: Record<string, unknown>) => void } = {},
 ): Promise<BridgeHandle | null> {
   if (!isBridgeEnabled()) return null;
@@ -189,7 +189,7 @@ export async function startKaambaanBridge(
   const loops: LoopHandle[] = [];
   for (const agent of config.agents) {
     const tenantId = await resolveTenantForUser(agent.hubUserId);
-    const client = new KaambaanClient({
+    const client = new SuperpipelineClient({
       baseUrl: config.baseUrl,
       boardId: agent.boardId,
       token: agent.token,

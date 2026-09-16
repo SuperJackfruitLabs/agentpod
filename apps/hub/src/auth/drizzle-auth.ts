@@ -136,13 +136,13 @@ export const auth = betterAuth({
      * "Offline" is the load-bearing word, and it was established by running it
      * rather than by reading documentation: a Cloudflare Worker verified a token
      * from this plugin with the issuer process killed (#331). That is what lets
-     * kaambaan check a caller at the edge with no network hop, which
+     * superpipeline check a caller at the edge with no network hop, which
      * decisions/2026-08-13-ecosystem-identity.md requires — enforcement local,
      * the token as carrier, and explicitly not a policy-service call in the hot
      * path.
      *
      * The claims live in ./jwt-claims.ts rather than inline here, because their
-     * NAMES are a contract the moment kaambaan reads one, and a contract inside
+     * NAMES are a contract the moment superpipeline reads one, and a contract inside
      * a plugin's options object cannot be checked against the shared fixture.
      */
     jwt({

@@ -1,12 +1,12 @@
 /**
- * The kaambaan client, against a fake board. No network, no `wrangler dev`.
+ * The superpipeline client, against a fake board. No network, no `wrangler dev`.
  *
  * The two failures that must never be collapsed into each other:
  *
  *   403 NOT_RUN_OWNER — this run belongs to another agent. A bug. Never retry.
  *   409 STALE_LEASE   — your lease lapsed. Stop work; the card is re-queued.
  *
- * kaambaan checks identity *before* the lease precisely so the two stay apart
+ * superpipeline checks identity *before* the lease precisely so the two stay apart
  * (board-do.ts:1746-1766). A client that reported "conflict" for both would turn
  * a hijack into a retry loop, and the hijack is the one that cannot be fixed by
  * trying again.
@@ -14,7 +14,7 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { KaambaanApiError, KaambaanClient, isForeignRun, isLeaseSuperseded } from "./kaambaan";
+import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded } from "./superpipeline";
 import type { GatePendingDelivery } from "../matrix-as/gates";
 
 const TOKEN = `kbn_${"a1b2c3d4".repeat(6)}`;
@@ -31,7 +31,7 @@ function fakeBoard(reply: (call: Call) => { status: number; body: unknown }) {
     const { status, body } = reply(call);
     return { status, ok: status >= 200 && status < 300, json: async () => body };
   };
-  return { calls, client: new KaambaanClient({ baseUrl: "https://board.test", boardId: BOARD, token: TOKEN, fetch }) };
+  return { calls, client: new SuperpipelineClient({ baseUrl: "https://board.test", boardId: BOARD, token: TOKEN, fetch }) };
 }
 
 const claimed = {
@@ -47,17 +47,17 @@ const work = { runId: "run_e074a2160c4b4f28", leaseEpoch: 1 };
 
 const boardError = (code: string, message = "no") => ({ error: { ok: false, code, message } });
 
-describe("KaambaanClient — credential", () => {
+describe("SuperpipelineClient — credential", () => {
   test("refuses anything that is not a kbn_ agent token", () => {
     const build = (token: string) =>
-      new KaambaanClient({ baseUrl: "x", boardId: BOARD, token, fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
-    expect(() => build("sk-not-a-kaambaan-token")).toThrow(/kbn_/);
+      new SuperpipelineClient({ baseUrl: "x", boardId: BOARD, token, fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
+    expect(() => build("sk-not-a-superpipeline-token")).toThrow(/kbn_/);
     expect(() => build("")).toThrow(/kbn_/);
   });
 
   test("authenticates with a bearer token and never sends a dev tenant header", () => {
     // The spike had to send `X-Tenant-Id: tnt_dev` because no agent-readable
-    // read existed. It does now, and a deployed kaambaan rejects dev headers —
+    // read existed. It does now, and a deployed superpipeline rejects dev headers —
     // so sending one is a bug that only shows up against production.
     const { calls, client } = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
     return client.claim().then(() => {
@@ -68,7 +68,7 @@ describe("KaambaanClient — credential", () => {
   });
 });
 
-describe("KaambaanClient — claim", () => {
+describe("SuperpipelineClient — claim", () => {
   test("returns the work packet", async () => {
     const { calls, client } = fakeBoard(() => ({ status: 200, body: claimed }));
     const got = await client.claim({ maxConcurrency: 2, profileKey: "codex" });
@@ -81,7 +81,7 @@ describe("KaambaanClient — claim", () => {
 
   test("a claim never carries an agentId — identity comes from the token", () => {
     // Decision 3: an agent's authority is its own. A client-asserted agentId is
-    // a request to be treated as someone else, and kaambaan ignores it anyway
+    // a request to be treated as someone else, and superpipeline ignores it anyway
     // (index.ts:365-372 reads the principal, never the body).
     const { calls, client } = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
     return client.claim().then(() => {
@@ -95,7 +95,7 @@ describe("KaambaanClient — claim", () => {
   });
 
   test("a board over its budget ceiling is indistinguishable from no work — and stays that way", async () => {
-    // kaambaan returns a bare `{claimed:false}` for over-budget, at-concurrency
+    // superpipeline returns a bare `{claimed:false}` for over-budget, at-concurrency
     // and nothing-ready alike (board-do.ts:1301-1320). The client must not
     // invent a reason it was not told.
     const { client } = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
@@ -104,7 +104,7 @@ describe("KaambaanClient — claim", () => {
 
   test("a rejected token is an error, never 'no work available'", async () => {
     const { client } = fakeBoard(() => ({ status: 401, body: { error: "a valid agent token is required" } }));
-    await expect(client.claim()).rejects.toThrow(KaambaanApiError);
+    await expect(client.claim()).rejects.toThrow(SuperpipelineApiError);
   });
 
   test("a claimed:true response missing its run is treated as no work", async () => {
@@ -113,7 +113,7 @@ describe("KaambaanClient — claim", () => {
   });
 });
 
-describe("KaambaanClient — the agent read surface", () => {
+describe("SuperpipelineClient — the agent read surface", () => {
   test("reads a run's context without a lease", async () => {
     const context = {
       run: { runId: work.runId, cardId: "crd_1", stageKey: "work", leaseEpoch: 1, status: "working", outcome: null, startedAt: "t", endedAt: null },
@@ -138,8 +138,8 @@ describe("KaambaanClient — the agent read surface", () => {
   });
 });
 
-describe("KaambaanClient — verbs", () => {
-  test("every run verb carries the lease epoch, and lands on kaambaan's own action names", async () => {
+describe("SuperpipelineClient — verbs", () => {
+  test("every run verb carries the lease epoch, and lands on superpipeline's own action names", async () => {
     const seen: string[] = [];
     const { client } = fakeBoard((c) => {
       seen.push(new URL(c.url).pathname.split("/").pop()!);
@@ -156,11 +156,11 @@ describe("KaambaanClient — verbs", () => {
     await client.release(work);
 
     // `activities` and `submit`, not `postActivity` and `submitForReview` —
-    // the verb names in the switch at kaambaan index.ts:414-443.
+    // the verb names in the switch at superpipeline index.ts:414-443.
     expect(seen).toEqual(["heartbeat", "activities", "complete", "submit", "block", "fail", "release"]);
   });
 
-  test("an activity is sent in the fields kaambaan actually reads", async () => {
+  test("an activity is sent in the fields superpipeline actually reads", async () => {
     const { calls, client } = fakeBoard(() => ({ status: 200, body: { activity: {} } }));
     await client.activity(work, { type: "action", action: "Read a.ts", parameter: { path: "a.ts" }, result: "ok" });
     expect(JSON.parse(calls[0]!.body!)).toEqual({
@@ -173,10 +173,10 @@ describe("KaambaanClient — verbs", () => {
   });
 });
 
-describe("KaambaanClient — 403 and 409 are different facts", () => {
+describe("SuperpipelineClient — 403 and 409 are different facts", () => {
   test("409 STALE_LEASE says the lease lapsed", async () => {
     const { client } = fakeBoard(() => ({ status: 409, body: boardError("STALE_LEASE", "no active lease for this run") }));
-    const err = (await client.heartbeat(work).catch((e) => e)) as KaambaanApiError;
+    const err = (await client.heartbeat(work).catch((e) => e)) as SuperpipelineApiError;
 
     expect(isLeaseSuperseded(err)).toBe(true);
     expect(isForeignRun(err)).toBe(false);
@@ -186,7 +186,7 @@ describe("KaambaanClient — 403 and 409 are different facts", () => {
 
   test("403 NOT_RUN_OWNER says the run is someone else's", async () => {
     const { client } = fakeBoard(() => ({ status: 403, body: boardError("NOT_RUN_OWNER", "this run belongs to another agent") }));
-    const err = (await client.complete(work).catch((e) => e)) as KaambaanApiError;
+    const err = (await client.complete(work).catch((e) => e)) as SuperpipelineApiError;
 
     expect(isForeignRun(err)).toBe(true);
     expect(isLeaseSuperseded(err)).toBe(false);
@@ -195,7 +195,7 @@ describe("KaambaanClient — 403 and 409 are different facts", () => {
   });
 
   test("the code decides, not the status — 403 and 409 carry other codes too", async () => {
-    // kaambaan answers 403 for SEPARATION_OF_DUTIES and 409 for GATE_NOT_PENDING
+    // superpipeline answers 403 for SEPARATION_OF_DUTIES and 409 for GATE_NOT_PENDING
     // (index.ts:31-58). Classifying on status alone would call a gate conflict a
     // lost lease and end a healthy harness mid-run.
     const sod = fakeBoard(() => ({ status: 403, body: boardError("SEPARATION_OF_DUTIES") }));
@@ -207,7 +207,7 @@ describe("KaambaanClient — 403 and 409 are different facts", () => {
 
   test("neither predicate fires on a plain failure or a non-error value", async () => {
     const { client } = fakeBoard(() => ({ status: 500, body: "gateway exploded" }));
-    const err = (await client.heartbeat(work).catch((e) => e)) as KaambaanApiError;
+    const err = (await client.heartbeat(work).catch((e) => e)) as SuperpipelineApiError;
     expect(isForeignRun(err)).toBe(false);
     expect(isLeaseSuperseded(err)).toBe(false);
     expect(err.code).toBeNull();
@@ -218,13 +218,13 @@ describe("KaambaanClient — 403 and 409 are different facts", () => {
 
   test("the error message names the verb, so a log line identifies the call", async () => {
     const { client } = fakeBoard(() => ({ status: 409, body: boardError("STALE_LEASE", "no active lease for this run") }));
-    const err = (await client.activity(work, { type: "thought" }).catch((e) => e)) as KaambaanApiError;
+    const err = (await client.activity(work, { type: "thought" }).catch((e) => e)) as SuperpipelineApiError;
     expect(err.message).toContain("activities");
     expect(err.message).toContain("no active lease for this run");
   });
 });
 
-describe("KaambaanClient — pending gates", () => {
+describe("SuperpipelineClient — pending gates", () => {
   const gate: GatePendingDelivery = {
     event: "gate.pending",
     boardId: BOARD,
@@ -259,6 +259,6 @@ describe("KaambaanClient — pending gates", () => {
     // A rejected token that read as "no gates pending" would let the sweep
     // report healthy forever while every gate it exists to catch stayed silent.
     const { client } = fakeBoard(() => ({ status: 401, body: boardError("UNAUTHORIZED") }));
-    await expect(client.pendingGates()).rejects.toBeInstanceOf(KaambaanApiError);
+    await expect(client.pendingGates()).rejects.toBeInstanceOf(SuperpipelineApiError);
   });
 });

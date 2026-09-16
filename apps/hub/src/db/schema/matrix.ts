@@ -223,9 +223,9 @@ export const matrixMissionMembers = pgTable(
 );
 
 /**
- * One kaambaan gate, one Matrix event.
+ * One superpipeline gate, one Matrix event.
  *
- * The record that makes the delivery path safe to retry. kaambaan's push is
+ * The record that makes the delivery path safe to retry. superpipeline's push is
  * at-least-once within a cap, its alarm re-picks failed rows, and the
  * reconciliation sweep asks independently which pending gates have no event —
  * so the same gate arrives here more than once **by design**. Without this, each
@@ -248,7 +248,7 @@ export const matrixGateEvents = pgTable(
     tenantId: text("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
-    /** kaambaan's board, needed to address the resolution endpoint. */
+    /** superpipeline's board, needed to address the resolution endpoint. */
     boardId: text("board_id").notNull(),
     cardId: text("card_id").notNull(),
     roomId: text("room_id").notNull(),

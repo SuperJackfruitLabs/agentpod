@@ -12,7 +12,7 @@ import { authMiddleware } from './auth/middleware.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
-import { createKaambaanPushRoutes } from './routes/kaambaan-push.ts';
+import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { servicePublicJwks } from './auth/service-signing.ts';
 // GET /api/auth/authorize — the cross-domain handoff's front door (see below)
 import { authorizeRoutes } from './routes/auth-authorize.ts';
@@ -66,7 +66,7 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
-import { startKaambaanBridge } from './services/bridge/loop.ts';
+import { startSuperpipelineBridge } from './services/bridge/loop.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
@@ -141,7 +141,7 @@ const app = new Hono()
    * registration order and the catch-all would otherwise swallow it.
    *
    * Merged here rather than published separately so consumers keep fetching
-   * exactly one URL. kaambaan asks for `${issuer}/api/auth/jwks` and verifies
+   * exactly one URL. superpipeline asks for `${issuer}/api/auth/jwks` and verifies
    * against whatever comes back; teaching it about a second endpoint would put
    * a deployment detail of this hub into another repository's code.
    *
@@ -189,7 +189,7 @@ const app = new Hono()
    * before the route's own credential check ever ran — the same reason the
    * jwks route and `/api/auth/*` above are registered here, ahead of it. The
    * route authenticates itself; `/api` is still right for it (Bearer passes
-   * CSRF, unlike the HMAC-signed `kaambaan-push` receiver under `/public`),
+   * CSRF, unlike the HMAC-signed `superpipeline-push` receiver under `/public`),
    * it just cannot sit behind a middleware built for a session.
    */
   .route('/api', stationTokenRoutes)
@@ -207,7 +207,7 @@ const app = new Hono()
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
   /**
    * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
-   * may dispatch, for kaambaan's agent picker
+   * may dispatch, for superpipeline's agent picker
    * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
    *
    * Registered HERE, ahead of `authMiddleware`, for the same reason
@@ -298,7 +298,7 @@ if (matrixBridge) {
   // be posted by two slightly different projections.
   const gateProjection = {
     domain: matrixBridge.config.domain,
-    boardBaseUrl: process.env.KAAMBAAN_BOARD_URL,
+    boardBaseUrl: process.env.SUPERPIPELINE_BOARD_URL,
     sendText: (userId: string, roomId: string, body: string) =>
       matrixBridge.client.sendText(userId, roomId, body),
     sendCustomEvent: (
@@ -309,7 +309,7 @@ if (matrixBridge) {
     ) => matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
   };
 
-  // POST /public/bridge/kaambaan/push — a board telling us a gate is open.
+  // POST /public/bridge/superpipeline/push — a board telling us a gate is open.
   //
   // Under /public, not /api, because the caller is a Worker holding a signing
   // secret rather than a browser holding a session — and /api/* carries the
@@ -317,14 +317,14 @@ if (matrixBridge) {
   // `runtime-callback.ts` is already mounted here for the same reason.
   app.route(
     '/public',
-    createKaambaanPushRoutes({
-      secret: process.env.KAAMBAAN_PUSH_SECRET,
+    createSuperpipelinePushRoutes({
+      secret: process.env.SUPERPIPELINE_PUSH_SECRET,
       tenantIdFor: tenantForBoard,
       ...gateProjection,
     }),
   );
 
-  // …and the floor beneath it. kaambaan retries a push five times and then
+  // …and the floor beneath it. superpipeline retries a push five times and then
   // dead-letters it, at which point the gate is silent on both sides: a card
   // blocked on an approval nobody was told about. This asks each board what it
   // is still waiting on. `projectGate` is idempotent on `gate_id`, so the two
@@ -460,12 +460,12 @@ console.log('Provisioners registered:', enabledProviders().join(', ') || '(none 
 startNodeSweeper();
 console.log('Node heartbeat sweeper started (45s threshold)');
 
-// Claim work from a kaambaan board, if this hub has been told to.
-// Off unless ENABLE_KAAMBAAN_BRIDGE=true — a hub that has not opted in
+// Claim work from a superpipeline board, if this hub has been told to.
+// Off unless ENABLE_SUPERPIPELINE_BRIDGE=true — a hub that has not opted in
 // constructs nothing here, exactly like an unregistered provisioner driver.
-const bridge = await startKaambaanBridge();
+const bridge = await startSuperpipelineBridge();
 console.log(
-  'kaambaan bridge:',
+  'superpipeline bridge:',
   bridge ? `claiming as ${bridge.agents.join(', ')}` : '(disabled)',
 );
 

@@ -13,7 +13,7 @@ import {
  * What a gate looks like on the wire.
  *
  * Pinned against `fixtures/ecosystem-identity/matrix_gate_events.json`, which
- * kaambaan and supermessage validate against too. A rename on any of the three
+ * superpipeline and supermessage validate against too. A rename on any of the three
  * sides is a gate that silently never resolves — which reads, to the person who
  * tapped, as a button that did nothing.
  */
@@ -62,16 +62,16 @@ describe("the gate event's wire shape", () => {
     expect(gateEventContent({ ...DELIVERY, handoffSummary: null }).handoff_summary).toBeUndefined();
   });
 
-  test("carries none of the four fields kaambaan#34 proposed that do not exist", () => {
+  test("carries none of the four fields superpipeline#34 proposed that do not exist", () => {
     // run_id and task_id name no column; gates do not expire; tenant_id is
-    // kaambaan's internal boundary and a room can be wider than a board.
+    // superpipeline's internal boundary and a room can be wider than a board.
     const c = gateEventContent(DELIVERY);
     for (const absent of ["run_id", "task_id", "expires_at", "tenant_id"]) {
       expect(c[absent], `${absent} was dropped deliberately`).toBeUndefined();
     }
   });
 
-  test("drops an option kaambaan could not resolve", () => {
+  test("drops an option superpipeline could not resolve", () => {
     const c = gateEventContent({
       ...DELIVERY,
       options: [{ id: "approve", label: "Approve" }, { id: "ship_it", label: "Ship it" }],
@@ -79,13 +79,13 @@ describe("the gate event's wire shape", () => {
     expect(c.options).toEqual([{ id: "approve", label: "Approve" }]);
   });
 
-  test("names the type kaambaan owns, not the plane that carries it", () => {
-    // AgentPod sends this; kaambaan owns what a gate means. The ownership map
+  test("names the type superpipeline owns, not the plane that carries it", () => {
+    // AgentPod sends this; superpipeline owns what a gate means. The ownership map
     // in charter's layer reference gives Gate to the work plane.
-    expect(GATE_EVENT_TYPE).toBe("dev.kaambaan.gate.v1");
+    expect(GATE_EVENT_TYPE).toBe("dev.superpipeline.gate.v1");
   });
 
-  test("the option ids are exactly kaambaan's GateDecision union", () => {
+  test("the option ids are exactly superpipeline's GateDecision union", () => {
     expect([...GATE_OPTION_IDS]).toEqual(["approve", "request_changes", "reject"]);
     expect(isGateOptionId("approve")).toBe(true);
     expect(isGateOptionId("ship_it")).toBe(false);
@@ -95,14 +95,14 @@ describe("the gate event's wire shape", () => {
   test("omits the deep link rather than sending a broken one", () => {
     expect(gateEventContent(DELIVERY).deep_link).toBeUndefined();
     expect(
-      gateEventContent(DELIVERY, "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22").deep_link
-    ).toBe("https://kaambaan.dev/b/brd_7c1f/c/crd_9a22");
+      gateEventContent(DELIVERY, "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22").deep_link
+    ).toBe("https://superpipeline.dev/b/brd_7c1f/c/crd_9a22");
   });
 
   test("the prose and the card agree on where the link goes", () => {
     // They are two events describing one gate. A reader who taps the prose
     // link and a reader who taps the card's must land in the same place.
-    const link = "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22";
+    const link = "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22";
     expect(gateProseBody(DELIVERY, link)).toContain(link);
     expect(gateEventContent(DELIVERY, link).deep_link).toBe(link);
   });
@@ -124,8 +124,8 @@ describe("the prose a stock client sees", () => {
     // https:// in prose renders as characters to retype — it looks like a link
     // and is not, which is worse than omitting it.
     expect(
-      gateProseBody(DELIVERY, "https://kaambaan.dev/b/brd_7c1f/c/crd_9a22")
-    ).toEndWith(" [Open the card](https://kaambaan.dev/b/brd_7c1f/c/crd_9a22)");
+      gateProseBody(DELIVERY, "https://superpipeline.dev/b/brd_7c1f/c/crd_9a22")
+    ).toEndWith(" [Open the card](https://superpipeline.dev/b/brd_7c1f/c/crd_9a22)");
   });
 
   test("is the same sentence the custom event carries as its body", () => {
@@ -197,7 +197,7 @@ describe("reading a decision", () => {
     expect(parseGateDecision(decision({ comment: "   " }))!.comment).toBeNull();
   });
 
-  test("refuses an option kaambaan could not resolve", () => {
+  test("refuses an option superpipeline could not resolve", () => {
     expect(parseGateDecision(decision({ option_id: "ship_it" }))).toBeNull();
   });
 
@@ -267,7 +267,7 @@ describe("acting on a decision", () => {
   });
 
   test("checks attribution before it resolves anything", async () => {
-    // Order matters: an unlinked sender must not reach kaambaan even once.
+    // Order matters: an unlinked sender must not reach superpipeline even once.
     const calls: string[] = [];
     const { deps } = decisionDeps({
       principalForMatrixId: async () => { calls.push("principal"); return null; },
@@ -278,10 +278,10 @@ describe("acting on a decision", () => {
   });
 });
 
-import { resolveGateAtKaambaan } from "./gates";
+import { resolveGateAtSuperpipeline } from "./gates";
 
 /**
- * Calling kaambaan as the person, not as this service.
+ * Calling superpipeline as the person, not as this service.
  *
  * The alternative — using the bridge's own `kbn_` agent token — would work on
  * the first try and make every approval in the suite attribute to one account.
@@ -312,8 +312,8 @@ describe("resolving at the board", () => {
   test("carries a freshly minted assertion for that principal", async () => {
     const minted: string[] = [];
     const { calls, f } = capture();
-    await resolveGateAtKaambaan(input, {
-      baseUrl: "https://kaambaan.dev/",
+    await resolveGateAtSuperpipeline(input, {
+      baseUrl: "https://superpipeline.dev/",
       mint: async (p) => { minted.push(p); return "the.jwt.here"; },
       fetch: f,
     });
@@ -324,21 +324,21 @@ describe("resolving at the board", () => {
 
   test("addresses the gate on its own board, with a trimmed base url", async () => {
     const { calls, f } = capture();
-    await resolveGateAtKaambaan(input, {
-      baseUrl: "https://kaambaan.dev/", mint: async () => "t", fetch: f,
+    await resolveGateAtSuperpipeline(input, {
+      baseUrl: "https://superpipeline.dev/", mint: async () => "t", fetch: f,
     });
-    expect(calls[0]!.url).toBe("https://kaambaan.dev/v1/boards/brd_7c1f/gates/gate_4e8b/resolve");
+    expect(calls[0]!.url).toBe("https://superpipeline.dev/v1/boards/brd_7c1f/gates/gate_4e8b/resolve");
   });
 
   test("omits a comment rather than sending null", async () => {
     const { calls, f } = capture();
-    await resolveGateAtKaambaan(input, { baseUrl: "https://k.dev", mint: async () => "t", fetch: f });
+    await resolveGateAtSuperpipeline(input, { baseUrl: "https://k.dev", mint: async () => "t", fetch: f });
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ decision: "approve" });
   });
 
   test("sends the feedback that becomes the rework's context", async () => {
     const { calls, f } = capture();
-    await resolveGateAtKaambaan(
+    await resolveGateAtSuperpipeline(
       { ...input, decision: "request_changes", comment: "Add a test." },
       { baseUrl: "https://k.dev", mint: async () => "t", fetch: f }
     );
@@ -346,11 +346,11 @@ describe("resolving at the board", () => {
       .toEqual({ decision: "request_changes", comment: "Add a test." });
   });
 
-  test("reports kaambaan's own code, not the status it arrived under", async () => {
+  test("reports superpipeline's own code, not the status it arrived under", async () => {
     // 403 is SEPARATION_OF_DUTIES and 409 is GATE_NOT_PENDING, and the caller
     // reacts differently to each. Reading the status alone loses that.
     const { f } = capture(409, { error: { code: "GATE_NOT_PENDING" } });
-    const r = await resolveGateAtKaambaan(input, {
+    const r = await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
     });
     expect(r).toEqual({ ok: false, code: "GATE_NOT_PENDING" });
@@ -358,7 +358,7 @@ describe("resolving at the board", () => {
 
   test("falls back to the status when the body says nothing useful", async () => {
     const { f } = capture(502, "<html>bad gateway</html>");
-    const r = await resolveGateAtKaambaan(input, {
+    const r = await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
     });
     expect(r).toEqual({ ok: false, code: "HTTP_502" });
@@ -368,7 +368,7 @@ describe("resolving at the board", () => {
     // A refusal is final; a network failure is not, and the reader should be
     // able to press the button again.
     const f = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
-    const r = await resolveGateAtKaambaan(input, {
+    const r = await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
     });
     expect(r).toEqual({ ok: false, code: "UNREACHABLE" });
@@ -377,7 +377,7 @@ describe("resolving at the board", () => {
   test("does not mint a second token for a retry it never makes", async () => {
     let mints = 0;
     const { f } = capture(409, { error: { code: "GATE_NOT_PENDING" } });
-    await resolveGateAtKaambaan(input, {
+    await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://k.dev", mint: async () => { mints++; return "t"; }, fetch: f,
     });
     expect(mints).toBe(1);

@@ -6,7 +6,7 @@
  * assertion of the identity they just proved. This module does the other thing,
  * and it exists for exactly one reason —
  * `charter → decisions/2026-08-14-approvals-cross-planes-as-events.md` requires
- * a human's approval to reach kaambaan **as that human**, and the human is not
+ * a human's approval to reach superpipeline **as that human**, and the human is not
  * present: they are a Matrix message and a `principal_identities` row.
  *
  * ## The two properties that make this safe to have at all
@@ -46,12 +46,12 @@ const log = createLogger("service-signing");
  * Short, because it is used immediately and once.
  *
  * A session token's lifetime is a convenience for a person clicking around. This
- * one exists to survive a single HTTP call to kaambaan, so anything longer is
+ * one exists to survive a single HTTP call to superpipeline, so anything longer is
  * just a wider window for a leaked token to be replayed in.
  */
 const ASSERTION_TTL = "120s";
 
-/** Matches Better Auth's `jwt` plugin, and what kaambaan pins. */
+/** Matches Better Auth's `jwt` plugin, and what superpipeline pins. */
 const ALG = "EdDSA";
 
 /** Who is doing the asserting. Ends up in `act.sub`. */

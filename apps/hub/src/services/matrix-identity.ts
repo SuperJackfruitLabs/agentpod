@@ -15,7 +15,7 @@
  *
  * The answer distinguishes them rather than merely saying "known", because
  * everything downstream treats them differently: a human's approval must carry
- * its sender or kaambaan's separation-of-duties check is void
+ * its sender or superpipeline's separation-of-duties check is void
  * (charter decisions/2026-08-14-approvals-cross-planes-as-events.md), while an
  * agent's message is work output. Collapsing the two here would throw that
  * distinction away at the one point where keeping it is free.
@@ -70,7 +70,7 @@ export async function resolveMatrixId(mxid: string): Promise<MatrixIdentity> {
   ]);
 
   // Filtered to `system = 'matrix'` above, deliberately. An external id is
-  // opaque per system, so a kaambaan or org-plane id that happened to be shaped
+  // opaque per system, so a superpipeline or org-plane id that happened to be shaped
   // like an mxid must not answer "who is this Matrix sender" — it names the same
   // person in a different namespace, which is not the same claim.
   const station = stationRows[0];

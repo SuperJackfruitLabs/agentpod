@@ -3,7 +3,7 @@
   "version": 5,
   "authoredAt": "2026-08-30",
   "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3)",
-  "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in kaambaan, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
+  "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in superpipeline, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
     "standard": "Registered JWT claims the issuer sets. Consumers MUST validate iss, aud and exp.",
@@ -39,7 +39,7 @@
       "claim": "tenant",
       "type": "string",
       "grammar": "^fleet_[0-9a-f]{20}$",
-      "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, kaambaan migration 0002).",
+      "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, superpipeline migration 0002).",
       "required": true,
       "crossRef": "id_grammar.json → agentpod.tenant"
     },
@@ -132,7 +132,7 @@
       },
       "required": false,
       "meaning": "RFC 8693's actor claim. Present when a SERVICE minted this token while asserting a principal who was not present to sign in — today, the Matrix Application Service resolving an approval gate on behalf of the human who tapped a button in a room. `sub` remains the human; `act.sub` is who spoke for them.",
-      "whyItExists": "charter decisions/2026-08-14-approvals-cross-planes-as-events.md requires a human's approval to reach kaambaan AS that human, because a bridge substituting its own identity would make every approval in the suite attribute to one account and void the separation-of-duties check. That requirement creates a token nobody signed in for. Such a token should not be INDISTINGUISHABLE from one a person minted from their own session — delegation that cannot be seen in the record is impersonation with better manners.",
+      "whyItExists": "charter decisions/2026-08-14-approvals-cross-planes-as-events.md requires a human's approval to reach superpipeline AS that human, because a bridge substituting its own identity would make every approval in the suite attribute to one account and void the separation-of-duties check. That requirement creates a token nobody signed in for. Such a token should not be INDISTINGUISHABLE from one a person minted from their own session — delegation that cannot be seen in the record is impersonation with better manners.",
       "consumerObligation": "A consumer MUST NOT grant more because `act` is present, and MUST NOT deny because it is absent. It carries no authority of its own: the claims beside it are built by the same code path a session token uses, so an assertion can never carry reach the person's own token would not. What a consumer MAY do is RECORD it, so an audit can distinguish 'she approved it' from 'the bridge approved it for her'.",
       "signedBy": "A separate key from the one session tokens use — agentpod migration 0054. Both are published in the same JWKS and verify identically, so this is an authority boundary rather than a cryptographic one: revoking the bridge's ability to speak for people is deleting one row, and does not sign every human out of the console."
     }

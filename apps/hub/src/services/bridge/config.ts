@@ -18,27 +18,27 @@ import { AcpSessionMode } from "@agentpod/contract";
 import { z } from "zod";
 
 /** Derived nowhere and switched nowhere: one flag, one meaning. */
-export const BRIDGE_ENV_FLAG = "ENABLE_KAAMBAAN_BRIDGE";
+export const BRIDGE_ENV_FLAG = "ENABLE_SUPERPIPELINE_BRIDGE";
 
 /**
  * The orchestrator this bridge speaks to, and the value written to
  * `external_source` on every row. A constant rather than configuration: the
- * client speaks kaambaan's agent contract specifically, and an operator who
+ * client speaks superpipeline's agent contract specifically, and an operator who
  * relabelled it would produce rows that cannot be joined to anything.
  */
-export const BRIDGE_SOURCE = "kaambaan";
+export const BRIDGE_SOURCE = "superpipeline";
 
 /**
  * Why `ask` is a mode again.
  *
  * It used to be refused here. The reason was real: spike RQ2 found that
- * kaambaan defined the `input-required → working` transition and **nothing
+ * superpipeline defined the `input-required → working` transition and **nothing
  * invoked it** — an elicitation created no gate, and no code anywhere
  * constructed the `prompt` activity that would carry an answer back. A
  * permission request was a question nothing could answer, so every one of them
  * parked the card until the 15-minute reclaim with the harness blocked.
  *
- * kaambaan PR #36 built that return path: a human answers through
+ * superpipeline PR #36 built that return path: a human answers through
  * `POST /v1/boards/:boardId/elicitations/:elicitationId/answer`, the state
  * machine's `human_reply` moves the card back to `working`, and the answer
  * appears on the run read surface the asking agent already polls — on the same
@@ -60,8 +60,8 @@ export const BridgeAgentConfig = z.object({
   /** Stable name for logs and `bridge_dispatches.agent_key`. Must be unique. */
   key: z.string().min(1),
   boardId: z.string().min(1),
-  /** This agent's own kaambaan credential. */
-  token: z.string().startsWith("kbn_", 'a kaambaan agent token starts with "kbn_"'),
+  /** This agent's own superpipeline credential. */
+  token: z.string().startsWith("kbn_", 'a superpipeline agent token starts with "kbn_"'),
   /** The station its work runs on. */
   stationId: z.string().min(1),
   /**
@@ -85,13 +85,13 @@ export const BridgeAgentConfig = z.object({
    * one as an environment variable being named to an operator. That premise is
    * worth keeping true, and the duration is what a reader wants anyway.
    *
-   * Not bounded by the lease: the bridge heartbeats throughout, so kaambaan's
+   * Not bounded by the lease: the bridge heartbeats throughout, so superpipeline's
    * 15-minute reclaim never fires on a waiting run. The bound is policy.
    */
   permissionWaitMs: z.number().int().positive().optional(),
-  /** How many of this agent's runs may be in flight. kaambaan defaults to 1. */
+  /** How many of this agent's runs may be in flight. superpipeline defaults to 1. */
   maxConcurrency: z.number().int().positive().optional(),
-  /** kaambaan profile to claim under, when the board routes by profile. */
+  /** superpipeline profile to claim under, when the board routes by profile. */
   profileKey: z.string().optional(),
 });
 export type BridgeAgentConfig = z.infer<typeof BridgeAgentConfig>;
@@ -116,27 +116,27 @@ export function isBridgeEnabled(): boolean {
 export function loadBridgeConfig(): BridgeConfig | null {
   if (!isBridgeEnabled()) return null;
 
-  const baseUrl = (process.env.KAAMBAAN_BASE_URL ?? "").trim();
+  const baseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim();
   if (!baseUrl) {
     throw new Error(
-      `KAAMBAAN_BASE_URL is required when ${BRIDGE_ENV_FLAG}=true — the origin of the kaambaan deployment to claim work from, e.g. https://kaambaan.dev`,
+      `SUPERPIPELINE_BASE_URL is required when ${BRIDGE_ENV_FLAG}=true — the origin of the superpipeline deployment to claim work from, e.g. https://superpipeline.dev`,
     );
   }
 
-  const raw = (process.env.KAAMBAAN_BRIDGE_AGENTS ?? "").trim();
+  const raw = (process.env.SUPERPIPELINE_BRIDGE_AGENTS ?? "").trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw || "[]");
   } catch {
     throw new Error(
-      `KAAMBAAN_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?}`,
+      `SUPERPIPELINE_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?}`,
     );
   }
 
   const agents = z.array(BridgeAgentConfig).parse(parsed);
   if (agents.length === 0) {
     throw new Error(
-      `KAAMBAAN_BRIDGE_AGENTS must list at least one agent when ${BRIDGE_ENV_FLAG}=true — an enabled bridge with no identities claims nothing and looks like an idle board`,
+      `SUPERPIPELINE_BRIDGE_AGENTS must list at least one agent when ${BRIDGE_ENV_FLAG}=true — an enabled bridge with no identities claims nothing and looks like an idle board`,
     );
   }
 
@@ -144,7 +144,7 @@ export function loadBridgeConfig(): BridgeConfig | null {
   for (const a of agents) {
     // `key` is written to bridge_dispatches.agent_key and appears in every log
     // line. Two identities under one name make attribution unanswerable.
-    if (seen.has(a.key)) throw new Error(`KAAMBAAN_BRIDGE_AGENTS: duplicate agent key "${a.key}"`);
+    if (seen.has(a.key)) throw new Error(`SUPERPIPELINE_BRIDGE_AGENTS: duplicate agent key "${a.key}"`);
     seen.add(a.key);
   }
 

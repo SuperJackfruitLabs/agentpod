@@ -428,7 +428,7 @@ export function collectConfigErrors(
     }
   }
 
-  // The kaambaan bridge, scoped by its flag for the same reason every rule
+  // The superpipeline bridge, scoped by its flag for the same reason every rule
   // above is: a hub that never claims board work must not be stopped from
   // booting by a bridge variable, and unset must stay indistinguishable from
   // off. When it IS on, a roster that fails to parse would otherwise produce a
@@ -439,7 +439,7 @@ export function collectConfigErrors(
       loadBridgeConfig();
     } catch (err) {
       errors.push({
-        field: "KAAMBAAN_BRIDGE_AGENTS",
+        field: "SUPERPIPELINE_BRIDGE_AGENTS",
         message: err instanceof Error ? err.message : String(err),
       });
     }

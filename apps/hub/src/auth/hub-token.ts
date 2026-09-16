@@ -3,7 +3,7 @@
  *
  * **The asymmetry this closes.** `charter → decisions/2026-08-15-one-issuer-and-offline-
  * verification.md` makes the hub the issuer and has every other plane verify offline against a
- * JWKS. kaambaan does exactly that. The hub did not: until now, exactly one route in this
+ * JWKS. superpipeline does exactly that. The hub did not: until now, exactly one route in this
  * codebase — `/api/fleet/dispatchable`, built for the cross-domain handoff — would read a
  * hub-issued token, and every other `/api/*` route went through `authMiddleware`, which accepts
  * a session cookie, the static `API_TOKEN`, or a Better Auth session token, and none of those

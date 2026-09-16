@@ -5,7 +5,7 @@
  *
  * The hub's session cookie is `SameSite=Lax`, so a cross-site `fetch` never
  * carries it and `GET /api/auth/token` — the hub's only way to hand a browser
- * a token — is unreachable from `kaambaan.dev` by construction. What Lax still
+ * a token — is unreachable from `superpipeline.dev` by construction. What Lax still
  * permits is **top-level navigation**, which was measured in a real browser
  * rather than read: a `fetch` to the hub saw no user, and navigating to the
  * same URL returned the full session. So the browser *goes* to this endpoint

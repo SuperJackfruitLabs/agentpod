@@ -224,12 +224,12 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:<release>
 # NODE_AGENT_FLY_PI_IMAGE=ghcr.io/<owner>/agentpod-node-pi-fly:<release>
 
-# ── kaambaan bridge ───────────────────────────────────────────────────────────
-# See "kaambaan bridge" below before enabling. OFF unless this is the literal
+# ── superpipeline bridge ───────────────────────────────────────────────────────────
+# See "superpipeline bridge" below before enabling. OFF unless this is the literal
 # lowercase string "true" — `1` and `TRUE` read as off.
-# ENABLE_KAAMBAAN_BRIDGE=false
-# KAAMBAAN_BASE_URL=https://kaambaan.dev
-# KAAMBAAN_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"kbn_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
+# ENABLE_SUPERPIPELINE_BRIDGE=false
+# SUPERPIPELINE_BASE_URL=https://superpipeline.dev
+# SUPERPIPELINE_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"kbn_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -389,7 +389,7 @@ every dispatch is refused — which is correct, and is also an outage.
 
 | Field | Meaning |
 |---|---|
-| `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. |
+| `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `superpipeline:<agentId>` is matched by superpipeline and **ignored** here. |
 | `mayGrantReach` | Whether this principal may **change what an agent is**. Required, and enforced — see the table below. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
 
 **What `mayGrantReach` gates**, as of #345. `mayDispatch` asks whether you may
@@ -448,24 +448,24 @@ Why values are namespaced, and where that ends:
 `charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`.
 
 Enforced at `acp.createSession`, the one choke point both the console and the
-kaambaan bridge pass through — a check living only in the bridge would leave
+superpipeline bridge pass through — a check living only in the bridge would leave
 provisioning straight at this API unguarded.
 
-### kaambaan bridge
+### superpipeline bridge
 
 Off by default, and **nothing is inferred from a credential being present** — a `kbn_` token
 sitting in an env file is not a decision to start claiming work on someone's board. A hub
 that has not opted in constructs nothing, opens no session and makes no request. Day-2
 operation — reading the ledger, spotting a halted loop — is
-[docs/OPERATING.md → The kaambaan bridge](./OPERATING.md#8-the-kaambaan-bridge).
+[docs/OPERATING.md → The superpipeline bridge](./OPERATING.md#8-the-superpipeline-bridge).
 
 Three variables, all required together:
 
 | Variable | Meaning |
 |---|---|
-| `ENABLE_KAAMBAAN_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
-| `KAAMBAAN_BASE_URL` | Origin of the kaambaan deployment, e.g. `https://kaambaan.dev`. Trailing slashes are stripped. |
-| `KAAMBAAN_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
+| `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
+| `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
+| `SUPERPIPELINE_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
 
 One process, many identities. Each roster entry is a separate principal with its own token,
 board and station — "the bridge's credential" is not a thing that exists:
@@ -489,29 +489,29 @@ board and station — "the bridge's credential" is not a thing that exists:
 | Field | Required | Notes |
 |---|---|---|
 | `key` | yes | Stable name. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique — a duplicate is refused at boot. |
-| `boardId` | yes | The kaambaan board to claim from. |
-| `token` | yes | This agent's own kaambaan credential, minted under "Connect an agent". Must start `kbn_`. |
+| `boardId` | yes | The superpipeline board to claim from. |
+| `token` | yes | This agent's own superpipeline credential, minted under "Connect an agent". Must start `kbn_`. |
 | `stationId` | yes | The station its work runs on. |
 | `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
 | `mode` | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call, which is a great deal of asking; it suits a board somebody is watching, which is why it is not the default. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers — see `permissionWaitMs`. |
 | `permissionWaitMs` | no (default **30 minutes**) | How long a human has to answer before the run gives up. Must be a positive integer. |
-| `maxConcurrency` | no | How many of this agent's runs may be in flight. kaambaan defaults to 1. |
+| `maxConcurrency` | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
 | `profileKey` | no | Claim under a profile, when the board routes by profile. |
 
 **What `permissionWaitMs` actually buys you.** When an agent asks for permission, the run keeps
-the card and keeps heartbeating, so kaambaan's 15-minute reclaim never fires — the wait is
+the card and keeps heartbeating, so superpipeline's 15-minute reclaim never fires — the wait is
 bounded by *this setting*, not by the lease. If it expires, the run is **`fail`ed and the card is
 re-queued** with the reason and a failure count. It is not silently dropped, and it is not
 `release`d either: a session had started, so the workspace may hold partial work, and `fail` is
 the verb that records that. The next attempt asks the question again, and a card nobody ever
-answers eventually trips kaambaan's own circuit breaker and parks for a human. Nothing is ever
+answers eventually trips superpipeline's own circuit breaker and parks for a human. Nothing is ever
 approved or declined on a human's behalf when the wait runs out.
 
 Set it per agent, because attendance is a property of a deployment: a board watched during
 office hours wants minutes, and one that runs unattended overnight wants the harness released
 quickly rather than a station pinned until morning.
 
-**A roster that fails to parse refuses the boot**, naming `KAAMBAAN_BRIDGE_AGENTS`. That is
+**A roster that fails to parse refuses the boot**, naming `SUPERPIPELINE_BRIDGE_AGENTS`. That is
 deliberate: a bridge that silently claimed nothing because its roster was malformed looks
 exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
 array, a token that does not start `kbn_`, a `permissionWaitMs` of zero or less, and a
@@ -519,8 +519,8 @@ duplicate `key`.
 
 > **Quoting.** The roster is JSON on one line, which makes it the value most likely to be
 > quoted in an env file, and the value quoting most often breaks. systemd's
-> `EnvironmentFile=` strips one surrounding layer, so both `KAAMBAAN_BRIDGE_AGENTS=[{…}]`
-> and `KAAMBAAN_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
+> `EnvironmentFile=` strips one surrounding layer, so both `SUPERPIPELINE_BRIDGE_AGENTS=[{…}]`
+> and `SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
 > parses the file differently will disagree with the hub about which one works. See the
 > pre-flight notes under [Re-deploy](#re-deploy-upgrade); this variable is why they exist.
 
@@ -529,7 +529,7 @@ duplicate `key`.
 ### The OAuth client registry
 
 A plane on its own domain cannot read the hub's session cookie: it is `SameSite=Lax`, and
-`kaambaan.dev` is a different site from `agentpod.dev`. The authorization-code flow
+`superpipeline.dev` is a different site from `agentpod.dev`. The authorization-code flow
 (`GET /api/auth/authorize` → `POST /api/auth/token/exchange`) exists so a browser can *navigate*
 to the hub — which `Lax` permits — and hand the plane's server a one-time code.
 
@@ -554,7 +554,7 @@ narrow on purpose:
 - **`localhost` is refused.** It is a *name*, resolved through DNS and `/etc/hosts`, so whoever
   can answer for it receives the authorization code. Only the IP literals are accepted.
 - the path must be exactly `/callback`; no query, no fragment, no userinfo, no scheme but `http`
-- it is **opt-in per client** — kaambaan registering a machine-local port would be a compromise,
+- it is **opt-in per client** — superpipeline registering a machine-local port would be a compromise,
   not a feature
 
 A malformed entry is skipped rather than thrown, so a typo cannot stop the hub booting for a
@@ -564,7 +564,7 @@ what it cannot find. The refusal names this variable.
 Example, registering the web plane and the CLI:
 
 ```
-HUB_OAUTH_CLIENTS=kaambaan|https://kaambaan.dev/hub/callback,apn|loopback
+HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback
 ```
 
 ## 5. Hub — build + deploy
@@ -869,14 +869,14 @@ Two things about that snippet are load-bearing, and both were learned the hard w
 - **Do not pipe the file through `xargs`.** The obvious form —
   `env $(grep -v '^#' /etc/agentpod/hub.env | xargs) bun …` — was in this runbook
   until 2026-08-14 and is **wrong**: `xargs` re-tokenises and strips quotes wherever
-  they appear, so a value containing them arrives mangled. Enabling the kaambaan
-  bridge, whose roster is a JSON array, produced `KAAMBAAN_BRIDGE_AGENTS is not
+  they appear, so a value containing them arrives mangled. Enabling the superpipeline
+  bridge, whose roster is a JSON array, produced `SUPERPIPELINE_BRIDGE_AGENTS is not
   valid JSON` from a config file that was perfectly valid — a pre-flight failing on
   a fault it invented, which is worse than no pre-flight at all.
 - **Strip exactly one layer of surrounding quotes, and nothing else** — that is what
   systemd's `EnvironmentFile=` does. The replacement snippet was, briefly, *fully*
   literal, which recreated the same class of bug from the other side: an operator who
-  quoted the roster (`KAAMBAAN_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
+  quoted the roster (`SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
   `JSON.parse` and the same invented failure. Note systemd does **not** strip trailing
   comments — `KEY=value  # note` really is a value with a comment in it, on the live
   hub as well as here, which is why the `ENCRYPTION_KEY` line in §4 keeps its comment

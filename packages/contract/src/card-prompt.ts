@@ -13,7 +13,7 @@ import { AcpRunId } from "./ids";
  * wrong work confidently. No test caught it, because every test asserted the
  * seam *carried* the work rather than what the work said.
  *
- * The three inputs are exactly what an agent token may read. kaambaan's
+ * The three inputs are exactly what an agent token may read. superpipeline's
  * `GET /v1/boards/:boardId/runs/:runId` returns `{run, card, stage, handoff,
  * references}` and nothing else, so this shape is the whole agent-visible
  * surface projected into text.
@@ -32,10 +32,10 @@ import { AcpRunId } from "./ids";
  */
 export const CARD_PROMPT_VERSION = "card-prompt/1";
 
-/** A card reference as an agent may read it (kaambaan `ReferenceView`, narrowed). */
+/** A card reference as an agent may read it (superpipeline `ReferenceView`, narrowed). */
 export const CardPromptReference = z.object({
   url: z.string().min(1),
-  /** kaambaan's references are nullable-titled; a URL alone still renders. */
+  /** superpipeline's references are nullable-titled; a URL alone still renders. */
   title: z.string().nullable().default(null),
   provider: z.string().min(1),
   sourceType: z.string().min(1),
@@ -48,7 +48,7 @@ const CardPrompt_ = z.object({
 
   /**
    * Which orchestrator this card came from. Open, like `Run.externalSource`,
-   * so the hub is not kaambaan-only — and required, because a prompt built
+   * so the hub is not superpipeline-only — and required, because a prompt built
    * from work whose orchestrator is unnamed cannot be traced to the board that
    * asked for it.
    */
@@ -65,7 +65,7 @@ const CardPrompt_ = z.object({
      * confident answer anyway.
      */
     title: z.string().min(1),
-    /** kaambaan's `JsonValue` spec. Absent is normal; a title-only card is legal. */
+    /** superpipeline's `JsonValue` spec. Absent is normal; a title-only card is legal. */
     spec: z.unknown().optional(),
   }),
 
@@ -79,7 +79,7 @@ const CardPrompt_ = z.object({
 
   attempt: z.object({
     /**
-     * kaambaan's `attemptCount`, which increments on **claim** (spike RQ4), so
+     * superpipeline's `attemptCount`, which increments on **claim** (spike RQ4), so
      * the agent working a card is always on attempt 1 or later. A zero means
      * the count was read from the wrong field, and "attempt 0" invites a
      * harness to treat a retry as a first run.
@@ -154,7 +154,7 @@ export function renderCardPrompt(prompt: CardPrompt): string {
   }
 
   // A `request_changes` gate decision merges `{feedback}` into the handoff the
-  // agent itself produced and re-queues the card (kaambaan board-do.ts:1505).
+  // agent itself produced and re-queues the card (superpipeline board-do.ts:1505).
   // Left inside the blob, the reviewer's instruction sits below the agent's own
   // summary of what it already did — the most important sentence on the card,
   // rendered as the least prominent one.

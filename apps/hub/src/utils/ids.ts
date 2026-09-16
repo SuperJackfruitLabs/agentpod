@@ -2,7 +2,7 @@
  * Prefixed ids, one minter.
  *
  * Was a private const in `services/enrollment.ts`, which is why `station-registry`
- * grew a second, incompatible shape (a hyphenated UUID that kaambaan's own id
+ * grew a second, incompatible shape (a hyphenated UUID that superpipeline's own id
  * schema rejects — see `fixtures/ecosystem-identity/id_grammar.json`,
  * `agentpod.station`). One exported minter is how that stops happening again.
  */

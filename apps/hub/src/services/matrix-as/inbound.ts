@@ -59,7 +59,7 @@ export interface InboundDeps {
    */
   decrypt?(roomId: string, asUserId: string, event: InboundEvent): Promise<InboundEvent | null>;
   /**
-   * Answering a kaambaan approval gate.
+   * Answering a superpipeline approval gate.
    *
    * Optional so a deployment with no board wired up behaves exactly as before,
    * and so the existing tests construct deps without it.

@@ -1,9 +1,9 @@
 # Ecosystem identity — shared fixture corpus
 
 Three products need the same identifiers to mean the same thing across a Bun/Postgres hub
-(AgentPod), a Cloudflare Workers/D1 board (kaambaan), and eventually a Rust client. No auth
+(AgentPod), a Cloudflare Workers/D1 board (superpipeline), and eventually a Rust client. No auth
 or contract *library* can be shared across those runtimes, and a published npm package would
-couple two deploy pipelines with very different cadences — kaambaan deploys on every merge to
+couple two deploy pipelines with very different cadences — superpipeline deploys on every merge to
 main, AgentPod deploys by hand.
 
 So: **each repo owns its own types; this corpus proves they agree.**
@@ -18,16 +18,16 @@ repo boundary instead of a language boundary.
 | File | What it pins |
 |---|---|
 | `id_grammar.json` | What each repo mints and validates for every entity id, plus the full prefix registry and the collisions in it — open (`knownConflicts`) and settled (`resolvedConflicts`). |
-| `run_join_key.json` | The run join key: *kaambaan mints the work run; AgentPod executes it; no competing run id for dispatched work.* |
-| `matrix_gate_events.json` | The two events a kaambaan approval gate crosses Matrix on: the gate the board asks, and the decision a human sends back. Pins the option ids against kaambaan's `GateDecision`, and records the four fields kaambaan#34 proposed that do not exist. |
+| `run_join_key.json` | The run join key: *superpipeline mints the work run; AgentPod executes it; no competing run id for dispatched work.* |
+| `matrix_gate_events.json` | The two events a superpipeline approval gate crosses Matrix on: the gate the board asks, and the decision a human sends back. Pins the option ids against superpipeline's `GateDecision`, and records the four fields superpipeline#34 proposed that do not exist. |
 | `card_prompt.json` | The prompt contract: what a card becomes when it is handed to a harness, assembled from the card, the previous stage's handoff and the card's references. Pins the **rendered text**, not only the shape. |
 
 All three are plain JSON and depend on no type from any repo. That is deliberate — a corpus that
-needed AgentPod's schemas to be readable could not be checked into kaambaan.
+needed AgentPod's schemas to be readable could not be checked into superpipeline.
 
 ## The negative cases are the point
 
-A corpus of only-valid examples proves almost nothing. The `mem_` vs `mbr_` drift in kaambaan
+A corpus of only-valid examples proves almost nothing. The `mem_` vs `mbr_` drift in superpipeline
 survived for as long as both halves existed **precisely because nothing ever validated a
 minted id against the schema** — and a valid-examples-only corpus would have missed it too,
 since `mem_abc123` is a perfectly well-formed id of a nonexistent entity.
@@ -61,14 +61,14 @@ the claim up and what they moved to. The move is checked, not taken on trust —
 prefix must have exactly one owner left in `claims`, so declaring a conflict resolved while
 still claiming the prefix fails the suite.
 
-`run` is the worked example. kaambaan mints `run_<16 hex>` for a work run and has production
+`run` is the worked example. superpipeline mints `run_<16 hex>` for a work run and has production
 data; AgentPod had reserved the same prefix for `acp_runs.id` in a schema comment that sat six
 lines above another comment promising it never minted a rival id. AgentPod moved to `attempt_`
 on 2026-08-14 — it is the executor, not the minter, and had never written an `acp_runs` row.
-The kaambaan-side change is nil: the corpus asks kaambaan to keep minting exactly what it
+The superpipeline-side change is nil: the corpus asks superpipeline to keep minting exactly what it
 already mints.
 
-## How kaambaan (or any peer) consumes it
+## How superpipeline (or any peer) consumes it
 
 1. Copy `id_grammar.json` and `run_join_key.json` into the peer repo. Copy, do not symlink or
    submodule — decoupled release cadence is the whole reason this is a file corpus rather

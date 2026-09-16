@@ -3,9 +3,9 @@
  * dispatch, with the handles a person recognises.
  *
  * This exists because the obvious answer does not work and could not be made
- * to work safely. kaambaan's agent picker used to ask
+ * to work safely. superpipeline's agent picker used to ask
  * `GET /api/admin/principals` with `credentials: "include"`, which fails twice
- * over from `kaambaan.dev`: the hub's session cookie is `SameSite=Lax` so a
+ * over from `superpipeline.dev`: the hub's session cookie is `SameSite=Lax` so a
  * cross-site `fetch` never carries it, and `authMiddleware` accepts a Better
  * Auth session, a session-token Bearer or the static API_TOKEN — never a
  * hub-issued JWT. Teaching that middleware about JWTs would change how EVERY
@@ -49,7 +49,7 @@ import { listPrincipals as defaultListPrincipals } from "../services/principals"
  * hub's service signing keys.
  *
  * Both halves, deliberately, because both halves are what a consumer is told
- * to verify against — kaambaan fetches that one URL and accepts anything in
+ * to verify against — superpipeline fetches that one URL and accepts anything in
  * it. A token signed by a service key is a hub token by the ecosystem's own
  * definition (`charter → decisions/2026-08-15-one-issuer-and-offline-
  * verification.md`), and accepting it here widens nothing: what it may
@@ -134,7 +134,7 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
     // An agent's token must not be able to read the fleet. `mayDispatch` is
     // the authority to ASK an agent to work; it was never the authority to
     // find out what else exists, and an agent that enumerates its siblings is
-    // an agent doing reconnaissance. This is the same refusal kaambaan's own
+    // an agent doing reconnaissance. This is the same refusal superpipeline's own
     // `resolveHubUser` makes on the human path, and for the same reason.
     if (claims.principalKind !== "human") {
       return c.json(

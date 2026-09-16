@@ -17,7 +17,7 @@ import { resolveMatrixId } from "../../src/services/matrix-identity";
  * `principal_identities` for people (#335).
  *
  * The answer has to distinguish them, because the two are treated differently
- * everywhere downstream: a human's approval must carry its sender or kaambaan's
+ * everywhere downstream: a human's approval must carry its sender or superpipeline's
  * separation-of-duties check is void, while an agent's message is work output.
  * A resolver that said only "known" would have thrown that distinction away at
  * the one point where it is cheap to keep.
@@ -116,10 +116,10 @@ describe("resolveMatrixId", () => {
   });
 
   test("an id in another namespace does not answer for Matrix", async () => {
-    // External ids are opaque per system. A kaambaan id shaped like an mxid
+    // External ids are opaque per system. A superpipeline id shaped like an mxid
     // names the same person in a different namespace, which is not the same
     // claim — and must not resolve a Matrix sender.
-    await linkIdentity(USER_PRINCIPAL, "kaambaan", "@lookalike:id.agentpod.dev");
+    await linkIdentity(USER_PRINCIPAL, "superpipeline", "@lookalike:id.agentpod.dev");
 
     expect(await resolveMatrixId("@lookalike:id.agentpod.dev")).toBeNull();
   });

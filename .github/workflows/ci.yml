@@ -282,7 +282,7 @@ jobs:
       # wrangler invoked directly rather than through cloudflare/wrangler-action.
       # The action picks a package manager by looking at the REPO ROOT, finds
       # pnpm-lock.yaml, and shells out to pnpm to install wrangler — which this job
-      # does not have, because docs-site is deliberately npm. kaambaan's identical
+      # does not have, because docs-site is deliberately npm. superpipeline's identical
       # job failed exactly this way on its first real run, with "Unable to locate
       # executable file: pnpm", before it ever reached Cloudflare.
       # Run from a scratch directory, NOT from docs-site and NOT from the repo root.

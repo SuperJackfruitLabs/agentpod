@@ -5,7 +5,7 @@
  * Fix round 1 finding: `index.ts:173-181`'s
  * `matrixBridge ? createStationMatrixCredentialRoutes({...}) : new Hono()`
  * had zero coverage, because nothing in this suite boots `index.ts` (DB
- * init, the node sweeper, the kaambaan bridge, the real Matrix bridge — all
+ * init, the node sweeper, the superpipeline bridge, the real Matrix bridge — all
  * side effects this suite has never wanted). A swapped ternary arm, or an
  * `&&` typo in place of `? :`, would silently make the endpoint vanish for
  * a configured deployment or throw for an unconfigured one, and nothing

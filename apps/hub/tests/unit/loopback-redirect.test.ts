@@ -17,7 +17,7 @@ import {
 } from "../../src/config";
 
 const cli: OAuthClient = { id: "apn", redirectUris: [LOOPBACK_MARKER] };
-const plane: OAuthClient = { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] };
+const plane: OAuthClient = { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] };
 
 describe("what a native app may register back to", () => {
   test("any port on 127.0.0.1, which is the whole point", () => {
@@ -88,7 +88,7 @@ describe("what it must refuse", () => {
 
 describe("the marker is opt-in, per client", () => {
   test("a client without it gets no loopback at all", () => {
-    // kaambaan is a web plane. If it ever asked to redirect to a machine-local port, that is a
+    // superpipeline is a web plane. If it ever asked to redirect to a machine-local port, that is a
     // compromise, not a feature.
     expect(isRegisteredRedirect(plane, "http://127.0.0.1:8080/callback")).toBe(false);
   });

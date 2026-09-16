@@ -1,5 +1,5 @@
 /**
- * POST /public/bridge/kaambaan/push — how a board tells the hub a gate is open.
+ * POST /public/bridge/superpipeline/push — how a board tells the hub a gate is open.
  *
  * **Public**, and mounted outside `/api/*` deliberately: the caller is a
  * Cloudflare Worker holding a shared signing secret, not a browser holding a
@@ -8,8 +8,8 @@
  * "a machine with a secret" (see `runtime-callback.ts`), so it goes there
  * rather than carving an exemption into a security middleware.
  *
- * Authentication is kaambaan's own outbound signature — HMAC-SHA256 over the
- * exact request bytes, `sha256=<hex>` in `X-Kaambaan-Signature`, the same
+ * Authentication is superpipeline's own outbound signature — HMAC-SHA256 over the
+ * exact request bytes, `sha256=<hex>` in `X-Superpipeline-Signature`, the same
  * scheme its inbound GitHub verifier uses. The bytes are read once and hashed
  * before being parsed, because a signature over a re-serialized object is a
  * signature over something the sender never sent.
@@ -29,9 +29,9 @@ import {
   type GateProjectionDeps,
 } from "../services/matrix-as/gates";
 
-const log = createLogger("kaambaan-push");
+const log = createLogger("superpipeline-push");
 
-export interface KaambaanPushDeps extends GateProjectionDeps {
+export interface SuperpipelinePushDeps extends GateProjectionDeps {
   /** The signing secret shared with the board's push config. */
   secret: string | undefined;
   /** Which fleet this board's gates belong to. */
@@ -62,14 +62,14 @@ async function signatureMatches(secret: string, raw: string, header: string): Pr
   return diff === 0;
 }
 
-export function createKaambaanPushRoutes(deps: KaambaanPushDeps) {
-  return new Hono().post("/bridge/kaambaan/push", async (c) => {
+export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
+  return new Hono().post("/bridge/superpipeline/push", async (c) => {
     if (!deps.secret) {
       log.warn("push rejected: no signing secret configured");
       return c.json({ error: "not configured" }, 503);
     }
 
-    const signature = c.req.header("X-Kaambaan-Signature");
+    const signature = c.req.header("X-Superpipeline-Signature");
     if (!signature) return c.json({ error: "unsigned" }, 401);
 
     // Read the bytes once, verify those, and only then parse them.
@@ -88,7 +88,7 @@ export function createKaambaanPushRoutes(deps: KaambaanPushDeps) {
     }
 
     if (!isGatePending(body)) {
-      // Another event kaambaan pushes — work.available, gate.resolved — or a
+      // Another event superpipeline pushes — work.available, gate.resolved — or a
       // shape this build does not know. 200, because it was delivered fine and
       // a non-2xx would make the board retry something it will never like.
       return c.json({ ok: true, ignored: true }, 200);

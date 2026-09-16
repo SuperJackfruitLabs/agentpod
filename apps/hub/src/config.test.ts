@@ -164,18 +164,18 @@ describe("parseOAuthClients", () => {
   });
 
   it("parses one client with one redirect URI", () => {
-    expect(parseOAuthClients("kaambaan|https://kaambaan.dev/hub/callback")).toEqual([
-      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+    expect(parseOAuthClients("superpipeline|https://superpipeline.dev/hub/callback")).toEqual([
+      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
     ]);
   });
 
   it("parses several clients", () => {
     expect(
       parseOAuthClients(
-        "kaambaan|https://kaambaan.dev/hub/callback,supermessage|https://supermessage.dev/hub/callback",
+        "superpipeline|https://superpipeline.dev/hub/callback,supermessage|https://supermessage.dev/hub/callback",
       ),
     ).toEqual([
-      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
       { id: "supermessage", redirectUris: ["https://supermessage.dev/hub/callback"] },
     ]);
   });
@@ -183,13 +183,13 @@ describe("parseOAuthClients", () => {
   it("merges repeated client keys into one entry with several URIs", () => {
     expect(
       parseOAuthClients(
-        "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|http://localhost:5174/hub/callback",
+        "superpipeline|https://superpipeline.dev/hub/callback,superpipeline|http://localhost:5174/hub/callback",
       ),
     ).toEqual([
       {
-        id: "kaambaan",
+        id: "superpipeline",
         redirectUris: [
-          "https://kaambaan.dev/hub/callback",
+          "https://superpipeline.dev/hub/callback",
           "http://localhost:5174/hub/callback",
         ],
       },
@@ -199,17 +199,17 @@ describe("parseOAuthClients", () => {
   it("does not repeat a URI registered twice for the same client", () => {
     expect(
       parseOAuthClients(
-        "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|https://kaambaan.dev/hub/callback",
+        "superpipeline|https://superpipeline.dev/hub/callback,superpipeline|https://superpipeline.dev/hub/callback",
       ),
     ).toEqual([
-      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
     ]);
   });
 
   it("trims whitespace around every part", () => {
     expect(
-      parseOAuthClients(" kaambaan | https://kaambaan.dev/hub/callback , "),
-    ).toEqual([{ id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] }]);
+      parseOAuthClients(" superpipeline | https://superpipeline.dev/hub/callback , "),
+    ).toEqual([{ id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] }]);
   });
 
   it("skips a malformed entry rather than throwing, and does not widen the rest", () => {
@@ -223,25 +223,25 @@ describe("parseOAuthClients", () => {
         "emptyuri|",                                // empty URI
         "  |  ",                                    // both empty
         "too|many|pipes",                           // ambiguous
-        "kaambaan|https://kaambaan.dev/hub/callback",
+        "superpipeline|https://superpipeline.dev/hub/callback",
       ].join(","),
     );
     expect(clients).toEqual([
-      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
     ]);
   });
 });
 
 describe("findOAuthClient", () => {
-  const registry = parseOAuthClients("kaambaan|https://kaambaan.dev/hub/callback");
+  const registry = parseOAuthClients("superpipeline|https://superpipeline.dev/hub/callback");
 
   it("finds a registered client by exact id", () => {
-    expect(findOAuthClient("kaambaan", registry)?.id).toBe("kaambaan");
+    expect(findOAuthClient("superpipeline", registry)?.id).toBe("superpipeline");
   });
 
   it("returns null for an unknown, empty or absent id", () => {
     expect(findOAuthClient("supermessage", registry)).toBeNull();
-    expect(findOAuthClient("KAAMBAAN", registry)).toBeNull();
+    expect(findOAuthClient("SUPERPIPELINE", registry)).toBeNull();
     expect(findOAuthClient("", registry)).toBeNull();
     expect(findOAuthClient(null, registry)).toBeNull();
     expect(findOAuthClient(undefined, registry)).toBeNull();
@@ -249,31 +249,31 @@ describe("findOAuthClient", () => {
 
   it("returns null against the default (empty) registry — a hub that has not opted in", () => {
     expect(oauthClients).toEqual([]);
-    expect(findOAuthClient("kaambaan")).toBeNull();
+    expect(findOAuthClient("superpipeline")).toBeNull();
   });
 });
 
 describe("isRegisteredRedirect", () => {
   const client = parseOAuthClients(
-    "kaambaan|https://kaambaan.dev/hub/callback,kaambaan|http://localhost:5174/hub/callback",
+    "superpipeline|https://superpipeline.dev/hub/callback,superpipeline|http://localhost:5174/hub/callback",
   )[0]!;
 
   it("accepts an exactly registered URI", () => {
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback")).toBe(true);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev/hub/callback")).toBe(true);
     expect(isRegisteredRedirect(client, "http://localhost:5174/hub/callback")).toBe(true);
   });
 
   it("refuses anything that is not the whole string", () => {
     // Prefix matching is how open redirectors are built: every one of these
     // sends the code to somewhere the operator never registered.
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback/x")).toBe(false);
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback?a=1")).toBe(false);
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callback#f")).toBe(false);
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev/hub/callbac")).toBe(false);
-    expect(isRegisteredRedirect(client, "http://kaambaan.dev/hub/callback")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev/hub/callback/x")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev/hub/callback?a=1")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev/hub/callback#f")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev/hub/callbac")).toBe(false);
+    expect(isRegisteredRedirect(client, "http://superpipeline.dev/hub/callback")).toBe(false);
     expect(isRegisteredRedirect(client, "https://evil.dev/hub/callback")).toBe(false);
-    expect(isRegisteredRedirect(client, "https://kaambaan.dev.evil.dev/hub/callback")).toBe(false);
-    expect(isRegisteredRedirect(client, " https://kaambaan.dev/hub/callback ")).toBe(false);
+    expect(isRegisteredRedirect(client, "https://superpipeline.dev.evil.dev/hub/callback")).toBe(false);
+    expect(isRegisteredRedirect(client, " https://superpipeline.dev/hub/callback ")).toBe(false);
     expect(isRegisteredRedirect(client, "")).toBe(false);
   });
 });
@@ -294,14 +294,14 @@ describe("oauthClients at module scope", () => {
       ],
       env: {
         ...process.env,
-        HUB_OAUTH_CLIENTS: "kaambaan|https://kaambaan.dev/hub/callback",
+        HUB_OAUTH_CLIENTS: "superpipeline|https://superpipeline.dev/hub/callback",
       },
       stdout: "pipe",
       stderr: "pipe",
     });
     expect(proc.exitCode).toBe(0);
     expect(JSON.parse(proc.stdout.toString())).toEqual([
-      { id: "kaambaan", redirectUris: ["https://kaambaan.dev/hub/callback"] },
+      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
     ]);
   });
 });

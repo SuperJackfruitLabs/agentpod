@@ -1,8 +1,8 @@
 /**
- * A client for kaambaan's agent contract — the surface a `kbn_` token reaches,
+ * A client for superpipeline's agent contract — the surface a `kbn_` token reaches,
  * and nothing else.
  *
- * ## Why this is not `@kaambaan/agent-sdk`
+ * ## Why this is not `@superpipeline/agent-sdk`
  *
  * The SDK now speaks `kbn_` bearer auth and gained `context(work)`, which is
  * what removed the spike's dev-header dependency, and this client deliberately
@@ -11,7 +11,7 @@
  * of finality:
  *
  * 1. **It is not published.** `packages/agent-sdk/package.json` is
- *    `"private": true` with `"main": "./src/index.ts"`, and `@kaambaan/agent-sdk`
+ *    `"private": true` with `"main": "./src/index.ts"`, and `@superpipeline/agent-sdk`
  *    is a 404 on npm. There is no way to depend on it from another repo short
  *    of vendoring the file — and vendoring an unversioned copy is worse than an
  *    honest reimplementation, because it looks like a dependency.
@@ -29,7 +29,7 @@
  *
  * ## The two failures this client refuses to blur
  *
- * kaambaan checks identity **before** the lease (board-do.ts:1746-1766) so that
+ * superpipeline checks identity **before** the lease (board-do.ts:1746-1766) so that
  * these never collapse into one another:
  *
  * - **403 `NOT_RUN_OWNER`** — the run belongs to another agent. A bug in the
@@ -38,7 +38,7 @@
  *   Stop working; someone else has it.
  *
  * Both are surfaced as `code` on the thrown error, and classified by code
- * rather than by status, because kaambaan answers 403 for
+ * rather than by status, because superpipeline answers 403 for
  * `SEPARATION_OF_DUTIES` and 409 for `GATE_NOT_PENDING` as well.
  */
 
@@ -59,13 +59,13 @@ export type Fetcher = (
  * two places for a header or a status to be handled differently.
  */
 /**
- * How long a single kaambaan call may take before it is abandoned.
+ * How long a single superpipeline call may take before it is abandoned.
  *
  * Generous, because a claim is allowed to be slow: it wakes a Durable Object, which can cold
  * start. It exists to bound the pathological case, not to police the normal one — measured
  * from infra, an ordinary refusal returns in about a third of a second.
  */
-export const KAAMBAAN_REQUEST_TIMEOUT_MS = 30_000;
+export const SUPERPIPELINE_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * A bare `fetch` here had no timeout, so a request that was sent and never answered blocked the
@@ -77,11 +77,11 @@ export const KAAMBAAN_REQUEST_TIMEOUT_MS = 30_000;
  * so a hung call releases its socket instead of leaking one per cycle.
  */
 export const fetchAdapter: Fetcher = async (url, init) => {
-  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(KAAMBAAN_REQUEST_TIMEOUT_MS) });
+  const res = await fetch(url, { ...init, signal: AbortSignal.timeout(SUPERPIPELINE_REQUEST_TIMEOUT_MS) });
   return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
 };
 
-export interface KaambaanClientOptions {
+export interface SuperpipelineClientOptions {
   baseUrl: string;
   boardId: string;
   /** The agent's own credential. Decision 3: an agent's authority is its own. */
@@ -118,12 +118,12 @@ export interface RunReference {
 /**
  * One question this run asked a human, as the run read surface returns it.
  *
- * `answer.option` is the **`name`** of the option that was chosen — kaambaan's
+ * `answer.option` is the **`name`** of the option that was chosen — superpipeline's
  * own spelling, which is why the bridge sends ACP's `optionId` as `name` when
  * it asks (see `permission.ts`).
  *
  * `cancelled` covers every way a question dies: the run ended or was reclaimed,
- * a human moved the card, or a newer question superseded it. kaambaan has no
+ * a human moved the card, or a newer question superseded it. superpipeline has no
  * separate "superseded" status, so all of them mean the same thing to a waiting
  * agent — stop waiting, nobody is going to answer this.
  */
@@ -170,27 +170,27 @@ export interface RunLease {
   leaseEpoch: number;
 }
 
-/** A refusal from the board, carrying kaambaan's own error code when it sent one. */
-export class KaambaanApiError extends Error {
+/** A refusal from the board, carrying superpipeline's own error code when it sent one. */
+export class SuperpipelineApiError extends Error {
   constructor(
     readonly status: number,
     readonly path: string,
-    /** kaambaan's `BoardErrorCode`, or null when the body carried none. */
+    /** superpipeline's `BoardErrorCode`, or null when the body carried none. */
     readonly code: string | null,
     message: string,
   ) {
     super(message);
-    this.name = "KaambaanApiError";
+    this.name = "SuperpipelineApiError";
   }
 }
 
 /**
  * The lease lapsed: the card has been re-queued and may already be someone
- * else's. Stop work — and, because kaambaan fences its own state but nothing
+ * else's. Stop work — and, because superpipeline fences its own state but nothing
  * fences the machine, end the ACP session too.
  */
 export function isLeaseSuperseded(err: unknown): boolean {
-  return err instanceof KaambaanApiError && err.code === "STALE_LEASE";
+  return err instanceof SuperpipelineApiError && err.code === "STALE_LEASE";
 }
 
 /**
@@ -198,10 +198,10 @@ export function isLeaseSuperseded(err: unknown): boolean {
  * permanently refused, and repeating it is repeating the hijack.
  */
 export function isForeignRun(err: unknown): boolean {
-  return err instanceof KaambaanApiError && err.code === "NOT_RUN_OWNER";
+  return err instanceof SuperpipelineApiError && err.code === "NOT_RUN_OWNER";
 }
 
-/** kaambaan replies `{error: {ok:false, code, message}}`, or `{error: "…"}`. */
+/** superpipeline replies `{error: {ok:false, code, message}}`, or `{error: "…"}`. */
 function readError(body: unknown): { code: string | null; message: string } {
   const e = (body as { error?: unknown } | null)?.error;
   if (typeof e === "string") return { code: null, message: e };
@@ -215,16 +215,16 @@ function readError(body: unknown): { code: string | null; message: string } {
   return { code: null, message: "" };
 }
 
-export class KaambaanClient {
+export class SuperpipelineClient {
   private readonly baseUrl: string;
   private readonly boardId: string;
   private readonly token: string;
   private readonly fetch: Fetcher;
 
-  constructor(opts: KaambaanClientOptions) {
+  constructor(opts: SuperpipelineClientOptions) {
     if (!opts.token.startsWith("kbn_")) {
       throw new Error(
-        'KaambaanClient: token must be a kaambaan agent token ("kbn_…"), minted via "Connect an agent"',
+        'SuperpipelineClient: token must be a superpipeline agent token ("kbn_…"), minted via "Connect an agent"',
       );
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -235,7 +235,7 @@ export class KaambaanClient {
 
   private headers(): Record<string, string> {
     // Bearer only. The spike sent `X-Tenant-Id: tnt_dev` because no
-    // agent-readable read existed; a deployed kaambaan rejects dev headers, so
+    // agent-readable read existed; a deployed superpipeline rejects dev headers, so
     // sending one is a bug that surfaces only against production.
     return { "Content-Type": "application/json", Authorization: `Bearer ${this.token}` };
   }
@@ -255,7 +255,7 @@ export class KaambaanClient {
       // A non-JSON body is a proxy or a crash; the status is the whole story.
     }
     const { code, message } = readError(parsed);
-    throw new KaambaanApiError(
+    throw new SuperpipelineApiError(
       res.status,
       path,
       code,
@@ -267,7 +267,7 @@ export class KaambaanClient {
    * Claim the next ready card, or null when there is none.
    *
    * A bare `{claimed:false}` is also what an over-budget board and an agent at
-   * its concurrency cap return (board-do.ts:1301-1320). kaambaan does not say
+   * its concurrency cap return (board-do.ts:1301-1320). superpipeline does not say
    * which, so neither does this — inventing a reason we were not told is how a
    * paused board gets reported as an idle one.
    *
@@ -314,7 +314,7 @@ export class KaambaanClient {
   /**
    * Every gate on this board still waiting on a human.
    *
-   * The read half of the reconciliation sweep. kaambaan pushes a gate when it
+   * The read half of the reconciliation sweep. superpipeline pushes a gate when it
    * opens and dead-letters the delivery after five attempts, at which point
    * the gate is silent on both sides — the card blocked on an approval nobody
    * was told about. This is how the hub asks instead of waiting to be told.
@@ -346,7 +346,7 @@ export class KaambaanClient {
     return this.verb(lease, "heartbeat");
   }
 
-  /** Note the action is `activities`; kaambaan's RPC method is `postActivity`. */
+  /** Note the action is `activities`; superpipeline's RPC method is `postActivity`. */
   activity(lease: RunLease, activity: BoardActivity): Promise<unknown> {
     return this.verb(lease, "activities", { ...activity });
   }
@@ -355,7 +355,7 @@ export class KaambaanClient {
     return this.verb(lease, "complete", handoff === undefined ? {} : { handoff });
   }
 
-  /** Action name `submit`; kaambaan's RPC method is `submitForReview`. */
+  /** Action name `submit`; superpipeline's RPC method is `submitForReview`. */
   submitForReview(lease: RunLease, output?: unknown): Promise<unknown> {
     return this.verb(lease, "submit", output === undefined ? {} : { output });
   }

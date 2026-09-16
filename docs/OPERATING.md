@@ -1062,12 +1062,12 @@ against a *copy* — never against the original.
 
 ---
 
-## 8. The kaambaan bridge
+## 8. The superpipeline bridge
 
-The bridge lets this hub **claim work from a kaambaan board** and run it on a station. It is
+The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It is
 outbound-only: it adds no HTTP route, opens no port, and nothing about a hub with it off is
 different from a hub built before it existed. See
-[DEPLOYMENT.md → kaambaan bridge](./DEPLOYMENT.md#kaambaan-bridge) for the three variables
+[DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the three variables
 and how the hub refuses a bad roster at boot.
 
 ### Is it on?
@@ -1075,14 +1075,14 @@ and how the hub refuses a bad roster at boot.
 The hub prints one line at boot, always, on or off:
 
 ```bash
-journalctl -u agentpod-hub | grep 'kaambaan bridge:'
-# kaambaan bridge: claiming as codex-mac, pi-vps
-# kaambaan bridge: (disabled)
+journalctl -u agentpod-hub | grep 'superpipeline bridge:'
+# superpipeline bridge: claiming as codex-mac, pi-vps
+# superpipeline bridge: (disabled)
 ```
 
 Then one `claiming` line per roster entry with its board, station, mode and base URL.
 
-> **`ENABLE_KAAMBAAN_BRIDGE=1` does not turn it on.** `isBridgeEnabled()` compares against
+> **`ENABLE_SUPERPIPELINE_BRIDGE=1` does not turn it on.** `isBridgeEnabled()` compares against
 > the literal lowercase string `"true"` — `1`, `TRUE` and `yes` all read as off. Boot
 > validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation
 > *and* starts nothing; the boot line above is what tells you which happened.
@@ -1095,10 +1095,10 @@ None of these are configurable — they are constants in `services/bridge/`:
 |---|---|---|
 | poll | 5s | after a cycle that found nothing to claim |
 | backoff | 30s | after a thrown cycle, and after `not-ready` or `released` — claim/release/claim is not a fix |
-| heartbeat | 60s | while a card is being worked (kaambaan reclaims an unheartbeated run at 15 min) |
+| heartbeat | 60s | while a card is being worked (superpipeline reclaims an unheartbeated run at 15 min) |
 | turn timeout | 30 min | one prompt turn; on expiry the run is failed on the board and the session ended |
 
-**One status halts a loop permanently: `foreign-run`** (kaambaan answered 403 `NOT_RUN_OWNER`).
+**One status halts a loop permanently: `foreign-run`** (superpipeline answered 403 `NOT_RUN_OWNER`).
 The agent stops claiming and only a hub restart resumes it — there is no route or metric that
 reports this, so `grep 'halting: a run belonged to another agent'` in the hub log is the only
 signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the loop claims again.
@@ -1106,7 +1106,7 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
-`(external_source, external_run_id)`; `external_source` is always `kaambaan`.
+`(external_source, external_run_id)`; `external_source` is always `superpipeline`.
 
 | `outcome` | Means |
 |---|---|
@@ -1120,7 +1120,7 @@ There is no API for the ledger — Postgres is the read path. One row per claime
 whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written
 once the first ACP event arrives).
 
-Two id spaces meet in this table and must never be confused: `external_run_id` is kaambaan's
+Two id spaces meet in this table and must never be confused: `external_run_id` is superpipeline's
 `run_…`, and `acp_run_id` is AgentPod's own `attempt_<uuid>` — one prompt-turn on a station,
 minted locally. A claimed card takes as many attempts as the work takes. Both directions are
 enforced in the database, not just in code: `acp_runs.id` must start `attempt_`, and both
@@ -1128,7 +1128,7 @@ tables refuse an `external_run_id` that starts `attempt_`.
 
 Every row carries `tenant_id`, and every ledger read and write is built through
 `tenantScope()`, which binds the tenant as the *first* predicate and refuses a tenant id that
-is not AgentPod's own `fleet_<20 hex>` grammar — a kaambaan `tnt_…` cannot become a predicate
+is not AgentPod's own `fleet_<20 hex>` grammar — a superpipeline `tnt_…` cannot become a predicate
 here. Today `resolveTenantForUser` returns the bootstrap tenant `fleet_00000000000000000000`
 for everyone; the boundary is in place ahead of the mapping.
 
@@ -1178,7 +1178,7 @@ are under [Troubleshooting](#9-troubleshooting).
 **A Fly runtime is `stopped` but still billing:**
 - Also expected. A stopped Fly machine still bills its rootfs, and the volume bills for as long as the **app** exists. Only **Destroy** ends the charge. `flyctl apps list` shows what is still there.
 
-**Is the kaambaan bridge's coalescing working, and by how much?**
+**Is the superpipeline bridge's coalescing working, and by how much?**
 
 The bridge projects a harness's ACP transcript into board activities, and it must not do so 1:1 — one trivial prompt was measured at 57 events from Codex and 1,051 from Hermes, so a harness that streams token by token would otherwise fire a thousand POSTs at a board for one instruction. Every dispatch records both ends of its own transcript, so the question is answerable from the hub alone:
 
@@ -1200,10 +1200,10 @@ The same two numbers appear once per worked card in the hub log — `journalctl 
 
 **A card on the board is sitting in `input-required`:**
 
-The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in kaambaan moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
+The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in superpipeline moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
 
-- **Only a human can answer it.** kaambaan refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
-- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `KAAMBAAN_BRIDGE_AGENTS` (default 30 minutes) — *not* by kaambaan's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips kaambaan's circuit breaker and parks for a human.
+- **Only a human can answer it.** superpipeline refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
+- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `SUPERPIPELINE_BRIDGE_AGENTS` (default 30 minutes) — *not* by superpipeline's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips superpipeline's circuit breaker and parks for a human.
 - **What gets asked depends on the mode.** `full-auto` never asks. `accept-edits` — the supervised setting — auto-approves file writes and asks about anything that executes. `ask` asks about every tool call, which is a great deal of asking; it is a mode for a board somebody is watching, not a default.
 - `journalctl -u agentpod-hub | grep -E 'permission request'` shows both ends: `a human answered a permission request` with the option that was chosen, and `a permission request went unanswered` with the reason.
 

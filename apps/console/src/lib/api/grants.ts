@@ -19,7 +19,7 @@ export interface Grant {
    *
    * One agent, named outright, with no patterns of any kind. The two namespaced
    * pattern forms that used to live here — `agentpod:<node>/<stationKey>` and
-   * `kaambaan:<agentId>` — are deleted rather than narrowed (charter
+   * `superpipeline:<agentId>` — are deleted rather than narrowed (charter
    * decisions/2026-08-30-an-agent-is-a-principal.md §3): they matched things
    * nobody intended, `hermes:*` silently spanned nodes, and an agent is an
    * identity rather than a place a station happens to be.
@@ -161,7 +161,7 @@ export function grantValueProblem(value: string): string | null {
   const trimmed = value.trim();
   if (trimmed === "") return "empty";
 
-  if (/^(agentpod|kaambaan|org-plane):/.test(trimmed)) {
+  if (/^(agentpod|superpipeline|org-plane):/.test(trimmed)) {
     return "that form is gone — a grant now names one agent by its principal id (prn_…), with no plane prefix and no patterns";
   }
 

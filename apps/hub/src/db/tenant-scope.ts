@@ -2,9 +2,9 @@
  * The tenant isolation guard.
  *
  * Isolation is a property of the data-access layer, not a filter every caller
- * has to remember to add. The principle is kaambaan's — *"there is NO unscoped
+ * has to remember to add. The principle is superpipeline's — *"there is NO unscoped
  * query builder"* — and it is the strongest thing in either codebase; the
- * implementation is not, because kaambaan builds raw SQL strings for D1 and this
+ * implementation is not, because superpipeline builds raw SQL strings for D1 and this
  * is Drizzle over Postgres. What transfers is the shape: a tenant predicate that
  * is built first, a table whitelist that refuses anything not registered, and a
  * tenant that cannot be absent.
@@ -69,9 +69,9 @@ export class TenantIsolationError extends Error {
 /**
  * Narrow `tenantId` to a real AgentPod tenant id or throw.
  *
- * Stricter than kaambaan's equivalent, which only checks for a non-empty string.
+ * Stricter than superpipeline's equivalent, which only checks for a non-empty string.
  * The extra check earns its place across the seam: `tnt_5f2b8c1a9d3e4076` is a
- * perfectly well-formed *kaambaan* tenant naming a boundary in a different
+ * perfectly well-formed *superpipeline* tenant naming a boundary in a different
  * database, and once a bridge exists it is a value that can reach this function.
  * A non-empty-string check would accept it and build a predicate that matches
  * nothing — a query that returns zero rows and looks like an empty fleet rather
@@ -195,7 +195,7 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
     table: principalIdentities,
     reason:
       "Hangs off `user`, which is exempt for the same reason: a principal is not INSIDE a fleet, " +
-      "it reaches one. The mapping says a person here is the same person on Matrix or kaambaan, " +
+      "it reaches one. The mapping says a person here is the same person on Matrix or superpipeline, " +
       "which is true regardless of which fleet they reach — a tenant column would imply an " +
       "identity could differ per fleet, and it cannot. " +
       "REVISIT IF THIS BECOMES REACHABLE OVER AN API: nothing today lists these rows, and every " +
@@ -295,7 +295,7 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
 /**
  * The tenant predicate, always bound first.
  *
- * Ordering is kaambaan's invariant and it costs nothing to keep: the tenant is
+ * Ordering is superpipeline's invariant and it costs nothing to keep: the tenant is
  * never one condition among several that a later edit might reorder away.
  */
 export function tenantScope<T extends TenantScopedTable>(

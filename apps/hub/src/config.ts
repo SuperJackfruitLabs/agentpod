@@ -223,13 +223,13 @@ export const config = {
   },
 
   bridge: {
-    // Whether this hub claims work from a kaambaan board at all. The bridge's
+    // Whether this hub claims work from a superpipeline board at all. The bridge's
     // own `isBridgeEnabled()` remains the authority at runtime (it requires the
     // literal string "true", like isProviderEnabled); this copy exists so
     // validate-config can scope its rule the way it scopes the provisioner
     // ones — a hub that never claims must not be stopped from booting by a
     // bridge variable. Off, and never inferred from a token being present.
-    enabled: getEnvBool('ENABLE_KAAMBAAN_BRIDGE', false),
+    enabled: getEnvBool('ENABLE_SUPERPIPELINE_BRIDGE', false),
   },
 
   // Database
@@ -358,7 +358,7 @@ export interface OAuthClient {
 /**
  * Parse `HUB_OAUTH_CLIENTS`:
  *
- *   kaambaan|https://kaambaan.dev/hub/callback,supermessage|https://…
+ *   superpipeline|https://superpipeline.dev/hub/callback,supermessage|https://…
  *
  * Several URIs for one client: repeat the client key.
  *

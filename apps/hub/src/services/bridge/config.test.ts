@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { isBridgeEnabled, loadBridgeConfig, BRIDGE_ENV_FLAG } from "./config";
 
-const KEYS = [BRIDGE_ENV_FLAG, "KAAMBAAN_BASE_URL", "KAAMBAAN_BRIDGE_AGENTS"] as const;
+const KEYS = [BRIDGE_ENV_FLAG, "SUPERPIPELINE_BASE_URL", "SUPERPIPELINE_BRIDGE_AGENTS"] as const;
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 
 const AGENT = {
@@ -27,8 +27,8 @@ function env(over: Partial<Record<(typeof KEYS)[number], string | undefined>>) {
 const enabled = (over: Record<string, unknown> = {}) =>
   env({
     [BRIDGE_ENV_FLAG]: "true",
-    KAAMBAAN_BASE_URL: "https://kaambaan.example",
-    KAAMBAAN_BRIDGE_AGENTS: JSON.stringify([{ ...AGENT, ...over }]),
+    SUPERPIPELINE_BASE_URL: "https://superpipeline.example",
+    SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([{ ...AGENT, ...over }]),
   });
 
 afterEach(() => {
@@ -47,7 +47,7 @@ describe("the bridge is off unless it is switched on", () => {
 
   test("only the literal string 'true' enables it", () => {
     for (const v of ["false", "1", "yes", "TRUE", ""]) {
-      env({ [BRIDGE_ENV_FLAG]: v, KAAMBAAN_BASE_URL: "https://k", KAAMBAAN_BRIDGE_AGENTS: "[]" });
+      env({ [BRIDGE_ENV_FLAG]: v, SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "[]" });
       expect(isBridgeEnabled()).toBe(false);
     }
   });
@@ -55,7 +55,7 @@ describe("the bridge is off unless it is switched on", () => {
   test("credentials alone never enable it", () => {
     // The provisioner rule: nothing is inferred from credentials being present.
     // A token left in an env file is not a decision to start claiming work.
-    env({ KAAMBAAN_BASE_URL: "https://k", KAAMBAAN_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
+    env({ SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
     expect(isBridgeEnabled()).toBe(false);
     expect(loadBridgeConfig()).toBeNull();
   });
@@ -63,30 +63,30 @@ describe("the bridge is off unless it is switched on", () => {
   test("switched on with a valid agent, it loads", () => {
     enabled();
     const cfg = loadBridgeConfig()!;
-    expect(cfg.baseUrl).toBe("https://kaambaan.example");
+    expect(cfg.baseUrl).toBe("https://superpipeline.example");
     expect(cfg.agents).toHaveLength(1);
     expect(cfg.agents[0]!.key).toBe("codex-mac");
-    expect(cfg.source).toBe("kaambaan");
+    expect(cfg.source).toBe("superpipeline");
   });
 });
 
 describe("an enabled bridge refuses to start half-configured", () => {
   test("no base URL", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", KAAMBAAN_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
-    expect(() => loadBridgeConfig()).toThrow(/KAAMBAAN_BASE_URL/);
+    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
+    expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BASE_URL/);
   });
 
   test("no agents", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", KAAMBAAN_BASE_URL: "https://k", KAAMBAAN_BRIDGE_AGENTS: "[]" });
-    expect(() => loadBridgeConfig()).toThrow(/KAAMBAAN_BRIDGE_AGENTS/);
+    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "[]" });
+    expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BRIDGE_AGENTS/);
   });
 
   test("unparseable agents", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", KAAMBAAN_BASE_URL: "https://k", KAAMBAAN_BRIDGE_AGENTS: "{not json" });
-    expect(() => loadBridgeConfig()).toThrow(/KAAMBAAN_BRIDGE_AGENTS/);
+    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "{not json" });
+    expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BRIDGE_AGENTS/);
   });
 
-  test("a token that is not a kaambaan agent token", () => {
+  test("a token that is not a superpipeline agent token", () => {
     enabled({ token: "hunter2" });
     expect(() => loadBridgeConfig()).toThrow(/kbn_/);
   });
@@ -96,8 +96,8 @@ describe("an enabled bridge refuses to start half-configured", () => {
     // identities under one name make an attribution question unanswerable.
     env({
       [BRIDGE_ENV_FLAG]: "true",
-      KAAMBAAN_BASE_URL: "https://k",
-      KAAMBAAN_BRIDGE_AGENTS: JSON.stringify([AGENT, { ...AGENT, boardId: "brd_other" }]),
+      SUPERPIPELINE_BASE_URL: "https://k",
+      SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT, { ...AGENT, boardId: "brd_other" }]),
     });
     expect(() => loadBridgeConfig()).toThrow(/codex-mac/);
   });
@@ -118,10 +118,10 @@ describe("permission mode", () => {
     expect(loadBridgeConfig()!.agents[0]!.mode).toBe("accept-edits");
   });
 
-  test("ask is allowed — kaambaan can answer a question now", () => {
+  test("ask is allowed — superpipeline can answer a question now", () => {
     // The refusal this replaces was correct when it was written: the
     // `input-required → working` transition existed and nothing invoked it.
-    // kaambaan PR #36 built the return path, so the reason is gone.
+    // superpipeline PR #36 built the return path, so the reason is gone.
     enabled({ mode: "ask" });
     expect(loadBridgeConfig()!.agents[0]!.mode).toBe("ask");
   });

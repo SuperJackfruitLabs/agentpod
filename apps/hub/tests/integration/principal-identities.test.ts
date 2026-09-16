@@ -69,7 +69,7 @@ describe("principal identities", () => {
     // The constraint that makes this table usable for what it exists for. Two
     // principals claiming one mxid makes "who sent this" unanswerable exactly
     // when it matters — attributing a human's approval, which must carry its
-    // sender or kaambaan's separation-of-duties check is void.
+    // sender or superpipeline's separation-of-duties check is void.
     await expect(
       linkIdentity(PRINCIPAL_B, "matrix", "@olivia:id.agentpod.dev")
     ).rejects.toThrow();
@@ -86,10 +86,10 @@ describe("principal identities", () => {
   });
 
   test("holds several systems for one principal", async () => {
-    await linkIdentity(PRINCIPAL_A, "kaambaan", "usr_kaambaan_a");
+    await linkIdentity(PRINCIPAL_A, "superpipeline", "usr_superpipeline_a");
 
     const all = await identitiesFor(PRINCIPAL_A);
-    expect(all.map((i) => i.system).sort()).toEqual(["kaambaan", "matrix"]);
+    expect(all.map((i) => i.system).sort()).toEqual(["matrix", "superpipeline"]);
   });
 
   test("refuses an unknown system", async () => {
@@ -105,12 +105,12 @@ describe("principal identities", () => {
   });
 
   test("unlinking is idempotent and scoped to one system", async () => {
-    await unlinkIdentity(PRINCIPAL_A, "kaambaan");
-    expect(await externalIdFor(PRINCIPAL_A, "kaambaan")).toBeNull();
+    await unlinkIdentity(PRINCIPAL_A, "superpipeline");
+    expect(await externalIdFor(PRINCIPAL_A, "superpipeline")).toBeNull();
     // Still there — unlinking one system must not touch another.
     expect(await externalIdFor(PRINCIPAL_A, "matrix")).toBe("@olivia:id.agentpod.dev");
 
-    await unlinkIdentity(PRINCIPAL_A, "kaambaan"); // again: no throw
+    await unlinkIdentity(PRINCIPAL_A, "superpipeline"); // again: no throw
   });
 
   test("deleting a principal takes its identities with it", async () => {

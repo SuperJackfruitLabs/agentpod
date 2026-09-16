@@ -98,14 +98,14 @@ describe("/api/admin/grants", () => {
   });
 
   test("refuses a value that is not a well-formed principal id", async () => {
-    // The retired `agentpod:`/`kaambaan:` namespaced form, and any other string
+    // The retired `agentpod:`/`superpipeline:` namespaced form, and any other string
     // shaped like something else — a grant now enumerates principal ids and
     // nothing else, so this must match nothing rather than look like a working
     // grant that silently permits nobody.
     const res = await app().request(`/grants/${SUBJECT}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mayDispatch: ["kaambaan:agt_x"], mayGrantReach: false }),
+      body: JSON.stringify({ mayDispatch: ["superpipeline:agt_x"], mayGrantReach: false }),
     });
     expect(res.status).toBe(400);
   });

@@ -15,7 +15,7 @@
  * anything leave the bridge. Two harnesses running the same instruction produce
  * the same activities.
  *
- * kaambaan's envelope already anticipates this (`ephemeral: true` means "render
+ * superpipeline's envelope already anticipates this (`ephemeral: true` means "render
  * transiently, replaced by the next activity") but nothing on either side
  * enforces that a producer coalesces first. This is that enforcement.
  */
@@ -25,9 +25,9 @@ import type { AcpEvent } from "@agentpod/contract";
 import { isAutoAnswered, permissionQuestion, toBoardOptions } from "./permission";
 
 /**
- * One kaambaan activity, in the shape its REST handler actually reads.
+ * One superpipeline activity, in the shape its REST handler actually reads.
  *
- * Pinned against kaambaan `apps/api/src/index.ts:390-403`, which destructures
+ * Pinned against superpipeline `apps/api/src/index.ts:390-403`, which destructures
  * `{type, ephemeral, body, action, parameter, result, signal, usage}` from the
  * request body. Note what is NOT there: `signalMetadata`. The spike sent an
  * elicitation's options in that field and they were dropped on the wire without
@@ -57,7 +57,7 @@ type ChunkKind = keyof typeof CHUNK_KINDS;
  */
 const DROPPED_KINDS = new Set([
   "available_commands_update", // the harness's slash-command catalogue
-  "session_info_update", // kaambaan derives its own state; ours would fight it
+  "session_info_update", // superpipeline derives its own state; ours would fight it
   "current_mode_update", // permission mode is the hub's business
 ]);
 
@@ -127,7 +127,7 @@ export class ActivityCoalescer {
       case "user-prompt":
         return [];
 
-      // Session lifecycle. kaambaan derives task state from activities, so
+      // Session lifecycle. superpipeline derives task state from activities, so
       // forwarding ours would fight its state machine.
       case "state":
         return [];
@@ -153,7 +153,7 @@ export class ActivityCoalescer {
           body: permissionQuestion(payload),
           signal: "select",
           // `parameter`, not `signalMetadata`: see BoardActivity. And the
-          // options are TRANSLATED, not forwarded — kaambaan echoes the chosen
+          // options are TRANSLATED, not forwarded — superpipeline echoes the chosen
           // option's `name` back, so `name` has to be the ACP `optionId`.
           parameter: { requestSeq: event.seq, options: toBoardOptions(payload.options) },
         });
@@ -191,7 +191,7 @@ export class ActivityCoalescer {
 
     if (kind in CHUNK_KINDS) {
       if (kind === "agent_thought_chunk") {
-        // kaambaan has no reasoning affordance distinct from ordinary messages,
+        // superpipeline has no reasoning affordance distinct from ordinary messages,
         // so the console's collapsible reasoning block cannot be reconstructed
         // from the activity stream. Recorded rather than hidden.
         this.lossKinds.add("agent_thought_chunk → thought (reasoning/message distinction lost)");
@@ -278,7 +278,7 @@ export class ActivityCoalescer {
   /**
    * `usage_update` is `{used, size}` — how full the context is. NOT tokens and
    * NOT money: RQ5 searched 1,108 events across both harnesses for token and
-   * cost fields and found zero. Deliberately never mapped onto kaambaan's
+   * cost fields and found zero. Deliberately never mapped onto superpipeline's
    * `usage` field, which means exactly those two things and feeds a budget cap.
    *
    * Two events per run say nothing on their own, so: track the peak, and emit

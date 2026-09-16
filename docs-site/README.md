@@ -14,7 +14,7 @@ It uses npm, and it lives at the repo root rather than under `apps/`. Both are d
 
 The site is Astro 7, which brings Vite 8. In a shared pnpm tree that re-resolves the root
 `vitest` against that Vite and breaks vitest-based suites elsewhere in the repo. The same
-change was made in kaambaan for the same reason, where it took out all 556 `apps/api`
+change was made in superpipeline for the same reason, where it took out all 556 `apps/api`
 tests on a change that touched no product code.
 
 Excluding it with a `!apps/docs` negation was tried there and rejected: the negation does
@@ -57,7 +57,7 @@ capability the code does not have should never reach the site.
    This repository has no Cloudflare secret today — the `worker` job only runs tests — so
    this is a new one rather than a widening.
 
-3. **Point the domain — and note this differs from kaambaan.** `agentpod.dev` is
+3. **Point the domain — and note this differs from superpipeline.** `agentpod.dev` is
    registered at **Porkbun and is not on Cloudflare's nameservers**, so adding a custom
    domain to the Pages project does *not* create the DNS record for you. Two steps:
 

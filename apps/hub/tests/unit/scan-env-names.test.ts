@@ -79,10 +79,10 @@ describe("scanEnvNames (#323)", () => {
     //
     // The gap is real but needs a rule that can tell a variable from a noun,
     // which this is not. Tracked rather than smuggled in here.
-    expect(scanEnvNames('throw new Error("Set KAAMBAAN_BASE_URL first");')).not.toContain(
-      "KAAMBAAN_BASE_URL"
+    expect(scanEnvNames('throw new Error("Set SUPERPIPELINE_BASE_URL first");')).not.toContain(
+      "SUPERPIPELINE_BASE_URL"
     );
-    expect(scanEnvNames('const k = "KAAMBAAN_BASE_URL";')).toContain("KAAMBAAN_BASE_URL");
+    expect(scanEnvNames('const k = "SUPERPIPELINE_BASE_URL";')).toContain("SUPERPIPELINE_BASE_URL");
   });
 
   test("ignores a backticked constant named in a comment — the #319 false red", () => {
@@ -102,11 +102,11 @@ describe("scanEnvNames (#323)", () => {
   test("still finds a real variable in a file that also comments about a constant", () => {
     const source = [
       "/** Unset means `DEFAULT_PERMISSION_WAIT_MS`. */",
-      'const enabled = getEnv("ENABLE_KAAMBAAN_BRIDGE") === "true";',
+      'const enabled = getEnv("ENABLE_SUPERPIPELINE_BRIDGE") === "true";',
     ].join("\n");
 
     const names = scanEnvNames(source);
-    expect(names).toContain("ENABLE_KAAMBAAN_BRIDGE");
+    expect(names).toContain("ENABLE_SUPERPIPELINE_BRIDGE");
     expect(names).not.toContain("DEFAULT_PERMISSION_WAIT_MS");
   });
 });

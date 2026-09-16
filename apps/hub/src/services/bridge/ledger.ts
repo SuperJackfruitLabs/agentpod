@@ -4,7 +4,7 @@
  * **The run join.** `startAttempt` is `acp_runs`' first writer — no statement
  * inserting into that table exists at any commit in this repository, and
  * production holds zero rows. What it writes is the paired fact the CHECK
- * enforces: `external_run_id` is kaambaan's work run and `external_source` says
+ * enforces: `external_run_id` is superpipeline's work run and `external_source` says
  * who minted it. The row's own id is `attempt_<uuid>`: AgentPod executes work
  * runs, it does not mint them, and one claimed card takes as many prompt-turns
  * as the work takes.
@@ -58,7 +58,7 @@ export interface PriorOutput {
   acpRunId: string | null;
 }
 
-/** AgentPod's own id space. Never `run_`, which is kaambaan's. */
+/** AgentPod's own id space. Never `run_`, which is superpipeline's. */
 const mintAttemptId = (): string => `attempt_${crypto.randomUUID()}`;
 
 const scope = (key: DispatchKey) =>
@@ -132,7 +132,7 @@ export async function startAttempt(input: StartAttemptInput): Promise<string> {
   return id;
 }
 
-/** Close an attempt. `state` is A2A's vocabulary, shared with kaambaan verbatim. */
+/** Close an attempt. `state` is A2A's vocabulary, shared with superpipeline verbatim. */
 export async function endAttempt(attemptId: string, state: string, endSeq: number | null): Promise<void> {
   await db
     .update(acpRuns)

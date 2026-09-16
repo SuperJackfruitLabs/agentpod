@@ -26,8 +26,8 @@ import { mintCode, redeemCode, CODE_TTL_MS } from "./oauth-codes";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const USER = `test-user-oauth-codes-${RUN}`;
-const CLIENT = "kaambaan";
-const REDIRECT = "https://kaambaan.dev/hub/callback";
+const CLIENT = "superpipeline";
+const REDIRECT = "https://superpipeline.dev/hub/callback";
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
 const minted: string[] = [];

@@ -1,6 +1,6 @@
 # Hub
 
-Fleet-console backend: Bun + Hono (chained routes, `AppType` export) + Drizzle/Postgres. Entry: `src/index.ts` — boot order matters: config validation → `initDatabase()` (migrations auto-apply on boot) → `resetOrphanedOnlineNodes()` → route mounting → provisioner registration → node sweeper → `startKaambaanBridge()`.
+Fleet-console backend: Bun + Hono (chained routes, `AppType` export) + Drizzle/Postgres. Entry: `src/index.ts` — boot order matters: config validation → `initDatabase()` (migrations auto-apply on boot) → `resetOrphanedOnlineNodes()` → route mounting → provisioner registration → node sweeper → `startSuperpipelineBridge()`.
 
 ## Commands
 
@@ -27,7 +27,7 @@ Test DB requirements (pgvector image + env override): see root `CLAUDE.md` / `TE
 - **Broker** (`services/broker.ts`): request/stream correlation by UUID; `request()` never rejects — resolves `{ok:false, error}` on timeout/offline/disconnect.
 - **Auth**: Better Auth, session cookies; secret comes from config (`BETTER_AUTH_SECRET`) passed explicitly to `betterAuth({secret})`. First signup becomes admin, then signup closes (`system_settings`).
 - **Stations**: presence in the `stations` table = adopted; there is no `adopted` column. Observe routes (`/api/stations/:id/...`) proxy to the node via broker and 502 on node-side failure.
-- **kaambaan bridge** (`services/bridge/`): outbound only — no route, no port. Gated on `ENABLE_KAAMBAAN_BRIDGE` being the **literal** `"true"` (`isBridgeEnabled`), while `config.bridge.enabled` uses the looser `getEnvBool`, so `=1` passes boot validation and starts nothing. `bridge_dispatches` is the ledger; `produced` is the outcome that makes at-least-once replay work, and `released` vs `abandoned` is the only record of whether a workspace was touched. Operator docs: `docs/OPERATING.md` §8, `docs/DEPLOYMENT.md`.
+- **superpipeline bridge** (`services/bridge/`): outbound only — no route, no port. Gated on `ENABLE_SUPERPIPELINE_BRIDGE` being the **literal** `"true"` (`isBridgeEnabled`), while `config.bridge.enabled` uses the looser `getEnvBool`, so `=1` passes boot validation and starts nothing. `bridge_dispatches` is the ledger; `produced` is the outcome that makes at-least-once replay work, and `released` vs `abandoned` is the only record of whether a workspace was touched. Operator docs: `docs/OPERATING.md` §8, `docs/DEPLOYMENT.md`.
 - **Errors skip CORS**: an exception thrown before Hono's CORS middleware finishes means the browser reports a CORS error — read the hub log for the real failure before chasing CORS.
 
 ## Tests

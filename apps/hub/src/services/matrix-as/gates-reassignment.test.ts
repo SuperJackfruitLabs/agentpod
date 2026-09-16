@@ -163,7 +163,7 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM matrix_gate_events WHERE tenant_id = ${BOOTSTRAP_TENANT_ID} AND board_id LIKE ${"brd_" + RUN + "%"}`;
-    await rawSql`DELETE FROM bridge_dispatches WHERE tenant_id = ${BOOTSTRAP_TENANT_ID} AND external_source = 'kaambaan' AND board_id LIKE ${"brd_" + RUN + "%"}`;
+    await rawSql`DELETE FROM bridge_dispatches WHERE tenant_id = ${BOOTSTRAP_TENANT_ID} AND external_source = 'superpipeline' AND board_id LIKE ${"brd_" + RUN + "%"}`;
     // `matrix_rooms` cascades from `stations` (ON DELETE CASCADE), so every
     // room this file created — however many stations it added below — goes
     // with it, without listing station ids by hand.
@@ -229,7 +229,7 @@ describe("reassignment: the room follows the agent, not the station", () => {
     // New work dispatched to the agent's new station.
     const cardId = `crd_${RUN}_1`;
     await db.insert(bridgeDispatches).values({
-      externalSource: "kaambaan",
+      externalSource: "superpipeline",
       externalRunId: `run_${RUN}_1`,
       tenantId: BOOTSTRAP_TENANT_ID,
       boardId: `brd_${RUN}`,
@@ -439,7 +439,7 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
     // New work dispatched to X, now that Q occupies it.
     const cardId = `crd_${RUN}_q`;
     await db.insert(bridgeDispatches).values({
-      externalSource: "kaambaan",
+      externalSource: "superpipeline",
       externalRunId: `run_${RUN}_q`,
       tenantId: BOOTSTRAP_TENANT_ID,
       boardId: `brd_${RUN}`,

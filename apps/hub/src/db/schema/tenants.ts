@@ -8,16 +8,16 @@
  * this inside", and it cannot answer the second one because a user belongs to no
  * larger thing here.
  *
- * **This tenant is local, and deliberately so.** Neither AgentPod nor kaambaan
+ * **This tenant is local, and deliberately so.** Neither AgentPod nor superpipeline
  * owns the organisation: Principal, Team, Role and authority belong to an
  * Organization plane that does not exist yet
  * (docs/strategy/2026-08-13-ecosystem-identity-decisions.md). Both products must
  * keep running standalone in the meantime, so each keeps its own boundary and
  * records an *optional* mapping to the same real organisation elsewhere — which
- * is what `externalId` + `externalSource` below are for. kaambaan is taking the
+ * is what `externalId` + `externalSource` below are for. superpipeline is taking the
  * identical shape in parallel.
  *
- * Concretely that means AgentPod does **not** mint kaambaan's `tnt_`. Two
+ * Concretely that means AgentPod does **not** mint superpipeline's `tnt_`. Two
  * products minting one prefix for rows in two different databases is exactly the
  * `run_` collision undone in #308, and doing it deliberately would be worse than
  * doing it by accident. AgentPod's tenant id space is `fleet_<20 hex>`; the
@@ -53,7 +53,7 @@ export const tenants = pgTable(
     // ── The optional external mapping ───────────────────────────────────────
     //
     // The id this tenant has in the system that actually owns the organisation,
-    // and which system that is — "kaambaan" today, "org-plane" when it exists.
+    // and which system that is — "superpipeline" today, "org-plane" when it exists.
     // Null on a standalone deployment, which is the default and must stay
     // workable: AgentPod cannot require a peer product to boot.
     //
@@ -69,14 +69,14 @@ export const tenants = pgTable(
   },
   (t) => [
     // A given organisation maps to at most one AgentPod tenant. Without this,
-    // two tenants could both claim to be the same kaambaan tenant and the
+    // two tenants could both claim to be the same superpipeline tenant and the
     // mapping would stop being a mapping. Partial by construction — NULLs are
     // distinct in a Postgres unique index, so any number of unmapped tenants
     // coexist.
     uniqueIndex("tenants_external_idx").on(t.externalSource, t.externalId),
 
     // Our own key is ours — the acp_runs precedent, for the same reason. A
-    // `tnt_…` here would be kaambaan's boundary standing in as this hub's
+    // `tnt_…` here would be superpipeline's boundary standing in as this hub's
     // primary key. Prefix-only, deliberately: the suffix family may change, the
     // id space may not.
     check("tenants_id_is_agentpod_fleet", sql`${t.id} LIKE 'fleet\\_%'`),

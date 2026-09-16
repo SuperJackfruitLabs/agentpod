@@ -584,7 +584,7 @@ export async function onNodeReportedMatrixId(
  * (`routes/station-matrix-credential.ts`) made for the credential-route mount
  * decision, and for the same reason. An inline registration inside
  * `index.ts`'s boot sequence cannot be exercised without booting the whole
- * hub (DB init, the node sweeper, the kaambaan bridge, the real Matrix
+ * hub (DB init, the node sweeper, the superpipeline bridge, the real Matrix
  * bridge) — nothing in this suite does that — so a deleted or broken
  * registration would leave every test green while a moved station silently
  * never converges: the exact defect the whole-branch review was built to

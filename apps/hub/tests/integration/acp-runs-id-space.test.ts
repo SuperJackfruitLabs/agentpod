@@ -1,7 +1,7 @@
 /**
  * Integration Test: acp_runs id-space constraints (migration 0035)
  *
- * `acp_runs.id` used to be spelled `run_…`, the same prefix kaambaan mints for a
+ * `acp_runs.id` used to be spelled `run_…`, the same prefix superpipeline mints for a
  * work run — and the schema file said so six lines above a comment reading "We
  * never mint a rival id". Two products, one id space, indistinguishable strings.
  *
@@ -32,8 +32,8 @@ const SESSION_ID = "acps_11111111-2222-4333-8444-555555555555";
 const USER_ID = "acp-runs-id-space-user";
 
 const OWN_ID = "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90";
-/** A real kaambaan work run id: `run_<16 hex>`. */
-const KAAMBAAN_RUN_ID = "run_e074a2160c4b4f28";
+/** A real superpipeline work run id: `run_<16 hex>`. */
+const SUPERPIPELINE_RUN_ID = "run_e074a2160c4b4f28";
 
 type RunRow = typeof acpRuns.$inferInsert;
 
@@ -113,16 +113,16 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
     expect(await violation(runRow({}))).toBe(ACCEPTED);
   });
 
-  test("refuses a kaambaan work run id as its own primary key", async () => {
+  test("refuses a superpipeline work run id as its own primary key", async () => {
     // The collision itself. Reverting the prefix to `run_` makes this insert
     // succeed, and this test fail.
-    expect(await violation(runRow({ id: KAAMBAAN_RUN_ID }))).toContain(
+    expect(await violation(runRow({ id: SUPERPIPELINE_RUN_ID }))).toContain(
       "acp_runs_id_is_agentpod_attempt",
     );
   });
 
   test("refuses the old prefix even on a locally-shaped id", async () => {
-    // Not just kaambaan's minted shape: the prefix itself is what is gone.
+    // Not just superpipeline's minted shape: the prefix itself is what is gone.
     expect(await violation(runRow({ id: `run_${OWN_ID.slice("attempt_".length)}` }))).toContain(
       "acp_runs_id_is_agentpod_attempt",
     );
@@ -131,7 +131,7 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
   test("keeps a dispatched run's two ids in their own spaces", async () => {
     expect(
       await violation(
-        runRow({ externalRunId: KAAMBAAN_RUN_ID, externalSource: "kaambaan" }),
+        runRow({ externalRunId: SUPERPIPELINE_RUN_ID, externalSource: "superpipeline" }),
       ),
     ).toBe(ACCEPTED);
   });
@@ -141,7 +141,7 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
       await violation(
         runRow({
           externalRunId: "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
-          externalSource: "kaambaan",
+          externalSource: "superpipeline",
         }),
       ),
     ).toContain("acp_runs_external_is_not_agentpod");
@@ -150,10 +150,10 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
   test("refuses an external run id with no source, and a source with no id", async () => {
     // #307 made these a paired presence in the contract; the storage layer is
     // where a future writer that bypasses the contract still gets caught.
-    expect(await violation(runRow({ externalRunId: KAAMBAAN_RUN_ID }))).toContain(
+    expect(await violation(runRow({ externalRunId: SUPERPIPELINE_RUN_ID }))).toContain(
       "acp_runs_external_pair",
     );
-    expect(await violation(runRow({ externalSource: "kaambaan" }))).toContain(
+    expect(await violation(runRow({ externalSource: "superpipeline" }))).toContain(
       "acp_runs_external_pair",
     );
   });

@@ -4,7 +4,7 @@
  * The three behaviours that earn their own tests here are the ones the spike
  * measured and could not fix in throwaway code:
  *
- *   409 STALE_LEASE — kaambaan fences its own state; NOTHING fences the machine.
+ *   409 STALE_LEASE — superpipeline fences its own state; NOTHING fences the machine.
  *     The original harness kept working with no idea its lease had been revoked.
  *     A 409 must stop the harness, not just the loop.
  *   403 NOT_RUN_OWNER — a different fact entirely, and never a retry.
@@ -29,7 +29,7 @@ import { bridgeDispatches } from "../../src/db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import type { BridgeAgentConfig } from "../../src/services/bridge/config";
 import { runOnce, type AcpPort, type DispatchDeps } from "../../src/services/bridge/dispatch";
-import { KaambaanClient } from "../../src/services/bridge/kaambaan";
+import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
 import { dispatchOutcome, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
@@ -56,7 +56,7 @@ type Handler = (path: string, body: unknown) => { status: number; body: unknown 
 
 function fakeBoard(handler: Handler) {
   const calls: Array<{ path: string; body: unknown }> = [];
-  const client = new KaambaanClient({
+  const client = new SuperpipelineClient({
     baseUrl: "https://board.test",
     boardId: BOARD_ID,
     token: TOKEN,
@@ -155,7 +155,7 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
 
 // ─── a board that can be asked a question ────────────────────────────────────
 
-/** One row of kaambaan's `elicitations`, as the run read surface returns it. */
+/** One row of superpipeline's `elicitations`, as the run read surface returns it. */
 interface Question {
   id: string;
   question: string;
@@ -167,7 +167,7 @@ interface Question {
 
 /**
  * A board that stores elicitations, supersedes the pending one when a new
- * question arrives (kaambaan's `openElicitation` does exactly that), and lets
+ * question arrives (superpipeline's `openElicitation` does exactly that), and lets
  * the test decide what happens to the pending question on each read.
  */
 function askingBoard(
@@ -249,14 +249,14 @@ const boardError = (code: string) => ({ error: { ok: false, code, message: code 
 
 const key = (externalRunId = RUN_ID) => ({
   tenantId: BOOTSTRAP_TENANT_ID,
-  externalSource: "kaambaan",
+  externalSource: "superpipeline",
   boardId: BOARD_ID,
   externalCardId: CARD_ID,
   externalRunId,
 });
 
 const deps = (
-  client: KaambaanClient,
+  client: SuperpipelineClient,
   acp: AcpPort,
   log?: (message: string, meta?: Record<string, unknown>) => void,
   over: Partial<DispatchDeps> = {},
@@ -265,7 +265,7 @@ const deps = (
   acp,
   agent,
   tenantId: BOOTSTRAP_TENANT_ID,
-  source: "kaambaan",
+  source: "superpipeline",
   // Long enough never to fire inside a test; the turn ends on an idle event.
   heartbeatMs: 60_000,
   turnTimeoutMs: 5_000,
@@ -344,7 +344,7 @@ describe("a card worked start to finish", () => {
 
     const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
     expect(run!.externalRunId).toBe(RUN_ID);
-    expect(run!.externalSource).toBe("kaambaan");
+    expect(run!.externalSource).toBe("superpipeline");
     expect(run!.state).toBe("completed");
     expect(run!.endedAt).toBeInstanceOf(Date);
 
@@ -395,7 +395,7 @@ describe("409 STALE_LEASE — the lease is gone, so the harness must stop", () =
     return { status: 200, body: { ok: true } };
   };
 
-  test("the ACP session is ended — kaambaan fences its data, nothing else fences the machine", async () => {
+  test("the ACP session is ended — superpipeline fences its data, nothing else fences the machine", async () => {
     const board = fakeBoard(staleBoard);
     const acp = fakeAcp(() => [chunk("still working"), chunk("and working"), idle()]);
 
@@ -592,7 +592,7 @@ describe("a claim that never started is handed straight back", () => {
 
 describe("a failure after the session started is not released", () => {
   // Releasing here would hand a card whose workspace may already be half-edited
-  // to the next claimer, with nothing recording that. kaambaan's `fail` re-queues
+  // to the next claimer, with nothing recording that. superpipeline's `fail` re-queues
   // it with a reason and a failure count, and the circuit breaker parks it for a
   // human if it keeps happening.
   test("the board is told it failed, and the reason says a session had started", async () => {
@@ -634,7 +634,7 @@ describe("a failure after the session started is not released", () => {
  * `accept-edits` auto-approves file writes but not command execution, EVERY
  * card whose work involves running something died that way.
  *
- * kaambaan PR #36 built the return path, so the question now goes to a human
+ * superpipeline PR #36 built the return path, so the question now goes to a human
  * and the answer comes back on the same lease.
  */
 describe("a permission request is asked of a human", () => {
@@ -655,7 +655,7 @@ describe("a permission request is asked of a human", () => {
     expect(posted).toBeDefined();
     expect(posted.signal).toBe("select");
     expect(posted.body).toContain("Run `bun test`");
-    // In `parameter`, which kaambaan stores — not `signalMetadata`, which it
+    // In `parameter`, which superpipeline stores — not `signalMetadata`, which it
     // removed from its contract entirely because nothing ever read it.
     expect(posted.parameter).toMatchObject({
       options: [
@@ -807,7 +807,7 @@ describe("a question nobody answers", () => {
       }),
     );
 
-    // kaambaan reclaims a lease that goes quiet for 15 minutes. Waiting for a
+    // superpipeline reclaims a lease that goes quiet for 15 minutes. Waiting for a
     // human is not going quiet, so the bound on the wait is policy, not the
     // lease — and that only holds if the beat carries on through it.
     expect(board.verbs().filter((v) => v === "heartbeat").length).toBeGreaterThan(0);
@@ -816,7 +816,7 @@ describe("a question nobody answers", () => {
 
 describe("a question that will never be answered", () => {
   test("a cancelled question stops the wait instead of running it out", async () => {
-    // kaambaan cancels a pending question when its run ends or is reclaimed,
+    // superpipeline cancels a pending question when its run ends or is reclaimed,
     // when the card is moved, or when a newer question supersedes it. All three
     // arrive as `cancelled`, and all three mean: stop waiting.
     const asked = askingBoard((q) => {
