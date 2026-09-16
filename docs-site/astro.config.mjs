@@ -4,6 +4,18 @@ import starlight from '@astrojs/starlight';
 
 export default defineConfig({
   site: 'https://docs.agentpod.dev',
+  // Astro turns on Vite's tsconfig path resolution unconditionally, and Vite
+  // 8's native resolver then discovers tsconfigs across the whole monorepo. It
+  // follows the root tsconfig's `references` into apps/console, whose tsconfig
+  // extends `.svelte-kit/tsconfig.json`, a file `svelte-kit sync` generates and
+  // git does not have. On any machine that has built the console it is there;
+  // on a fresh CI checkout it is not, and `astro sync` fails:
+  //
+  //   Tsconfig not found apps/console/.svelte-kit/tsconfig.json
+  //
+  // This site defines no path aliases, so it loses nothing by turning it off.
+  // Output is byte-identical either way.
+  vite: { resolve: { tsconfigPaths: false } },
   integrations: [
     starlight({
       title: 'AgentPod',
