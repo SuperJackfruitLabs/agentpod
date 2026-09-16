@@ -267,7 +267,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 20
+          # Astro 7 refuses to start below 22.12 ("Node.js v20.20.2 is not
+          # supported by Astro!"). The other jobs stay on 20; only this one
+          # builds the docs site. It never runs on a pull request, so a PR
+          # going green says nothing about it — that is how 20 survived here.
+          node-version: 22
           cache: npm
           cache-dependency-path: docs-site/package-lock.json
 
