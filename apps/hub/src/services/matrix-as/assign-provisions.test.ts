@@ -22,7 +22,7 @@
  * adoption, the real `POST /api/admin/agents` and
  * `PUT /api/admin/stations/:id/agent` behind the real admin guard, and the
  * real `projectGate`. Only the homeserver is faked — and `bridge_dispatches`
- * is inserted directly, because that row is kaambaan's record of work this
+ * is inserted directly, because that row is superpipeline's record of work this
  * fleet already did, not the thing under test.
  */
 
@@ -172,10 +172,10 @@ function gateDeps() {
   };
 }
 
-/** kaambaan's record that this fleet ran the card. Not the thing under test. */
+/** superpipeline's record that this fleet ran the card. Not the thing under test. */
 async function dispatched(stationId: string, cardId: string) {
   await db.insert(bridgeDispatches).values({
-    externalSource: "kaambaan",
+    externalSource: "superpipeline",
     externalRunId: `run_${cardId}`,
     tenantId: BOOTSTRAP_TENANT_ID,
     boardId: `brd_${RUN}`,

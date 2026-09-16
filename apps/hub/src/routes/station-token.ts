@@ -34,7 +34,7 @@
  * (`auth/service-signing.ts`:19-25).
  *
  * Mounted under `/api`, not `/public`: `Bearer` already passes the CSRF
- * middleware (unlike the HMAC-signed `kaambaan-push` receiver, which needs
+ * middleware (unlike the HMAC-signed `superpipeline-push` receiver, which needs
  * `/public` because a signed body is not a bearer credential), so nothing
  * here needs the exemption.
  */

@@ -2,7 +2,7 @@
  * The floor beneath push.
  *
  * `charter → decisions/2026-08-30-a-gate-closes-over-chat.md` §5: "Delivery is
- * push, made durable, with a reconciliation sweep beneath it." kaambaan retries
+ * push, made durable, with a reconciliation sweep beneath it." superpipeline retries
  * a delivery five times and then dead-letters it. At that point the gate is
  * silent on both sides — the card is blocked on an approval nobody was ever
  * told about, and neither product is looking. This asks the board directly.
@@ -321,7 +321,7 @@ describe("the gate sweep", () => {
 describe("what the sweep reads, and as whom", () => {
   const config = {
     baseUrl: "https://board.test",
-    source: "kaambaan",
+    source: "superpipeline",
     agents: [
       { key: "forge", boardId: "brd_one", token: `kbn_${"a".repeat(48)}`, stationId: "stn_1", hubUserId: "usr_1" },
       { key: "quill", boardId: "brd_two", token: `kbn_${"b".repeat(48)}`, stationId: "stn_2", hubUserId: "usr_1" },
@@ -369,7 +369,7 @@ describe("what the sweep reads, and as whom", () => {
 describe("starting the sweeper", () => {
   const config = {
     baseUrl: "https://board.test",
-    source: "kaambaan",
+    source: "superpipeline",
     agents: [{ key: "forge", boardId: "brd_one", token: `kbn_${"a".repeat(48)}`, stationId: "s", hubUserId: "u" }],
   } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
 

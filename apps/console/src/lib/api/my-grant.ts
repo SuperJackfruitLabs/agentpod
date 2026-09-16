@@ -3,7 +3,7 @@
  *
  * Read out of the principal's own token rather than from a new endpoint — the
  * hub already mints one at `/api/auth/token` carrying `mayDispatch` and
- * `mayGrantReach`, and kaambaan's web app reads it the same way (kaambaan#43).
+ * `mayGrantReach`, and superpipeline's web app reads it the same way (superpipeline#43).
  *
  * **Advisory only.** The hub decides; this exists so a control that will be
  * refused can say so before it is clicked. When it cannot find out it answers

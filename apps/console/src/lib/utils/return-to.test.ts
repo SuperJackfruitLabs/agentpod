@@ -14,7 +14,7 @@ const APP = "https://console.agentpod.dev";
 const HUB = "https://hub.agentpod.dev";
 
 const AUTHORIZE =
-  `${HUB}/api/auth/authorize?client=kaambaan&redirect_uri=https%3A%2F%2Fkaambaan.dev%2Fhub%2Fcallback` +
+  `${HUB}/api/auth/authorize?client=superpipeline&redirect_uri=https%3A%2F%2Fsuperpipeline.dev%2Fhub%2Fcallback` +
   "&state=abc&code_challenge=vX9v2t8QpM7wR3nK1sJ4dF6hL0zY5cB8aE2gN7uT1oQ&code_challenge_method=S256";
 
 test("the parameter is the one the hub actually sets", () => {

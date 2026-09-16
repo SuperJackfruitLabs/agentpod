@@ -9,7 +9,7 @@
  * Values are bare principal ids (`prn_…`), matched by equality — per charter
  * decisions/2026-08-30-an-agent-is-a-principal.md §3, which replaced the two
  * namespaced, pattern-matched forms this file used to carry
- * (`agentpod:<node>/<stationKey>`, `kaambaan:<agentId>`) with one enumeration.
+ * (`agentpod:<node>/<stationKey>`, `superpipeline:<agentId>`) with one enumeration.
  * The phased path — a third value alongside the two retiring ones — was
  * skipped: nothing is in production, so the destination is built directly.
  */

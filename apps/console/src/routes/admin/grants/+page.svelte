@@ -334,7 +334,7 @@
           <p class="text-sm font-medium">Enforced</p>
           <p class="text-xs text-muted-foreground">
             Dispatch is refused unless a grant permits it. A principal with no grant is refused
-            everywhere — on this console and on the kaambaan board.
+            everywhere — on this console and on the superpipeline board.
           </p>
         </div>
       {:else}

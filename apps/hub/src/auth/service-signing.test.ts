@@ -74,7 +74,7 @@ describe("mintPrincipalAssertion", () => {
     expect(claims.aud).toBe(config.publicUrl);
 
     // alg/kid: EdDSA, matching Better Auth's own jwt plugin and what
-    // kaambaan pins — a different algorithm here is a token no consumer's
+    // superpipeline pins — a different algorithm here is a token no consumer's
     // pinned verifier would even attempt.
     expect(header.alg).toBe("EdDSA");
     expect(header.kid).toBeTruthy();

@@ -16,7 +16,7 @@ const fixture = JSON.parse(
  * The hub as the suite's token issuer
  * (charter decisions/2026-08-15-one-issuer-and-offline-verification.md).
  *
- * These assert the CONTRACT, not the library. The moment kaambaan reads a claim,
+ * These assert the CONTRACT, not the library. The moment superpipeline reads a claim,
  * the claim's name is shared: a rename here is a silent authorization failure
  * over there, and it fails in the direction that looks like the caller simply
  * having no permission — which is the hardest kind of bug to see.
@@ -77,7 +77,7 @@ describe("the token claim contract (#332)", () => {
       resolveTenant: async () => "fleet_0123456789abcdef0123",
       // Bare principal ids, which is what a grant value is now: one agent, by
       // its own id, matched by equality. The namespaced patterns that used to
-      // sit here (`agentpod:<node>/<key>`, `kaambaan:<agentId>`) are deleted,
+      // sit here (`agentpod:<node>/<key>`, `superpipeline:<agentId>`) are deleted,
       // and a literal in the issuer's own test is how a retired form outlives
       // the code that read it.
       loadGrant: async () => ({

@@ -19,7 +19,7 @@ import { createPrincipal } from "../../src/services/principals";
  * resolved, a posture scanner grading machines it never opened.
  *
  * `createSession` is the one choke point BOTH dispatch paths pass through: the
- * console/API route (`routes/station-acp.ts`) and the kaambaan bridge
+ * console/API route (`routes/station-acp.ts`) and the superpipeline bridge
  * (`services/bridge/dispatch.ts`). Decision 4 of the ecosystem-identity decision
  * is explicit that a check covering only board-driven work leaves the most
  * common path — provisioning straight at AgentPod — unguarded, and "a control
@@ -144,9 +144,9 @@ describe("dispatch consults the control pair (#Phase 3)", () => {
   test("refuses a value that is not a principal id, rather than treating it as one", async () => {
     // Namespacing is gone along with the pattern language: a value that is not
     // this station's occupant is refused the same way whatever it looks like,
-    // whether it is shaped like the retired kaambaan namespace or anything else.
+    // whether it is shaped like the retired superpipeline namespace or anything else.
     process.env.ENFORCE_CONTROL_PAIR = "true";
-    await setGrant(USER_PRINCIPAL, { mayDispatch: ["kaambaan:agt_anything"], mayGrantReach: false });
+    await setGrant(USER_PRINCIPAL, { mayDispatch: ["superpipeline:agt_anything"], mayGrantReach: false });
 
     await expect(
       createSession({ stationId, userId: USER, mode: "default" })

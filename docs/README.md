@@ -26,8 +26,8 @@ an executable corpus that caught four real cross-repo disagreements on its first
 
 | Document | Covers |
 |----------|--------|
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Deploying from scratch: VPS hub (systemd + Postgres/pgvector + nginx), console on Cloudflare Pages, node-agent images, every hub environment variable, the kaambaan bridge |
-| [OPERATING.md](./OPERATING.md) | Day-2: enrolling nodes, adopting stations, driving capability panels, provisioning on Docker/Cloudflare/Modal/Fly, the kaambaan bridge ledger, troubleshooting |
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Deploying from scratch: VPS hub (systemd + Postgres/pgvector + nginx), console on Cloudflare Pages, node-agent images, every hub environment variable, the superpipeline bridge |
+| [OPERATING.md](./OPERATING.md) | Day-2: enrolling nodes, adopting stations, driving capability panels, provisioning on Docker/Cloudflare/Modal/Fly, the superpipeline bridge ledger, troubleshooting |
 
 ## Working on the repo
 

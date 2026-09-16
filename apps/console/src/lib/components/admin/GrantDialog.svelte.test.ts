@@ -13,7 +13,7 @@
  *
  * A value is one agent's principal id. The namespaced, pattern-matched forms
  * this dialog used to ask for — `agentpod:<node>/<stationKey>`,
- * `kaambaan:<agentId>` — are deleted rather than deprecated, so they are
+ * `superpipeline:<agentId>` — are deleted rather than deprecated, so they are
  * asserted here as REFUSALS: they are still written down in older notes and
  * still what someone would paste in first.
  */

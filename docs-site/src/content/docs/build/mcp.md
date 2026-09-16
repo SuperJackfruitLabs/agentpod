@@ -59,7 +59,7 @@ authorization model.
 ## Where work lives
 
 AgentPod is the **execution** side: where you run, and what ran there. Claiming a card,
-reporting progress and finishing work live in [kaambaan's MCP server](https://docs.kaambaan.dev/build/mcp/),
+reporting progress and finishing work live in [superpipeline's MCP server](https://docs.superpipeline.dev/build/mcp/),
 not this one.
 
 ## Next

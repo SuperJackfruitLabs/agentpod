@@ -42,7 +42,7 @@ describe("a probe that never answers", () => {
       acp: { stationReady: () => never } as never,
       agent: agent as never,
       tenantId: "tnt_x",
-      source: "kaambaan",
+      source: "superpipeline",
       log: () => {},
     } as never);
 
@@ -56,7 +56,7 @@ describe("a probe that never answers", () => {
       acp: { stationReady: async () => ({ ready: true }) } as never,
       agent: agent as never,
       tenantId: "tnt_x",
-      source: "kaambaan",
+      source: "superpipeline",
       log: () => {},
     } as never);
     // ready → it went on to claim, and found nothing

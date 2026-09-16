@@ -57,8 +57,8 @@ const SUSPENDED_USER = `test-user-authorize-suspended-${RUN}`;
 /** A signed-in operator who maps to no principal at all. */
 const UNMAPPED_USER = `test-user-authorize-unmapped-${RUN}`;
 
-const REDIRECT = "https://kaambaan.dev/hub/callback";
-const SECOND_REDIRECT = "https://kaambaan.dev/hub/callback-alt";
+const REDIRECT = "https://superpipeline.dev/hub/callback";
+const SECOND_REDIRECT = "https://superpipeline.dev/hub/callback-alt";
 
 /**
  * The registry the routes under test read. Two URIs for one client, so
@@ -66,18 +66,18 @@ const SECOND_REDIRECT = "https://kaambaan.dev/hub/callback-alt";
  * so a cross-client redirect can be attempted.
  */
 const REGISTRY: OAuthClient[] = [
-  { id: "kaambaan", redirectUris: [REDIRECT, SECOND_REDIRECT] },
+  { id: "superpipeline", redirectUris: [REDIRECT, SECOND_REDIRECT] },
   { id: "supermessage", redirectUris: ["https://supermessage.dev/hub/callback"] },
 ];
 
 /** 43 base64url characters — S256 of some verifier. */
 const CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
 
-/** The state kaambaan would send: opaque here, meaningful only to it. */
-const STATE = "opaque-state-from-kaambaan";
+/** The state superpipeline would send: opaque here, meaningful only to it. */
+const STATE = "opaque-state-from-superpipeline";
 
 const VALID: Record<string, string> = {
-  client: "kaambaan",
+  client: "superpipeline",
   redirect_uri: REDIRECT,
   state: STATE,
   code_challenge: CHALLENGE,
@@ -169,7 +169,7 @@ describe("a refusal never carries a Location header", () => {
     // client's list is. Otherwise one registered plane could collect another's
     // codes.
     const res = await authorize(signedIn, {
-      client: "kaambaan",
+      client: "superpipeline",
       redirect_uri: "https://supermessage.dev/hub/callback",
     });
 
@@ -314,7 +314,7 @@ describe("a browser with no hub session", () => {
     const back = new URL(location.searchParams.get("redirect") ?? "https://invalid.example");
 
     expect(back.pathname).toBe("/api/auth/authorize");
-    expect(back.searchParams.get("client")).toBe("kaambaan");
+    expect(back.searchParams.get("client")).toBe("superpipeline");
     expect(back.searchParams.get("redirect_uri")).toBe(REDIRECT);
     expect(back.searchParams.get("state")).toBe(STATE);
     expect(back.searchParams.get("code_challenge")).toBe(CHALLENGE);
@@ -390,7 +390,7 @@ describe("a signed-in operator authorizing a registered plane", () => {
     const [row] = await db.select().from(oauthCodes).where(eq(oauthCodes.code, code));
 
     expect(row).toBeDefined();
-    expect(row!.clientId).toBe("kaambaan");
+    expect(row!.clientId).toBe("superpipeline");
     expect(row!.redirectUri).toBe(REDIRECT);
     expect(row!.codeChallenge).toBe(CHALLENGE);
     expect(row!.userId).toBe(LIVE_USER);
@@ -452,7 +452,7 @@ describe("registration order in src/index.ts", () => {
    * silently. Hono matches in registration order: below the Better Auth
    * catch-all the route is simply never reached, and below `authMiddleware`
    * every navigation gets a 401 before the route's own logic runs — and both
-   * look, from kaambaan, exactly like an operator who has not connected yet.
+   * look, from superpipeline, exactly like an operator who has not connected yet.
    */
   const source = readFileSync(
     new URL("../index.ts", import.meta.url),
@@ -613,7 +613,7 @@ describe("a code is spent once", () => {
     // Minted directly, with a TTL already in the past: the alternative is
     // sleeping for the real sixty seconds.
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: LIVE_USER,
@@ -731,7 +731,7 @@ describe("a body that is not a request", () => {
 describe("the principal behind the code", () => {
   test("a suspended principal is refused in buildTokenPayload's own words", async () => {
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: SUSPENDED_USER,
@@ -750,7 +750,7 @@ describe("the principal behind the code", () => {
 
   test("a user who maps to no principal is refused", async () => {
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: UNMAPPED_USER,
@@ -906,7 +906,7 @@ describe("the token is the one GET /api/auth/token already issues", () => {
 
   test("every claim matches, for the same person, minted both ways", async () => {
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: sessionUser,
@@ -941,7 +941,7 @@ describe("the token is the one GET /api/auth/token already issues", () => {
 
   test("signed by the same key, and it verifies against the published JWKS", async () => {
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: sessionUser,
@@ -969,7 +969,7 @@ describe("the token is the one GET /api/auth/token already issues", () => {
 
   test("lives exactly as long as TOKEN_TTL, and expiresIn says so", async () => {
     const { code } = await mintCode({
-      clientId: "kaambaan",
+      clientId: "superpipeline",
       redirectUri: REDIRECT,
       codeChallenge: CHALLENGE,
       userId: sessionUser,

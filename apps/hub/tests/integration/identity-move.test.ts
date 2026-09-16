@@ -298,13 +298,13 @@ afterAll(async () => {
   }
 });
 
-/** kaambaan's record that this fleet ran the card. Not the thing under test. */
+/** superpipeline's record that this fleet ran the card. Not the thing under test. */
 async function dispatched(cardId: string): Promise<void> {
   await rawSql`
     INSERT INTO bridge_dispatches (external_source, external_run_id, tenant_id, board_id,
                                    external_card_id, agent_key, station_id, lease_epoch,
                                    outcome, started_at, updated_at)
-    VALUES ('kaambaan', ${"run_" + cardId}, ${TENANT}, ${BOARD}, ${cardId}, 'test',
+    VALUES ('superpipeline', ${"run_" + cardId}, ${TENANT}, ${BOARD}, ${cardId}, 'test',
             ${STATION}, 1, 'produced', now(), now())`;
 }
 

@@ -612,7 +612,7 @@ export interface StationReadiness {
  *
  * The same three gates `createSession` fails fast on, asked without opening
  * anything — for callers that want to know *before* they take on an obligation
- * they would then have to unwind. The kaambaan bridge is the first: it claims a
+ * they would then have to unwind. The superpipeline bridge is the first: it claims a
  * card from a board and a claim it cannot execute strands that card until the
  * board's 15-minute reclaim, so it asks here first.
  *
@@ -644,7 +644,7 @@ export async function createSession(
   //
   // Decision 4 of charter decisions/2026-08-13-ecosystem-identity.md, enforced
   // HERE because this is the one choke point both dispatch paths pass through:
-  // the console/API route and the kaambaan bridge. A check in kaambaan alone
+  // the console/API route and the superpipeline bridge. A check in superpipeline alone
   // would cover board-driven work while provisioning straight at AgentPod — the
   // most common path today — went unguarded, and "a control with a hole that
   // shape is not a control".

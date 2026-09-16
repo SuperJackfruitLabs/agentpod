@@ -11,7 +11,7 @@
  *
  * A TABLE rather than columns on `user`, which is where this differs from
  * tenancy: a tenant maps to one external organisation, but a principal is
- * legitimately known to several systems at once — Matrix, kaambaan, and
+ * legitimately known to several systems at once — Matrix, superpipeline, and
  * eventually the Organization plane. Columns would mean a migration per system.
  *
  * **This is a record of sameness, never a grant.** Nothing may read authority
@@ -35,7 +35,7 @@ import { principals } from "./organization";
  * identity of one kind of principal, reached like any other system rather than
  * being what a principal structurally is.
  */
-export const IDENTITY_SYSTEMS = ["better-auth", "matrix", "kaambaan", "agentpod", "org-plane"] as const;
+export const IDENTITY_SYSTEMS = ["better-auth", "matrix", "superpipeline", "agentpod", "org-plane"] as const;
 export type IdentitySystem = (typeof IDENTITY_SYSTEMS)[number];
 
 export const principalIdentities = pgTable(
@@ -55,7 +55,7 @@ export const principalIdentities = pgTable(
      * That system's id for them — `@olivia:id.agentpod.dev`, a `tnt_`-scoped
      * principal id, whatever the Organization plane eventually mints.
      *
-     * Deliberately opaque: no grammar is imposed, for the same reason kaambaan's
+     * Deliberately opaque: no grammar is imposed, for the same reason superpipeline's
      * migration 0002 imposes none on its external ids. A shape assumption here
      * would be a shape assumption about a system that has not been built.
      */
@@ -72,7 +72,7 @@ export const principalIdentities = pgTable(
      * message" needs one answer. Two principals claiming one mxid would make
      * that question unanswerable exactly when it matters — attributing a human's
      * approval, which charter decisions/2026-08-14-approvals-cross-planes-as-events.md
-     * says must carry its sender or kaambaan's separation-of-duties check is void.
+     * says must carry its sender or superpipeline's separation-of-duties check is void.
      */
     uniqueIndex("principal_identities_system_external_idx").on(t.system, t.externalId),
 
@@ -87,7 +87,7 @@ export const principalIdentities = pgTable(
 
     check(
       "principal_identities_system_known",
-      sql`${t.system} IN ('better-auth', 'matrix', 'kaambaan', 'agentpod', 'org-plane')`
+      sql`${t.system} IN ('better-auth', 'matrix', 'superpipeline', 'agentpod', 'org-plane')`
     ),
 
     /** An empty external id is not a mapping; it is a row that looks like one. */

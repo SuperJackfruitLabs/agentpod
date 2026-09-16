@@ -7,7 +7,7 @@
  * which is also the off switch.
  *
  * Gated on `ENABLE_MATRIX_BRIDGE` being the **literal lowercase `"true"`**,
- * matching `ENABLE_KAAMBAAN_BRIDGE` and `ENFORCE_CONTROL_PAIR`. This codebase has
+ * matching `ENABLE_SUPERPIPELINE_BRIDGE` and `ENFORCE_CONTROL_PAIR`. This codebase has
  * already learned that a looser boolean lets `=1` pass validation and start
  * nothing.
  */
@@ -24,7 +24,7 @@ import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
 import {
   handleGateDecision,
   projectionForGate,
-  resolveGateAtKaambaan,
+  resolveGateAtSuperpipeline,
   roomAgentUser,
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
@@ -281,12 +281,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   /**
    * Answering a gate, wired only when a board is configured.
    *
-   * `KAAMBAAN_BASE_URL` absent means no board, which means no gate could have
+   * `SUPERPIPELINE_BASE_URL` absent means no board, which means no gate could have
    * been projected in the first place — so leaving this undefined is the
    * honest state rather than a half-built path that fails at the last step.
    */
-  const kaambaanBaseUrl = (process.env.KAAMBAAN_BASE_URL ?? "").trim();
-  const gates = kaambaanBaseUrl
+  const superpipelineBaseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim();
+  const gates = superpipelineBaseUrl
     ? {
         handle: (
           event: { sender: string; content: Record<string, unknown> },
@@ -302,8 +302,8 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             },
             projectionFor: projectionForGate,
             resolveGate: (input) =>
-              resolveGateAtKaambaan(input, {
-                baseUrl: kaambaanBaseUrl,
+              resolveGateAtSuperpipeline(input, {
+                baseUrl: superpipelineBaseUrl,
                 mint: (principalId) => mintPrincipalAssertion({ principalId }),
               }),
             reply: async (roomId: string, body: string) => {

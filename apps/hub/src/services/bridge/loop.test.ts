@@ -11,8 +11,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { BRIDGE_ENV_FLAG } from "./config";
 import type { DispatchResult } from "./dispatch";
-import { KaambaanApiError } from "./kaambaan";
-import { startAgentLoop, startKaambaanBridge } from "./loop";
+import { SuperpipelineApiError } from "./superpipeline";
+import { startAgentLoop, startSuperpipelineBridge } from "./loop";
 
 const saved = process.env[BRIDGE_ENV_FLAG];
 afterEach(() => {
@@ -176,12 +176,12 @@ describe("off by default", () => {
       },
     });
 
-    expect(await startKaambaanBridge({ acp })).toBeNull();
+    expect(await startSuperpipelineBridge({ acp })).toBeNull();
     expect(touched).toBe(false);
   });
 });
 
-describe("a credential kaambaan will not accept", () => {
+describe("a credential superpipeline will not accept", () => {
   /**
    * Found on the live fleet, 2026-09-04: the hub had been claiming against a board with a
    * token whose agent was deleted three days earlier. Every thirty seconds, a 401, logged and
@@ -196,7 +196,7 @@ describe("a credential kaambaan will not accept", () => {
     const handle = startAgentLoop({
       run: async () => {
         calls++;
-        throw new KaambaanApiError(401, "/v1/boards/brd_x/claims", null, "a valid agent token is required");
+        throw new SuperpipelineApiError(401, "/v1/boards/brd_x/claims", null, "a valid agent token is required");
       },
       log: (m) => lines.push(m),
       sleep: async () => {},
@@ -212,7 +212,7 @@ describe("a credential kaambaan will not accept", () => {
     const handle = startAgentLoop({
       run: async () => {
         calls++;
-        throw new KaambaanApiError(403, "/v1/boards/brd_x/claims", null, "forbidden");
+        throw new SuperpipelineApiError(403, "/v1/boards/brd_x/claims", null, "forbidden");
       },
       log: () => {},
       sleep: async () => {},
@@ -227,7 +227,7 @@ describe("a credential kaambaan will not accept", () => {
       run: async () => {
         calls++;
         if (calls >= 3) handle.stop();
-        throw new KaambaanApiError(500, "/v1/boards/brd_x/claims", null, "upstream exploded");
+        throw new SuperpipelineApiError(500, "/v1/boards/brd_x/claims", null, "upstream exploded");
       },
       log: () => {},
       sleep: async () => {},

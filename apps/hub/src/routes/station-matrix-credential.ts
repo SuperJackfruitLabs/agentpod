@@ -177,7 +177,7 @@ export function createStationMatrixCredentialRoutes(deps: StationMatrixCredentia
  *
  * Pulled out so it has a unit test of its own: an inline `matrixBridge ? … :
  * new Hono()` in `index.ts` cannot be exercised without booting the entire
- * hub (DB, sweepers, the kaambaan bridge, the real Matrix bridge) — nothing
+ * hub (DB, sweepers, the superpipeline bridge, the real Matrix bridge) — nothing
  * in this suite does that, so a swapped ternary arm or an `&&` typo would
  * silently make this route vanish or throw, and nothing would catch it.
  * `index.ts` calls this function rather than inlining the ternary again, so

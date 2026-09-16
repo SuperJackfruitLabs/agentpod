@@ -4,7 +4,7 @@ import { pgTable, text, timestamp, index } from "drizzle-orm/pg-core";
  * A one-time authorization code for the cross-domain token handoff.
  *
  * The hub's session cookie is `SameSite=Lax`, so a plane on its own domain
- * (kaambaan.dev) can never carry it on a cross-site `fetch`. What Lax *does*
+ * (superpipeline.dev) can never carry it on a cross-site `fetch`. What Lax *does*
  * permit is top-level navigation, so the browser NAVIGATES to
  * `GET /api/auth/authorize`, the hub reads its own first-party cookie, and one
  * of these rows is what comes back through the redirect — exchanged

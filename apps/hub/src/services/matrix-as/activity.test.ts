@@ -2,7 +2,7 @@
 //
 // It used to do nothing at all — no default case, no log, no record — which is
 // how `tool_call` came to be discarded for the entire life of the bridge
-// without a single line anywhere saying so. The kaambaan coalescer keeps
+// without a single line anywhere saying so. The superpipeline coalescer keeps
 // `unmapped()`/`losses()` for exactly this reason, and lists its dropped kinds
 // explicitly "so a NEW kind shows up in `unmapped()` instead of joining this
 // set by accident" (`bridge/coalesce.ts:53-62`). This is that discipline, on

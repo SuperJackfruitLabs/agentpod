@@ -177,7 +177,7 @@ test("a hub-origin authorize URL is resumed after signing in", async () => {
   // The flow this whole spec exists for: the operator was sent here BY the hub, mid-handoff, and
   // has to end up back at the authorize endpoint rather than on the console home.
   const authorize =
-    "https://hub.x/api/auth/authorize?client=kaambaan&state=abc&code_challenge_method=S256";
+    "https://hub.x/api/auth/authorize?client=superpipeline&state=abc&code_challenge_method=S256";
   await signInFrom(`?redirect=${encodeURIComponent(authorize)}`);
 
   // A real browser navigation, not `goto` — SvelteKit's goto refuses to leave the origin.

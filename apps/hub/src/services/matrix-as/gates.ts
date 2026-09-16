@@ -1,18 +1,18 @@
 /**
- * Projecting a kaambaan approval gate into the room where the work happened.
+ * Projecting a superpipeline approval gate into the room where the work happened.
  *
- * `charter` → `decisions/2026-08-30-a-gate-closes-over-chat.md`. kaambaan owns
+ * `charter` → `decisions/2026-08-30-a-gate-closes-over-chat.md`. superpipeline owns
  * the gate; this only renders it and carries an answer back.
  *
  * ## Two events, not one
  *
- * A gate is sent as `dev.kaambaan.gate.v1` **and** as an ordinary prose
+ * A gate is sent as `dev.superpipeline.gate.v1` **and** as an ordinary prose
  * message beside it. That is this codebase's existing convention rather than a
  * new idea — `dev.agentpod.permission.v1` already does it, and supermessage's
  * `PermissionRequestRenderer` documents why: a client that never renders the
  * custom event is then "exactly as able to answer as it was". It matters here
  * because a stock Matrix client renders an unknown **event type** as nothing at
- * all. kaambaan#34 assumed a custom event's own `body` would be shown by every
+ * all. superpipeline#34 assumed a custom event's own `body` would be shown by every
  * client; that holds for an unknown *msgtype* and not for an unknown *type*.
  *
  * The prose goes first. If only one of the two lands, the room should be left
@@ -20,7 +20,7 @@
  *
  * ## Why a gate can be delivered more than once, and must post once
  *
- * kaambaan's push is at-least-once within an attempt cap, its alarm re-picks
+ * superpipeline's push is at-least-once within an attempt cap, its alarm re-picks
  * failed rows, and the sweep asks independently which pending gates have no
  * event. All three are meant to overlap. `matrix_gate_events` keyed on
  * `gate_id` is what turns that overlap into one question instead of three.
@@ -41,11 +41,11 @@ import { moveInProgress } from "./identity-move";
 
 const log = createLogger("matrix-gates");
 
-export const GATE_EVENT_TYPE = "dev.kaambaan.gate.v1";
-export const GATE_DECISION_SUITE_TYPE = "dev.kaambaan.gate.decision.v1";
+export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
+export const GATE_DECISION_SUITE_TYPE = "dev.superpipeline.gate.decision.v1";
 
 /**
- * The only option ids kaambaan resolves against — its `GateDecision`.
+ * The only option ids superpipeline resolves against — its `GateDecision`.
  *
  * Mirrored here rather than imported because the two products share no runtime.
  * Pinned by `fixtures/ecosystem-identity/matrix_gate_events.json`, which both
@@ -57,7 +57,7 @@ export type GateOptionId = (typeof GATE_OPTION_IDS)[number];
 export const isGateOptionId = (v: unknown): v is GateOptionId =>
   typeof v === "string" && (GATE_OPTION_IDS as readonly string[]).includes(v);
 
-/** The body kaambaan pushes on `gate.pending`. */
+/** The body superpipeline pushes on `gate.pending`. */
 export interface GatePendingDelivery {
   event: "gate.pending";
   boardId: string;
@@ -71,7 +71,7 @@ export interface GatePendingDelivery {
    * What the reviewer is being asked to approve — the previous stage's
    * handoff, bounded by the board at 600 characters.
    *
-   * Optional because a board that has not shipped kaambaan#… yet sends none,
+   * Optional because a board that has not shipped superpipeline#… yet sends none,
    * and a gate without it must still render.
    */
   handoffSummary?: string | null;
@@ -177,7 +177,7 @@ async function dispatchedStationId(
     .where(
       and(
         eq(bridgeDispatches.tenantId, tenantId),
-        eq(bridgeDispatches.externalSource, "kaambaan"),
+        eq(bridgeDispatches.externalSource, "superpipeline"),
         eq(bridgeDispatches.boardId, boardId),
         eq(bridgeDispatches.externalCardId, cardId)
       )
@@ -285,16 +285,16 @@ export function gateProseBody(d: GatePendingDelivery, link?: string): string {
 /**
  * Where the card's link goes.
  *
- * `…/b/<board>/c/<card>` — the address kaambaan#34 assumed and kaambaan did
+ * `…/b/<board>/c/<card>` — the address superpipeline#34 assumed and superpipeline did
  * not have. This projected that shape for a day and it returned 404, because
  * the board app had no routing at all: one page, no `$page`, no
  * `searchParams`, no card route. It was briefly changed to the app root, and
- * is now back to the card because kaambaan/#47 made cards addressable.
+ * is now back to the card because superpipeline/#47 made cards addressable.
  *
  * Worth keeping the history in view: the field was in the schema and in the
  * tests for a day before anyone tapped it. A test that asserts a link is
  * *present* proves nothing about whether it *resolves*, which is why the
- * kaambaan side is covered by end-to-end tests that follow it.
+ * superpipeline side is covered by end-to-end tests that follow it.
  */
 function boardLink(baseUrl: string | undefined, boardId: string, cardId: string): string | undefined {
   if (!baseUrl) return undefined;
@@ -462,7 +462,7 @@ export async function projectGate(
   // cost; a question never asked is the failure this file exists to prevent.
   //
   // Re-thrown rather than turned into an outcome, so the push receiver keeps
-  // answering 5xx and kaambaan keeps retrying. Converting a failure into a 200
+  // answering 5xx and superpipeline keeps retrying. Converting a failure into a 200
   // would quietly retire push's own retry, leaving the sweep as the only path
   // — and the sweep counts this now (`gate-sweep.ts`), so a throw can no
   // longer be missing from the tally either.
@@ -582,11 +582,11 @@ export interface GateDecisionDeps {
     eventId: string;
   } | null>;
   /**
-   * Resolve the gate at kaambaan **as `principalId`**, never as this service.
+   * Resolve the gate at superpipeline **as `principalId`**, never as this service.
    *
    * The whole decision of 2026-08-14 rests here: a bridge that substituted its
    * own identity would make every approval in the suite attribute to one
-   * account and void kaambaan's separation-of-duties check.
+   * account and void superpipeline's separation-of-duties check.
    */
   resolveGate(input: {
     tenantId: string;
@@ -661,7 +661,7 @@ export async function handleGateDecision(
     return { status: "refused", reason: "unknown-gate" };
   }
 
-  log.warn("kaambaan refused a decision", { gateId: parsed.gateId, code: result.code });
+  log.warn("superpipeline refused a decision", { gateId: parsed.gateId, code: result.code });
   return { status: "refused", reason: "unknown-gate" };
 }
 
@@ -680,7 +680,7 @@ export async function tenantForBoard(boardId: string): Promise<string | null> {
     .from(bridgeDispatches)
     .where(
       and(
-        eq(bridgeDispatches.externalSource, "kaambaan"),
+        eq(bridgeDispatches.externalSource, "superpipeline"),
         eq(bridgeDispatches.boardId, boardId)
       )
     )
@@ -689,19 +689,19 @@ export async function tenantForBoard(boardId: string): Promise<string | null> {
 }
 
 /**
- * Resolve a gate at kaambaan **as the human**, using a short-lived assertion.
+ * Resolve a gate at superpipeline **as the human**, using a short-lived assertion.
  *
  * This is the function `charter →
  * decisions/2026-08-14-approvals-cross-planes-as-events.md` is about. The
  * alternative — calling with this service's own `kbn_` agent token — would work
  * on the first try and make every approval in the suite attribute to one
- * account, voiding kaambaan's separation-of-duties check while appearing to
+ * account, voiding superpipeline's separation-of-duties check while appearing to
  * succeed. That is why the token is minted per decision rather than held.
  *
  * `principalId` must have come from `principal_identities`. See
  * `mintPrincipalAssertion`, which says the same thing louder.
  */
-export async function resolveGateAtKaambaan(
+export async function resolveGateAtSuperpipeline(
   input: {
     boardId: string;
     gateId: string;
@@ -747,7 +747,7 @@ export async function resolveGateAtKaambaan(
 
   if (res.ok) return { ok: true };
 
-  // kaambaan answers with `{ error: { code } }`. The code is what matters:
+  // superpipeline answers with `{ error: { code } }`. The code is what matters:
   // it answers 403 for SEPARATION_OF_DUTIES and 409 for GATE_NOT_PENDING, and
   // those are different situations with the same shape.
   let code = `HTTP_${res.status}`;
