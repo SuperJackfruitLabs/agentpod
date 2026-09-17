@@ -693,7 +693,7 @@ export async function tenantForBoard(boardId: string): Promise<string | null> {
  *
  * This is the function `charter →
  * decisions/2026-08-14-approvals-cross-planes-as-events.md` is about. The
- * alternative — calling with this service's own `kbn_` agent token — would work
+ * alternative — calling with this service's own `spa_` agent token — would work
  * on the first try and make every approval in the suite attribute to one
  * account, voiding superpipeline's separation-of-duties check while appearing to
  * succeed. That is why the token is minted per decision rather than held.

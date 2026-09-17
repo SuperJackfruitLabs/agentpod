@@ -4,7 +4,7 @@
  *
  * One process, not one per agent — the hub already owns the station connections
  * and the ACP session machinery, and a second process would need a second copy
- * of both. What is *not* shared is identity: each loop holds its own `kbn_`
+ * of both. What is *not* shared is identity: each loop holds its own `spa_`
  * token, because an agent's authority is its own rather than a projection of
  * whoever dispatched it.
  *

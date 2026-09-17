@@ -56,12 +56,12 @@ func TestNeverReadsTheNodeCredential(t *testing.T) {
 
 func TestEnvironmentWins(t *testing.T) {
 	withConfigDir(t)
-	t.Setenv(EnvToken, "  kbn-ish-token  ")
+	t.Setenv(EnvToken, "  spa-ish-token  ")
 	c, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Token != "kbn-ish-token" {
+	if c.Token != "spa-ish-token" {
 		t.Fatalf("token not trimmed: %q", c.Token)
 	}
 	if !strings.HasPrefix(c.Source, "env:") {

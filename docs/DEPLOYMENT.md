@@ -229,7 +229,7 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # lowercase string "true" — `1` and `TRUE` read as off.
 # ENABLE_SUPERPIPELINE_BRIDGE=false
 # SUPERPIPELINE_BASE_URL=https://superpipeline.dev
-# SUPERPIPELINE_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"kbn_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
+# SUPERPIPELINE_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"spa_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -453,7 +453,7 @@ provisioning straight at this API unguarded.
 
 ### superpipeline bridge
 
-Off by default, and **nothing is inferred from a credential being present** — a `kbn_` token
+Off by default, and **nothing is inferred from a credential being present** — a `spa_` token
 sitting in an env file is not a decision to start claiming work on someone's board. A hub
 that has not opted in constructs nothing, opens no session and makes no request. Day-2
 operation — reading the ledger, spotting a halted loop — is
@@ -475,7 +475,7 @@ board and station — "the bridge's credential" is not a thing that exists:
   {
     "key": "codex-mac",
     "boardId": "brd_9c1d4e5f6a7b8c9d",
-    "token": "kbn_…",
+    "token": "spa_…",
     "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
     "hubUserId": "usr-local-1",
     "mode": "full-auto",
@@ -490,7 +490,7 @@ board and station — "the bridge's credential" is not a thing that exists:
 |---|---|---|
 | `key` | yes | Stable name. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique — a duplicate is refused at boot. |
 | `boardId` | yes | The superpipeline board to claim from. |
-| `token` | yes | This agent's own superpipeline credential, minted under "Connect an agent". Must start `kbn_`. |
+| `token` | yes | This agent's own superpipeline credential, minted under "Connect an agent". Must start `spa_`. |
 | `stationId` | yes | The station its work runs on. |
 | `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
 | `mode` | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call, which is a great deal of asking; it suits a board somebody is watching, which is why it is not the default. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers — see `permissionWaitMs`. |
@@ -514,7 +514,7 @@ quickly rather than a station pinned until morning.
 **A roster that fails to parse refuses the boot**, naming `SUPERPIPELINE_BRIDGE_AGENTS`. That is
 deliberate: a bridge that silently claimed nothing because its roster was malformed looks
 exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
-array, a token that does not start `kbn_`, a `permissionWaitMs` of zero or less, and a
+array, a token that does not start `spa_`, a `permissionWaitMs` of zero or less, and a
 duplicate `key`.
 
 > **Quoting.** The roster is JSON on one line, which makes it the value most likely to be

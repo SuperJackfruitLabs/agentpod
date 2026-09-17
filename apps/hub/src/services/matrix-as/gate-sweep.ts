@@ -226,7 +226,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
  * `SUPERPIPELINE_BRIDGE_AGENTS` — the sweep needs no configuration of its own, and
  * giving it any would create a second place for the board list to be wrong.
  *
- * **A board is read with its own board's token.** An agent's `kbn_` credential
+ * **A board is read with its own board's token.** An agent's `spa_` credential
  * is scoped to the board it claims on, so using the wrong one is a 401 that
  * arrives as `failedBoards` — a board that "could not be reached" rather than a
  * credential that was refused. Deduplicated because two agents on one board is

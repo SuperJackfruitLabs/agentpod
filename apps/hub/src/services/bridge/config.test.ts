@@ -14,7 +14,7 @@ const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
 const AGENT = {
   key: "codex-mac",
   boardId: "brd_9c1d4e5f6a7b8c9d",
-  token: `kbn_${"a1b2c3d4".repeat(6)}`,
+  token: `spa_${"a1b2c3d4".repeat(6)}`,
   stationId: "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
   hubUserId: "usr-local-1",
 };
@@ -88,7 +88,7 @@ describe("an enabled bridge refuses to start half-configured", () => {
 
   test("a token that is not a superpipeline agent token", () => {
     enabled({ token: "hunter2" });
-    expect(() => loadBridgeConfig()).toThrow(/kbn_/);
+    expect(() => loadBridgeConfig()).toThrow(/spa_/);
   });
 
   test("two agents sharing a key", () => {

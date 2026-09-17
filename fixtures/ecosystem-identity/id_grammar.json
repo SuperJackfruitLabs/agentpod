@@ -95,7 +95,7 @@
       ],
       "reject": [
         { "value": "agent_9f1c2ab04d7e6b3a", "reason": "wrong-prefix" },
-        { "value": "kbn_9f1c2ab04d7e6b3a4c5d6e7f8091a2b3c4d5e6f70819", "reason": "credential-not-identifier", "note": "`kbn_` is superpipeline's AGENT BEARER TOKEN (apps/api/src/auth/agent-token.ts:10), not an agent id. It is 48 hex chars and is a secret. A validator that accepts it here would let a credential be stored in an id column." },
+        { "value": "spa_9f1c2ab04d7e6b3a4c5d6e7f8091a2b3c4d5e6f70819", "reason": "credential-not-identifier", "note": "`spa_` is superpipeline's AGENT BEARER TOKEN (apps/api/src/auth/agent-token.ts:10), not an agent id. It is 48 hex chars and is a secret. A validator that accepts it here would let a credential be stored in an id column." },
         { "value": "agt_", "reason": "prefix-only" },
         { "value": "", "reason": "empty" }
       ]
@@ -394,7 +394,7 @@
       { "prefix": "task", "owner": "superpipeline", "entity": "task", "status": "declared-never-minted", "note": "TaskId exists in superpipeline's contract and Run.taskId references it, but no newId('task') call exists and the runs table stores card_id. Declared but unreachable." },
       { "prefix": "evt", "owner": "superpipeline", "entity": "event", "status": "declared-never-minted", "note": "EventId is declared; activities are keyed by an AUTOINCREMENT seq instead (board-do.ts activities table)." },
       { "prefix": "push", "owner": "superpipeline", "entity": "pushConfig", "status": "minted-never-declared", "note": "SAME CLASS AS THE mem_/mbr_ BUG, still open. newId('push') at apps/api/src/board/board-do.ts:1023 mints a prefix absent from ID_PREFIXES and from every schema in packages/contract/src/ids.ts. Found by this corpus; not fixed here, because superpipeline is not this repo's to change." },
-      { "prefix": "kbn", "owner": "superpipeline", "entity": "agentBearerToken", "status": "credential", "note": "a secret, not an identifier — apps/api/src/auth/agent-token.ts:10, 48 hex chars" },
+      { "prefix": "spa", "owner": "superpipeline", "entity": "agentBearerToken", "status": "credential", "note": "a secret, not an identifier — apps/api/src/auth/agent-token.ts:10, 48 hex chars" },
 
       { "prefix": "node", "owner": "agentpod", "entity": "node", "status": "minted-never-declared" },
       { "prefix": "rt", "owner": "agentpod", "entity": "runtime", "status": "minted-never-declared" },

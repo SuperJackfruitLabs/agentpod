@@ -3,7 +3,7 @@
  *
  * Gated exactly like the provisioner drivers: one `ENABLE_*` flag, compared to
  * the literal string `"true"`, off when unset, and **nothing inferred from
- * credentials being present** — a `kbn_` token left in an env file is not a
+ * credentials being present** — a `spa_` token left in an env file is not a
  * decision to start claiming work on someone's board. A hub that has not opted
  * in constructs nothing, opens no session and makes no request.
  *
@@ -61,7 +61,7 @@ export const BridgeAgentConfig = z.object({
   key: z.string().min(1),
   boardId: z.string().min(1),
   /** This agent's own superpipeline credential. */
-  token: z.string().startsWith("kbn_", 'a superpipeline agent token starts with "kbn_"'),
+  token: z.string().startsWith("spa_", 'a superpipeline agent token starts with "spa_"'),
   /** The station its work runs on. */
   stationId: z.string().min(1),
   /**
