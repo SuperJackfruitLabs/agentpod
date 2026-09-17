@@ -49,6 +49,27 @@ is a smaller, single-purpose tool for the principal the model says should hold
 the least — which is a real benefit and a weaker claim than "security boundary".
 It is recorded as the weaker claim.
 
+## The plainer reason, which is neither security nor size
+
+The argument above is about what a worker should be able to do. There is a
+simpler one that does not depend on threat models at all, and it is the one that
+should be read first: **the two programs have different lifecycles, and nothing
+in common except a repository.**
+
+| | `agentpod-node` | `agentpod-fleet` |
+|---|---|---|
+| shape | a resident daemon | an interactive client |
+| lifetime | enrolled once, runs continuously | invoked, does one thing, exits |
+| audience | the host it is installed on | people and agents, many times a day |
+| where | enrolled nodes | laptops, CI, worker sandboxes — machines that are *not* nodes |
+| installed by | an enrolment that takes a hub URL and a token | placing a binary |
+| updated | deliberately, per §295, because a node's version is operational state | whenever, because an exited process has no version to be at |
+
+Packaging a service that must stay up together with a command someone runs
+forty times a day gives two things one install path, one update cadence and one
+release story, when they share none of those needs. That is the case for the
+split even if every security consideration in this spec were struck out.
+
 ## The decision
 
 **Two binaries from one Go module.** The fleet client becomes `agentpod-fleet`,
