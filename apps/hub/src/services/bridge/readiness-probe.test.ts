@@ -25,7 +25,7 @@ describe("a probe that never answers", () => {
   const agent = {
     key: "a",
     boardId: "brd_x",
-    token: "kbn_x",
+    token: "spa_x",
     stationId: "station_x",
     hubUserId: "usr_x",
     mode: "full-auto" as const,

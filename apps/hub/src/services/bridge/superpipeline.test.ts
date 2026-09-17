@@ -17,7 +17,7 @@ import { describe, expect, test } from "bun:test";
 import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded } from "./superpipeline";
 import type { GatePendingDelivery } from "../matrix-as/gates";
 
-const TOKEN = `kbn_${"a1b2c3d4".repeat(6)}`;
+const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 const BOARD = "brd_9c1d4e5f6a7b8c9d";
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: string };
@@ -48,11 +48,11 @@ const work = { runId: "run_e074a2160c4b4f28", leaseEpoch: 1 };
 const boardError = (code: string, message = "no") => ({ error: { ok: false, code, message } });
 
 describe("SuperpipelineClient — credential", () => {
-  test("refuses anything that is not a kbn_ agent token", () => {
+  test("refuses anything that is not a spa_ agent token", () => {
     const build = (token: string) =>
       new SuperpipelineClient({ baseUrl: "x", boardId: BOARD, token, fetch: async () => ({ status: 200, ok: true, json: async () => ({}) }) });
-    expect(() => build("sk-not-a-superpipeline-token")).toThrow(/kbn_/);
-    expect(() => build("")).toThrow(/kbn_/);
+    expect(() => build("sk-not-a-superpipeline-token")).toThrow(/spa_/);
+    expect(() => build("")).toThrow(/spa_/);
   });
 
   test("authenticates with a bearer token and never sends a dev tenant header", () => {

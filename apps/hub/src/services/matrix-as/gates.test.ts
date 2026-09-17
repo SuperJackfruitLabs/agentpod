@@ -283,7 +283,7 @@ import { resolveGateAtSuperpipeline } from "./gates";
 /**
  * Calling superpipeline as the person, not as this service.
  *
- * The alternative — using the bridge's own `kbn_` agent token — would work on
+ * The alternative — using the bridge's own `spa_` agent token — would work on
  * the first try and make every approval in the suite attribute to one account.
  * It fails in the direction that looks like success, which is why the token is
  * minted per decision rather than held.

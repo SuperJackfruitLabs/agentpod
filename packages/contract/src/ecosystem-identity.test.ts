@@ -392,7 +392,7 @@ describe("ecosystem identity corpus — card prompt", () => {
     // either a secret or an id the harness cannot act on and could echo back
     // into a transcript the board then renders.
     for (const c of prompts.cases.filter((x) => x.rendered !== undefined)) {
-      expect(c.rendered!).not.toContain("kbn_");
+      expect(c.rendered!).not.toContain("spa_");
       expect(c.rendered!).not.toContain("attempt_");
       expect(c.rendered!).not.toContain("acps_");
       expect(c.rendered!.toLowerCase()).not.toContain("leaseepoch");

@@ -1,10 +1,10 @@
 /**
- * A client for superpipeline's agent contract — the surface a `kbn_` token reaches,
+ * A client for superpipeline's agent contract — the surface a `spa_` token reaches,
  * and nothing else.
  *
  * ## Why this is not `@superpipeline/agent-sdk`
  *
- * The SDK now speaks `kbn_` bearer auth and gained `context(work)`, which is
+ * The SDK now speaks `spa_` bearer auth and gained `context(work)`, which is
  * what removed the spike's dev-header dependency, and this client deliberately
  * mirrors its method names and types so it is a drop-in the day the SDK becomes
  * consumable. It is not consumable today, for three reasons in descending order
@@ -222,9 +222,9 @@ export class SuperpipelineClient {
   private readonly fetch: Fetcher;
 
   constructor(opts: SuperpipelineClientOptions) {
-    if (!opts.token.startsWith("kbn_")) {
+    if (!opts.token.startsWith("spa_")) {
       throw new Error(
-        'SuperpipelineClient: token must be a superpipeline agent token ("kbn_…"), minted via "Connect an agent"',
+        'SuperpipelineClient: token must be a superpipeline agent token ("spa_…"), minted via "Connect an agent"',
       );
     }
     this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
@@ -319,7 +319,7 @@ export class SuperpipelineClient {
    * the gate is silent on both sides — the card blocked on an approval nobody
    * was told about. This is how the hub asks instead of waiting to be told.
    *
-   * Authenticated with the agent's own `kbn_` token. The board snapshot
+   * Authenticated with the agent's own `spa_` token. The board snapshot
    * carries the same gates and is a human route; reaching it would mean
    * minting an assertion for a person on a timer, and the property that makes
    * assertions safe is that their subject is never chosen by the caller.

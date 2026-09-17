@@ -39,7 +39,7 @@ const USER_ID = "bridge-dispatch-user";
 const BOARD_ID = "brd_9c1d4e5f6a7b8c9d";
 const CARD_ID = "crd_1a2b3c4d5e6f7a8b";
 const RUN_ID = "run_e074a2160c4b4f28";
-const TOKEN = `kbn_${"a1b2c3d4".repeat(6)}`;
+const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
 
 const agent: BridgeAgentConfig = {
   key: "codex-mac",

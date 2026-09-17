@@ -323,10 +323,10 @@ describe("what the sweep reads, and as whom", () => {
     baseUrl: "https://board.test",
     source: "superpipeline",
     agents: [
-      { key: "forge", boardId: "brd_one", token: `kbn_${"a".repeat(48)}`, stationId: "stn_1", hubUserId: "usr_1" },
-      { key: "quill", boardId: "brd_two", token: `kbn_${"b".repeat(48)}`, stationId: "stn_2", hubUserId: "usr_1" },
+      { key: "forge", boardId: "brd_one", token: `spa_${"a".repeat(48)}`, stationId: "stn_1", hubUserId: "usr_1" },
+      { key: "quill", boardId: "brd_two", token: `spa_${"b".repeat(48)}`, stationId: "stn_2", hubUserId: "usr_1" },
       // Two agents on one board is ordinary: an agent is not a board.
-      { key: "scout", boardId: "brd_one", token: `kbn_${"c".repeat(48)}`, stationId: "stn_3", hubUserId: "usr_1" },
+      { key: "scout", boardId: "brd_one", token: `spa_${"c".repeat(48)}`, stationId: "stn_3", hubUserId: "usr_1" },
     ],
   } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
 
@@ -370,7 +370,7 @@ describe("starting the sweeper", () => {
   const config = {
     baseUrl: "https://board.test",
     source: "superpipeline",
-    agents: [{ key: "forge", boardId: "brd_one", token: `kbn_${"a".repeat(48)}`, stationId: "s", hubUserId: "u" }],
+    agents: [{ key: "forge", boardId: "brd_one", token: `spa_${"a".repeat(48)}`, stationId: "s", hubUserId: "u" }],
   } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
 
   test("does not start on a hub that works no board", async () => {
