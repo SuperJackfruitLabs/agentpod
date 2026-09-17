@@ -263,7 +263,7 @@ export const auth = betterAuth({
     return {
       // Controls the __Secure- prefix on cookie names (requires HTTPS).
       useSecureCookies: cookieOpts.secure,
-      // Cross-subdomain sharing (app.agentpod.dev ↔ hub.agentpod.dev).
+      // Cross-subdomain sharing (console.agentpod.dev ↔ hub.agentpod.dev).
       // Only enabled when COOKIE_DOMAIN is set (never in dev).
       ...(cookieOpts.domain
         ? {
