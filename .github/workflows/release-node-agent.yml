@@ -42,18 +42,20 @@ jobs:
         with:
           go-version-file: apps/node-agent/go.mod
 
-      - name: Build binary
+      - name: Build binaries
         working-directory: apps/node-agent
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build \
-            -trimpath \
-            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }} \
-            ./cmd/agentpod-node
+          for cmd in agentpod-node agentpod-fleet; do
+            go build \
+              -trimpath \
+              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+              -o ${cmd}-${{ matrix.goos }}-${{ matrix.goarch }} \
+              ./cmd/${cmd}
+          done
 
       - name: Upload binary to release (retry x3)
         env:
@@ -66,7 +68,9 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes || true
           ok=0
           for i in 1 2 3; do
-            if gh release upload "$TAG" "agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }}" \
+            if gh release upload "$TAG" \
+                "agentpod-node-${{ matrix.goos }}-${{ matrix.goarch }}" \
+                "agentpod-fleet-${{ matrix.goos }}-${{ matrix.goarch }}" \
                 --repo "$GITHUB_REPOSITORY" --clobber; then
               ok=1; break
             fi
@@ -99,6 +103,7 @@ jobs:
             if gh release upload "$TAG" \
                 apps/node-agent/deploy/agentpod-node.service \
                 apps/node-agent/scripts/install.sh \
+                apps/node-agent/scripts/install-fleet.sh \
                 --repo "$GITHUB_REPOSITORY" --clobber; then
               ok=1; break
             fi
@@ -201,7 +206,9 @@ jobs:
           assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name')"
           missing=""
-          for want in agentpod-node-linux-amd64 agentpod-node-linux-arm64 SHA256SUMS; do
+          for want in agentpod-node-linux-amd64 agentpod-node-linux-arm64 \
+                      agentpod-fleet-linux-amd64 agentpod-fleet-linux-arm64 \
+                      SHA256SUMS; do
             printf '%s\n' "$assets" | grep -qx "$want" || missing="$missing $want"
           done
           if [ -n "$missing" ]; then
