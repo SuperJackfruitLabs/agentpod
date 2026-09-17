@@ -14,15 +14,25 @@
  * `registerDescriptors` in cmd/agentpod-node/registry.go; the capabilities are the
  * hub's `gateCapability` calls plus the console's station panels; the provisioning
  * substrates are the driver files in services/provisioner/; the install command is
- * what install.sh actually accepts. If those move, this page is wrong.
+ * what install.sh actually accepts; the standalone `apn scan` download names an asset
+ * .github/workflows/release-node-agent.yml uploads. If those move, this page is wrong.
  *
  * The hero is a fleet panel rather than a headline over a gradient, because the
  * product's thesis is that machines you cannot reach are still reachable: every
  * node dials OUT, so a laptop behind CGNAT is in the fleet on the same terms as a
  * VPS. Showing that is the argument.
  */
+import Mark from '../components/Mark.astro';
+
 const harnesses = ['Hermes', 'OpenClaw', 'Claude Code', 'Codex', 'OpenCode', 'Pi'];
 const substrates = ['Docker', 'Cloudflare', 'Modal', 'Fly'];
+
+const SITE = 'https://agentpod.dev';
+const TITLE = 'AgentPod — the console for the machines your agents live on';
+const DESCRIPTION =
+  'A fleet and facilities console for agent runtimes. Attach to the agents you already run, ' +
+  'reach machines behind NAT, and manage files, logs, terminals, health and cleanup from one ' +
+  'place. Self-hostable.';
 
 const nodes = [
   {
@@ -30,7 +40,7 @@ const nodes = [
     kind: 'VPS · Ubuntu',
     state: 'online',
     stations: [
-      { name: 'hermes', detail: 'coder-kai · hanuman' },
+      { name: 'hermes', detail: 'support-triage' },
       { name: 'claude-code', detail: 'billing-api' },
     ],
   },
@@ -54,12 +64,25 @@ const nodes = [
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AgentPod — the console for the machines your agents live on</title>
-    <meta
-      name="description"
-      content="A fleet and facilities console for agent runtimes. Attach to the agents you already run, reach machines behind NAT, and manage files, logs, terminals, health and cleanup from one place. Self-hostable."
-    />
+    <title>{TITLE}</title>
+    <meta name="description" content={DESCRIPTION} />
+    <link rel="canonical" href={`${SITE}/`} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <!-- What a pasted link unfurls as. Without these, Slack and X showed a bare URL. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="AgentPod" />
+    <meta property="og:url" content={`${SITE}/`} />
+    <meta property="og:title" content={TITLE} />
+    <meta property="og:description" content={DESCRIPTION} />
+    <meta property="og:image" content={`${SITE}/og.png`} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AgentPod — the console for the machines your agents live on." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={TITLE} />
+    <meta name="twitter:description" content={DESCRIPTION} />
+    <meta name="twitter:image" content={`${SITE}/og.png`} />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -115,11 +138,14 @@ const nodes = [
         display: flex; align-items: center; justify-content: space-between;
         padding-top: 26px; padding-bottom: 26px; gap: 20px;
       }
+      /* The name is plain text in the product's capitalisation; the mark carries the
+         accent. The same treatment is used by the blog header, the console and the docs. */
       .brand {
+        display: inline-flex; align-items: center; gap: 10px;
         font-family: var(--display); font-weight: 800; font-size: 21px;
         letter-spacing: -0.02em; color: var(--text); text-decoration: none;
+        --mark-accent: var(--cyan);
       }
-      .brand span { color: var(--cyan); }
       nav { display: flex; gap: 22px; font-size: 15px; }
       nav a { color: var(--muted); text-decoration: none; }
       nav a:hover, nav a:focus-visible { color: var(--text); }
@@ -226,7 +252,7 @@ const nodes = [
   <body>
     <header class="mast">
       <div class="wrap">
-        <a class="brand" href="/">agent<span>pod</span></a>
+        <a class="brand" href="/"><Mark />AgentPod</a>
         <nav>
           <a href="https://docs.agentpod.dev">Docs</a>
           <a href="/blog">Blog</a>
@@ -349,9 +375,13 @@ curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/downlo
           read. It needs no hub, no account and no network, and exits 0, 1 or 2 so it works in
           cron.
         </p>
-        <pre><code>apn scan</code></pre>
+        <pre><code><span class="c"># no install and no enrolment: the released binary, run where it lands</span>
+curl -fsSLo apn https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/agentpod-node-linux-amd64
+chmod +x apn && ./apn scan</code></pre>
         <p class="note">
-          A check that cannot determine an answer says so. It is never reported as a pass.
+          Swap the suffix for <code>linux-arm64</code>, <code>darwin-amd64</code> or
+          <code>darwin-arm64</code>; each release carries a <code>SHA256SUMS</code>. A check that
+          cannot determine an answer says so. It is never reported as a pass.
         </p>
       </div>
     </section>

@@ -22,6 +22,30 @@ export default defineConfig({
       description:
         'A fleet and facilities console for agent runtimes. Docs for running a fleet, ' +
         'operating the machines your agents live on, and building against the hub.',
+      // The mark and palette are agentpod.dev's; see src/styles/theme.css for where each
+      // value comes from. Two logo files because an <img> cannot follow the theme's colours.
+      logo: { light: './src/assets/mark-light.svg', dark: './src/assets/mark-dark.svg', alt: '' },
+      customCss: ['./src/styles/theme.css'],
+      favicon: '/favicon.svg',
+      head: [
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true } },
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'stylesheet',
+            href:
+              'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800' +
+              '&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap',
+          },
+        },
+        // Starlight writes og:title, og:description and og:url per page, but no image. The
+        // image is agentpod.dev's (apps/landing/og/), by absolute URL.
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://agentpod.dev/og.png' } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://agentpod.dev/og.png' } },
+      ],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/SuperJackfruitLabs/agentpod' },
       ],

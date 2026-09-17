@@ -13,6 +13,7 @@
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { STATE } from "$lib/fleet/state";
   import StateDot from "./StateDot.svelte";
+  import Mark from "$lib/components/brand/Mark.svelte";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import Search from "@lucide/svelte/icons/search";
   import SunMoon from "@lucide/svelte/icons/sun-moon";
@@ -73,15 +74,16 @@
     <PanelLeft class="size-4" aria-hidden="true" />
   </button>
 
+  <!-- The mark and the name as agentpod.dev and the docs set them: the name in
+       plain text, the colour on the mark. It was "AGENTPOD · MUSTER", and Muster
+       is an internal codename, not something an operator should read. -->
   <a
     href="/"
-    class="flex shrink-0 items-baseline gap-1.5 rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+    data-testid="wordmark"
+    class="flex shrink-0 items-center gap-2 rounded px-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
   >
-    <span class="text-sm font-semibold tracking-[0.12em] text-foreground">AGENTPOD</span>
-    <span
-      data-testid="wordmark-suffix"
-      class="text-sm tracking-[0.12em] text-muted-foreground max-[900px]:hidden"
-    >· MUSTER</span>
+    <Mark class="size-[18px]" />
+    <span class="text-sm font-semibold text-foreground">AgentPod</span>
   </a>
 
   <a

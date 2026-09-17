@@ -57,14 +57,9 @@ capability the code does not have should never reach the site.
    This repository has no Cloudflare secret today — the `worker` job only runs tests — so
    this is a new one rather than a widening.
 
-3. **Point the domain — and note this differs from superpipeline.** `agentpod.dev` is
-   registered at **Porkbun and is not on Cloudflare's nameservers**, so adding a custom
-   domain to the Pages project does *not* create the DNS record for you. Two steps:
-
-   - Add `docs.agentpod.dev` as a custom domain on the Pages project. Cloudflare will show
-     the `<project>.pages.dev` hostname it expects and report the domain as pending.
-   - At Porkbun, create a `CNAME` for `docs` pointing at that `<project>.pages.dev`
-     hostname. Validation completes once it resolves.
+3. **Point the domain.** `agentpod.dev` is on Cloudflare's nameservers (it was at Porkbun's
+   when this was first written, which is why older notes describe a manual CNAME). Adding
+   `docs.agentpod.dev` as a custom domain on the Pages project creates the DNS record.
 
 ### Checking it
 

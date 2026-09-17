@@ -4,12 +4,19 @@ import "../themes/modern/styles.css";
 interface Props {
   title: string;
   description?: string;
+  /** `article` for a blog post; everything else is the site itself. */
+  ogType?: 'website' | 'article';
 }
 
-const { 
-  title, 
-  description = "Your AI agents, anywhere. Run powerful AI agents in secure, portable sandboxes. Access from any device." 
+// The fallback is the landing page's description. It was "secure, portable sandboxes.
+// Access from any device" — the pre-pivot pitch, still shown on any page that set none.
+const {
+  title,
+  description = "A fleet and facilities console for agent runtimes. Attach to the agents you already run, reach machines behind NAT, and manage files, logs, terminals, health and cleanup from one place. Self-hostable.",
+  ogType = 'website',
 } = Astro.props;
+// Absolute, as og:image must be: a crawler resolves nothing against the page.
+const ogImage = new URL('/og.png', Astro.site);
 // `build.format: 'file'` means the pathname carries `.html` at build time, so the
 // canonical was announcing https://agentpod.dev/blog.html — a URL that resolves only
 // because Cloudflare matches extensionless, and not the one anybody links to. Strip it,
@@ -31,14 +38,19 @@ const canonicalURL = new URL(
     <link rel="canonical" href={canonicalURL} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     
-    <meta property="og:type" content="website" />
+    <meta property="og:type" content={ogType} />
+    <meta property="og:site_name" content="AgentPod" />
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
     
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

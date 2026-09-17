@@ -8,8 +8,8 @@ description: Two modes — the machine and the principal — and why the credent
 ## The two modes
 
 **Node verbs** act on *this machine*: `status`, `start`, `stop`, `logs`, `enroll`, `run`,
-`detect`, `scan`, `service`, `update`. They use the credential `apn enroll` stored on this
-host, which says *"I am this host."*
+`detect`, `scan`, `service`, `update`. Those that talk to the hub use the credential
+`apn enroll` stored on this host, which says *"I am this host."*
 
 **Fleet verbs** act on the fleet as *you*: `apn fleet <verb>`. They use a hub-issued token
 held by a person or an agent — the one `apn fleet login` writes, or `$AGENTPOD_TOKEN`.
@@ -58,16 +58,21 @@ authority to *find out what else exists*.
 If you have been granted nothing, you get an empty list rather than an error. That is the
 truth, and it is something you can act on.
 
-## The one command that needs no node
+## Commands that need no enrolment
 
 ```sh
+apn scan
 apn acp --list
 apn acp --station <id>
 ```
 
-`apn acp` attaches a local ACP editor to a station on another machine. It is the only
-command that does not require this host to be enrolled — a laptop can install `apn` purely
-as a client. See [Attaching an editor](/use/acp/).
+`apn scan` checks this machine's agent runtimes for exposure, and needs nothing at all — no
+hub, no token, no network. It runs from a downloaded binary on a machine that has never been
+near AgentPod. See [Checking for exposure](/use/scan/).
+
+`apn acp` attaches a local ACP editor to a station on another machine. Like the `fleet`
+verbs, it takes a hub token rather than this host's credential, so a laptop can use `apn`
+purely as a client without being enrolled. See [Attaching an editor](/use/acp/).
 
 ## Tokens on the command line
 

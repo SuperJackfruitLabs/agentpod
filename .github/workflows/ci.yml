@@ -248,8 +248,7 @@ jobs:
   # Publishing a page that lies is worse than not publishing it.
   #
   # Requires a CLOUDFLARE_API_TOKEN repo secret with Cloudflare Pages: Edit, and a
-  # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md —
-  # note that agentpod.dev is NOT on Cloudflare, so the DNS record is manual.
+  # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md.
   deploy-docs:
     needs: [hub]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -309,3 +308,84 @@ jobs:
           cd "$RUNNER_TEMP/wrangler-cwd"
           npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/docs-site/dist" \
             --project-name=agentpod-docs --branch=main
+
+  # The marketing site, apps/landing, on every pull request. It had no CI at all, so a
+  # change that broke its build was found — if at all — by whoever next deployed it by
+  # hand. It is also the gate for deploy-landing below: nothing tests the page's claims
+  # the way docs-claims tests the docs, so the most this can promise is that it builds
+  # and type-checks.
+  landing:
+    name: landing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Unlike docs-site, the landing app is inside the pnpm workspace (apps/*), so it
+      # installs from the root lockfile — filtered, since it needs none of the hub's or
+      # console's dependencies.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @agentpod/landing
+
+      - name: Type check (astro check)
+        working-directory: apps/landing
+        run: pnpm check
+
+      - name: Build
+        working-directory: apps/landing
+        run: pnpm build
+
+  # agentpod.dev, to the Cloudflare Pages project `agentpod-site`.
+  #
+  # Until this job existed the site was only ever deployed by hand, so the live page
+  # drifted behind main — it was still linking docs.kaambaan.dev days after the source
+  # stopped. Same shape as deploy-docs above, and the same CLOUDFLARE_API_TOKEN.
+  deploy-landing:
+    needs: [landing]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-landing
+      cancel-in-progress: false
+    environment:
+      name: landing
+      url: https://agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @agentpod/landing
+
+      - name: Build
+        working-directory: apps/landing
+        run: pnpm build
+
+      # From a neutral cwd, for the reasons given on deploy-docs: inside the app wrangler
+      # scaffolds a Cloudflare adapter into it, and at the repo root it refuses to run.
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/apps/landing/dist" \
+            --project-name=agentpod-site --branch=main

@@ -17,6 +17,25 @@ apn scan
 It needs **no hub, no account and no network**. It works on a machine that has never heard
 of AgentPod, which is the point.
 
+## Running it without installing AgentPod
+
+The installer in [Your first node](/start/first-node/) enrolls the machine, so it wants a hub
+and a token. `apn scan` wants neither — download the released binary on its own and run it
+where it lands:
+
+```sh
+curl -fsSLO https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/agentpod-node-linux-amd64
+curl -fsSLO https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS    # macOS: shasum -a 256 --ignore-missing -c SHA256SUMS
+chmod +x agentpod-node-linux-amd64
+./agentpod-node-linux-amd64 scan
+```
+
+Each release publishes `agentpod-node-linux-amd64`, `agentpod-node-linux-arm64`,
+`agentpod-node-darwin-amd64` and `agentpod-node-darwin-arm64`. `apn` is only the installer's
+name for this binary; downloaded directly, it keeps the release name. Nothing is written to
+the machine besides the file you downloaded.
+
 ## Exit codes
 
 | Code | Means |
