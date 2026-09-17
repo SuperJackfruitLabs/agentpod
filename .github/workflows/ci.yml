@@ -303,6 +303,12 @@ jobs:
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
         run: |
           mkdir -p "$RUNNER_TEMP/wrangler-cwd"
           cd "$RUNNER_TEMP/wrangler-cwd"
@@ -390,6 +396,12 @@ jobs:
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
         run: |
           mkdir -p "$RUNNER_TEMP/wrangler-cwd"
           cd "$RUNNER_TEMP/wrangler-cwd"
@@ -442,6 +454,12 @@ jobs:
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
         run: |
           mkdir -p "$RUNNER_TEMP/wrangler-cwd"
           cd "$RUNNER_TEMP/wrangler-cwd"
