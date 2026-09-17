@@ -683,6 +683,10 @@ overhead depending on syscall frequency.
 
 ## 6. Console — build + deploy to Cloudflare Pages
 
+> **agentpod.dev itself deploys from CI.** The `deploy-console` job in `.github/workflows/ci.yml`
+> builds with `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console`
+> project on every push to `main`. The steps below are for a deployment on your own domain.
+
 Build the static SPA (build locally — the VPS does not need to run this step):
 
 ```bash
