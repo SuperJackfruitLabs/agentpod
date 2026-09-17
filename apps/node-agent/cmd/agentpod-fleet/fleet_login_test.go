@@ -116,7 +116,7 @@ func jwtish(sub, kind string) string {
 	return "aGRy." + base64.RawURLEncoding.EncodeToString(p) + ".c2ln"
 }
 
-// runLogin runs `apn fleet …` and, for `login`, PLAYS THE BROWSER ITSELF.
+// runLogin runs `fleet …` and, for `login`, PLAYS THE BROWSER ITSELF.
 //
 // The first version of this test set `BROWSER=true` and trusted the platform to open a browser
 // that would follow the redirect. That passes on a developer's Mac, where `open` really works,
@@ -129,7 +129,7 @@ func jwtish(sub, kind string) string {
 // contributes to this flow and nothing more.
 func runLogin(t *testing.T, bin, hub, home string, args ...string) (string, int) {
 	t.Helper()
-	cmd := exec.Command(bin, append([]string{"fleet"}, args...)...)
+	cmd := exec.Command(bin, args...)
 	cmd.Env = []string{
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + home,

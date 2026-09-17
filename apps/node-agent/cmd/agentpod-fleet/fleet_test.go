@@ -41,7 +41,7 @@ func run(t *testing.T, bin string, env []string, args ...string) (string, int) {
 
 func TestFleetWithoutCredentialRefusesAndSaysHow(t *testing.T) {
 	bin := build(t)
-	out, code := run(t, bin, nil, "fleet", "whoami")
+	out, code := run(t, bin, nil, "whoami")
 
 	if code == 0 {
 		t.Fatal("a fleet command with no credential must not succeed")
@@ -69,7 +69,7 @@ func TestFleetNeverUsesTheNodeCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := exec.Command(bin, "fleet", "whoami")
+	cmd := exec.Command(bin, "whoami")
 	cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + home, "PATH=" + os.Getenv("PATH")}
 	out, _ := cmd.CombinedOutput()
 
@@ -87,7 +87,7 @@ func TestFleetWhoamiReadsTheTokenWithoutAHub(t *testing.T) {
 	// A well-formed JWT payload, signed with nonsense. `whoami` reports what you carry; it is
 	// not an authorization decision, and it must not need the network to answer.
 	tok := "aGRy.eyJzdWIiOiJwcm5fYWJjIiwicHJpbmNpcGFsS2luZCI6Imh1bWFuIn0.c2ln"
-	out, code := run(t, bin, []string{"AGENTPOD_TOKEN=" + tok}, "fleet", "whoami")
+	out, code := run(t, bin, []string{"AGENTPOD_TOKEN=" + tok}, "whoami")
 	if code != 0 {
 		t.Fatalf("whoami should succeed offline, got %d:\n%s", code, out)
 	}
@@ -96,30 +96,9 @@ func TestFleetWhoamiReadsTheTokenWithoutAHub(t *testing.T) {
 	}
 }
 
-func TestNodeIsAnAliasAndCannotDiverge(t *testing.T) {
-	bin := build(t)
-	// `apn version` and `apn node version` are the same command because `node` is a word
-	// stripped before one switch — not a second dispatch that could drift.
-	bare, c1 := run(t, bin, nil, "version")
-	viaNode, c2 := run(t, bin, nil, "node", "version")
-	if c1 != c2 || bare != viaNode {
-		t.Fatalf("`apn version` and `apn node version` differ:\n%q (%d)\n%q (%d)", bare, c1, viaNode, c2)
-	}
-}
-
-func TestHelpShowsBothModes(t *testing.T) {
-	bin := build(t)
-	out, _ := run(t, bin, nil, "help")
-	for _, want := range []string{"Fleet:", "fleet", "node"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("top-level help should mention %q:\n%s", want, out)
-		}
-	}
-}
-
 func TestFleetHelpExplainsTheCredentialBoundary(t *testing.T) {
 	bin := build(t)
-	out, _ := run(t, bin, nil, "help", "fleet")
+	out, _ := run(t, bin, nil, "help")
 	// The boundary is the thing an operator most needs told, because both modes are reasonably
 	// described as "talking to the hub".
 	for _, want := range []string{"never falls back", "AGENTPOD_TOKEN", "MACHINE"} {
@@ -131,7 +110,7 @@ func TestFleetHelpExplainsTheCredentialBoundary(t *testing.T) {
 
 func TestUnknownFleetVerbExitsTwo(t *testing.T) {
 	bin := build(t)
-	_, code := run(t, bin, nil, "fleet", "nonsense")
+	_, code := run(t, bin, nil, "nonsense")
 	if code != 2 {
 		t.Fatalf("unknown subcommand should exit 2, got %d", code)
 	}

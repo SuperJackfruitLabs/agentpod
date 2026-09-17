@@ -16,24 +16,6 @@ var commands = []struct {
 	name, group, oneline, detail string
 }{
 	{
-		name: "fleet", group: "Fleet",
-		oneline: "Act on the fleet as a signed-in principal (whoami, nodes, agents, stats)",
-		detail: "apn fleet <verb> — act on the fleet as a PRINCIPAL, not as this machine.\n\n" +
-			"  apn fleet login            sign in and store a hub token\n" +
-			"  apn fleet whoami [--json]   who the stored token says you are\n" +
-			"  apn fleet logout            forget the stored token\n" +
-			"  apn fleet nodes             the fleet's nodes\n" +
-			"  apn fleet agents            the agents you may dispatch\n" +
-			"  apn fleet stats             fleet totals\n" +
-			"  apn fleet activity          recent fleet activity\n\n" +
-			"The credential is separate from the node's, deliberately. `apn enroll` gives THIS\n" +
-			"MACHINE an identity; these verbs use a hub-issued token held by a person or an\n" +
-			"agent, from $AGENTPOD_TOKEN or the file `apn fleet login` writes. A fleet command\n" +
-			"never falls back to the node's credential — a node secret says 'I am this host',\n" +
-			"and it is not an authority to operate the fleet.\n\n" +
-			"Set $AGENTPOD_HUB to talk to a hub other than the default.",
-	},
-	{
 		name: "node", group: "Fleet",
 		oneline: "Explicit spelling for the machine-scoped verbs (apn node status, …)",
 		detail: "apn node <verb> — the explicit form of the machine-scoped verbs.\n\n" +
@@ -192,8 +174,7 @@ func helpText(version string) string {
 	b.WriteString("Examples:\n")
 	b.WriteString("  apn status\n")
 	b.WriteString("  apn logs -f\n")
-	b.WriteString("  apn enroll --hub https://hub.example.com --token <TOKEN>\n")
-	b.WriteString("  apn fleet whoami\n\n")
+	b.WriteString("  apn enroll --hub https://hub.example.com --token <TOKEN>\n\n")
 	b.WriteString("Run 'apn help <command>' or 'apn <command> -h' for command details.")
 
 	return b.String()

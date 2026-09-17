@@ -112,9 +112,6 @@ func main() {
 			os.Exit(0)
 		}
 		runCmd() // implemented in Task 9
-	case "fleet":
-		// Acting as a principal, not as this machine. See fleet.go.
-		fleetCmd(os.Args[2:])
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)
