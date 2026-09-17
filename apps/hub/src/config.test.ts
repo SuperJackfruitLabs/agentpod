@@ -17,7 +17,10 @@ describe("allowedOrigins (single canonical list)", () => {
   it("contains expected default origins", () => {
     expect(allowedOrigins).toContain("http://localhost:5173");
     expect(allowedOrigins).toContain("https://console.agentpod.dev");
-    expect(allowedOrigins).toContain("https://app.agentpod.dev");
+  });
+
+  it("no longer trusts the retired app.agentpod.dev console origin", () => {
+    expect(allowedOrigins).not.toContain("https://app.agentpod.dev");
   });
 
   it("is a plain array (not readonly tuple)", () => {
@@ -28,7 +31,6 @@ describe("allowedOrigins (single canonical list)", () => {
 describe("isAllowedOrigin", () => {
   it("returns true for origins in the allowedOrigins list", () => {
     expect(isAllowedOrigin("https://console.agentpod.dev")).toBe(true);
-    expect(isAllowedOrigin("https://app.agentpod.dev")).toBe(true);
     expect(isAllowedOrigin("http://localhost:5173")).toBe(true);
   });
 
