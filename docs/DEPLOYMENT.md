@@ -130,8 +130,8 @@ API_TOKEN=<run: openssl rand -hex 24>
 
 # ── Browser origins and the session cookie ────────────────────────────────────
 # REQUIRED on any domain other than agentpod.dev. The built-in origin allowlist
-# is only http://localhost:5173, https://console.agentpod.dev and
-# https://app.agentpod.dev (config.ts); ALLOWED_ORIGINS ADDS to it. Without
+# is only http://localhost:5173 and https://console.agentpod.dev (config.ts);
+# ALLOWED_ORIGINS ADDS to it. Without
 # your console's origin here, every mutating /api/* request is rejected by the
 # CSRF middleware and the terminal WebSocket fails its CSWSH check — the
 # console loads and cannot log in.
@@ -235,7 +235,7 @@ chmod 600 /etc/agentpod/hub.env
 ```
 
 > **Key constraints**
-> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173`, `console.agentpod.dev` and `app.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
+> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173` and `console.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
 > - `BETTER_AUTH_SECRET`: ≥ 32 characters **and** at least two character classes when `NODE_ENV=production`.
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
 > - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
@@ -589,9 +589,8 @@ systemctl daemon-reload
 systemctl enable --now agentpod-hub
 ```
 
-> **The unit hardcodes `agentpod.dev`.** Three `Environment=` lines in the shipped file name
-> that domain — `COOKIE_DOMAIN=.agentpod.dev`, `ALLOWED_ORIGINS=https://app.agentpod.dev`,
-> and `PUBLIC_URL=https://hub.agentpod.dev`. On any other domain, **edit them** (or delete
+> **The unit hardcodes `agentpod.dev`.** Two `Environment=` lines in the shipped file name
+> that domain — `COOKIE_DOMAIN=.agentpod.dev` and `PUBLIC_URL=https://hub.agentpod.dev`. On any other domain, **edit them** (or delete
 > them and keep the values in `hub.env`, which the same unit loads via `EnvironmentFile=`).
 > Note `PUBLIC_URL` is read by nothing in the hub — the config field is
 > `MANAGEMENT_API_PUBLIC_URL` — so it is inert either way.
@@ -719,14 +718,6 @@ Cloudflare Pages picks this up automatically. Alternatively, enable the "SPA" se
 ## 7. nginx vhosts (hub only)
 
 The console is hosted on Cloudflare Pages and does **not** require an nginx vhost on the VPS. Only the hub vhost is wanted here.
-
-> **The repo's vhost file contains two server blocks, not one.** `deploy/nginx/hub.agentpod.dev.conf`
-> carries `hub.agentpod.dev` **and** an `app.agentpod.dev` block serving
-> `/opt/agentpod/apps/console/build` from disk — a leftover from the pre-Pages deploy.
-> Copying it as-is installs a vhost for a hostname this guide never creates. `nginx -t`
-> passes either way (a missing `root` directory is not a config error), so nothing tells you.
-> **Delete the second `server { … }` block after copying**, or serve the console from it
-> instead of Cloudflare Pages — but pick one.
 
 **7a. WebSocket upgrade map** (add once to the `http{}` context):
 

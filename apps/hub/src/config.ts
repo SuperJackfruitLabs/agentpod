@@ -267,7 +267,10 @@ export type Config = typeof config;
 const _DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:5173',         // Vite dev
   'https://console.agentpod.dev',  // Production console (Cloudflare Pages; same-site w/ hub.agentpod.dev)
-  'https://app.agentpod.dev',      // legacy console origin (transitional)
+  // `https://app.agentpod.dev` was here as the "transitional" origin of the first,
+  // VPS-served console. Retired 2026-09-17: nothing has served a console there since
+  // the vhost was removed, and a trusted origin nobody operates is one somebody else
+  // could. See SuperJackfruitLabs/estate#2.
 ] as const;
 
 /**
