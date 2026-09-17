@@ -395,3 +395,56 @@ jobs:
           cd "$RUNNER_TEMP/wrangler-cwd"
           npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/apps/landing/dist" \
             --project-name=agentpod-site --branch=main
+
+  # console.agentpod.dev, to the Cloudflare Pages project `agentpod-console`.
+  #
+  # Deployed by hand until this job existed, and it drifted the way the landing page
+  # did: on 2026-09-17 the live console was two weeks behind main, missing a sign-in
+  # fix and the rebrand. Gated on `console`, so the build that ships is one whose
+  # type check and tests passed.
+  #
+  # PUBLIC_HUB_URL is baked in at build time; without it a hosted console opens
+  # disconnected (stores/connection.svelte.ts). Same `docs` environment as the other
+  # deploy jobs, because that is where CLOUDFLARE_API_TOKEN lives — see
+  # deploy-landing.
+  deploy-console:
+    needs: [console]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-console
+      cancel-in-progress: false
+    environment:
+      name: docs
+      url: https://console.agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: apps/console
+        env:
+          PUBLIC_HUB_URL: https://hub.agentpod.dev
+        run: pnpm build
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/apps/console/build" \
+            --project-name=agentpod-console --branch=main \
+            --commit-hash="$GITHUB_SHA"
