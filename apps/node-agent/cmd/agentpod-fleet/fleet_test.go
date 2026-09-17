@@ -48,7 +48,7 @@ func TestFleetWithoutCredentialRefusesAndSaysHow(t *testing.T) {
 	}
 	// It has to name the fix, and distinguish itself from enrolment — the two are routinely
 	// confused precisely because both are called "connecting to the hub".
-	for _, want := range []string{"Not signed in", "apn fleet login", "AGENTPOD_TOKEN", "MACHINE"} {
+	for _, want := range []string{"Not signed in", "fleet login", "AGENTPOD_TOKEN", "MACHINE"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("refusal should mention %q, got:\n%s", want, out)
 		}

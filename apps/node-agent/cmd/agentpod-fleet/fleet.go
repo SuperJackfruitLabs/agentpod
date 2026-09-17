@@ -76,7 +76,7 @@ func requireCredential() fleetcred.Credential {
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"Not signed in to a fleet.\n\n"+
-				"  apn fleet login            sign in and store a token\n"+
+				"  fleet login            sign in and store a token\n"+
 				"  %s=…   supply one directly\n\n"+
 				"This is separate from `apn enroll`, which gives this MACHINE an identity.\n"+
 				"A node's credential is never used to act on the fleet.\n",
@@ -85,7 +85,7 @@ func requireCredential() fleetcred.Credential {
 	}
 	if claims, err := fleetcred.Inspect(c.Token); err == nil && claims.Expired() {
 		fmt.Fprintf(os.Stderr,
-			"Your session expired at %s.\n\n  apn fleet login\n",
+			"Your session expired at %s.\n\n  fleet login\n",
 			claims.Expiry.Local().Format(time.RFC1123))
 		os.Exit(1)
 	}
@@ -173,7 +173,7 @@ func fleetGet(path string, args []string) {
 		os.Exit(1)
 	}
 	if res.StatusCode == http.StatusUnauthorized {
-		fmt.Fprintf(os.Stderr, "The hub did not accept that token (401).\n\n  apn fleet login\n")
+		fmt.Fprintf(os.Stderr, "The hub did not accept that token (401).\n\n  fleet login\n")
 		os.Exit(1)
 	}
 	if res.StatusCode >= 400 {
