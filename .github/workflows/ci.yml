@@ -349,6 +349,12 @@ jobs:
   # Until this job existed the site was only ever deployed by hand, so the live page
   # drifted behind main — it was still linking docs.kaambaan.dev days after the source
   # stopped. Same shape as deploy-docs above, and the same CLOUDFLARE_API_TOKEN.
+  #
+  # It runs in the `docs` environment on purpose. The token is an environment secret
+  # there, not a repository one, and a job in any other environment receives an empty
+  # string — the first run of this job, in its own `landing` environment, failed on
+  # exactly that. Both jobs push to Pages on the same account, so sharing the
+  # environment exposes nothing the token did not already reach.
   deploy-landing:
     needs: [landing]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -357,7 +363,7 @@ jobs:
       group: deploy-landing
       cancel-in-progress: false
     environment:
-      name: landing
+      name: docs
       url: https://agentpod.dev
     steps:
       - name: Checkout
