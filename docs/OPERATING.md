@@ -99,16 +99,38 @@ single-use (`enrollment_tokens.used_at`) and scoped to the operator account
 
 ---
 
+## The fleet client
+
+`fleet` acts on the fleet as *you*, not as a machine. It is a separate binary
+from `apn`: install it on a laptop, in CI, or in an agent's workspace — anywhere
+that is **not** an enrolled node.
+
+```sh
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install-fleet.sh | sh
+fleet login
+fleet nodes
+```
+
+It enrols nothing and installs no service. Its credential is a hub token in
+`<UserConfigDir>/agentpod/token.json`, separate from a node's
+`<UserConfigDir>/agentpod-node/config.json`, and neither binary can read the
+other's — they share no code.
+
+Removed in the release following v0.1.33: `apn fleet <verb>`. Use `fleet <verb>`.
+
+---
+
 ## 1a. Two modes: acting as a machine, or as yourself
 
 `apn` is the node agent, and every verb above acts on **the machine it runs on**, authenticating
 as that machine with the `<nodeId>:<nodeSecret>` written by `apn enroll`. On a laptop, in CI, or
-inside an agent's workspace there is nothing to act *as* — which is where `apn fleet` comes in.
+inside an agent's workspace there is nothing to act *as* — which is where `fleet`, a separate
+binary, comes in.
 
 | mode | acts as | credential |
 |---|---|---|
 | `apn node …` | this machine | `<nodeId>:<nodeSecret>` from the node's config |
-| `apn fleet …` | you, or an agent | a hub token |
+| `fleet …` | you, or an agent | a hub token |
 
 `apn node <verb>` is the explicit spelling; the bare forms keep working, so `apn status` and
 `apn node status` are the same command and every existing runbook still reads correctly.
@@ -116,14 +138,14 @@ inside an agent's workspace there is nothing to act *as* — which is where `apn
 ### Signing in
 
 ```sh
-apn fleet login          # opens a browser, stores a token
-apn fleet whoami         # who that token says you are, and when it expires
-apn fleet logout
+fleet login          # opens a browser, stores a token
+fleet whoami         # who that token says you are, and when it expires
+fleet logout
 ```
 
 `login` is authorization-code with PKCE against the hub, and the browser only ever performs a
 top-level navigation — which is what makes it work at all, since the hub's session cookie is
-`SameSite=Lax` and would not be sent on a cross-site fetch. The token is exchanged by `apn`
+`SameSite=Lax` and would not be sent on a cross-site fetch. The token is exchanged by `fleet`
 itself, so it never enters a URL, your shell history, or a `Referer`.
 
 The hub must have the CLI registered — `apn|loopback` in `HUB_OAUTH_CLIENTS`, see
@@ -133,10 +155,10 @@ it, authorize refuses, which is the correct posture for a hub that has not opted
 ### Reading the fleet
 
 ```sh
-apn fleet nodes
-apn fleet agents
-apn fleet stats
-apn fleet activity
+fleet nodes
+fleet agents
+fleet stats
+fleet activity
 ```
 
 Output is the hub's own JSON, passed through rather than reformatted — a client that summarises a
@@ -152,18 +174,19 @@ payload it does not fully model silently drops the field somebody needed.
 | `BROWSER` | The command `login` opens. May carry arguments. `BROWSER=none` opens nothing and leaves the printed URL as the whole interface, which is what you want over SSH. |
 
 ```sh
-AGENTPOD_TOKEN=… apn fleet nodes
+AGENTPOD_TOKEN=… fleet nodes
 ```
 
 ### The rule worth knowing
 
 **A fleet command never falls back to the node's credential.** With no token it fails and tells
 you to sign in; it does not quietly act as the machine. A node secret says *"I am this host"* and
-is not an authority to operate the fleet — so the fleet verbs are present on every enrolled
-station and useless there without a token the node does not have.
+is not an authority to operate the fleet — and since `apn` and `fleet` are separate binaries that
+share no code, even run on the same machine as an enrolled node, `fleet` cannot reach the node's
+credential at all.
 
 Two failures that look alike and are not: **401 means sign in**, **403 means your principal may
-not do this**. `apn` reports them differently on purpose. In particular a hub token naming an
+not do this**. `fleet` reports them differently on purpose. In particular a hub token naming an
 **agent** is refused from the operator API with 403 — agents reach the hub through its MCP
 endpoint, not these verbs.
 
