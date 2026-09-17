@@ -22,11 +22,12 @@ apn acp --station <id> --session <id>   # resume a session
 
 `--hub` points at a hub other than the default.
 
-## This is the one command that needs no node
+## It needs no node
 
-Every other node verb assumes this machine is enrolled. `apn acp` does not — a laptop can
-install `apn` purely as a client, attach to stations elsewhere, and never be part of the
-fleet itself.
+`apn acp` does not assume this machine is enrolled — a laptop can install `apn` purely as a
+client, attach to stations elsewhere, and never be part of the fleet itself. (`apn scan` is
+the other command that works on an unenrolled machine; see [Checking for
+exposure](/use/scan/).)
 
 ## Tokens
 

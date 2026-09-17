@@ -122,11 +122,13 @@ test("the avatar shows the signed-in user's initials", () => {
   expect(getByTestId("user-avatar").textContent?.trim()).toBe("AB");
 });
 
-test("the wordmark is present, with · MUSTER as its own element so it can drop out on narrow screens", () => {
-  const { getByTestId, getByText } = render(TopBar);
+test("the wordmark is the mark and the product's name, leading home", () => {
+  const { getByTestId } = render(TopBar);
+  const wordmark = getByTestId("wordmark");
 
-  expect(getByText("AGENTPOD")).toBeTruthy();
-  expect(getByTestId("wordmark-suffix").textContent).toContain("MUSTER");
+  expect(wordmark.textContent?.trim()).toBe("AgentPod");
+  expect(wordmark.getAttribute("href")).toBe("/");
+  expect(wordmark.querySelector('[data-testid="agentpod-mark"]')).toBeTruthy();
 });
 
 test("the roster toggle calls back and is hidden above the one-column breakpoint", async () => {

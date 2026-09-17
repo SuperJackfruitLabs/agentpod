@@ -7,7 +7,7 @@
   import { Input } from "$lib/components/ui/input";
   import { Field } from "$lib/components/ui/field";
   import { Spinner } from "$lib/components/ui/spinner";
-  import Server from "@lucide/svelte/icons/server";
+  import Mark from "$lib/components/brand/Mark.svelte";
   import Circle from "@lucide/svelte/icons/circle";
   import { statusTextClass } from "$lib/utils/status-badge";
 
@@ -152,9 +152,7 @@
   <div class="w-full max-w-md rounded-lg border bg-card p-6 space-y-6">
     <!-- Brand -->
     <div class="flex flex-col items-center gap-3 text-center">
-      <div class="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-        <Server class="size-5" />
-      </div>
+      <Mark class="size-10" />
       <div>
         <h1 class="text-lg font-semibold">AgentPod</h1>
         <p class="mt-1 text-sm text-muted-foreground">

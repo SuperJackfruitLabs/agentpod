@@ -10,6 +10,8 @@
  * Deliberately plain markup with its own styles rather than the app's utility classes: the
  * landing page is standalone, and this has to look like it.
  */
+import Mark from '../Mark.astro';
+
 interface Props {
   variant?: 'transparent' | 'solid';
 }
@@ -18,7 +20,7 @@ const { variant = 'transparent' } = Astro.props;
 
 <header class:list={['mast', variant]}>
   <div class="wrap">
-    <a class="brand" href="/" aria-label="AgentPod home">agent<span>pod</span></a>
+    <a class="brand" href="/" aria-label="AgentPod home"><Mark />AgentPod</a>
     <nav aria-label="Main navigation">
       <a href="https://docs.agentpod.dev">Docs</a>
       <a href="/blog">Blog</a>
@@ -43,7 +45,12 @@ const { variant = 'transparent' } = Astro.props;
     justify-content: space-between;
     gap: 20px;
   }
+  /* As on the landing page: the name in plain text, the accent on the mark. */
   .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    --mark-accent: var(--accent-sienna);
     font-family: var(--font-display);
     font-weight: 800;
     font-size: 21px;
@@ -51,7 +58,6 @@ const { variant = 'transparent' } = Astro.props;
     color: var(--foreground);
     text-decoration: none;
   }
-  .brand span { color: var(--accent-sienna); }
   nav { display: flex; gap: 22px; font-size: 15px; }
   nav a { color: var(--foreground-muted); text-decoration: none; }
   nav a:hover, nav a:focus-visible { color: var(--foreground); }

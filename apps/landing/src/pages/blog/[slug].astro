@@ -42,7 +42,7 @@ const readTime = calculateReadTime(post.body);
 const formattedDate = formatDate(post.data.date);
 ---
 
-<ModernLayout title={`${post.data.title} — AgentPod Blog`} description={post.data.excerpt}>
+<ModernLayout title={`${post.data.title} — AgentPod Blog`} description={post.data.excerpt} ogType="article">
   <Header slot="header" variant="solid" />
   
   <!-- Article Header -->

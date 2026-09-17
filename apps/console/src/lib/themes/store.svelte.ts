@@ -24,9 +24,6 @@ const THEME_COLOR_SCHEME_KEY = "agentpod-color-scheme";
 const THEME_FONT_PAIRING_KEY = "agentpod-font-pairing";
 const THEME_CUSTOM_THEMES_KEY = "agentpod-custom-themes";
 
-// Legacy key (for migration from old codeopen keys)
-const LEGACY_THEME_PRESET_KEY = "codeopen-theme-preset";
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -65,12 +62,6 @@ function initialize() {
   const savedFontPairing = localStorage.getItem(THEME_FONT_PAIRING_KEY);
   const savedCustomThemes = localStorage.getItem(THEME_CUSTOM_THEMES_KEY);
 
-  // Check for legacy preset and migrate
-  const legacyPreset = localStorage.getItem(LEGACY_THEME_PRESET_KEY);
-  if (legacyPreset && !savedColorScheme && !savedFontPairing) {
-    migrateFromLegacyPreset(legacyPreset);
-  }
-
   if (savedMode && ["light", "dark", "system", "auto"].includes(savedMode)) {
     themeMode = savedMode;
   }
@@ -99,30 +90,6 @@ function initialize() {
   startAutoModeTimer();
 
   applyTheme();
-}
-
-/**
- * Migrate from legacy preset system to new modular system
- */
-function migrateFromLegacyPreset(presetId: string) {
-  // Map legacy preset ID to color scheme
-  if (colorSchemesMap.has(presetId)) {
-    colorSchemeId = presetId;
-    localStorage.setItem(THEME_COLOR_SCHEME_KEY, presetId);
-  }
-
-  // Map legacy preset ID to appropriate font pairing
-  const preset = themePresetsMap.get(presetId);
-  if (preset) {
-    const mappedFontPairing = mapPresetToFontPairing(preset);
-    if (mappedFontPairing) {
-      fontPairingId = mappedFontPairing;
-      localStorage.setItem(THEME_FONT_PAIRING_KEY, mappedFontPairing);
-    }
-  }
-
-  // Clean up legacy key
-  localStorage.removeItem(LEGACY_THEME_PRESET_KEY);
 }
 
 /**
