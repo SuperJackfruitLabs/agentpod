@@ -92,7 +92,7 @@ func Load() (Credential, error) {
 	return Credential{Token: s.Token, Source: p}, nil
 }
 
-// Save writes the token for later `apn fleet` calls, 0600 inside a 0700 directory — the same
+// Save writes the token for later `fleet` calls, 0600 inside a 0700 directory — the same
 // posture the node config is written with.
 func Save(token, hub string) error {
 	p := Path()
