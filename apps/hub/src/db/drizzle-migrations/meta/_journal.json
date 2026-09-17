@@ -470,6 +470,13 @@
       "when": 1789567032380,
       "tag": "0066_kaambaan_is_now_superpipeline",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789648322149,
+      "tag": "0067_better_auth_1_7_columns",
+      "breakpoints": true
     }
   ]
 }
