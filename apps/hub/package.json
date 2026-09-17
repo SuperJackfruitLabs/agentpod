@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/pg": "^8.21.0",
+    "@types/pg": "^8.23.1",
     "@types/pngjs": "^6.0.5",
     "drizzle-kit": "^0.31.10",
     "typescript": "^5.9.3"
