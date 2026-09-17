@@ -1,24 +1,25 @@
-// Package fleetcred resolves the credential `apn fleet` acts with.
+// Package fleetcred resolves the credential `fleet` acts with.
 //
 // # Why this is a package and not three lines in main
 //
-// `apn` has two modes, and the boundary between them is the CREDENTIAL, not the verb list.
-// `apn node` acts as this machine, with `<nodeId>:<nodeSecret>` from the node's own config.
-// `apn fleet` acts as a principal — a person, or an agent — with a hub-issued token.
+// AgentPod ships two binaries, and the boundary between them is the CREDENTIAL, not the verb
+// list. `apn node` (agentpod-node) acts as this machine, with `<nodeId>:<nodeSecret>` from the
+// node's own config. `fleet` (agentpod-fleet) acts as a principal — a person, or an agent — with
+// a hub-issued token.
 //
-// The rule that makes it safe to ship fleet verbs in the binary installed on every station:
-// **neither mode may ever read the other's credential.** A fleet command with no token fails and
-// says how to get one. It must never fall back to the node secret, because a node secret is a
-// MACHINE identity, and letting it act on the fleet would be the CLI inventing an escalation no
-// hub guard asked for.
+// The rule that makes the split safe: **neither binary may ever read the other's credential.**
+// A fleet command with no token fails and says how to get one. It must never fall back to the
+// node secret, because a node secret is a MACHINE identity, and letting it act on the fleet
+// would be the CLI inventing an escalation no hub guard asked for.
 //
 // The two live in different directories for the same reason — `agentpod-node/` and `agentpod/` —
 // so neither can be reached by a path mistake, and an operator can delete one without disturbing
 // the other.
 //
-// The consequence worth stating plainly: the fleet verbs are present on every station and
-// **useless without a token the node does not have**. Authority stays where it already is, in the
-// hub's own guards.
+// The consequence worth stating plainly: `fleet` is a separate binary from `apn`, installed only
+// where someone chooses to put it — never shipped as part of an enrolled node — and it is
+// **useless without a token**, whether or not a node happens to be enrolled on the same machine.
+// Authority stays where it already is, in the hub's own guards.
 package fleetcred
 
 import (
@@ -50,7 +51,7 @@ type Credential struct {
 	Source string
 }
 
-// Path is where `apn fleet login` stores its token.
+// Path is where `fleet login` stores its token.
 //
 // Deliberately NOT under `agentpod-node/`. A separate directory is what stops a future edit from
 // reaching the node's secret with a relative path, and it lets an operator remove one credential

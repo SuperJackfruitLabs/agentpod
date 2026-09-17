@@ -100,4 +100,4 @@ has stopped being valid or you pass `--force`.
 ## Next
 
 - [Stations](/use/stations/) — what lives on the node
-- [The apn command](/use/cli/) — the fleet verbs, which act as *you* rather than as the machine
+- [apn and fleet](/use/cli/) — the `fleet` client, which acts as *you* rather than as the machine

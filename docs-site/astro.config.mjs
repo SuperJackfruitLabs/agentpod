@@ -64,7 +64,7 @@ export default defineConfig({
             { label: 'Nodes', slug: 'use/nodes' },
             { label: 'Stations', slug: 'use/stations' },
             { label: 'What you can do to a station', slug: 'use/panels' },
-            { label: 'The apn command', slug: 'use/cli' },
+            { label: 'apn and fleet', slug: 'use/cli' },
             { label: 'Checking for exposure', slug: 'use/scan' },
             { label: 'Attaching an editor', slug: 'use/acp' },
           ],

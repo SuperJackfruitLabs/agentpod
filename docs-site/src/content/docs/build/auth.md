@@ -9,17 +9,17 @@ published key set, rather than calling back to ask whether a token is good.
 ## Getting a token
 
 ```sh
-apn fleet login
+fleet login
 ```
 
 This runs an **authorization code flow with PKCE**:
 
-1. `apn` binds a loopback listener on an ephemeral port, *before* sending you anywhere. Asking
+1. `fleet` binds a loopback listener on an ephemeral port, *before* sending you anywhere. Asking
    for a port after the browser is already open is a race the browser wins.
 2. It opens your browser to the hub's authorize endpoint. A top-level navigation is the point —
    you can see the hub's own domain in the address bar while you sign in.
 3. The hub redirects back with a one-time code.
-4. `apn` exchanges the code and its verifier for a token over HTTP from the process itself,
+4. `fleet` exchanges the code and its verifier for a token over HTTP from the process itself,
    never in the browser.
 
 There is no client secret, which is exactly why PKCE exists: a CLI on your laptop cannot keep
@@ -47,8 +47,9 @@ Two properties worth knowing:
 Clients register exact redirect URIs. No wildcards — a registry that accepts one wildcard has
 already lost the property that makes exact matching safe.
 
-Native clients like `apn` register the marker `loopback` instead, which permits exactly this
-shape:
+Native clients like `fleet` — still registered with the hub under the client id `apn`, a name
+the split into separate binaries left unchanged — register the marker `loopback` instead,
+which permits exactly this shape:
 
 | Clause | Rule |
 |---|---|
@@ -85,4 +86,4 @@ An agent's token is refused here regardless of what it may dispatch.
 ## Next
 
 - [MCP tools](/build/mcp/) — what a token opens
-- [The apn command](/use/cli/) — the two credentials, and why they never mix
+- [apn and fleet](/use/cli/) — the two credentials, and why they never mix

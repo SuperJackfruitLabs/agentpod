@@ -1,50 +1,66 @@
 ---
-title: The apn command
-description: Two modes — the machine and the principal — and why the credentials never mix.
+title: apn and fleet
+description: Two binaries — the resident node daemon and the client that acts as you — and why their credentials never mix.
 ---
 
-`apn` is the node agent binary, and it runs in **two modes**.
+AgentPod ships two command-line binaries. `apn` (`agentpod-node`) is the resident daemon
+installed on an enrolled host. `fleet` (`agentpod-fleet`) is a separate client you run
+anywhere that is **not** an enrolled node — a laptop, CI, an agent's own workspace.
 
-## The two modes
+## Two binaries, not two modes
 
-**Node verbs** act on *this machine*: `status`, `start`, `stop`, `logs`, `enroll`, `run`,
-`detect`, `scan`, `service`, `update`. Those that talk to the hub use the credential
-`apn enroll` stored on this host, which says *"I am this host."*
+`apn` acts on **this machine**: `status`, `start`, `stop`, `logs`, `enroll`, `run`, `detect`,
+`scan`, `service`, `acp`, `update`. Those that talk to the hub use the credential `apn enroll`
+stored on this host, which says *"I am this host."*
 
-**Fleet verbs** act on the fleet as *you*: `apn fleet <verb>`. They use a hub-issued token
-held by a person or an agent — the one `apn fleet login` writes, or `$AGENTPOD_TOKEN`.
+`fleet` acts on the fleet **as you**: `login`, `whoami`, `logout`, `nodes`, `agents`, `stats`,
+`activity`. It uses a hub-issued token held by a person or an agent — the one `fleet login`
+writes, or `$AGENTPOD_TOKEN`.
 
 ```sh
 apn status          # how is this machine?
-apn fleet whoami    # who am I?
+fleet whoami        # who am I?
 ```
 
-A fleet command **never falls back to the node's credential.** A node secret asserts which
-host you are; it is not an authority to operate a fleet, and treating it as one would mean
-that rooting any laptop in the fleet hands over the whole fleet. The two credentials are
-stored separately and are never substituted for one another.
+`apn` and `fleet` are separate binaries built from the same repository and sharing no code —
+`apn` links none of `fleet`'s code, and `fleet` links none of `apn`'s. A fleet command
+**never falls back to the node's credential**, and that is now structural rather than
+conventional: neither binary *can* read the other's credential, because neither links the
+code that would let it. A node secret asserts which host you are; it was never an authority
+to operate a fleet, and treating it as one would mean that rooting any laptop in the fleet
+hands over the whole fleet. The two credentials are stored separately, in separate config
+directories, and are never substituted for one another.
+
+## Installing `fleet`
+
+```sh
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install-fleet.sh | sh
+```
+
+This installs a client only — it enrols nothing and installs no service. `apn` has its own
+installer; see [Enrolling a node](/use/nodes/).
 
 ## Signing in
 
 ```sh
-apn fleet login
+fleet login
 ```
 
 This opens a browser, you sign in to the hub, and the token is written to disk. After that:
 
 ```sh
-apn fleet whoami            # who the stored token says you are
-apn fleet whoami --json     # the same, for scripts
-apn fleet nodes             # the fleet's nodes
-apn fleet agents            # the agents you may dispatch
-apn fleet stats             # fleet totals
-apn fleet activity          # recent fleet activity
-apn fleet logout            # forget the stored token
+fleet whoami            # who the stored token says you are
+fleet whoami --json     # the same, for scripts
+fleet nodes             # the fleet's nodes
+fleet agents            # the agents you may dispatch
+fleet stats             # fleet totals
+fleet activity          # recent fleet activity
+fleet logout            # forget the stored token
 ```
 
 Set `$AGENTPOD_HUB` to talk to a hub other than the default.
 
-### What `apn fleet agents` actually answers
+### What `fleet agents` actually answers
 
 Not "every agent in the fleet" — **the agents this token may dispatch**. That answer is
 read from a claim the hub signed into the token itself. It is not a query parameter, not a
@@ -70,14 +86,14 @@ apn acp --station <id>
 hub, no token, no network. It runs from a downloaded binary on a machine that has never been
 near AgentPod. See [Checking for exposure](/use/scan/).
 
-`apn acp` attaches a local ACP editor to a station on another machine. Like the `fleet`
-verbs, it takes a hub token rather than this host's credential, so a laptop can use `apn`
+`apn acp` attaches a local ACP editor to a station on another machine. Like `fleet`, it takes
+a hub token rather than this host's credential, so a laptop can use `apn`'s `acp` command
 purely as a client without being enrolled. See [Attaching an editor](/use/acp/).
 
 ## Tokens on the command line
 
-The `fleet` verbs take their token from `$AGENTPOD_TOKEN` or from the file `apn fleet
-login` writes. There is no `--token` flag on them.
+`fleet` takes its token from `$AGENTPOD_TOKEN` or from the file `fleet login` writes. There
+is no `--token` flag on it.
 
 `apn acp` does accept `--token`, and you should generally not use it: a token in an
 argument lands in your shell history and in the process list. Prefer `$AGENTPOD_TOKEN`,
@@ -89,13 +105,16 @@ the machine, not a principal's hub token.)
 ## Getting help
 
 ```sh
-apn help            # everything, grouped
-apn help fleet      # one command in detail
-apn fleet -h        # the same text, plus flag defaults
+apn help            # apn's commands, grouped
+apn <command> -h    # one apn command in detail
+fleet help          # fleet's commands
+fleet -h            # the same text
 ```
 
-The help text is generated from a single table in the binary, so `apn help <cmd>` and
-`apn <cmd> -h` cannot disagree with each other.
+`apn`'s help text is generated from a single table in the binary, so `apn help <cmd>` and
+`apn <cmd> -h` cannot disagree with each other. `fleet` has one command group — everything it
+does acts as a principal — so `fleet`, `fleet help` and `fleet -h` all print the same block.
 
 Help flags are checked **before** anything happens: `apn stop -h` prints help and does not
-stop the service, and `apn service -h` cannot install or uninstall anything.
+stop the service, `apn service -h` cannot install or uninstall anything, and `fleet login -h`
+prints help without opening a browser.
