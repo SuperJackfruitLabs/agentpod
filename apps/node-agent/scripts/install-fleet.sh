@@ -22,19 +22,39 @@ ALIAS="$BIN_DIR/fleet"
 # someone and is never this installer's to replace.
 ours_alias() { [ -L "$ALIAS" ] && [ "$(readlink "$ALIAS")" = "$DEST" ]; }
 
+# $DEST is a plain file: it carries no marker of its own, so the only
+# provenance signal available without inventing a lockfile or state directory
+# is whether our alias already points at it — that combination (cp then ln,
+# in that order) only exists after this installer wrote both names. This
+# cannot tell "our binary, alias since removed" apart from "a stranger's
+# same-named file" — both look like a bare $DEST with no vouching alias — so
+# it treats them the same and refuses/leaves them alone either way. That is
+# deliberately conservative: it can mean a genuinely-ours $DEST is left
+# behind by --uninstall, or blocks a re-install, after the alias next to it
+# is removed by something other than this script; recovery is the same as
+# for a stranger's alias — move it aside, or point BIN_DIR elsewhere.
+ours_dest() { [ -e "$DEST" ] && ours_alias; }
+
 if [ "${1:-}" = "--uninstall" ]; then
+	# ours_dest reads ours_alias, so it must be decided before the alias is
+	# removed below — otherwise our own binary looks unowned the moment its
+	# alias is gone, and --uninstall would skip it.
+	dest_is_ours=0
+	if ours_dest; then dest_is_ours=1; fi
+
 	# Each removal is gated by an `if`, not a `cmd && rm` list: under set -eu
 	# a false condition at the end of a `&&` list is a non-zero exit for the
 	# whole statement, which would abort the script before reaching the
 	# echo below whenever there was nothing to remove (BIN_DIR empty or
 	# missing, or a second run right after the first). An `if` condition is
-	# exempt from set -e, so a false ours_alias/-f here is just "skip it".
+	# exempt from set -e, so a false ours_alias/dest_is_ours here is just
+	# "skip it".
 	removed=""
 	if ours_alias; then
 		rm -f "$ALIAS"
 		removed="$removed $ALIAS"
 	fi
-	if [ -f "$DEST" ]; then
+	if [ "$dest_is_ours" = 1 ]; then
 		rm -f "$DEST"
 		removed="$removed $DEST"
 	fi
@@ -50,6 +70,11 @@ fi
 # half-install behind.
 if [ -e "$DEST" ] && [ ! -f "$DEST" ]; then
 	echo "error: $DEST exists and is not a regular file." >&2
+	exit 1
+fi
+if [ -e "$DEST" ] && ! ours_dest; then
+	echo "error: $DEST already exists and was not created by this installer." >&2
+	echo "       Move it aside, or set BIN_DIR to somewhere else." >&2
 	exit 1
 fi
 if { [ -e "$ALIAS" ] || [ -L "$ALIAS" ]; } && ! ours_alias; then

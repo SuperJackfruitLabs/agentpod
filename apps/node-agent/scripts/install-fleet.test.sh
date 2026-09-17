@@ -55,4 +55,76 @@ BIN_DIR="$BIN_DIR" sh "$INSTALLER" --uninstall >/dev/null || fail "uninstall exi
 # exit 0, not fail because the files are already gone.
 BIN_DIR="$BIN_DIR" sh "$INSTALLER" --uninstall >/dev/null || fail "second uninstall exited non-zero"
 
+# Re-running install over its own prior install (both names already ours)
+# must still succeed — the DEST provenance check must not mistake our own
+# install for a stranger's.
+BIN_DIR="$BIN_DIR" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null \
+  || fail "first install (for re-run case) exited non-zero"
+BIN_DIR="$BIN_DIR" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null \
+  || fail "re-install over our own prior install exited non-zero"
+[ "$("$BIN_DIR/fleet")" = "fake-fleet" ] || fail "fleet broken after re-install"
+BIN_DIR="$BIN_DIR" sh "$INSTALLER" --uninstall >/dev/null || fail "cleanup uninstall exited non-zero"
+
+# --- DEST provenance: $DEST needs the same "did we put this here" test that
+# $ALIAS already has. A regular file happening to sit at $DEST is not
+# necessarily ours just because it's a regular file.
+
+# A coincidental regular file at $DEST, with no alias vouching for it: install
+# must refuse, must not touch that file, and must not create the alias either
+# (a refusal never leaves a half-install).
+DESTONLY=$(mktemp -d)
+echo "someone else's binary" > "$DESTONLY/agentpod-fleet"
+chmod +x "$DESTONLY/agentpod-fleet"
+if BIN_DIR="$DESTONLY" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null 2>&1; then
+  fail "installer overwrote a stranger's agentpod-fleet"
+fi
+[ "$(cat "$DESTONLY/agentpod-fleet")" = "someone else's binary" ] \
+  || fail "stranger's agentpod-fleet was modified"
+[ ! -e "$DESTONLY/fleet" ] || fail "installer created fleet alias despite refusing DEST"
+
+# Same setup: --uninstall must not delete that file either. Nothing vouches
+# for it, so it is left alone, and the run still exits 0.
+BIN_DIR="$DESTONLY" sh "$INSTALLER" --uninstall >/dev/null || fail "uninstall (DEST-only) exited non-zero"
+[ -f "$DESTONLY/agentpod-fleet" ] || fail "uninstall deleted a stranger's agentpod-fleet"
+
+# --- Only one of the two names present, the other direction: a dangling
+# alias (points at a DEST that doesn't exist yet) is still "ours" by the
+# readlink check, so install may proceed and fill in the missing binary.
+ALIASONLY=$(mktemp -d)
+ln -s "$ALIASONLY/agentpod-fleet" "$ALIASONLY/fleet"
+BIN_DIR="$ALIASONLY" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null \
+  || fail "install with a dangling own-alias exited non-zero"
+[ -x "$ALIASONLY/agentpod-fleet" ] || fail "DEST not created alongside dangling own-alias"
+[ "$("$ALIASONLY/fleet")" = "fake-fleet" ] || fail "fleet (was dangling) does not run the binary"
+BIN_DIR="$ALIASONLY" sh "$INSTALLER" --uninstall >/dev/null || fail "cleanup uninstall exited non-zero"
+
+# --- Alias is a symlink pointing somewhere else entirely (not $DEST, and not
+# dangling — it resolves to a real, unrelated file). Neither install nor
+# uninstall may touch it.
+ELSEWHERE=$(mktemp -d)
+echo "unrelated target" > "$ELSEWHERE/other-target"
+ln -s "$ELSEWHERE/other-target" "$ELSEWHERE/fleet"
+if BIN_DIR="$ELSEWHERE" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null 2>&1; then
+  fail "installer replaced an alias pointing elsewhere"
+fi
+[ "$(readlink "$ELSEWHERE/fleet")" = "$ELSEWHERE/other-target" ] \
+  || fail "alias pointing elsewhere was retargeted"
+[ ! -e "$ELSEWHERE/agentpod-fleet" ] || fail "installer created DEST despite refusing the alias"
+BIN_DIR="$ELSEWHERE" sh "$INSTALLER" --uninstall >/dev/null || fail "uninstall (foreign alias) exited non-zero"
+[ -L "$ELSEWHERE/fleet" ] || fail "uninstall removed an alias pointing elsewhere"
+
+# --- Alias is a dangling symlink pointing somewhere else (not $DEST, and the
+# target doesn't exist either). `[ -e "$ALIAS" ]` is false here since -e
+# follows the link to a missing target — only the `[ -L "$ALIAS" ]` half of
+# the guard catches this. Neither install nor uninstall may touch it.
+DANGLING=$(mktemp -d)
+ln -s "$DANGLING/nonexistent-target" "$DANGLING/fleet"
+if BIN_DIR="$DANGLING" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null 2>&1; then
+  fail "installer replaced a dangling foreign alias"
+fi
+[ "$(readlink "$DANGLING/fleet")" = "$DANGLING/nonexistent-target" ] \
+  || fail "dangling foreign alias was retargeted"
+BIN_DIR="$DANGLING" sh "$INSTALLER" --uninstall >/dev/null || fail "uninstall (dangling foreign alias) exited non-zero"
+[ -L "$DANGLING/fleet" ] || fail "uninstall removed a dangling foreign alias"
+
 echo "ok: install-fleet.sh"
