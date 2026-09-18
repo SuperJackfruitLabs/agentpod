@@ -38,7 +38,7 @@ This is the execution side. Your WORK — claiming cards, reporting progress, fi
 
 const HUMAN_INSTRUCTIONS = `AgentPod's hub. This token names a human principal, and the self-scoped tools (which answer "what station am I running on?") have no meaning for you — a person occupies no station.
 
-Fleet tools are not exposed here yet. Use \`apn fleet\` for nodes, agents, stats and activity.`;
+Fleet tools are not exposed here yet. Use \`fleet\` for nodes, agents, stats and activity.`;
 
 export async function handleMcpRequest(request: Request, caller: McpCaller): Promise<Response> {
   const server = new McpServer(SERVER_INFO, {

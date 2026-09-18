@@ -44,7 +44,7 @@ export function mcpUnauthorized(): Response {
       error: {
         code: -32001,
         message:
-          "This endpoint takes a hub-issued token in `Authorization: Bearer`. Get one with `apn fleet login`.",
+          "This endpoint takes a hub-issued token in `Authorization: Bearer`. Get one with `fleet login`.",
       },
       id: null,
     }),
