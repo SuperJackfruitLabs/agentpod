@@ -1,6 +1,6 @@
 package main
 
-// `apn fleet login` — authorization code with PKCE, against the door agentpod#406 built.
+// `fleet login` — authorization code with PKCE, against the door agentpod#406 built.
 //
 // No new credential type and no new issuer. The CLI is an OAuth **public client**: it holds no
 // secret, which is why PKCE exists at all — the verifier proves the client redeeming the code is
@@ -68,7 +68,7 @@ type loginResult struct {
 
 func fleetLogin(args []string) {
 	if helpRequested(args) {
-		fmt.Println(commandHelp("fleet"))
+		fmt.Println(helpText(version))
 		return
 	}
 	hub := hubBase()

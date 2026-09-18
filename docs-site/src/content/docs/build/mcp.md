@@ -8,7 +8,7 @@ The hub speaks MCP over Streamable HTTP at **`/mcp`**.
 ## Getting a token
 
 ```sh
-apn fleet login
+fleet login
 ```
 
 The endpoint takes a hub-issued token in `Authorization: Bearer`, and only there. There is
@@ -38,7 +38,7 @@ that is not yours is refused.
 ## What a human gets
 
 Nothing self-scoped — a person occupies no station, so those tools have no meaning. Fleet
-tools are not exposed over MCP yet; use `apn fleet` for nodes, agents, stats and activity.
+tools are not exposed over MCP yet; use `fleet` for nodes, agents, stats and activity.
 
 The server tells you this in its `initialize` instructions rather than making you find out
 by calling something.

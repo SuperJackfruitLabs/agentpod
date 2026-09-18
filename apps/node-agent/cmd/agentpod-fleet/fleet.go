@@ -1,15 +1,13 @@
 package main
 
-// `apn fleet …` — acting as a PRINCIPAL against a hub, rather than as this machine.
+// `fleet …` — acting as a PRINCIPAL against a hub, rather than as this machine.
 //
 // The split between this and `apn node …` is the credential, not the verb list. Everything in
 // `node` authenticates as `<nodeId>:<nodeSecret>` from the node's own config; everything here
 // authenticates with a hub-issued token that a person or an agent holds.
 //
 // **A fleet command never falls back to the node's secret.** That rule lives in
-// `internal/fleetcred` with the test that pins it, and it is the whole reason these verbs can
-// ship inside the binary installed on every station: they are present, and useless without a
-// token the node does not have.
+// `internal/fleetcred` with the test that pins it.
 //
 // This file adds no authority of its own and performs no client-side permission check. It
 // renders the hub's answer, including the hub's refusal. A client that pre-empts a server
@@ -41,10 +39,10 @@ func hubBase() string {
 	return defaultHub
 }
 
-// fleetCmd dispatches `apn fleet <verb>`.
+// fleetCmd dispatches `fleet <verb>`.
 func fleetCmd(args []string) {
 	if len(args) == 0 || helpRequested(args) {
-		fmt.Println(commandHelp("fleet"))
+		fmt.Println(helpText(version))
 		return
 	}
 	switch args[0] {
@@ -63,7 +61,7 @@ func fleetCmd(args []string) {
 	case "activity":
 		fleetGet("/api/activity", args[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], commandHelp("fleet"))
+		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], helpText(version))
 		os.Exit(2)
 	}
 }
@@ -78,7 +76,7 @@ func requireCredential() fleetcred.Credential {
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"Not signed in to a fleet.\n\n"+
-				"  apn fleet login            sign in and store a token\n"+
+				"  fleet login            sign in and store a token\n"+
 				"  %s=…   supply one directly\n\n"+
 				"This is separate from `apn enroll`, which gives this MACHINE an identity.\n"+
 				"A node's credential is never used to act on the fleet.\n",
@@ -87,7 +85,7 @@ func requireCredential() fleetcred.Credential {
 	}
 	if claims, err := fleetcred.Inspect(c.Token); err == nil && claims.Expired() {
 		fmt.Fprintf(os.Stderr,
-			"Your session expired at %s.\n\n  apn fleet login\n",
+			"Your session expired at %s.\n\n  fleet login\n",
 			claims.Expiry.Local().Format(time.RFC1123))
 		os.Exit(1)
 	}
@@ -175,7 +173,7 @@ func fleetGet(path string, args []string) {
 		os.Exit(1)
 	}
 	if res.StatusCode == http.StatusUnauthorized {
-		fmt.Fprintf(os.Stderr, "The hub did not accept that token (401).\n\n  apn fleet login\n")
+		fmt.Fprintf(os.Stderr, "The hub did not accept that token (401).\n\n  fleet login\n")
 		os.Exit(1)
 	}
 	if res.StatusCode >= 400 {

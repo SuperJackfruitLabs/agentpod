@@ -72,4 +72,4 @@ a host you have not logged into lately is still in front of you.
 
 ## Next
 
-- [The apn command](/use/cli/) — the rest of the surface
+- [apn and fleet](/use/cli/) — the rest of the surface

@@ -154,6 +154,14 @@ jobs:
       - name: Test the Modal image entrypoint wrapper
         run: sh apps/node-agent/deploy/test-modal-entrypoint.sh
 
+      # install-fleet.sh is published as a release asset and runs on a stranger's
+      # machine via `curl | sh`, `rm` included — the same reasoning as the two
+      # suites above applies twice over: it is a required check, so a job of its
+      # own would not gate, and untested shell that deletes files is exactly the
+      # kind of thing that should not ship unverified.
+      - name: Test the fleet client installer
+        run: sh apps/node-agent/scripts/install-fleet.test.sh
+
       # The Fly images bake in a RELEASED node-agent binary rather than
       # compiling one, so they carry a version pin — and a pin nobody is forced
       # to move goes stale silently (issue #290: both Fly images sat on v0.1.22
