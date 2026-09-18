@@ -73,24 +73,46 @@ describe("published docs", () => {
 
   test("every apn command named is a registered command", () => {
     // Read from what actually DISPATCHES, not from the help table. A command listed in help
-    // but not dispatched is the bug in the other direction, and `apn fleet login` — dispatched
-    // for months while missing from help — is why this test trusts the switch over the table.
+    // but not dispatched is the bug in the other direction, and the fleet `login` verb —
+    // dispatched for months while missing from help, back when it still lived under `apn` —
+    // is why this test trusts the switch over the table.
     const known = new Set(
       [...read("apps/node-agent/cmd/agentpod-node/main.go").matchAll(/^\tcase "([a-z]+)"/gm)].map(
         (m) => m[1]!,
       ),
     );
     known.add("node"); // stripped before the switch, so both spellings reach one dispatch
-    for (const [, verb] of read("apps/node-agent/cmd/agentpod-node/fleet.go").matchAll(
-      /^\tcase "([a-z]+)":/gm,
-    )) {
-      known.add(verb!);
-    }
     expect(known.size).toBeGreaterThan(10);
 
     for (const page of all()) {
-      for (const [, cmd] of page.text.matchAll(/`apn (?:fleet )?([a-z]+)/g)) {
+      for (const [, cmd] of page.text.matchAll(/`apn ([a-z]+)/g)) {
         expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd);
+      }
+    }
+  });
+
+  test("every fleet command named is a registered command", () => {
+    // `agentpod-fleet` split out of `agentpod-node` in this branch, and the old `apn`-prefixed
+    // spelling was deleted with no shim, so published pages now write these verbs as
+    // `fleet <verb>`. Without this pass, `cli.md` documenting seven `fleet` verbs the
+    // `apn` test above never looks at would silently drop the published-docs guard for the
+    // whole new binary — exactly the "description far from its code with no check" failure
+    // mode this file exists to prevent.
+    const known = new Set(
+      [
+        ...read("apps/node-agent/cmd/agentpod-fleet/fleet.go").matchAll(/^\tcase "([a-z]+)":/gm),
+      ].map((m) => m[1]!),
+    );
+    // `help` and `version` are dispatched by agentpod-fleet's main.go, one level above
+    // fleet.go's switch (see fleet.go's own header comment on the split) — real verbs, just
+    // not ones fleet.go's switch can see.
+    known.add("help");
+    known.add("version");
+    expect(known.size).toBeGreaterThan(5);
+
+    for (const page of all()) {
+      for (const [, cmd] of page.text.matchAll(/`fleet ([a-z]+)/g)) {
+        expect(known, `${page.file} names \`fleet ${cmd}\``).toContain(cmd);
       }
     }
   });
