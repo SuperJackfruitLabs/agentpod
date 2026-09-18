@@ -25,11 +25,14 @@ fleet whoami        # who am I?
 `apn` and `fleet` are separate binaries built from the same repository and sharing no code —
 `apn` links none of `fleet`'s code, and `fleet` links none of `apn`'s. A fleet command
 **never falls back to the node's credential**, and that is now structural rather than
-conventional: neither binary *can* read the other's credential, because neither links the
-code that would let it. A node secret asserts which host you are; it was never an authority
-to operate a fleet, and treating it as one would mean that rooting any laptop in the fleet
-hands over the whole fleet. The two credentials are stored separately, in separate config
-directories, and are never substituted for one another.
+conventional: `fleet` cannot reach the node's credential at all, and `apn` cannot reach the
+stored fleet token — `apn` links none of the code that reads `fleet login`'s token file.
+`apn acp` is the one exception, and it is narrower than it looks: it accepts a principal
+token you hand it explicitly, via `$AGENTPOD_TOKEN` or `--token`, never the file on disk. A
+node secret asserts which host you are; it was never an authority to operate a fleet, and
+treating it as one would mean that rooting any laptop in the fleet hands over the whole
+fleet. The two credentials are stored separately, in separate config directories, and are
+never substituted for one another.
 
 ## Installing `fleet`
 
