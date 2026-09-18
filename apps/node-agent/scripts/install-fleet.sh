@@ -101,7 +101,21 @@ else
 		url="https://github.com/$REPO/releases/download/$tag/agentpod-fleet-$os-$arch"
 	fi
 	echo "downloading $url"
-	curl -fsSL "$url" -o "$DEST"
+	# Download beside $DEST rather than onto it: `curl -o` creates/truncates its
+	# output before the body arrives, so a download interrupted partway (the most
+	# likely first-run failure, on this exact `curl | sh` path) would otherwise
+	# leave a partial file at $DEST. `set -e` then aborts before chmod/ln, so no
+	# alias gets written — and on the NEXT run, ours_dest() sees a $DEST with no
+	# vouching alias and refuses, permanently, blaming the user for a stranger's
+	# file that was actually this installer's own debris. Downloading to a temp
+	# path and moving it into place only after a complete, executable download
+	# means $DEST only ever exists complete.
+	tmp="$DEST.download.$$"
+	trap 'rm -f "$tmp"' EXIT
+	curl -fsSL "$url" -o "$tmp"
+	chmod 755 "$tmp"
+	mv "$tmp" "$DEST"
+	trap - EXIT
 fi
 
 chmod 755 "$DEST"

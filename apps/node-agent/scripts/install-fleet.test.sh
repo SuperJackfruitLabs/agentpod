@@ -127,4 +127,43 @@ fi
 BIN_DIR="$DANGLING" sh "$INSTALLER" --uninstall >/dev/null || fail "uninstall (dangling foreign alias) exited non-zero"
 [ -L "$DANGLING/fleet" ] || fail "uninstall removed a dangling foreign alias"
 
+# --- A download that fails after curl has already created its output file
+# (the realistic shape of an interrupted network transfer: curl opens -o's
+# target before the body arrives) must not leave $DEST behind — a partial
+# $DEST with no vouching alias is indistinguishable from a stranger's file,
+# so ours_dest() would refuse every subsequent run and blame the user for
+# this installer's own debris. Simulated with a fake `curl` earlier on PATH
+# that writes a partial file to its -o target, then fails — matching how a
+# truncated real transfer behaves, without needing a real network.
+FAKECURLDIR=$(mktemp -d)
+cat > "$FAKECURLDIR/curl" <<'EOF'
+#!/bin/sh
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+[ -n "$out" ] && printf 'PARTIAL-DOWNLOAD' > "$out"
+exit 1
+EOF
+chmod +x "$FAKECURLDIR/curl"
+
+FAILDIR=$(mktemp -d)
+if PATH="$FAKECURLDIR:$PATH" BIN_DIR="$FAILDIR" sh "$INSTALLER" >/dev/null 2>&1; then
+  fail "installer succeeded despite a failed download"
+fi
+[ ! -e "$FAILDIR/agentpod-fleet" ] || fail "a failed download left debris at DEST"
+[ ! -e "$FAILDIR/fleet" ]          || fail "a failed download left the fleet alias behind"
+
+# The next run, over that same BIN_DIR, must succeed — the failed attempt
+# above must not have wedged the installer into permanently refusing $DEST
+# as a stranger's file.
+BIN_DIR="$FAILDIR" FLEET_BINARY="$FAKE/agentpod-fleet" sh "$INSTALLER" >/dev/null \
+  || fail "install after a prior failed download exited non-zero"
+[ "$("$FAILDIR/fleet")" = "fake-fleet" ] || fail "fleet broken after recovering from a failed download"
+BIN_DIR="$FAILDIR" sh "$INSTALLER" --uninstall >/dev/null || fail "cleanup uninstall exited non-zero"
+
 echo "ok: install-fleet.sh"
