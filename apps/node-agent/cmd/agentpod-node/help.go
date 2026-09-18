@@ -16,12 +16,13 @@ var commands = []struct {
 	name, group, oneline, detail string
 }{
 	{
-		name: "node", group: "Fleet",
+		name: "node", group: "Node",
 		oneline: "Explicit spelling for the machine-scoped verbs (apn node status, …)",
 		detail: "apn node <verb> — the explicit form of the machine-scoped verbs.\n\n" +
-			"Every verb in this help that is not under Fleet is a node verb, and both spellings\n" +
-			"work: `apn status` and `apn node status` are the same command. The bare forms are\n" +
-			"kept because existing runbooks name them.",
+			"Every verb apn dispatches is a node verb — this binary is machine-scoped only,\n" +
+			"the fleet-acting verbs live in the separate `fleet` binary — and both spellings\n" +
+			"work here: `apn status` and `apn node status` are the same command. The bare\n" +
+			"forms are kept because existing runbooks name them.",
 	},
 	{
 		name: "status", group: "Service",
@@ -150,7 +151,7 @@ var commands = []struct {
 
 // commandGroups lists the group names in the order they render in the
 // top-level help layout.
-var commandGroups = []string{"Fleet", "Service", "Node", "Maintenance"}
+var commandGroups = []string{"Service", "Node", "Maintenance"}
 
 // helpText renders the full top-level `apn help` layout: tool one-liner and
 // version, usage line, commands grouped by purpose, an examples block, and
