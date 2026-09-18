@@ -563,10 +563,38 @@ v0.1.7 shipped incomplete."
 - Consumes: the command surface from Task 1, the installer from Task 2.
 - Produces: no code.
 
+> **Corrected after execution.** Steps 1 and 4 below were rewritten after Task 4 shipped, once
+> its fix rounds surfaced two defects in the original commands — both mine, not the
+> implementer's. (a) Step 3 adds a historical note containing the literal string `apn fleet`,
+> which made Step 4's original "no output" check self-defeating: it could never pass once
+> Step 3 had run. (b) this shell's `grep` is a `ugrep` wrapper that silently omits
+> `docs-site/src/content/docs/build/*.md` on a from-root scan — the root `.gitignore`'s bare
+> `build/` rule and `docs-site/.gitignore`'s `!src/content/docs/build/` negation resolve
+> correctly under `git`, but `ugrep --ignore-files` does not apply the same per-directory
+> negation precedence — and that gap is exactly how two live docs-site pages were missed on
+> the first pass. The commands below use `/usr/bin/grep` directly (bypassing the shell
+> wrapper), scan `.md`, `.mdx`, `.mjs` and `.go` so a stale reference in a doc-site nav config
+> or a Go comment cannot hide from them either, and Step 4 excludes the intentional survivors
+> by content instead of loosening the search. This note exists so the document does not
+> silently disagree with what was actually run.
+
 - [ ] **Step 1: Find every mention**
 
-Run: `cd /home/rakeshgangwar/Projects/superjackfruit/agentpod && grep -rn 'apn fleet' --include='*.md' . | grep -v docs/superpowers`
-Expected: a list to work through. Each hit is either rewritten to `fleet <verb>` or, if it is a dated record, left alone.
+Run:
+```sh
+cd /home/rakeshgangwar/Projects/superjackfruit/agentpod && \
+/usr/bin/find . -name node_modules -prune -o -name '.git' -prune \
+  -o \( -name '*.md' -o -name '*.mdx' -o -name '*.mjs' -o -name '*.go' \) -print 2>/dev/null \
+  | xargs /usr/bin/grep -n 'apn fleet' 2>/dev/null \
+  | /usr/bin/grep -v '^\./docs/superpowers' \
+  | /usr/bin/grep -v '^\./\.superpowers/'
+```
+Expected: a list to work through, including `docs-site/`. `docs/superpowers/` is filtered out of
+this list because every hit under it is a dated record by definition. `docs/archive/` is
+deliberately **not** filtered, so its hits still appear here — each one is a dated record too,
+and is left alone. `.superpowers/` (this task's own gitignored working notes) is filtered out
+because it is process scratch, not repository documentation. Anything else in the list is live
+and gets rewritten to `fleet <verb>`.
 
 - [ ] **Step 2: Rewrite the live references**
 
@@ -599,8 +627,24 @@ Removed in the release following v0.1.33: `apn fleet <verb>`. Use `fleet <verb>`
 
 - [ ] **Step 4: Verify no live doc still says `apn fleet`**
 
-Run: `cd /home/rakeshgangwar/Projects/superjackfruit/agentpod && grep -rn 'apn fleet' --include='*.md' . | grep -v docs/superpowers | grep -v docs/archive`
-Expected: no output.
+Run:
+```sh
+cd /home/rakeshgangwar/Projects/superjackfruit/agentpod && \
+/usr/bin/find . -name node_modules -prune -o -name '.git' -prune \
+  -o \( -name '*.md' -o -name '*.mdx' -o -name '*.mjs' -o -name '*.go' \) -print 2>/dev/null \
+  | xargs /usr/bin/grep -n 'apn fleet' 2>/dev/null \
+  | /usr/bin/grep -v '^\./docs/superpowers' \
+  | /usr/bin/grep -v '^\./docs/archive' \
+  | /usr/bin/grep -v '^\./\.superpowers/' \
+  | /usr/bin/grep -v 'Removed in the release following v0.1.33' \
+  | /usr/bin/grep -v 'strings.Contains(help, "apn fleet")' \
+  | /usr/bin/grep -v 'help still says `apn fleet`' \
+  | /usr/bin/grep -v 'apn fleet` was a one-release'
+```
+Expected: no output. The four `grep -v` content filters at the end exclude the three lines that
+must survive on purpose: the historical note Step 3 just added to `docs/OPERATING.md`, and the
+two lines in `cmd/agentpod-node/help_test.go` / `cmd/agentpod-fleet/main_test.go` that correctly
+assert `apn fleet` is gone. Anything else surfacing here is a real miss.
 
 - [ ] **Step 5: Commit**
 
