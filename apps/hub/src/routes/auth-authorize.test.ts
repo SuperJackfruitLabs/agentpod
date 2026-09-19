@@ -863,6 +863,82 @@ describe("a browser cannot use this endpoint", () => {
   });
 });
 
+// ─── aud names the planes a client's tokens may reach ─────────────────────────
+
+/**
+ * The point of this whole task: a token minted THROUGH a registered client
+ * carries that client's own `audiences`, not the bare issuer string
+ * `GET /api/auth/token` uses when there is no client context at all.
+ *
+ * A separate client/app from `REGISTRY` above, with an explicit multi-value
+ * `audiences` list, so a wrong implementation that still hands back
+ * `config.publicUrl` (the pre-this-task behaviour) or the single-value
+ * default (`[HUB_AUDIENCE]`, what a no-third-field entry gets) is visibly
+ * distinguishable from the right one.
+ */
+describe("aud names the planes a client's tokens may reach", () => {
+  const APP_AUDIENCE = "https://app.superpipeline.dev";
+  const MULTI_CLIENT_ID = "superpipeline-multi";
+  const multiClient: OAuthClient = {
+    id: MULTI_CLIENT_ID,
+    redirectUris: [REDIRECT],
+    audiences: [HUB_AUDIENCE, APP_AUDIENCE],
+  };
+  const multiApp = createAuthorizeRoutes({
+    clients: [...REGISTRY, multiClient],
+    getSession: async () => ({ user: { id: LIVE_USER } }),
+  });
+
+  async function tokenFor(app: ReturnType<typeof appFor>, client: string): Promise<string> {
+    const res = await authorize(app, { client });
+    const code = new URL(res.headers.get("location") ?? "").searchParams.get("code")!;
+    const exchanged = await exchange(app, {
+      code,
+      code_verifier: VERIFIER,
+      redirect_uri: REDIRECT,
+    });
+    return ((await exchanged.json()) as { token: string }).token;
+  }
+
+  test("carries that client's full audiences array, not the issuer string", async () => {
+    const token = await tokenFor(multiApp, MULTI_CLIENT_ID);
+
+    // Not just "truthy" or "contains" — the exact array, in order, so a
+    // regression that dropped a value or fell back to a single-string aud
+    // (the pre-this-task shape) is caught precisely.
+    expect(claimsOf(token).aud).toEqual([HUB_AUDIENCE, APP_AUDIENCE]);
+  });
+
+  test("a client with no third field still gets the hub alone, not the bare issuer string", async () => {
+    // REGISTRY's "superpipeline" entry declares no audiences — the deployed
+    // HUB_OAUTH_CLIENTS reality this whole default exists for.
+    const token = await tokenFor(signedIn, "superpipeline");
+
+    expect(claimsOf(token).aud).toEqual([HUB_AUDIENCE]);
+  });
+
+  /**
+   * The safety net this task's deploy-alone requirement rests on:
+   * superpipeline still checks `audience: opts.issuer` today (`hub-jwt.ts:260`)
+   * and is not tightened until a later task. `jose` matches when the checked
+   * value appears IN an array audience, so a real, signed, JWKS-verified
+   * token whose `aud` array contains the hub's URL alongside another audience
+   * must still verify when superpipeline checks the hub's URL alone.
+   */
+  test("the array still contains the hub's URL — verifies against a hub-only audience check", async () => {
+    const token = await tokenFor(multiApp, MULTI_CLIENT_ID);
+    const claims = claimsOf(token).aud as string[];
+    expect(claims).toContain(HUB_AUDIENCE);
+
+    const jwks = createLocalJWKSet((await auth.api.getJwks()) as never);
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: config.publicUrl,
+      audience: HUB_AUDIENCE,
+    });
+    expect(payload.sub).toBeTruthy();
+  });
+});
+
 // ─── The token itself ─────────────────────────────────────────────────────────
 
 describe("the token is the one GET /api/auth/token already issues", () => {
@@ -911,7 +987,7 @@ describe("the token is the one GET /api/auth/token already issues", () => {
     }
   });
 
-  test("every claim matches, for the same person, minted both ways", async () => {
+  test("every claim but aud matches, for the same person, minted both ways", async () => {
     const { code } = await mintCode({
       clientId: "superpipeline",
       redirectUri: REDIRECT,
@@ -940,9 +1016,18 @@ describe("the token is the one GET /api/auth/token already issues", () => {
     expect(a.principalKind).toBe(b.principalKind as string);
     expect(a.mayGrantReach).toBe(b.mayGrantReach as boolean);
     expect(a.iss).toBe(b.iss as string);
-    expect(a.aud).toBe(b.aud as string);
-    // The claim names themselves, so a claim added on one path and not the
-    // other is a failure rather than something nobody looks at.
+    // `aud` is the one claim this task makes diverge, deliberately: the
+    // exchanged token was minted for a registered client ("superpipeline",
+    // REGISTRY above) and carries THAT client's own audiences array —
+    // defaulted here to the hub alone, since REGISTRY declares no third
+    // field. `GET /api/auth/token` has no client context at all, so it keeps
+    // Better Auth's own untouched default: the issuer, as a bare string.
+    // Same claim name, intentionally different shape — see the doc comment
+    // on `TokenPayload.aud` (jwt-claims.ts).
+    expect(a.aud).toEqual([HUB_AUDIENCE]);
+    expect(b.aud).toBe(config.publicUrl);
+    // Every OTHER claim name still matches, so a claim added on one path and
+    // not the other is a failure rather than something nobody looks at.
     expect(Object.keys(a).sort()).toEqual(Object.keys(b).sort());
   });
 
@@ -966,9 +1051,14 @@ describe("the token is the one GET /api/auth/token already issues", () => {
     expect(kid(token)).toBe(kid(direct.token));
 
     const jwks = createLocalJWKSet((await auth.api.getJwks()) as never);
+    // The exchanged token's audience is now REGISTRY's "superpipeline"
+    // entry's own list ([HUB_AUDIENCE], its default), not `config.publicUrl`
+    // — checking `audience: HUB_AUDIENCE` is what proves it actually verifies
+    // as a real, published-JWKS-backed token, not merely that the claim looks
+    // right.
     const { payload } = await jwtVerify(token, jwks, {
       issuer: config.publicUrl,
-      audience: config.publicUrl,
+      audience: HUB_AUDIENCE,
     });
 
     expect(payload.sub).toBeTruthy();

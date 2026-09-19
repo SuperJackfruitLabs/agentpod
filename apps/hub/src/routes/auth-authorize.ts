@@ -434,9 +434,17 @@ export function createAuthorizeRoutes(deps: AuthorizeDeps = {}): Hono {
       const candidates = clients.filter((client) => isRegisteredRedirect(client, redirectUri));
 
       let redeemed: Awaited<ReturnType<typeof redeemCode>> = null;
+      // The client the code was actually redeemed against — kept alongside
+      // `redeemed` (not re-looked-up by `redeemed.clientId`, which the row
+      // does not carry) so the token minted below can be scoped to exactly
+      // this client's own `audiences`, not some other candidate's.
+      let redeemedClient: OAuthClient | null = null;
       for (const client of candidates) {
         redeemed = await redeemCode({ code, clientId: client.id, redirectUri });
-        if (redeemed) break;
+        if (redeemed) {
+          redeemedClient = client;
+          break;
+        }
       }
 
       if (!redeemed) {
@@ -482,11 +490,21 @@ export function createAuthorizeRoutes(deps: AuthorizeDeps = {}): Hono {
       //
       // `auth.api.signJWT` is the jwt plugin's own signer, holding the options
       // the plugin was registered with in `drizzle-auth.ts` — so the signing
-      // key, `TOKEN_TTL`, the issuer and the audience are that endpoint's by
-      // construction rather than by being copied here. Only the payload is
-      // assembled, and it is assembled the way `getJwtToken` assembles it:
-      // `iat`, then the configured `definePayload` (`buildTokenPayload`), then
-      // `sub`.
+      // key and `TOKEN_TTL` are that endpoint's by construction rather than by
+      // being copied here. Only the payload is assembled, and it is assembled
+      // the way `getJwtToken` assembles it: `iat`, then the configured
+      // `definePayload` (`buildTokenPayload`), then `sub`.
+      //
+      // **The issuer stays that endpoint's by construction; the audience does
+      // not.** `GET /api/auth/token` has no client context, so its `aud`
+      // stays the plugin's own default (the issuer, as a bare string) —
+      // unaffected by anything below. This exchange DOES have a client — the
+      // one `redeemedClient` names — so `buildTokenPayload` is handed that
+      // client's `audiences`, which becomes this token's `aud` array
+      // (`signJWT` in Better Auth's jwt plugin: `payload.aud ?? defaultAud`).
+      // A client cannot gain reach into a plane it was not granted in the
+      // registry, and every deployed entry defaults to the hub alone — see
+      // `OAuthClient.audiences` and `HUB_AUDIENCE` in `../config`.
       //
       // **`sub` is the Better Auth user id, not `buildTokenPayload`'s principal
       // id.** The plugin overwrites `sub` after calling `definePayload`
@@ -498,7 +516,16 @@ export function createAuthorizeRoutes(deps: AuthorizeDeps = {}): Hono {
       // that decision, on both paths at once.
       let payload: TokenPayload;
       try {
-        payload = await buildTokenPayload({ user: { id: redeemed.userId } });
+        payload = await buildTokenPayload({
+          user: { id: redeemed.userId },
+          // `redeemedClient` is set in the same loop iteration that set
+          // `redeemed`, so it is never null once `redeemed` is truthy — but
+          // that correlation isn't visible to the type checker, and `?.`
+          // costs nothing: if it were ever null, the payload would simply
+          // fall back to `buildTokenPayload`'s own no-client default (`aud`
+          // absent, the issuer applies) rather than throw.
+          audiences: redeemedClient?.audiences,
+        });
       } catch (e) {
         const message = (e as Error).message;
         // The same translation the authorize route does, and for the same
