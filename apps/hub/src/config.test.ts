@@ -275,7 +275,11 @@ describe("parseOAuthClients", () => {
 
   it("defaults a client with no audiences to the hub alone", () => {
     const clients = parseOAuthClients("apn|https://127.0.0.1/callback");
-    expect(clients[0]!.audiences).toEqual(["https://hub.agentpod.dev"]);
+    // `HUB_AUDIENCE`, not a literal: the default is whatever identity THIS
+    // deployment issues and verifies under (`config.publicUrl`), so pinning a
+    // literal here would pass while the hub's own middleware rejected the
+    // token everywhere that value is not the production hostname.
+    expect(clients[0]!.audiences).toEqual([HUB_AUDIENCE]);
   });
 
   it("still parses the redirect URI correctly when audiences are present", () => {

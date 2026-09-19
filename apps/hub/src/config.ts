@@ -384,17 +384,26 @@ export interface OAuthClient {
  * The hub's own identity as an audience — what an `HUB_OAUTH_CLIENTS` entry's
  * `audiences` defaults to when it declares no third field.
  *
- * A literal, not `config.publicUrl`: `publicUrl` is where THIS process
- * happens to answer requests (a Fly hostname, an internal port, `localhost`
- * in dev) and can differ per deployment, while this is the fixed production
- * identity the deployed registry already assumes — the same reasoning
- * `_DEFAULT_ALLOWED_ORIGINS` above uses for hardcoding
- * `https://console.agentpod.dev` rather than deriving it. What this default
- * exists to keep working is one specific deployment's `HUB_OAUTH_CLIENTS`, so
- * hardcoding that deployment's own value is the correct default, not a
- * shortcut around one.
+ * `config.publicUrl`, and it has to be. `publicUrl` is not merely where this
+ * process answers requests: it is the issuer identity every consumer of a
+ * hub token checks. `auth/hub-token.ts` verifies with
+ * `{ issuer: config.publicUrl, audience: config.publicUrl }`, which is the
+ * check `auth/middleware.ts` runs on every bearer (how `apn fleet nodes`
+ * authenticates), and it is Better Auth's `baseURL` in
+ * `auth/drizzle-auth.ts`. A literal here would mint tokens whose `aud` the
+ * hub's own middleware rejects in every deployment whose
+ * `MANAGEMENT_API_PUBLIC_URL` is not that exact string — local dev, a preview
+ * or Fly hostname, and the `auth.agentpod.dev` move this programme has as its
+ * next change. Production only survives it by coincidence of the two matching.
+ *
+ * The production literal belongs one level up, as the value that deployment
+ * gives `MANAGEMENT_API_PUBLIC_URL` (see `publicUrl` above) — one place, so
+ * issuer and audience cannot drift apart. The `_DEFAULT_ALLOWED_ORIGINS`
+ * analogy does not carry: an origin allowlist is permissive, so a stale extra
+ * entry costs nothing a deployment did not already accept; an audience is a
+ * restriction, and a stale one locks the rightful holder out.
  */
-export const HUB_AUDIENCE = 'https://hub.agentpod.dev';
+export const HUB_AUDIENCE = config.publicUrl;
 
 /**
  * Parse `HUB_OAUTH_CLIENTS`:
