@@ -301,6 +301,27 @@ describe("parseOAuthClients", () => {
     );
     expect(clients[0]!.audiences).toEqual(["https://hub.agentpod.dev"]);
   });
+
+  it("a stray token after a no-third-field entry does not attach to it — it is simply not registered", () => {
+    // Regression: a dropped-pipe typo anywhere in the string used to attach
+    // to whichever earlier, unrelated, well-formed entry happened to be
+    // `current` — silently replacing that client's default hub audience with
+    // the stray text and widening nothing it should have (superpipeline lost
+    // its own default). A client that declared no third field must never
+    // accept a continuation, because it never opened an audience field to
+    // continue.
+    const clients = parseOAuthClients(
+      "superpipeline|https://superpipeline.dev/hub/callback,typo-missing-pipe,supermessage|https://supermessage.dev/hub/callback"
+    );
+    const superpipeline = clients.find((c) => c.id === "superpipeline");
+    const supermessage = clients.find((c) => c.id === "supermessage");
+
+    expect(superpipeline?.audiences).toEqual([HUB_AUDIENCE]);
+    expect(supermessage?.audiences).toEqual([HUB_AUDIENCE]);
+    // The stray token attached itself to nothing, anywhere.
+    expect(clients.some((c) => c.audiences.includes("typo-missing-pipe"))).toBe(false);
+    expect(clients.find((c) => c.id === "typo-missing-pipe")).toBeUndefined();
+  });
 });
 
 describe("findOAuthClient", () => {
