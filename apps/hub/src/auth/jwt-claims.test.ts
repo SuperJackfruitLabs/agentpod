@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SignJWT, generateKeyPair, jwtVerify } from "jose";
 
 import { buildTokenPayload } from "./jwt-claims";
 
@@ -118,5 +119,81 @@ describe("buildTokenPayload carries the principal's email", () => {
     });
     expect("email" in payload).toBe(false);
     expect("email_verified" in payload).toBe(false);
+  });
+});
+
+/**
+ * `aud` — where a token may be spent. Set from the caller's `audiences`
+ * (a registered client's `OAuthClient.audiences`, `config.ts`), never
+ * computed here: `buildTokenPayload` does not know about the client
+ * registry, only about the list it is handed.
+ *
+ * Absent entirely, not `?? [issuer]`, for a mint with no client context —
+ * `GET /api/auth/token`'s own `definePayload` and the agent exchange
+ * (`service-signing.ts`'s `signServiceToken`) pass no `audiences`, and both
+ * must keep signing `aud` exactly as they always have: Better Auth's own
+ * default (the issuer) for the former, an explicit `.setAudience(config.
+ * publicUrl)` for the latter. An absent key, not a present-and-empty one, is
+ * what leaves that untouched — the same reasoning `email`/`email_verified`
+ * already use above.
+ */
+describe("buildTokenPayload carries aud for a registered client", () => {
+  test("aud is the client's full audiences list, in order", async () => {
+    const payload = await buildTokenPayload({
+      user: { id: "usr-uuid" },
+      audiences: ["https://hub.agentpod.dev", "https://app.superpipeline.dev"],
+      resolvePrincipal: async () => ({ id: "prn_0123456789abcdef0123", kind: "human" }),
+      resolveTenant: async () => "fleet_00000000000000000000",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false }),
+    });
+    expect(payload.aud).toEqual(["https://hub.agentpod.dev", "https://app.superpipeline.dev"]);
+  });
+
+  test("omits aud entirely when no audiences are given — the existing default keeps applying", async () => {
+    const payload = await buildTokenPayload({
+      user: { id: "usr-uuid" },
+      resolvePrincipal: async () => ({ id: "prn_0123456789abcdef0123", kind: "human" }),
+      resolveTenant: async () => "fleet_00000000000000000000",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false }),
+    });
+    expect("aud" in payload).toBe(false);
+  });
+});
+
+/**
+ * The safety net this whole task rests on: superpipeline still checks
+ * `audience: opts.issuer` today (`hub-jwt.ts:260`) and is not tightened until
+ * a later task. `jose` matches when the checked value appears IN an array
+ * audience, so a token whose `aud` array contains the hub's URL alongside
+ * others must still verify when checked against the hub's URL alone. This is
+ * pinned with an actual jose sign/verify round trip — not asserted from the
+ * payload shape — so a future change to how the token is actually signed
+ * cannot silently stop being safe to deploy on its own.
+ */
+describe("a multi-audience token still verifies against a single-audience check (jose semantics)", () => {
+  test("a token whose aud array contains the hub's URL verifies when only the hub's URL is checked", async () => {
+    const payload = await buildTokenPayload({
+      user: { id: "usr-uuid" },
+      audiences: ["https://hub.agentpod.dev", "https://app.superpipeline.dev"],
+      resolvePrincipal: async () => ({ id: "prn_0123456789abcdef0123", kind: "human" }),
+      resolveTenant: async () => "fleet_00000000000000000000",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false }),
+    });
+    expect(payload.aud).toContain("https://hub.agentpod.dev");
+
+    const { privateKey, publicKey } = await generateKeyPair("EdDSA");
+    const token = await new SignJWT(payload)
+      .setProtectedHeader({ alg: "EdDSA" })
+      .setIssuedAt()
+      .setIssuer("https://hub.agentpod.dev")
+      .setAudience(payload.aud!)
+      .setExpirationTime("5m")
+      .sign(privateKey);
+
+    const { payload: verified } = await jwtVerify(token, publicKey, {
+      issuer: "https://hub.agentpod.dev",
+      audience: "https://hub.agentpod.dev",
+    });
+    expect(verified.sub).toBe(payload.sub);
   });
 });

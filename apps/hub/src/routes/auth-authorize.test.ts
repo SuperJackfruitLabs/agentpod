@@ -44,7 +44,7 @@ import { createPrincipal, suspendPrincipal } from "../services/principals";
 import { auth } from "../auth/drizzle-auth";
 import { TOKEN_TTL } from "../auth/jwt-claims";
 import { mintCode } from "../services/oauth-codes";
-import { config, signInUrl, type OAuthClient } from "../config";
+import { config, signInUrl, HUB_AUDIENCE, type OAuthClient } from "../config";
 import { createAuthorizeRoutes } from "./auth-authorize";
 
 const RUN = crypto.randomUUID().slice(0, 8);
@@ -66,8 +66,15 @@ const SECOND_REDIRECT = "https://superpipeline.dev/hub/callback-alt";
  * so a cross-client redirect can be attempted.
  */
 const REGISTRY: OAuthClient[] = [
-  { id: "superpipeline", redirectUris: [REDIRECT, SECOND_REDIRECT] },
-  { id: "supermessage", redirectUris: ["https://supermessage.dev/hub/callback"] },
+  // `audiences` defaults to the hub alone, same as an `HUB_OAUTH_CLIENTS`
+  // entry with no third field (config.test.ts) — this task adds the field to
+  // the type, not yet a way for this route to read a client's own list.
+  { id: "superpipeline", redirectUris: [REDIRECT, SECOND_REDIRECT], audiences: [HUB_AUDIENCE] },
+  {
+    id: "supermessage",
+    redirectUris: ["https://supermessage.dev/hub/callback"],
+    audiences: [HUB_AUDIENCE],
+  },
 ];
 
 /** 43 base64url characters — S256 of some verifier. */

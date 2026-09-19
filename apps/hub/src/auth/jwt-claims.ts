@@ -56,6 +56,19 @@ export interface TokenPayload extends Record<string, unknown> {
    */
   email?: string;
   email_verified?: boolean;
+  /**
+   * Where this token may be spent. Present only when minted for a registered
+   * client (`OAuthClient.audiences`, `../config`) — absent, never `?? [iss]`,
+   * for every other mint (`GET /api/auth/token`'s own `definePayload`, the
+   * agent exchange's `signServiceToken`), so both keep signing `aud` exactly
+   * as they always have: Better Auth's own default for the former, an
+   * explicit `.setAudience(config.publicUrl)` for the latter. Absent and
+   * present-with-a-value are different claims to `auth.api.signJWT`'s own
+   * signer (`payload.aud ?? defaultAud`), so this must be a real absence, not
+   * `undefined` sitting in the object — see the conditional spread at the
+   * bottom of `buildTokenPayload`.
+   */
+  aud?: string[];
 }
 
 /**
@@ -99,6 +112,13 @@ export type BuildPayloadInput = BuildPayloadSubject & {
   resolvePrincipal?: (userId: string) => Promise<ResolvedPrincipalInput | null>;
   /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
   resolvePrincipalById?: (id: string) => Promise<ResolvedPrincipalInput | null>;
+  /**
+   * The audiences a token minted for a registered client may be spent at —
+   * a client's `OAuthClient.audiences` (`../config`). Absent for a mint with
+   * no client context, which must keep signing `aud` as the issuer; see the
+   * doc comment on `TokenPayload.aud`.
+   */
+  audiences?: string[];
 };
 
 /**
@@ -208,6 +228,11 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     ...(principal.email
       ? { email: principal.email, email_verified: principal.emailVerified === true }
       : {}),
+    // Same reasoning as the email spread above: absent, not `aud: undefined`
+    // sitting in the object, for a caller that passed no `audiences` — an
+    // actually-absent key is what leaves `GET /api/auth/token` and the agent
+    // exchange's own audience handling untouched.
+    ...(input.audiences ? { aud: input.audiences } : {}),
   };
 }
 
