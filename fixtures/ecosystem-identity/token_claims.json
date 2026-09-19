@@ -1,8 +1,8 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 5,
-  "authoredAt": "2026-08-30",
-  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3)",
+  "version": 6,
+  "authoredAt": "2026-09-20",
+  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3); `email`/`email_verified` added 2026-09-20 (agentpod `apps/hub/src/auth/jwt-claims.ts`, `buildTokenPayload`'s conditional spread, and the join it reads from in `apps/hub/src/services/principals.ts`) so superpipeline can resolve or create a local user from a hub token instead of only verifying it carries a real, unnamed principal — part of the suite sign-in programme, task 1 of 2026-09-20-suite-sign-in",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in superpipeline, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
@@ -135,6 +135,24 @@
       "whyItExists": "charter decisions/2026-08-14-approvals-cross-planes-as-events.md requires a human's approval to reach superpipeline AS that human, because a bridge substituting its own identity would make every approval in the suite attribute to one account and void the separation-of-duties check. That requirement creates a token nobody signed in for. Such a token should not be INDISTINGUISHABLE from one a person minted from their own session — delegation that cannot be seen in the record is impersonation with better manners.",
       "consumerObligation": "A consumer MUST NOT grant more because `act` is present, and MUST NOT deny because it is absent. It carries no authority of its own: the claims beside it are built by the same code path a session token uses, so an assertion can never carry reach the person's own token would not. What a consumer MAY do is RECORD it, so an audit can distinguish 'she approved it' from 'the bridge approved it for her'.",
       "signedBy": "A separate key from the one session tokens use — agentpod migration 0054. Both are published in the same JWKS and verify identically, so this is an authority boundary rather than a cryptographic one: revoking the bridge's ability to speak for people is deleting one row, and does not sign every human out of the console."
+    },
+    {
+      "claim": "email",
+      "type": "string",
+      "required": false,
+      "meaning": "The Better Auth email of the user linked to `sub`. Present only when the principal has one linked — absent, not present-and-null, for an agent or a service principal, or a human principal not yet linked to a Better Auth user. Always present together with `email_verified`; never one without the other.",
+      "whyItExists": "superpipeline is the suite's second identity consumer and verifies hub tokens entirely offline. Before this claim it could confirm a token was authentic but could not learn who the person was — it could not match them to an existing local user, and could not create one either, since superpipeline's `users.email` column is `NOT NULL UNIQUE`. The OIDC standard spelling, not a bespoke name, is deliberate: it moves the token towards a conforming ID token a standard library can read, rather than a shape only this suite understands.",
+      "consumerObligation": "MUST NOT be required, and MUST NOT read its absence as a weaker caller — an agent token asserting no email is the ordinary case, not a gap. A consumer resolving or creating a local user from this claim MUST also check `email_verified` before trusting the address as a matching key.",
+      "source": "agentpod `apps/hub/src/auth/jwt-claims.ts` (`buildTokenPayload`), joined from `apps/hub/src/services/principals.ts`'s `principalForUser`/`principalById`"
+    },
+    {
+      "claim": "email_verified",
+      "type": "boolean",
+      "required": false,
+      "meaning": "Whether the `email` claim above has been verified. Present exactly when `email` is present, and set to `false` for an unverified address rather than omitted — omitting it for an unverified address would read as 'no opinion', which is not what an unverified address means.",
+      "whyItExists": "Same reason `email` exists: a consumer that matches or creates a local user from an address needs to know whether to trust it first.",
+      "consumerObligation": "MUST NOT treat its absence as either 'verified' or 'unverified' — absence means `email` itself is absent, nothing more. When present, a consumer MUST gate anything that depends on the address being real (matching an existing account by it, for instance) on this being `true`.",
+      "source": "agentpod `apps/hub/src/auth/jwt-claims.ts` (`buildTokenPayload`), joined from `apps/hub/src/services/principals.ts`'s `principalForUser`/`principalById`"
     }
   ]
 }
