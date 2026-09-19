@@ -10,6 +10,23 @@ const fixture = JSON.parse(
   issued: Array<{ claim: string; required: boolean; enum?: string[] }>;
   standard: Array<{ claim: string }>;
   reserved: Array<{ claim: string; issuedToday: boolean }>;
+  /**
+   * Present only on some tokens (`act`, `email`, `email_verified` today) — the
+   * fixture's own field shape for the category, per its `howToRead.conditional`.
+   * `required` is always `false` here by definition of the category, but is
+   * still present on each entry, so it is typed rather than assumed.
+   */
+  conditional: Array<{
+    claim: string;
+    type: string;
+    required: boolean;
+    meaning: string;
+    whyItExists: string;
+    consumerObligation: string;
+    shape?: Record<string, string>;
+    signedBy?: string;
+    source?: string;
+  }>;
 };
 
 /**
@@ -63,6 +80,46 @@ describe("the token claim contract (#332)", () => {
       ...fixture.issued.map((c) => c.claim),
       ...fixture.standard.map((c) => c.claim),
       ...fixture.reserved.map((c) => c.claim),
+      // `conditional` claims (`act`, `email`, `email_verified`) are described
+      // too — leaving this out would make every one of them read as an
+      // invented claim the moment a real payload carried one, which is
+      // exactly backwards for a category the fixture defines and documents.
+      ...fixture.conditional.map((c) => c.claim),
+    ]);
+
+    const undescribed = Object.keys(payload).filter((k) => !described.has(k));
+    expect(undescribed).toEqual([]);
+  });
+
+  test("a payload carrying a conditional claim is not reported as undescribed", async () => {
+    // The test above only proves the direction it was written for unless a
+    // payload actually carries a `conditional` claim at least once — `act`
+    // never has, and neither would `email`/`email_verified` without this.
+    // Both are minted by the same conditional spread in buildTokenPayload
+    // (see jwt-claims.test.ts for the full behavioural pin); this test's job
+    // is narrower, and just the fixture-vs-code check above: that carrying
+    // one does not turn it into an "undescribed claim" false positive.
+    const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
+    const payload = await buildTokenPayload({
+      user: { id: "user_abc123" },
+      resolvePrincipal: async () => ({
+        id: "prn_test0123456789abcdef",
+        kind: "human" as const,
+        email: "someone@example.com",
+        emailVerified: true,
+      }),
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => null,
+    });
+
+    expect(payload.email).toBe("someone@example.com");
+    expect(payload.email_verified).toBe(true);
+
+    const described = new Set([
+      ...fixture.issued.map((c) => c.claim),
+      ...fixture.standard.map((c) => c.claim),
+      ...fixture.reserved.map((c) => c.claim),
+      ...fixture.conditional.map((c) => c.claim),
     ]);
 
     const undescribed = Object.keys(payload).filter((k) => !described.has(k));
