@@ -19,7 +19,13 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { db, rawSql } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { seedAgentPrincipals } from "../../scripts/seed-agent-principals";
-import { createPrincipal, principalForUser, suspendPrincipal, restorePrincipal } from "./principals";
+import {
+  createPrincipal,
+  principalById,
+  principalForUser,
+  suspendPrincipal,
+  restorePrincipal,
+} from "./principals";
 import { buildTokenPayload } from "../auth/jwt-claims";
 
 // Fixed handles, cleaned up below: running this suite twice against the same
@@ -64,6 +70,40 @@ describe("principals", () => {
   test("a user with no principal resolves to null, never to a default", async () => {
     // Falling back would hand one principal's authority to an unmapped caller.
     expect(await principalForUser("usr-nobody")).toBeNull();
+  });
+
+  test("both resolvers carry the linked user's email and verification state", async () => {
+    // The join `buildTokenPayload` relies on to mint `email`/`email_verified` —
+    // proven here against a real `user` row, not an injected resolver, since
+    // the resolver-injecting tests in jwt-claims.test.ts prove what
+    // buildTokenPayload does with a result, never that this query produces one.
+    const userId = `usr-email-${crypto.randomUUID().slice(0, 8)}`;
+    const email = `${userId}@example.com`;
+    await createTestUser({ id: userId, email, emailVerified: false });
+    const id = await createPrincipal({
+      kind: "human",
+      handle: `t-${crypto.randomUUID().slice(0, 8)}`,
+      userId,
+    });
+
+    try {
+      const byUser = await principalForUser(userId);
+      expect(byUser?.email).toBe(email);
+      expect(byUser?.emailVerified).toBe(false);
+
+      const byId = await principalById(id);
+      expect(byId?.email).toBe(email);
+      expect(byId?.emailVerified).toBe(false);
+    } finally {
+      await rawSql`DELETE FROM "user" WHERE id = ${userId}`;
+    }
+  });
+
+  test("an agent has no Better Auth identity, so both resolvers return no email", async () => {
+    const id = await createPrincipal({ kind: "agent", handle: `t-${crypto.randomUUID().slice(0, 8)}` });
+    const byId = await principalById(id);
+    expect(byId?.email).toBeNull();
+    expect(byId?.emailVerified).toBeNull();
   });
 });
 

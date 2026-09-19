@@ -1,9 +1,30 @@
 import { and, eq, isNull } from "drizzle-orm";
 
 import { db } from "../db/drizzle";
+import { user } from "../db/schema/auth";
 import { principalIdentities } from "../db/schema/identities";
 import { BOOTSTRAP_ORG_ID, principals, type PrincipalKind } from "../db/schema/organization";
 import { prefixedId } from "../utils/ids";
+
+/**
+ * The shape `principalForUser` and `principalById` both resolve to: a
+ * principal plus the Better Auth `email`/`emailVerified` of whichever user is
+ * linked to it, if any — joined in the same query rather than fetched
+ * separately, because `buildTokenPayload` needs both to answer "who is this"
+ * in one round trip, the same reasoning `listPrincipals`'s `userId` follows.
+ *
+ * `email`/`emailVerified` are `null`, not absent, when no `user` row matches —
+ * an agent or a service has no Better Auth identity by construction, and this
+ * is a plain lookup result, not the token claim itself. `buildTokenPayload` is
+ * where "no email" becomes "no claim".
+ */
+export interface ResolvedPrincipal {
+  id: string;
+  kind: PrincipalKind;
+  suspendedAt: Date | null;
+  email: string | null;
+  emailVerified: boolean | null;
+}
 
 export async function createPrincipal(input: {
   kind: PrincipalKind;
@@ -41,19 +62,38 @@ export async function createPrincipal(input: {
  *
  * Null rather than a fallback: an unmapped caller must fail closed, for the same
  * reason `buildTokenPayload` refuses to mint a token when no tenant resolves.
+ *
+ * Left-joined to `user` on the same `userId` this was called with, so the
+ * email `buildTokenPayload` needs is already in this row rather than a second
+ * query — a LEFT join, not inner, because a principal can be linked before the
+ * `user` row backing it exists (see `principals.test.ts`'s "finds the
+ * principal" case, which never inserts one).
  */
-export async function principalForUser(
-  userId: string
-): Promise<{ id: string; kind: PrincipalKind; suspendedAt: Date | null } | null> {
+export async function principalForUser(userId: string): Promise<ResolvedPrincipal | null> {
   const [row] = await db
-    .select({ id: principals.id, kind: principals.kind, suspendedAt: principals.suspendedAt })
+    .select({
+      id: principals.id,
+      kind: principals.kind,
+      suspendedAt: principals.suspendedAt,
+      email: user.email,
+      emailVerified: user.emailVerified,
+    })
     .from(principalIdentities)
     .innerJoin(principals, eq(principals.id, principalIdentities.principalId))
+    .leftJoin(user, eq(user.id, principalIdentities.externalId))
     .where(
       and(eq(principalIdentities.system, "better-auth"), eq(principalIdentities.externalId, userId))
     )
     .limit(1);
-  return row ? { id: row.id, kind: row.kind as PrincipalKind, suspendedAt: row.suspendedAt } : null;
+  return row
+    ? {
+        id: row.id,
+        kind: row.kind as PrincipalKind,
+        suspendedAt: row.suspendedAt,
+        email: row.email ?? null,
+        emailVerified: row.emailVerified ?? null,
+      }
+    : null;
 }
 
 /**
@@ -68,16 +108,42 @@ export async function principalForUser(
  *
  * Null rather than a fallback, for the same reason `principalForUser` is:
  * an id that names nobody must fail closed, not mint for a default.
+ *
+ * Left-joined through `principal_identities` (the same `system: "better-auth"`
+ * link `userIdForPrincipal` reads) to `user`, so a caller on this path —
+ * `mintPrincipalAssertion`, `station-token.ts` — gets the linked human's email
+ * in the same round trip when there is one, and both left joins simply yield
+ * no match for an agent or a service, which has neither.
  */
-export async function principalById(
-  id: string
-): Promise<{ id: string; kind: PrincipalKind; suspendedAt: Date | null } | null> {
+export async function principalById(id: string): Promise<ResolvedPrincipal | null> {
   const [row] = await db
-    .select({ id: principals.id, kind: principals.kind, suspendedAt: principals.suspendedAt })
+    .select({
+      id: principals.id,
+      kind: principals.kind,
+      suspendedAt: principals.suspendedAt,
+      email: user.email,
+      emailVerified: user.emailVerified,
+    })
     .from(principals)
+    .leftJoin(
+      principalIdentities,
+      and(
+        eq(principalIdentities.principalId, principals.id),
+        eq(principalIdentities.system, "better-auth")
+      )
+    )
+    .leftJoin(user, eq(user.id, principalIdentities.externalId))
     .where(eq(principals.id, id))
     .limit(1);
-  return row ? { id: row.id, kind: row.kind as PrincipalKind, suspendedAt: row.suspendedAt } : null;
+  return row
+    ? {
+        id: row.id,
+        kind: row.kind as PrincipalKind,
+        suspendedAt: row.suspendedAt,
+        email: row.email ?? null,
+        emailVerified: row.emailVerified ?? null,
+      }
+    : null;
 }
 
 /**
