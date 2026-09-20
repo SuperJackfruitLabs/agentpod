@@ -1,34 +1,33 @@
 #!/bin/sh
-# Guard the node-agent release pin baked into the Fly images.
+# Resolve the latest node-agent release, and compare two versions.
 #
-# The Fly images download a RELEASED agentpod-node binary and verify it against
-# SHA256SUMS, instead of compiling one the way the Modal images do. That is a
-# real supply-chain property and it stays. Its cost is a version pin, and a pin
-# nobody is forced to move goes stale silently: on 2026-08-13 both Fly images
-# still said v0.1.22 while the fleet was on v0.1.24, so the #286 Pi fix could
-# not reach a Fly station no matter how many times the image was republished
-# (issue #290).
+# **Was `check-version-pin.sh`, which also failed CI when a Fly Dockerfile's ARG
+# default fell behind the latest release.** That guard is gone with the pin it
+# guarded: the Dockerfiles now default to `releases/latest/download`, so there is
+# no constant to go stale and nothing to check. What is left is the part
+# `publish-images.yml` actually needs — a version to pass as `--build-arg`, so a
+# PUBLISHED image is still built against one explicit release and stays
+# reproducible.
 #
-# This script is the thing that forces the pin to move. It fails when the ARG
-# default in either Fly Dockerfile is BEHIND the latest node-agent release, or
-# when the two Dockerfiles disagree with each other.
+# The history is worth keeping, because the pin was not pointless: on 2026-08-13
+# both Fly images still said v0.1.22 while the fleet was on v0.1.24, so the #286
+# Pi fix could not reach a Fly station (issue #290). The pin was one answer to
+# that. Defaulting to `latest` is a better one — it cannot drift — and it keeps
+# the supply-chain property that mattered, since the image still downloads a
+# RELEASED binary and verifies it against that release's SHA256SUMS.
 #
-# POSIX sh with no dependencies beyond `gh` or `curl`, because it runs in the
-# node-agent CI job next to `go test` and in the publish workflow, neither of
-# which should need a package manager.
+# POSIX sh with no dependencies beyond `gh` or `curl`.
 #
 # Usage:
-#   check-version-pin.sh                       # resolve latest release, check pins
-#   check-version-pin.sh --latest v0.1.24      # check pins against a given version
-#   check-version-pin.sh --print-latest        # print the resolved latest release
-#   check-version-pin.sh --compare A B         # print older|same|newer (A vs B)
-#   check-version-pin.sh [--latest V] FILE...  # check these Dockerfiles instead
+#   latest-release.sh                     # print the resolved latest release
+#   latest-release.sh --print-latest      # the same, named
+#   latest-release.sh --compare A B       # print older|same|newer (A vs B)
 set -e
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 die() {
-  echo "check-version-pin: $1" >&2
+  echo "latest-release: $1" >&2
   exit 2
 }
 
@@ -120,19 +119,11 @@ resolve_latest() {
 }
 
 # ── Arguments ────────────────────────────────────────────────────────────────
-LATEST=""
-MODE=check
-FILES=""
+MODE=print-latest
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --latest)
-      [ $# -ge 2 ] || die "--latest needs a version"
-      LATEST="$2"
-      shift 2
-      ;;
     --print-latest)
-      MODE=print-latest
       shift
       ;;
     --compare)
@@ -144,70 +135,16 @@ while [ $# -gt 0 ]; do
       sed -n '2,30p' "$0"
       exit 0
       ;;
-    -*)
-      die "unknown option: $1"
-      ;;
     *)
-      FILES="$FILES $1"
-      shift
+      die "unknown argument: $1"
       ;;
   esac
 done
 
-# Both Fly images by default. They are pinned together ON PURPOSE — two
-# stations on one substrate running different node-agent builds makes "it works
-# on the other one" mean nothing — so both are checked, and against each other.
-# The Cloudflare worker image is checked too. It is not a Fly file, but it
-# pins the node-agent the same way and is a deployment artifact its nodes
-# cannot self-update away from (#349) — while nothing checked it, it sat on
-# v0.1.22 for five releases and a station could not be moved forward at all.
-[ -n "$FILES" ] || FILES="$HERE/Dockerfile $HERE/Dockerfile.pi $HERE/../../cloudflare/worker-v2/Dockerfile"
+# The repo is read from a Dockerfile so the resolver and the images cannot
+# disagree about WHICH repository's releases they mean — the worker image names
+# a different owner from the Fly ones, and a resolver with its own hardcoded
+# repo would silently answer for the wrong one.
+LATEST=$(resolve_latest "$(repo_in "$HERE/Dockerfile")")
 
-if [ -z "$LATEST" ]; then
-  # shellcheck disable=SC2086 # deliberate word splitting of the file list
-  set -- $FILES
-  LATEST=$(resolve_latest "$(repo_in "$1")")
-fi
-
-if [ "$MODE" = print-latest ]; then
-  printf '%s\n' "$LATEST"
-  exit 0
-fi
-
-# ── The check ────────────────────────────────────────────────────────────────
-STATUS=0
-FIRST_PIN=""
-FIRST_FILE=""
-
-# shellcheck disable=SC2086 # deliberate word splitting of the file list
-for file in $FILES; do
-  pin=$(pin_in "$file")
-  rel=$(version_relation "$pin" "$LATEST")
-
-  if [ -z "$FIRST_PIN" ]; then
-    FIRST_PIN="$pin"
-    FIRST_FILE="$file"
-  elif [ "$pin" != "$FIRST_PIN" ]; then
-    echo "FAIL: $file pins $pin but $FIRST_FILE pins $FIRST_PIN — the Fly images must pin the same node-agent release" >&2
-    STATUS=1
-  fi
-
-  case "$rel" in
-    older)
-      echo "FAIL: $file pins AGENTPOD_VERSION=$pin, which is behind the current node-agent release $LATEST." >&2
-      echo "      A Fly image built from this default ships an agent without the fixes in $LATEST." >&2
-      echo "      Fix: set 'ARG AGENTPOD_VERSION=$LATEST' in $file." >&2
-      STATUS=1
-      ;;
-    same)
-      echo "ok: $file pins $pin (current release)"
-      ;;
-    newer)
-      # An unreleased pin would fail the image build at the download, not here;
-      # this is only reachable while a release is mid-flight.
-      echo "ok: $file pins $pin (ahead of the resolved release $LATEST)"
-      ;;
-  esac
-done
-
-exit $STATUS
+printf '%s\n' "$LATEST"

@@ -619,6 +619,25 @@ curl -s http://127.0.0.1:3001/health
 # {"status":"ok",...}
 ```
 
+**`/health` is not enough, and this is not a theoretical caution.** On
+2026-09-20 the hub was pulled, restarted, reported `active`, answered `/health`
+with 200 and migrated cleanly — while every `/api/auth/devices*` route returned
+404, because they had been mounted behind Better Auth's `/api/auth/*` catch-all.
+Nothing in this runbook looked at a route, so the deploy read as a success for
+as long as it took somebody to curl one by hand.
+
+Run the smoke check after every deploy:
+
+```bash
+sh /opt/agentpod/deploy/smoke.sh http://127.0.0.1:3001
+# every route answers, and refuses; non-zero exit if any is missing
+```
+
+It uses no credentials. It asks each route anonymously and requires a *refusal*
+— a 401 or 403 proves the route exists and is mounted where it can be reached,
+where a 404 proves it is not. That distinction is the whole point: a process
+that is up and a product that is served are different facts.
+
 > If you need to run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`
 
 ### Optional: gVisor isolation for provisioned runtimes
