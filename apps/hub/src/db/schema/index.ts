@@ -25,6 +25,9 @@ export * from "./cloudflare";
 // Node registry (fleet console)
 export * from "./nodes";
 
+// Device credentials — what a human at a terminal exchanges for a token
+export * from "./devices";
+
 // Station registry (adopted stations, fleet console)
 export * from "./stations";
 

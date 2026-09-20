@@ -37,6 +37,7 @@ import {
   AcpRunId,
   UserId,
   PrincipalId,
+  DeviceCredentialId,
   OrganizationId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
@@ -103,6 +104,7 @@ const VALIDATORS: Record<string, ZodType> = {
   "agentpod.acpRun": AcpRunId,
   "agentpod.user": UserId,
   "agentpod.principal": PrincipalId,
+  "agentpod.deviceCredential": DeviceCredentialId,
   "agentpod.organization": OrganizationId,
 };
 

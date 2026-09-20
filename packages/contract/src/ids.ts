@@ -141,6 +141,21 @@ export const TenantId = truncatedUuidId("fleet");
 export const PrincipalId = truncatedUuidId("prn");
 
 /**
+ * The id half of a device credential — the long-lived secret a human at a
+ * terminal exchanges for a five-minute token (`charter →
+ * decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
+ * accepted 2026-09-20).
+ *
+ * Validated even though nothing crosses a plane with it today, because the
+ * credential is presented as `dev_…:<secret>` and anything that splits on the
+ * first colon has to agree about the left side. The corpus also carries the
+ * whole `dev_…:secret` string in its REJECT list: a parser that lets that
+ * through as an id is the one that puts a secret into a log line that prints
+ * ids.
+ */
+export const DeviceCredentialId = truncatedUuidId("dev");
+
+/**
  * An organisation. Minted by the hub, which IS the Organization plane until
  * the plane is extracted into its own service — see `TenantId`'s doc comment
  * for why AgentPod and superpipeline each keep a local tenant in the meantime.

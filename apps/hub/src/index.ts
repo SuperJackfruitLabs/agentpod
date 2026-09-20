@@ -9,6 +9,8 @@ import { initDatabase } from './db/drizzle.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
+// A human at a terminal exchanging a device credential for a short-lived token
+import { deviceRoutes } from './routes/devices.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
@@ -223,6 +225,24 @@ const app = new Hono()
    * there later cannot quietly pull this path behind the middleware.
    */
   .route('/', dispatchableRoutes)
+  /**
+   * /api/auth/devices* — the device credential a human exchanges at a terminal
+   * (`charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
+   * accepted 2026-09-20; `docs/superpowers/specs/2026-09-20-device-credential-design.md`).
+   *
+   * Ahead of `authMiddleware`, and for two reasons rather than one. The exchange
+   * route's credential is `dev_…:secret`, which is no kind of session; and the
+   * three management routes have to accept a hub JWT, because `fleet login` holds
+   * exactly that at the moment it creates a device. They resolve a session OR a
+   * verified hub token themselves, refusing an agent, a bridge assertion, and —
+   * the one that matters — a token that was itself minted from a device, so a
+   * stolen credential cannot mint a replacement that outlives its revocation.
+   *
+   * Above `.route('/api/auth', ...)` handlers for the same defensive reason
+   * `dispatchableRoutes` sits above `/api/fleet`: a wildcard added there later
+   * must not quietly pull these behind the middleware.
+   */
+  .route('/api/auth', deviceRoutes)
   /**
    * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
    *
