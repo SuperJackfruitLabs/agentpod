@@ -47,13 +47,48 @@ entrypoints and notice presence. The authenticated catalog/plan must supply the
 archive pin; the archive's own claim is not a trust source.
 
 Acquisition limits are 32 MiB compressed, 64 MiB expanded, 4,096 regular files,
-8 MiB per file and 2 MiB for the manifest. Paths are relative ASCII names with
-bounded components; content and metadata may contain Unicode. Links, special
+8 MiB per file and 2 MiB for the manifest. Archive paths have at most 64 components
+and 16,384 total file/directory names. Paths are relative ASCII names with bounded
+components; content and metadata may contain Unicode. Links, special
 files, overlapping paths, case aliases, duplicate JSON keys, multiple roots,
 reserved installation receipts and archive tails are rejected. PAX path headers
 from the library exporter are supported. The eventual transport must enforce a
 deadline as well: cancellation cannot interrupt an arbitrary blocked reader.
 This reader is an offline primitive, not an advertised management capability.
+
+The local Go installation engine now persists typed plans and receipts. Its
+namespace under `.agentpod-skills` binds node, station, harness, selected library
+profile, canonical workspace path and workspace device/inode identity. The exact
+generation destination and payload diff are part of the persisted plan. Clients
+will apply by operation ID; they will not submit editable plans or target paths.
+
+Planning verifies the current generation and pins its head receipt. Application
+uses an advisory filesystem lock, records staging intent, writes and verifies a
+new generation, then atomically replaces the current-head receipt. The head
+includes the operation ID so rolling between the same two generations does not
+make an old plan current again. Package manifests appear in the review diff.
+Generation directories are retained; applying or rolling back never overwrites
+their contents. Rollback binds and verifies both the current and prior generation,
+including user edits. Rolling back the initial installation restores managed
+absence. It does not claim that no other skills exist in the workspace.
+
+Individual files, metadata and initial namespace publication use temporary paths
+and atomic renames with file/directory synchronization. A repeated operation ID
+returns its historical receipt after completion; an interrupted application can
+resume staging or reconcile a completed head switch. `Operation` is observational;
+`Verify` re-reads current file hashes and modes. A timeout is not evidence of no
+change. Tests cover actual process exits as well as injected failures; they do not
+simulate hardware power loss or defend against a malicious process with the same
+OS permissions as the node.
+
+Interrupted temporary writes are preserved outside generations. The engine stops
+at 16 retained partial writes, 256 operation records per binding (with one record
+reserved from new installations for rollback), or 512 namespaces
+per workspace instead of silently deleting evidence. Retention inspection and
+cleanup must be exposed before broad managed rollout. This increment does not
+perform authenticated transport, advertise `skills.manage`, register a plugin,
+update harness configuration, refresh a session, or expose install API/UI actions.
+It materializes a reviewed package; session loading remains unknown.
 
 Keep management separate as `skills.manage`; do not advertise it with inventory.
 The planned verbs are `skills.plan`, `skills.apply`, `skills.verify`,

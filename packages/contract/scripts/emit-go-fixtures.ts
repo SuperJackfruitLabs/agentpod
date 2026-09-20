@@ -18,8 +18,9 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory } from "../src/index";
+import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt } from "../src/index";
 
+import { planFixture } from "../src/fixtures/skill-install";
 import { inventoryWireFixture } from "../src/fixtures/skill-inventory";
 
 const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contractfix/testdata");
@@ -27,6 +28,8 @@ const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contrac
 /** name → [schema, value]. The value must satisfy the schema or this throws. */
 const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["skill_inventory", SkillInventory, inventoryWireFixture],
+  ["skill_install_plan", SkillInstallPlan, planFixture],
+  ["skill_install_receipt", SkillInstallReceipt, { plan: planFixture, phase: "applied", updatedAt: "2026-09-20T16:00:01Z", completedAt: "2026-09-20T16:00:01Z", error: null }],
   ["host_info", HostInfo, { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 }],
 
   // capabilities gate whole console features; one silently dropped in the Go

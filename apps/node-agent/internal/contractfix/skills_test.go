@@ -8,3 +8,8 @@ import (
 func TestSkillInventoryRoundTrips(t *testing.T) {
 	roundTrip(t, "skill_inventory.json", &skills.Inventory{})
 }
+
+func TestSkillInstallRoundTrips(t *testing.T) {
+	roundTrip(t, "skill_install_plan.json", &skills.InstallPlan{})
+	roundTrip(t, "skill_install_receipt.json", &skills.InstallReceipt{})
+}

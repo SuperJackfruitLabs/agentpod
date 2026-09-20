@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "operationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "action": "install",
+  "binding": {
+    "nodeId": "fixture-node",
+    "stationKey": "codex:fixture",
+    "harness": "codex",
+    "profile": "fixture",
+    "workspacePath": "/fixture/workspace",
+    "workspaceIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "expectedHead": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "before": null,
+  "after": {
+    "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "archiveSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "bundleDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "targetPath": "/fixture/workspace/.agentpod-skills/fixture/generations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "changes": {
+    "added": [
+      "skills/fixture/SKILL.md"
+    ],
+    "removed": [],
+    "changed": []
+  },
+  "activation": "pending",
+  "createdAt": "2026-09-20T16:00:00Z",
+  "planDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

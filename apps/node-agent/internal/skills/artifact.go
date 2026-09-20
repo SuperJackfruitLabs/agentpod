@@ -44,6 +44,7 @@ type BundleSkill struct {
 }
 
 type BundleManifest struct {
+	rawSHA256     string                // exact manifest bytes, used for installation review diffs
 	SchemaVersion int                   `json:"schema_version"`
 	Name          string                `json:"name"`
 	Version       string                `json:"version"`
@@ -218,6 +219,9 @@ func recordArchivePath(seen map[string]archivePathEntry, relative string) error 
 				return fmt.Errorf("skills: duplicate, case-colliding or overlapping path")
 			}
 		} else {
+			if len(seen) >= maxArtifactFiles*4 {
+				return fmt.Errorf("skills: expanded directory count exceeds limit")
+			}
 			seen[folded] = archivePathEntry{name: name, file: file}
 		}
 	}
@@ -236,6 +240,9 @@ func knownHarness(value string) bool {
 // macOS. Unicode skill content and metadata remain supported.
 func artifactPath(value string) bool {
 	if value == "" || len(value) > 1024 || path.IsAbs(value) || path.Clean(value) != value || strings.ContainsAny(value, "\\:") {
+		return false
+	}
+	if len(strings.Split(value, "/")) > 64 {
 		return false
 	}
 	for _, part := range strings.Split(value, "/") {
@@ -292,6 +299,7 @@ func parseBundleManifest(data []byte) (BundleManifest, error) {
 		}
 		seen[skill.ID] = true
 	}
+	manifest.rawSHA256 = hashBytes(data)
 	return manifest, nil
 }
 
