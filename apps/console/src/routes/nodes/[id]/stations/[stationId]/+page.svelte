@@ -25,6 +25,7 @@
   import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
   import SkillsPanel from "$lib/components/stations/SkillsPanel.svelte";
+  import SkillManagementPanel from "$lib/components/stations/SkillManagementPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -161,7 +162,9 @@
     Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
   );
 
-  const hasSkills = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
+  const hasSkillInventory = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
+  const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
+  const hasSkills = $derived(hasSkillInventory || hasSkillManagement);
 
   const hasChangeset = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
@@ -659,7 +662,8 @@
   {#if hasSkills}
     {@render mountedPanel("skills", skillsContent)}
     {#snippet skillsContent()}
-      <SkillsPanel {stationId} />
+      {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
+      {#if hasSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={mayGrantReach} />{/if}
     {/snippet}
   {/if}
 
