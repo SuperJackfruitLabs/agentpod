@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "harness": "codex",
+  "version": "codex-cli 0.147.0",
+  "kind": "go-native-placement-fixture",
+  "checks": [
+    {
+      "check": "stored-generation-not-discovered",
+      "passed": true,
+      "observation": []
+    },
+    {
+      "check": "native-plan-does-not-publish",
+      "passed": true,
+      "observation": []
+    },
+    {
+      "check": "native-discovery-after-go-publication",
+      "passed": true,
+      "observation": [
+        {
+          "name": "sjl-fixture:sjl-fixture",
+          "description": "Verify a synthetic bundle.",
+          "scope": "repo",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "check": "bundled-reference-present",
+      "passed": true,
+      "sha256": "be6c0c61215a32ce4edcd57129d7f475de088fa112581f9fe4af05fa2d94c3af"
+    },
+    {
+      "check": "historical-receipt-replay",
+      "passed": true
+    },
+    {
+      "check": "stored-upgrade-does-not-reload-native",
+      "passed": true,
+      "observation": [
+        {
+          "name": "sjl-fixture:sjl-fixture",
+          "description": "Verify a synthetic bundle.",
+          "scope": "repo",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "check": "native-upgrade-excludes-history",
+      "passed": true,
+      "observation": [
+        {
+          "name": "sjl-fixture:sjl-fixture",
+          "description": "Verify a revised synthetic bundle.",
+          "scope": "repo",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "check": "native-rollback-restores-first",
+      "passed": true,
+      "observation": [
+        {
+          "name": "sjl-fixture:sjl-fixture",
+          "description": "Verify a synthetic bundle.",
+          "scope": "repo",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "check": "deactivation-excludes-retained-generations",
+      "passed": true,
+      "observation": []
+    },
+    {
+      "check": "restore-after-deactivation",
+      "passed": true,
+      "observation": [
+        {
+          "name": "sjl-fixture:sjl-fixture",
+          "description": "Verify a synthetic bundle.",
+          "scope": "repo",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "check": "sibling-isolation",
+      "passed": true,
+      "observation": []
+    }
+  ],
+  "limitations": [
+    "Only disposable synthetic Git workspaces were changed.",
+    "No model turn, ACP, native trust decision or active-session behavior was tested.",
+    "Pi invokes its installed directory loader, not a trusted session.",
+    "Remote activation remains unexposed pending external-process coverage, version/mode gates and the operator workflow.",
+    "The node receipt keeps loaded unknown; the separate native probe observes discovery."
+  ]
+}

@@ -327,3 +327,13 @@ it launches its bundled @openai/codex entrypoint. The adapter's --version report
 the adapter version, even when passed after its cli subcommand. Future preflight
 must resolve the actual engine and launch mode rather than use the host PATH
 Codex version or the adapter version as engine evidence.
+
+### Codex fresh-session ACP evidence
+
+The bundled Codex 0.147.0 now passes the same eleven placement lifecycle checks
+as the earlier host CLI. Codex ACP 1.1.14 also passes all eleven using fresh
+sessions with a disposable home and offline provider. Both advertise the exported
+qualified fixture name; installation alone remains undiscovered and sibling
+workspaces remain isolated. No model prompt or client tool is used. These are
+repeatable installed-runtime probes, not a production version gate or evidence
+of active-session refresh, production authentication or AgentPod transport.

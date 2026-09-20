@@ -157,6 +157,9 @@ jobs:
         working-directory: apps/node-agent
         run: go test ./... -race
 
+      - name: Test offline ACP discovery probe
+        run: python3 -B -m unittest discover -s apps/node-agent/internal/skills/testdata -p test_probe_codex_acp.py
+
       # Here rather than in a job of its own: it is about the node-agent's
       # runtime layout, and this job is a required check — a new job would not
       # gate. Runs as a user who can write to /, so the /workspace assertions
