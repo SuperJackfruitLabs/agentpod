@@ -13,7 +13,7 @@ import (
 // TestFleetHelpListsEveryVerb this file replaces made exactly that point, and its replacement
 // here restated wantVerbs by hand without wiring dispatched ⊆ listed AND listed ⊆ dispatched,
 // which is the bug that comment warned about).
-var wantVerbs = []string{"login", "whoami", "logout", "nodes", "agents", "stats", "activity"}
+var wantVerbs = []string{"login", "whoami", "logout", "nodes", "agents", "stats", "activity", "devices"}
 
 // dispatchedVerbs reads fleet.go's switch directly: the verbs this binary actually dispatches.
 func dispatchedVerbs(t *testing.T) map[string]bool {

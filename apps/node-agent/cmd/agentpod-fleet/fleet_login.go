@@ -169,7 +169,45 @@ func fleetLogin(args []string) {
 	if claims.PrincipalKind != "" {
 		fmt.Printf(" (%s)", claims.PrincipalKind)
 	}
-	fmt.Printf("\nToken stored at %s\n", fleetcred.Path())
+	fmt.Println()
+
+	// The step that makes this the LAST browser trip.
+	//
+	// The token just obtained lives five minutes. Before this existed that was the whole of
+	// `login`, so the next lapse meant coming back here — four times in one session on
+	// 2026-09-20. Exchanging the token once for a ninety-day device credential is what
+	// `charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`
+	// accepted, and every later command exchanges that instead of opening a browser.
+	//
+	// **A failure here is not a failed login.** The token is already stored and works for the
+	// next five minutes, so this degrades to exactly the behaviour that shipped before — which
+	// is the property that makes it safe against a hub that has not deployed the endpoint yet.
+	if device, err := fleetcred.CreateDevice(hub, token, deviceName()); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"\nSigned in, but this machine could not be registered as a device: %v\n"+
+				"Tokens last five minutes, so `fleet login` will be needed again.\n", err)
+	} else if err := fleetcred.SaveDevice(device); err != nil {
+		fmt.Fprintf(os.Stderr, "\nSigned in, but could not store the device credential: %v\n", err)
+	} else {
+		fmt.Printf("This machine is registered as %s (%s).\n", device.Name, device.ID)
+	}
+
+	fmt.Printf("Token stored at %s\n", fleetcred.Path())
+}
+
+// deviceName is what the inventory will call this machine.
+//
+// The hostname, because the list exists to be read by a person deciding which entry is the
+// laptop they lost — and "which of these is mine" is a question a random id cannot answer.
+// $AGENTPOD_DEVICE_NAME overrides it for a container or a CI runner whose hostname is a hash.
+func deviceName() string {
+	if n := strings.TrimSpace(os.Getenv("AGENTPOD_DEVICE_NAME")); n != "" {
+		return n
+	}
+	if h, err := os.Hostname(); err == nil && strings.TrimSpace(h) != "" {
+		return h
+	}
+	return "unnamed device"
 }
 
 // exchange trades the code and verifier for a token, from this process rather than the browser.
