@@ -129,6 +129,11 @@ func (s *InstallStore) PlanPlacement(ctx context.Context, id, action string) (Pl
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return PlacementPlan{}, err
 	}
+	if fence, err := readPlacementAdmission(repo); err != nil {
+		return PlacementPlan{}, err
+	} else if fence != nil {
+		return PlacementPlan{}, fmt.Errorf("%w: repository native admission requires recovery", ErrInstallConflict)
+	}
 	if active, err := s.activePlacement(); err != nil {
 		return PlacementPlan{}, err
 	} else if active != "" {
@@ -243,12 +248,22 @@ func (s *InstallStore) ApplyPlacement(ctx context.Context, id, digest string) (P
 	if receipt.Plan.PlanDigest != digest || receipt.Plan.RepositoryPath != repo || receipt.Plan.RepositoryIdentity != identity {
 		return receipt, fmt.Errorf("%w: native reviewed plan or repository changed", ErrInstallConflict)
 	}
+	fence, err := readPlacementAdmission(repo)
+	if err != nil {
+		return receipt, err
+	}
+	if fence != nil && *fence != admissionFor(receipt.Plan) {
+		return receipt, fmt.Errorf("%w: another native operation owns repository admission", ErrInstallConflict)
+	}
 	if receipt.Phase == "applied" {
 		active, err := s.activePlacement()
 		if err != nil {
 			return receipt, err
 		}
-		if active == id {
+		if active != "" && active != id {
+			return receipt, fmt.Errorf("%w: another native journal requires recovery", ErrInstallConflict)
+		}
+		if active == id || fence != nil {
 			head, err := s.placementHead()
 			if err != nil {
 				return receipt, err
@@ -256,16 +271,18 @@ func (s *InstallStore) ApplyPlacement(ctx context.Context, id, digest string) (P
 			if head.OperationID != id || !sameGeneration(head.Current, receipt.Plan.After) {
 				return receipt, fmt.Errorf("%w: completed native journal differs from head", ErrInstallConflict)
 			}
-			if err = s.root.Remove("native/active.json"); err != nil {
-				return receipt, err
-			}
-			if err = syncDir(s.root, "native"); err != nil {
-				return receipt, err
+			if active == id {
+				if err = s.root.Remove("native/active.json"); err != nil {
+					return receipt, err
+				}
+				if err = syncDir(s.root, "native"); err != nil {
+					return receipt, err
+				}
 			}
 		}
-		return receipt, nil // historical receipt; fresh verification checks later edits
+		return receipt, s.finishPlacementAdmission(receipt.Plan) // historical receipt; fresh verification checks later edits
 	}
-	err = s.applyPlacement(ctx, &receipt)
+	err = s.applyPlacement(ctx, &receipt, fence != nil)
 	if errors.Is(err, ErrInstallConflict) {
 		message := err.Error()
 		if len(message) > 2048 {
@@ -276,9 +293,12 @@ func (s *InstallStore) ApplyPlacement(ctx context.Context, id, digest string) (P
 			return receipt, fmt.Errorf("%v; saving native conflict: %w", err, saveErr)
 		}
 	}
+	if err == nil {
+		err = s.finishPlacementAdmission(receipt.Plan)
+	}
 	return receipt, err
 }
-func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt) error {
+func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt, admitted bool) error {
 	p := r.Plan
 	active, err := s.activePlacement()
 	if err != nil {
@@ -305,6 +325,9 @@ func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt) 
 		if err = s.verifyPlaced(ctx, workspace, target, p.After); err != nil {
 			return err
 		}
+		if err := s.beginPlacementAdmission(p); err != nil {
+			return err
+		}
 		return s.finishPlacement(r)
 	}
 	if hashJSON(head) != p.ExpectedHead {
@@ -315,7 +338,7 @@ func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt) 
 		if err != nil {
 			return err
 		}
-		if hashJSON(managed) != p.ExpectedInstallationHead {
+		if !admitted && hashJSON(managed) != p.ExpectedInstallationHead {
 			return fmt.Errorf("%w: managed selection changed", ErrInstallConflict)
 		}
 		if err = s.verifyPlaced(ctx, workspace, target, p.Before); err != nil {
@@ -334,6 +357,9 @@ func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt) 
 		return err
 	}
 	if err = s.placementCollisions(ctx, p.RepositoryPath, p.TargetPath, after); err != nil {
+		return err
+	}
+	if err := s.beginPlacementAdmission(p); err != nil {
 		return err
 	}
 	if active == "" {
@@ -388,6 +414,15 @@ func (s *InstallStore) VerifyPlacement(ctx context.Context) (PlacementVerificati
 		return PlacementVerification{}, err
 	}
 	defer unlock()
+	repo, _, err := s.placementRepository()
+	if err != nil {
+		return PlacementVerification{}, err
+	}
+	if fence, err := readPlacementAdmission(repo); err != nil {
+		return PlacementVerification{}, err
+	} else if fence != nil {
+		return PlacementVerification{}, fmt.Errorf("%w: repository native admission requires recovery", ErrInstallConflict)
+	}
 	if active, err := s.activePlacement(); err != nil {
 		return PlacementVerification{}, err
 	} else if active != "" {

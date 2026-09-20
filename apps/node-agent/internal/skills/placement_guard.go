@@ -12,9 +12,9 @@ import (
 // The caller must supply the same coordinator used by all process managers.
 // This does not establish quiescence of external processes, lifecycle daemons
 // or detached children, nor check harness version/mode. The lease lasts for this
-// call; durable admission fencing after interruption is a separate requirement
-// before remote exposure. It remains an internal
-// building block, not an advertised remote activation capability.
+// call; the transaction's durable recovery marker blocks later starts if the
+// call is interrupted. It remains an internal building block, not an advertised
+// remote activation capability.
 func (s *InstallStore) ApplyPlacementWhenIdle(ctx context.Context, id, digest string, g *workspacegate.Coordinator) (PlacementReceipt, error) {
 	if g == nil {
 		return PlacementReceipt{}, fmt.Errorf("skills: workspace coordinator required")
