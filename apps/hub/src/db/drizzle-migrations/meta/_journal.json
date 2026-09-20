@@ -477,6 +477,13 @@
       "when": 1789648322149,
       "tag": "0067_better_auth_1_7_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789887373428,
+      "tag": "0068_device_credentials",
+      "breakpoints": true
     }
   ]
 }

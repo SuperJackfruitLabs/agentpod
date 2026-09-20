@@ -53,6 +53,7 @@ import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
+import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
 import { tenants } from "./schema/tenants";
 import { organizations, principals } from "./schema/organization";
@@ -104,6 +105,7 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
  */
 export const TENANT_SCOPED_TABLES = {
   nodes,
+  deviceCredentials,
   provisionedRuntimes,
   enrollmentTokens,
   stations,

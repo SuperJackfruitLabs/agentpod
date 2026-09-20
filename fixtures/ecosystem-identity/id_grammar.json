@@ -2,176 +2,355 @@
   "corpus": "ecosystem-identity/id-grammar",
   "version": 1,
   "authoredAt": "2026-08-13",
-  "authoredFrom": "code, not documentation — every `grammarSource` and `mintSource` is a file:line that was read",
+  "authoredFrom": "code, not documentation \u2014 every `grammarSource` and `mintSource` is a file:line that was read",
   "purpose": "Two repos with separate release cadences must agree on what an identifier means. Neither can import the other's types, so this corpus is the shared artefact: each repo checks it in, maps the entities it owns or consumes onto its own validators, and proves acceptance and rejection against these lists. A repo that disagrees with a peer fails its own test suite rather than failing in production.",
   "howToRead": {
     "grammar": "The regex EVERY validator in the suite must implement for this entity. A validator that accepts less will reject a peer's legitimate id; one that accepts more lets a mis-wired id through.",
     "mintedAs": "The narrower shape the minter actually produces today. Informational: it documents the gap between what is minted and what is accepted, which is where drift hides.",
     "accept": "Values a validator MUST accept. `mint: true` marks values that also satisfy `mintedAs`.",
-    "reject": "Values a validator MUST reject. These are the point of the corpus — the `mem_`/`mbr_` drift in superpipeline survived because nothing ever validated a minted id against a schema, and a corpus of only-valid examples would have missed it too."
+    "reject": "Values a validator MUST reject. These are the point of the corpus \u2014 the `mem_`/`mbr_` drift in superpipeline survived because nothing ever validated a minted id against a schema, and a corpus of only-valid examples would have missed it too."
   },
-
   "entities": [
     {
       "entity": "superpipeline.tenant",
       "owner": "superpipeline",
       "prefix": "tnt",
       "grammar": "^tnt_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline packages/contract/src/ids.ts:7-12 — idSchema('tnt')",
+      "grammarSource": "superpipeline packages/contract/src/ids.ts:7-12 \u2014 idSchema('tnt')",
       "mintedAs": "^tnt_[0-9a-f]{16}$",
       "mintSource": "superpipeline apps/api/src/ids.ts:2 newId(), called at apps/api/src/db/catalog.ts:45",
       "accept": [
-        { "value": "tnt_5f2b8c1a9d3e4076", "mint": true, "note": "canonical: what newId('tnt') produces" },
-        { "value": "tnt_Aa0Bb1", "mint": false, "note": "shortest and mixed-case: minted ids are never like this, but the declared grammar accepts it, so a peer that rejects it is wrong about superpipeline's contract" }
+        {
+          "value": "tnt_5f2b8c1a9d3e4076",
+          "mint": true,
+          "note": "canonical: what newId('tnt') produces"
+        },
+        {
+          "value": "tnt_Aa0Bb1",
+          "mint": false,
+          "note": "shortest and mixed-case: minted ids are never like this, but the declared grammar accepts it, so a peer that rejects it is wrong about superpipeline's contract"
+        }
       ],
       "reject": [
-        { "value": "tenant_5f2b8c1a9d3e4076", "reason": "wrong-prefix", "note": "the spelled-out word, not the declared prefix" },
-        { "value": "usr_a1b2c3d4e5f60718", "reason": "other-entity", "note": "a perfectly valid id of a different entity — this is the failure that a bare z.string() cannot catch" },
-        { "value": "tnt_ab", "reason": "too-short" },
-        { "value": "tnt_abc-12", "reason": "wrong-alphabet", "note": "hyphen; superpipeline's alphabet is base62 with no separators" },
-        { "value": "tnt_", "reason": "prefix-only" },
-        { "value": "5f2b8c1a9d3e4076", "reason": "no-prefix" },
-        { "value": "tnt5f2b8c1a9d3e4076", "reason": "no-separator" },
-        { "value": "tnts_5f2b8c1a9d3e4076", "reason": "prefix-not-anchored", "note": "catches a regex missing its leading ^ or matching the prefix as a substring" },
-        { "value": "xtnt_5f2b8c1a9d3e4076", "reason": "prefix-not-anchored" },
-        { "value": "tnt_5f2b8c1a9d3e4076\n", "reason": "trailing-newline", "note": "some regex flavours let `$` match before a trailing newline; a suite-wide id must not" },
-        { "value": " tnt_5f2b8c1a9d3e4076", "reason": "leading-whitespace" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "tenant_5f2b8c1a9d3e4076",
+          "reason": "wrong-prefix",
+          "note": "the spelled-out word, not the declared prefix"
+        },
+        {
+          "value": "usr_a1b2c3d4e5f60718",
+          "reason": "other-entity",
+          "note": "a perfectly valid id of a different entity \u2014 this is the failure that a bare z.string() cannot catch"
+        },
+        {
+          "value": "tnt_ab",
+          "reason": "too-short"
+        },
+        {
+          "value": "tnt_abc-12",
+          "reason": "wrong-alphabet",
+          "note": "hyphen; superpipeline's alphabet is base62 with no separators"
+        },
+        {
+          "value": "tnt_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "5f2b8c1a9d3e4076",
+          "reason": "no-prefix"
+        },
+        {
+          "value": "tnt5f2b8c1a9d3e4076",
+          "reason": "no-separator"
+        },
+        {
+          "value": "tnts_5f2b8c1a9d3e4076",
+          "reason": "prefix-not-anchored",
+          "note": "catches a regex missing its leading ^ or matching the prefix as a substring"
+        },
+        {
+          "value": "xtnt_5f2b8c1a9d3e4076",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "tnt_5f2b8c1a9d3e4076\n",
+          "reason": "trailing-newline",
+          "note": "some regex flavours let `$` match before a trailing newline; a suite-wide id must not"
+        },
+        {
+          "value": " tnt_5f2b8c1a9d3e4076",
+          "reason": "leading-whitespace"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "superpipeline.user",
       "owner": "superpipeline",
       "prefix": "usr",
       "grammar": "^usr_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline packages/contract/src/ids.ts:13 — idSchema('usr')",
+      "grammarSource": "superpipeline packages/contract/src/ids.ts:13 \u2014 idSchema('usr')",
       "mintedAs": "^usr_[0-9a-f]{16}$",
-      "mintSource": "superpipeline apps/api/src/db/catalog.ts:36 — newId('usr')",
-      "note": "This is the principal id on the superpipeline side. AgentPod's user id is NOT this shape — see agentpod.user. There is no mapping between them anywhere in either repo today.",
+      "mintSource": "superpipeline apps/api/src/db/catalog.ts:36 \u2014 newId('usr')",
+      "note": "This is the principal id on the superpipeline side. AgentPod's user id is NOT this shape \u2014 see agentpod.user. There is no mapping between them anywhere in either repo today.",
       "accept": [
-        { "value": "usr_a1b2c3d4e5f60718", "mint": true }
+        {
+          "value": "usr_a1b2c3d4e5f60718",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "user_a1b2c3d4e5f60718", "reason": "wrong-prefix" },
-        { "value": "tnt_5f2b8c1a9d3e4076", "reason": "other-entity" },
-        { "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "reason": "wrong-alphabet", "note": "an AgentPod user id, which is a bare UUID. Handing one to superpipeline as a principal is a real, reachable mistake once a bridge exists." },
-        { "value": "usr_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "user_a1b2c3d4e5f60718",
+          "reason": "wrong-prefix"
+        },
+        {
+          "value": "tnt_5f2b8c1a9d3e4076",
+          "reason": "other-entity"
+        },
+        {
+          "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "reason": "wrong-alphabet",
+          "note": "an AgentPod user id, which is a bare UUID. Handing one to superpipeline as a principal is a real, reachable mistake once a bridge exists."
+        },
+        {
+          "value": "usr_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "superpipeline.membership",
       "owner": "superpipeline",
       "prefix": "mbr",
       "grammar": "^mbr_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline packages/contract/src/ids.ts:15 — idSchema('mbr')",
+      "grammarSource": "superpipeline packages/contract/src/ids.ts:15 \u2014 idSchema('mbr')",
       "mintedAs": "^mbr_[0-9a-f]{16}$",
-      "mintSource": "superpipeline apps/api/src/db/catalog.ts:48 — newId('mbr')",
+      "mintSource": "superpipeline apps/api/src/db/catalog.ts:48 \u2014 newId('mbr')",
       "note": "The regression case. The contract declared `mem_` while the API minted `mbr_`; nothing validated a minted id against the schema, so the two disagreed for as long as both existed. Fixed in superpipeline 7740f06. This entry exists so it cannot recur silently in either repo.",
       "accept": [
-        { "value": "mbr_0c4b4f289d3a51b6", "mint": true }
+        {
+          "value": "mbr_0c4b4f289d3a51b6",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "mem_0c4b4f289d3a51b6", "reason": "wrong-prefix", "note": "the abbreviation the contract used to declare. Must stay rejected." },
-        { "value": "member_0c4b4f289d3a51b6", "reason": "wrong-prefix" },
-        { "value": "mbr_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "mem_0c4b4f289d3a51b6",
+          "reason": "wrong-prefix",
+          "note": "the abbreviation the contract used to declare. Must stay rejected."
+        },
+        {
+          "value": "member_0c4b4f289d3a51b6",
+          "reason": "wrong-prefix"
+        },
+        {
+          "value": "mbr_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "superpipeline.agent",
       "owner": "superpipeline",
       "prefix": "agt",
       "grammar": "^agt_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline packages/contract/src/ids.ts:17 — idSchema('agt')",
+      "grammarSource": "superpipeline packages/contract/src/ids.ts:17 \u2014 idSchema('agt')",
       "mintedAs": "^agt_[0-9a-f]{16}$",
-      "mintSource": "superpipeline apps/api/src/db/catalog.ts:60 — newId('agt')",
-      "note": "The agent is a principal in its own right (ecosystem decision 3), so this id — not a human's — is what attribution hangs off for dispatched work.",
+      "mintSource": "superpipeline apps/api/src/db/catalog.ts:60 \u2014 newId('agt')",
+      "note": "The agent is a principal in its own right (ecosystem decision 3), so this id \u2014 not a human's \u2014 is what attribution hangs off for dispatched work.",
       "accept": [
-        { "value": "agt_9f1c2ab04d7e6b3a", "mint": true }
+        {
+          "value": "agt_9f1c2ab04d7e6b3a",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "agent_9f1c2ab04d7e6b3a", "reason": "wrong-prefix" },
-        { "value": "spa_9f1c2ab04d7e6b3a4c5d6e7f8091a2b3c4d5e6f70819", "reason": "credential-not-identifier", "note": "`spa_` is superpipeline's AGENT BEARER TOKEN (apps/api/src/auth/agent-token.ts:10), not an agent id. It is 48 hex chars and is a secret. A validator that accepts it here would let a credential be stored in an id column." },
-        { "value": "agt_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "agent_9f1c2ab04d7e6b3a",
+          "reason": "wrong-prefix"
+        },
+        {
+          "value": "spa_9f1c2ab04d7e6b3a4c5d6e7f8091a2b3c4d5e6f70819",
+          "reason": "credential-not-identifier",
+          "note": "`spa_` is superpipeline's AGENT BEARER TOKEN (apps/api/src/auth/agent-token.ts:10), not an agent id. It is 48 hex chars and is a secret. A validator that accepts it here would let a credential be stored in an id column."
+        },
+        {
+          "value": "agt_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "superpipeline.run",
       "owner": "superpipeline",
       "prefix": "run",
       "grammar": "^run_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline packages/contract/src/ids.ts:21 — idSchema('run')",
+      "grammarSource": "superpipeline packages/contract/src/ids.ts:21 \u2014 idSchema('run')",
       "mintedAs": "^run_[0-9a-f]{16}$",
-      "mintSource": "superpipeline apps/api/src/ids.ts:2 newId(), called at apps/api/src/board/board-do.ts:1253 (claim → INSERT INTO runs)",
-      "note": "The join key. Superpipeline mints the work run; AgentPod executes it and must never mint a rival id for the same attempt. See run_join_key.json. AgentPod used to reserve this same prefix for its own acp_runs primary key; it gave the claim up on 2026-08-14 and moved to `attempt_` — see `resolvedConflicts` below and the `agentpod.acpRun` entity.",
+      "mintSource": "superpipeline apps/api/src/ids.ts:2 newId(), called at apps/api/src/board/board-do.ts:1253 (claim \u2192 INSERT INTO runs)",
+      "note": "The join key. Superpipeline mints the work run; AgentPod executes it and must never mint a rival id for the same attempt. See run_join_key.json. AgentPod used to reserve this same prefix for its own acp_runs primary key; it gave the claim up on 2026-08-14 and moved to `attempt_` \u2014 see `resolvedConflicts` below and the `agentpod.acpRun` entity.",
       "accept": [
-        { "value": "run_e074a2160c4b4f28", "mint": true, "note": "canonical claim result" },
-        { "value": "run_Aa0Bb1", "mint": false, "note": "superpipeline's own test suite asserts this parses (packages/contract/test/ids.test.ts:8). AgentPod must not be stricter than the minter's contract about an id it did not mint." }
+        {
+          "value": "run_e074a2160c4b4f28",
+          "mint": true,
+          "note": "canonical claim result"
+        },
+        {
+          "value": "run_Aa0Bb1",
+          "mint": false,
+          "note": "superpipeline's own test suite asserts this parses (packages/contract/test/ids.test.ts:8). AgentPod must not be stricter than the minter's contract about an id it did not mint."
+        }
       ],
       "reject": [
-        { "value": "task_e074a2160c4b4f28", "reason": "other-entity" },
-        { "value": "card_3d4e5f6071829304", "reason": "other-entity" },
-        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "other-entity", "note": "an AgentPod acp_runs id — one attempt at executing a work run, not the work run. This pair used to be indistinguishable; keeping it in both reject lists is what stops the collision returning." },
-        { "value": "run_", "reason": "prefix-only" },
-        { "value": "run_abc", "reason": "too-short" },
-        { "value": "run_e074a216-0c4b", "reason": "wrong-alphabet" },
-        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "reason": "other-entity", "note": "an AgentPod ACP session id. The bridge spike today correlates a superpipeline run to an AgentPod session in a console.log line and nothing else (superpipeline/../bridge/spike/src/bridge.ts:30-31), so confusing the two is exactly the mistake in reach." },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "task_e074a2160c4b4f28",
+          "reason": "other-entity"
+        },
+        {
+          "value": "card_3d4e5f6071829304",
+          "reason": "other-entity"
+        },
+        {
+          "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+          "reason": "other-entity",
+          "note": "an AgentPod acp_runs id \u2014 one attempt at executing a work run, not the work run. This pair used to be indistinguishable; keeping it in both reject lists is what stops the collision returning."
+        },
+        {
+          "value": "run_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "run_abc",
+          "reason": "too-short"
+        },
+        {
+          "value": "run_e074a216-0c4b",
+          "reason": "wrong-alphabet"
+        },
+        {
+          "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+          "reason": "other-entity",
+          "note": "an AgentPod ACP session id. The bridge spike today correlates a superpipeline run to an AgentPod session in a console.log line and nothing else (superpipeline/../bridge/spike/src/bridge.ts:30-31), so confusing the two is exactly the mistake in reach."
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.node",
       "owner": "agentpod",
       "prefix": "node",
       "grammar": "^node_[0-9a-f]{20}$",
-      "grammarSource": "NONE — AgentPod had no id validator of any kind before this corpus. Every id field in packages/contract/src is a bare z.string(). The grammar here is derived from the mint site and this corpus is its first enforcement.",
+      "grammarSource": "NONE \u2014 AgentPod had no id validator of any kind before this corpus. Every id field in packages/contract/src is a bare z.string(). The grammar here is derived from the mint site and this corpus is its first enforcement.",
       "mintedAs": "^node_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:12 prefixedId(), called at :185 — `crypto.randomUUID().replace(/-/g,'').slice(0,20)`",
+      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:12 prefixedId(), called at :185 \u2014 `crypto.randomUUID().replace(/-/g,'').slice(0,20)`",
       "note": "20 lowercase hex, not superpipeline's 16. The two repos use different lengths from the same underlying source (a UUID with its hyphens stripped). Nothing forces them to agree and nothing has noticed.",
       "accept": [
-        { "value": "node_9f1c2ab04d7e6b3a5c88", "mint": true }
+        {
+          "value": "node_9f1c2ab04d7e6b3a5c88",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "node_9f1c2ab04d7e6b3a", "reason": "too-short", "note": "16 hex — superpipeline's length. A superpipeline-shaped id must not pass as an AgentPod node id." },
-        { "value": "node_9F1C2AB04D7E6B3A5C88", "reason": "wrong-alphabet", "note": "uppercase hex is never minted; accepting it means two spellings of the same id can both exist as distinct primary keys" },
-        { "value": "node_9f1c2ab0-4d7e-6b3a-5c88-000000000000", "reason": "wrong-alphabet", "note": "hyphenated UUID — the shape AgentPod's OTHER id family uses (see agentpod.station)" },
-        { "value": "nodes_9f1c2ab04d7e6b3a5c88", "reason": "prefix-not-anchored" },
-        { "value": "rt_3d4e5f60718293a4b5c6", "reason": "other-entity" },
-        { "value": "node_", "reason": "prefix-only" },
-        { "value": "node_9f1c2ab04d7e6b3a5c88\n", "reason": "trailing-newline" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "node_9f1c2ab04d7e6b3a",
+          "reason": "too-short",
+          "note": "16 hex \u2014 superpipeline's length. A superpipeline-shaped id must not pass as an AgentPod node id."
+        },
+        {
+          "value": "node_9F1C2AB04D7E6B3A5C88",
+          "reason": "wrong-alphabet",
+          "note": "uppercase hex is never minted; accepting it means two spellings of the same id can both exist as distinct primary keys"
+        },
+        {
+          "value": "node_9f1c2ab0-4d7e-6b3a-5c88-000000000000",
+          "reason": "wrong-alphabet",
+          "note": "hyphenated UUID \u2014 the shape AgentPod's OTHER id family uses (see agentpod.station)"
+        },
+        {
+          "value": "nodes_9f1c2ab04d7e6b3a5c88",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "rt_3d4e5f60718293a4b5c6",
+          "reason": "other-entity"
+        },
+        {
+          "value": "node_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "node_9f1c2ab04d7e6b3a5c88\n",
+          "reason": "trailing-newline"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.runtime",
       "owner": "agentpod",
       "prefix": "rt",
       "grammar": "^rt_[0-9a-f]{20}$",
-      "grammarSource": "NONE before this corpus — RuntimeSummary.id is z.string() (packages/contract/src/runtime.ts:197)",
+      "grammarSource": "NONE before this corpus \u2014 RuntimeSummary.id is z.string() (packages/contract/src/runtime.ts:197)",
       "mintedAs": "^rt_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/runtimes.ts:54-55 prefixedId(), called at :155 — prefixedId('rt')",
-      "note": "Do not confuse `rt_…` (AgentPod's runtime, a provisioned container/machine) with `runtimes.externalId`, which is the SUBSTRATE's handle (e.g. a Fly app/machine pair) and has no suite-wide grammar at all.",
+      "mintSource": "agentpod apps/hub/src/services/runtimes.ts:54-55 prefixedId(), called at :155 \u2014 prefixedId('rt')",
+      "note": "Do not confuse `rt_\u2026` (AgentPod's runtime, a provisioned container/machine) with `runtimes.externalId`, which is the SUBSTRATE's handle (e.g. a Fly app/machine pair) and has no suite-wide grammar at all.",
       "accept": [
-        { "value": "rt_3d4e5f60718293a4b5c6", "mint": true }
+        {
+          "value": "rt_3d4e5f60718293a4b5c6",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "runtime_3d4e5f60718293a4b5c6", "reason": "wrong-prefix" },
-        { "value": "rt_3d4e5f60718293a4b5", "reason": "too-short", "note": "19 hex" },
-        { "value": "rt_3d4e5f60718293a4b5c6d", "reason": "too-long", "note": "21 hex — catches a regex missing its trailing $" },
-        { "value": "node_9f1c2ab04d7e6b3a5c88", "reason": "other-entity" },
-        { "value": "rt_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "runtime_3d4e5f60718293a4b5c6",
+          "reason": "wrong-prefix"
+        },
+        {
+          "value": "rt_3d4e5f60718293a4b5",
+          "reason": "too-short",
+          "note": "19 hex"
+        },
+        {
+          "value": "rt_3d4e5f60718293a4b5c6d",
+          "reason": "too-long",
+          "note": "21 hex \u2014 catches a regex missing its trailing $"
+        },
+        {
+          "value": "node_9f1c2ab04d7e6b3a5c88",
+          "reason": "other-entity"
+        },
+        {
+          "value": "rt_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.enrollmentToken",
       "owner": "agentpod",
@@ -179,18 +358,30 @@
       "grammar": "^etk_[0-9a-f]{20}$",
       "grammarSource": "NONE before this corpus",
       "mintedAs": "^etk_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:58 — prefixedId('etk')",
-      "note": "The enrollment token ROW id. The token itself is a different thing with a different shape — `enr_` + 20 hex + 32 hex (enrollment.ts:54) — and is a secret. They are kept apart here so a validator cannot be written that blurs them.",
+      "mintSource": "agentpod apps/hub/src/services/enrollment.ts:58 \u2014 prefixedId('etk')",
+      "note": "The enrollment token ROW id. The token itself is a different thing with a different shape \u2014 `enr_` + 20 hex + 32 hex (enrollment.ts:54) \u2014 and is a secret. They are kept apart here so a validator cannot be written that blurs them.",
       "accept": [
-        { "value": "etk_7b2e9a103c5d4e8fb012", "mint": true }
+        {
+          "value": "etk_7b2e9a103c5d4e8fb012",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "enr_7b2e9a103c5d4e8fb0125f2b8c1a9d3e40760c4b4f289d3a51b6", "reason": "credential-not-identifier", "note": "the enrollment token secret, which starts with a different prefix and is 52 hex long" },
-        { "value": "etk_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "enr_7b2e9a103c5d4e8fb0125f2b8c1a9d3e40760c4b4f289d3a51b6",
+          "reason": "credential-not-identifier",
+          "note": "the enrollment token secret, which starts with a different prefix and is 52 hex long"
+        },
+        {
+          "value": "etk_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.station",
       "owner": "agentpod",
@@ -198,101 +389,244 @@
       "grammar": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "grammarSource": "NONE before this corpus",
       "mintedAs": "^station_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "agentpod apps/hub/src/services/station-registry.ts:50 — `station_${crypto.randomUUID()}` (hyphens KEPT)",
-      "note": "A second, incompatible AgentPod grammar: prefix + a hyphenated UUID. Note what this means across the seam — superpipeline's own id schema is `^<prefix>_[A-Za-z0-9]{6,}$`, whose alphabet has no hyphen, so superpipeline's contract would REJECT every AgentPod station id it was ever handed. That is a live disagreement, not a hypothetical.",
+      "mintSource": "agentpod apps/hub/src/services/station-registry.ts:50 \u2014 `station_${crypto.randomUUID()}` (hyphens KEPT)",
+      "note": "A second, incompatible AgentPod grammar: prefix + a hyphenated UUID. Note what this means across the seam \u2014 superpipeline's own id schema is `^<prefix>_[A-Za-z0-9]{6,}$`, whose alphabet has no hyphen, so superpipeline's contract would REJECT every AgentPod station id it was ever handed. That is a live disagreement, not a hypothetical.",
       "accept": [
-        { "value": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90", "mint": true }
+        {
+          "value": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "station_4a1482de9c3f4b178a550d6e2f7c1b90", "reason": "wrong-alphabet", "note": "hyphens stripped — the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted." },
-        { "value": "station_4a1482de-9c3f-4b17-8a55", "reason": "too-short" },
-        { "value": "station_4A1482DE-9C3F-4B17-8A55-0D6E2F7C1B90", "reason": "wrong-alphabet", "note": "uppercase" },
-        { "value": "station_", "reason": "prefix-only" },
-        { "value": "codex:4a1482de", "reason": "other-entity", "note": "a station KEY (harness:hash), which is what the node-agent reports and is not an id at all — see StationHealthReport.key" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "station_4a1482de9c3f4b178a550d6e2f7c1b90",
+          "reason": "wrong-alphabet",
+          "note": "hyphens stripped \u2014 the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted."
+        },
+        {
+          "value": "station_4a1482de-9c3f-4b17-8a55",
+          "reason": "too-short"
+        },
+        {
+          "value": "station_4A1482DE-9C3F-4B17-8A55-0D6E2F7C1B90",
+          "reason": "wrong-alphabet",
+          "note": "uppercase"
+        },
+        {
+          "value": "station_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "codex:4a1482de",
+          "reason": "other-entity",
+          "note": "a station KEY (harness:hash), which is what the node-agent reports and is not an id at all \u2014 see StationHealthReport.key"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.acpSession",
       "owner": "agentpod",
       "prefix": "acps",
       "grammar": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "grammarSource": "NONE before this corpus — AcpSessionRow.id is z.string() (packages/contract/src/acp-session.ts)",
+      "grammarSource": "NONE before this corpus \u2014 AcpSessionRow.id is z.string() (packages/contract/src/acp-session.ts)",
       "mintedAs": "^acps_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "agentpod apps/hub/src/services/acp-sessions.ts:641 — `acps_${crypto.randomUUID()}`",
+      "mintSource": "agentpod apps/hub/src/services/acp-sessions.ts:641 \u2014 `acps_${crypto.randomUUID()}`",
       "note": "The session is the ONLY identity on the ACP wire today: neither AcpClientMsg nor AcpServerMsg carries a run or correlation id. A dispatched run is therefore currently observable only as 'some session on some station'.",
       "accept": [
-        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "mint": true }
+        {
+          "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "acp_3d4e5f60", "reason": "other-entity", "note": "`acp_<8 hex>` is a DIFFERENT id: the node-agent's process-local ACP session id (apps/node-agent/internal/acp/manager.go:40-46, 32 bits of entropy, collision-retried in-process). The hub's `acps_<uuid>` doubles as the node-side instance discriminator (acp-sessions.ts:688-691), so both prefixes are live in the same subsystem and differ by one character." },
-        { "value": "run_e074a2160c4b4f28", "reason": "other-entity", "note": "a superpipeline run id" },
-        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "other-entity", "note": "an AgentPod acp_runs id. Same family and same subsystem — acp_runs.session_id is a FK to acp_sessions.id — so these two travel together and must not be interchangeable." },
-        { "value": "acps_", "reason": "prefix-only" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "acp_3d4e5f60",
+          "reason": "other-entity",
+          "note": "`acp_<8 hex>` is a DIFFERENT id: the node-agent's process-local ACP session id (apps/node-agent/internal/acp/manager.go:40-46, 32 bits of entropy, collision-retried in-process). The hub's `acps_<uuid>` doubles as the node-side instance discriminator (acp-sessions.ts:688-691), so both prefixes are live in the same subsystem and differ by one character."
+        },
+        {
+          "value": "run_e074a2160c4b4f28",
+          "reason": "other-entity",
+          "note": "a superpipeline run id"
+        },
+        {
+          "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+          "reason": "other-entity",
+          "note": "an AgentPod acp_runs id. Same family and same subsystem \u2014 acp_runs.session_id is a FK to acp_sessions.id \u2014 so these two travel together and must not be interchangeable."
+        },
+        {
+          "value": "acps_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.acpRun",
       "owner": "agentpod",
       "prefix": "attempt",
       "grammar": "^attempt_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "grammarSource": "agentpod packages/contract/src/ids.ts — AcpRunId. Also enforced in the database: acp_runs carries a CHECK constraint (`acp_runs_id_is_agentpod_attempt`) added by migration 0035.",
+      "grammarSource": "agentpod packages/contract/src/ids.ts \u2014 AcpRunId. Also enforced in the database: acp_runs carries a CHECK constraint (`acp_runs_id_is_agentpod_attempt`) added by migration 0035.",
       "mintedAs": "^attempt_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "NONE — nothing in apps/hub/src inserts into acp_runs yet, and no such statement has existed at any commit. The grammar is reserved and enforced ahead of its first writer, which is the only moment the rename was free.",
-      "note": "WAS `run_`, colliding head-on with superpipeline's work run — the schema file carried the comment `\"run_\" + uuid-ish` two lines above `We never mint a rival id` and contradicted itself. AgentPod moved because AgentPod is the executor: superpipeline mints work runs and has live production data, while acp_runs has no writer and no rows. `attempt` also names the thing correctly — a run here is a PROMPT-TURN, opening when a prompt is submitted and closing when the agent yields, while superpipeline's work run is a claimed card that takes as many prompt-turns as the work takes. One work run is executed as a series of attempts; the two never counted 1:1 and were never the same entity, whatever the shared prefix implied. Hyphenated-UUID family, matching its sibling acps_ in the same subsystem; `acpr_` was rejected as one character from `acps_`, which the acp_/acps_ near-miss below already shows is a trap.",
+      "mintSource": "NONE \u2014 nothing in apps/hub/src inserts into acp_runs yet, and no such statement has existed at any commit. The grammar is reserved and enforced ahead of its first writer, which is the only moment the rename was free.",
+      "note": "WAS `run_`, colliding head-on with superpipeline's work run \u2014 the schema file carried the comment `\"run_\" + uuid-ish` two lines above `We never mint a rival id` and contradicted itself. AgentPod moved because AgentPod is the executor: superpipeline mints work runs and has live production data, while acp_runs has no writer and no rows. `attempt` also names the thing correctly \u2014 a run here is a PROMPT-TURN, opening when a prompt is submitted and closing when the agent yields, while superpipeline's work run is a claimed card that takes as many prompt-turns as the work takes. One work run is executed as a series of attempts; the two never counted 1:1 and were never the same entity, whatever the shared prefix implied. Hyphenated-UUID family, matching its sibling acps_ in the same subsystem; `acpr_` was rejected as one character from `acps_`, which the acp_/acps_ near-miss below already shows is a trap.",
       "accept": [
-        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "mint": true }
+        {
+          "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "run_e074a2160c4b4f28", "reason": "other-entity", "note": "THE COLLISION. A superpipeline work run id. Before 2026-08-14 this shape was AgentPod's own primary key too, and the two were indistinguishable strings; this is the case that fails if the `run_` prefix is ever restored." },
-        { "value": "run_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "wrong-prefix", "note": "the exact old AgentPod grammar — the old prefix with the current suffix. Rejecting only superpipeline's minted shape would let a hub keep the contested prefix as long as it spelled the suffix differently." },
-        { "value": "attempt_9f1c2ab04d7e4b3a8c880d6e2f7c1b90", "reason": "wrong-alphabet", "note": "hyphens stripped — the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted." },
-        { "value": "attempt_9F1C2AB0-4D7E-4B3A-8C88-0D6E2F7C1B90", "reason": "wrong-alphabet", "note": "uppercase" },
-        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88", "reason": "too-short" },
-        { "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2", "reason": "other-entity", "note": "the ACP session this run belongs to — acp_runs.session_id references it, so both ids are in hand at every call site that will ever write a run" },
-        { "value": "attempts_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90", "reason": "prefix-not-anchored" },
-        { "value": "attempt_", "reason": "prefix-only" },
-        { "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90\n", "reason": "trailing-newline" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "run_e074a2160c4b4f28",
+          "reason": "other-entity",
+          "note": "THE COLLISION. A superpipeline work run id. Before 2026-08-14 this shape was AgentPod's own primary key too, and the two were indistinguishable strings; this is the case that fails if the `run_` prefix is ever restored."
+        },
+        {
+          "value": "run_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+          "reason": "wrong-prefix",
+          "note": "the exact old AgentPod grammar \u2014 the old prefix with the current suffix. Rejecting only superpipeline's minted shape would let a hub keep the contested prefix as long as it spelled the suffix differently."
+        },
+        {
+          "value": "attempt_9f1c2ab04d7e4b3a8c880d6e2f7c1b90",
+          "reason": "wrong-alphabet",
+          "note": "hyphens stripped \u2014 the shape node_/rt_ use. Both spellings would name the same UUID; only one is minted."
+        },
+        {
+          "value": "attempt_9F1C2AB0-4D7E-4B3A-8C88-0D6E2F7C1B90",
+          "reason": "wrong-alphabet",
+          "note": "uppercase"
+        },
+        {
+          "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88",
+          "reason": "too-short"
+        },
+        {
+          "value": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+          "reason": "other-entity",
+          "note": "the ACP session this run belongs to \u2014 acp_runs.session_id references it, so both ids are in hand at every call site that will ever write a run"
+        },
+        {
+          "value": "attempts_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "attempt_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90\n",
+          "reason": "trailing-newline"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.tenant",
       "owner": "agentpod",
       "prefix": "fleet",
       "grammar": "^fleet_[0-9a-f]{20}$",
-      "grammarSource": "agentpod packages/contract/src/ids.ts — TenantId. Also enforced in the database: tenants carries a CHECK constraint (`tenants_id_is_agentpod_fleet`) added by migration 0036.",
+      "grammarSource": "agentpod packages/contract/src/ids.ts \u2014 TenantId. Also enforced in the database: tenants carries a CHECK constraint (`tenants_id_is_agentpod_fleet`) added by migration 0036.",
       "mintedAs": "^fleet_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/db/schema/tenants.ts — BOOTSTRAP_TENANT_ID, a deterministic literal created by migration 0036. No random minter exists yet: exactly one tenant exists, and it must be the SAME id on a fresh deploy and on the live hub, which a random id cannot guarantee. When a second tenant becomes creatable the minter is prefixedId('fleet'), the helper already used for node/rt/etk.",
-      "note": "AgentPod's LOCAL isolation boundary. Deliberately NOT `tnt_`, which superpipeline mints: neither product owns the organisation — that belongs to an Organization plane that does not exist yet — so each keeps its own local tenant and records an optional external mapping (tenants.external_id + tenants.external_source) to the same real organisation elsewhere. Two products minting one prefix for rows in different databases is precisely the `run_` collision resolved on 2026-08-14, and doing it deliberately would be worse than doing it by accident.\n\nWhy `fleet` and not an abbreviation of `tenant`: `ten_`, `tn_` and `tnnt_` are all one glance from superpipeline's `tnt_` while meaning the identical thing in a different database — the `acp_`/`acps_` near-miss recorded below is already evidence that one character of distance is not distance. A prefix that differs from its table name is the norm in this repo, not an exception (`rt_`/provisioned_runtimes, `etk_`/enrollment_tokens, `acps_`/acp_sessions, `attempt_`/acp_runs), so the table keeps the suite's shared word — `tenants`, column `tenant_id`, which is what an Organization plane will map — while the id space says whose rows these are. `fleet` also names what an AgentPod tenant contains: the nodes, stations and runtimes of one fleet.\n\nWhy the 20-hex family and not the hyphenated-UUID family: this is the one AgentPod id DESIGNED to cross the repo seam — superpipeline's tenant row records it as its own external id, and the Organization plane will map it. superpipeline's declared alphabet is base62 with no separator (`^<prefix>_[A-Za-z0-9]{6,}$`), so every id in AgentPod's hyphenated family is rejected by the peer's own contract on arrival; the corpus already records that as a live disagreement for `station_`. `fleet_<20 hex>` satisfies both repos' grammars, so the mapping is exchangeable in both directions on the day it is written rather than after a migration.",
+      "mintSource": "agentpod apps/hub/src/db/schema/tenants.ts \u2014 BOOTSTRAP_TENANT_ID, a deterministic literal created by migration 0036. No random minter exists yet: exactly one tenant exists, and it must be the SAME id on a fresh deploy and on the live hub, which a random id cannot guarantee. When a second tenant becomes creatable the minter is prefixedId('fleet'), the helper already used for node/rt/etk.",
+      "note": "AgentPod's LOCAL isolation boundary. Deliberately NOT `tnt_`, which superpipeline mints: neither product owns the organisation \u2014 that belongs to an Organization plane that does not exist yet \u2014 so each keeps its own local tenant and records an optional external mapping (tenants.external_id + tenants.external_source) to the same real organisation elsewhere. Two products minting one prefix for rows in different databases is precisely the `run_` collision resolved on 2026-08-14, and doing it deliberately would be worse than doing it by accident.\n\nWhy `fleet` and not an abbreviation of `tenant`: `ten_`, `tn_` and `tnnt_` are all one glance from superpipeline's `tnt_` while meaning the identical thing in a different database \u2014 the `acp_`/`acps_` near-miss recorded below is already evidence that one character of distance is not distance. A prefix that differs from its table name is the norm in this repo, not an exception (`rt_`/provisioned_runtimes, `etk_`/enrollment_tokens, `acps_`/acp_sessions, `attempt_`/acp_runs), so the table keeps the suite's shared word \u2014 `tenants`, column `tenant_id`, which is what an Organization plane will map \u2014 while the id space says whose rows these are. `fleet` also names what an AgentPod tenant contains: the nodes, stations and runtimes of one fleet.\n\nWhy the 20-hex family and not the hyphenated-UUID family: this is the one AgentPod id DESIGNED to cross the repo seam \u2014 superpipeline's tenant row records it as its own external id, and the Organization plane will map it. superpipeline's declared alphabet is base62 with no separator (`^<prefix>_[A-Za-z0-9]{6,}$`), so every id in AgentPod's hyphenated family is rejected by the peer's own contract on arrival; the corpus already records that as a live disagreement for `station_`. `fleet_<20 hex>` satisfies both repos' grammars, so the mapping is exchangeable in both directions on the day it is written rather than after a migration.",
       "accept": [
-        { "value": "fleet_00000000000000000000", "mint": true, "note": "THE BOOTSTRAP TENANT. All-zero on purpose: deterministic, so a fresh deploy and the live hub agree without coordinating, and unmistakable in a log line as the one tenant that was created by a migration rather than by a person." },
-        { "value": "fleet_9f1c2ab04d7e6b3a5c88", "mint": true, "note": "what prefixedId('fleet') will produce for the second tenant" }
+        {
+          "value": "fleet_00000000000000000000",
+          "mint": true,
+          "note": "THE BOOTSTRAP TENANT. All-zero on purpose: deterministic, so a fresh deploy and the live hub agree without coordinating, and unmistakable in a log line as the one tenant that was created by a migration rather than by a person."
+        },
+        {
+          "value": "fleet_9f1c2ab04d7e6b3a5c88",
+          "mint": true,
+          "note": "what prefixedId('fleet') will produce for the second tenant"
+        }
       ],
       "reject": [
-        { "value": "tnt_5f2b8c1a9d3e4076", "reason": "other-entity", "note": "THE COLLISION THIS PREFIX EXISTS TO AVOID — a superpipeline tenant. Both name an isolation boundary, both are the natural join for the same real organisation, and they live in different databases; a shared prefix would make a value read out of context unattributable, which is the `run_` failure exactly." },
-        { "value": "tenant_00000000000000000000", "reason": "wrong-prefix", "note": "the spelled-out word" },
-        { "value": "ten_00000000000000000000", "reason": "wrong-prefix", "note": "an abbreviation of `tenant` one character from superpipeline's `tnt_`. Rejected here so a later hand cannot quietly re-introduce the near-miss the note above rules out." },
-        { "value": "fleet_9f1c2ab04d7e6b3a", "reason": "too-short", "note": "16 hex — superpipeline's length. AgentPod slices the same UUID source to 20; a superpipeline-shaped id must not pass as an AgentPod tenant." },
-        { "value": "fleet_9f1c2ab04d7e6b3a5c88a", "reason": "too-long", "note": "21 hex — catches a regex missing its trailing $" },
-        { "value": "fleet_9F1C2AB04D7E6B3A5C88", "reason": "wrong-alphabet", "note": "uppercase hex is never minted; accepting it means two spellings of one tenant can both exist as distinct primary keys, which is an isolation boundary with two names" },
-        { "value": "fleet_9f1c2ab0-4d7e-6b3a-5c88-000000000000", "reason": "wrong-alphabet", "note": "hyphenated UUID — AgentPod's OTHER family, and the one superpipeline's contract would reject on arrival. Choosing it here would have made the external mapping unusable in one direction." },
-        { "value": "node_9f1c2ab04d7e6b3a5c88", "reason": "other-entity", "note": "same family and same length — a node id and a tenant id are now one prefix apart in shape, so this case is what keeps them apart in a validator" },
-        { "value": "fleets_00000000000000000000", "reason": "prefix-not-anchored" },
-        { "value": "xfleet_00000000000000000000", "reason": "prefix-not-anchored" },
-        { "value": "fleet_", "reason": "prefix-only" },
-        { "value": "00000000000000000000", "reason": "no-prefix" },
-        { "value": "fleet00000000000000000000", "reason": "no-separator" },
-        { "value": "fleet_00000000000000000000\n", "reason": "trailing-newline" },
-        { "value": " fleet_00000000000000000000", "reason": "leading-whitespace" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "tnt_5f2b8c1a9d3e4076",
+          "reason": "other-entity",
+          "note": "THE COLLISION THIS PREFIX EXISTS TO AVOID \u2014 a superpipeline tenant. Both name an isolation boundary, both are the natural join for the same real organisation, and they live in different databases; a shared prefix would make a value read out of context unattributable, which is the `run_` failure exactly."
+        },
+        {
+          "value": "tenant_00000000000000000000",
+          "reason": "wrong-prefix",
+          "note": "the spelled-out word"
+        },
+        {
+          "value": "ten_00000000000000000000",
+          "reason": "wrong-prefix",
+          "note": "an abbreviation of `tenant` one character from superpipeline's `tnt_`. Rejected here so a later hand cannot quietly re-introduce the near-miss the note above rules out."
+        },
+        {
+          "value": "fleet_9f1c2ab04d7e6b3a",
+          "reason": "too-short",
+          "note": "16 hex \u2014 superpipeline's length. AgentPod slices the same UUID source to 20; a superpipeline-shaped id must not pass as an AgentPod tenant."
+        },
+        {
+          "value": "fleet_9f1c2ab04d7e6b3a5c88a",
+          "reason": "too-long",
+          "note": "21 hex \u2014 catches a regex missing its trailing $"
+        },
+        {
+          "value": "fleet_9F1C2AB04D7E6B3A5C88",
+          "reason": "wrong-alphabet",
+          "note": "uppercase hex is never minted; accepting it means two spellings of one tenant can both exist as distinct primary keys, which is an isolation boundary with two names"
+        },
+        {
+          "value": "fleet_9f1c2ab0-4d7e-6b3a-5c88-000000000000",
+          "reason": "wrong-alphabet",
+          "note": "hyphenated UUID \u2014 AgentPod's OTHER family, and the one superpipeline's contract would reject on arrival. Choosing it here would have made the external mapping unusable in one direction."
+        },
+        {
+          "value": "node_9f1c2ab04d7e6b3a5c88",
+          "reason": "other-entity",
+          "note": "same family and same length \u2014 a node id and a tenant id are now one prefix apart in shape, so this case is what keeps them apart in a validator"
+        },
+        {
+          "value": "fleets_00000000000000000000",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "xfleet_00000000000000000000",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "fleet_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "00000000000000000000",
+          "reason": "no-prefix"
+        },
+        {
+          "value": "fleet00000000000000000000",
+          "reason": "no-separator"
+        },
+        {
+          "value": "fleet_00000000000000000000\n",
+          "reason": "trailing-newline"
+        },
+        {
+          "value": " fleet_00000000000000000000",
+          "reason": "leading-whitespace"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.user",
       "owner": "agentpod",
@@ -300,132 +634,431 @@
       "grammar": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "grammarSource": "NONE before this corpus",
       "mintedAs": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-      "mintSource": "agentpod Better Auth — `advanced.generateId: () => crypto.randomUUID()` at apps/hub/src/auth/drizzle-auth.ts:249 (the live config; apps/hub/src/auth/index.ts:171 is a legacy duplicate). The override applies to every Better Auth model, so user/session/account/verification ids all take this shape. Admin-created users bypass Better Auth entirely and call crypto.randomUUID() directly at apps/hub/src/routes/admin.ts:432 — same grammar by coincidence, not by shared code.",
-      "note": "THE HEADLINE DISAGREEMENT. AgentPod's principal id carries no prefix and is not type-legible: a bare UUID says nothing about what it identifies. superpipeline's principal is `usr_<16 hex>`. The two cannot be exchanged, and no mapping table exists in either repo. There is also no organization id to map: the Better Auth organization plugin is NOT installed (plugin list at apps/hub/src/auth/drizzle-auth.ts:110-123) and 'organization' appears nowhere in apps/hub/src or in any of the 35 migrations. Ecosystem decision 2 (`mxid → Principal` must be minted by an explicit link, never inferred) applies here identically: the AgentPod↔superpipeline principal link must be minted, not derived from a matching email.",
+      "mintSource": "agentpod Better Auth \u2014 `advanced.generateId: () => crypto.randomUUID()` at apps/hub/src/auth/drizzle-auth.ts:249 (the live config; apps/hub/src/auth/index.ts:171 is a legacy duplicate). The override applies to every Better Auth model, so user/session/account/verification ids all take this shape. Admin-created users bypass Better Auth entirely and call crypto.randomUUID() directly at apps/hub/src/routes/admin.ts:432 \u2014 same grammar by coincidence, not by shared code.",
+      "note": "THE HEADLINE DISAGREEMENT. AgentPod's principal id carries no prefix and is not type-legible: a bare UUID says nothing about what it identifies. superpipeline's principal is `usr_<16 hex>`. The two cannot be exchanged, and no mapping table exists in either repo. There is also no organization id to map: the Better Auth organization plugin is NOT installed (plugin list at apps/hub/src/auth/drizzle-auth.ts:110-123) and 'organization' appears nowhere in apps/hub/src or in any of the 35 migrations. Ecosystem decision 2 (`mxid \u2192 Principal` must be minted by an explicit link, never inferred) applies here identically: the AgentPod\u2194superpipeline principal link must be minted, not derived from a matching email.",
       "accept": [
-        { "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479", "mint": true }
+        {
+          "value": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "usr_a1b2c3d4e5f60718", "reason": "other-entity", "note": "a superpipeline principal. Nothing today would stop one being written into an AgentPod user column." },
-        { "value": "user_f47ac10b-58cc-4372-a567-0e02b2c3d479", "reason": "wrong-prefix", "note": "there is no prefix; adding one is as wrong as omitting a required one" },
-        { "value": "f47ac10b58cc4372a5670e02b2c3d479", "reason": "wrong-alphabet", "note": "hyphens stripped" },
-        { "value": "f47ac10b-58cc-4372-a567", "reason": "too-short" },
-        { "value": "", "reason": "empty" }
+        {
+          "value": "usr_a1b2c3d4e5f60718",
+          "reason": "other-entity",
+          "note": "a superpipeline principal. Nothing today would stop one being written into an AgentPod user column."
+        },
+        {
+          "value": "user_f47ac10b-58cc-4372-a567-0e02b2c3d479",
+          "reason": "wrong-prefix",
+          "note": "there is no prefix; adding one is as wrong as omitting a required one"
+        },
+        {
+          "value": "f47ac10b58cc4372a5670e02b2c3d479",
+          "reason": "wrong-alphabet",
+          "note": "hyphens stripped"
+        },
+        {
+          "value": "f47ac10b-58cc-4372-a567",
+          "reason": "too-short"
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
       ]
     },
-
     {
       "entity": "agentpod.principal",
       "owner": "agentpod",
       "prefix": "prn",
       "grammar": "^prn_[0-9a-f]{20}$",
-      "grammarSource": "agentpod packages/contract/src/ids.ts — PrincipalId",
+      "grammarSource": "agentpod packages/contract/src/ids.ts \u2014 PrincipalId",
       "mintedAs": "^prn_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('prn')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3.",
-      "note": "A suite principal — human, agent or service — the type `agentpod.user`'s bare UUID never was. Twenty lowercase hex, deliberately NOT a hyphenated UUID like agentpod.station: superpipeline's id schema is ^<prefix>_[A-Za-z0-9]{6,}$, whose alphabet has no hyphen, and a principal id crosses that seam on every grant.",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() \u2014 `prefixedId('prn')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3.",
+      "note": "A suite principal \u2014 human, agent or service \u2014 the type `agentpod.user`'s bare UUID never was. Twenty lowercase hex, deliberately NOT a hyphenated UUID like agentpod.station: superpipeline's id schema is ^<prefix>_[A-Za-z0-9]{6,}$, whose alphabet has no hyphen, and a principal id crosses that seam on every grant.",
       "accept": [
-        { "value": "prn_0123456789abcdef0123", "mint": true },
-        { "value": "prn_ffffffffffffffffffff", "mint": true }
+        {
+          "value": "prn_0123456789abcdef0123",
+          "mint": true
+        },
+        {
+          "value": "prn_ffffffffffffffffffff",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "org_0123456789abcdef0123", "reason": "other-entity", "note": "an AgentPod organization id, minted from the same 20-hex family" },
-        { "value": "prn_0123456789abcdef012", "reason": "too-short" },
-        { "value": "prn_0123456789ABCDEF0123", "reason": "wrong-alphabet", "note": "uppercase hex is never minted" },
-        { "value": "prn_01234567-89ab-cdef-0123-456789abcdef", "reason": "wrong-alphabet", "note": "hyphenated UUID — the family superpipeline's declared alphabet would reject on arrival, exactly the agentpod.station scar this entity does not repeat" },
-        { "value": "principal_0123456789abcdef0123", "reason": "wrong-prefix", "note": "the spelled-out word, not the declared prefix" },
-        { "value": "prn_", "reason": "prefix-only" }
+        {
+          "value": "org_0123456789abcdef0123",
+          "reason": "other-entity",
+          "note": "an AgentPod organization id, minted from the same 20-hex family"
+        },
+        {
+          "value": "prn_0123456789abcdef012",
+          "reason": "too-short"
+        },
+        {
+          "value": "prn_0123456789ABCDEF0123",
+          "reason": "wrong-alphabet",
+          "note": "uppercase hex is never minted"
+        },
+        {
+          "value": "prn_01234567-89ab-cdef-0123-456789abcdef",
+          "reason": "wrong-alphabet",
+          "note": "hyphenated UUID \u2014 the family superpipeline's declared alphabet would reject on arrival, exactly the agentpod.station scar this entity does not repeat"
+        },
+        {
+          "value": "principal_0123456789abcdef0123",
+          "reason": "wrong-prefix",
+          "note": "the spelled-out word, not the declared prefix"
+        },
+        {
+          "value": "prn_",
+          "reason": "prefix-only"
+        }
       ]
     },
-
+    {
+      "entity": "agentpod.deviceCredential",
+      "owner": "agentpod",
+      "prefix": "dev",
+      "grammar": "^dev_[0-9a-f]{20}$",
+      "grammarSource": "agentpod apps/hub/src/services/device-credentials.ts \u2014 prefixedId('dev')",
+      "mintedAs": "^dev_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId(), called at apps/hub/src/services/device-credentials.ts in mintDeviceCredential()",
+      "note": "The long-lived credential a human at a terminal exchanges for a five-minute token (charter \u2192 decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md, accepted 2026-09-20). Registered here even though it crosses no plane today: it is the id half of a credential presented as `dev_\u2026:<secret>`, so a validator that splits on the first colon has to agree about what the left side looks like. Twenty lowercase hex, matching agentpod.principal rather than agentpod.station's hyphenated UUID, for the same reason \u2014 superpipeline's id alphabet has no hyphen and this should stay portable if it ever crosses.",
+      "accept": [
+        {
+          "value": "dev_0123456789abcdef0123",
+          "mint": true
+        },
+        {
+          "value": "dev_ffffffffffffffffffff",
+          "mint": true
+        }
+      ],
+      "reject": [
+        {
+          "value": "device_0123456789abcdef0123",
+          "reason": "wrong-prefix",
+          "note": "the spelled-out word, not the declared prefix"
+        },
+        {
+          "value": "prn_0123456789abcdef0123",
+          "reason": "other-entity",
+          "note": "a valid principal id; a bare string check cannot catch this and a credential parser must"
+        },
+        {
+          "value": "dev_0123456789abcdef012",
+          "reason": "too-short",
+          "note": "nineteen hex \u2014 one short, which is what a slice off-by-one produces"
+        },
+        {
+          "value": "dev_0123456789ABCDEF0123",
+          "reason": "wrong-alphabet",
+          "note": "uppercase hex; prefixedId lowercases"
+        },
+        {
+          "value": "dev_0123456789abcdef-123",
+          "reason": "wrong-alphabet",
+          "note": "hyphen, i.e. an unstripped UUID"
+        },
+        {
+          "value": "dev_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "0123456789abcdef0123",
+          "reason": "no-prefix"
+        },
+        {
+          "value": "dev0123456789abcdef0123",
+          "reason": "no-separator"
+        },
+        {
+          "value": "devs_0123456789abcdef0123",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "xdev_0123456789abcdef0123",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "dev_0123456789abcdef0123\n",
+          "reason": "trailing-newline"
+        },
+        {
+          "value": " dev_0123456789abcdef0123",
+          "reason": "leading-whitespace"
+        },
+        {
+          "value": "dev_0123456789abcdef0123:somesecret",
+          "reason": "other-entity",
+          "note": "the WHOLE credential, not its id half. A parser that splits on the first colon must never hand this through as an id \u2014 it is the mistake that would send a secret into a log line that prints ids."
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
+      ]
+    },
     {
       "entity": "agentpod.organization",
       "owner": "agentpod",
       "prefix": "org",
       "grammar": "^org_[0-9a-f]{20}$",
-      "grammarSource": "agentpod packages/contract/src/ids.ts — OrganizationId",
+      "grammarSource": "agentpod packages/contract/src/ids.ts \u2014 OrganizationId",
       "mintedAs": "^org_[0-9a-f]{20}$",
-      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() — `prefixedId('org')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3. The migration's bootstrap row is deterministic (BOOTSTRAP_ORG_ID), not minted — the same exception tenants.ts documents for BOOTSTRAP_TENANT_ID.",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId() \u2014 `prefixedId('org')`. Not yet called anywhere: the minter exists ahead of its first writer, which is Task 3. The migration's bootstrap row is deterministic (BOOTSTRAP_ORG_ID), not minted \u2014 the same exception tenants.ts documents for BOOTSTRAP_TENANT_ID.",
       "note": "Minted by the hub, which IS the Organization plane until the plane is extracted. tenants.external_id carries this value with external_source = 'org-plane'.",
       "accept": [
-        { "value": "org_0123456789abcdef0123", "mint": true }
+        {
+          "value": "org_0123456789abcdef0123",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "prn_0123456789abcdef0123", "reason": "other-entity", "note": "an AgentPod principal id, minted from the same 20-hex family" },
-        { "value": "org_0123456789abcdef012", "reason": "too-short" },
-        { "value": "org_0123456789ABCDEF0123", "reason": "wrong-alphabet", "note": "uppercase hex is never minted" },
-        { "value": "org_", "reason": "prefix-only" }
+        {
+          "value": "prn_0123456789abcdef0123",
+          "reason": "other-entity",
+          "note": "an AgentPod principal id, minted from the same 20-hex family"
+        },
+        {
+          "value": "org_0123456789abcdef012",
+          "reason": "too-short"
+        },
+        {
+          "value": "org_0123456789ABCDEF0123",
+          "reason": "wrong-alphabet",
+          "note": "uppercase hex is never minted"
+        },
+        {
+          "value": "org_",
+          "reason": "prefix-only"
+        }
       ]
     },
-
     {
       "entity": "superpipeline.gate",
       "owner": "superpipeline",
       "prefix": "gate",
       "grammar": "^gate_[A-Za-z0-9]{6,}$",
-      "grammarSource": "superpipeline apps/api/src/board/board-do.ts createGate() — newId('gate')",
+      "grammarSource": "superpipeline apps/api/src/board/board-do.ts createGate() \u2014 newId('gate')",
       "mintedAs": "^gate_[A-Za-z0-9]{16}$",
       "mintSource": "superpipeline newId('gate')",
-      "note": "Absent from this corpus until 2026-08-30 although it crosses a repo boundary on every projected approval. superpipeline#34's sketch proposed `gat_`, which is why this entry exists — the prefix registry below already claims `gate` for superpipeline, but no entity carried its grammar until now.",
+      "note": "Absent from this corpus until 2026-08-30 although it crosses a repo boundary on every projected approval. superpipeline#34's sketch proposed `gat_`, which is why this entry exists \u2014 the prefix registry below already claims `gate` for superpipeline, but no entity carried its grammar until now.",
       "accept": [
-        { "value": "gate_4e8b1c2d3f4a5b6c", "mint": true }
+        {
+          "value": "gate_4e8b1c2d3f4a5b6c",
+          "mint": true
+        }
       ],
       "reject": [
-        { "value": "gat_4e8b1c2d3f4a5b6c", "reason": "wrong-prefix", "note": "superpipeline#34's rejected sketch" },
-        { "value": "gate_", "reason": "prefix-only" },
-        { "value": "gate_short", "reason": "too-short" }
+        {
+          "value": "gat_4e8b1c2d3f4a5b6c",
+          "reason": "wrong-prefix",
+          "note": "superpipeline#34's rejected sketch"
+        },
+        {
+          "value": "gate_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "gate_short",
+          "reason": "too-short"
+        }
       ]
     }
   ],
-
   "prefixRegistry": {
     "note": "Every prefix either repo claims, so a new collision is visible the moment it is added. `status` records what is true in code, which is not always what a table declares.",
     "claims": [
-      { "prefix": "tnt", "owner": "superpipeline", "entity": "tenant", "status": "declared-and-minted" },
-      { "prefix": "usr", "owner": "superpipeline", "entity": "user", "status": "declared-and-minted" },
-      { "prefix": "mbr", "owner": "superpipeline", "entity": "membership", "status": "declared-and-minted" },
-      { "prefix": "brd", "owner": "superpipeline", "entity": "board", "status": "declared-and-minted" },
-      { "prefix": "agt", "owner": "superpipeline", "entity": "agent", "status": "declared-and-minted" },
-      { "prefix": "tok", "owner": "superpipeline", "entity": "token", "status": "declared-and-minted" },
-      { "prefix": "card", "owner": "superpipeline", "entity": "card", "status": "declared-and-minted" },
-      { "prefix": "ctx", "owner": "superpipeline", "entity": "context", "status": "declared-and-minted" },
-      { "prefix": "ref", "owner": "superpipeline", "entity": "reference", "status": "declared-and-minted" },
-      { "prefix": "gate", "owner": "superpipeline", "entity": "gate", "status": "declared-and-minted" },
-      { "prefix": "run", "owner": "superpipeline", "entity": "run", "status": "declared-and-minted" },
-      { "prefix": "task", "owner": "superpipeline", "entity": "task", "status": "declared-never-minted", "note": "TaskId exists in superpipeline's contract and Run.taskId references it, but no newId('task') call exists and the runs table stores card_id. Declared but unreachable." },
-      { "prefix": "evt", "owner": "superpipeline", "entity": "event", "status": "declared-never-minted", "note": "EventId is declared; activities are keyed by an AUTOINCREMENT seq instead (board-do.ts activities table)." },
-      { "prefix": "push", "owner": "superpipeline", "entity": "pushConfig", "status": "minted-never-declared", "note": "SAME CLASS AS THE mem_/mbr_ BUG, still open. newId('push') at apps/api/src/board/board-do.ts:1023 mints a prefix absent from ID_PREFIXES and from every schema in packages/contract/src/ids.ts. Found by this corpus; not fixed here, because superpipeline is not this repo's to change." },
-      { "prefix": "spa", "owner": "superpipeline", "entity": "agentBearerToken", "status": "credential", "note": "a secret, not an identifier — apps/api/src/auth/agent-token.ts:10, 48 hex chars" },
-
-      { "prefix": "node", "owner": "agentpod", "entity": "node", "status": "minted-never-declared" },
-      { "prefix": "rt", "owner": "agentpod", "entity": "runtime", "status": "minted-never-declared" },
-      { "prefix": "etk", "owner": "agentpod", "entity": "enrollmentToken", "status": "minted-never-declared" },
-      { "prefix": "station", "owner": "agentpod", "entity": "station", "status": "minted-never-declared" },
-      { "prefix": "acps", "owner": "agentpod", "entity": "acpSession", "status": "minted-never-declared" },
-      { "prefix": "acp", "owner": "agentpod", "entity": "nodeLocalAcpSession", "status": "minted-never-declared", "note": "node-agent only — `acp_<8 hex>`, apps/node-agent/internal/acp/manager.go:40-46. One character away from the hub's `acps_`, and the hub's id is passed to the node as the instance discriminator, so both live in the same subsystem." },
-      { "prefix": "audit", "owner": "agentpod", "entity": "auditEntry", "status": "minted-never-declared", "note": "apps/hub/src/services/audit.ts:94 — `audit_${crypto.randomUUID()}`, hyphenated-UUID family" },
-      { "prefix": "enr", "owner": "agentpod", "entity": "enrollmentTokenSecret", "status": "credential" },
-      { "prefix": "chg", "owner": "agentpod", "entity": "change", "status": "reserved-never-minted", "note": "only appears as a test literal in packages/contract/src/run.test.ts; Change is a reserved schema with no writer" },
-      { "prefix": "attempt", "owner": "agentpod", "entity": "acpRun", "status": "reserved-never-minted", "note": "acp_runs.id. Reserved but validated and CHECK-constrained ahead of its first writer — see the agentpod.acpRun entity, and resolvedConflicts for the `run_` prefix it replaced." },
-      { "prefix": "fleet", "owner": "agentpod", "entity": "tenant", "status": "declared-and-minted", "note": "tenants.id — AgentPod's LOCAL isolation boundary, deliberately not superpipeline's `tnt_`. Exactly one value is minted today (the bootstrap tenant, created deterministically by migration 0036) and it is validated in the contract and CHECK-constrained in the database. See the agentpod.tenant entity for why the prefix is not an abbreviation of `tenant` and why it takes the 20-hex family rather than the hyphenated one." }
+      {
+        "prefix": "tnt",
+        "owner": "superpipeline",
+        "entity": "tenant",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "usr",
+        "owner": "superpipeline",
+        "entity": "user",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "mbr",
+        "owner": "superpipeline",
+        "entity": "membership",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "brd",
+        "owner": "superpipeline",
+        "entity": "board",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "agt",
+        "owner": "superpipeline",
+        "entity": "agent",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "tok",
+        "owner": "superpipeline",
+        "entity": "token",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "card",
+        "owner": "superpipeline",
+        "entity": "card",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "ctx",
+        "owner": "superpipeline",
+        "entity": "context",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "ref",
+        "owner": "superpipeline",
+        "entity": "reference",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "gate",
+        "owner": "superpipeline",
+        "entity": "gate",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "run",
+        "owner": "superpipeline",
+        "entity": "run",
+        "status": "declared-and-minted"
+      },
+      {
+        "prefix": "task",
+        "owner": "superpipeline",
+        "entity": "task",
+        "status": "declared-never-minted",
+        "note": "TaskId exists in superpipeline's contract and Run.taskId references it, but no newId('task') call exists and the runs table stores card_id. Declared but unreachable."
+      },
+      {
+        "prefix": "evt",
+        "owner": "superpipeline",
+        "entity": "event",
+        "status": "declared-never-minted",
+        "note": "EventId is declared; activities are keyed by an AUTOINCREMENT seq instead (board-do.ts activities table)."
+      },
+      {
+        "prefix": "push",
+        "owner": "superpipeline",
+        "entity": "pushConfig",
+        "status": "minted-never-declared",
+        "note": "SAME CLASS AS THE mem_/mbr_ BUG, still open. newId('push') at apps/api/src/board/board-do.ts:1023 mints a prefix absent from ID_PREFIXES and from every schema in packages/contract/src/ids.ts. Found by this corpus; not fixed here, because superpipeline is not this repo's to change."
+      },
+      {
+        "prefix": "spa",
+        "owner": "superpipeline",
+        "entity": "agentBearerToken",
+        "status": "credential",
+        "note": "a secret, not an identifier \u2014 apps/api/src/auth/agent-token.ts:10, 48 hex chars"
+      },
+      {
+        "prefix": "node",
+        "owner": "agentpod",
+        "entity": "node",
+        "status": "minted-never-declared"
+      },
+      {
+        "prefix": "rt",
+        "owner": "agentpod",
+        "entity": "runtime",
+        "status": "minted-never-declared"
+      },
+      {
+        "prefix": "etk",
+        "owner": "agentpod",
+        "entity": "enrollmentToken",
+        "status": "minted-never-declared"
+      },
+      {
+        "prefix": "station",
+        "owner": "agentpod",
+        "entity": "station",
+        "status": "minted-never-declared"
+      },
+      {
+        "prefix": "acps",
+        "owner": "agentpod",
+        "entity": "acpSession",
+        "status": "minted-never-declared"
+      },
+      {
+        "prefix": "acp",
+        "owner": "agentpod",
+        "entity": "nodeLocalAcpSession",
+        "status": "minted-never-declared",
+        "note": "node-agent only \u2014 `acp_<8 hex>`, apps/node-agent/internal/acp/manager.go:40-46. One character away from the hub's `acps_`, and the hub's id is passed to the node as the instance discriminator, so both live in the same subsystem."
+      },
+      {
+        "prefix": "audit",
+        "owner": "agentpod",
+        "entity": "auditEntry",
+        "status": "minted-never-declared",
+        "note": "apps/hub/src/services/audit.ts:94 \u2014 `audit_${crypto.randomUUID()}`, hyphenated-UUID family"
+      },
+      {
+        "prefix": "enr",
+        "owner": "agentpod",
+        "entity": "enrollmentTokenSecret",
+        "status": "credential"
+      },
+      {
+        "prefix": "chg",
+        "owner": "agentpod",
+        "entity": "change",
+        "status": "reserved-never-minted",
+        "note": "only appears as a test literal in packages/contract/src/run.test.ts; Change is a reserved schema with no writer"
+      },
+      {
+        "prefix": "attempt",
+        "owner": "agentpod",
+        "entity": "acpRun",
+        "status": "reserved-never-minted",
+        "note": "acp_runs.id. Reserved but validated and CHECK-constrained ahead of its first writer \u2014 see the agentpod.acpRun entity, and resolvedConflicts for the `run_` prefix it replaced."
+      },
+      {
+        "prefix": "fleet",
+        "owner": "agentpod",
+        "entity": "tenant",
+        "status": "declared-and-minted",
+        "note": "tenants.id \u2014 AgentPod's LOCAL isolation boundary, deliberately not superpipeline's `tnt_`. Exactly one value is minted today (the bootstrap tenant, created deterministically by migration 0036) and it is validated in the contract and CHECK-constrained in the database. See the agentpod.tenant entity for why the prefix is not an abbreviation of `tenant` and why it takes the 20-hex family rather than the hyphenated one."
+      }
     ],
     "knownConflicts": [],
     "resolvedConflicts": [
       {
         "prefix": "run",
-        "wasClaimedBy": ["superpipeline", "agentpod"],
+        "wasClaimedBy": [
+          "superpipeline",
+          "agentpod"
+        ],
         "nowClaimedBy": "superpipeline",
         "resolvedAt": "2026-08-14",
         "resolution": "AgentPod's acp_runs.id moved to `attempt_<uuid>`.",
-        "detail": "superpipeline mints `run_<16 hex>` for a work run (apps/api/src/board/board-do.ts:1253) and has live production data. AgentPod had reserved the SAME prefix for acp_runs.id — the schema file carried the comment `\"run_\" + uuid-ish` six lines above `We never mint a rival id` and so contradicted itself — but AgentPod is the executor, not the minter: no statement inserting into acp_runs exists at any commit in this repository, so no row anywhere carries the old prefix and the rename cost nothing. It stops being free the moment the bridge writes its first run, which is why it happened now. `attempt` is not a synonym for `run`: an AgentPod run is a prompt-turn and a superpipeline work run is a claimed card, so one work run is executed as a series of attempts and the shapes now say so. Recorded here, and asserted, so the collision cannot return unnoticed."
+        "detail": "superpipeline mints `run_<16 hex>` for a work run (apps/api/src/board/board-do.ts:1253) and has live production data. AgentPod had reserved the SAME prefix for acp_runs.id \u2014 the schema file carried the comment `\"run_\" + uuid-ish` six lines above `We never mint a rival id` and so contradicted itself \u2014 but AgentPod is the executor, not the minter: no statement inserting into acp_runs exists at any commit in this repository, so no row anywhere carries the old prefix and the rename cost nothing. It stops being free the moment the bridge writes its first run, which is why it happened now. `attempt` is not a synonym for `run`: an AgentPod run is a prompt-turn and a superpipeline work run is a claimed card, so one work run is executed as a series of attempts and the shapes now say so. Recorded here, and asserted, so the collision cannot return unnoticed."
       }
     ]
   },
-
   "openDisagreements": [
     "Principal shape: superpipeline `usr_<16 hex>`; AgentPod a bare unprefixed UUID. No mapping exists in either repo.",
     "Token length: superpipeline takes 16 hex from a UUID, AgentPod takes 20. Same source, different slice, no reason recorded in either.",
-    "Alphabet: AgentPod has TWO families — `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, attempt, audit). superpipeline's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
-    "Tenancy: both repos now scope their own rows structurally, and NEITHER owns the organisation — that belongs to an Organization plane that does not exist yet, so each keeps a LOCAL boundary (superpipeline `tnt_`, AgentPod `fleet_`) plus an optional external mapping to the same real organisation elsewhere. What is still open is the mapping itself: nothing has yet written an AgentPod tenants.external_id, no superpipeline tenant points back, and per ecosystem decision 2 that link must be minted explicitly rather than inferred from a matching name. Was 'AgentPod has no tenant concept at all'; that half is closed.",
-    "RESOLVED 2026-08-14 — prefix `run` was claimed by both repos; AgentPod moved acp_runs.id to `attempt_` and superpipeline keeps `run_`. See prefixRegistry.resolvedConflicts."
+    "Alphabet: AgentPod has TWO families \u2014 `<prefix>_<20 hex>` (node, rt, etk) and `<prefix>_<hyphenated UUID>` (station, acps, attempt, audit). superpipeline's declared alphabet is base62 with no hyphen, so it would reject every id in AgentPod's second family.",
+    "Tenancy: both repos now scope their own rows structurally, and NEITHER owns the organisation \u2014 that belongs to an Organization plane that does not exist yet, so each keeps a LOCAL boundary (superpipeline `tnt_`, AgentPod `fleet_`) plus an optional external mapping to the same real organisation elsewhere. What is still open is the mapping itself: nothing has yet written an AgentPod tenants.external_id, no superpipeline tenant points back, and per ecosystem decision 2 that link must be minted explicitly rather than inferred from a matching name. Was 'AgentPod has no tenant concept at all'; that half is closed.",
+    "RESOLVED 2026-08-14 \u2014 prefix `run` was claimed by both repos; AgentPod moved acp_runs.id to `attempt_` and superpipeline keeps `run_`. See prefixRegistry.resolvedConflicts."
   ]
 }

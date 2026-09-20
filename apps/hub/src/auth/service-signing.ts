@@ -138,6 +138,21 @@ export interface SignServiceTokenInput {
    * future could not make this override a built claim, only add to it.
    */
   extraClaims?: ActClaim;
+  /**
+   * How the subject authenticated — OIDC's authentication-methods reference.
+   *
+   * A named field rather than a widening of `extraClaims`, which is typed to
+   * `ActClaim` alone on purpose ("by type rather than by discipline", above).
+   * Turning that into a claim bag to fit one more claim would give up the
+   * property the comment is about; a second named field keeps every claim this
+   * function can add enumerable by reading its input type.
+   *
+   * `["device"]` marks a token minted by exchanging a long-lived device
+   * credential (`routes/devices.ts`), which superpipeline refuses to turn into a
+   * session — see `charter →
+   * decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`.
+   */
+  amr?: string[];
 }
 
 /**
@@ -156,7 +171,13 @@ export async function signServiceToken(input: SignServiceTokenInput): Promise<st
   // `payload` spread LAST: `extraClaims` can only ever add `act`, by type —
   // this ordering means even a mistaken future widening of `ActClaim` could
   // not let an extra claim overwrite a built one, only merge under it.
-  return new SignJWT({ ...(input.extraClaims ?? {}), ...input.payload })
+  // `payload` still spread LAST, after both additive fields, for the reason
+  // given above: a built claim can never be overwritten by one added here.
+  return new SignJWT({
+    ...(input.extraClaims ?? {}),
+    ...(input.amr ? { amr: input.amr } : {}),
+    ...input.payload,
+  })
     .setProtectedHeader({ alg: ALG, kid: key.kid })
     .setSubject(input.subject)
     .setIssuedAt()
