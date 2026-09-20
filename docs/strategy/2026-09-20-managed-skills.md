@@ -311,3 +311,19 @@ one actual canary per harness, rollback, then an operator-selected cohort. Test
 persistent and ephemeral Modal, Fly images and local placement separately; source
 pins do not establish deployed versions. Follow the current release runbook and
 verify the real deployment before claiming completion.
+
+### Runtime selection follow-up (2026-09-21)
+
+Pi ACP now receives the absolute selected Pi executable through
+`PI_ACP_PI_COMMAND`, in addition to its supporting PATH. Previously an inherited
+adapter override could select a different engine, and a `PI_PATH` executable
+with a custom basename was not honored by the adapter's default `pi` lookup.
+The synthetic adapter regression reproduces both conditions and waits for its
+child to exit. This aligns selection; it does not establish version identity,
+external-process quiescence or eligibility for native activation.
+
+Read-only inspection of codex-acp 1.1.14 also confirms that, without CODEX_PATH,
+it launches its bundled @openai/codex entrypoint. The adapter's --version reports
+the adapter version, even when passed after its cli subcommand. Future preflight
+must resolve the actual engine and launch mode rather than use the host PATH
+Codex version or the adapter version as engine evidence.
