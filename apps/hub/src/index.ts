@@ -179,6 +179,29 @@ const app = new Hono()
    * below sits ahead of the middleware for the same structural reason.
    */
   .route('/', authorizeRoutes)
+  /**
+   * /api/auth/devices* — the device credential a human exchanges at a terminal
+   * (`charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
+   * accepted 2026-09-20; `docs/superpowers/specs/2026-09-20-device-credential-design.md`).
+   *
+   * **HERE, above the Better Auth catch-all, and this position is the whole
+   * route.** It shipped below it on 2026-09-20 and every one of these paths
+   * answered 404 in production: Hono matches in registration order, and the
+   * `.on(['GET','POST'], '/api/auth/*', …)` immediately below swallows every
+   * `/api/auth/*` path this hub adds of its own. That is precisely what the
+   * `authorizeRoutes` comment above warns about, and the first version of this
+   * block cited that warning while sitting on the wrong side of it.
+   *
+   * Above `authMiddleware` too, for two reasons rather than one: the exchange
+   * route's credential is `dev_…:secret`, which is no kind of session; and the
+   * three management routes have to accept a hub JWT, because `fleet login`
+   * holds exactly that at the moment it creates a device. They resolve a
+   * session OR a verified hub token themselves, refusing an agent, a bridge
+   * assertion, and — the one that matters — a token that was itself minted
+   * from a device, so a stolen credential cannot mint a replacement that
+   * outlives its revocation.
+   */
+  .route('/api/auth', deviceRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
@@ -225,24 +248,6 @@ const app = new Hono()
    * there later cannot quietly pull this path behind the middleware.
    */
   .route('/', dispatchableRoutes)
-  /**
-   * /api/auth/devices* — the device credential a human exchanges at a terminal
-   * (`charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
-   * accepted 2026-09-20; `docs/superpowers/specs/2026-09-20-device-credential-design.md`).
-   *
-   * Ahead of `authMiddleware`, and for two reasons rather than one. The exchange
-   * route's credential is `dev_…:secret`, which is no kind of session; and the
-   * three management routes have to accept a hub JWT, because `fleet login` holds
-   * exactly that at the moment it creates a device. They resolve a session OR a
-   * verified hub token themselves, refusing an agent, a bridge assertion, and —
-   * the one that matters — a token that was itself minted from a device, so a
-   * stolen credential cannot mint a replacement that outlives its revocation.
-   *
-   * Above `.route('/api/auth', ...)` handlers for the same defensive reason
-   * `dispatchableRoutes` sits above `/api/fleet`: a wildcard added there later
-   * must not quietly pull these behind the middleware.
-   */
-  .route('/api/auth', deviceRoutes)
   /**
    * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
    *
