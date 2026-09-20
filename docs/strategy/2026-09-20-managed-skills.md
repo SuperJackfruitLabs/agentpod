@@ -142,8 +142,8 @@ an empty inventory. The console shows scope, freshness, coverage and unknown
 states, with plugins separate from skills. Management adds profile/artifact
 selection, a reviewable diff, progress, conflicts, activation and rollback.
 
-The management API is now implemented; the console management flow remains
-pending. All operator routes require the existing authenticated user, tenant,
+The management API and console artifact flow are now implemented. All operator
+routes require the existing authenticated user, tenant,
 station ownership and advertised capability. Planning and application additionally
 require reach permission, including rollback planning because it persists state.
 
@@ -181,6 +181,19 @@ retention inspection/maintenance. No background scheduler is introduced.
 Migration `0069_managed_skills` adds the two tables and ownership indexes. Referenced
 unique indexes precede their composite foreign keys. Test it against the prior
 schema, not only a database where the feature tables already exist.
+
+The station Skills tab exposes management only when `skills.manage` is advertised.
+An operator can upload an exported archive with its declared profile, select an
+artifact for the station harness, review added/changed/removed paths and the bound
+workspace, then apply the exact displayed plan digest. Rollback requires its own
+review. Reach permissions disable mutation controls; the hub remains authoritative.
+History, inspection and fresh file verification remain available for recovery.
+A lost planning response retains its request UUID for retry. An uncertain apply
+requires node inspection before the UI offers apply again. Navigation discards late
+responses from the previous station. Conflict guidance preserves local edits;
+there is no force-overwrite button. Loading evidence remains separate from applied
+files. The UI currently selects uploaded artifacts; stable catalog/release discovery,
+native activation and rollout cohorts remain unfinished.
 
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,
