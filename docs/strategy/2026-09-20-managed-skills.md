@@ -40,6 +40,21 @@ followed. Skill bodies, arbitrary metadata and credentials do not leave the node
 
 ## Management protocol to follow
 
+The Go artifact reader now accepts a separately pinned library `tar.gz` stream
+without writing it to a station. It verifies the archive SHA-256, the library's
+canonical manifest digest, complete file set, file hashes/modes, declared skill
+entrypoints and notice presence. The authenticated catalog/plan must supply the
+archive pin; the archive's own claim is not a trust source.
+
+Acquisition limits are 32 MiB compressed, 64 MiB expanded, 4,096 regular files,
+8 MiB per file and 2 MiB for the manifest. Paths are relative ASCII names with
+bounded components; content and metadata may contain Unicode. Links, special
+files, overlapping paths, case aliases, duplicate JSON keys, multiple roots,
+reserved installation receipts and archive tails are rejected. PAX path headers
+from the library exporter are supported. The eventual transport must enforce a
+deadline as well: cancellation cannot interrupt an arbitrary blocked reader.
+This reader is an offline primitive, not an advertised management capability.
+
 Keep management separate as `skills.manage`; do not advertise it with inventory.
 The planned verbs are `skills.plan`, `skills.apply`, `skills.verify`,
 `skills.rollback` and `skills.operation`. Implement their contract alongside the
