@@ -74,6 +74,14 @@ func runCmd() {
 	})
 
 	h := gateway.NewTerminalHandler(descriptor.NewHandler(reg), resolver, mgr, lifecycleFn)
+	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
+		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
+			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
+		})
+		reg.EnableSkillManagement()
+	} else {
+		fmt.Fprintln(os.Stderr, "skill management unavailable:", err)
+	}
 	h = gateway.NewMatrixAdoptHandler(h, gateway.MatrixAdoptDeps{
 		Resolver: resolver,
 		HarnessFor: func(key string) (string, error) {

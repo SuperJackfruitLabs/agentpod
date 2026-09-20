@@ -1,0 +1,49 @@
+package descriptor
+
+import (
+	"context"
+	"slices"
+	"testing"
+)
+
+type managedSkillDescriptor struct{ fakeDescriptor }
+
+func (d *managedSkillDescriptor) ManagedSkillWorkspace(ctx context.Context, key string) (string, error) {
+	return localManagedSkillWorkspace(ctx, d, key)
+}
+
+func TestManagedSkillCapabilityRequiresProviderAndConfiguredDelivery(t *testing.T) {
+	workspace := t.TempDir()
+	reg := NewRegistry()
+	provider := &managedSkillDescriptor{fakeDescriptor{harness: "codex", stations: []Station{{Key: "codex:fixture", Harness: "codex", WorkspacePath: &workspace, Capabilities: []string{"health"}}}}}
+	reg.Register(provider)
+	if slices.Contains(reg.DetectAll()[0].Capabilities, "skills.manage") {
+		t.Fatal("management advertised without handler")
+	}
+	if _, _, err := reg.ManagedSkillWorkspace(t.Context(), "codex:fixture"); err == nil {
+		t.Fatal("disabled management resolved workspace")
+	}
+	reg.EnableSkillManagement()
+	if !slices.Contains(reg.DetectAll()[0].Capabilities, "skills.manage") {
+		t.Fatal("configured provider unavailable")
+	}
+	if slices.Contains(provider.stations[0].Capabilities, "skills.manage") {
+		t.Fatal("registry mutated descriptor-owned capabilities")
+	}
+	path, harness, err := reg.ManagedSkillWorkspace(t.Context(), "codex:fixture")
+	if err != nil || path != workspace || harness != "codex" {
+		t.Fatalf("incorrect binding: %v", err)
+	}
+	for _, key := range []string{"codex", "codex:../other", "codex:missing"} {
+		if _, _, err := reg.ManagedSkillWorkspace(t.Context(), key); err == nil {
+			t.Fatalf("undetected key accepted: %s", key)
+		}
+	}
+	reg.Register(&fakeDescriptor{harness: "codex", stations: provider.stations})
+	if slices.Contains(reg.DetectAll()[0].Capabilities, "skills.manage") {
+		t.Fatal("unsupported descriptor advertised management")
+	}
+	if _, _, err := reg.ManagedSkillWorkspace(t.Context(), "codex:fixture"); err == nil {
+		t.Fatal("unsupported provider accepted")
+	}
+}

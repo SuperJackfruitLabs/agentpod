@@ -2,12 +2,14 @@ package descriptor
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
 // Registry maps harness names to Descriptor implementations.
 type Registry struct {
-	descriptors map[string]Descriptor
+	descriptors     map[string]Descriptor
+	skillManagement bool
 }
 
 // NewRegistry returns an empty Registry.
@@ -29,7 +31,13 @@ func (r *Registry) DetectAll() []Station {
 	for _, d := range r.descriptors {
 		stations, err := d.Detect()
 		if err == nil {
-			all = append(all, stations...)
+			_, managed := d.(SkillManagementProvider)
+			for _, station := range stations {
+				if r.skillManagement && managed && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.manage")
+				}
+				all = append(all, station)
+			}
 		}
 	}
 	return all
