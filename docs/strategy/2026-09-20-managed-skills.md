@@ -166,8 +166,8 @@ Receipts are historical; fresh verification rereads current bytes and keeps nati
 eligibility/session loading unknown.
 
 This primitive is deliberately **not advertised as a remote capability** yet.
-It requires a quiescent workspace. Before broker/hub/console exposure, implement
-the coordinator guard against concurrent session start/use, verify actual runtime
+It requires a quiescent workspace. Before broker/hub/console exposure, complete
+session coordination and durable recovery admission, verify actual runtime
 version/mode and expose unsupported or externally busy cases. Advisory locks do
 not control external harnesses or editors. No busy station is restarted and no
 production workspace was changed by this work.
@@ -178,6 +178,36 @@ safe deactivation. The optional native probe adds 44 checks using four real
 harnesses and checked-in synthetic exporter fixtures. Pi uses its loader only;
 none establishes model behavior, ACP, session trust or deployed operation. See
 `apps/node-agent/internal/skills/testdata/README.md` for reproduction and evidence.
+
+### Managed session coordination
+
+ACP and terminal managers now share an in-process workspace coordinator in the
+daemon. Activity reserves its resolved directory before process creation and
+keeps that reservation until the direct child is reaped, including during close
+or shutdown. Concurrent opens for the same instance share the pending start;
+shutdown closes admission permanently and waits for admitted starts and closing
+children. Terminal children are reaped on natural exit as well as explicit close,
+and late output subscribers receive the retained output followed by closure.
+
+Exclusive publication leases reject related activity and prevent new starts for
+their duration. Canonical paths plus filesystem identities detect aliases,
+nested paths and renamed repository roots; unrelated directories remain usable.
+`ApplyPlacementWhenIdle` acquires that lease over the repository, rechecks its
+identity and runs the existing reviewed transaction. Tests exercise actual ACP
+and PTY children against synthetic placement, including attempts to start them
+at the publication boundary. This is lifecycle coordination, not a native ACP
+compatibility test: the test children are shell/cat fixtures.
+
+This guard covers cooperating managers in one node process only. It does not
+discover external harness processes, lifecycle-managed daemons or detached
+children. A terminal or ACP tool may also change directory after launch; its
+reservation describes the admitted working directory, not every file it can
+access. External directory moves or replacements during admission are also outside
+this in-process guard. Admission after an interrupted native transaction needs a durable
+repository fence, including after a node restart; the current lease ends when
+the apply call returns. Those gaps, actual version/mode gating and operator
+visibility must be resolved before any remote activation capability is enabled.
+No wire verbs, advertised capabilities or production placements change here.
 
 ## Hub, console and verification
 

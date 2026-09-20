@@ -12,6 +12,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
 func runCmd() {
@@ -25,9 +26,10 @@ func runCmd() {
 	fmt.Println("connecting to", cfg.Hub, "as", cfg.NodeID)
 
 	reg := buildRegistry(cfg)
-	mgr := terminal.NewManager()
+	workspaces := workspacegate.New()
+	mgr := terminal.NewManagerWithWorkspaces(workspaces)
 	defer mgr.Shutdown()
-	acpMgr := acp.NewManager()
+	acpMgr := acp.NewManagerWithWorkspaces(workspaces)
 	defer acpMgr.Shutdown()
 
 	resolver := gateway.WorkspaceFunc(func(key string) (string, error) {
