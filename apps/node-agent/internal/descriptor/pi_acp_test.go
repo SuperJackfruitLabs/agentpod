@@ -3,6 +3,7 @@ package descriptor
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,8 +139,8 @@ func TestPiACPCommandUsesAdapterAndWorkspaceDir(t *testing.T) {
 	if dir != ws {
 		t.Errorf("dir = %q, want %q", dir, ws)
 	}
-	if len(env) != 1 {
-		t.Errorf("env = %v, want exactly PATH: no credential belongs in a child env (Pi reads auth.json itself)", env)
+	if len(env) != 2 {
+		t.Errorf("env = %v, want PATH and PI_ACP_PI_COMMAND only (Pi reads auth.json itself)", env)
 	}
 	// The stubs share a directory, so PATH's head is that directory.
 	if got, ok := envValue(env, "PATH"); !ok || !strings.HasPrefix(got, filepath.Dir(stub)+string(os.PathListSeparator)) {
@@ -243,5 +244,42 @@ func TestPiACPCommandUnknownKey(t *testing.T) {
 
 	if _, _, _, err := NewPi(dataDir).(ACPCommander).ACPCommand("pi:deadbeef"); err == nil {
 		t.Fatal("expected error for unknown station key")
+	}
+}
+
+// Exercise the adapter's documented selector, including the inherited override
+// and a PI_PATH executable whose basename is not "pi".
+func TestPiACPCommandPinsSelectedEngine(t *testing.T) {
+	dataDir, ws := buildPiFixture(t)
+	bin := t.TempDir()
+	selected := filepath.Join(bin, "pi selected")
+	wrong := filepath.Join(bin, "pi")
+	adapter := filepath.Join(bin, "pi-acp")
+	for path, script := range map[string]string{
+		selected: "#!/bin/sh\nprintf selected",
+		wrong:    "#!/bin/sh\nprintf wrong",
+		adapter:  "#!/bin/sh\nexec \"${PI_ACP_PI_COMMAND:-pi}\"",
+	} {
+		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+	t.Setenv(piBinaryEnv, selected)
+	t.Setenv(piACPBinaryEnv, adapter)
+	t.Setenv("PI_ACP_PI_COMMAND", wrong)
+	argv, dir, env, err := NewPi(dataDir).(ACPCommander).ACPCommand(piProjectKey(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("adapter: %v: %s", err, output)
+	}
+	if string(output) != "selected" {
+		t.Fatalf("adapter ran %q, want selected PI_PATH engine", output)
 	}
 }

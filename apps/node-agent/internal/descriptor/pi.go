@@ -554,11 +554,18 @@ func (p *piDescriptor) ACPCommand(key string) ([]string, string, []string, error
 			"pi: found the %s adapter but no `pi` executable for it to drive — install Pi or set %s",
 			piACPBinaryName, piBinaryEnv)
 	}
-	piDir := filepath.Dir(piPath)
-	if abs, err := filepath.Abs(piDir); err == nil {
-		piDir = abs
+	// Resolve before switching to the station cwd. The adapter otherwise uses
+	// an inherited PI_ACP_PI_COMMAND, or searches for a binary literally named
+	// pi, neither of which necessarily matches the executable we selected.
+	piPath, err = filepath.Abs(piPath)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("pi: resolve selected executable: %w", err)
 	}
-	env := []string{"PATH=" + pathWithDirFirst(piDir, p.getenv("PATH"))}
+	piDir := filepath.Dir(piPath)
+	env := []string{
+		"PATH=" + pathWithDirFirst(piDir, p.getenv("PATH")),
+		"PI_ACP_PI_COMMAND=" + piPath,
+	}
 
 	return []string{adapter}, wsPath, env, nil
 }
