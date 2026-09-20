@@ -133,6 +133,52 @@ known revision until a supported refresh boundary. Unsupported refresh remains
 pending; installation never automatically restarts it. Verify presence, native
 eligibility/loading and an exercise separately.
 
+## Native project placement primitive
+
+The Go node now has a separate placement transaction for the grouped project
+layouts tested on Codex 0.155.0, OpenCode 1.18.15, Pi 0.84.1's directory loader and
+OpenClaw 2026.2.12. Claude's grouped layout is unsupported; Hermes has no local
+runtime evidence. The primitive publishes a complete selected generation to
+`.agents/skills/sjl-<profile>`, `.opencode/skills/sjl-<profile>`,
+`.pi/skills/sjl-<profile>` or `skills/sjl-<profile>` respectively.
+
+Placement has its own typed plan, head, operation receipt, journal and retained
+copies. A plan pins both managed and native heads, the workspace/repository
+identities, generation digest, native destination and file diff. A repository-wide
+advisory lock coordinates nested workspaces. Bounded scans check declared names
+in known project roots through the Git root. User, configured external and native
+plugin roots remain unobserved; a future operator flow must expose that limitation.
+Removal introduces no names and preserves unrelated unfinished user skills.
+
+Only plain-skill exports are eligible for this adapter. Undeclared root components,
+native hooks/tool-server configuration, Pi executable extensions/dependencies and
+undeclared nested skill entrypoints are refused. Executable native integrations
+need their own reviewed adapter; an artifact hash does not authorize activation.
+
+Staging and backups stay under the managed namespace, outside discovery roots.
+Publishing journals intent, verifies a complete staged copy, moves the owned prior
+directory into backup, publishes the new directory, then records its native head.
+There is a brief absence window between renames. Recovery recognizes publication
+before head/receipt completion, preserves edits and refuses competing operations.
+Rollback and deactivation affect native placement without changing the independently
+selected managed generation. Repeated activation preserves useful rollback history.
+Receipts are historical; fresh verification rereads current bytes and keeps native
+eligibility/session loading unknown.
+
+This primitive is deliberately **not advertised as a remote capability** yet.
+It requires a quiescent workspace. Before broker/hub/console exposure, implement
+the coordinator guard against concurrent session start/use, verify actual runtime
+version/mode and expose unsupported or externally busy cases. Advisory locks do
+not control external harnesses or editors. No busy station is restarted and no
+production workspace was changed by this work.
+
+Tests cover actual process exits at eight publication stages, stale managed/native
+state, changed review digests, nested-root collisions, symlinks, user edits and
+safe deactivation. The optional native probe adds 44 checks using four real
+harnesses and checked-in synthetic exporter fixtures. Pi uses its loader only;
+none establishes model behavior, ACP, session trust or deployed operation. See
+`apps/node-agent/internal/skills/testdata/README.md` for reproduction and evidence.
+
 ## Hub, console and verification
 
 Expose inventory at `POST /api/stations/:id/skills/inventory`. Authenticate, resolve

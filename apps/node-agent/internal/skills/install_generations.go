@@ -26,10 +26,16 @@ func (s *InstallStore) verifyGeneration(ctx context.Context, g *Generation) (*Bu
 	if g == nil {
 		return nil, nil
 	}
+	return s.verifyGenerationAt(ctx, "generations/"+g.Generation, g)
+}
+
+func (s *InstallStore) verifyGenerationAt(ctx context.Context, directory string, g *Generation) (*BundleManifest, error) {
+	if g == nil {
+		return nil, nil
+	}
 	if !validGeneration(g) {
 		return nil, fmt.Errorf("skills: invalid generation")
 	}
-	directory := "generations/" + g.Generation
 	var receipt generationReceipt
 	if err := s.readJSON(directory+"/.sjl-receipt.json", &receipt); err != nil {
 		return nil, err
@@ -151,6 +157,9 @@ func walkManaged(ctx context.Context, root *os.Root, visit func(string, fs.DirEn
 			for _, entry := range entries {
 				name := path.Join(relative, entry.Name())
 				if err := visit(name, entry, nil); err != nil {
+					if err == fs.SkipDir && entry.IsDir() {
+						continue
+					}
 					return err
 				}
 				if entry.IsDir() {

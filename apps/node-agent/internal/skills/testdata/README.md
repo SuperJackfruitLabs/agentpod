@@ -20,3 +20,30 @@ Python or library checkout.
 These establish artifact-format interoperability only. They do not establish
 native discovery, session loading, behavioral quality, publisher authentication,
 installation or rollback.
+
+## Go native-placement probe
+
+The placement unit tests exercise these archives through storage, publication,
+upgrade, rollback, removal and recovery. An optional probe adds native discovery:
+
+```sh
+cd apps/node-agent
+go test -c -o /absolute/path/placement-tests ./internal/skills
+python3 internal/skills/testdata/probe_placement.py --harness codex --binary /absolute/path/codex --node-test-binary /absolute/path/placement-tests --output /absolute/path/new-report.json
+```
+
+Use `--harness opencode`, `openclaw` or `pi` with an explicit matching binary.
+Pi also needs `--pi-skills-module /absolute/path/to/pi/dist/core/skills.js`.
+The script creates disposable Git workspaces, invokes the Go test fixture and
+queries native discovery. It does not invoke models, read credential stores,
+change live settings or grant project trust. OpenCode uses isolated XDG paths;
+OpenClaw uses temporary state/config. Only synthetic entries are retained from
+native output. Codex uses one app-server with explicit refresh; the others use
+fresh processes. Pi invokes its installed directory loader, not a full session.
+
+The `native-placement-*-2026-09-21.json` reports contain 44 passing checks on
+Codex 0.155.0, OpenCode 1.18.15, Pi 0.84.1 and OpenClaw 2026.2.12. Stored upgrades
+remain undiscovered until publication; retained generations/backups are excluded
+after native upgrade, rollback and deactivation. The Go receipt still reports
+loading unknown. Broker/session-guard integration and deployed/ACP evidence remain
+separate requirements.

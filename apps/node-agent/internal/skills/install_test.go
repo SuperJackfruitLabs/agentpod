@@ -22,11 +22,24 @@ func revisedFixture(t *testing.T) ([]byte, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revisedHash := hashBytes(append(artifact.Files["skills/sjl-fixture/SKILL.md"], []byte("\nSynthetic revision two.\n")...))
+	revisedFiles := map[string][]byte{"skills/sjl-fixture/SKILL.md": append(artifact.Files["skills/sjl-fixture/SKILL.md"], []byte("\nSynthetic revision two.\n")...)}
+	for _, name := range []string{"plugin.json", ".codex-plugin/plugin.json"} {
+		var native map[string]any
+		decoder := json.NewDecoder(bytes.NewReader(artifact.Files[name]))
+		decoder.UseNumber()
+		if err := decoder.Decode(&native); err != nil {
+			t.Fatal(err)
+		}
+		native["version"] = "0.2.0-fixture"
+		encoded, err := libraryJSON(native)
+		if err != nil {
+			t.Fatal(err)
+		}
+		revisedFiles[name] = encoded
+	}
 	data := rewriteArchive(t, original, func(header *tar.Header, data []byte) (*tar.Header, []byte) {
-		if header.Name == "sjl-fixture/skills/sjl-fixture/SKILL.md" {
-			data = append(data, []byte("\nSynthetic revision two.\n")...)
-			revisedHash = hashBytes(data)
+		if revised, ok := revisedFiles[strings.TrimPrefix(header.Name, "sjl-fixture/")]; ok {
+			data = revised
 		}
 		if header.Name == "sjl-fixture/sjl-bundle.json" {
 			var manifest map[string]any
@@ -35,7 +48,9 @@ func revisedFixture(t *testing.T) ([]byte, string) {
 			if err := decoder.Decode(&manifest); err != nil {
 				t.Fatal(err)
 			}
-			manifest["files"].(map[string]any)["skills/sjl-fixture/SKILL.md"].(map[string]any)["sha256"] = revisedHash
+			for name, revised := range revisedFiles {
+				manifest["files"].(map[string]any)[name].(map[string]any)["sha256"] = hashBytes(revised)
+			}
 			manifest["version"] = "0.2.0-fixture"
 			delete(manifest, "digest")
 			encoded, err := libraryJSON(manifest)

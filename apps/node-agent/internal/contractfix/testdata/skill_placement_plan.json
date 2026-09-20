@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "operationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "action": "activate",
+  "binding": {
+    "nodeId": "fixture-node",
+    "stationKey": "codex:fixture",
+    "harness": "codex",
+    "profile": "fixture",
+    "workspacePath": "/fixture/workspace",
+    "workspaceIdentity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "repositoryPath": "/fixture/workspace",
+  "repositoryIdentity": "2222222222222222222222222222222222222222222222222222222222222222",
+  "expectedInstallationHead": "1111111111111111111111111111111111111111111111111111111111111111",
+  "expectedHead": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "before": null,
+  "after": {
+    "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "archiveSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "bundleDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "targetPath": "/fixture/workspace/.agents/skills/sjl-fixture",
+  "changes": {
+    "added": [
+      "skills/fixture/SKILL.md"
+    ],
+    "removed": [],
+    "changed": []
+  },
+  "discoveryNames": [
+    "sjl-fixture:sjl-fixture"
+  ],
+  "activation": "quiescent-project; loading-unverified",
+  "createdAt": "2026-09-20T16:00:00Z",
+  "planDigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+}

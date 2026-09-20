@@ -16,3 +16,4 @@ export * from "./skill-install";
 export * from "./skill-management";
 export * from "./posture";
 export * from "./matrix-events";
+export * from "./skill-placement";
