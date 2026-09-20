@@ -63,6 +63,7 @@ export const stations = pgTable("stations", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   uniqueIndex("stations_node_id_station_key_idx").on(t.nodeId, t.stationKey),
+  uniqueIndex("stations_skill_owner_idx").on(t.id, t.tenantId, t.userId),
   // Partial: many stations share `principal_id IS NULL` (unoccupied is the
   // default state), and only a non-null occupant needs to be unique.
   uniqueIndex("stations_principal_id_idx").on(t.principalId).where(sql`${t.principalId} IS NOT NULL`),

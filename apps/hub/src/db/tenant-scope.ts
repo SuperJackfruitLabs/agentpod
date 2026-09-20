@@ -55,6 +55,7 @@ import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
+import { skillArtifacts, skillOperations } from "./schema/skills";
 import { tenants } from "./schema/tenants";
 import { organizations, principals } from "./schema/organization";
 
@@ -109,6 +110,8 @@ export const TENANT_SCOPED_TABLES = {
   provisionedRuntimes,
   enrollmentTokens,
   stations,
+  skillArtifacts,
+  skillOperations,
   stationAudit,
   acpSessions,
   acpEvents,
