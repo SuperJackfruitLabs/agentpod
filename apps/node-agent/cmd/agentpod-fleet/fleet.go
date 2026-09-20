@@ -60,6 +60,8 @@ func fleetCmd(args []string) {
 		fleetGet("/api/fleet/stats", args[1:])
 	case "activity":
 		fleetGet("/api/activity", args[1:])
+	case "devices":
+		fleetDevices(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], helpText(version))
 		os.Exit(2)
@@ -72,7 +74,11 @@ func fleetCmd(args []string) {
 // because the one thing it must never do — reach for the node's credential — is easiest to
 // guarantee when there is a single place that can decide.
 func requireCredential() fleetcred.Credential {
-	c, err := fleetcred.Load()
+	// `Resolve`, not `Load`: the environment, then a cached token that is still good, then the
+	// device credential exchanged for a fresh one. That third step is what stopped a lapsed
+	// five-minute token from meaning a browser
+	// (charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md).
+	c, err := fleetcred.Resolve(hubBase())
 	if err != nil {
 		fmt.Fprintf(os.Stderr,
 			"Not signed in to a fleet.\n\n"+
@@ -83,10 +89,15 @@ func requireCredential() fleetcred.Credential {
 			fleetcred.EnvToken)
 		os.Exit(1)
 	}
+	// Reachable now only for a token supplied through $AGENTPOD_TOKEN: `Resolve` exchanges the
+	// device credential rather than handing back anything stale, so a device-holding operator
+	// never sees this. Which is why the hint names the variable rather than `fleet login` — the
+	// thing to change is the one the caller actually set.
 	if claims, err := fleetcred.Inspect(c.Token); err == nil && claims.Expired() {
 		fmt.Fprintf(os.Stderr,
-			"Your session expired at %s.\n\n  fleet login\n",
-			claims.Expiry.Local().Format(time.RFC1123))
+			"The token in %s expired at %s.\n\n"+
+				"  fleet login            sign in on this machine instead, and stop supplying one\n",
+			c.Source, claims.Expiry.Local().Format(time.RFC1123))
 		os.Exit(1)
 	}
 	return c
@@ -128,12 +139,63 @@ func fleetWhoami(args []string) {
 	}
 }
 
+// fleetLogout removes this machine's credentials, and revokes the device credential at the hub
+// first.
+//
+// **Signing out stopped being a purely local act** when a ninety-day credential started living
+// on disk. Deleting the file and leaving the row live would mean an operator who signed out
+// still had a working credential in the hub's table — visible in the inventory, revocable by
+// nobody who thought they had already dealt with it.
+//
+// A hub that cannot be reached does NOT stop the local removal. Being unable to reach the hub is
+// exactly when someone most wants the secret off this disk, and the credential expires on its
+// own in ninety days. The failure is reported rather than swallowed, with the id, so it can be
+// revoked from the console or another machine.
 func fleetLogout() {
+	if d, err := fleetcred.LoadDevice(); err == nil {
+		hub := d.Hub
+		if hub == "" {
+			hub = hubBase()
+		}
+		if err := fleetcred.RevokeDevice(hub, d); err != nil {
+			fmt.Fprintf(os.Stderr,
+				"Signed out on this machine, but the hub did not confirm revoking %s: %v\n\n"+
+					"  fleet devices revoke %s   from another machine\n"+
+					"It expires on its own within 90 days.\n",
+				d.ID, err, d.ID)
+		}
+	}
+	if err := fleetcred.ForgetDevice(); err != nil {
+		fmt.Fprintf(os.Stderr, "could not remove the stored device credential: %v\n", err)
+		os.Exit(1)
+	}
 	if err := fleetcred.Forget(); err != nil {
 		fmt.Fprintf(os.Stderr, "could not remove the stored token: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Println("signed out")
+}
+
+// fleetDevices lists the devices that may act as this principal, or revokes one.
+//
+// The record this implements asks for devices to be "a thing an operator can see and name in a
+// list". This is that list; the console carries the same one for the person whose laptop was
+// stolen and who is, by then, not at that laptop.
+func fleetDevices(args []string) {
+	if len(args) > 0 && args[0] == "revoke" {
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "usage: fleet devices revoke <deviceId>")
+			os.Exit(2)
+		}
+		c := requireCredential()
+		if err := fleetcred.RevokeDeviceByID(hubBase(), c.Token, args[1]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("revoked %s\n", args[1])
+		return
+	}
+	fleetGet("/api/auth/devices", args)
 }
 
 func wantsJSON(args []string) bool {

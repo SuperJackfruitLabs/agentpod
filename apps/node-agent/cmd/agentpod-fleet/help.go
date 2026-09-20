@@ -9,9 +9,11 @@ func helpText(version string) string {
 
 Usage: fleet <verb> [flags]
 
-  fleet login                sign in and store a hub token
+  fleet login                sign in once; this machine keeps a device credential
   fleet whoami [--json]      who the stored token says you are
-  fleet logout               forget the stored token
+  fleet logout               revoke this device and forget both credentials
+  fleet devices [--json]     machines that may act as you
+  fleet devices revoke <id>  revoke one
   fleet nodes                the fleet's nodes
   fleet agents               the agents you may dispatch
   fleet stats                fleet totals
@@ -22,11 +24,17 @@ Usage: fleet <verb> [flags]
 
 The credential is a person's or an agent's, never a machine's. `+"`apn enroll`"+` gives THIS
 MACHINE an identity; these verbs use a hub-issued token from $AGENTPOD_TOKEN or the
-file `+"`fleet login`"+` writes. A fleet command never falls back to a node's
+files `+"`fleet login`"+` writes. A fleet command never falls back to a node's
 credential — a node secret says 'I am this host', and that is not an authority to
 operate the fleet.
 
-Set $AGENTPOD_HUB to talk to a hub other than the default.`, version)
+Hub tokens last five minutes. `+"`fleet login`"+` also registers this machine as a device,
+and every later command exchanges that credential for a fresh token — so the browser
+opens once, not once per lapse. The device credential lasts 90 days and renews itself
+whenever it is used. `+"`fleet devices`"+` lists them; `+"`fleet logout`"+` revokes this one.
+
+Set $AGENTPOD_HUB to talk to a hub other than the default, and
+$AGENTPOD_DEVICE_NAME to name this machine in the device list.`, version)
 }
 
 // helpRequested reports whether args' first element is a help flag. Only the
