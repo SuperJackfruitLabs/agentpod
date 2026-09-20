@@ -275,9 +275,20 @@ func TestArtifactRejectsTransportAndExpansionBounds(t *testing.T) {
 }
 
 func TestArtifactRejectsFilesystemIncompatiblePaths(t *testing.T) {
-	for _, value := range []string{"a/" + strings.Repeat("x", 256), "../escape", "/absolute", "a/./b", "a//b", "a/../b", "café/file", "a/line\nbreak"} {
+	for _, value := range []string{strings.Repeat("a/", 65) + "file", "a/" + strings.Repeat("x", 256), "../escape", "/absolute", "a/./b", "a//b", "a/../b", "café/file", "a/line\nbreak"} {
 		if artifactPath(value) {
 			t.Fatalf("unsafe or nonportable path accepted: %q", value)
 		}
 	}
+}
+
+func TestArtifactBoundsImplicitDirectories(t *testing.T) {
+	seen := map[string]archivePathEntry{}
+	for i := 0; i < maxArtifactFiles; i++ {
+		name := fmt.Sprintf("tree-%d/", i) + strings.Repeat("a/", 62) + "file"
+		if err := recordArchivePath(seen, name); err != nil {
+			return
+		}
+	}
+	t.Fatal("implicit directory count was unbounded")
 }
