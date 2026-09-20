@@ -110,6 +110,8 @@ describe("the capability classification", () => {
     expect(isReachBearing("fs.write")).toBe(true);
     expect(isReachBearing("terminal")).toBe(true);
     expect(isReachBearing("cleanup")).toBe(true);
+    expect(isReachBearing("skills.manage")).toBe(true);
+    expect(isReachBearing("skills.inventory")).toBe(false);
 
     // Reads are not reach. A console that refused to show a diff or a log would
     // be routed around within a day.
@@ -137,6 +139,12 @@ describe("requireGrantReach", () => {
 
     const e = await denial(() => requireGrantReach(USER, STATION, "fs.write", "mutate"));
     expect(isGrantReachDenied(e)).toBe(true);
+  });
+
+  test("skill mutation requires reach while skill status is observational", async () => {
+    await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    expect(isGrantReachDenied(await denial(() => requireGrantReach(USER, STATION, "skills.manage", "mutate")))).toBe(true);
+    expect(await denial(() => requireGrantReach(USER, STATION, "skills.manage", "read"))).toBeNull();
   });
 
   test("refuses when the boolean is held but this station is out of scope", async () => {

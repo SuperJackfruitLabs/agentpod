@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SkillObservation } from "./skills";
 
 const Digest = z.string().regex(/^[a-f0-9]{64}$/);
 const OperationId = z.string().regex(/^[a-f0-9]{32}$/);
@@ -39,3 +40,25 @@ export type SkillInstallBinding = z.infer<typeof SkillInstallBinding>;
 export type SkillGeneration = z.infer<typeof SkillGeneration>;
 export type SkillInstallPlan = z.infer<typeof SkillInstallPlan>;
 export type SkillInstallReceipt = z.infer<typeof SkillInstallReceipt>;
+
+const SkillProfileParams = z.object({
+  key: z.string().min(1).max(512).refine(value => value.trim() === value && !/[\x00-\x1f\x7f]/.test(value)),
+  profile: SkillInstallBinding.shape.profile,
+}).strict();
+const StationId = z.string().regex(/^[a-zA-Z0-9_-]{1,256}$/);
+export const SkillVerifyParams = SkillProfileParams;
+export const SkillOperationParams = SkillProfileParams.extend({operationId: OperationId});
+export const SkillPlanParams = SkillOperationParams.extend({stationId: StationId, archiveSHA256: Digest});
+export const SkillApplyParams = SkillOperationParams.extend({stationId: StationId, expectedPlanDigest: Digest});
+export const SkillOperationResult = z.object({receipt: SkillInstallReceipt.nullable()}).strict();
+export const SkillInstallVerification = z.object({
+  current: SkillGeneration.nullable(), path: z.string().min(1).max(4096).nullable(),
+  present: SkillObservation, loaded: SkillObservation,
+}).strict().refine(value => (value.current === null) === (value.path === null), {
+  message: "A verified generation has a concrete path",
+});
+export const SkillVerifyResult = z.object({
+  nodeId: SkillInstallBinding.shape.nodeId, stationKey: SkillInstallBinding.shape.stationKey,
+  harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
+  verification: SkillInstallVerification,
+}).strict();

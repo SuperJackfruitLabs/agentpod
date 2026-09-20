@@ -18,7 +18,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt } from "../src/index";
+import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
 
 import { planFixture } from "../src/fixtures/skill-install";
 import { inventoryWireFixture } from "../src/fixtures/skill-inventory";
@@ -29,6 +29,14 @@ const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contrac
 const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["skill_inventory", SkillInventory, inventoryWireFixture],
   ["skill_install_plan", SkillInstallPlan, planFixture],
+  ["skill_verify", SkillVerifyResult, {
+    nodeId: planFixture.binding.nodeId, stationKey: planFixture.binding.stationKey,
+    harness: planFixture.binding.harness, profile: planFixture.binding.profile,
+    verification: {current: planFixture.after, path: planFixture.targetPath,
+      present:{value:true,observedAt:"2026-09-20T16:00:01Z",reason:"Verified managed files"},
+      loaded:{value:null,observedAt:null,reason:"No session inspection"}},
+  }],
+  ["skill_operation_missing", SkillOperationResult, {receipt:null}],
   ["skill_install_receipt", SkillInstallReceipt, { plan: planFixture, phase: "applied", updatedAt: "2026-09-20T16:00:01Z", completedAt: "2026-09-20T16:00:01Z", error: null }],
   ["host_info", HostInfo, { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 }],
 

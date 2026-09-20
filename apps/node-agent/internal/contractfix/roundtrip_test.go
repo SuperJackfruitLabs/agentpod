@@ -124,3 +124,8 @@ func TestHealthFrameStationsRoundTrip(t *testing.T) {
 func TestHelloRoundTrips(t *testing.T) {
 	roundTrip(t, "hello.json", &gateway.HelloMsg{})
 }
+
+func TestSkillManagementResultsRoundTrip(t *testing.T) {
+	roundTrip(t, "skill_verify.json", &gateway.SkillVerifyResult{})
+	roundTrip(t, "skill_operation_missing.json", &gateway.SkillOperationResult{})
+}

@@ -51,6 +51,12 @@ func (s *InstallStore) operation(id string) (InstallReceipt, error) {
 		return receipt, err
 	}
 	if err := s.readJSON(relative, &receipt); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if parentErr := checkComponents(s.root, "operations"); parentErr != nil {
+				return receipt, fmt.Errorf("%w: missing operations directory", ErrInstallConflict)
+			}
+			return receipt, fmt.Errorf("%w: %w", ErrInstallOperationNotFound, err)
+		}
 		return receipt, err
 	}
 	p := receipt.Plan
@@ -199,6 +205,16 @@ func (s *InstallStore) Operation(ctx context.Context, id string) (InstallReceipt
 	return s.operation(id)
 }
 func (s *InstallStore) Apply(ctx context.Context, id string, archive io.Reader) (InstallReceipt, error) {
+	return s.applyOperation(ctx, id, archive, nil)
+}
+
+// ApplyReviewed checks the caller's reviewed plan under the same lock as the
+// head switch. A digest mismatch never changes the operation or installation.
+func (s *InstallStore) ApplyReviewed(ctx context.Context, id, expectedPlanDigest string, archive io.Reader) (InstallReceipt, error) {
+	return s.applyOperation(ctx, id, archive, &expectedPlanDigest)
+}
+
+func (s *InstallStore) applyOperation(ctx context.Context, id string, archive io.Reader, expectedPlanDigest *string) (InstallReceipt, error) {
 	unlock, err := s.lock(ctx)
 	if err != nil {
 		return InstallReceipt{}, err
@@ -207,6 +223,9 @@ func (s *InstallStore) Apply(ctx context.Context, id string, archive io.Reader) 
 	receipt, err := s.operation(id)
 	if err != nil {
 		return receipt, err
+	}
+	if expectedPlanDigest != nil && *expectedPlanDigest != receipt.Plan.PlanDigest {
+		return receipt, fmt.Errorf("%w: reviewed plan digest differs", ErrInstallConflict)
 	}
 	if receipt.Phase == "applied" {
 		return receipt, nil

@@ -40,8 +40,8 @@ type InstallReceipt struct {
 	Error       *string     `json:"error"`
 }
 type InstallVerification struct {
-	Current *Generation
-	Path    *string
-	Present Observation
-	Loaded  Observation
+	Current *Generation `json:"current"`
+	Path    *string     `json:"path"`
+	Present Observation `json:"present"`
+	Loaded  Observation `json:"loaded"`
 }

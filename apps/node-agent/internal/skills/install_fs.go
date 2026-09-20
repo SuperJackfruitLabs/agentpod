@@ -22,6 +22,8 @@ import (
 
 var operationPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var ErrInstallConflict = errors.New("skill installation conflict")
+var ErrInstallStoreNotFound = errors.New("managed skill namespace not found")
+var ErrInstallOperationNotFound = errors.New("managed skill operation not found")
 
 // InstallStore manages immutable package generations within one station/profile.
 // Callers resolve the binding from trusted node identity and station detection,
@@ -38,7 +40,18 @@ func OpenInstallStore(binding InstallBinding) (*InstallStore, error) {
 	return openInstallStore(binding, nil)
 }
 
+// OpenExistingInstallStore opens an existing namespace without creating any
+// state. Status and verification callers must use this instead of initializing
+// a store as a side effect of a read. Missing namespaces return os.ErrNotExist.
+func OpenExistingInstallStore(binding InstallBinding) (*InstallStore, error) {
+	return openInstallStoreMode(binding, nil, false)
+}
+
 func openInstallStore(binding InstallBinding, beforePublish func() error) (*InstallStore, error) {
+	return openInstallStoreMode(binding, beforePublish, true)
+}
+
+func openInstallStoreMode(binding InstallBinding, beforePublish func() error, create bool) (*InstallStore, error) {
 	if binding.NodeID == "" || len(binding.NodeID) > 256 || binding.StationKey == "" || len(binding.StationKey) > 512 || !knownHarness(binding.Harness) || !slugPattern.MatchString(binding.Profile) || len(binding.Profile) > 124 || !filepath.IsAbs(binding.WorkspacePath) {
 		return nil, fmt.Errorf("skills: invalid installation binding")
 	}
@@ -65,14 +78,24 @@ func openInstallStore(binding InstallBinding, beforePublish func() error) (*Inst
 		return nil, err
 	}
 	defer parent.Close()
-	if err := makeDirs(parent, ".agentpod-skills"); err != nil {
-		return nil, err
-	}
-	if err := syncDir(parent, "."); err != nil {
+	if create {
+		if err := makeDirs(parent, ".agentpod-skills"); err != nil {
+			return nil, err
+		}
+		if err := syncDir(parent, "."); err != nil {
+			return nil, err
+		}
+	} else if err := checkComponents(parent, ".agentpod-skills"); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %w", ErrInstallStoreNotFound, err)
+		}
 		return nil, err
 	}
 	namespace := ".agentpod-skills/" + hashJSON(binding)
 	if _, err := parent.Lstat(namespace); errors.Is(err, os.ErrNotExist) {
+		if !create {
+			return nil, fmt.Errorf("%w: %w", ErrInstallStoreNotFound, err)
+		}
 		if err := initializeNamespace(parent, namespace, binding, beforePublish); err != nil {
 			return nil, err
 		}
@@ -136,6 +159,9 @@ func initializeNamespace(parent *os.Root, namespace string, binding InstallBindi
 		}
 	}
 	staged := &InstallStore{root: root, binding: binding}
+	if err := staged.atomicWrite("lock", nil, 0600, false); err != nil {
+		return err
+	}
 	if err := staged.writeJSON("binding.json", binding); err != nil {
 		return err
 	}
@@ -393,7 +419,7 @@ func (s *InstallStore) lock(ctx context.Context) (func(), error) {
 	if err := s.checkIdentity(); err != nil {
 		return nil, err
 	}
-	file, err := openManaged(s.root, "lock", os.O_RDWR|os.O_CREATE, 0600)
+	file, err := openManaged(s.root, "lock", os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}

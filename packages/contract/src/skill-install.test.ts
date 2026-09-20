@@ -2,6 +2,31 @@ import { expect, test } from "bun:test";
 import { SkillInstallPlan, SkillInstallReceipt } from "./skill-install";
 
 import { planFixture } from "./fixtures/skill-install";
+import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
+import { Capability } from "./station";
+
+test("skill management requests accept identifiers and reviewed digests, never caller paths or URLs", () => {
+  const base = {key:"codex:fixture", profile:"fixture", operationId:"a".repeat(32)};
+  const plan = {...base, stationId:"station-fixture", archiveSHA256:"b".repeat(64)};
+  expect(VERB_PARAMS["skills.plan"].parse(plan)).toEqual(plan);
+  for (const extra of [{workspacePath:"/tmp/other"},{url:"https://example.org/skill.tgz"},{command:"do stuff"}]) {
+    expect(VERB_PARAMS["skills.plan"].safeParse({...plan,...extra}).success).toBe(false);
+  }
+  expect(VERB_PARAMS["skills.apply"].safeParse({...base,stationId:"station-fixture"}).success).toBe(false);
+  expect(VERB_PARAMS["skills.apply"].safeParse({...base,stationId:"station-fixture",expectedPlanDigest:"b".repeat(64)}).success).toBe(true);
+  expect(VERB_PARAMS["skills.rollback"].parse(base)).toEqual(base);
+  expect(VERB_PARAMS["skills.operation"].parse(base)).toEqual(base);
+  expect(VERB_PARAMS["skills.verify"].safeParse(base).success).toBe(false);
+  expect(Capability.parse("skills.manage")).toBe("skills.manage");
+});
+
+test("skill status distinguishes unknown operation and absent managed files from harness activation", () => {
+  expect(VERB_RESULTS["skills.operation"].parse({receipt:null})).toEqual({receipt:null});
+  const observation = {value:null,observedAt:null,reason:"No session inspection"};
+  const status = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",verification:{current:null,path:null,present:{...observation,value:false,observedAt:"2026-09-20T16:00:01Z"},loaded:observation}};
+  expect(VERB_RESULTS["skills.verify"].parse(status).verification.loaded.value).toBeNull();
+  expect(VERB_RESULTS["skills.verify"].safeParse({...status,verification:{...status.verification,path:"/tmp/claimed"}}).success).toBe(false);
+});
 
 test("durable plans bind identity and a prior head, with activation pending", () => {
   expect(SkillInstallPlan.parse(planFixture).activation).toBe("pending");

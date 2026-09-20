@@ -38,7 +38,7 @@ Unreadable roots, malformed entries and bounds reached remain visible. Reads are
 bounded and confined to the resolved root; symlinks and special files are not
 followed. Skill bodies, arbitrary metadata and credentials do not leave the node.
 
-## Management protocol to follow
+## Managed packages and node protocol
 
 The Go artifact reader now accepts a separately pinned library `tar.gz` stream
 without writing it to a station. It verifies the archive SHA-256, the library's
@@ -52,15 +52,14 @@ and 16,384 total file/directory names. Paths are relative ASCII names with bound
 components; content and metadata may contain Unicode. Links, special
 files, overlapping paths, case aliases, duplicate JSON keys, multiple roots,
 reserved installation receipts and archive tails are rejected. PAX path headers
-from the library exporter are supported. The eventual transport must enforce a
-deadline as well: cancellation cannot interrupt an arbitrary blocked reader.
-This reader is an offline primitive, not an advertised management capability.
+from the library exporter are supported. The HTTP acquisition client adds a
+60-second deadline, context cancellation and an independent 32 MiB stream bound.
 
 The local Go installation engine now persists typed plans and receipts. Its
 namespace under `.agentpod-skills` binds node, station, harness, selected library
 profile, canonical workspace path and workspace device/inode identity. The exact
 generation destination and payload diff are part of the persisted plan. Clients
-will apply by operation ID; they will not submit editable plans or target paths.
+apply by operation ID and reviewed plan digest, not editable plans or target paths.
 
 Planning verifies the current generation and pins its head receipt. Application
 uses an advisory filesystem lock, records staging intent, writes and verifies a
@@ -85,15 +84,34 @@ Interrupted temporary writes are preserved outside generations. The engine stops
 at 16 retained partial writes, 256 operation records per binding (with one record
 reserved from new installations for rollback), or 512 namespaces
 per workspace instead of silently deleting evidence. Retention inspection and
-cleanup must be exposed before broad managed rollout. This increment does not
-perform authenticated transport, advertise `skills.manage`, register a plugin,
-update harness configuration, refresh a session, or expose install API/UI actions.
-It materializes a reviewed package; session loading remains unknown.
+cleanup must be exposed before broad managed rollout. Package materialization
+does not register a plugin, update harness configuration or refresh a session.
+Session loading remains unknown.
 
-Keep management separate as `skills.manage`; do not advertise it with inventory.
-The planned verbs are `skills.plan`, `skills.apply`, `skills.verify`,
-`skills.rollback` and `skills.operation`. Implement their contract alongside the
-durable state machine rather than reserving nonfunctional endpoints.
+The node now implements `skills.plan`, `skills.apply`, `skills.verify`,
+`skills.rollback` and `skills.operation` under the separate `skills.manage`
+capability. Six descriptors opt into exact detected-workspace resolution. The
+registry advertises management only when the handler and authenticated download
+client are configured. A hub without the new capability schema safely filters it.
+The shared hub reach classifier treats management mutations as granting reach;
+observational calls do not create a namespace or repair missing lock state.
+
+Requests accept station keys, library profiles and operation IDs. Plan additionally
+requires the station database ID and pinned archive SHA-256; apply requires the
+station ID and reviewed plan digest. Unknown fields, duplicate keys, caller paths,
+commands and download URLs are rejected. Apply compares the reviewed digest again
+under the installation lock. A completed apply returns its historical receipt
+without downloading again; rollback uses retained local generations.
+
+The node download client uses its existing enrolled identity to POST to its fixed
+hub origin at `/api/nodes/:nodeId/stations/:stationId/skill-artifacts/:operationId`,
+with `X-AgentPod-Station-Key` binding the detected key. TLS is mandatory outside
+loopback development. Redirects are refused, response bodies never become errors,
+and bytes must match the requested digest before the archive verifier runs.
+The server route, immutable artifact storage and per-operation authorization are
+still pending: this branch does not expose a working hub installation API. The
+server must authenticate the node, check current station ownership and the
+operation's station/key/profile/pin binding, and permit retries for recovery.
 
 A plan binds the exact node/station/profile/workspace, immutable artifact digest,
 expected prior state, owned relative paths, operation ID, concrete diff and

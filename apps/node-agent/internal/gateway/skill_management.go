@@ -1,0 +1,211 @@
+package gateway
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"regexp"
+	"time"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+)
+
+// Resolve must require the complete, currently detected station key and return
+// its workspace and harness. No caller-supplied path reaches the install store.
+type SkillManagementDeps struct {
+	NodeID  string
+	Resolve func(context.Context, string) (workspace, harness string, err error)
+	Fetch   SkillArtifactFetcher
+}
+type SkillOperationResult struct {
+	Receipt *skills.InstallReceipt `json:"receipt"`
+}
+type SkillVerifyResult struct {
+	NodeID       string                     `json:"nodeId"`
+	StationKey   string                     `json:"stationKey"`
+	Harness      string                     `json:"harness"`
+	Profile      string                     `json:"profile"`
+	Verification skills.InstallVerification `json:"verification"`
+}
+type skillManagementHandler struct {
+	inner Handler
+	deps  SkillManagementDeps
+}
+
+func NewSkillManagementHandler(inner Handler, deps SkillManagementDeps) Handler {
+	return &skillManagementHandler{inner: inner, deps: deps}
+}
+
+var skillProfile = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+// Decode the small, flat protocol explicitly: encoding/json's struct decoder
+// also accepts case-insensitive and duplicate keys, unlike the strict contract.
+func skillManagementParams(verb string, raw json.RawMessage) (map[string]string, error) {
+	fields := map[string]bool{"key": true, "profile": true}
+	if verb != "skills.verify" {
+		fields["operationId"] = true
+	}
+	if verb == "skills.plan" {
+		fields["stationId"] = true
+		fields["archiveSHA256"] = true
+	}
+	if verb == "skills.apply" {
+		fields["stationId"] = true
+		fields["expectedPlanDigest"] = true
+	}
+	invalid := fmt.Errorf("skills: invalid management params")
+	if len(raw) > 8192 {
+		return nil, invalid
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, invalid
+	}
+	params := map[string]string{}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, invalid
+		}
+		key, ok := token.(string)
+		if !ok || !fields[key] {
+			return nil, invalid
+		}
+		if _, exists := params[key]; exists {
+			return nil, invalid
+		}
+		var value string
+		if err := decoder.Decode(&value); err != nil {
+			return nil, invalid
+		}
+		params[key] = value
+	}
+	if token, err := decoder.Token(); err != nil || token != json.Delim('}') || decoder.Decode(new(any)) != io.EOF || len(params) != len(fields) {
+		return nil, invalid
+	}
+	if !validArtifactStationKey(params["key"]) || len(params["profile"]) > 124 || !skillProfile.MatchString(params["profile"]) {
+		return nil, invalid
+	}
+	if fields["operationId"] && !artifactOperation.MatchString(params["operationId"]) {
+		return nil, invalid
+	}
+	if fields["stationId"] && !artifactSegment.MatchString(params["stationId"]) {
+		return nil, invalid
+	}
+	for _, key := range []string{"archiveSHA256", "expectedPlanDigest"} {
+		if fields[key] && !artifactDigest.MatchString(params[key]) {
+			return nil, invalid
+		}
+	}
+	return params, nil
+}
+
+func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
+	switch verb {
+	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify":
+	default:
+		return h.inner.Handle(ctx, verb, raw, emit)
+	}
+	params, err := skillManagementParams(verb, raw)
+	if err != nil {
+		return nil, false, err
+	}
+	if h.deps.NodeID == "" || h.deps.Resolve == nil || h.deps.Fetch == nil {
+		return nil, false, fmt.Errorf("skills: management unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	workspace, harness, err := h.deps.Resolve(ctx, params["key"])
+	if err != nil {
+		return nil, false, err
+	}
+	binding := skills.InstallBinding{NodeID: h.deps.NodeID, StationKey: params["key"], Harness: harness, Profile: params["profile"], WorkspacePath: workspace}
+	var store *skills.InstallStore
+	var archive []byte
+	if verb == "skills.plan" {
+		archive, err = h.deps.Fetch(ctx, SkillArtifactRequest{StationID: params["stationId"], StationKey: params["key"], OperationID: params["operationId"], ArchiveSHA256: params["archiveSHA256"]})
+		if err != nil {
+			return nil, false, err
+		}
+		// Reject a wrong package before claiming any on-disk namespace. The
+		// store verifies it again when persisting the plan under its own lock.
+		artifact, err := skills.ReadArtifact(ctx, bytes.NewReader(archive), params["archiveSHA256"], harness)
+		if err != nil {
+			return nil, false, err
+		}
+		if artifact.Manifest.Profile != binding.Profile {
+			return nil, false, fmt.Errorf("skills: artifact profile mismatch")
+		}
+		store, err = skills.OpenInstallStore(binding)
+	} else {
+		store, err = skills.OpenExistingInstallStore(binding)
+	}
+	if errors.Is(err, skills.ErrInstallStoreNotFound) {
+		if verb == "skills.operation" {
+			return SkillOperationResult{}, false, nil
+		}
+		if verb == "skills.verify" {
+			present := false
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			return SkillVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: skills.InstallVerification{
+				Present: skills.Observation{Value: &present, ObservedAt: &now, Reason: "No managed namespace exists for this profile"},
+				Loaded:  skills.Observation{Reason: "No harness registration or session inspection was performed"},
+			}}, false, nil
+		}
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer store.Close()
+	switch verb {
+	case "skills.plan":
+		plan, err := store.PlanInstall(ctx, params["operationId"], bytes.NewReader(archive), params["archiveSHA256"])
+		return plan, false, err
+	case "skills.rollback":
+		plan, err := store.PlanRollback(ctx, params["operationId"])
+		return plan, false, err
+	case "skills.operation":
+		receipt, err := store.Operation(ctx, params["operationId"])
+		if errors.Is(err, skills.ErrInstallOperationNotFound) {
+			return SkillOperationResult{}, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return SkillOperationResult{Receipt: &receipt}, false, nil
+	case "skills.verify":
+		verification, err := store.Verify(ctx)
+		return SkillVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
+	case "skills.apply":
+		receipt, err := store.Operation(ctx, params["operationId"])
+		if err != nil {
+			return nil, false, err
+		}
+		if receipt.Plan.PlanDigest != params["expectedPlanDigest"] {
+			return nil, false, fmt.Errorf("%w: reviewed plan digest differs", skills.ErrInstallConflict)
+		}
+		var reader io.Reader
+		if receipt.Plan.Action == "install" && receipt.Phase != "applied" {
+			archive, err = h.deps.Fetch(ctx, SkillArtifactRequest{StationID: params["stationId"], StationKey: params["key"], OperationID: params["operationId"], ArchiveSHA256: receipt.Plan.After.ArchiveSHA256})
+			if err != nil {
+				return nil, false, err
+			}
+			reader = bytes.NewReader(archive)
+		}
+		applied, err := store.ApplyReviewed(ctx, params["operationId"], params["expectedPlanDigest"], reader)
+		return applied, false, err
+	}
+	return nil, false, fmt.Errorf("skills: unknown management verb")
+}
+
+func (h *skillManagementHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {
+	if handler, ok := h.inner.(FrameHandler); ok {
+		return handler.HandleFrame(frameType, id, raw)
+	}
+	return nil
+}
