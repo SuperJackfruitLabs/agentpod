@@ -45,5 +45,9 @@ The `native-placement-*-2026-09-21.json` reports contain 44 passing checks on
 Codex 0.155.0, OpenCode 1.18.15, Pi 0.84.1 and OpenClaw 2026.2.12. Stored upgrades
 remain undiscovered until publication; retained generations/backups are excluded
 after native upgrade, rollback and deactivation. The Go receipt still reports
-loading unknown. Broker/session-guard integration and deployed/ACP evidence remain
-separate requirements.
+loading unknown. The `native-placement-admission-*-2026-09-21.json` reports repeat
+those 44 checks after adding durable recovery admission. Separate process-exit
+tests cover ten transaction boundaries and prove that fresh ACP/terminal managers
+refuse new starts until recovery. Those children are shell/cat fixtures, not
+native ACP sessions. Broker exposure, external-process/version gates and deployed
+native/ACP evidence remain separate requirements.

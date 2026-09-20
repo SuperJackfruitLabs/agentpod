@@ -116,7 +116,7 @@ def probe(args):
         finally:
             if native:native.close()
     return {'schema_version':1,'harness':args.harness,'version':version,'kind':'go-native-placement-fixture',
-      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.','No model turn, ACP, native trust decision or active-session behavior was tested.','Pi invokes its installed directory loader, not a trusted session.','Remote activation remains unexposed pending a coordinator session guard and operator workflow.','The node receipt keeps loaded unknown; the separate native probe observes discovery.']}
+      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.','No model turn, ACP, native trust decision or active-session behavior was tested.','Pi invokes its installed directory loader, not a trusted session.','Remote activation remains unexposed pending external-process coverage, version/mode gates and the operator workflow.','The node receipt keeps loaded unknown; the separate native probe observes discovery.']}
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)

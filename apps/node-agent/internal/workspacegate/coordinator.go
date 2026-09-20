@@ -98,7 +98,17 @@ func (l *Lease) Path() string { return l.path }
 func (l *Lease) Release()     { l.once.Do(l.release) }
 
 func (g *Coordinator) Activity(ctx context.Context, dir string) (*Lease, error) {
-	return g.acquire(ctx, dir, false)
+	lease, err := g.acquire(ctx, dir, false)
+	if err != nil {
+		return nil, err
+	}
+	// Reserve first: a cooperating publisher cannot start between inspection
+	// and spawn. Failed inspection must release the provisional reservation.
+	if err := checkRecovery(ctx, lease.Path()); err != nil {
+		lease.Release()
+		return nil, err
+	}
+	return lease, nil
 }
 
 func (g *Coordinator) Exclusive(ctx context.Context, dir string) (*Lease, error) {

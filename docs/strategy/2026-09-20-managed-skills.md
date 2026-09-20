@@ -167,12 +167,12 @@ eligibility/session loading unknown.
 
 This primitive is deliberately **not advertised as a remote capability** yet.
 It requires a quiescent workspace. Before broker/hub/console exposure, complete
-session coordination and durable recovery admission, verify actual runtime
+external/lifecycle process coverage, verify actual runtime
 version/mode and expose unsupported or externally busy cases. Advisory locks do
 not control external harnesses or editors. No busy station is restarted and no
 production workspace was changed by this work.
 
-Tests cover actual process exits at eight publication stages, stale managed/native
+Tests cover actual process exits at ten publication stages, stale managed/native
 state, changed review digests, nested-root collisions, symlinks, user edits and
 safe deactivation. The optional native probe adds 44 checks using four real
 harnesses and checked-in synthetic exporter fixtures. Pi uses its loader only;
@@ -198,14 +198,36 @@ and PTY children against synthetic placement, including attempts to start them
 at the publication boundary. This is lifecycle coordination, not a native ACP
 compatibility test: the test children are shell/cat fixtures.
 
+The transaction durably publishes
+`.agentpod-skills/admission/fence.json` at the repository root before its native
+journal or discovery files change. It binds the station/workspace, repository
+identity, operation ID and reviewed plan digest. A changed managed selection
+cannot replace that operation's pinned generation during recovery. Competing
+namespaces and unreviewed or mismatched operations cannot clear or replace it.
+Completion persists the native head, receipt and journal cleanup before removing
+the marker and syncing its directory. Receipt-only cleanup preserves later user
+edits while fresh file verification still reports them.
+
+Every managed session start reserves its cwd, then inspects the cwd and its
+ancestors for the marker before spawning. This inspection creates no files,
+reads no marker contents and rejects ambiguous paths. Recreated managers therefore
+refuse new starts after a failed apply or node restart until exact-operation
+recovery finishes. Recovery itself can still acquire the exclusive lease. A
+preflight failure before any publication intent does not leave a recovery block.
+Malformed or edited markers remain blocked for inspection instead of being
+silently deleted. Ten separate-process exit tests include admission creation and
+the interval after journal cleanup but before marker removal.
+
 This guard covers cooperating managers in one node process only. It does not
 discover external harness processes, lifecycle-managed daemons or detached
 children. A terminal or ACP tool may also change directory after launch; its
 reservation describes the admitted working directory, not every file it can
 access. External directory moves or replacements during admission are also outside
-this in-process guard. Admission after an interrupted native transaction needs a durable
-repository fence, including after a node restart; the current lease ends when
-the apply call returns. Those gaps, actual version/mode gating and operator
+this in-process guard. Marker inspection does not enumerate descendant repositories
+from an ancestor cwd. The marker is not a cross-process active-session lock: an
+already running child left behind by a terminated node needs external-process
+inspection before recovery, as does activity managed by another node process.
+Those gaps, actual version/mode gating and operator
 visibility must be resolved before any remote activation capability is enabled.
 No wire verbs, advertised capabilities or production placements change here.
 

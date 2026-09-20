@@ -31,7 +31,7 @@ func TestPlacementCrashHelper(t *testing.T) {
 	}
 }
 func TestPlacementRecoversProcessExitAcrossNativeSwitch(t *testing.T) {
-	for _, point := range []string{"native-journal", "file-open", "file-write", "native-stage", "native-backup", "native-publish", "native-head", "native-receipt"} {
+	for _, point := range []string{"native-admission", "native-journal", "file-open", "file-write", "native-stage", "native-backup", "native-publish", "native-head", "native-receipt", "native-journal-cleared"} {
 		t.Run(point, func(t *testing.T) {
 			s := placementFixtureStore(t)
 			ctx := context.Background()
@@ -61,6 +61,7 @@ func TestPlacementRecoversProcessExitAcrossNativeSwitch(t *testing.T) {
 			if !errors.As(err, &exited) || exited.ExitCode() != 91 {
 				t.Fatalf("process did not exit at %s: %v %s", point, err, output)
 			}
+			assertFreshSessionAdmission(t, s.binding.WorkspacePath, true)
 			if _, err = s.VerifyPlacement(ctx); err == nil {
 				t.Fatal("incomplete native publication reported success")
 			}
@@ -70,6 +71,7 @@ func TestPlacementRecoversProcessExitAcrossNativeSwitch(t *testing.T) {
 			if _, err = s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err != nil {
 				t.Fatal(err)
 			}
+			assertFreshSessionAdmission(t, s.binding.WorkspacePath, false)
 			verified, err := s.VerifyPlacement(ctx)
 			if err != nil || verified.Current == nil || verified.Current.Generation != id {
 				t.Fatalf("native recovery failed: %+v %v", verified, err)
@@ -126,6 +128,7 @@ func TestPlacementRecoveryPreservesEditedBackupAndStaging(t *testing.T) {
 			if _, err = s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err == nil {
 				t.Fatal("recovery overwrote edit")
 			}
+			assertFreshSessionAdmission(t, s.binding.WorkspacePath, true)
 			content, _ := os.ReadFile(file)
 			if string(content) != "preserved user edit" {
 				t.Fatal("edit was lost")
