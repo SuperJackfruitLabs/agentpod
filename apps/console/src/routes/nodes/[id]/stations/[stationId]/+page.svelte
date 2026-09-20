@@ -24,6 +24,7 @@
   import Terminal from "$lib/components/stations/Terminal.svelte";
   import ChatPanel from "$lib/components/stations/chat/ChatPanel.svelte";
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
+  import SkillsPanel from "$lib/components/stations/SkillsPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -61,6 +62,7 @@
     | "logs"
     | "files"
     | "terminal"
+    | "skills"
     | "changes"
     | "cleanup"
     | "activity"
@@ -71,6 +73,7 @@
     "logs",
     "files",
     "terminal",
+    "skills",
     "changes",
     "cleanup",
     "activity",
@@ -157,6 +160,8 @@
   const canLifecycle = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("lifecycle")
   );
+
+  const hasSkills = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
 
   const hasChangeset = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
@@ -331,6 +336,7 @@
           },
         ]
       : []),
+    ...(hasSkills ? [{ id: "skills" as const, label: "Skills", icon: ScrollTextIcon }] : []),
     ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity" as const, label: "Activity", icon: ActivityIcon },
@@ -647,6 +653,13 @@
       <div class="min-h-0 flex-1">
         <Terminal {stationId} />
       </div>
+    {/snippet}
+  {/if}
+
+  {#if hasSkills}
+    {@render mountedPanel("skills", skillsContent)}
+    {#snippet skillsContent()}
+      <SkillsPanel {stationId} />
     {/snippet}
   {/if}
 

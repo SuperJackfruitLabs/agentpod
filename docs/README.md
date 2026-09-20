@@ -40,6 +40,8 @@ an executable corpus that caught four real cross-repo disagreements on its first
 
 ## Dated decisions
 
+- [2026-09-20 — Skill inventory and managed installation](./strategy/2026-09-20-managed-skills.md) — proposed; optional capabilities, independent evidence states and rollout gates
+
 [`strategy/`](./strategy/) — point-in-time arguments about where the product goes. **Read the
 date.** These are proposals and decisions as of the day they were written; where one and the
 code disagree, the code wins.

@@ -29,6 +29,8 @@ func NewHandler(reg *Registry) gateway.Handler {
 		emit func(seq int, chunk string, eof bool, enc string) error,
 	) (any, bool, error) {
 		switch verb {
+		case "skills.inventory":
+			return handleSkillInventory(ctx, reg, params)
 		case "detect":
 			return handleDetect(reg)
 

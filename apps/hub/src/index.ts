@@ -57,6 +57,7 @@ import { fleetActivityRoutes } from './routes/activity-fleet.ts';
 import { stationWriteRoutes } from './routes/station-writes.ts';
 import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
+import { stationSkillsRoutes } from './routes/station-skills.ts';
 import { stationChangesetRoutes } from './routes/station-changeset.ts';
 import { nodePostureRoutes } from './routes/node-posture.ts';
 import { runtimeCallbackRoutes } from './routes/runtime-callback.ts';
@@ -289,6 +290,7 @@ const app = new Hono()
   .route('/api', stationWriteRoutes)                       // POST /api/stations/:id/fs/{write,mkdir,move,delete}
   .route('/api', stationLifecycleRoutes)                   // POST /api/stations/:id/lifecycle
   .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationSkillsRoutes)
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state

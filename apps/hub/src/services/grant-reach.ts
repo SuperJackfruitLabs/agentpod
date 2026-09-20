@@ -43,6 +43,7 @@ export const REACH_BEARING: Record<Capability, boolean> = {
   cleanup: true, // `apply` deletes; `plan` is a read and passes on effect
 
   changeset: false, // status/diff are reads
+  "skills.inventory": false, // metadata only; installation is a separate capability
   lifecycle: false, // operating an agent, not widening it
   acp: false, // dispatch — mayDispatch already guards it
   inventory: false,

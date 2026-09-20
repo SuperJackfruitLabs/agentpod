@@ -252,7 +252,7 @@ func piStation(wsPath string, caps []string) Station {
 func (p *piDescriptor) Detect() ([]Station, error) {
 	// "lifecycle" is NEVER advertised: Pi has no persistent process to stop or
 	// start, so this descriptor does not implement Lifecycle at all.
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
 
 	// "acp" is advertised ONLY when BOTH halves of the chat path resolve: the
 	// pi-acp adapter, and the `pi` it spawns. The console gates the Chat tab on

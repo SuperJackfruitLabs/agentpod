@@ -124,7 +124,7 @@ func (o *openCodeDescriptor) Detect() ([]Station, error) {
 		return nil, err
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 	if openCodeSupervised() {
 		// Only a provisioned opencode container (deploy/node-opencode-entrypoint.sh)
 		// runs a supervised `opencode serve` process for Stop/Start to control.
