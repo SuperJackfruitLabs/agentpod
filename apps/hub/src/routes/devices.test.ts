@@ -35,6 +35,7 @@ import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
 import { decodeJwt } from "jose";
 import { eq } from "drizzle-orm";
+import { readFileSync } from "node:fs";
 
 import { db, rawSql } from "../db/drizzle";
 import { deviceCredentials } from "../db/schema/devices";
@@ -224,5 +225,51 @@ describe("the secret", () => {
     const [stored] = await db.select().from(deviceCredentials).where(eq(deviceCredentials.id, device.id));
     expect(stored!.secretHash).not.toBe(device.secret);
     expect(stored!.secretHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+/**
+ * Where these routes are MOUNTED, which is the part the tests above cannot see.
+ *
+ * Every test in this file mounts `deviceRoutes` on a bare Hono app. That is the
+ * right shape for testing what the routes do — and it is exactly why all eight
+ * passed while every one of these paths answered **404 in production** on
+ * 2026-09-20.
+ *
+ * `index.ts` registers `.on(['GET','POST'], '/api/auth/*', …)` for Better Auth,
+ * and Hono matches in registration order: anything mounted under `/api/auth`
+ * after that line is swallowed. The device routes shipped below it. The comment
+ * on the mount even cited the warning it was violating.
+ *
+ * So this reads the source and asserts the order, the same way
+ * `cmd/agentpod-fleet/main_test.go` reads `fleet.go`'s switch. A structural test
+ * for a structural invariant: what breaks is not a handler's behaviour but where
+ * it sits in a list.
+ */
+describe("the device routes are mounted where they can be reached", () => {
+  // Read synchronously: `describe` bodies are not async, and this is a file on disk.
+  const source = readFileSync(new URL("../index.ts", import.meta.url), "utf8");
+
+  test("above Better Auth's /api/auth/* catch-all", () => {
+    const mount = source.indexOf(".route('/api/auth', deviceRoutes)");
+    const catchAll = source.indexOf(".on(['GET', 'POST'], '/api/auth/*'");
+
+    expect(mount, "deviceRoutes is not mounted in index.ts at all").toBeGreaterThan(-1);
+    expect(catchAll, "the Better Auth catch-all moved or changed shape — re-read this test").toBeGreaterThan(-1);
+    expect(
+      mount,
+      "deviceRoutes is mounted AFTER Better Auth's /api/auth/* catch-all, which swallows it — every device path will 404",
+    ).toBeLessThan(catchAll);
+  });
+
+  test("above authMiddleware, which would 401 a dev_… credential", () => {
+    const mount = source.indexOf(".route('/api/auth', deviceRoutes)");
+    const middleware = source.indexOf(".use('/api/*', authMiddleware)");
+
+    expect(middleware).toBeGreaterThan(-1);
+    expect(
+      mount,
+      "deviceRoutes is behind authMiddleware, which accepts no dev_… credential and no hub JWT",
+    ).toBeLessThan(middleware);
   });
 });
