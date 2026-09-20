@@ -356,7 +356,54 @@ export interface OAuthClient {
   id: string;
   /** Exact redirect URIs. Full-string compare — no prefix, no origin matching. */
   redirectUris: string[];
+  /**
+   * The planes a token minted for this client may be spent at — becomes the
+   * token's `aud` (a list: decisions/2026-09-20-suite-sign-in). A client that
+   * legitimately reaches several planes from one stored credential (the `apn`
+   * CLI: `apn fleet nodes` hits the hub, `supi boards` hits superpipeline)
+   * lists every one of them, hub included if the token must still reach the
+   * hub itself.
+   *
+   * Never empty. An entry that declares no third field in `HUB_OAUTH_CLIENTS`
+   * gets `[HUB_AUDIENCE]` — see that constant's own comment for why this,
+   * and not an empty list, is what keeps the deployed registry (which has no
+   * audiences in it at all today) working unchanged.
+   *
+   * That default applies ONLY when a client declares nothing. An entry that
+   * declares a third field is taken exactly as written, hub URL included or
+   * not — a client whose token should never reach the hub at all (a browser
+   * client that only ever presents its token to its own plane's API) is
+   * meant to be expressible by simply not listing it, and a later task in
+   * this programme does exactly that. Nothing here unions `HUB_AUDIENCE` into
+   * an explicit list.
+   */
+  audiences: string[];
 }
+
+/**
+ * The hub's own identity as an audience — what an `HUB_OAUTH_CLIENTS` entry's
+ * `audiences` defaults to when it declares no third field.
+ *
+ * `config.publicUrl`, and it has to be. `publicUrl` is not merely where this
+ * process answers requests: it is the issuer identity every consumer of a
+ * hub token checks. `auth/hub-token.ts` verifies with
+ * `{ issuer: config.publicUrl, audience: config.publicUrl }`, which is the
+ * check `auth/middleware.ts` runs on every bearer (how `apn fleet nodes`
+ * authenticates), and it is Better Auth's `baseURL` in
+ * `auth/drizzle-auth.ts`. A literal here would mint tokens whose `aud` the
+ * hub's own middleware rejects in every deployment whose
+ * `MANAGEMENT_API_PUBLIC_URL` is not that exact string — local dev, a preview
+ * or Fly hostname, and the `auth.agentpod.dev` move this programme has as its
+ * next change. Production only survives it by coincidence of the two matching.
+ *
+ * The production literal belongs one level up, as the value that deployment
+ * gives `MANAGEMENT_API_PUBLIC_URL` (see `publicUrl` above) — one place, so
+ * issuer and audience cannot drift apart. The `_DEFAULT_ALLOWED_ORIGINS`
+ * analogy does not carry: an origin allowlist is permissive, so a stale extra
+ * entry costs nothing a deployment did not already accept; an audience is a
+ * restriction, and a stale one locks the rightful holder out.
+ */
+export const HUB_AUDIENCE = config.publicUrl;
 
 /**
  * Parse `HUB_OAUTH_CLIENTS`:
@@ -364,6 +411,40 @@ export interface OAuthClient {
  *   superpipeline|https://superpipeline.dev/hub/callback,supermessage|https://…
  *
  * Several URIs for one client: repeat the client key.
+ *
+ * A third `|`-separated field, when present, is the audiences this client's
+ * tokens may be spent at — itself comma-separated:
+ *
+ *   apn|https://127.0.0.1/callback|https://hub.agentpod.dev,https://app.superpipeline.dev
+ *
+ * Because a comma is what already separates entries, a plain top-level
+ * `split(',')` cannot tell "a second audience for this client" apart from
+ * "the start of the next entry" — but it doesn't have to: only the start of
+ * an entry ever contains `|` (an audience URL never does), so a comma-split
+ * token with no `|` at all is unambiguously a continuation of some PRECEDING
+ * token's audience list, never a new entry.
+ *
+ * `openForAudience` below is that one bit of lookback state — but it tracks
+ * more than "the most recent entry", on purpose. It is set to an entry ONLY
+ * when the token that just produced or touched that entry itself carried a
+ * third field (`parts.length === 3`); a token with just `id|uri` closes it
+ * (sets it back to `null`), even though that same id is very much a valid,
+ * `current`-in-every-other-sense entry. This is the difference between "the
+ * array happens to be empty right now" and "this entry never opened an
+ * audience field at all" — collapsing the two let a dropped-pipe typo
+ * ANYWHERE later in the string silently attach to whichever earlier
+ * well-formed, no-third-field entry preceded it, replacing that client's
+ * default hub audience with the stray text. `openForAudience` is also reset
+ * to `null` on a malformed token and on an empty one, so a stray token can
+ * never re-attach to an unrelated earlier entry through any path.
+ *
+ * An entry that declares no third field gets `audiences: [HUB_AUDIENCE]` —
+ * see that constant's comment for why. It is filled in once parsing finishes,
+ * not at the point an entry is created, so a client whose first occurrence
+ * carries no audience and whose second (repeated key) does still ends up with
+ * the declared one rather than the default. An entry that DOES declare a
+ * third field is taken exactly as written — see `OAuthClient.audiences`'s own
+ * comment on why that must stay expressible even when it omits the hub.
  *
  * Exported because `oauthClients` below is computed at module scope and cannot
  * be re-derived after import — the same reason `sessionCookieOptions` takes an
@@ -378,24 +459,75 @@ export interface OAuthClient {
  */
 export function parseOAuthClients(raw: string | undefined): OAuthClient[] {
   const byId = new Map<string, OAuthClient>();
-  for (const entry of (raw ?? '').split(',')) {
-    if (!entry.trim()) continue;
-    const parts = entry.split('|');
-    // Exactly one separator. "too|many|pipes" is ambiguous about where the id
-    // ends, and guessing is how a wrong destination gets registered.
-    if (parts.length !== 2) continue;
+  // The entry a bare (no `|`) token extends — see the doc comment above for
+  // why this is narrower than "the most recently touched entry".
+  let openForAudience: OAuthClient | null = null;
+
+  for (const rawToken of (raw ?? '').split(',')) {
+    const token = rawToken.trim();
+    if (!token) {
+      openForAudience = null;
+      continue;
+    }
+
+    if (!token.includes('|')) {
+      // A continuation of `openForAudience`'s audience list — or, with
+      // nothing open to continue (the very first token, right after a
+      // malformed one, or right after a token that itself declared no third
+      // field), an orphan that names nothing and is simply not registered.
+      if (openForAudience && !openForAudience.audiences.includes(token)) {
+        openForAudience.audiences.push(token);
+      }
+      continue;
+    }
+
+    const parts = token.split('|');
+    // Exactly `id|uri` or `id|uri|audience`. Anything else is ambiguous
+    // about where the id and URI end, and guessing is how a wrong
+    // destination — or audience — gets registered.
+    if (parts.length !== 2 && parts.length !== 3) {
+      openForAudience = null;
+      continue;
+    }
+
     const id = parts[0]!.trim();
     const redirectUri = parts[1]!.trim();
-    if (!id || !redirectUri) continue;
+    const audience = parts[2]?.trim();
+    // A third field present but empty ("id|uri|") is a typo, the same as an
+    // empty id or URI — not a request for zero audiences, which is simply
+    // not writing a third field at all.
+    if (!id || !redirectUri || (parts.length === 3 && !audience)) {
+      openForAudience = null;
+      continue;
+    }
+
     const existing = byId.get(id);
+    let entry: OAuthClient;
     if (existing) {
       if (!existing.redirectUris.includes(redirectUri)) {
         existing.redirectUris.push(redirectUri);
       }
+      if (audience && !existing.audiences.includes(audience)) {
+        existing.audiences.push(audience);
+      }
+      entry = existing;
     } else {
-      byId.set(id, { id, redirectUris: [redirectUri] });
+      entry = { id, redirectUris: [redirectUri], audiences: audience ? [audience] : [] };
+      byId.set(id, entry);
     }
+
+    // Open for continuation ONLY when THIS token itself carried a third
+    // field. `id|uri` (no third field) closes it even for an id that already
+    // has audiences from an earlier occurrence — see the doc comment above:
+    // "entry exists" and "entry currently accepts a continuation" are
+    // deliberately different questions.
+    openForAudience = parts.length === 3 ? entry : null;
   }
+
+  for (const client of byId.values()) {
+    if (client.audiences.length === 0) client.audiences.push(HUB_AUDIENCE);
+  }
+
   return [...byId.values()];
 }
 

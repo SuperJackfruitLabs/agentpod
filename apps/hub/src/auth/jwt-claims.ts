@@ -43,6 +43,32 @@ export interface TokenPayload extends Record<string, unknown> {
   /** The control pair. Namespaced values; see the grant decision. */
   mayDispatch: string[];
   mayGrantReach: boolean;
+  /**
+   * The OIDC standard spellings — not `emailVerified`, not `verified_email` —
+   * so the token moves towards a conforming ID token a consumer can resolve
+   * or create a local user from, rather than a bespoke shape only this suite
+   * understands.
+   *
+   * Both are ABSENT, never `null`, for a principal with no linked Better Auth
+   * user (an agent, a service, or a human principal not yet linked): an agent
+   * token must not assert anything about an address it does not have. See the
+   * conditional spread at the bottom of `buildTokenPayload`.
+   */
+  email?: string;
+  email_verified?: boolean;
+  /**
+   * Where this token may be spent. Present only when minted for a registered
+   * client (`OAuthClient.audiences`, `../config`) — absent, never `?? [iss]`,
+   * for every other mint (`GET /api/auth/token`'s own `definePayload`, the
+   * agent exchange's `signServiceToken`), so both keep signing `aud` exactly
+   * as they always have: Better Auth's own default for the former, an
+   * explicit `.setAudience(config.publicUrl)` for the latter. Absent and
+   * present-with-a-value are different claims to `auth.api.signJWT`'s own
+   * signer (`payload.aud ?? defaultAud`), so this must be a real absence, not
+   * `undefined` sitting in the object — see the conditional spread at the
+   * bottom of `buildTokenPayload`.
+   */
+  aud?: string[];
 }
 
 /**
@@ -83,13 +109,31 @@ export type BuildPayloadInput = BuildPayloadSubject & {
     principalId: string
   ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
   /** Injectable for the same reason. Defaults to `principalForUser`. Used only on the `user` path. */
-  resolvePrincipal?: (
-    userId: string
-  ) => Promise<{ id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null>;
+  resolvePrincipal?: (userId: string) => Promise<ResolvedPrincipalInput | null>;
   /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
-  resolvePrincipalById?: (
-    id: string
-  ) => Promise<{ id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null>;
+  resolvePrincipalById?: (id: string) => Promise<ResolvedPrincipalInput | null>;
+  /**
+   * The audiences a token minted for a registered client may be spent at —
+   * a client's `OAuthClient.audiences` (`../config`). Absent for a mint with
+   * no client context, which must keep signing `aud` as the issuer; see the
+   * doc comment on `TokenPayload.aud`.
+   */
+  audiences?: string[];
+};
+
+/**
+ * What a resolver hands back. `email`/`emailVerified` are optional, not just
+ * nullable: a test injecting a resolver for an agent (no user, ever) can omit
+ * them entirely rather than writing `email: null` at every call site that
+ * doesn't care — `principalForUser`/`principalById`'s real return always sets
+ * them, to `null` when nothing joined.
+ */
+type ResolvedPrincipalInput = {
+  id: string;
+  kind: PrincipalKind;
+  suspendedAt?: Date | null;
+  email?: string | null;
+  emailVerified?: boolean | null;
 };
 
 /**
@@ -134,7 +178,7 @@ export type BuildPayloadInput = BuildPayloadSubject & {
  * old issuer silently authorise everything.
  */
 export async function buildTokenPayload(input: BuildPayloadInput): Promise<TokenPayload> {
-  let principal: { id: string; kind: PrincipalKind; suspendedAt?: Date | null } | null;
+  let principal: ResolvedPrincipalInput | null;
   let who: string;
 
   if (input.principalId !== undefined) {
@@ -177,6 +221,18 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     tenant,
     mayDispatch: grant?.mayDispatch ?? [],
     mayGrantReach: grant?.mayGrantReach ?? false,
+    // Conditional spread, not a `?? null`/`?? undefined` field: an absent key
+    // and a key present with a null/undefined value are different claims to a
+    // consumer, and `principal.email` is only ever set for a principal with a
+    // linked Better Auth user.
+    ...(principal.email
+      ? { email: principal.email, email_verified: principal.emailVerified === true }
+      : {}),
+    // Same reasoning as the email spread above: absent, not `aud: undefined`
+    // sitting in the object, for a caller that passed no `audiences` — an
+    // actually-absent key is what leaves `GET /api/auth/token` and the agent
+    // exchange's own audience handling untouched.
+    ...(input.audiences ? { aud: input.audiences } : {}),
   };
 }
 

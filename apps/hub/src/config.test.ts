@@ -11,6 +11,7 @@ import {
   oauthClients,
   findOAuthClient,
   isRegisteredRedirect,
+  HUB_AUDIENCE,
 } from "./config";
 
 describe("allowedOrigins (single canonical list)", () => {
@@ -167,7 +168,11 @@ describe("parseOAuthClients", () => {
 
   it("parses one client with one redirect URI", () => {
     expect(parseOAuthClients("superpipeline|https://superpipeline.dev/hub/callback")).toEqual([
-      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
     ]);
   });
 
@@ -177,8 +182,16 @@ describe("parseOAuthClients", () => {
         "superpipeline|https://superpipeline.dev/hub/callback,supermessage|https://supermessage.dev/hub/callback",
       ),
     ).toEqual([
-      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
-      { id: "supermessage", redirectUris: ["https://supermessage.dev/hub/callback"] },
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
+      {
+        id: "supermessage",
+        redirectUris: ["https://supermessage.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
     ]);
   });
 
@@ -194,6 +207,7 @@ describe("parseOAuthClients", () => {
           "https://superpipeline.dev/hub/callback",
           "http://localhost:5174/hub/callback",
         ],
+        audiences: [HUB_AUDIENCE],
       },
     ]);
   });
@@ -204,14 +218,24 @@ describe("parseOAuthClients", () => {
         "superpipeline|https://superpipeline.dev/hub/callback,superpipeline|https://superpipeline.dev/hub/callback",
       ),
     ).toEqual([
-      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
     ]);
   });
 
   it("trims whitespace around every part", () => {
     expect(
       parseOAuthClients(" superpipeline | https://superpipeline.dev/hub/callback , "),
-    ).toEqual([{ id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] }]);
+    ).toEqual([
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
+    ]);
   });
 
   it("skips a malformed entry rather than throwing, and does not widen the rest", () => {
@@ -224,13 +248,83 @@ describe("parseOAuthClients", () => {
         "|https://nobody.example/hub/callback",     // empty id
         "emptyuri|",                                // empty URI
         "  |  ",                                    // both empty
-        "too|many|pipes",                           // ambiguous
+        "too|many|pipes|extra",                     // ambiguous — four segments, not two or three
         "superpipeline|https://superpipeline.dev/hub/callback",
       ].join(","),
     );
     expect(clients).toEqual([
-      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
     ]);
+  });
+
+  // ── The third field: per-client audiences ─────────────────────────────────
+
+  it("parses a client's audiences", () => {
+    const clients = parseOAuthClients(
+      "apn|https://127.0.0.1/callback|https://hub.agentpod.dev,https://app.superpipeline.dev"
+    );
+    expect(clients[0]!.audiences).toEqual([
+      "https://hub.agentpod.dev",
+      "https://app.superpipeline.dev",
+    ]);
+  });
+
+  it("defaults a client with no audiences to the hub alone", () => {
+    const clients = parseOAuthClients("apn|https://127.0.0.1/callback");
+    // `HUB_AUDIENCE`, not a literal: the default is whatever identity THIS
+    // deployment issues and verifies under (`config.publicUrl`), so pinning a
+    // literal here would pass while the hub's own middleware rejected the
+    // token everywhere that value is not the production hostname.
+    expect(clients[0]!.audiences).toEqual([HUB_AUDIENCE]);
+  });
+
+  it("still parses the redirect URI correctly when audiences are present", () => {
+    const clients = parseOAuthClients(
+      "apn|https://127.0.0.1/callback|https://hub.agentpod.dev,https://app.superpipeline.dev"
+    );
+    expect(clients[0]!.id).toBe("apn");
+    expect(clients[0]!.redirectUris).toEqual(["https://127.0.0.1/callback"]);
+  });
+
+  it("skips an entry whose audience field is present but empty", () => {
+    // "id|uri|" is a caller having typed the third separator and then
+    // nothing — the same kind of typo emptyuri| already refuses, not a
+    // request for zero audiences (that is simply not writing a third field
+    // at all).
+    const clients = parseOAuthClients("apn|https://127.0.0.1/callback|");
+    expect(clients).toEqual([]);
+  });
+
+  it("does not repeat an audience registered twice for the same client", () => {
+    const clients = parseOAuthClients(
+      "apn|https://127.0.0.1/callback|https://hub.agentpod.dev,https://hub.agentpod.dev"
+    );
+    expect(clients[0]!.audiences).toEqual(["https://hub.agentpod.dev"]);
+  });
+
+  it("a stray token after a no-third-field entry does not attach to it — it is simply not registered", () => {
+    // Regression: a dropped-pipe typo anywhere in the string used to attach
+    // to whichever earlier, unrelated, well-formed entry happened to be
+    // `current` — silently replacing that client's default hub audience with
+    // the stray text and widening nothing it should have (superpipeline lost
+    // its own default). A client that declared no third field must never
+    // accept a continuation, because it never opened an audience field to
+    // continue.
+    const clients = parseOAuthClients(
+      "superpipeline|https://superpipeline.dev/hub/callback,typo-missing-pipe,supermessage|https://supermessage.dev/hub/callback"
+    );
+    const superpipeline = clients.find((c) => c.id === "superpipeline");
+    const supermessage = clients.find((c) => c.id === "supermessage");
+
+    expect(superpipeline?.audiences).toEqual([HUB_AUDIENCE]);
+    expect(supermessage?.audiences).toEqual([HUB_AUDIENCE]);
+    // The stray token attached itself to nothing, anywhere.
+    expect(clients.some((c) => c.audiences.includes("typo-missing-pipe"))).toBe(false);
+    expect(clients.find((c) => c.id === "typo-missing-pipe")).toBeUndefined();
   });
 });
 
@@ -303,7 +397,11 @@ describe("oauthClients at module scope", () => {
     });
     expect(proc.exitCode).toBe(0);
     expect(JSON.parse(proc.stdout.toString())).toEqual([
-      { id: "superpipeline", redirectUris: ["https://superpipeline.dev/hub/callback"] },
+      {
+        id: "superpipeline",
+        redirectUris: ["https://superpipeline.dev/hub/callback"],
+        audiences: [HUB_AUDIENCE],
+      },
     ]);
   });
 });
