@@ -1,0 +1,38 @@
+[
+  {
+    "file": "export-codex.tar.gz",
+    "harness": "codex",
+    "archiveSHA256": "9339ee132422c5692fbd099ac086065e09c9db4cdd19437dc9f23b201c686a42",
+    "bundleDigest": "b955c59daedd145753d134dc32df73cdb772bc7f2ae822d624e20d6bea5639c6"
+  },
+  {
+    "file": "export-claude-code.tar.gz",
+    "harness": "claude-code",
+    "archiveSHA256": "607d649019afe18426a30a8a20f94da77e1da9486a12d26dbeb143181d2a0a04",
+    "bundleDigest": "e8d4f41359ba42b588b4d7ff84e6e75c2459017456b7097ae41502a74fb1fe30"
+  },
+  {
+    "file": "export-opencode.tar.gz",
+    "harness": "opencode",
+    "archiveSHA256": "178a8ff8065295335382ccbc5717bf8fe5b0fca26ebc90a45ce838be55fcdeb2",
+    "bundleDigest": "cfb858e23901526626bae180b0992f6d1cfc79e54f8712f2ecec8cc6cfccf122"
+  },
+  {
+    "file": "export-pi.tar.gz",
+    "harness": "pi",
+    "archiveSHA256": "3ec1fe3474639422f73b266bd7c9114176eb3d2a7b159bf4264809a2d23681a1",
+    "bundleDigest": "873bcf956060b8f6bb24afc2eeda4d2147304743a2e005eaf08cc89e83114100"
+  },
+  {
+    "file": "export-hermes.tar.gz",
+    "harness": "hermes",
+    "archiveSHA256": "b18c1ed29870786c57bb36636907aef6f1736027b6224e629485a71dc7762fe6",
+    "bundleDigest": "67c88cf8feee5c79d26446e4771da1b33cf87b1306a62e3613ae95e282a05f19"
+  },
+  {
+    "file": "export-openclaw.tar.gz",
+    "harness": "openclaw",
+    "archiveSHA256": "729ee99cff13be60bf7f499be5249cc14c159c143c12ec241080a28fd192ce3c",
+    "bundleDigest": "bafc88af798e69b670bc8cf14dd99bba2dd132d9efb0724d58010d325fd7cad5"
+  }
+]
