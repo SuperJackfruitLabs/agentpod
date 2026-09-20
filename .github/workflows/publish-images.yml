@@ -167,7 +167,7 @@ jobs:
           if [ -n "${REQUESTED:-}" ]; then
             version="$REQUESTED"
           else
-            version="$(sh fly/node-image/check-version-pin.sh --print-latest)"
+            version="$(sh fly/node-image/latest-release.sh --print-latest)"
           fi
           case "$version" in
             v[0-9]*.[0-9]*) ;;
@@ -181,7 +181,6 @@ jobs:
           # local build silently produces a worse one. Requesting an older
           # version on purpose still passes — the defaults are ahead of it, not
           # behind.
-          sh fly/node-image/check-version-pin.sh --latest "$version"
 
       # agentpod-node:base is not published anywhere, so every image that is
       # FROM it (directly, or through a harness layer) has to build it here. The

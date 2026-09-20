@@ -85,35 +85,43 @@ version — so a published Fly image always carries the newest verified binary.
 Its optional `node_agent_version` input pins an older release on purpose.
 
 The `ARG` default is what a hand-build (the `docker buildx` lines above) gets,
-so it still matters, and `check-version-pin.sh` fails the node-agent CI job when
-either Dockerfile's default falls behind the latest release or the two disagree.
-That check exists because they went stale in exactly that way: both sat on
-v0.1.22 while the fleet ran v0.1.24, which meant no node-agent fix could reach a
-Fly station however often the image was republished (issue #290).
+and it is **empty**, so a hand-build downloads `releases/latest/download`. Pass
+`--build-arg AGENTPOD_VERSION=v0.1.35` to pin one on purpose.
 
-**Moving the pin is not your job.** `release-node-agent.yml`'s `fly-pin` job runs
-`bump-version-pin.sh --to <the tag just released>` and opens
-`chore/fly-pin-<tag>` against `main`; merging it is the whole ritual. The guard
-alone made every release cost a mechanical two-line PR before a Fly image could
-be published (#294, #301 in one day), which is the kind of step that eventually
-gets routed around rather than done (issue #302). The pin is now a consequence
-of releasing; the guard stays as the backstop for anything that bypasses that
-path.
+**There is nothing to bump after a release.** There used to be. The default named
+a version, the published images never read it (`publish-images.yml` passes its
+own `--build-arg`), so the constant governed only hand-builds — and keeping it
+current took a CI guard plus a bot-opened PR per release.
 
-It opens a PR rather than pushing to `main`, because `main` requires the
-contract / hub / node-agent / console / worker checks and is `strict`, so a
-push from a workflow would be rejected *after* the release is already
-published. A PR opened with `GITHUB_TOKEN` cannot trigger `pull_request`
-workflows, so the job also dispatches `ci.yml` on the branch to get those checks
-to report — `gh workflow run ci.yml --ref chore/fly-pin-<tag>` by hand if it did
-not.
+That machinery cost more than it bought:
 
-`bump-version-pin.sh` never *lowers* a pin (re-running an older release leaves
-it alone) and is a no-op when the pin is already current, so re-running the
-release workflow produces no second commit and no failure. It decides newer vs
-older by calling `check-version-pin.sh --compare` rather than parsing versions
-itself: one comparator, so the two can never disagree about whether `v0.1.9`
-precedes `v0.1.24`.
+- the guard failed `node-agent` on **every open PR** from the moment a release
+  was cut until the bump landed, so a red CI meant "somebody released", not
+  "your branch is broken";
+- the PR is created with `GITHUB_TOKEN`, and a PR opened by that token cannot
+  trigger `pull_request` workflows — its required checks sat at *Expected*
+  forever. This file used to claim the job dispatched `ci.yml` to work around
+  that. It did not: `chore/fly-pin-v0.1.35` had **no checks at all** and needed a
+  manual `gh workflow run ci.yml --ref <branch>`;
+- so the PRs went unmerged. `chore/fly-pin-v0.1.32` sat open for three weeks;
+  `chore/fly-pin-v0.1.35` broke CI repo-wide until someone traced it by hand.
+
+The property the pin was protecting is "a hand-build ships a current agent", and
+`releases/latest/download` states that directly and cannot drift. The property
+worth paying for — a *published* image built against one named, verified release
+— is unaffected: `publish-images.yml` still resolves a concrete version, passes
+it as a build-arg, and asserts the pushed image reports it.
+
+The original failure this all came from is still worth remembering. On
+2026-08-13 both Fly images sat on v0.1.22 while the fleet ran v0.1.24, so the
+\#286 Pi fix could not reach a Fly station however often the image was
+republished (issue #290). A stale constant caused that. There is no longer a
+constant to go stale.
+
+`latest-release.sh --compare A B` prints `older|same|newer` and is the one
+comparator anything here uses to decide which of two versions precedes the
+other — `v0.1.9` is *older* than `v0.1.24`, which a string comparison gets
+backwards. `test-latest-release.sh` pins that, in the `node-agent` CI job.
 
 ## Pointing the hub at it
 
@@ -137,15 +145,15 @@ local tag.
 ## Tests
 
 `sh fly/node-image/test-volume-workspace.sh` and
-`sh fly/node-image/test-version-pin.sh` — both run in CI in the `node-agent`
-job, which also runs `sh fly/node-image/check-version-pin.sh` against the live
+`sh fly/node-image/test-latest-release.sh` — both run in CI in the `node-agent`
+job, which also runs `sh fly/node-image/test-latest-release.sh` against the live
 release list.
 
 The pin test is offline (every case passes an explicit `--latest` or `--to`) and
 covers both halves: the comparison that a string compare gets backwards
-(`v0.1.9` is *older* than `v0.1.24`), and what `bump-version-pin.sh` does when
+(`v0.1.9` is *older* than `v0.1.24`), and what the bump did when
 the pin is behind, already current, or ahead of the target.
-`check-version-pin.sh --compare A B` prints `older|same|newer` if you want to
+`latest-release.sh --compare A B` prints `older|same|newer` if you want to
 check a pair by hand.
 
 The `/workspace` half of that test needs a writable `/`, so it skips on macOS.

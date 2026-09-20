@@ -26,7 +26,24 @@ FROM oven/bun:1-slim
 # overrides this with --build-arg, so what a published image carries is the
 # release resolved at build time; this default is what a local `docker build`
 # gets.
-ARG AGENTPOD_VERSION=v0.1.35
+# Empty by default: a plain `docker build` takes the LATEST release.
+#
+# It used to name a version, and that constant was the whole of a problem. The
+# published images never read this default — `publish-images.yml` passes
+# `--build-arg AGENTPOD_VERSION=<resolved latest>` — so the default only ever
+# governed a local `docker build`. Keeping it current therefore needed a guard
+# (`check-version-pin.sh`) that failed CI on every PR after a release, plus a
+# bot-opened PR to move it; that PR is created with GITHUB_TOKEN, which cannot
+# trigger `pull_request` workflows, so its checks never ran and it sat open
+# until somebody noticed. Two of them had.
+#
+# The property actually wanted here is "current", and `releases/latest/download`
+# says that directly. Reproducibility lives where it matters — the published
+# images, which are still built against an explicit version.
+#
+#   docker build .                                  # latest release
+#   docker build --build-arg AGENTPOD_VERSION=v0.1.35 .   # pinned
+ARG AGENTPOD_VERSION=
 
 # oven/bun:1-slim leaves USER unset, i.e. root, which is what everything below
 # needs: apt, the release download, and at runtime the wrapper replacing
@@ -55,7 +72,11 @@ RUN bun add -g opencode-ai@1.18.15
 
 # Installed at /agentpod-node so the fleet entrypoint works unmodified.
 RUN set -eux; \
-    base="https://github.com/SuperJackfruitLabs/agentpod/releases/download/${AGENTPOD_VERSION}"; \
+    if [ -n "${AGENTPOD_VERSION}" ]; then \
+      base="https://github.com/SuperJackfruitLabs/agentpod/releases/download/${AGENTPOD_VERSION}"; \
+    else \
+      base="https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download"; \
+    fi; \
     curl -fsSL -o /agentpod-node "${base}/agentpod-node-linux-amd64"; \
     curl -fsSL -o /tmp/SHA256SUMS "${base}/SHA256SUMS"; \
     cp /agentpod-node /tmp/agentpod-node-linux-amd64; \

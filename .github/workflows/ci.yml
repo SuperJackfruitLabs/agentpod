@@ -169,17 +169,26 @@ jobs:
       # station at all). These two steps are that forcing function. They live in
       # this job for the same reason as the ones above: it is a required check,
       # and a job of its own would not gate.
-      - name: Test the Fly node-agent pin check
-        run: sh fly/node-image/test-version-pin.sh
-
-      # Resolves the latest release from the GitHub API and fails when either
-      # Fly Dockerfile's ARG default is behind it. Expected to turn red on the
-      # first PR after a node-agent release: bumping both ARGs is the fix, and
-      # noticing here is the entire point.
-      - name: Check the Fly images pin the current node-agent release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: sh fly/node-image/check-version-pin.sh
+      - name: Test the release version comparator
+        run: sh fly/node-image/test-latest-release.sh
+  # The hub is deployed BY HAND (ssh + git pull + systemctl restart), so nothing
+  # here ships it. What this does is notice when the thing that is running stops
+  # serving what it should — which on 2026-09-20 took a person curling a route to
+  # discover, hours after a green deploy.
+  #
+  # Runs on main only, and never fails the build: it reports on a deployment this
+  # workflow did not perform and may legitimately be mid-restart. It is a signal,
+  # not a gate. The gate is running it yourself after deploying, per
+  # docs/DEPLOYMENT.md.
+  hub-smoke:
+    name: hub smoke (production)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: Probe the deployed hub's routes
+        run: sh deploy/smoke.sh https://hub.agentpod.dev
 
   console:
     name: console
