@@ -120,6 +120,23 @@ jobs:
           SESSION_SECRET: test-session-secret-32-chars-long
           ENCRYPTION_KEY: test-encryption-key-32-bytes!!!!
 
+      - name: Setup Go for managed skill integration
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - name: Test managed skills across hub and node
+        working-directory: apps/hub
+        timeout-minutes: 5
+        run: bun tests/integration/skills-node-e2e.ts
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
+          API_TOKEN: test-token
+          SESSION_SECRET: test-session-secret-32-chars-long
+          ENCRYPTION_KEY: test-encryption-key-32-bytes!!!!
+
   node-agent:
     name: node-agent
     runs-on: ubuntu-latest

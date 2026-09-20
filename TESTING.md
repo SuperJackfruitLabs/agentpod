@@ -156,6 +156,22 @@ test rather than configured twice.
 
 ## Live verification
 
+The hub CI job runs the managed-skills integration probe with the real Go handler
+after the hub suite. To reproduce it locally, start the isolated pgvector test
+database and use the node's Go toolchain:
+
+```bash
+cd apps/hub
+DATABASE_URL="postgres://agentpod:agentpod-dev-password@127.0.0.1:5434/agentpod" bun tests/integration/skills-node-e2e.ts
+```
+
+It creates a temporary test user/node, serves loopback HTTP, and materializes only
+the checked-in synthetic skill archive in a temporary workspace. It checks denied
+and allowed station grants with the control pair enforced, then plan,
+authenticated download, reviewed apply, verified files, idempotent replay and
+rollback. It cleans up its subprocess, database rows and files. No live harness
+settings are read or changed, and this does not establish native loading.
+
 Unit suites are necessary, not sufficient — features that touch the fleet get
 verified against the real deployment (console at `console.agentpod.dev`, the
 live nodes) before an issue is closed. When a release changes the node-agent,

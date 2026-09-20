@@ -13,5 +13,6 @@ export * from "./card-prompt";
 export * from "./changeset";
 export * from "./skills";
 export * from "./skill-install";
+export * from "./skill-management";
 export * from "./posture";
 export * from "./matrix-events";

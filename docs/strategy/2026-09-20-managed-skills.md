@@ -108,10 +108,11 @@ hub origin at `/api/nodes/:nodeId/stations/:stationId/skill-artifacts/:operation
 with `X-AgentPod-Station-Key` binding the detected key. TLS is mandatory outside
 loopback development. Redirects are refused, response bodies never become errors,
 and bytes must match the requested digest before the archive verifier runs.
-The server route, immutable artifact storage and per-operation authorization are
-still pending: this branch does not expose a working hub installation API. The
-server must authenticate the node, check current station ownership and the
-operation's station/key/profile/pin binding, and permit retries for recovery.
+The hub now implements that route with a short-lived operation authorization.
+It checks the enrolled node secret, current station node/key/owner/tenant/harness,
+the operation and artifact binding, the owner's ban state and current reach
+permission. Downloads are available during an authorized plan/apply attempt;
+recovery renews authorization through the same authenticated operator action.
 
 A plan binds the exact node/station/profile/workspace, immutable artifact digest,
 expected prior state, owned relative paths, operation ID, concrete diff and
@@ -141,11 +142,58 @@ an empty inventory. The console shows scope, freshness, coverage and unknown
 states, with plugins separate from skills. Management adds profile/artifact
 selection, a reviewable diff, progress, conflicts, activation and rollback.
 
+The management API is now implemented; the console management flow remains
+pending. All operator routes require the existing authenticated user, tenant,
+station ownership and advertised capability. Planning and application additionally
+require reach permission, including rollback planning because it persists state.
+
+| Route (under `/api`) | Request / result |
+|---|---|
+| `POST /skills/artifacts?harness=…&profile=…` | Binary upload; immutable artifact ID, server-computed archive hash and declared metadata |
+| `GET /skills/artifacts` | Owner/tenant metadata only; no content or inferred compatibility |
+| `DELETE /skills/artifacts/:artifactId` | Deletes only an owned artifact not referenced by an operation |
+| `POST /stations/:id/skills/plan` | `{requestId, artifactId}`; durable operation with node-validated plan |
+| `POST /stations/:id/skills/rollback` | `{requestId, profile}`; a separate reviewable rollback plan |
+| `GET /stations/:id/skills/operations` | Last 50 operation summaries, without large plan payloads |
+| `GET /stations/:id/skills/operations/:operationId` | Recorded plan, receipt and coordination status |
+| `POST /stations/:id/skills/operations/:operationId/inspect` | `{}`; reconcile with the node's durable receipt |
+| `POST /stations/:id/skills/operations/:operationId/apply` | `{planDigest}`; apply the exact reviewed plan |
+| `POST /stations/:id/skills/verify` | `{profile}`; fresh managed-file evidence, with loading independently unknown |
+
+Artifacts use the existing Postgres database, scoped to owner and tenant. Upload
+declarations remain unverified metadata until a node validates the actual package;
+they never establish native compatibility. Each upload is bounded to 32 MiB and
+30 seconds, with 128 MiB / 256-artifact retention per owner and tenant. Quota checks
+serialize across hub processes. Composite foreign keys prevent cross-owner or
+cross-tenant artifact and station references.
+
+A client request UUID maps to one station-scoped operation ID. An operation cannot
+be retargeted by replaying that UUID with different input. The hub atomically
+records an audit intent and a 180-second coordination lease before dispatch;
+downloads have a separate 90-second authorization window. Final writes match the
+worker's lease token so a stale response cannot overwrite a newer observation.
+Every retry inspects the node first. Timeout, invalid replies and expired worker
+leases report `unknown`, never success or evidence of no change. A node-confirmed
+receipt is required for completion. The station retains up to 256 operation
+records, reserving one from new installs for rollback; broad rollout still needs
+retention inspection/maintenance. No background scheduler is introduced.
+
+Migration `0069_managed_skills` adds the two tables and ownership indexes. Referenced
+unique indexes precede their composite foreign keys. Test it against the prior
+schema, not only a database where the feature tables already exist.
+
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,
 malformed entries and unchanged user files. Gateway/hub tests cover unavailable
 capabilities, ownership, malformed replies and offline nodes. UI tests distinguish
 present from loaded and preserve partial/error states.
+
+The required hub CI job also runs a real Go-handler integration fixture over
+loopback HTTP, an isolated database and a temporary workspace. It exercises
+upload, enforced station grants, plan, authenticated download, reviewed apply, file verification, replay
+and retained-generation rollback. The fixture authenticates a temporary node
+identity and does not read live enrollment files or start a harness. Native/ACP
+activation and deployed placement remain separate, unmet gates.
 
 Release still requires native and ACP evidence for each declared harness target,
 one actual canary per harness, rollback, then an operator-selected cohort. Test

@@ -30,6 +30,7 @@ export * from "./devices";
 
 // Station registry (adopted stations, fleet console)
 export * from "./stations";
+export * from "./skills";
 
 // Station audit log (write ops + terminal events, fleet console)
 export * from "./audit";
