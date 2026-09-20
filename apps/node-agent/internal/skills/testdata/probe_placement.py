@@ -58,6 +58,17 @@ def probe(args):
     binary=str(Path(shutil.which(args.binary) or args.binary).resolve())
     test_binary=str(Path(args.node_test_binary).resolve())
     version=subprocess.run([binary,'--version'],check=True,capture_output=True,text=True,timeout=45).stdout.strip()
+    acp_adapter=getattr(args,'codex_acp_adapter',None)
+    adapter_version=None
+    if acp_adapter:
+        if args.harness!='codex':raise ValueError('ACP comparison currently supports Codex only')
+        acp_adapter=str(Path(shutil.which(acp_adapter) or acp_adapter).resolve())
+        # Match the adapter's createRequire(import.meta.url) resolution, not PATH.
+        resolved=subprocess.run(['node','--input-type=module','-e',
+          "import {createRequire} from 'node:module'; console.log(createRequire(process.argv[1]).resolve('@openai/codex/bin/codex.js'));",acp_adapter],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
+        if Path(resolved).resolve()!=Path(binary):raise ValueError("--binary must be this adapter bundled Codex entrypoint")
+        adapter_version=subprocess.run([acp_adapter,'--version'],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
+        if adapter_version!='@agentclientprotocol/codex-acp 1.1.14':raise ValueError('ACP probe needs review for this adapter version')
     checks=[];expected='sjl-fixture:sjl-fixture' if args.harness=='codex' else 'sjl-fixture'
     skills_dir=Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory(prefix='agentpod-native-placement-') as temporary:
@@ -73,7 +84,7 @@ def probe(args):
         if args.harness=='pi':
             if not args.pi_skills_module:raise ValueError('Pi requires its explicit installed loader module')
             (root/'pi-scan.mjs').write_text("import {pathToFileURL} from 'node:url';const {loadSkillsFromDir}=await import(pathToFileURL(process.argv[2]).href);console.log(JSON.stringify(loadSkillsFromDir({dir:process.argv[3],source:'agentpod-synthetic-probe'})));\n")
-        native=Codex(binary,root) if args.harness=='codex' else None
+        native=Codex(binary,root) if args.harness=='codex' and not acp_adapter else None
         def operation(action):
             command_env=dict(os.environ,SJL_NATIVE_PLACEMENT_WORKSPACE=str(workspace),SJL_NATIVE_PLACEMENT_HARNESS=args.harness,SJL_NATIVE_PLACEMENT_ACTION=action)
             r=subprocess.run([test_binary,'-test.run=^TestNativePlacementFixtureOperation$'],cwd=skills_dir,env=command_env,capture_output=True,text=True,timeout=45)
@@ -84,7 +95,10 @@ def probe(args):
             if result['verification']['loaded']['value'] is not None:raise RuntimeError('filesystem receipt falsely claimed loading')
             return result
         def scan(directory):
-            if native:data=native.request('skills/list',{'cwds':[str(directory)],'forceReload':True})['data'][0]
+            if acp_adapter:
+                from probe_codex_acp import scan as scan_acp
+                data={'skills':scan_acp(acp_adapter,directory,root/'acp-home')}
+            elif native:data=native.request('skills/list',{'cwds':[str(directory)],'forceReload':True})['data'][0]
             else:
                 if args.harness=='openclaw':
                     (root/'config.json').write_text(json.dumps({'agents':{'defaults':{'workspace':str(directory)}},'plugins':{'enabled':False}}))
@@ -96,7 +110,7 @@ def probe(args):
                 if r.returncode or output.stat().st_size>32*1024*1024:raise RuntimeError('native scan failed or exceeded its bound')
                 data=json.loads(output.read_text())
                 if isinstance(data,list):data={'skills':data}
-            return [{key:item[key] for key in ('name','description','scope','source','eligible','enabled') if key in item} for item in data['skills'] if item['name'] in ('sjl-fixture',expected)]
+            return [{key:item[key] for key in ('name','description','scope','source','eligible','enabled') if key in item} for item in data['skills'] if item['name'] in ('sjl-fixture','sjl-fixture:sjl-fixture')]
         def check(name,description=None,count=1,directory=workspace):
             observed=scan(directory)
             checks.append({'check':name,'passed':len(observed)==count and all(i['name']==expected and (description is None or i['description']==description) for i in observed),'observation':observed})
@@ -115,12 +129,14 @@ def probe(args):
             check('sibling-isolation',count=0,directory=sibling)
         finally:
             if native:native.close()
-    return {'schema_version':1,'harness':args.harness,'version':version,'kind':'go-native-placement-fixture',
-      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.','No model turn, ACP, native trust decision or active-session behavior was tested.','Pi invokes its installed directory loader, not a trusted session.','Remote activation remains unexposed pending external-process coverage, version/mode gates and the operator workflow.','The node receipt keeps loaded unknown; the separate native probe observes discovery.']}
+    return {'schema_version':1,'harness':args.harness,'version':version,'kind':'go-acp-placement-fixture' if acp_adapter else 'go-native-placement-fixture',
+      'adapter_version':adapter_version,'discovery_mode':'fresh ACP session with isolated offline provider' if acp_adapter else 'native discovery',
+      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.',('No model turn, production provider/authentication, native trust decision or existing-session refresh was tested.' if acp_adapter else 'No model turn, ACP, native trust decision or active-session behavior was tested.'),'Pi invokes its installed directory loader, not a trusted session.','Remote activation remains unexposed pending external-process coverage, version/mode gates and the operator workflow.','The node receipt keeps loaded unknown; the separate native probe observes discovery.']}
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--harness',choices=list(ROOTS),required=True);parser.add_argument('--binary',required=True)
+    parser.add_argument('--codex-acp-adapter',help='Probe fresh ACP sessions using the adapter bundled engine and isolated offline provider')
     parser.add_argument('--node-test-binary',required=True);parser.add_argument('--pi-skills-module');parser.add_argument('--output',required=True,type=Path)
     args=parser.parse_args()
     if args.output.exists():parser.error('preserve existing evidence; choose a new output')

@@ -51,3 +51,40 @@ tests cover ten transaction boundaries and prove that fresh ACP/terminal manager
 refuse new starts until recovery. Those children are shell/cat fixtures, not
 native ACP sessions. Broker exposure, external-process/version gates and deployed
 native/ACP evidence remain separate requirements.
+
+### Codex ACP discovery comparison
+
+`acp-placement-codex-2026-09-21.json` records all eleven placement lifecycle
+checks through codex-acp 1.1.14 and its bundled Codex 0.147.0. The companion
+`native-placement-codex-bundled-2026-09-21.json` exercises that same bundled
+engine's native app-server discovery. This differs from the earlier host CLI
+0.155.0 evidence. Both discover the exported qualified name
+`sjl-fixture:sjl-fixture`.
+
+Build the fixture test binary as above, then run:
+
+```sh
+python3 -B probe_placement.py --harness codex \
+  --binary /absolute/adapter/node_modules/@openai/codex/bin/codex.js \
+  --codex-acp-adapter /absolute/codex-acp \
+  --node-test-binary /absolute/skills-tests --output /tmp/acp-evidence.json
+python3 -B -m unittest discover -s . -p test_probe_codex_acp.py
+```
+
+The probe validates the adapter version and uses Node's `createRequire` resolution
+to ensure `--binary` identifies its bundled engine. No inherited CODEX_PATH is
+passed to ACP. Every scan starts a fresh adapter/session with an isolated HOME
+and CODEX_HOME, a credential-free provider pointing at a closed loopback port,
+no MCP servers and no client tools. Only `initialize` and `session/new` are sent;
+no model prompt is sent. The probe observes `available_commands_update`, bounds
+frames/queue/time, terminates the process group and reaps the adapter. Synthetic
+client tests run in the required node-agent CI job; real installed-runtime probes
+remain opt-in.
+
+The first probe assertion incorrectly expected the unqualified name from a
+minimal hand-written fixture. Inspecting the exported fixture's actual command
+update established the qualified name; the final report tests that exact name.
+The discovery evidence establishes fresh-session advertisement and lifecycle
+isolation, not model use, production authentication, trust, existing-session
+refresh, AgentPod transport or external-process quiescence. Remote activation
+and all other harness ACP comparisons remain pending.
