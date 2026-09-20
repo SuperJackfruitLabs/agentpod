@@ -132,7 +132,7 @@ func (c *codexDescriptor) Detect() ([]Station, error) {
 
 	// "acp" is advertised because *codexDescriptor implements ACPCommander (via
 	// the external codex-acp adapter — see ACPCommand).
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 
 	stations := []Station{}
 	for _, projPath := range parseCodexProjectPaths(data) {

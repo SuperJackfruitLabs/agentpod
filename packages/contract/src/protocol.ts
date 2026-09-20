@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Station, StationHealth, FsEntry } from "./station";
 import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
 import { PostureReport } from "./posture";
+import { SkillInventory, SkillInventoryParams } from "./skills";
 
 export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
@@ -25,6 +26,7 @@ export type InputMsg = z.infer<typeof InputMsg>;
 export type ResizeMsg = z.infer<typeof ResizeMsg>;
 
 export const VERB_PARAMS = {
+  "skills.inventory": SkillInventoryParams,
   "detect": z.object({}),
   "health": z.object({ key: z.string() }),
   "fs.list": z.object({ key: z.string(), path: z.string() }),
@@ -72,6 +74,7 @@ export const VERB_PARAMS = {
 // NOTE: "detect" returns plain Station[] (no adopted field) — the hub
 // annotates adopted:true/false from its DB before forwarding to clients.
 export const VERB_RESULTS = {
+  "skills.inventory": SkillInventory,
   "detect": z.array(Station),
   "health": StationHealth,
   "fs.list": z.array(FsEntry),

@@ -130,7 +130,7 @@ func (c *claudeCodeDescriptor) Detect() ([]Station, error) {
 
 	// "acp" is advertised because *claudeCodeDescriptor implements ACPCommander
 	// (via the external claude-agent-acp adapter — see ACPCommand).
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 	var stations []Station
 
 	for _, projPath := range paths {

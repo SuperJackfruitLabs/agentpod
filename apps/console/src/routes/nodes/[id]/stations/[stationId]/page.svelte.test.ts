@@ -510,3 +510,25 @@ test("a reply about the agent we have just navigated away from is dropped", asyn
 
   expect(getByTestId("station-handle").textContent).toContain("scribe");
 });
+
+test("skill inventory tab is capability gated and fetches only the selected station", async () => {
+  vi.spyOn(api,"listStations").mockResolvedValue([station(["health","skills.inventory"])]);
+  const inventory=vi.spyOn(api,"skillsInventory").mockResolvedValue({
+    stationKey:"codex:fixture",harness:"codex",observedAt:"2026-09-20T10:00:00Z",
+    skills:[],plugins:[],issues:[],coverage:{complete:false,roots:[],limitations:["Fixture scan"]},
+  });
+  setUrl("?tab=skills");
+  const {getAllByRole}=render(StationPage);
+  await waitFor(()=>expect(tabNames(getAllByRole("tab"))).toContain("Skills"));
+  await waitFor(()=>expect(inventory).toHaveBeenCalledWith("station_1"));
+});
+
+test("older stations have no skill inventory tab or request",async()=>{
+  vi.spyOn(api,"listStations").mockResolvedValue([station(["health"])]);
+  const inventory=vi.spyOn(api,"skillsInventory");
+  setUrl("?tab=skills");
+  const {getAllByRole}=render(StationPage);
+  await waitFor(()=>expect(tabNames(getAllByRole("tab"))).toContain("Health"));
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Skills");
+  expect(inventory).not.toHaveBeenCalled();
+});

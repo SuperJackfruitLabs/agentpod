@@ -1,4 +1,4 @@
-import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats } from "@agentpod/contract";
+import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory } from "@agentpod/contract";
 import { goto } from "$app/navigation";
 import { clearAuthSession } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
@@ -543,4 +543,11 @@ export const nodePosture = (nodeId: string) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
+  });
+
+// Station-local skill observations, independently of runtime health.
+export type SkillInventoryResult = SkillInventory;
+export const skillsInventory = (stationId: string) =>
+  http<SkillInventoryResult>(`/api/stations/${stationId}/skills/inventory`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
   });
