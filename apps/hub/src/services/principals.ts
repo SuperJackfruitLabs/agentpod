@@ -278,6 +278,57 @@ export async function listPrincipals(): Promise<
  * Null for an agent or a service, which have no Better Auth identity by construction. That is a
  * refusal at the caller, not an error here.
  */
+/**
+ * Resolve the `sub` of a hub-issued token to a Better Auth user id.
+ *
+ * **Both shapes are real, and assuming one of them was a live 403.** A token's `sub` is:
+ *
+ *   - a `prn_…` principal id, when the token was minted by a service signing key —
+ *     `station-token.ts`, `mintPrincipalAssertion`, the bridge; or
+ *   - a **Better Auth user id**, for every token that came out of a session or the
+ *     authorization-code exchange, because Better Auth's jwt plugin overwrites `sub` with
+ *     `session.user.id` after `definePayload` has run.
+ *
+ * `authMiddleware` resolved only the first, so every token a person obtained through
+ * `fleet login` was refused with "That principal has no account on this hub" — `fleet nodes`,
+ * `agents`, `stats` and `activity`, all of them, since the middleware learned to read hub
+ * tokens at all. The test that should have caught it minted its own token with a `prn_` subject,
+ * so it exercised a shape the hub does not actually produce.
+ *
+ * The principal mapping is tried FIRST and the user table second. Both are lookups against rows
+ * that exist; nothing here trusts the token's own claim about which kind it carries, so a
+ * `prn_` that names no identity stays refused rather than falling through to be read as a user
+ * id that happens not to exist either.
+ */
+export async function userIdForTokenSubject(sub: string): Promise<string | null> {
+  const viaPrincipal = await userIdForPrincipal(sub);
+  if (viaPrincipal) return viaPrincipal;
+
+  // The second shape, answered from the SAME table rather than from `user`.
+  //
+  // "Is this a Better Auth user id?" is not the question — `user` would answer that, and would
+  // admit somebody who has an account here but is not a principal. The question the refusal
+  // below actually asks is "does this subject have a principal on this hub", and a
+  // `better-auth` identity row IS that fact, read in the other direction. Any token this hub
+  // mints for a human already implies one, because `buildTokenPayload` refuses to mint without
+  // a principal.
+  //
+  // Keeping both directions on one table also keeps them consistent: an identity unlinked from
+  // a principal stops resolving by either route at the same moment, rather than one path
+  // outliving the other.
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
+      and(
+        eq(principalIdentities.externalId, sub),
+        eq(principalIdentities.system, "better-auth")
+      )
+    )
+    .limit(1);
+  return identity?.externalId ?? null;
+}
+
 export async function userIdForPrincipal(principalId: string): Promise<string | null> {
   const [identity] = await db
     .select({ externalId: principalIdentities.externalId })

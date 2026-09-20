@@ -128,3 +128,53 @@ describe("what it does not accept", () => {
     expect((await get(foreign)).status).toBe(401);
   });
 });
+
+/**
+ * The subject shape the hub ACTUALLY mints.
+ *
+ * Every test above mints its token with `sub` set to a `prn_…`. That is a real shape — a service
+ * signing key produces it — but it is not the one a person gets. Better Auth's jwt plugin
+ * overwrites `sub` with `session.user.id` after `definePayload` runs, so every token out of a
+ * session or the authorization-code exchange carries a **Better Auth user id**.
+ *
+ * `authMiddleware` resolved only the `prn_` shape, so every credential from `fleet login` was
+ * refused with "That principal has no account on this hub" — `fleet nodes`, `agents`, `stats`
+ * and `activity`, all of them, for as long as this branch has existed. Found on 2026-09-20 by
+ * running `fleet nodes` against production, not by this file, because this file only ever fed
+ * the middleware a shape the hub does not produce.
+ */
+describe("a token whose sub is a Better Auth user id, as the hub really mints", () => {
+  test("is admitted, and resolves to that same user", async () => {
+    // The exact shape `fleet login` yields: sub is the user id, not the principal id.
+    const res = await get(await tokenFor(humanUserId, "human"));
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { id: string; authType: string };
+    expect(body.id).toBe(humanUserId);
+    expect(body.authType).toBe("hub_token");
+  });
+
+  test("and the prn_ shape still works — both are real, neither replaced the other", async () => {
+    // Guards the fix against being a swap rather than a widening. A service signing key still
+    // mints `prn_` subjects, and the bridge depends on them resolving.
+    const res = await get(await tokenFor(humanPrincipalId, "human"));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { id: string }).id).toBe(humanUserId);
+  });
+
+  test("a subject that is neither a principal nor a user is still refused", async () => {
+    // The widening must not become "admit anything the token claims". A signed token naming a
+    // subject this hub has never heard of resolves to nobody and fails closed.
+    const res = await get(await tokenFor(`usr_no_such_${Date.now()}`, "human"));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { message: string }).message).toContain("no account");
+  });
+
+  test("an agent token is still refused on the user-id shape too", async () => {
+    // The human-only rule is enforced before the subject is resolved, so widening the
+    // resolution must not have opened a path around it.
+    const res = await get(await tokenFor(humanUserId, "agent"));
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { message: string }).message).toContain("agent");
+  });
+});

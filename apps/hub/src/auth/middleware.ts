@@ -14,7 +14,7 @@ import { auth, type Session, type User } from "./drizzle-auth";
 import { BOOTSTRAP_TENANT_ID } from "./tenant";
 import { config } from "../config";
 import { createLogger } from "../utils/logger";
-import { userIdForPrincipal } from "../services/principals";
+import { userIdForTokenSubject } from "../services/principals";
 import { verifyHubToken } from "./hub-token";
 
 const log = createLogger("auth-middleware");
@@ -203,7 +203,15 @@ export const authMiddleware = createMiddleware(async (c: Context, next: Next) =>
       // Translated to a Better Auth id HERE, once, because everything below resolves on one —
       // `getStation(userId, …)`, `requireLive(userId, …)`. Passing a `prn_` down is the defect
       // that killed every bridge-mode room on 2026-08-31 (#399, #400).
-      const userId = await userIdForPrincipal(hubClaims.sub);
+      //
+      // **`userIdForTokenSubject`, not `userIdForPrincipal`.** A token's `sub` is a `prn_` only
+      // when a service signing key minted it; every token that came out of a session or the
+      // authorization-code exchange carries a Better Auth user id instead, because Better Auth's
+      // jwt plugin overwrites `sub` with `session.user.id`. Resolving only the first shape meant
+      // every credential a person got from `fleet login` was refused here — `fleet nodes`,
+      // `agents`, `stats`, `activity` — for as long as this branch has existed. See that
+      // function for why the two lookups are ordered the way they are.
+      const userId = await userIdForTokenSubject(hubClaims.sub);
       if (!userId) {
         log.warn("Hub token names a principal with no Better Auth identity", { sub: hubClaims.sub });
         return c.json(
