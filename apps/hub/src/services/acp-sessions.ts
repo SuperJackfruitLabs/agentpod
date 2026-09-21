@@ -172,6 +172,8 @@ interface LiveSession {
    * (after cancelTurn + a new prompt) can never clobber the new turn's status.
    */
   turnEpoch: number;
+  /** Did the current turn produce an update the transcript can show? */
+  turnProduced: boolean;
   /** Parked ask-mode permission requests keyed by the request event's seq. */
   pending: Map<number, (resp: RequestPermissionResponse) => void>;
   ended: boolean;
@@ -488,6 +490,17 @@ async function handleWireClosed(live: LiveSession, reason: string): Promise<void
 
 function handleSessionUpdate(live: LiveSession, params: SessionNotification): void {
   if (live.ended) return;
+  // `session_info` can rename the session but leaves the chat empty. Only mark
+  // a turn productive when the console has an agent update to render.
+  const update = params.update as { sessionUpdate?: unknown };
+  if (
+    update.sessionUpdate === "agent_message_chunk" ||
+    update.sessionUpdate === "agent_thought_chunk" ||
+    update.sessionUpdate === "tool_call" ||
+    update.sessionUpdate === "tool_call_update"
+  ) {
+    live.turnProduced = true;
+  }
   // Every SDK sessionUpdate notification → agent-update with the raw update.
   persistEvent(live, "agent-update", params.update);
 }
@@ -730,6 +743,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     seq: 0,
     chain: Promise.resolve(),
     turnEpoch: 0,
+    turnProduced: false,
     pending: new Map(),
     ended: false,
     wire: null,
@@ -999,6 +1013,7 @@ export async function promptSession(
   // Stale-turn guard: only the completion of the CURRENT turn may transition
   // status (a late response from a cancelled turn must not reset a new one).
   live.turnEpoch += 1;
+  live.turnProduced = false;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
     !live.ended && live.turnEpoch === epoch && live.status === "working";
@@ -1011,19 +1026,34 @@ export async function promptSession(
       prompt: [{ type: "text", text }],
     })
     .then(async () => {
-      await audit.done("ok");
       if (isCurrentTurn()) {
+        if (!live.turnProduced) {
+          const message = "The agent completed without a reply.";
+          await audit.done("error", message).catch(() => {});
+          const { done: errorWritten } = persistEvent(live, "error", { message });
+          const { done: idleWritten } = setStatus(live, "idle");
+          await Promise.all([errorWritten, idleWritten]);
+          return;
+        }
+        await audit.done("ok");
         await setStatus(live, "idle").done;
+      } else {
+        await audit.done("ok");
       }
     })
     .catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
       await audit
-        .done("error", err instanceof Error ? err.message : String(err))
+        .done("error", message)
         .catch(() => {});
       // Wire-level failures transition the session via handleWireClosed; only
-      // recover to idle when this turn is still the live one.
+      // recover to idle when this turn is still the live one. A normal ACP
+      // request rejection is different: persist it in the transcript so every
+      // client sees the provider or adapter error instead of an idle empty turn.
       if (isCurrentTurn()) {
-        await setStatus(live, "idle").done;
+        const { done: errorWritten } = persistEvent(live, "error", { message });
+        const { done: idleWritten } = setStatus(live, "idle");
+        await Promise.all([errorWritten, idleWritten]);
       }
     });
 }
