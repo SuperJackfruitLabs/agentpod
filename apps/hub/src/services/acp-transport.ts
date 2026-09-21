@@ -25,6 +25,9 @@
 import { z } from "zod";
 import { VERB_RESULTS } from "@agentpod/contract";
 import * as broker from "./broker";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger("acp-transport");
 
 // The contract shape (sessionId + optional echoed instance), tightened so an
 // empty sessionId is still treated as a malformed open response.
@@ -126,6 +129,10 @@ export async function openAcpWire(
   let controller: ReadableStreamDefaultController<Uint8Array>;
   let writableController: WritableStreamDefaultController;
   let done = false;
+  // The node starts each acp.attach stream at zero. Retaining this evidence is
+  // essential: a missing frame permanently corrupts the hub transcript and
+  // Matrix reply, but the bytes we did receive remain useful to the caller.
+  let expectedChunkSeq = 0;
 
   /** Terminate readable, error writable, and settle closed exactly once. */
   const finish = (reason: string) => {
@@ -176,7 +183,31 @@ export async function openAcpWire(
     nodeId,
     "acp.attach",
     { sessionId },
-    (_seq, chunk, eof) => {
+    (seq, chunk, eof) => {
+      if (!done) {
+        if (seq > expectedChunkSeq) {
+          log.error("ACP stream sequence gap", {
+            nodeId,
+            stationKey,
+            sessionId,
+            instance,
+            expectedSeq: expectedChunkSeq,
+            receivedSeq: seq,
+          });
+          expectedChunkSeq = seq + 1;
+        } else if (seq < expectedChunkSeq) {
+          log.error("ACP stream sequence out of order", {
+            nodeId,
+            stationKey,
+            sessionId,
+            instance,
+            expectedSeq: expectedChunkSeq,
+            receivedSeq: seq,
+          });
+        } else {
+          expectedChunkSeq += 1;
+        }
+      }
       if (chunk !== null && !done) {
         const bytes = new Uint8Array(Buffer.from(chunk, "base64"));
         const exitReason = parseExitReason(bytes);
