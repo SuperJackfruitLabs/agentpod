@@ -54,8 +54,8 @@ type codexDescriptor struct {
 // unconfigured host still detects stations, and an ACP session still starts as
 // long as the adapter (or npx) is reachable on PATH.
 type CodexConfig struct {
-	Home        string // path to the ~/.codex directory; default <user home>/.codex
-	AcpBinary   string // a codex-acp executable; empty = resolve it
+	Home      string // path to the ~/.codex directory; default <user home>/.codex
+	AcpBinary string // a codex-acp executable; empty = resolve it
 	// CodexBinary is opt-in: naming a codex CLI here sets CODEX_PATH, which
 	// overrides the Codex the adapter bundles. Empty means "don't set it" —
 	// never "discover one". Discovery would find CLIs older than the
@@ -321,7 +321,7 @@ const (
 	// unpinned `npx -y <pkg>` would silently change every node's adapter the
 	// moment a new version is published, mid-flight, with no way to tell which
 	// version a session actually ran.
-	codexACPPackage = "@agentclientprotocol/codex-acp@1.1.14"
+	codexACPPackage = "@agentclientprotocol/codex-acp@1.12.0"
 	// codexACPMinNodeMajor is 0 — "no minimum" — NOT an oversight: unlike
 	// claude-agent-acp (node >= 22), codex-acp declares no `engines` field at
 	// all, so there is no documented requirement to enforce. The runtime is
@@ -485,6 +485,11 @@ func (c *codexDescriptor) healthAt(projPath string) Health {
 		health.Note = &note
 	}
 
+	runtime := c.chatRuntimeNote()
+	if health.Note != nil {
+		runtime = *health.Note + "; " + runtime
+	}
+	health.Note = &runtime
 	return health
 }
 

@@ -88,3 +88,8 @@ The discovery evidence establishes fresh-session advertisement and lifecycle
 isolation, not model use, production authentication, trust, existing-session
 refresh, AgentPod transport or external-process quiescence. Remote activation
 and all other harness ACP comparisons remain pending.
+
+`acp-placement-codex-1.12-2026-09-21.json` repeats the eleven lifecycle checks
+with adapter 1.12.0 and its bundled Codex 0.154.0; all passed. This is separate
+from the retained 1.1.14 evidence above. The same isolated discovery protocol
+and limits apply.

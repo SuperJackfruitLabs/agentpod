@@ -68,7 +68,7 @@ def probe(args):
           "import {createRequire} from 'node:module'; console.log(createRequire(process.argv[1]).resolve('@openai/codex/bin/codex.js'));",acp_adapter],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
         if Path(resolved).resolve()!=Path(binary):raise ValueError("--binary must be this adapter bundled Codex entrypoint")
         adapter_version=subprocess.run([acp_adapter,'--version'],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
-        if adapter_version!='@agentclientprotocol/codex-acp 1.1.14':raise ValueError('ACP probe needs review for this adapter version')
+        if adapter_version not in ('@agentclientprotocol/codex-acp 1.1.14', '@agentclientprotocol/codex-acp 1.12.0'):raise ValueError('ACP probe needs review for this adapter version')
     checks=[];expected='sjl-fixture:sjl-fixture' if args.harness=='codex' else 'sjl-fixture'
     skills_dir=Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory(prefix='agentpod-native-placement-') as temporary:
