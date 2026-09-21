@@ -101,3 +101,14 @@ and all other harness ACP comparisons remain pending.
 with adapter 1.12.0 and its bundled Codex 0.154.0; all passed. This is separate
 from the retained 1.1.14 evidence above. The same isolated discovery protocol
 and limits apply.
+
+### OpenCode ACP discovery comparison
+
+`acp-placement-opencode-2026-09-22.json` records a fresh `opencode acp` session
+using the installed 1.18.15 platform binary and the exact grouped native
+projection. It advertised `sjl-fixture` in the target workspace and excluded it
+in a sibling workspace. The opt-in Go test named in the report reproduces these
+checks with disposable HOME and XDG directories and no model prompt. The
+native receipt's OpenCode discovery name is the plain skill ID, matching this
+observation. The report does not prove a deployed canary or active-session
+refresh.
