@@ -1,11 +1,47 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+func TestSkillsStationVerifyUsesTheManagedVerificationRoute(t *testing.T) {
+	bin := build(t)
+	var gotMethod, gotPath, gotAuth string
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"state":"verified"}`))
+	}))
+	defer srv.Close()
+
+	out, code := run(t, bin, []string{
+		"AGENTPOD_HUB=" + srv.URL,
+		"AGENTPOD_TOKEN=" + jwtish("prn_operator", "human"),
+	}, "skills", "station", "verify", "--station", "station_fixture", "--profile", "fixture")
+	if code != 0 {
+		t.Fatalf("verify failed (%d): %s", code, out)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/stations/station_fixture/skills/verify" {
+		t.Fatalf("verify route = %s %s", gotMethod, gotPath)
+	}
+	if !strings.HasPrefix(gotAuth, "Bearer ") {
+		t.Fatalf("missing bearer authorization: %q", gotAuth)
+	}
+	if gotBody["profile"] != "fixture" {
+		t.Fatalf("verify body = %#v", gotBody)
+	}
+	if !strings.Contains(out, `"state":"verified"`) {
+		t.Fatalf("verify result was not preserved: %s", out)
+	}
+}
 
 func TestSkillsArtifactDeleteUsesTheOwnedArtifactRoute(t *testing.T) {
 	bin := build(t)
