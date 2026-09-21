@@ -12,10 +12,14 @@ import (
 func TestDiscoverACPSkillCommandsUsesHarnessCommandMapping(t *testing.T) {
 	workspace := t.TempDir()
 	adapter := filepath.Join(t.TempDir(), "adapter")
-	script := `#!/bin/sh
+	script := `#!/bin/bash
 read first
-read second
+if read -r -t 1 second; then
+  printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-1,"message":"session/new arrived before initialize response"}}'
+  exit 1
+fi
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+read second
 printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
 printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"/release"},{"name":"/ignore"},{"name":"builtin"}]}}}'
 `
