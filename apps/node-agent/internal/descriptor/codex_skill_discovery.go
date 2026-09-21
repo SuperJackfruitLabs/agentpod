@@ -11,8 +11,8 @@ import (
 // codexACPDiscoverSkills starts the selected adapter with a new, disposable
 // CODEX_HOME and an unreachable local provider. It sends only ACP initialize
 // and session/new; it never creates a prompt or gives the adapter client tools.
-func codexACPDiscoverSkills(ctx context.Context, adapter, workspace string) ([]string, error) {
-	if adapter == "" || !filepath.IsAbs(adapter) || !filepath.IsAbs(workspace) {
+func codexACPDiscoverSkills(ctx context.Context, adapter, workspace, nodePath string) ([]string, error) {
+	if adapter == "" || !filepath.IsAbs(adapter) || !filepath.IsAbs(workspace) || !filepath.IsAbs(nodePath) {
 		return nil, fmt.Errorf("invalid Codex discovery scope")
 	}
 	home, err := os.MkdirTemp("", "agentpod-codex-skill-discovery-")
@@ -25,7 +25,7 @@ func codexACPDiscoverSkills(ctx context.Context, adapter, workspace string) ([]s
 		return nil, err
 	}
 	return discoverACPSkillCommands(ctx, []string{adapter}, workspace, []string{
-		"PATH=" + os.Getenv("PATH"), "HOME=" + home, "CODEX_HOME=" + home, "NO_BROWSER=1", "LANG=C",
+		"PATH=" + pathWithDirFirst(filepath.Dir(nodePath), os.Getenv("PATH")), "HOME=" + home, "CODEX_HOME=" + home, "NO_BROWSER=1", "LANG=C",
 	}, func(name string) (string, bool) {
 		return strings.TrimPrefix(name, "$"), strings.HasPrefix(name, "$")
 	})

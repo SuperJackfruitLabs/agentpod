@@ -53,7 +53,12 @@ func (d *codexDescriptor) SkillInventory(ctx context.Context, key string) (skill
 	if err != nil {
 		return skills.Inventory{}, err
 	}
-	advertised, err := d.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace)
+	nodePath, err := d.nativeSkillDiscoveryNode()
+	if err != nil {
+		setCodexLoadingUnknown(&inventory, err.Error())
+		return inventory, nil
+	}
+	advertised, err := d.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace, nodePath)
 	if err != nil {
 		setCodexLoadingUnknown(&inventory, "Fresh isolated Codex session could not establish discovery: "+boundedSkillReason(err.Error()))
 		return inventory, nil
