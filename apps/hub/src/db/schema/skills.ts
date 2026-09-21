@@ -56,6 +56,50 @@ export const skillArtifacts = pgTable(
   ],
 );
 
+/** A verified SJL library release, scoped to the importing tenant and owner. */
+export const trustedSkillReleases = pgTable(
+  "trusted_skill_releases",
+  {
+    id: text("id").primaryKey(),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    profile: text("profile").notNull(),
+    recordDigest: text("record_digest").notNull(),
+    record: jsonb("record").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("trusted_skill_releases_owner_digest_idx").on(t.tenantId, t.userId, t.recordDigest),
+    uniqueIndex("trusted_skill_releases_owner_version_profile_idx").on(t.tenantId, t.userId, t.version, t.profile),
+    uniqueIndex("trusted_skill_releases_owner_id_idx").on(t.id, t.tenantId, t.userId),
+    check("trusted_skill_releases_digest_check", sql`${t.recordDigest} ~ '^[a-f0-9]{64}$'`),
+  ],
+);
+
+/** Maps every trusted release pin to an existing immutable artifact blob. */
+export const trustedSkillReleaseArtifacts = pgTable(
+  "trusted_skill_release_artifacts",
+  {
+    releaseId: text("release_id").notNull(),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+    userId: text("user_id").notNull(),
+    artifactId: text("artifact_id").notNull(),
+    harness: text("harness").notNull(),
+    bundleDigest: text("bundle_digest").notNull(),
+  },
+  (t) => [
+    uniqueIndex("trusted_skill_release_artifacts_release_harness_idx").on(t.releaseId, t.tenantId, t.userId, t.harness),
+    uniqueIndex("trusted_skill_release_artifacts_artifact_idx").on(t.artifactId, t.tenantId, t.userId),
+    foreignKey({ name: "trusted_skill_release_artifacts_release_owner_fk", columns: [t.releaseId, t.tenantId, t.userId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId, trustedSkillReleases.userId] }).onDelete("cascade"),
+    // The public artifact delete path refuses catalog-pinned blobs.  Cascading
+    // here is solely for tenant/user teardown, where PostgreSQL otherwise has
+    // no safe ordering across two children of the same user.
+    foreignKey({ name: "trusted_skill_release_artifacts_artifact_owner_fk", columns: [t.artifactId, t.tenantId, t.userId], foreignColumns: [skillArtifacts.id, skillArtifacts.tenantId, skillArtifacts.userId] }).onDelete("cascade"),
+    check("trusted_skill_release_artifacts_digest_check", sql`${t.bundleDigest} ~ '^[a-f0-9]{64}$'`),
+  ],
+);
+
 export const skillOperations = pgTable(
   "skill_operations",
   {
