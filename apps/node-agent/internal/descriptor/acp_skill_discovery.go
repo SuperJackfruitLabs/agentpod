@@ -12,11 +12,29 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const acpDiscoveryMaxFrame = 1 << 20
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 // discoverACPSkillCommands starts a resolved ACP adapter, sends only
 // initialize and session/new, then returns the slash-command names that the
@@ -39,7 +57,7 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 	cmd.Dir = workspace
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	var stderr bytes.Buffer
+	var stderr synchronizedBuffer
 	cmd.Stderr = &stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
