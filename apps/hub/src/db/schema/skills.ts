@@ -100,6 +100,22 @@ export const trustedSkillReleaseArtifacts = pgTable(
   ],
 );
 
+/** An explicit, immutable rollout audience for one trusted release identity. */
+export const skillReleaseCohorts = pgTable("skill_release_cohorts", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  releaseId: text("release_id").notNull(),
+  recordDigest: text("record_digest").notNull(),
+  stationIds: jsonb("station_ids").$type<string[]>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("skill_release_cohorts_owner_id_idx").on(t.id, t.tenantId, t.userId),
+  foreignKey({ name: "skill_release_cohorts_release_owner_fk", columns: [t.releaseId, t.tenantId, t.userId], foreignColumns: [trustedSkillReleases.id, trustedSkillReleases.tenantId, trustedSkillReleases.userId] }).onDelete("restrict"),
+  check("skill_release_cohorts_digest_check", sql`${t.recordDigest} ~ '^[a-f0-9]{64}$'`),
+  check("skill_release_cohorts_station_ids_check", sql`jsonb_typeof(${t.stationIds})='array' AND jsonb_array_length(${t.stationIds}) BETWEEN 1 AND 256`),
+]);
+
 export const skillOperations = pgTable(
   "skill_operations",
   {

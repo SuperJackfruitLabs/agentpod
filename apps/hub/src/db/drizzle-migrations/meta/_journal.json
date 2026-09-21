@@ -512,6 +512,13 @@
       "when": 1790008044519,
       "tag": "0072_remarkable_robin_chapel",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790009079202,
+      "tag": "0073_flowery_ikaris",
+      "breakpoints": true
     }
   ]
 }

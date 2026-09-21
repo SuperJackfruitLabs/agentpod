@@ -61,6 +61,7 @@ import {
   skillOperations,
   trustedSkillReleaseArtifacts,
   trustedSkillReleases,
+  skillReleaseCohorts,
 } from "./schema/skills";
 import { tenants } from "./schema/tenants";
 import { organizations, principals } from "./schema/organization";
@@ -120,6 +121,7 @@ export const TENANT_SCOPED_TABLES = {
   skillOperations,
   trustedSkillReleases,
   trustedSkillReleaseArtifacts,
+  skillReleaseCohorts,
   stationSetups,
   stationAudit,
   acpSessions,
