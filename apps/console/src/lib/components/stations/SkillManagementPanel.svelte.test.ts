@@ -47,10 +47,29 @@ function operation(state = "planned") {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "listSkillArtifacts").mockResolvedValue([artifact]);
+  vi.spyOn(api, "listTrustedSkillReleases").mockResolvedValue([]);
+  vi.spyOn(api, "listSkillReleaseCohorts").mockResolvedValue([]);
   vi.spyOn(api, "listSkillOperations").mockResolvedValue([]);
 });
 afterEach(cleanup);
 const props = { stationId: "station_1", harness: "codex", canManage: true };
+
+test("creates an explicit one-station cohort before planning its trusted release canary", async () => {
+  const release = { id: "22222222-2222-4222-8222-222222222222", version: "1.2.3", profile: "fixture", recordDigest: "a".repeat(64), createdAt: planFixture.createdAt };
+  const cohort = { id: "33333333-3333-4333-8333-333333333333", releaseId: release.id, recordDigest: release.recordDigest, stationIds: ["station_1"], createdAt: planFixture.createdAt };
+  vi.spyOn(api, "listTrustedSkillReleases").mockResolvedValue([release]);
+  vi.spyOn(api, "createSkillReleaseCohort").mockResolvedValue(cohort);
+  const canary = vi.spyOn(api, "planSkillReleaseCanary").mockResolvedValue({ cohortId: cohort.id, releaseId: release.id, recordDigest: release.recordDigest, stationId: "station_1", operationId: planFixture.operationId, operation: operation() });
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() => expect(view.getByRole("option", { name: /1\.2\.3/ })).toBeTruthy());
+  await fireEvent.change(view.getByLabelText("Trusted release"), { target: { value: release.id } });
+  await fireEvent.click(view.getByRole("button", { name: "Enroll this station as canary" }));
+  await waitFor(() => expect((view.getByRole("button", { name: "Review canary plan" }) as HTMLButtonElement).disabled).toBe(false));
+  expect(api.createSkillReleaseCohort).toHaveBeenCalledWith(release.id, release.recordDigest, ["station_1"]);
+  await fireEvent.click(view.getByRole("button", { name: "Review canary plan" }));
+  await waitFor(() => expect(canary).toHaveBeenCalledWith(cohort.id, release.id, release.recordDigest, "station_1", expect.any(String)));
+  expect(view.getByText("skills/fixture/SKILL.md")).toBeTruthy();
+});
 
 test("shows exact changes before applying the reviewed digest and keeps activation separate", async () => {
   vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());

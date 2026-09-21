@@ -113,3 +113,4 @@ export const SkillReleaseCanaryApplyRequest = SkillReleaseCanaryOperationRequest
 
 export type TrustedSkillReleaseRecord = z.infer<typeof TrustedSkillReleaseRecord>;
 export type TrustedSkillReleaseMetadata = z.infer<typeof TrustedSkillReleaseMetadata>;
+export type SkillReleaseCohortMetadata = z.infer<typeof SkillReleaseCohortMetadata>;

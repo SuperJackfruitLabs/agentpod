@@ -1,10 +1,12 @@
 <script lang="ts">
-  import type { SkillArtifactMetadata, SkillHubOperation, SkillHubOperationSummary } from "@agentpod/contract";
+  import type { SkillArtifactMetadata, SkillHubOperation, SkillHubOperationSummary, TrustedSkillReleaseMetadata, SkillReleaseCohortMetadata } from "@agentpod/contract";
   import * as api from "$lib/api/skills";
   import { Button } from "$lib/components/ui/button";
 
   let { stationId, harness, canManage, canNative = false }: { stationId: string; harness: string; canManage: boolean; canNative?: boolean } = $props();
   let artifacts = $state<SkillArtifactMetadata[]>([]);
+  let releases = $state<TrustedSkillReleaseMetadata[]>([]);
+  let cohorts = $state<SkillReleaseCohortMetadata[]>([]);
   let history = $state<SkillHubOperationSummary[]>([]);
   let nativeHistory = $state<SkillHubOperationSummary[]>([]);
   let operation = $state<SkillHubOperation | null>(null);
@@ -12,6 +14,8 @@
   let retention = $state<Awaited<ReturnType<typeof api.inspectSkillRetention>> | null>(null);
   let maintenance = $state<Awaited<ReturnType<typeof api.planSkillMaintenance>> | null>(null);
   let artifactId = $state("");
+  let releaseId = $state("");
+  let cohortId = $state("");
   let profile = $state("");
   let file = $state<File | null>(null);
   let busy = $state<string | null>(null);
@@ -20,6 +24,8 @@
   let nativePending = $state<{ action: "activate" | "deactivate" | "rollback"; requestId: string } | null>(null);
   let epoch = 0;
   const eligible = $derived(artifacts.filter(artifact => artifact.harness === harness));
+  const selectedRelease = $derived(releases.find(release => release.id === releaseId) ?? null);
+  const selectedCohort = $derived(cohorts.find(cohort => cohort.id === cohortId) ?? null);
   const locked = $derived(busy !== null || !canManage);
   const nativeLocked = $derived(busy !== null || !canNative);
   const validProfile = $derived(profile.length <= 124 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(profile));
@@ -32,11 +38,11 @@
     const id = stationId;
     void harness;
     const ticket = ++epoch;
-    artifacts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null; maintenance = null;
-    artifactId = ""; profile = ""; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
-    void Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]).then(([packages, operations, nativeOperations]) => {
+    artifacts = []; releases = []; cohorts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null; maintenance = null;
+    artifactId = ""; releaseId = ""; cohortId = ""; profile = ""; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
+    void Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listTrustedSkillReleases() : Promise.resolve([]), canManage ? api.listSkillReleaseCohorts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]).then(([packages, trustedReleases, releaseCohorts, operations, nativeOperations]) => {
       if (ticket !== epoch) return;
-      artifacts = packages; history = operations; nativeHistory = nativeOperations;
+      artifacts = packages; releases = trustedReleases; cohorts = releaseCohorts; history = operations; nativeHistory = nativeOperations;
     }).catch(e => {
       if (ticket === epoch) error = e instanceof Error ? e.message : "Could not load management data";
     }).finally(() => { if (ticket === epoch) busy = null; });
@@ -115,9 +121,21 @@
   }
   function refresh() {
     const id = stationId;
-    void perform("Refreshing history", () => Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]), ([packages, operations, nativeOperations]) => {
-      artifacts = packages; history = operations; nativeHistory = nativeOperations;
+    void perform("Refreshing history", () => Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listTrustedSkillReleases() : Promise.resolve([]), canManage ? api.listSkillReleaseCohorts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]), ([packages, trustedReleases, releaseCohorts, operations, nativeOperations]) => {
+      artifacts = packages; releases = trustedReleases; cohorts = releaseCohorts; history = operations; nativeHistory = nativeOperations;
     });
+  }
+  function createCanaryCohort() {
+    if (locked || !selectedRelease) return;
+    const release = selectedRelease;
+    void perform("Creating explicit canary cohort", () => api.createSkillReleaseCohort(release.id, release.recordDigest, [stationId]), result => {
+      cohorts = [result, ...cohorts.filter(cohort => cohort.id !== result.id)]; cohortId = result.id;
+    });
+  }
+  function planCanary() {
+    if (locked || !selectedCohort || !selectedRelease || !selectedCohort.stationIds.includes(stationId)) return;
+    const cohort = selectedCohort, release = selectedRelease;
+    void perform("Preparing trusted release canary", () => api.planSkillReleaseCanary(cohort.id, release.id, release.recordDigest, stationId, crypto.randomUUID()), result => show(result.operation));
   }
   function planNative(action: "activate" | "deactivate" | "rollback") {
     if (nativeLocked || !validProfile) return;
@@ -151,6 +169,26 @@
   {#if !canManage}<p class="text-sm text-muted-foreground">Permission to change this station is required to install or roll back skills.</p>{/if}
   {#if busy}<p role="status" class="text-sm">{busy}…</p>{/if}
   {#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
+  {#if canManage}
+    <section aria-label="Trusted release canary" class="space-y-2 rounded-md border border-primary/30 p-3 text-sm">
+      <h3 class="font-medium">Trusted release canary</h3>
+      <p class="text-muted-foreground">A canary is one explicit station in an immutable cohort. Its reviewed plan does not advance any other station.</p>
+      <label class="block" for="trusted-release">Trusted release</label>
+      <select id="trusted-release" class="w-full rounded-md border bg-background p-2 text-sm" bind:value={releaseId} disabled={locked}>
+        <option value="">Select a recorded release</option>
+        {#each releases as release (release.id)}<option value={release.id}>{release.version} · {release.profile} · {release.recordDigest.slice(0, 12)}</option>{/each}
+      </select>
+      {#if releases.length === 0}<p class="text-xs text-muted-foreground">No trusted release records are available for this account.</p>{/if}
+      <div class="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={locked || !selectedRelease} onclick={createCanaryCohort}>Enroll this station as canary</Button>
+        <select aria-label="Canary cohort" class="rounded-md border bg-background p-2 text-sm" bind:value={cohortId} disabled={locked}>
+          <option value="">Select a cohort</option>
+          {#each cohorts.filter(cohort => cohort.releaseId === selectedRelease?.id && cohort.stationIds.includes(stationId)) as cohort (cohort.id)}<option value={cohort.id}>{cohort.id.slice(0, 12)} · {cohort.stationIds.length} station{cohort.stationIds.length === 1 ? "" : "s"}</option>{/each}
+        </select>
+        <Button size="sm" disabled={locked || !selectedRelease || !selectedCohort || !selectedCohort.stationIds.includes(stationId)} onclick={planCanary}>Review canary plan</Button>
+      </div>
+    </section>
+  {/if}
   <div class="grid gap-4 rounded-md border p-3 sm:grid-cols-2">
     <div class="space-y-2">
       <label class="block text-sm font-medium" for="skill-artifact">Artifact</label>

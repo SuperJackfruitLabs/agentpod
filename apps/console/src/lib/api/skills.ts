@@ -5,6 +5,9 @@ import {
   SkillVerifyResult,
   SkillRetentionResult,
   SkillMaintenanceResult,
+  TrustedSkillReleaseMetadata,
+  SkillReleaseCohortMetadata,
+  SkillReleaseCanaryOperation,
 } from "@agentpod/contract";
 import { http } from "./client";
 
@@ -41,6 +44,21 @@ function checkedOperation(stationId: string, data: unknown, id?: string) {
 }
 export const listSkillArtifacts = async () =>
   SkillArtifactMetadata.array().parse(await http("/api/skills/artifacts"));
+export const listTrustedSkillReleases = async () =>
+  TrustedSkillReleaseMetadata.array().parse(await http("/api/skills/catalog/releases"));
+export const listSkillReleaseCohorts = async () =>
+  SkillReleaseCohortMetadata.array().parse(await http("/api/skills/catalog/cohorts"));
+export const createSkillReleaseCohort = async (releaseId: string, recordDigest: string, stationIds: string[]) =>
+  SkillReleaseCohortMetadata.parse(await http("/api/skills/catalog/cohorts", post({ releaseId, recordDigest, stationIds })));
+export const planSkillReleaseCanary = async (
+  cohortId: string, releaseId: string, recordDigest: string, stationId: string, requestId: string,
+) => {
+  const result = await http(`/api/skills/catalog/cohorts/${encodeURIComponent(cohortId)}/canary/plan`, post({ releaseId, recordDigest, stationId, requestId }));
+  const { operation: rawOperation, ...rawBinding } = result as { operation: unknown } & Record<string, unknown>;
+  const binding = SkillReleaseCanaryOperation.parse(rawBinding);
+  const operation = checkedOperation(stationId, rawOperation, binding.operationId);
+  return { ...binding, operation };
+};
 export const uploadSkillArtifact = async (
   file: File,
   harness: string,
