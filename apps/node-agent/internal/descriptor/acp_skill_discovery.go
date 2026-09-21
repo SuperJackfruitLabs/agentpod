@@ -116,10 +116,8 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 	if err := write(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}, "clientInfo": map[string]string{"name": "agentpod-native-skill-verifier", "version": "1"}}); err != nil {
 		return nil, err
 	}
-	if err := write(2, "session/new", map[string]any{"cwd": workspace, "mcpServers": []any{}}); err != nil {
-		return nil, err
-	}
 	responses := map[float64]bool{}
+	sessionRequested := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -147,6 +145,17 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 					return nil, fmt.Errorf("ACP discovery request failed")
 				}
 				responses[id] = true
+				// ACP initialization is a handshake.  Some adapters begin their
+				// session setup as soon as they answer it and can close their
+				// transport when session/new arrives before that response.  Keep
+				// the probe protocol-correct and send the dependent request only
+				// after initialization is acknowledged.
+				if id == 1 && !sessionRequested {
+					if err := write(2, "session/new", map[string]any{"cwd": workspace, "mcpServers": []any{}}); err != nil {
+						return nil, err
+					}
+					sessionRequested = true
+				}
 			}
 			if e.Params.Update.SessionUpdate == "available_commands_update" {
 				if !responses[1] || !responses[2] {
