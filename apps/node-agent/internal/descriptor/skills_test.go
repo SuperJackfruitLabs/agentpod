@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
 
 func TestSkillInventoryIsOptionalAndScopedToDetectedStation(t *testing.T) {
@@ -54,6 +57,73 @@ func TestAllSkillInventoryDescriptorsImplementOptionalInterface(t *testing.T) {
 		if _, ok := d.(SkillInventoryProvider); !ok {
 			t.Fatalf("%s lacks its advertised provider", d.Harness())
 		}
+	}
+}
+
+func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
+	home, project, _ := buildCodexFixture(t)
+	skill := filepath.Join(project, ".agents", "skills", "sjl-fixture", "skills", "fixture")
+	if err := os.MkdirAll(skill, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: fixture\ndescription: Fixture\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	unmanaged := filepath.Join(project, ".agents", "skills", "local")
+	if err := os.MkdirAll(unmanaged, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unmanaged, "SKILL.md"), []byte("---\nname: local\ndescription: Local fixture\n---\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	d := newTestCodex(t, home, false)
+	root := t.TempDir()
+	pkg := filepath.Join(root, "node_modules", "@agentclientprotocol", "codex-acp")
+	entry := filepath.Join(pkg, "dist", "index.js")
+	if err := os.MkdirAll(filepath.Dir(entry), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(entry, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkg, "package.json"), []byte(`{"name":"@agentclientprotocol/codex-acp","version":"1.12.0"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	engine := filepath.Join(pkg, "node_modules", "@openai", "codex", "package.json")
+	if err := os.MkdirAll(filepath.Dir(engine), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engine, []byte(`{"name":"@openai/codex","version":"0.154.0"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(root, "codex-acp")
+	if err := os.Symlink(entry, shim); err != nil {
+		t.Fatal(err)
+	}
+	d.acpBinary = shim
+	d.adapterRunning = func(string, string) (bool, string) { return false, "" }
+	called := false
+	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace string) ([]string, error) {
+		called = true
+		if adapter != shim || workspace != project {
+			t.Fatalf("unexpected discovery scope %q %q", adapter, workspace)
+		}
+		return []string{"sjl-fixture:fixture"}, nil
+	}
+	result, err := d.SkillInventory(context.Background(), codexKeyFor(project))
+	if err != nil || !called || len(result.Skills) != 2 {
+		t.Fatalf("result=%+v called=%v err=%v", result, called, err)
+	}
+	byName := map[string]skills.Entry{}
+	for _, entry := range result.Skills {
+		byName[entry.Name] = entry
+	}
+	loaded := byName["fixture"].Evidence.Loaded
+	if loaded.Value == nil || !*loaded.Value || loaded.ObservedAt == nil || !strings.Contains(loaded.Reason, "fresh isolated ACP") {
+		t.Fatalf("unexpected loading evidence: %+v", loaded)
+	}
+	if loaded = byName["local"].Evidence.Loaded; loaded.Value != nil || !strings.Contains(loaded.Reason, "no established command-name mapping") {
+		t.Fatalf("unmanaged skill loading evidence: %+v", loaded)
 	}
 }
 
