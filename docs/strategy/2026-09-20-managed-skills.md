@@ -340,9 +340,11 @@ requires node inspection before the UI offers apply again. Navigation discards l
 responses from the previous station. Conflict guidance preserves local edits;
 there is no force-overwrite button. Loading evidence remains separate from applied
 files. The UI now presents native activation, rollback and removal as separate
-reviewed operations only when the node advertises `skills.native`. The trusted
-catalog and immutable cohorts now exist at the API boundary; an operator UI,
-archive-content admission and live canary evidence remain unfinished.
+reviewed operations only when the node advertises `skills.native`. The Console
+and fleet CLI support artifact intake, complete catalog-record admission,
+immutable cohorts, and explicit canary planning, inspection and reviewed
+application. Catalog intake verifies archive content before pinning it. Those
+surfaces do not substitute for live canary, loading and rollback evidence.
 
 ### Stable catalog intake boundary
 
@@ -434,6 +436,19 @@ of active-session refresh, production authentication or AgentPod transport.
 The node now reuses this same bounded probe for `skills.native.verify` on a
 managed Codex placement. The verification receipt carries the command names
 derived from its verified generation, so an unrelated skill cannot make the
-placement appear loaded. The probe is read-only and leaves native publication
-fail-closed until the operator activation workflow, lifecycle coverage and
-cohort rollout gates are implemented.
+placement appear loaded. The probe is read-only. Native publication remains
+fail-closed by default until the operator enables the local node gate; live
+lifecycle, canary, loading and rollback evidence remain required before a
+cohort rollout can be claimed.
+
+### Fleet CLI release evidence (2026-09-22)
+
+`v0.1.46` packages the fleet skill-catalog and canary commands. Its published
+assets were downloaded and verified against `SHA256SUMS`. The CLI has a separate
+human operator login and never substitutes a node credential for fleet access.
+
+`v0.1.47` packages explicit cleanup of an unreferenced uploaded artifact:
+`fleet skills artifact delete --id …`. The hub remains the authority: it refuses
+an artifact that is missing or retained by an operation. Its published assets
+were also downloaded and verified against `SHA256SUMS`. Cleanup capability does
+not authorize deleting a live artifact or establish a release canary.
