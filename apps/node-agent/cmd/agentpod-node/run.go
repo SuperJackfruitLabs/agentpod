@@ -79,6 +79,13 @@ func runCmd() {
 	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
 			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
+			Workspaces: workspaces,
+			// Native publication has a separate protocol boundary and remains
+			// fail-closed until a harness-specific runtime gate proves its
+			// version, launch mode and external-process quiescence.
+			AuthorizeNative: func(context.Context, string, string) error {
+				return fmt.Errorf("native activation has not been enabled for this node")
+			},
 		})
 		reg.EnableSkillManagement()
 	} else {

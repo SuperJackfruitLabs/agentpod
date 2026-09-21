@@ -7,18 +7,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
 // Resolve must require the complete, currently detected station key and return
 // its workspace and harness. No caller-supplied path reaches the install store.
 type SkillManagementDeps struct {
-	NodeID  string
-	Resolve func(context.Context, string) (workspace, harness string, err error)
-	Fetch   SkillArtifactFetcher
+	NodeID          string
+	Resolve         func(context.Context, string) (workspace, harness string, err error)
+	Fetch           SkillArtifactFetcher
+	Workspaces      *workspacegate.Coordinator
+	AuthorizeNative func(context.Context, string, string) error
 }
 type SkillOperationResult struct {
 	Receipt *skills.InstallReceipt `json:"receipt"`
@@ -29,6 +33,16 @@ type SkillVerifyResult struct {
 	Harness      string                     `json:"harness"`
 	Profile      string                     `json:"profile"`
 	Verification skills.InstallVerification `json:"verification"`
+}
+type SkillNativeOperationResult struct {
+	Receipt *skills.PlacementReceipt `json:"receipt"`
+}
+type SkillNativeVerifyResult struct {
+	NodeID       string                       `json:"nodeId"`
+	StationKey   string                       `json:"stationKey"`
+	Harness      string                       `json:"harness"`
+	Profile      string                       `json:"profile"`
+	Verification skills.PlacementVerification `json:"verification"`
 }
 type skillManagementHandler struct {
 	inner Handler
@@ -45,7 +59,7 @@ var skillProfile = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // also accepts case-insensitive and duplicate keys, unlike the strict contract.
 func skillManagementParams(verb string, raw json.RawMessage) (map[string]string, error) {
 	fields := map[string]bool{"key": true, "profile": true}
-	if verb != "skills.verify" {
+	if verb != "skills.verify" && verb != "skills.native.verify" {
 		fields["operationId"] = true
 	}
 	if verb == "skills.plan" {
@@ -54,6 +68,12 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 	}
 	if verb == "skills.apply" {
 		fields["stationId"] = true
+		fields["expectedPlanDigest"] = true
+	}
+	if verb == "skills.native.plan" {
+		fields["action"] = true
+	}
+	if verb == "skills.native.apply" {
 		fields["expectedPlanDigest"] = true
 	}
 	invalid := fmt.Errorf("skills: invalid management params")
@@ -101,12 +121,15 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 			return nil, invalid
 		}
 	}
+	if fields["action"] && params["action"] != "activate" && params["action"] != "deactivate" && params["action"] != "rollback" {
+		return nil, invalid
+	}
 	return params, nil
 }
 
 func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
 	switch verb {
-	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify":
+	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
 	default:
 		return h.inner.Handle(ctx, verb, raw, emit)
 	}
@@ -114,8 +137,11 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	if err != nil {
 		return nil, false, err
 	}
-	if h.deps.NodeID == "" || h.deps.Resolve == nil || h.deps.Fetch == nil {
+	if h.deps.NodeID == "" || h.deps.Resolve == nil {
 		return nil, false, fmt.Errorf("skills: management unavailable")
+	}
+	if (verb == "skills.plan" || verb == "skills.apply") && h.deps.Fetch == nil {
+		return nil, false, fmt.Errorf("skills: artifact transport unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -125,6 +151,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		return nil, false, err
 	}
 	binding := skills.InstallBinding{NodeID: h.deps.NodeID, StationKey: params["key"], Harness: harness, Profile: params["profile"], WorkspacePath: workspace}
+	nativeMutation := verb == "skills.native.plan" || verb == "skills.native.apply"
+	if nativeMutation && (h.deps.Workspaces == nil || h.deps.AuthorizeNative == nil) {
+		return nil, false, fmt.Errorf("skills: native activation unavailable")
+	}
+	if nativeMutation {
+		if err := h.deps.AuthorizeNative(ctx, params["key"], harness); err != nil {
+			return nil, false, fmt.Errorf("skills: native activation refused: %w", err)
+		}
+	}
 	var store *skills.InstallStore
 	var archive []byte
 	if verb == "skills.plan" {
@@ -199,6 +234,24 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		}
 		applied, err := store.ApplyReviewed(ctx, params["operationId"], params["expectedPlanDigest"], reader)
 		return applied, false, err
+	case "skills.native.plan":
+		plan, err := store.PlanPlacement(ctx, params["operationId"], params["action"])
+		return plan, false, err
+	case "skills.native.operation":
+		receipt, err := store.PlacementOperation(ctx, params["operationId"])
+		if errors.Is(err, os.ErrNotExist) {
+			return SkillNativeOperationResult{}, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return SkillNativeOperationResult{Receipt: &receipt}, false, nil
+	case "skills.native.apply":
+		receipt, err := store.ApplyPlacementWhenIdle(ctx, params["operationId"], params["expectedPlanDigest"], h.deps.Workspaces)
+		return receipt, false, err
+	case "skills.native.verify":
+		verification, err := store.VerifyPlacement(ctx)
+		return SkillNativeVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
 	}
 	return nil, false, fmt.Errorf("skills: unknown management verb")
 }
