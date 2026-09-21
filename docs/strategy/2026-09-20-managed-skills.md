@@ -336,6 +336,25 @@ files. The UI now presents native activation, rollback and removal as separate
 reviewed operations only when the node advertises `skills.native`. Stable
 catalog/release discovery and rollout cohorts remain unfinished.
 
+### Stable catalog intake boundary
+
+The future catalog accepts an immutable library release record, never a claim
+attached to a manually uploaded archive. Intake must require schema version one,
+one canonical artifact for each of the six harnesses, the record digest over its
+unsigned canonical JSON, and archive bytes matching every pinned SHA-256. Each
+archive must then pass the node-equivalent bundle checks and match its declared
+harness, profile and bundle digest. A duplicate record digest is idempotent;
+the same version/profile with a different digest is refused. Catalog records are
+owner/tenant scoped and retain their original release record and archive pins.
+They do not prove a harness loaded a skill or that a release is safe to deploy.
+
+A cohort is an operator-selected immutable list of station IDs plus one catalog
+record digest. Planning rechecks every station owner, tenant, harness and reach
+permission and creates reviewed per-station plans. Applying one cohort member
+does not advance another. A canary records verified apply, runtime observation
+and rollback before any later cohort is chosen. Empty, offline, mixed-owner or
+already-unknown stations are visible refusals, never silently excluded.
+
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,
 malformed entries and unchanged user files. Gateway/hub tests cover unavailable
