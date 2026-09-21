@@ -561,6 +561,75 @@ test(
   20_000
 );
 
+test("promptSession persists an ACP rejection before returning the session to idle", async () => {
+  const { server, fake, station } = await setupRig("acpsess-prompt-error", {
+    stationKey: "acp-prompt-error-station",
+    failPrompt: "Provider quota exhausted",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const liveEvents: AcpEvent[] = [];
+    const unsub = subscribe(row.id, (event) => liveEvents.push(event));
+
+    await promptSession(TEST_USER, row.id, "hello");
+    const { all } = await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { message?: string }).message === "Provider quota exhausted",
+      8_000,
+    );
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+    await pollUntil(() => liveEvents.some((event) => event.type === "error"));
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toContain("Provider quota exhausted");
+    unsub();
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("promptSession reports an adapter that completes without any visible update", async () => {
+  const { server, fake, station } = await setupRig("acpsess-silent-prompt", {
+    stationKey: "acp-silent-prompt-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { all } = await pollForEvent(
+      row.id,
+      (event) =>
+        event.type === "error" &&
+        (event.payload as { message?: string }).message === "The agent completed without a reply.",
+      8_000,
+    );
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(all.some((event) => event.type === "agent-update")).toBe(false);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toBe("The agent completed without a reply.");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
 test(
   "ask mode: permission parks (status waiting), answerPermission resolves it, events persisted, agent sees selected outcome",
   async () => {

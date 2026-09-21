@@ -60,6 +60,10 @@ export interface FakeAcpNodeOpts {
   hangPrompt?: boolean;
   /** Ignore session/cancel: a hanging prompt stays open until releasePrompt(). */
   ignoreCancel?: boolean;
+  /** Reject session/prompt without emitting an agent update (provider failure). */
+  failPrompt?: string;
+  /** Complete session/prompt without emitting an update (adapter false success). */
+  silentPrompt?: boolean;
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
@@ -241,6 +245,21 @@ export async function connectFakeAcpNode(
     msg: { id: string | number; params: { sessionId: string } }
   ) => {
     proc.pendingPrompts.push(msg.id);
+    if (opts.failPrompt) {
+      const id = proc.pendingPrompts.shift();
+      if (id !== undefined) {
+        sendAgent(proc, {
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32000, message: opts.failPrompt },
+        });
+      }
+      return;
+    }
+    if (opts.silentPrompt) {
+      respondOldest(proc, { stopReason: "end_turn" });
+      return;
+    }
     sendAgent(proc, {
       jsonrpc: "2.0",
       method: "session/update",
