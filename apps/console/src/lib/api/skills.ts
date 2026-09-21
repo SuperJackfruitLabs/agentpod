@@ -3,6 +3,7 @@ import {
   SkillHubOperation,
   SkillHubOperationSummary,
   SkillVerifyResult,
+  SkillNativeVerifyResult,
   SkillRetentionResult,
   SkillMaintenanceResult,
   TrustedSkillReleaseMetadata,
@@ -207,7 +208,7 @@ export const applySkillMaintenance = async (stationId: string, profile: string, 
   return result;
 };
 export const verifyNativeSkillPlacement = async (stationId: string, profile: string) => {
-  const result = SkillVerifyResult.parse(
+  const result = SkillNativeVerifyResult.parse(
     await http(`${stationPath(stationId)}/native/verify`, post({ profile })),
   );
   if (result.profile !== profile) throw new Error("Verification belongs to a different profile");

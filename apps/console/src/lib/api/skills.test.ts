@@ -78,6 +78,27 @@ test("refuses a verification for another profile", async () => {
     skills.verifySkillFiles("station_1", "fixture"),
   ).rejects.toThrow();
 });
+test("preserves native discovery names when verifying a native placement", async () => {
+  const http = vi.spyOn(client, "http").mockResolvedValue({
+    nodeId: "fixture-node",
+    stationKey: "codex:fixture",
+    harness: "codex",
+    profile: "fixture",
+    verification: {
+      current: planFixture.after,
+      path: "/workspace/.agents/skills/sjl-fixture",
+      discoveryNames: ["sjl-fixture:sjl-fixture"],
+      present: { value: true, reason: "Verified native placement", observedAt: planFixture.createdAt },
+      loaded: { value: true, reason: "Fresh isolated session advertised the skill", observedAt: planFixture.createdAt },
+    },
+  });
+  const result = await skills.verifyNativeSkillPlacement("station_1", "fixture");
+  expect(result.verification.discoveryNames).toEqual(["sjl-fixture:sjl-fixture"]);
+  expect(http).toHaveBeenCalledWith(
+    "/api/stations/station_1/skills/native/verify",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
 test("rejects oversized artifacts before sending bytes", async () => {
   const http = vi.spyOn(client, "http");
   await expect(
