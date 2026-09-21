@@ -11,9 +11,10 @@ import (
 )
 
 type installHead struct {
-	OperationID string      `json:"operationId"`
-	Current     *Generation `json:"current"`
-	Previous    *Generation `json:"previous"`
+	OperationID  string      `json:"operationId"`
+	Current      *Generation `json:"current"`
+	Previous     *Generation `json:"previous"`
+	NativeLayout string      `json:"nativeLayout,omitempty"`
 }
 
 // RetentionInspection is observational accounting for a single managed

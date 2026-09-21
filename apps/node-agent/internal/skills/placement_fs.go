@@ -16,6 +16,8 @@ import (
 var placementRoots = map[string]string{"codex": ".agents/skills", "opencode": ".opencode/skills", "pi": ".pi/skills", "openclaw": "skills"}
 var placementScanRoots = []string{".agents/skills", ".claude/skills", ".opencode/skills", ".pi/skills", ".hermes/skills", "skills"}
 
+const codexDirectLayout = "codex-direct-v1"
+
 func (s *InstallStore) placementTarget() (string, error) {
 	root, ok := placementRoots[s.binding.Harness]
 	if !ok {
@@ -191,7 +193,17 @@ func (s *InstallStore) placementWorkspace() (*InstallStore, error) {
 	}
 	return &InstallStore{root: root, binding: s.binding}, nil
 }
-func (s *InstallStore) verifyPlaced(ctx context.Context, workspace *InstallStore, relative string, g *Generation) error {
+func (s *InstallStore) verifyPlaced(ctx context.Context, workspace *InstallStore, relative string, g *Generation, layout string) error {
+	if s.binding.Harness == "codex" && layout == codexDirectLayout {
+		manifest, err := s.verifyGeneration(ctx, g)
+		if err != nil {
+			return err
+		}
+		if err := verifyCodexProjection(ctx, workspace.root, relative, s, g, manifest); err != nil {
+			return fmt.Errorf("%w: native files differ: %v", ErrInstallConflict, err)
+		}
+		return nil
+	}
 	if g == nil {
 		if _, err := workspace.root.Lstat(relative); errors.Is(err, os.ErrNotExist) {
 			return nil

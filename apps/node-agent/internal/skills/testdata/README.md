@@ -52,6 +52,14 @@ refuse new starts until recovery. Those children are shell/cat fixtures, not
 native ACP sessions. Broker exposure, external-process/version gates and deployed
 native/ACP evidence remain separate requirements.
 
+The Codex reports below are historical evidence for the older grouped export,
+which advertised `sjl-fixture:sjl-fixture`. Current placement projects the
+bundle's single plain skill directly to `.agents/skills/sjl-fixture/SKILL.md`.
+`acp-placement-codex-direct-2026-09-22.json` records all eleven direct-layout
+checks passing with codex-acp 1.12.0 and bundled Codex 0.154.0, including
+upgrade, rollback, deactivation and sibling isolation. A deployed station
+canary is still needed to establish production loading.
+
 ### Codex ACP discovery comparison
 
 `acp-placement-codex-2026-09-21.json` records all eleven placement lifecycle

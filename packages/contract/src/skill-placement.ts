@@ -12,11 +12,11 @@ export const SkillPlacementPlan=z.object({
  schemaVersion:z.literal(1),operationId:OperationId,action:z.enum(['activate','deactivate','rollback']),
  binding:SkillInstallBinding.extend({harness:z.enum(['codex','opencode','pi','openclaw'])}),
  repositoryPath:Path,repositoryIdentity:Digest,expectedInstallationHead:Digest,expectedHead:Digest,
- before:SkillGeneration.nullable(),after:SkillGeneration.nullable(),targetPath:Path,
+ before:SkillGeneration.nullable(),after:SkillGeneration.nullable(),nativeLayout:z.literal('codex-direct-v1').optional(),targetPath:Path,
  changes:z.object({added:z.array(RelativePath).max(4096),removed:z.array(RelativePath).max(4096),changed:z.array(RelativePath).max(4096)}).strict(),
  discoveryNames:z.array(z.string().min(1).max(256)).max(256),
  activation:z.literal('quiescent-project; loading-unverified'),createdAt:z.iso.datetime(),planDigest:Digest,
-}).strict().refine(p=>p.action!=='activate'||p.after!==null).refine(p=>p.action!=='deactivate'||p.after===null);
+}).strict().refine(p=>p.action!=='activate'||p.after!==null).refine(p=>p.action!=='deactivate'||p.after===null).refine(p=>p.nativeLayout===undefined||p.binding.harness==='codex');
 export const SkillPlacementReceipt=z.object({
  plan:SkillPlacementPlan,phase:z.enum(['planned','staging','switching','applied','conflict']),
  updatedAt:z.iso.datetime(),completedAt:z.iso.datetime().nullable(),error:z.string().max(2048).nullable(),

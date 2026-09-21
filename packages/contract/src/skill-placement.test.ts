@@ -10,6 +10,11 @@ test("native placement binds a separate head, repository and concrete discovery 
   expect(SkillPlacementPlan.safeParse({...placementFixture, activation:"loaded"}).success).toBe(false);
   expect(SkillPlacementPlan.safeParse({...placementFixture, targetPath:null}).success).toBe(false);
   expect(SkillPlacementPlan.safeParse({...placementFixture, binding:{...placementFixture.binding,harness:"claude-code"}}).success).toBe(false);
+  expect(SkillPlacementPlan.parse(placementFixture).nativeLayout).toBe('codex-direct-v1');
+  const {nativeLayout: _legacyLayout, ...legacy} = placementFixture;
+  expect(SkillPlacementPlan.safeParse({...legacy, discoveryNames:['sjl-fixture:sjl-fixture']}).success).toBe(true);
+  expect(SkillPlacementPlan.safeParse({...placementFixture, nativeLayout:'codex-grouped-v1'}).success).toBe(false);
+  expect(SkillPlacementPlan.safeParse({...placementFixture, binding:{...placementFixture.binding,harness:'pi'}}).success).toBe(false);
 });
 test("placement receipt cannot turn interrupted publication into success", () => {
   const receipt={plan:placementFixture,phase:"switching",updatedAt:"2026-09-20T16:00:01Z",completedAt:null,error:null};
