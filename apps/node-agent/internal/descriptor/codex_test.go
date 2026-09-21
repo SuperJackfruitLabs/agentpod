@@ -427,8 +427,8 @@ func TestCodexHealth(t *testing.T) {
 	if !h.Running {
 		t.Error("Health.Running = false, want true (stubbed probe)")
 	}
-	if h.Note != nil {
-		t.Errorf("Health.Note = %q, want nil", *h.Note)
+	if h.Note == nil || !strings.Contains(*h.Note, "Next chat:") {
+		t.Errorf("Health.Note = %v, want chat runtime diagnostics", h.Note)
 	}
 
 	d2 := newTestCodex(t, home, false)

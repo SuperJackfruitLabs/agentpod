@@ -170,7 +170,7 @@ func TestCodexACPCommand_NpxFallbackIsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ACPCommand: %v", err)
 	}
-	want := []string{"/usr/bin/npx", "-y", "@agentclientprotocol/codex-acp@1.1.14"}
+	want := []string{"/usr/bin/npx", "-y", "@agentclientprotocol/codex-acp@1.12.0"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Errorf("argv = %v, want %v", argv, want)
 	}
