@@ -108,6 +108,15 @@ rechecks every head and candidate immediately before removal. A mismatch or an
 uncertain result leaves state intact and requires a new inspection. There is no
 background cleanup and no recursive caller-supplied path.
 
+The first implementation exposes that plan and its exact digest through the
+station Skills panel. Apply receives only the reviewed digest; it writes a
+node-owned maintenance journal before removal and updates that journal after
+each candidate, so an interrupted cleanup resumes the original reviewed set
+instead of creating a fresh plan. Source-level checks cover protected heads and
+the retained history floor. CI, a released node binary, and a disposable
+station recovery exercise remain required before this closes the broad-rollout
+gate.
+
 The node now implements `skills.plan`, `skills.apply`, `skills.verify`,
 `skills.rollback` and `skills.operation` under the separate `skills.manage`
 capability. Six descriptors opt into exact detected-workspace resolution. The

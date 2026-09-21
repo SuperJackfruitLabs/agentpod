@@ -101,6 +101,11 @@
     const id = stationId, selectedProfile = profile;
     void perform("Preparing retained-state maintenance preview", () => api.planSkillMaintenance(id, selectedProfile), result => { maintenance = result; });
   }
+  function applyMaintenance() {
+    if (locked || !maintenance || maintenance.maintenance.preview.generations.length + maintenance.maintenance.preview.operations.length + maintenance.maintenance.preview.nativeOperations.length + maintenance.maintenance.preview.nativeBackups.length === 0) return;
+    const reviewed = maintenance, id = stationId;
+    void perform("Applying reviewed retained-state cleanup", () => api.applySkillMaintenance(id, reviewed.profile, reviewed.maintenance.planDigest), result => { maintenance = result; retention = null; });
+  }
   function upload() {
     if (locked || !file || !validProfile) return;
     const archive = file, targetHarness = harness, targetProfile = profile;
@@ -196,6 +201,9 @@
       </details>
       <p class="text-xs text-muted-foreground">Review digest: {maintenance.maintenance.planDigest}</p>
       <p class="text-xs text-muted-foreground">{maintenance.maintenance.limitation}</p>
+      {#if maintenance.maintenance.preview.generations.length + maintenance.maintenance.preview.operations.length + maintenance.maintenance.preview.nativeOperations.length + maintenance.maintenance.preview.nativeBackups.length > 0}
+        <Button size="sm" variant="destructive" disabled={locked} onclick={applyMaintenance}>Apply reviewed cleanup</Button>
+      {:else}<p class="text-xs text-muted-foreground">No safely removable retained state was found.</p>{/if}
     </section>
   {/if}
   {#if pending}

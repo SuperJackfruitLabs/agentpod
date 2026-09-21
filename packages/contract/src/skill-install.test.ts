@@ -41,6 +41,8 @@ test("maintenance preview is a bounded read-only plan", () => {
   expect(VERB_PARAMS["skills.maintenance.plan"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
   expect(VERB_PARAMS["skills.maintenance.plan"].safeParse({key:"codex:fixture",profile:"fixture",operationId:"a".repeat(32)}).success).toBe(false);
   expect(SkillMaintenanceResult.parse(result).maintenance.preview.generations).toHaveLength(1);
+  expect(VERB_PARAMS["skills.maintenance.apply"].safeParse({key:"codex:fixture",profile:"fixture",expectedPlanDigest:"a".repeat(64)}).success).toBe(true);
+  expect(VERB_PARAMS["skills.maintenance.apply"].safeParse({key:"codex:fixture",profile:"fixture",expectedPlanDigest:"a".repeat(64),generations:["b".repeat(32)]}).success).toBe(false);
 });
 
 test("durable plans bind identity and a prior head, with activation pending", () => {

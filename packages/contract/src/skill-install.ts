@@ -95,3 +95,4 @@ export const SkillMaintenanceResult = z.object({
   harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
   maintenance: SkillMaintenancePlan,
 }).strict();
+export const SkillMaintenanceApplyParams = SkillProfileParams.extend({ expectedPlanDigest: Digest });

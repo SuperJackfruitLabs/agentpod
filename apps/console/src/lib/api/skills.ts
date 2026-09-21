@@ -176,6 +176,13 @@ export const planSkillMaintenance = async (stationId: string, profile: string) =
     throw new Error("Maintenance preview belongs to a different profile");
   return result;
 };
+export const applySkillMaintenance = async (stationId: string, profile: string, planDigest: string) => {
+  const result = SkillMaintenanceResult.parse(
+    await http(`${stationPath(stationId)}/maintenance/apply`, post({ profile, expectedPlanDigest: planDigest })),
+  );
+  if (result.profile !== profile) throw new Error("Maintenance result belongs to a different profile");
+  return result;
+};
 export const verifyNativeSkillPlacement = async (stationId: string, profile: string) => {
   const result = SkillVerifyResult.parse(
     await http(`${stationPath(stationId)}/native/verify`, post({ profile })),
