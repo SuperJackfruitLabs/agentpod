@@ -35,6 +35,14 @@ type MaintenancePlan struct {
 	ObservedAt string             `json:"observedAt"`
 	Limitation string             `json:"limitation"`
 }
+type maintenanceEntry struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+type maintenanceJournal struct {
+	Plan    MaintenancePlan    `json:"plan"`
+	Pending []maintenanceEntry `json:"pending"`
+}
 
 func (p MaintenancePreview) Empty() bool {
 	return len(p.Generations)+len(p.Operations)+len(p.NativeOperations)+len(p.NativeBackups) == 0
@@ -86,6 +94,10 @@ func (s *InstallStore) MaintenancePreview(ctx context.Context) (MaintenancePrevi
 		return MaintenancePreview{}, err
 	}
 	defer unlock()
+	return s.maintenancePreviewLocked(ctx)
+}
+
+func (s *InstallStore) maintenancePreviewLocked(ctx context.Context) (MaintenancePreview, error) {
 	if err := ctx.Err(); err != nil {
 		return MaintenancePreview{}, err
 	}
@@ -168,14 +180,90 @@ func (s *InstallStore) MaintenancePreview(ctx context.Context) (MaintenancePrevi
 }
 
 func (s *InstallStore) PlanMaintenance(ctx context.Context) (MaintenancePlan, error) {
-	preview, err := s.MaintenancePreview(ctx)
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return MaintenancePlan{}, err
+	}
+	defer unlock()
+	if _, err := s.root.Lstat("maintenance.json"); err == nil {
+		return MaintenancePlan{}, fmt.Errorf("%w: maintenance requires recovery", ErrInstallConflict)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return MaintenancePlan{}, err
+	}
+	preview, err := s.maintenancePreviewLocked(ctx)
 	if err != nil {
 		return MaintenancePlan{}, err
 	}
 	return MaintenancePlan{
 		Preview: preview, PlanDigest: hashJSON(preview), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
-		Limitation: "Read-only maintenance preview. Applying cleanup requires a separately reviewed durable journal and is not available from this node version.",
+		Limitation: "Apply requires this exact reviewed digest. A durable node journal records and resumes only these candidates.",
 	}, nil
+}
+
+func maintenanceEntriesFor(plan MaintenancePlan) []maintenanceEntry {
+	entries := []maintenanceEntry{}
+	for _, pair := range []struct {
+		kind string
+		ids  []string
+	}{{"generations", plan.Preview.Generations}, {"operations", plan.Preview.Operations}, {"native/operations", plan.Preview.NativeOperations}, {"native/backups", plan.Preview.NativeBackups}} {
+		for _, id := range pair.ids {
+			entries = append(entries, maintenanceEntry{pair.kind, id})
+		}
+	}
+	return entries
+}
+
+// ApplyMaintenance never accepts paths. It removes only entries persisted in
+// the reviewed journal; interruption leaves the remaining exact set to resume.
+func (s *InstallStore) ApplyMaintenance(ctx context.Context, digest string) (MaintenancePlan, error) {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return MaintenancePlan{}, err
+	}
+	defer unlock()
+	var journal maintenanceJournal
+	if err = s.readJSON("maintenance.json", &journal); errors.Is(err, os.ErrNotExist) {
+		preview, planErr := s.maintenancePreviewLocked(ctx)
+		if planErr != nil {
+			return MaintenancePlan{}, planErr
+		}
+		plan := MaintenancePlan{Preview: preview, PlanDigest: hashJSON(preview), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Limitation: "Apply requires this exact reviewed digest. A durable node journal records and resumes only these candidates."}
+		if plan.PlanDigest != digest {
+			return MaintenancePlan{}, fmt.Errorf("%w: reviewed maintenance digest differs", ErrInstallConflict)
+		}
+		journal = maintenanceJournal{Plan: plan, Pending: maintenanceEntriesFor(plan)}
+		if err = s.writeJSON("maintenance.json", journal); err != nil {
+			return MaintenancePlan{}, err
+		}
+	} else if err != nil {
+		return MaintenancePlan{}, err
+	} else if journal.Plan.PlanDigest != digest {
+		return MaintenancePlan{}, fmt.Errorf("%w: maintenance recovery belongs to another review", ErrInstallConflict)
+	}
+	for len(journal.Pending) > 0 {
+		entry := journal.Pending[0]
+		if !operationPattern.MatchString(entry.ID) {
+			return MaintenancePlan{}, fmt.Errorf("%w: invalid maintenance journal", ErrInstallConflict)
+		}
+		relative := path.Join(entry.Kind, entry.ID)
+		if entry.Kind == "operations" || entry.Kind == "native/operations" {
+			relative += ".json"
+		}
+		if err = s.root.RemoveAll(relative); err != nil {
+			return MaintenancePlan{}, err
+		}
+		journal.Pending = journal.Pending[1:]
+		if err = s.writeJSON("maintenance.json", journal); err != nil {
+			return MaintenancePlan{}, err
+		}
+		if err = s.checkpoint("maintenance-remove"); err != nil {
+			return MaintenancePlan{}, err
+		}
+	}
+	if err = s.root.Remove("maintenance.json"); err != nil {
+		return MaintenancePlan{}, err
+	}
+	return journal.Plan, syncDir(s.root, ".")
 }
 
 func (s *InstallStore) completedOptionalMaintenanceOperations(directory string, native bool, protected string, floor int) ([]string, error) {

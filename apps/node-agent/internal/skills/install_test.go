@@ -598,6 +598,20 @@ func TestMaintenancePreviewKeepsHeadsAndHistoryFloor(t *testing.T) {
 			t.Fatalf("current or rollback generation proposed: %s", id)
 		}
 	}
+	plan, err := store.PlanMaintenance(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyMaintenance(ctx, plan.PlanDigest); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := store.Retention(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained.Operations != RetentionFloor || retained.Generations != 2 {
+		t.Fatalf("maintenance removed protected history: %+v", retained)
+	}
 	// An incomplete receipt is recovery evidence and blocks every candidate.
 	if _, err := store.PlanRollback(ctx, strings.Repeat("f", 32)); err != nil {
 		t.Fatal(err)
