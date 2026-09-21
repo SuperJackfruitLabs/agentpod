@@ -54,6 +54,12 @@ beforeEach(() => {
 afterEach(cleanup);
 const props = { stationId: "station_1", harness: "codex", canManage: true };
 
+test("explains how a Codex node operator enables native placement", async () => {
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() => expect(view.getByText("Native placement is off on this node")).toBeTruthy());
+  expect(view.getByText("apn native-skills enable")).toBeTruthy();
+});
+
 test("creates an explicit one-station cohort before planning its trusted release canary", async () => {
   const release = { id: "22222222-2222-4222-8222-222222222222", version: "1.2.3", profile: "fixture", recordDigest: "a".repeat(64), createdAt: planFixture.createdAt };
   const cohort = { id: "33333333-3333-4333-8333-333333333333", releaseId: release.id, recordDigest: release.recordDigest, stationIds: ["station_1"], createdAt: planFixture.createdAt };

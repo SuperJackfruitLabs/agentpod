@@ -30,6 +30,7 @@
   const selectedCohort = $derived(cohorts.find(cohort => cohort.id === cohortId) ?? null);
   const locked = $derived(busy !== null || !canManage);
   const nativeLocked = $derived(busy !== null || !canNative);
+  const needsNativeActivation = $derived(canManage && harness === "codex" && !canNative);
   const validProfile = $derived(profile.length <= 124 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(profile));
   const labels: Record<SkillHubOperation["state"], string> = {
     requested: "Requested", planning: "Preparing plan", planned: "Ready for review",
@@ -180,6 +181,12 @@
         <Button size="sm" variant="outline" disabled={nativeLocked || !validProfile || nativePending !== null} onclick={() => planNative("deactivate")}>Review native removal</Button>
       </div>
       {#if nativePending}<p>Planning has not returned a confirmed result. <button class="underline" disabled={nativeLocked} onclick={retryNativePlanning}>Retry native planning</button></p>{/if}
+    </div>
+  {/if}
+  {#if needsNativeActivation}
+    <div class="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+      <h3 class="font-medium">Native placement is off on this node</h3>
+      <p class="mt-1 text-muted-foreground">A node operator must run <code>apn native-skills enable</code> and restart the node service. AgentPod will then re-detect the station and expose native placement only when its Codex runtime is ready and the workspace is quiet.</p>
     </div>
   {/if}
   {#if !canManage}<p class="text-sm text-muted-foreground">Permission to change this station is required to install or roll back skills.</p>{/if}
