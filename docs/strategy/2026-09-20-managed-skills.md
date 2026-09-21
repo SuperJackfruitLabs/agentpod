@@ -333,8 +333,9 @@ requires node inspection before the UI offers apply again. Navigation discards l
 responses from the previous station. Conflict guidance preserves local edits;
 there is no force-overwrite button. Loading evidence remains separate from applied
 files. The UI now presents native activation, rollback and removal as separate
-reviewed operations only when the node advertises `skills.native`. Stable
-catalog/release discovery and rollout cohorts remain unfinished.
+reviewed operations only when the node advertises `skills.native`. The trusted
+catalog and immutable cohorts now exist at the API boundary; an operator UI,
+archive-content admission and live canary evidence remain unfinished.
 
 ### Stable catalog intake boundary
 
@@ -350,10 +351,13 @@ They do not prove a harness loaded a skill or that a release is safe to deploy.
 
 A cohort is an operator-selected immutable list of station IDs plus one catalog
 record digest. Planning rechecks every station owner, tenant, harness and reach
-permission and creates reviewed per-station plans. Applying one cohort member
-does not advance another. A canary records verified apply, runtime observation
-and rollback before any later cohort is chosen. Empty, offline, mixed-owner or
-already-unknown stations are visible refusals, never silently excluded.
+permission and creates reviewed per-station plans. The first station is named
+explicitly in a canary request, which records an ordinary managed operation
+bound to the cohort's release, digest and harness-specific archive. Its later
+inspection and reviewed apply repeat that binding; applying it does not advance
+another cohort member. Runtime observation and rollback remain required before
+any later cohort is chosen. Empty, offline, mixed-owner or already-unknown
+stations are visible refusals, never silently excluded.
 
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,

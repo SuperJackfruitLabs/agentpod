@@ -14,6 +14,9 @@ import {
   SkillNativePlanRequest,
   SkillNativeVerifyResult,
   TrustedSkillReleaseImportRequest,
+  SkillReleaseCanaryPlanRequest,
+  SkillReleaseCanaryOperationRequest,
+  SkillReleaseCanaryApplyRequest,
 } from "@agentpod/contract";
 import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
@@ -38,6 +41,7 @@ import {
   listTrustedSkillReleases,
 } from "../services/trusted-skill-catalog";
 import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skill-release-cohorts";
+import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skill-release-canary";
 import { SkillReleaseCohortCreateRequest } from "@agentpod/contract";
 import {
   createSkillOperation,
@@ -168,6 +172,35 @@ export function createSkillManagementRoutes(
     .post("/skills/catalog/cohorts", async (c) =>
       c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest)), 201),
     )
+    .post("/skills/catalog/cohorts/:cohortId/canary/plan", async (c) => {
+      const caller = owner(c);
+      const binding = await createSkillReleaseCanaryOperation(
+        caller,
+        c.req.param("cohortId"),
+        await body(c, SkillReleaseCanaryPlanRequest),
+      );
+      const station = await getStation(caller.userId, binding.stationId);
+      if (!station || station.tenantId !== caller.tenantId)
+        throw new SkillRequestError(409, "Canary station is no longer available to this owner");
+      const result = await executeSkillOperation(caller, station, binding.operationId, "plan", undefined, timeoutMs);
+      return c.json({ ...binding, operation: result }, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/skills/catalog/cohorts/:cohortId/canary/operations/inspect", async (c) => {
+      const caller = owner(c);
+      const { station, operation } = await getSkillReleaseCanaryOperation(caller, c.req.param("cohortId"), await body(c, SkillReleaseCanaryOperationRequest));
+      const result = await executeSkillOperation(caller, station, operation.id, "inspect", undefined, timeoutMs);
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/skills/catalog/cohorts/:cohortId/canary/operations/apply", async (c) => {
+      const caller = owner(c);
+      const request = await body(c, SkillReleaseCanaryApplyRequest);
+      const { station, operation } = await getSkillReleaseCanaryOperation(caller, c.req.param("cohortId"), request);
+      if (!station.capabilities?.includes("skills.manage"))
+        throw new SkillRequestError(409, "Canary station does not advertise skill management");
+      await requireGrantReach(caller.userId, station, "skills.manage", "mutate");
+      const result = await executeSkillOperation(caller, station, operation.id, "apply", request.planDigest, timeoutMs);
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
     .post("/skills/artifacts", async (c) => {
       const query = new URL(c.req.url).searchParams;
       if ([...query.keys()].some((key) => query.getAll(key).length !== 1))
