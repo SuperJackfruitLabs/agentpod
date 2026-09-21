@@ -366,6 +366,15 @@ for every listed asset. This establishes a reproducible node release; it does
 not establish that any station has installed the version or that retained state
 has been inspected on a live station.
 
+`v0.1.44` packages merged change `#502` (`8fbedb25`): the reviewed retained
+state cleanup flow. Its release workflow completed successfully, and all four
+node binaries, four fleet binaries, installers, service unit and checksum
+manifest were downloaded and verified against `SHA256SUMS`. The remaining
+evidence is deliberately operational: install it only on a disposable station,
+exercise preview, reviewed cleanup, an interrupted journal and recovery, then
+inspect retained state. This release evidence does not establish that a station
+has installed it or that cleanup has run safely outside fixtures.
+
 ### Runtime selection follow-up (2026-09-21)
 
 Pi ACP now receives the absolute selected Pi executable through
