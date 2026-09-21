@@ -194,11 +194,20 @@ endpoint, not these verbs.
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.
 
-**Detect → Adopt:**
+**Detect → Register → Assign:**
 
-1. Open the node in the console. The station list shows discovered runtimes with status `detected`.
-2. Click **Adopt** on a station to bring it under management. Adopting does not restart or modify the runtime.
-3. The station moves to `adopted` status and its capability panels become active.
+1. Open the node in the console. Discovered workspaces appear in its station list.
+2. As an administrator, click **Add agent**. Review a new identity or select an unassigned identity, then explicitly choose whether your account should gain dispatch access. Existing permissions stay unchanged; setup never moves an occupied identity.
+3. **Complete setup** registers the workspace, assigns its identity, and provisions or reuses its Matrix room when the bridge is configured. A Matrix failure keeps the assignment: use **Retry Matrix setup**. Native harness Matrix client adoption, where required, remains a separate step in the identity panel.
+4. Existing unoccupied stations expose **Assign agent**. **Register workspace only (advanced)** and **Register all workspaces** deliberately leave workspaces unoccupied. Non-administrators can register workspaces but cannot assign identities or grant dispatch access.
+
+An administrator can use **Remove station** in the station detail panel to unregister it. This does not stop processes, delete workspace files or installed skills, delete the agent identity, or revoke existing grants. It does delete station skill-operation history and Matrix routing records; homeserver messages remain. Re-registering does not restore deleted records.
+
+Implementation: `apps/hub/src/routes/station-setup.ts` and
+`apps/console/src/lib/components/stations/StationSetup.svelte`. Setup uses a durable
+request receipt so a response-loss retry cannot create a second identity or restore a
+subsequently revoked grant. Deploy the hub (including migration `0070_station_setup`)
+before the console. No node-agent release is required.
 
 Stations are discovered per harness:
 

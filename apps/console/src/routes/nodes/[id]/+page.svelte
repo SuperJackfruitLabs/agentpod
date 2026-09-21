@@ -1,4 +1,8 @@
 <script lang="ts">
+  import { refreshFleet } from "$lib/stores/fleet.svelte";
+  import StationSetup from "$lib/components/stations/StationSetup.svelte";
+  import { auth } from "$lib/stores/auth.svelte";
+  import * as Dialog from "$lib/components/ui/dialog";
   import { onMount } from "svelte";
   import { page } from "$app/state";
   import { stations, loadDetected, adopt, loadAdopted } from "$lib/stores/stations.svelte";
@@ -86,14 +90,23 @@
     }
   }
 
+  let setupOpen = $state(false);
+  let setupTarget = $state<{nodeId:string;stationKey:string;displayName:string}|null>(null);
+  let bulkOpen = $state(false);
+  const admin = $derived(auth.user?.role === "admin");
   async function handleAdopt(key: string) {
-    await adopt(id, [key]);
+    if (!admin) { await adopt(id,[key]); return; }
+    const detected = stations.detected.find(s=>s.key===key);
+    if (!detected) return;
+    setupTarget = {nodeId:id,stationKey:key,displayName:detected.displayName};
+    setupOpen = true;
   }
 
   async function handleAdoptAll() {
     const unadopted = stations.detected.filter((s) => !s.adopted);
     if (unadopted.length === 0) return;
     await adopt(id, unadopted.map((s) => s.key));
+    if (!stations.error) bulkOpen = false;
   }
 
   function isAlreadyAdopted(key: string): boolean {
@@ -229,11 +242,11 @@
         <Button
           variant="outline"
           size="sm"
-          onclick={handleAdoptAll}
+          onclick={() => bulkOpen = true}
           disabled={stations.isLoading}
           class="shrink-0"
         >
-          Add all agents
+          Register all workspaces
         </Button>
       {/if}
     </div>
@@ -306,7 +319,7 @@
                       onclick={() => handleAdopt(s.key)}
                       disabled={stations.isLoading}
                     >
-                      Add agent
+                      {admin ? "Add agent" : "Register workspace"}
                     </Button>
                   {:else}
                     <span class="text-xs text-muted-foreground">Added</span>
@@ -340,3 +353,20 @@
     {/if}
   </section>
 </div>
+
+
+{#if setupTarget}
+  <StationSetup bind:open={setupOpen} target={setupTarget} onComplete={() => { void loadAdopted(id); void refreshFleet(); }} />
+{/if}
+<Dialog.Root bind:open={bulkOpen}>
+  <Dialog.Content>
+    <Dialog.Header><Dialog.Title>Register all workspaces?</Dialog.Title>
+      <Dialog.Description>This advanced action registers the detected workspaces only. Each remains unoccupied until you assign an agent. It creates no identities, dispatch grants, or Matrix rooms. To complete setup now, cancel and use Add agent for each workspace.</Dialog.Description>
+    </Dialog.Header>
+    {#if stations.error}<p role="alert" class="text-destructive">{stations.error}</p>{/if}
+    <Dialog.Footer>
+      <Button variant="outline" disabled={stations.isLoading} onclick={()=>bulkOpen=false}>Cancel</Button>
+      <Button disabled={stations.isLoading} onclick={handleAdoptAll}>Register workspaces only</Button>
+    </Dialog.Footer>
+  </Dialog.Content>
+</Dialog.Root>

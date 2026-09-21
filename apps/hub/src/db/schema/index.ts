@@ -60,3 +60,5 @@ export * from "./matrix-credentials";
 // way a plane on its own domain can reach an issuer behind a SameSite=Lax
 // cookie (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
 export * from "./oauth";
+
+export * from "./station-setup";

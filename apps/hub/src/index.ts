@@ -512,7 +512,7 @@ if (matrixBridge) {
   // `provision.ts` returns early from — so without this the console could
   // create an agent, put it in a station, and leave it with no room at all
   // until the next restart. `routes/agents-admin.ts` awaits this one.
-  onProvisionStation((stationId) => matrixBridge.provision(stationId));
+  onProvisionStation((stationId) => matrixBridge.provision(stationId), matrixBridge.config.domain);
   await startMatrixBridge(matrixBridge);
 } else {
   console.log('matrix bridge: (disabled)');
