@@ -36,6 +36,10 @@ func fleetSkills(args []string) {
   fleet skills station rollback-plan --station ID --profile PROFILE
   fleet skills station inspect --station ID --operation ID
   fleet skills station apply --station ID --operation ID --plan-digest SHA256
+  fleet skills native plan --station ID --profile PROFILE --action activate|deactivate|rollback
+  fleet skills native inspect --station ID --operation ID
+  fleet skills native apply --station ID --operation ID --plan-digest SHA256
+  fleet skills native verify --station ID --profile PROFILE
 
 Every mutation returns the hub's reviewed record. Read that response before an
 apply command; this CLI never turns a plan into an implicit apply.`)
@@ -60,8 +64,58 @@ apply command; this CLI never turns a plan into an implicit apply.`)
 		fleetSkillCanary(args[1:])
 	case "station":
 		fleetSkillStation(args[1:])
+	case "native":
+		fleetSkillNative(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown fleet skills command: %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
+func fleetSkillNative(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet skills native <plan|inspect|apply|verify> …")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("fleet skills native", flag.ExitOnError)
+	station := fs.String("station", "", "station ID")
+	profile := fs.String("profile", "", "profile")
+	action := fs.String("action", "", "native placement action")
+	operation := fs.String("operation", "", "operation ID")
+	planDigest := fs.String("plan-digest", "", "reviewed plan digest")
+	fs.Parse(args[1:])
+	if *station == "" || fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "native commands require --station ID")
+		os.Exit(2)
+	}
+	base := "/api/stations/" + url.PathEscape(*station) + "/skills/native"
+	switch args[0] {
+	case "plan":
+		if *profile == "" || (*action != "activate" && *action != "deactivate" && *action != "rollback") {
+			fmt.Fprintln(os.Stderr, "plan requires --profile PROFILE --action activate|deactivate|rollback")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomHex32(), "profile": *profile, "action": *action})
+	case "inspect":
+		if *operation == "" {
+			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
+			os.Exit(2)
+		}
+		fleetGet(base+"/operations/"+url.PathEscape(*operation), nil)
+	case "apply":
+		if *operation == "" || *planDigest == "" {
+			fmt.Fprintln(os.Stderr, "apply requires --operation ID --plan-digest SHA256")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/operations/"+url.PathEscape(*operation)+"/apply", map[string]string{"planDigest": *planDigest})
+	case "verify":
+		if *profile == "" {
+			fmt.Fprintln(os.Stderr, "verify requires --profile PROFILE")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/verify", map[string]string{"profile": *profile})
+	default:
+		fmt.Fprintln(os.Stderr, "usage: fleet skills native <plan|inspect|apply|verify> …")
 		os.Exit(2)
 	}
 }
