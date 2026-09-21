@@ -12,6 +12,12 @@ func (d *managedSkillDescriptor) ManagedSkillWorkspace(ctx context.Context, key 
 	return localManagedSkillWorkspace(ctx, d, key)
 }
 
+type nativeManagedSkillDescriptor struct{ managedSkillDescriptor }
+
+func (d *nativeManagedSkillDescriptor) NativeSkillReadiness(context.Context, string) (NativeSkillReadiness, error) {
+	return NativeSkillReadiness{Harness: d.Harness(), Reason: "fixture"}, nil
+}
+
 func TestManagedSkillCapabilityRequiresProviderAndConfiguredDelivery(t *testing.T) {
 	workspace := t.TempDir()
 	reg := NewRegistry()
@@ -45,5 +51,24 @@ func TestManagedSkillCapabilityRequiresProviderAndConfiguredDelivery(t *testing.
 	}
 	if _, _, err := reg.ManagedSkillWorkspace(t.Context(), "codex:fixture"); err == nil {
 		t.Fatal("unsupported provider accepted")
+	}
+}
+
+func TestNativeSkillCapabilityRequiresExplicitOperatorEnablementAndReadinessProvider(t *testing.T) {
+	workspace := t.TempDir()
+	reg := NewRegistry()
+	provider := &nativeManagedSkillDescriptor{managedSkillDescriptor{fakeDescriptor{harness: "codex", stations: []Station{{Key: "codex:fixture", Harness: "codex", WorkspacePath: &workspace, Capabilities: []string{"health"}}}}}}
+	reg.Register(provider)
+	reg.EnableSkillManagement()
+	if slices.Contains(reg.DetectAll()[0].Capabilities, "skills.native") {
+		t.Fatal("native management advertised without explicit operator enablement")
+	}
+	reg.EnableNativeSkillManagement()
+	if !slices.Contains(reg.DetectAll()[0].Capabilities, "skills.native") {
+		t.Fatal("native management was not advertised for a readiness-capable provider")
+	}
+	reg.Register(&managedSkillDescriptor{fakeDescriptor{harness: "codex", stations: provider.stations}})
+	if slices.Contains(reg.DetectAll()[0].Capabilities, "skills.native") {
+		t.Fatal("native management advertised without a readiness provider")
 	}
 }

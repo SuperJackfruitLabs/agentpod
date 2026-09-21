@@ -8,8 +8,9 @@ import (
 
 // Registry maps harness names to Descriptor implementations.
 type Registry struct {
-	descriptors     map[string]Descriptor
-	skillManagement bool
+	descriptors           map[string]Descriptor
+	skillManagement       bool
+	nativeSkillManagement bool
 }
 
 // NewRegistry returns an empty Registry.
@@ -32,9 +33,13 @@ func (r *Registry) DetectAll() []Station {
 		stations, err := d.Detect()
 		if err == nil {
 			_, managed := d.(SkillManagementProvider)
+			_, native := d.(NativeSkillReadinessProvider)
 			for _, station := range stations {
 				if r.skillManagement && managed && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.manage")
+				}
+				if r.nativeSkillManagement && managed && native && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.native")
 				}
 				all = append(all, station)
 			}
@@ -42,6 +47,12 @@ func (r *Registry) DetectAll() []Station {
 	}
 	return all
 }
+
+// EnableNativeSkillManagement is called only when the daemon's operator
+// configuration explicitly permits native placement. Per-station readiness is
+// rechecked during the mutation itself; detection only advertises that the
+// harness has a native-readiness implementation.
+func (r *Registry) EnableNativeSkillManagement() { r.nativeSkillManagement = true }
 
 // For resolves the Descriptor responsible for key.
 //

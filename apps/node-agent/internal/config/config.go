@@ -57,6 +57,9 @@ type Config struct {
   CodexAcpBinary      string `json:"codexAcpBinary,omitempty"`
   CodexBinary         string `json:"codexBinary,omitempty"`
   NodeBinary          string `json:"nodeBinary,omitempty"`
+  // NativeSkillActivation is an explicit operator opt-in for the separate
+  // native-placement transaction. It is off by default.
+  NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`
 }
 
 func DefaultPath() string {

@@ -81,10 +81,13 @@ func runCmd() {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
 			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
 			Workspaces: workspaces,
-			// Native publication remains fail-closed. Resolve the exact runtime
-			// first so refusal is actionable, then keep external-process
-			// quiescence as a distinct required gate.
+			// Native placement is separately opt-in. Readiness resolves the exact
+			// runtime and checks its process boundary; ApplyPlacementWhenIdle holds
+			// the repository lease for the complete filesystem transaction.
 			AuthorizeNative: func(ctx context.Context, key, _ string) error {
+				if !cfg.NativeSkillActivation {
+					return fmt.Errorf("native activation is disabled in this node's operator configuration")
+				}
 				readiness, err := reg.NativeSkillReadiness(ctx, key)
 				if err != nil {
 					return err
@@ -92,13 +95,16 @@ func runCmd() {
 				if !readiness.Ready {
 					return fmt.Errorf("%s", readiness.Reason)
 				}
-				return fmt.Errorf("native activation remains unavailable until the operator activation workflow is configured")
+				return nil
 			},
 			VerifyNative: func(ctx context.Context, key, _ string, names []string) (skills.Observation, error) {
 				return reg.NativeSkillLoading(ctx, key, names)
 			},
 		})
 		reg.EnableSkillManagement()
+		if cfg.NativeSkillActivation {
+			reg.EnableNativeSkillManagement()
+		}
 	} else {
 		fmt.Fprintln(os.Stderr, "skill management unavailable:", err)
 	}

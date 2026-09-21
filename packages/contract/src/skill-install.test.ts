@@ -18,6 +18,7 @@ test("skill management requests accept identifiers and reviewed digests, never c
   expect(VERB_PARAMS["skills.operation"].parse(base)).toEqual(base);
   expect(VERB_PARAMS["skills.verify"].safeParse(base).success).toBe(false);
   expect(Capability.parse("skills.manage")).toBe("skills.manage");
+  expect(Capability.parse("skills.native")).toBe("skills.native");
 });
 
 test("skill status distinguishes unknown operation and absent managed files from harness activation", () => {

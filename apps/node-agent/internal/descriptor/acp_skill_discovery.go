@@ -124,8 +124,13 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("ACP discovery deadline exceeded: %w", ctx.Err())
-		case err := <-readErr:
-			if err == nil {
+		case err, ok := <-readErr:
+			// The scanner can observe EOF before the buffered events channel is
+			// drained. Keep consuming those already-read frames; a command update
+			// in that buffer is still valid discovery evidence. A non-EOF reader
+			// error remains terminal because its stream may be incomplete.
+			if !ok || err == io.EOF {
+				readErr = nil
 				continue
 			}
 			return nil, fmt.Errorf("ACP output closed before discovery completed: %w", err)
