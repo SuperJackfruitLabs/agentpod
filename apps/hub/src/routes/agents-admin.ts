@@ -34,6 +34,7 @@
  */
 
 import { Hono } from "hono";
+import { stationSetupRouter } from "./station-setup";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { and, eq, ne, sql } from "drizzle-orm";
@@ -89,6 +90,7 @@ const assignBody = z.object({
 });
 
 export const agentsAdminRouter = new Hono()
+  .route("/", stationSetupRouter)
   /**
    * Mint a new agent principal.
    *

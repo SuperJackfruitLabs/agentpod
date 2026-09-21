@@ -162,7 +162,7 @@ test("an already-added agent says so instead of offering to add it twice", async
   const { getByText, queryByText } = render(NodeDetailPage);
 
   await waitFor(() => expect(getByText("Added")).toBeTruthy());
-  expect(queryByText("Add agent")).toBeNull();
+  expect(queryByText("Register workspace")).toBeNull();
 });
 
 test("detected station card's Adopt button calls adopt(id, [key])", async () => {
@@ -175,9 +175,9 @@ test("detected station card's Adopt button calls adopt(id, [key])", async () => 
 
   await waitFor(() => {
     expect(getByText("Workspace")).toBeTruthy();
-    expect((getByText("Add agent") as HTMLButtonElement).disabled).toBe(false);
+    expect((getByText("Register workspace") as HTMLButtonElement).disabled).toBe(false);
   });
-  getByText("Add agent").click();
+  getByText("Register workspace").click();
 
   await waitFor(() => {
     expect(adoptSpy).toHaveBeenCalledWith("node_1", ["claude://workspace"]);
@@ -197,10 +197,12 @@ test("Adopt all calls adopt(id, allUnadoptedKeys)", async () => {
   // briefly render present-but-disabled before both loaders settle. Wait for
   // it to be enabled (not merely present) before clicking.
   await waitFor(() => {
-    const btn = getByText("Add all agents") as HTMLButtonElement;
+    const btn = getByText("Register all workspaces") as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
   });
-  getByText("Add all agents").click();
+  getByText("Register all workspaces").click();
+  await waitFor(() => expect(getByText("Register workspaces only")).toBeTruthy());
+  getByText("Register workspaces only").click();
 
   await waitFor(() => {
     expect(adoptSpy).toHaveBeenCalledWith("node_1", [

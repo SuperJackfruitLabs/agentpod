@@ -115,10 +115,13 @@ export async function stationReportedMatrixId(
 type Provisioner = (stationId: string) => Promise<void>;
 
 let provisioner: Provisioner | null = null;
+let provisionDomain: string | null = null;
+export function stationSetupMatrixDomain(): string | null { return provisionDomain; }
 
 /** Register the one provisioner. Boot wiring, same as `onStationsAdopted`. */
-export function onProvisionStation(fn: Provisioner | null): void {
+export function onProvisionStation(fn: Provisioner | null, domain?: string): void {
   provisioner = fn;
+  provisionDomain = fn ? domain ?? null : null;
 }
 
 /**

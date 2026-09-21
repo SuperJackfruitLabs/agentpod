@@ -425,6 +425,7 @@
     {node}
     agentVersion={fleetAgent?.agentVersion ?? null}
     onSavePurpose={savePurpose}
+    onSetupComplete={() => { void loadStation(); void refreshFleet(); }}
   />
 {/snippet}
 

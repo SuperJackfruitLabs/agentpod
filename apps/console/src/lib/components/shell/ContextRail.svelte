@@ -23,6 +23,10 @@
     type PrincipalSummary,
   } from "$lib/api/grants";
   import { auth } from "$lib/stores/auth.svelte";
+  import RemoveStation from "$lib/components/stations/RemoveStation.svelte";
+  import { goto } from "$app/navigation";
+  import { refreshFleet } from "$lib/stores/fleet.svelte";
+  import StationOnboarding from "$lib/components/stations/StationOnboarding.svelte";
   import MatrixIdentityPanel from "$lib/components/stations/MatrixIdentityPanel.svelte";
   import PurposeField from "$lib/components/purpose/PurposeField.svelte";
 
@@ -32,6 +36,7 @@
     node?: NodeSummary | null;
     /** The node's agent binary version — the fleet snapshot's copy is fine. */
     agentVersion?: string | null;
+    onSetupComplete?: () => void;
     onSavePurpose?: (purpose: string | null) => Promise<void>;
     /** Injected by tests. Defaults to this session's role. */
     isAdmin?: boolean;
@@ -44,6 +49,7 @@
     node = null,
     agentVersion = null,
     onSavePurpose,
+    onSetupComplete,
     isAdmin,
     listGrants = defaultListGrants,
     listPrincipals = defaultListPrincipals,
@@ -192,6 +198,10 @@
         operator was relying on — `waiting` is the hub's answer now, not a
         flag this component holds.
       -->
+      {#if admin}<StationOnboarding {station} onChanged={onSetupComplete} />{/if}
+      {#if admin}
+        <div class="mt-3"><RemoveStation stationId={station.id} displayName={station.displayName} onRemoved={()=>{void refreshFleet();void goto(`/nodes/${station!.nodeId}`);}} /></div>
+      {/if}
       <div class="mt-3 empty:hidden">
         <MatrixIdentityPanel station={{ id: station.id, matrixId: station.matrixId }} />
       </div>
