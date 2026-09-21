@@ -290,8 +290,18 @@ func TestACPCloseEmitsExitEvent(t *testing.T) {
 		t.Fatal(`no stream frame with "event":"exit" received after acp.close`)
 	}
 
-	if _, ok := mgr.Get(sessionID); ok {
-		t.Fatal("session should be removed from the manager after acp.close")
+	// The exit event is emitted by an OnExit callback. It can reach the hub
+	// just before the close request returns and removes the session, so assert
+	// the documented eventual post-close state rather than scheduler timing.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := mgr.Get(sessionID); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session should be removed from the manager after acp.close")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
