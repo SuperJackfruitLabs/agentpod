@@ -42,13 +42,14 @@ type codexDescriptor struct {
 	// Host seams. These are fields so no test needs codex, node or npx
 	// installed, none touches the host's PATH or filesystem and none spawns a
 	// pgrep-visible child; production wiring in NewCodexFrom uses the real host.
-	processRunning func(projPath string) (running bool, note string)
-	adapterRunning func(adapterPath, projPath string) (running bool, note string)
-	userHome       string                                // OS user home; "" omits home-relative candidates
-	lookPath       func(string) (string, error)          // exec.LookPath
-	isExecutable   func(string) bool                     // isExecutableFile
-	nodeVersion    func(nodePath string) (string, error) // `node --version`
-	getenv         func(string) string                   // os.Getenv
+	processRunning       func(projPath string) (running bool, note string)
+	adapterRunning       func(adapterPath, projPath string) (running bool, note string)
+	nativeSkillDiscovery func(context.Context, string, string) ([]string, error)
+	userHome             string                                // OS user home; "" omits home-relative candidates
+	lookPath             func(string) (string, error)          // exec.LookPath
+	isExecutable         func(string) bool                     // isExecutableFile
+	nodeVersion          func(nodePath string) (string, error) // `node --version`
+	getenv               func(string) string                   // os.Getenv
 }
 
 // CodexConfig carries everything the descriptor needs. Zero values are valid: an
@@ -90,17 +91,18 @@ func NewCodexFrom(cfg CodexConfig) Descriptor {
 		home = filepath.Join(base, ".codex")
 	}
 	return &codexDescriptor{
-		home:           home,
-		acpBinary:      cfg.AcpBinary,
-		codexBinary:    cfg.CodexBinary,
-		nodeBinary:     cfg.NodeBinary,
-		processRunning: codexProcessRunning,
-		adapterRunning: codexAdapterProcessRunning,
-		userHome:       userHome,
-		lookPath:       exec.LookPath,
-		isExecutable:   isExecutableFile,
-		nodeVersion:    nodeVersionOutput,
-		getenv:         os.Getenv,
+		home:                 home,
+		acpBinary:            cfg.AcpBinary,
+		codexBinary:          cfg.CodexBinary,
+		nodeBinary:           cfg.NodeBinary,
+		processRunning:       codexProcessRunning,
+		adapterRunning:       codexAdapterProcessRunning,
+		nativeSkillDiscovery: codexACPDiscoverSkills,
+		userHome:             userHome,
+		lookPath:             exec.LookPath,
+		isExecutable:         isExecutableFile,
+		nodeVersion:          nodeVersionOutput,
+		getenv:               os.Getenv,
 	}
 }
 

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
@@ -34,7 +37,79 @@ func localSkillInventory(ctx context.Context, d Descriptor, key string, roots []
 	return skills.Inventory{}, fmt.Errorf("skills.inventory: station is not currently detected")
 }
 func (d *codexDescriptor) SkillInventory(ctx context.Context, key string) (skills.Inventory, error) {
-	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: ".agents/skills", Scope: "workspace"}})
+	inventory, err := localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: ".agents/skills", Scope: "workspace"}})
+	if err != nil || len(inventory.Skills) == 0 {
+		return inventory, err
+	}
+	readiness, err := d.NativeSkillReadiness(ctx, key)
+	if err != nil {
+		return skills.Inventory{}, err
+	}
+	if !readiness.Ready {
+		setCodexLoadingUnknown(&inventory, readiness.Reason)
+		return inventory, nil
+	}
+	workspace, err := d.projectPathForKey(key)
+	if err != nil {
+		return skills.Inventory{}, err
+	}
+	advertised, err := d.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace)
+	if err != nil {
+		setCodexLoadingUnknown(&inventory, "Fresh isolated Codex session could not establish discovery: "+boundedSkillReason(err.Error()))
+		return inventory, nil
+	}
+	setCodexLoadingEvidence(&inventory, advertised)
+	return inventory, nil
+}
+
+func boundedSkillReason(reason string) string {
+	if len(reason) > 512 {
+		return reason[:512]
+	}
+	return reason
+}
+
+func setCodexLoadingUnknown(inventory *skills.Inventory, reason string) {
+	for i := range inventory.Skills {
+		inventory.Skills[i].Evidence.Loaded = skills.Observation{Reason: reason}
+	}
+	inventory.Coverage.Limitations = append(inventory.Coverage.Limitations, "Codex loading evidence was not collected: "+reason)
+}
+
+func setCodexLoadingEvidence(inventory *skills.Inventory, advertised []string) {
+	seen := make(map[string]bool, len(advertised))
+	for _, name := range advertised {
+		seen[name] = true
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for i := range inventory.Skills {
+		expected := codexAdvertisedSkillName(inventory.Skills[i])
+		if expected == "" {
+			inventory.Skills[i].Evidence.Loaded = skills.Observation{Reason: "Fresh isolated Codex discovery ran, but this non-managed layout has no established command-name mapping"}
+			continue
+		}
+		loaded := expected != "" && seen[expected]
+		reason := "A fresh isolated ACP session did not advertise this skill"
+		if loaded {
+			reason = "A fresh isolated ACP session advertised this skill"
+		}
+		inventory.Skills[i].Evidence.Loaded = skills.Observation{Value: &loaded, ObservedAt: &now, Reason: reason}
+	}
+}
+
+// codexAdvertisedSkillName only recognizes the managed grouped layout. Other
+// files retain unknown loading evidence rather than being guessed as an
+// AgentPod-managed command.
+func codexAdvertisedSkillName(entry skills.Entry) string {
+	parts := strings.Split(filepath.ToSlash(entry.ID), "/")
+	if len(parts) != 6 || parts[0] != ".agents" || parts[1] != "skills" || !strings.HasPrefix(parts[2], "sjl-") || parts[3] != "skills" || parts[5] != "SKILL.md" {
+		return ""
+	}
+	name := entry.Name
+	if name == "" || strings.Contains(name, ":") {
+		return ""
+	}
+	return parts[2] + ":" + name
 }
 func (d *claudeCodeDescriptor) SkillInventory(ctx context.Context, key string) (skills.Inventory, error) {
 	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: ".claude/skills", Scope: "workspace"}})
