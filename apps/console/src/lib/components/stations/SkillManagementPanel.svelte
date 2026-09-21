@@ -10,6 +10,7 @@
   let operation = $state<SkillHubOperation | null>(null);
   let verification = $state<Awaited<ReturnType<typeof api.verifySkillFiles>> | null>(null);
   let retention = $state<Awaited<ReturnType<typeof api.inspectSkillRetention>> | null>(null);
+  let maintenance = $state<Awaited<ReturnType<typeof api.planSkillMaintenance>> | null>(null);
   let artifactId = $state("");
   let profile = $state("");
   let file = $state<File | null>(null);
@@ -31,7 +32,7 @@
     const id = stationId;
     void harness;
     const ticket = ++epoch;
-    artifacts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null;
+    artifacts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null; maintenance = null;
     artifactId = ""; profile = ""; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
     void Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]).then(([packages, operations, nativeOperations]) => {
       if (ticket !== epoch) return;
@@ -95,6 +96,11 @@
     const id = stationId, selectedProfile = profile;
     void perform("Inspecting retained skill state", () => api.inspectSkillRetention(id, selectedProfile), result => { retention = result; });
   }
+  function previewMaintenance() {
+    if (locked || !validProfile) return;
+    const id = stationId, selectedProfile = profile;
+    void perform("Preparing retained-state maintenance preview", () => api.planSkillMaintenance(id, selectedProfile), result => { maintenance = result; });
+  }
   function upload() {
     if (locked || !file || !validProfile) return;
     const archive = file, targetHarness = harness, targetProfile = profile;
@@ -156,6 +162,7 @@
       <p class="text-xs text-muted-foreground">Use the profile named in the exported artifact, or an installed profile to restore its previous revision.</p>
       <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={() => plan("rollback")}>Review rollback</Button>
       <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={inspectRetention}>Inspect retained state</Button>
+      <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={previewMaintenance}>Preview safe cleanup</Button>
       <details class="text-sm">
         <summary class="cursor-pointer">Upload an exported artifact</summary>
         <label class="mt-2 block" for="skill-file">Archive (up to 32 MiB)</label>
@@ -174,6 +181,21 @@
         <p>Native records: {retention.retention.nativeOperations} operations, {retention.retention.nativeStaging} staging copies, {retention.retention.nativeBackups} backups.</p>
       {/if}
       <p class="text-xs text-muted-foreground">{retention.retention.limitation}</p>
+    </section>
+  {/if}
+  {#if maintenance}
+    <section aria-label="Safe retained-state cleanup preview" class="space-y-2 rounded-md border p-3 text-sm">
+      <h3 class="font-semibold">Safe cleanup preview for {maintenance.profile}</h3>
+      <p>Unreferenced generations: {maintenance.maintenance.preview.generations.length}; completed managed records: {maintenance.maintenance.preview.operations.length}; completed native records: {maintenance.maintenance.preview.nativeOperations.length}; native backups: {maintenance.maintenance.preview.nativeBackups.length}.</p>
+      <details><summary class="cursor-pointer">Review candidate identifiers</summary>
+        <ul class="mt-2 max-h-40 overflow-auto break-all font-mono text-xs">
+          {#each ["generations", "operations", "nativeOperations", "nativeBackups"] as kind}
+            {#each maintenance.maintenance.preview[kind as "generations" | "operations" | "nativeOperations" | "nativeBackups"] as candidate}<li>{kind}: {candidate}</li>{/each}
+          {/each}
+        </ul>
+      </details>
+      <p class="text-xs text-muted-foreground">Review digest: {maintenance.maintenance.planDigest}</p>
+      <p class="text-xs text-muted-foreground">{maintenance.maintenance.limitation}</p>
     </section>
   {/if}
   {#if pending}

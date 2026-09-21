@@ -42,6 +42,13 @@ type SkillRetentionResult struct {
 	Profile    string                     `json:"profile"`
 	Retention  skills.RetentionInspection `json:"retention"`
 }
+type SkillMaintenanceResult struct {
+	NodeID      string                 `json:"nodeId"`
+	StationKey  string                 `json:"stationKey"`
+	Harness     string                 `json:"harness"`
+	Profile     string                 `json:"profile"`
+	Maintenance skills.MaintenancePlan `json:"maintenance"`
+}
 type SkillNativeOperationResult struct {
 	Receipt *skills.PlacementReceipt `json:"receipt"`
 }
@@ -67,7 +74,7 @@ var skillProfile = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // also accepts case-insensitive and duplicate keys, unlike the strict contract.
 func skillManagementParams(verb string, raw json.RawMessage) (map[string]string, error) {
 	fields := map[string]bool{"key": true, "profile": true}
-	if verb != "skills.verify" && verb != "skills.native.verify" && verb != "skills.retention" {
+	if verb != "skills.verify" && verb != "skills.native.verify" && verb != "skills.retention" && verb != "skills.maintenance.plan" {
 		fields["operationId"] = true
 	}
 	if verb == "skills.plan" {
@@ -137,7 +144,7 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 
 func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
 	switch verb {
-	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.retention", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
+	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.retention", "skills.maintenance.plan", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
 	default:
 		return h.inner.Handle(ctx, verb, raw, emit)
 	}
@@ -203,6 +210,9 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		if verb == "skills.retention" {
 			return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: skills.RetentionInspection{NamespaceExists: false, OperationLimit: 256, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Limitation: "No managed namespace exists for this profile; no state was created while inspecting"}}, false, nil
 		}
+		if verb == "skills.maintenance.plan" {
+			return nil, false, fmt.Errorf("skills: no managed namespace exists for maintenance")
+		}
 	}
 	if err != nil {
 		return nil, false, err
@@ -230,6 +240,9 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	case "skills.retention":
 		retention, err := store.Retention(ctx)
 		return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: retention}, false, err
+	case "skills.maintenance.plan":
+		plan, err := store.PlanMaintenance(ctx)
+		return SkillMaintenanceResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Maintenance: plan}, false, err
 	case "skills.apply":
 		receipt, err := store.Operation(ctx, params["operationId"])
 		if err != nil {

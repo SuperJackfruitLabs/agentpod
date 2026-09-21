@@ -82,3 +82,16 @@ export const SkillRetentionResult = z.object({
   harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
   retention: SkillRetentionInspection,
 }).strict();
+export const SkillMaintenancePreview = z.object({
+  generations: z.array(OperationId).max(256), operations: z.array(OperationId).max(256),
+  nativeOperations: z.array(OperationId).max(256), nativeBackups: z.array(OperationId).max(256),
+}).strict();
+export const SkillMaintenancePlan = z.object({
+  preview: SkillMaintenancePreview, planDigest: Digest, observedAt: z.iso.datetime(),
+  limitation: z.string().min(1).max(2048),
+}).strict();
+export const SkillMaintenanceResult = z.object({
+  nodeId: SkillInstallBinding.shape.nodeId, stationKey: SkillInstallBinding.shape.stationKey,
+  harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
+  maintenance: SkillMaintenancePlan,
+}).strict();

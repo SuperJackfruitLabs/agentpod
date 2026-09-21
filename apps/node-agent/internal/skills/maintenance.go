@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 )
 
 // RetentionFloor is deliberately small but non-zero.  It retains a readable
@@ -19,10 +20,20 @@ const RetentionFloor = 32
 // cleanup operation.  Paths are relative to the private namespace, never
 // supplied by a caller.
 type MaintenancePreview struct {
-	Generations      []string
-	Operations       []string
-	NativeOperations []string
-	NativeBackups    []string
+	Generations      []string `json:"generations"`
+	Operations       []string `json:"operations"`
+	NativeOperations []string `json:"nativeOperations"`
+	NativeBackups    []string `json:"nativeBackups"`
+}
+
+// MaintenancePlan is a read-only, reviewable maintenance proposal.  The digest
+// binds exactly the candidates returned by this node; it is not an authority to
+// remove arbitrary caller-selected paths.
+type MaintenancePlan struct {
+	Preview    MaintenancePreview `json:"preview"`
+	PlanDigest string             `json:"planDigest"`
+	ObservedAt string             `json:"observedAt"`
+	Limitation string             `json:"limitation"`
 }
 
 func (p MaintenancePreview) Empty() bool {
@@ -154,6 +165,17 @@ func (s *InstallStore) MaintenancePreview(ctx context.Context) (MaintenancePrevi
 	sort.Strings(preview.NativeOperations)
 	sort.Strings(preview.NativeBackups)
 	return preview, nil
+}
+
+func (s *InstallStore) PlanMaintenance(ctx context.Context) (MaintenancePlan, error) {
+	preview, err := s.MaintenancePreview(ctx)
+	if err != nil {
+		return MaintenancePlan{}, err
+	}
+	return MaintenancePlan{
+		Preview: preview, PlanDigest: hashJSON(preview), ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Limitation: "Read-only maintenance preview. Applying cleanup requires a separately reviewed durable journal and is not available from this node version.",
+	}, nil
 }
 
 func (s *InstallStore) completedOptionalMaintenanceOperations(directory string, native bool, protected string, floor int) ([]string, error) {

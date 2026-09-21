@@ -3,7 +3,7 @@ import { Station, StationHealth, FsEntry } from "./station";
 import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
 import { PostureReport } from "./posture";
 import { SkillInventory, SkillInventoryParams } from "./skills";
-import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillRetentionParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult, SkillRetentionResult } from "./skill-install";
+import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillRetentionParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult, SkillRetentionResult, SkillMaintenanceResult } from "./skill-install";
 import { SkillNativePlanParams, SkillNativeApplyParams, SkillNativeOperationParams, SkillNativeVerifyParams, SkillNativeOperationResult, SkillNativeVerifyResult } from "./skill-native";
 import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
 
@@ -35,6 +35,7 @@ export const VERB_PARAMS = {
   "skills.operation": SkillOperationParams,
   "skills.verify": SkillVerifyParams,
   "skills.retention": SkillRetentionParams,
+  "skills.maintenance.plan": SkillRetentionParams,
   "skills.native.plan": SkillNativePlanParams,
   "skills.native.apply": SkillNativeApplyParams,
   "skills.native.operation": SkillNativeOperationParams,
@@ -93,6 +94,7 @@ export const VERB_RESULTS = {
   "skills.operation": SkillOperationResult,
   "skills.verify": SkillVerifyResult,
   "skills.retention": SkillRetentionResult,
+  "skills.maintenance.plan": SkillMaintenanceResult,
   "skills.native.plan": SkillPlacementPlan,
   "skills.native.apply": SkillPlacementReceipt,
   "skills.native.operation": SkillNativeOperationResult,
