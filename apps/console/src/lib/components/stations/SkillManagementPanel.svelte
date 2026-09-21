@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SkillArtifactMetadata, SkillHubOperation, SkillHubOperationSummary, TrustedSkillReleaseMetadata, SkillReleaseCohortMetadata } from "@agentpod/contract";
+  import { TrustedSkillReleaseRecord, type SkillArtifactMetadata, type SkillHubOperation, type SkillHubOperationSummary, type TrustedSkillReleaseMetadata, type SkillReleaseCohortMetadata } from "@agentpod/contract";
   import * as api from "$lib/api/skills";
   import { Button } from "$lib/components/ui/button";
 
@@ -18,6 +18,7 @@
   let cohortId = $state("");
   let profile = $state("");
   let file = $state<File | null>(null);
+  let releaseRecord = $state("");
   let busy = $state<string | null>(null);
   let error = $state<string | null>(null);
   let pending = $state<{ action: "install" | "rollback"; value: string; requestId: string } | null>(null);
@@ -132,6 +133,20 @@
       cohorts = [result, ...cohorts.filter(cohort => cohort.id !== result.id)]; cohortId = result.id;
     });
   }
+  function importRelease() {
+    if (locked || !releaseRecord.trim()) return;
+    let record: TrustedSkillReleaseRecord;
+    try { record = TrustedSkillReleaseRecord.parse(JSON.parse(releaseRecord)); }
+    catch { error = "Release record must be valid canonical release JSON."; return; }
+    const pins = record.artifacts.map(expected => {
+      const artifact = artifacts.find(candidate => candidate.harness === expected.harness && candidate.profile === record.profile && candidate.archiveSHA256 === expected.archive_sha256);
+      return artifact ? { harness: expected.harness, artifactId: artifact.id } : null;
+    });
+    if (pins.some(pin => pin === null)) { error = "Upload each archive named by this release record before recording it."; return; }
+    void perform("Recording trusted release", () => api.importTrustedSkillRelease(record, pins as { harness: TrustedSkillReleaseRecord["artifacts"][number]["harness"]; artifactId: string }[]), result => {
+      releases = [result, ...releases.filter(release => release.id !== result.id)]; releaseId = result.id; releaseRecord = "";
+    });
+  }
   function planCanary() {
     if (locked || !selectedCohort || !selectedRelease || !selectedCohort.stationIds.includes(stationId)) return;
     const cohort = selectedCohort, release = selectedRelease;
@@ -179,6 +194,12 @@
         {#each releases as release (release.id)}<option value={release.id}>{release.version} · {release.profile} · {release.recordDigest.slice(0, 12)}</option>{/each}
       </select>
       {#if releases.length === 0}<p class="text-xs text-muted-foreground">No trusted release records are available for this account.</p>{/if}
+      <details class="text-xs text-muted-foreground">
+        <summary class="cursor-pointer">Record a complete trusted release</summary>
+        <p class="mt-2">Paste the signed-off release JSON. AgentPod matches every pinned archive by harness, profile and checksum before recording it.</p>
+        <textarea aria-label="Trusted release record" class="mt-2 min-h-32 w-full rounded-md border bg-background p-2 font-mono text-xs" bind:value={releaseRecord} disabled={locked} placeholder={'{"schema_version":1, ...}'}></textarea>
+        <Button size="sm" variant="outline" class="mt-2" disabled={locked || !releaseRecord.trim()} onclick={importRelease}>Record trusted release</Button>
+      </details>
       <div class="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={locked || !selectedRelease} onclick={createCanaryCohort}>Enroll this station as canary</Button>
         <select aria-label="Canary cohort" class="rounded-md border bg-background p-2 text-sm" bind:value={cohortId} disabled={locked}>

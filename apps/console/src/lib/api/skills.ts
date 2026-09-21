@@ -8,6 +8,7 @@ import {
   TrustedSkillReleaseMetadata,
   SkillReleaseCohortMetadata,
   SkillReleaseCanaryOperation,
+  TrustedSkillReleaseRecord,
 } from "@agentpod/contract";
 import { http } from "./client";
 
@@ -46,6 +47,10 @@ export const listSkillArtifacts = async () =>
   SkillArtifactMetadata.array().parse(await http("/api/skills/artifacts"));
 export const listTrustedSkillReleases = async () =>
   TrustedSkillReleaseMetadata.array().parse(await http("/api/skills/catalog/releases"));
+export const importTrustedSkillRelease = async (
+  record: TrustedSkillReleaseRecord,
+  artifacts: { harness: TrustedSkillReleaseRecord["artifacts"][number]["harness"]; artifactId: string }[],
+) => TrustedSkillReleaseMetadata.parse(await http("/api/skills/catalog/releases", post({ record, artifacts })));
 export const listSkillReleaseCohorts = async () =>
   SkillReleaseCohortMetadata.array().parse(await http("/api/skills/catalog/cohorts"));
 export const createSkillReleaseCohort = async (releaseId: string, recordDigest: string, stationIds: string[]) =>
