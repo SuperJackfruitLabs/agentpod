@@ -43,6 +43,38 @@ func TestSkillsStationVerifyUsesTheManagedVerificationRoute(t *testing.T) {
 	}
 }
 
+func TestSkillsNativeVerifyUsesTheNativeVerificationRoute(t *testing.T) {
+	bin := build(t)
+	var gotMethod, gotPath string
+	var gotBody map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"verification":{"discoveryNames":["sjl-fixture:sjl-fixture"]}}`))
+	}))
+	defer srv.Close()
+
+	out, code := run(t, bin, []string{
+		"AGENTPOD_HUB=" + srv.URL,
+		"AGENTPOD_TOKEN=" + jwtish("prn_operator", "human"),
+	}, "skills", "native", "verify", "--station", "station_fixture", "--profile", "fixture")
+	if code != 0 {
+		t.Fatalf("verify failed (%d): %s", code, out)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/stations/station_fixture/skills/native/verify" {
+		t.Fatalf("native verification route = %s %s", gotMethod, gotPath)
+	}
+	if gotBody["profile"] != "fixture" {
+		t.Fatalf("native verification body = %#v", gotBody)
+	}
+	if !strings.Contains(out, `"discoveryNames":["sjl-fixture:sjl-fixture"]`) {
+		t.Fatalf("native verification result was not preserved: %s", out)
+	}
+}
+
 func TestSkillsArtifactDeleteUsesTheOwnedArtifactRoute(t *testing.T) {
 	bin := build(t)
 	var gotMethod, gotPath, gotAuth string
