@@ -57,6 +57,11 @@ describe("the bridge switch", () => {
     expect(bridge!.config.domain).toBe("id.agentpod.dev");
   });
 
+  test("has a close path even when crypto is not configured", async () => {
+    const bridge = createMatrixBridge(matrixBridgeConfig(base));
+    await expect(bridge!.close()).resolves.toBeUndefined();
+  });
+
   test("defaults the homeserver to loopback, because it is never remote here", () => {
     const cfg = matrixBridgeConfig({ ...base, MATRIX_HOMESERVER_URL: undefined });
     expect(cfg.homeserverUrl).toBe("http://127.0.0.1:6167");
