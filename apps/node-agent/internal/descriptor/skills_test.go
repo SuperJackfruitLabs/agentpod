@@ -125,6 +125,14 @@ func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 	if loaded = byName["local"].Evidence.Loaded; loaded.Value != nil || !strings.Contains(loaded.Reason, "no established command-name mapping") {
 		t.Fatalf("unmanaged skill loading evidence: %+v", loaded)
 	}
+	loading, err := d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture:fixture"})
+	if err != nil || loading.Value == nil || !*loading.Value || loading.ObservedAt == nil {
+		t.Fatalf("native loading: %+v %v", loading, err)
+	}
+	loading, err = d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture:missing"})
+	if err != nil || loading.Value == nil || *loading.Value {
+		t.Fatalf("missing native name claimed loaded: %+v %v", loading, err)
+	}
 }
 
 func TestSkillInventoryUnsupportedDescriptorDoesNotFallbackToFiles(t *testing.T) {

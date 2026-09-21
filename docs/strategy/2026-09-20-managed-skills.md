@@ -162,8 +162,13 @@ There is a brief absence window between renames. Recovery recognizes publication
 before head/receipt completion, preserves edits and refuses competing operations.
 Rollback and deactivation affect native placement without changing the independently
 selected managed generation. Repeated activation preserves useful rollback history.
-Receipts are historical; fresh verification rereads current bytes and keeps native
-eligibility/session loading unknown.
+Receipts are historical; fresh verification rereads current bytes. For a managed
+Codex placement whose selected adapter/engine pair is covered by the isolated
+probe and whose workspace is quiescent, it also starts an offline disposable ACP
+session and compares the exact qualified command names in the placement receipt.
+That produces a dated loaded yes/no observation. Every other harness, unmanaged
+layout, unknown runtime, busy workspace and probe failure remains unknown with
+its reason; this does not establish active-session refresh.
 
 This primitive is deliberately **not advertised as a remote capability** yet.
 It requires a quiescent workspace. Before broker/hub/console exposure, complete
@@ -343,3 +348,10 @@ qualified fixture name; installation alone remains undiscovered and sibling
 workspaces remain isolated. No model prompt or client tool is used. These are
 repeatable installed-runtime probes, not a production version gate or evidence
 of active-session refresh, production authentication or AgentPod transport.
+
+The node now reuses this same bounded probe for `skills.native.verify` on a
+managed Codex placement. The verification receipt carries the command names
+derived from its verified generation, so an unrelated skill cannot make the
+placement appear loaded. The probe is read-only and leaves native publication
+fail-closed until the operator activation workflow, lifecycle coverage and
+cohort rollout gates are implemented.

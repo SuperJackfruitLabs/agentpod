@@ -34,7 +34,7 @@ func TestPlacementPublishesAndRecoversNativeDiscoveryDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial, err := s.VerifyPlacement(ctx)
-	if err != nil || initial.Present.Value == nil || !*initial.Present.Value || initial.Loaded.Value != nil {
+	if err != nil || initial.Present.Value == nil || !*initial.Present.Value || initial.Loaded.Value != nil || strings.Join(initial.DiscoveryNames, ",") != "sjl-fixture:sjl-fixture" {
 		t.Fatalf("native evidence: %+v %v", initial, err)
 	}
 	if _, err = s.ApplyPlacement(ctx, plan.OperationID, plan.PlanDigest); err != nil {
@@ -74,7 +74,7 @@ func TestPlacementPublishesAndRecoversNativeDiscoveryDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	absent, err := s.VerifyPlacement(ctx)
-	if err != nil || *absent.Present.Value {
+	if err != nil || *absent.Present.Value || len(absent.DiscoveryNames) != 0 {
 		t.Fatalf("deactivate: %+v %v", absent, err)
 	}
 	if _, err = os.Stat(plan.TargetPath); !os.IsNotExist(err) {

@@ -21,6 +21,6 @@ export const SkillPlacementReceipt=z.object({
  plan:SkillPlacementPlan,phase:z.enum(['planned','staging','switching','applied','conflict']),
  updatedAt:z.iso.datetime(),completedAt:z.iso.datetime().nullable(),error:z.string().max(2048).nullable(),
 }).strict().refine(r=>(r.phase==='applied')===(r.completedAt!==null));
-export const SkillPlacementVerification=z.object({current:SkillGeneration.nullable(),path:Path,present:SkillObservation,loaded:SkillObservation}).strict();
+export const SkillPlacementVerification=z.object({current:SkillGeneration.nullable(),path:Path,discoveryNames:z.array(z.string().min(1).max(256)).max(256),present:SkillObservation,loaded:SkillObservation}).strict();
 export type SkillPlacementPlan=z.infer<typeof SkillPlacementPlan>;
 export type SkillPlacementReceipt=z.infer<typeof SkillPlacementReceipt>;

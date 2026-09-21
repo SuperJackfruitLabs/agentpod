@@ -440,7 +440,22 @@ func (s *InstallStore) VerifyPlacement(ctx context.Context) (PlacementVerificati
 	if err = s.verifyPlaced(ctx, workspace, target, head.Current); err != nil {
 		return PlacementVerification{}, err
 	}
+	manifest, err := s.verifyGeneration(ctx, head.Current)
+	if err != nil {
+		return PlacementVerification{}, err
+	}
+	names := []string{}
+	if manifest != nil {
+		for _, skill := range manifest.Skills {
+			name := skill.ID
+			if s.binding.Harness == "codex" {
+				name = manifest.Name + ":" + name
+			}
+			names = append(names, name)
+		}
+		sort.Strings(names)
+	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	present := head.Current != nil
-	return PlacementVerification{Current: head.Current, Path: filepath.Join(s.binding.WorkspacePath, target), Present: Observation{Value: &present, ObservedAt: &now, Reason: "Verified owned files in the native project discovery root"}, Loaded: Observation{Reason: "Native eligibility, project trust and session loading were not queried"}}, nil
+	return PlacementVerification{Current: head.Current, Path: filepath.Join(s.binding.WorkspacePath, target), DiscoveryNames: names, Present: Observation{Value: &present, ObservedAt: &now, Reason: "Verified owned files in the native project discovery root"}, Loaded: Observation{Reason: "Native eligibility, project trust and session loading were not queried"}}, nil
 }

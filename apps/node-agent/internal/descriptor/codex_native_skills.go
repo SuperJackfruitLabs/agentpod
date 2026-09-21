@@ -2,10 +2,13 @@ package descriptor
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
 
 // NativeSkillReadiness reports only the adapter/engine pair an ACP session
@@ -57,6 +60,40 @@ func (c *codexDescriptor) NativeSkillReadiness(ctx context.Context, key string) 
 		}
 	}
 	return NativeSkillReadiness{Harness: "codex", Ready: ready, Reason: reason, AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+}
+
+// NativeSkillLoading uses the same readiness gate as publication, then starts
+// the selected ACP adapter with an isolated offline home. It compares only the
+// exact native discovery names from the node's verified placement receipt.
+func (c *codexDescriptor) NativeSkillLoading(ctx context.Context, key string, expected []string) (skills.Observation, error) {
+	if len(expected) == 0 {
+		return skills.Observation{Reason: "No native skill names are selected for this placement"}, nil
+	}
+	readiness, err := c.NativeSkillReadiness(ctx, key)
+	if err != nil {
+		return skills.Observation{}, err
+	}
+	if !readiness.Ready {
+		return skills.Observation{Reason: readiness.Reason}, nil
+	}
+	workspace, err := c.projectPathForKey(key)
+	if err != nil {
+		return skills.Observation{}, err
+	}
+	advertised, err := c.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace)
+	if err != nil {
+		return skills.Observation{}, fmt.Errorf("fresh isolated Codex session could not establish discovery: %w", err)
+	}
+	seen := make(map[string]bool, len(advertised))
+	for _, name := range advertised {
+		seen[name] = true
+	}
+	for _, name := range expected {
+		if !seen[name] {
+			return observedNativeSkillLoading(false, "A fresh isolated ACP session did not advertise "+name), nil
+		}
+	}
+	return observedNativeSkillLoading(true, "A fresh isolated ACP session advertised every native skill in this placement"), nil
 }
 
 // codexAdapterProcessRunning finds the selected adapter in command lines, then
