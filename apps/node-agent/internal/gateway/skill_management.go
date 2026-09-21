@@ -35,6 +35,13 @@ type SkillVerifyResult struct {
 	Profile      string                     `json:"profile"`
 	Verification skills.InstallVerification `json:"verification"`
 }
+type SkillRetentionResult struct {
+	NodeID     string                     `json:"nodeId"`
+	StationKey string                     `json:"stationKey"`
+	Harness    string                     `json:"harness"`
+	Profile    string                     `json:"profile"`
+	Retention  skills.RetentionInspection `json:"retention"`
+}
 type SkillNativeOperationResult struct {
 	Receipt *skills.PlacementReceipt `json:"receipt"`
 }
@@ -60,7 +67,7 @@ var skillProfile = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // also accepts case-insensitive and duplicate keys, unlike the strict contract.
 func skillManagementParams(verb string, raw json.RawMessage) (map[string]string, error) {
 	fields := map[string]bool{"key": true, "profile": true}
-	if verb != "skills.verify" && verb != "skills.native.verify" {
+	if verb != "skills.verify" && verb != "skills.native.verify" && verb != "skills.retention" {
 		fields["operationId"] = true
 	}
 	if verb == "skills.plan" {
@@ -130,7 +137,7 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 
 func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
 	switch verb {
-	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
+	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.retention", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
 	default:
 		return h.inner.Handle(ctx, verb, raw, emit)
 	}
@@ -193,6 +200,9 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 				Loaded:  skills.Observation{Reason: "No harness registration or session inspection was performed"},
 			}}, false, nil
 		}
+		if verb == "skills.retention" {
+			return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: skills.RetentionInspection{NamespaceExists: false, OperationLimit: 256, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Limitation: "No managed namespace exists for this profile; no state was created while inspecting"}}, false, nil
+		}
 	}
 	if err != nil {
 		return nil, false, err
@@ -217,6 +227,9 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	case "skills.verify":
 		verification, err := store.Verify(ctx)
 		return SkillVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
+	case "skills.retention":
+		retention, err := store.Retention(ctx)
+		return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: retention}, false, err
 	case "skills.apply":
 		receipt, err := store.Operation(ctx, params["operationId"])
 		if err != nil {

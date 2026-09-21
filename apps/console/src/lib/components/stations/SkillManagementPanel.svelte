@@ -9,6 +9,7 @@
   let nativeHistory = $state<SkillHubOperationSummary[]>([]);
   let operation = $state<SkillHubOperation | null>(null);
   let verification = $state<Awaited<ReturnType<typeof api.verifySkillFiles>> | null>(null);
+  let retention = $state<Awaited<ReturnType<typeof api.inspectSkillRetention>> | null>(null);
   let artifactId = $state("");
   let profile = $state("");
   let file = $state<File | null>(null);
@@ -30,7 +31,7 @@
     const id = stationId;
     void harness;
     const ticket = ++epoch;
-    artifacts = []; history = []; nativeHistory = []; operation = null; verification = null;
+    artifacts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null;
     artifactId = ""; profile = ""; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
     void Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]).then(([packages, operations, nativeOperations]) => {
       if (ticket !== epoch) return;
@@ -88,6 +89,11 @@
     const id = stationId, selectedProfile = operation.profile;
     verification = null;
     void perform("Verifying installed files", () => operation!.kind === "native" ? api.verifyNativeSkillPlacement(id, selectedProfile) : api.verifySkillFiles(id, selectedProfile), result => { verification = result; });
+  }
+  function inspectRetention() {
+    if (locked || !validProfile) return;
+    const id = stationId, selectedProfile = profile;
+    void perform("Inspecting retained skill state", () => api.inspectSkillRetention(id, selectedProfile), result => { retention = result; });
   }
   function upload() {
     if (locked || !file || !validProfile) return;
@@ -149,6 +155,7 @@
       <input id="skill-profile" class="w-full rounded-md border bg-background p-2 text-sm" bind:value={profile} placeholder="engineering-core" maxlength="124" disabled={locked || pending !== null} />
       <p class="text-xs text-muted-foreground">Use the profile named in the exported artifact, or an installed profile to restore its previous revision.</p>
       <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={() => plan("rollback")}>Review rollback</Button>
+      <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={inspectRetention}>Inspect retained state</Button>
       <details class="text-sm">
         <summary class="cursor-pointer">Upload an exported artifact</summary>
         <label class="mt-2 block" for="skill-file">Archive (up to 32 MiB)</label>
@@ -157,6 +164,18 @@
       </details>
     </div>
   </div>
+  {#if retention}
+    <section aria-label="Retained skill state" class="space-y-2 rounded-md border p-3 text-sm">
+      <h3 class="font-semibold">Retained state for {retention.profile}</h3>
+      {#if !retention.retention.namespaceExists}
+        <p>No managed namespace exists. Inspection did not create one.</p>
+      {:else}
+        <p>Operations: {retention.retention.operations} of {retention.retention.operationLimit}; generations: {retention.retention.generations}; staging records: {retention.retention.staging}; interrupted writes: {retention.retention.pending}.</p>
+        <p>Native records: {retention.retention.nativeOperations} operations, {retention.retention.nativeStaging} staging copies, {retention.retention.nativeBackups} backups.</p>
+      {/if}
+      <p class="text-xs text-muted-foreground">{retention.retention.limitation}</p>
+    </section>
+  {/if}
   {#if pending}
     <div class="space-y-2 rounded-md border p-3 text-sm">
       <p>Planning has not returned a confirmed result. Retry the same request or refresh history to find its operation.</p>

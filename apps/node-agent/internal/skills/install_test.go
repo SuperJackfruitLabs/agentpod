@@ -557,3 +557,23 @@ func TestInstallRetainsCapacityForRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetentionInspectionReportsOnlyNodeOwnedState(t *testing.T) {
+	store, _ := testInstallStore(t)
+	inspection, err := store.Retention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inspection.NamespaceExists || inspection.OperationLimit != 256 || inspection.Operations != 0 || inspection.Generations != 0 || inspection.Staging != 0 || inspection.Pending != 0 {
+		t.Fatalf("unexpected initial retention inspection: %+v", inspection)
+	}
+	id := strings.Repeat("a", 32)
+	planFixtureInstall(t, store, id)
+	inspection, err = store.Retention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Operations != 1 || inspection.Generations != 0 || inspection.Limitation == "" {
+		t.Fatalf("unexpected planned retention inspection: %+v", inspection)
+	}
+}

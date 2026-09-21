@@ -47,6 +47,8 @@ const SkillProfileParams = z.object({
 }).strict();
 const StationId = z.string().regex(/^[a-zA-Z0-9_-]{1,256}$/);
 export const SkillVerifyParams = SkillProfileParams;
+/** Read-only accounting for the node-owned managed namespace. */
+export const SkillRetentionParams = SkillProfileParams;
 export const SkillOperationParams = SkillProfileParams.extend({operationId: OperationId});
 export const SkillPlanParams = SkillOperationParams.extend({stationId: StationId, archiveSHA256: Digest});
 export const SkillApplyParams = SkillOperationParams.extend({stationId: StationId, expectedPlanDigest: Digest});
@@ -61,4 +63,22 @@ export const SkillVerifyResult = z.object({
   nodeId: SkillInstallBinding.shape.nodeId, stationKey: SkillInstallBinding.shape.stationKey,
   harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
   verification: SkillInstallVerification,
+}).strict();
+export const SkillRetentionInspection = z.object({
+  namespaceExists: z.boolean(),
+  operations: z.number().int().min(0).max(256),
+  operationLimit: z.literal(256),
+  generations: z.number().int().min(0).max(256),
+  staging: z.number().int().min(0).max(16),
+  pending: z.number().int().min(0).max(16),
+  nativeOperations: z.number().int().min(0).max(256),
+  nativeStaging: z.number().int().min(0).max(16),
+  nativeBackups: z.number().int().min(0).max(256),
+  observedAt: z.iso.datetime(),
+  limitation: z.string().min(1).max(2048),
+}).strict();
+export const SkillRetentionResult = z.object({
+  nodeId: SkillInstallBinding.shape.nodeId, stationKey: SkillInstallBinding.shape.stationKey,
+  harness: SkillInstallBinding.shape.harness, profile: SkillInstallBinding.shape.profile,
+  retention: SkillRetentionInspection,
 }).strict();

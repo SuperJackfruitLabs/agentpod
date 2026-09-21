@@ -88,6 +88,13 @@ cleanup must be exposed before broad managed rollout. Package materialization
 does not register a plugin, update harness configuration or refresh a session.
 Session loading remains unknown.
 
+The console now exposes a read-only retained-state inspection for one managed
+profile. It reports the node-owned operation, generation, staging, pending-write,
+and native-placement counts without creating a namespace. It deliberately does
+not prune anything: receipts and generations remain recovery evidence until a
+separately reviewed maintenance policy can prove what is safe to remove. Broad
+rollout therefore still requires that maintenance policy and its recovery tests.
+
 The node now implements `skills.plan`, `skills.apply`, `skills.verify`,
 `skills.rollback` and `skills.operation` under the separate `skills.manage`
 capability. Six descriptors opt into exact detected-workspace resolution. The

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SkillInstallPlan, SkillInstallReceipt } from "./skill-install";
+import { SkillInstallPlan, SkillInstallReceipt, SkillRetentionResult } from "./skill-install";
 
 import { planFixture } from "./fixtures/skill-install";
 import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
@@ -27,6 +27,13 @@ test("skill status distinguishes unknown operation and absent managed files from
   const status = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",verification:{current:null,path:null,present:{...observation,value:false,observedAt:"2026-09-20T16:00:01Z"},loaded:observation}};
   expect(VERB_RESULTS["skills.verify"].parse(status).verification.loaded.value).toBeNull();
   expect(VERB_RESULTS["skills.verify"].safeParse({...status,verification:{...status.verification,path:"/tmp/claimed"}}).success).toBe(false);
+});
+
+test("retention inspection is read-only accounting, including an absent namespace", () => {
+  const retention = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",retention:{namespaceExists:false,operations:0,operationLimit:256,generations:0,staging:0,pending:0,nativeOperations:0,nativeStaging:0,nativeBackups:0,observedAt:"2026-09-21T15:00:00Z",limitation:"No managed namespace exists; no state was created"}};
+  expect(VERB_PARAMS["skills.retention"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
+  expect(SkillRetentionResult.parse(retention).retention.namespaceExists).toBe(false);
+  expect(SkillRetentionResult.safeParse({...retention,retention:{...retention.retention,operationLimit:255}}).success).toBe(false);
 });
 
 test("durable plans bind identity and a prior head, with activation pending", () => {
