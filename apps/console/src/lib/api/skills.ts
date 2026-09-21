@@ -4,6 +4,7 @@ import {
   SkillHubOperationSummary,
   SkillVerifyResult,
   SkillRetentionResult,
+  SkillMaintenanceResult,
 } from "@agentpod/contract";
 import { http } from "./client";
 
@@ -165,6 +166,14 @@ export const inspectSkillRetention = async (stationId: string, profile: string) 
   );
   if (result.profile !== profile)
     throw new Error("Retention inspection belongs to a different profile");
+  return result;
+};
+export const planSkillMaintenance = async (stationId: string, profile: string) => {
+  const result = SkillMaintenanceResult.parse(
+    await http(`${stationPath(stationId)}/maintenance/plan`, post({ profile })),
+  );
+  if (result.profile !== profile)
+    throw new Error("Maintenance preview belongs to a different profile");
   return result;
 };
 export const verifyNativeSkillPlacement = async (stationId: string, profile: string) => {

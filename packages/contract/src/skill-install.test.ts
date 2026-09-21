@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SkillInstallPlan, SkillInstallReceipt, SkillRetentionResult } from "./skill-install";
+import { SkillInstallPlan, SkillInstallReceipt, SkillRetentionResult, SkillMaintenanceResult } from "./skill-install";
 
 import { planFixture } from "./fixtures/skill-install";
 import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
@@ -34,6 +34,13 @@ test("retention inspection is read-only accounting, including an absent namespac
   expect(VERB_PARAMS["skills.retention"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
   expect(SkillRetentionResult.parse(retention).retention.namespaceExists).toBe(false);
   expect(SkillRetentionResult.safeParse({...retention,retention:{...retention.retention,operationLimit:255}}).success).toBe(false);
+});
+
+test("maintenance preview is a bounded read-only plan", () => {
+  const result = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",maintenance:{preview:{generations:["a".repeat(32)],operations:[],nativeOperations:[],nativeBackups:[]},planDigest:"b".repeat(64),observedAt:"2026-09-21T15:00:00Z",limitation:"Read-only preview"}};
+  expect(VERB_PARAMS["skills.maintenance.plan"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
+  expect(VERB_PARAMS["skills.maintenance.plan"].safeParse({key:"codex:fixture",profile:"fixture",operationId:"a".repeat(32)}).success).toBe(false);
+  expect(SkillMaintenanceResult.parse(result).maintenance.preview.generations).toHaveLength(1);
 });
 
 test("durable plans bind identity and a prior head, with activation pending", () => {

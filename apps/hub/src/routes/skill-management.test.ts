@@ -126,6 +126,9 @@ async function setup() {
       let data: unknown;
       if (msg.verb === "skills.operation" || msg.verb === "skills.native.operation")
         data = { receipt: receipts.get(params.operationId) ?? null };
+      else if (msg.verb === "skills.maintenance.plan") {
+        data = { nodeId, stationKey: station!.stationKey, harness: "codex", profile: params.profile, maintenance: { preview: { generations: [], operations: [], nativeOperations: [], nativeBackups: [] }, planDigest: "a".repeat(64), observedAt: "2026-09-21T15:00:00Z", limitation: "Read-only preview" } };
+      }
       else if (msg.verb === "skills.native.plan") {
         const plan = {
           ...structuredClone(placementFixture),
@@ -230,6 +233,17 @@ async function setup() {
   });
   return { nodeId, station: station!, state, requests, receipts, planReached };
 }
+
+test("maintenance preview is authenticated, station-bound, and read-only", async () => {
+  const c = await setup();
+  const res = await app.request(`/api/stations/${c.station.id}/skills/maintenance/plan`, json({ profile: "fixture" }));
+  expect(res.status).toBe(200);
+  const data = await res.json() as any;
+  expect(data.nodeId).toBe(c.nodeId);
+  expect(data.stationKey).toBe(c.station.stationKey);
+  expect(data.maintenance.planDigest).toBe("a".repeat(64));
+  expect(c.requests.at(-1)).toEqual({ verb: "skills.maintenance.plan", params: { key: c.station.stationKey, profile: "fixture" } });
+});
 
 test("upload, authorized plan/download, reviewed apply and inspect form a durable operation", async () => {
   const c = await setup();

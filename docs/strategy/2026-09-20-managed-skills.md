@@ -95,6 +95,19 @@ not prune anything: receipts and generations remain recovery evidence until a
 separately reviewed maintenance policy can prove what is safe to remove. Broad
 rollout therefore still requires that maintenance policy and its recovery tests.
 
+The maintenance policy is now defined for implementation. A node first produces
+a bounded, read-only plan and a digest of the managed and native heads it
+observed. It refuses to plan if either namespace contains an incomplete or
+conflicting receipt, an active native journal, malformed node-owned state, or a
+changed workspace binding. A plan may include only completed records beyond a
+fixed retained history floor and generations unreferenced by both managed and
+native current/previous heads. It never includes staging, pending writes,
+conflicts, active journals, current/previous generations, or the history floor.
+Applying requires the exact reviewed digest under the installation lock and
+rechecks every head and candidate immediately before removal. A mismatch or an
+uncertain result leaves state intact and requires a new inspection. There is no
+background cleanup and no recursive caller-supplied path.
+
 The node now implements `skills.plan`, `skills.apply`, `skills.verify`,
 `skills.rollback` and `skills.operation` under the separate `skills.manage`
 capability. Six descriptors opt into exact detected-workspace resolution. The

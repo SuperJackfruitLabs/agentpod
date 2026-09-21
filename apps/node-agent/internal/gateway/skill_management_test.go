@@ -183,6 +183,29 @@ func TestSkillManagementPlansAppliesInspectsAndRollsBack(t *testing.T) {
 	}
 }
 
+func TestSkillMaintenancePlanIsReadOnlyAndBoundToDetectedProfile(t *testing.T) {
+	h, _, pin, _ := skillTestHandler(t)
+	id := strings.Repeat("a", 32)
+	plan, err := skillCall(t, h, "skills.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": id, "stationId": "station-fixture", "archiveSHA256": pin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = skillCall(t, h, "skills.apply", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": id, "stationId": "station-fixture", "expectedPlanDigest": plan.(skills.InstallPlan).PlanDigest}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := skillCall(t, h, "skills.maintenance.plan", map[string]string{"key": "codex:fixture", "profile": "fixture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maintenance := result.(SkillMaintenanceResult)
+	if maintenance.NodeID != "fixture-node" || maintenance.Profile != "fixture" || maintenance.Maintenance.PlanDigest == "" || !maintenance.Maintenance.Preview.Empty() {
+		t.Fatalf("unexpected maintenance preview: %#v", maintenance)
+	}
+	if _, err = skillCall(t, h, "skills.maintenance.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": id}); err == nil {
+		t.Fatal("maintenance preview accepted caller operation ID")
+	}
+}
+
 func TestSkillManagementRefusesCallerPathsUnknownFieldsAndUndetectedKeys(t *testing.T) {
 	h, workspace, _, calls := skillTestHandler(t)
 	for _, raw := range []string{
