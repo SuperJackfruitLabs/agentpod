@@ -2,7 +2,10 @@ package descriptor
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // NativeSkillReadiness reports only the adapter/engine pair an ACP session
@@ -10,7 +13,8 @@ import (
 // an engine outside the adapter bundle and AgentPod has no discovery evidence
 // for that arbitrary binary.
 func (c *codexDescriptor) NativeSkillReadiness(ctx context.Context, key string) (NativeSkillReadiness, error) {
-	if _, err := c.projectPathForKey(key); err != nil {
+	workspace, err := c.projectPathForKey(key)
+	if err != nil {
 		return NativeSkillReadiness{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -40,7 +44,47 @@ func (c *codexDescriptor) NativeSkillReadiness(ctx context.Context, key string) 
 	if !ready {
 		reason = "Adapter and bundled engine pair has no recorded native discovery evidence"
 	}
+	if ready {
+		if running, note := c.processRunning(workspace); note != "" {
+			return NativeSkillReadiness{Harness: "codex", Reason: "Direct Codex process inspection failed: " + note, AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+		} else if running {
+			return NativeSkillReadiness{Harness: "codex", Reason: "A direct Codex process is active in this workspace", AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+		}
+		if running, note := c.adapterRunning(adapter, workspace); note != "" {
+			return NativeSkillReadiness{Harness: "codex", Reason: "codex-acp process inspection failed: " + note, AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+		} else if running {
+			return NativeSkillReadiness{Harness: "codex", Reason: "A codex-acp process is active in this workspace", AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+		}
+	}
 	return NativeSkillReadiness{Harness: "codex", Ready: ready, Reason: reason, AdapterPath: adapter, AdapterVersion: adapterVersion, EngineVersion: engineVersion}, nil
+}
+
+// codexAdapterProcessRunning finds the selected adapter in command lines, then
+// verifies that a matching process has a cwd within the target workspace. The
+// adapter commonly runs under node, so checking a process name would miss it.
+func codexAdapterProcessRunning(adapterPath, workspace string) (bool, string) {
+	pattern := regexp.QuoteMeta(adapterPath)
+	out, err := exec.Command("pgrep", "-f", pattern).Output()
+	if err != nil {
+		if exit, ok := err.(*exec.ExitError); ok && exit.ExitCode() == 1 {
+			return false, ""
+		}
+		return false, "process check unavailable (pgrep not found or failed)"
+	}
+	pids := strings.Fields(string(out))
+	if len(pids) == 0 {
+		return false, ""
+	}
+	lsofOut, err := exec.Command("lsof", "-a", "-p", strings.Join(pids, ","), "-d", "cwd", "-Fn").Output()
+	if err != nil {
+		return false, "process check unavailable (lsof not found or failed)"
+	}
+	for _, cwd := range parseLsofCwds(lsofOut) {
+		if cwdWithinWorkspace(cwd, workspace) {
+			return true, ""
+		}
+	}
+	return false, ""
 }
 
 func codexAdapterPackage(resolved string) (string, string) {
