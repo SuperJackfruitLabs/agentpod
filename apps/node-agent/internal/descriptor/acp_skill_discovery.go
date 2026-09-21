@@ -2,6 +2,7 @@ package descriptor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,11 +11,30 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const acpDiscoveryMaxFrame = 1 << 20
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
 
 // discoverACPSkillCommands starts a resolved ACP adapter, sends only
 // initialize and session/new, then returns the slash-command names that the
@@ -37,6 +57,8 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 	cmd.Dir = workspace
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var stderr synchronizedBuffer
+	cmd.Stderr = &stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -105,6 +127,16 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 		}
 		readErr <- io.EOF
 	}()
+	stderrSummary := func() string {
+		// Adapters occasionally describe a startup/configuration refusal only on
+		// stderr. Keep that evidence compact and one-line before it reaches the
+		// hub's separately bounded, path-scrubbing diagnostic boundary.
+		message := strings.Join(strings.Fields(stderr.String()), " ")
+		if len(message) > 400 {
+			message = message[:400] + "…"
+		}
+		return message
+	}
 	write := func(id int, method string, params any) error {
 		frame, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 		if err != nil {
@@ -134,6 +166,9 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 			return nil, fmt.Errorf("ACP output closed before discovery completed: %w", err)
 		case e, ok := <-events:
 			if !ok {
+				if summary := stderrSummary(); summary != "" {
+					return nil, fmt.Errorf("ACP output closed before discovery completed: %s", summary)
+				}
 				return nil, fmt.Errorf("ACP output closed before discovery completed")
 			}
 			if e.Method != "" && e.ID != nil {

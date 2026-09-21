@@ -480,3 +480,46 @@ station; the installed 0.5.5 CLI fails with the user's normal plugin settings,
 and a disposable isolated-config launch did not register a station. Neither
 harness was changed merely to obtain a canary. The managed canary matrix remains
 incomplete, as do native publication, fresh-session loading and exercise gates.
+
+### Live Codex native-placement canary (2026-09-22)
+
+The disposable stopped Codex station `new-game` (`codex:e420535d`) completed a
+reviewed native activation of the synthetic `fixture` profile. The reviewed plan
+contained only `SKILL.md` and one fixture reference and published them at
+`/Users/rakeshgangwar/new-game/.agents/skills/sjl-fixture`. Fresh node
+verification reports **Files present: Yes** and the inventory reports a regular
+`SKILL.md` entrypoint at that workspace location. This proves reviewed native
+publication and file verification for this one Codex station.
+
+The deployed hub was advanced to merged revision `726bba5b` and health-checked
+after restart. This included the safe skill-operation diagnostic change: a node
+refusal is now retained as a bounded diagnostic rather than overwritten by a
+generic unknown outcome. The Mac node was then self-updated from `v0.1.49` to
+`v0.1.50`. The Console initially displayed a connection error because its
+request timed out before the hub's 12-second update reply; the hub subsequently
+completed the update and the node returned online at `v0.1.50`. This is a UI
+timeout/reporting issue to address separately, not an unsuccessful node update.
+
+Fresh isolated Codex loading is still **Unknown**. The live node reports:
+`ACP output closed before discovery completed`. It does not claim that the
+fixture loaded or was used. Change `#527` adds a compact adapter stderr summary
+to this failure so the next released node run can identify the actual ACP
+startup/configuration refusal without exposing an unbounded transcript. Its
+focused descriptor test passes. The next operational sequence is: merge and
+release `#527`, update the disposable Mac node, rerun only this read-only
+verification, then fix the specific adapter diagnostic if it still cannot
+discover commands.
+
+Current completion record:
+
+- Done: contracts, verified artifact handling, reviewed managed installation and
+  rollback, retained-state cleanup planning, native placement transactions,
+  Console controls, fleet CLI planning, synthetic managed canaries for Hermes,
+  Pi and Claude Code, and one live Codex native file-placement canary.
+- Proven only for the Codex native canary: reviewed file publication and fresh
+  file verification. No claim is made for session loading, use, behavior, or
+  active-session refresh.
+- Remaining before a broad release claim: resolve Codex fresh-session discovery;
+  perform an explicit Codex rollback and re-verification; create safe disposable
+  canaries for OpenCode and OpenClaw; capture per-harness native/loading and
+  rollback evidence; then choose and operate an explicit trusted-release cohort.
