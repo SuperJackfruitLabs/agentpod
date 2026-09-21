@@ -23,6 +23,7 @@ type SkillManagementDeps struct {
 	Fetch           SkillArtifactFetcher
 	Workspaces      *workspacegate.Coordinator
 	AuthorizeNative func(context.Context, string, string) error
+	VerifyNative    func(context.Context, string, string, []string) (skills.Observation, error)
 }
 type SkillOperationResult struct {
 	Receipt *skills.InstallReceipt `json:"receipt"`
@@ -251,9 +252,23 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		return receipt, false, err
 	case "skills.native.verify":
 		verification, err := store.VerifyPlacement(ctx)
+		if err == nil && h.deps.VerifyNative != nil && len(verification.DiscoveryNames) != 0 {
+			loaded, verifyErr := h.deps.VerifyNative(ctx, params["key"], harness, verification.DiscoveryNames)
+			if verifyErr != nil {
+				loaded = skills.Observation{Reason: "Native loading verification failed: " + boundedNativeVerificationReason(verifyErr.Error())}
+			}
+			verification.Loaded = loaded
+		}
 		return SkillNativeVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
 	}
 	return nil, false, fmt.Errorf("skills: unknown management verb")
+}
+
+func boundedNativeVerificationReason(reason string) string {
+	if len(reason) > 512 {
+		return reason[:512]
+	}
+	return reason
 }
 
 func (h *skillManagementHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {

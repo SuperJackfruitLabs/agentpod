@@ -74,6 +74,14 @@ func TestNativeSkillActivationRequiresAnExplicitRuntimeGate(t *testing.T) {
 		Fetch:           func(context.Context, SkillArtifactRequest) ([]byte, error) { return archive, nil },
 		Workspaces:      workspacegate.New(),
 		AuthorizeNative: func(context.Context, string, string) error { return nil },
+		VerifyNative: func(_ context.Context, key, harness string, names []string) (skills.Observation, error) {
+			if key != "codex:fixture" || harness != "codex" || strings.Join(names, ",") != "sjl-fixture:sjl-fixture" {
+				t.Fatalf("unexpected native loading scope: %q %q %q", key, harness, names)
+			}
+			yes := true
+			now := "2026-09-21T00:00:00Z"
+			return skills.Observation{Value: &yes, ObservedAt: &now, Reason: "fresh isolated fixture session advertised every skill"}, nil
+		},
 	})
 	installed, err := skillCall(t, enabled, "skills.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("c", 32), "stationId": "station-fixture", "archiveSHA256": pinned})
 	if err != nil {
@@ -92,7 +100,7 @@ func TestNativeSkillActivationRequiresAnExplicitRuntimeGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	verified, err := skillCall(t, enabled, "skills.native.verify", base)
-	if err != nil || verified.(SkillNativeVerifyResult).Verification.Present.Value == nil || !*verified.(SkillNativeVerifyResult).Verification.Present.Value {
+	if err != nil || verified.(SkillNativeVerifyResult).Verification.Present.Value == nil || !*verified.(SkillNativeVerifyResult).Verification.Present.Value || verified.(SkillNativeVerifyResult).Verification.Loaded.Value == nil || !*verified.(SkillNativeVerifyResult).Verification.Loaded.Value {
 		t.Fatalf("native verification: %#v %v", verified, err)
 	}
 }

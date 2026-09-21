@@ -22,4 +22,15 @@ describe("native skill activation protocol", () => {
     expect(VERB_RESULTS["skills.native.plan"].parse(fixture)).toEqual(fixture);
     expect(VERB_RESULTS["skills.native.plan"].safeParse({ ...fixture, activation: "loaded" }).success).toBe(false);
   });
+
+  it("requires the native verification receipt to name the exact discovered commands", () => {
+    const verification = {
+      current: null, path: "/workspace/.agents/skills/sjl-fixture", discoveryNames: [],
+      present: { value: false, observedAt: "2026-09-21T00:00:00Z", reason: "verified" },
+      loaded: { value: null, observedAt: null, reason: "nothing is published" },
+    };
+    const result = { nodeId: "node", stationKey: "codex:fixture", harness: "codex", profile: "fixture", verification };
+    expect(VERB_RESULTS["skills.native.verify"].parse(result)).toEqual(result);
+    expect(VERB_RESULTS["skills.native.verify"].safeParse({ ...result, verification: { ...verification, discoveryNames: [""] } }).success).toBe(false);
+  });
 });

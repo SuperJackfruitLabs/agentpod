@@ -11,6 +11,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
@@ -91,7 +92,10 @@ func runCmd() {
 				if !readiness.Ready {
 					return fmt.Errorf("%s", readiness.Reason)
 				}
-				return fmt.Errorf("native activation remains unavailable until a fresh-session loading verifier is configured")
+				return fmt.Errorf("native activation remains unavailable until the operator activation workflow is configured")
+			},
+			VerifyNative: func(ctx context.Context, key, _ string, names []string) (skills.Observation, error) {
+				return reg.NativeSkillLoading(ctx, key, names)
 			},
 		})
 		reg.EnableSkillManagement()
