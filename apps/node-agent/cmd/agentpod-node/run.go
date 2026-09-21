@@ -80,11 +80,18 @@ func runCmd() {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
 			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
 			Workspaces: workspaces,
-			// Native publication has a separate protocol boundary and remains
-			// fail-closed until a harness-specific runtime gate proves its
-			// version, launch mode and external-process quiescence.
-			AuthorizeNative: func(context.Context, string, string) error {
-				return fmt.Errorf("native activation has not been enabled for this node")
+			// Native publication remains fail-closed. Resolve the exact runtime
+			// first so refusal is actionable, then keep external-process
+			// quiescence as a distinct required gate.
+			AuthorizeNative: func(ctx context.Context, key, _ string) error {
+				readiness, err := reg.NativeSkillReadiness(ctx, key)
+				if err != nil {
+					return err
+				}
+				if !readiness.Ready {
+					return fmt.Errorf("%s", readiness.Reason)
+				}
+				return fmt.Errorf("external harness-process quiescence is not yet verified")
 			},
 		})
 		reg.EnableSkillManagement()
