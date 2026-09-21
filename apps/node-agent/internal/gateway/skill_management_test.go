@@ -75,7 +75,7 @@ func TestNativeSkillActivationRequiresAnExplicitRuntimeGate(t *testing.T) {
 		Workspaces:      workspacegate.New(),
 		AuthorizeNative: func(context.Context, string, string) error { return nil },
 		VerifyNative: func(_ context.Context, key, harness string, names []string) (skills.Observation, error) {
-			if key != "codex:fixture" || harness != "codex" || strings.Join(names, ",") != "sjl-fixture:sjl-fixture" {
+			if key != "codex:fixture" || harness != "codex" || strings.Join(names, ",") != "sjl-fixture" {
 				t.Fatalf("unexpected native loading scope: %q %q %q", key, harness, names)
 			}
 			yes := true

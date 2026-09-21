@@ -62,11 +62,11 @@ func TestAllSkillInventoryDescriptorsImplementOptionalInterface(t *testing.T) {
 
 func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 	home, project, _ := buildCodexFixture(t)
-	skill := filepath.Join(project, ".agents", "skills", "sjl-fixture", "skills", "fixture")
+	skill := filepath.Join(project, ".agents", "skills", "sjl-fixture")
 	if err := os.MkdirAll(skill, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: fixture\ndescription: Fixture\n---\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: sjl-fixture\ndescription: Fixture\n---\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	unmanaged := filepath.Join(project, ".agents", "skills", "local")
@@ -108,7 +108,7 @@ func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 		if adapter != shim || workspace != project {
 			t.Fatalf("unexpected discovery scope %q %q", adapter, workspace)
 		}
-		return []string{"sjl-fixture:fixture"}, nil
+		return []string{"sjl-fixture"}, nil
 	}
 	result, err := d.SkillInventory(context.Background(), codexKeyFor(project))
 	if err != nil || !called || len(result.Skills) != 2 {
@@ -118,18 +118,18 @@ func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 	for _, entry := range result.Skills {
 		byName[entry.Name] = entry
 	}
-	loaded := byName["fixture"].Evidence.Loaded
+	loaded := byName["sjl-fixture"].Evidence.Loaded
 	if loaded.Value == nil || !*loaded.Value || loaded.ObservedAt == nil || !strings.Contains(loaded.Reason, "fresh isolated ACP") {
 		t.Fatalf("unexpected loading evidence: %+v", loaded)
 	}
 	if loaded = byName["local"].Evidence.Loaded; loaded.Value != nil || !strings.Contains(loaded.Reason, "no established command-name mapping") {
 		t.Fatalf("unmanaged skill loading evidence: %+v", loaded)
 	}
-	loading, err := d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture:fixture"})
+	loading, err := d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture"})
 	if err != nil || loading.Value == nil || !*loading.Value || loading.ObservedAt == nil {
 		t.Fatalf("native loading: %+v %v", loading, err)
 	}
-	loading, err = d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture:missing"})
+	loading, err = d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"missing"})
 	if err != nil || loading.Value == nil || *loading.Value {
 		t.Fatalf("missing native name claimed loaded: %+v %v", loading, err)
 	}

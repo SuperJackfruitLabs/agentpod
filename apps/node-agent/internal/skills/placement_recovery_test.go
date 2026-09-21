@@ -76,11 +76,40 @@ func TestPlacementRecoversProcessExitAcrossNativeSwitch(t *testing.T) {
 			if err != nil || verified.Current == nil || verified.Current.Generation != id {
 				t.Fatalf("native recovery failed: %+v %v", verified, err)
 			}
-			old := filepath.Join(s.directory, "native/backups", p.OperationID, "skills/sjl-fixture/SKILL.md")
+			old := filepath.Join(s.directory, "native/backups", p.OperationID, "SKILL.md")
 			if _, err = os.Stat(old); err != nil {
 				t.Fatal("old native content lost", err)
 			}
 		})
+	}
+}
+
+func TestCodexLegacyMigrationRecoversAfterBackup(t *testing.T) {
+	s := legacyCodexPlacement(t)
+	ctx := context.Background()
+	p, err := s.PlanPlacement(ctx, strings.Repeat("b", 32), "activate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.afterWrite = func(point string) error {
+		if point == "native-backup" {
+			return errors.New("fixture interruption")
+		}
+		return nil
+	}
+	if _, err := s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err == nil {
+		t.Fatal("migration interruption was not observed")
+	}
+	s.afterWrite = nil
+	if _, err := s.VerifyPlacement(ctx); err == nil {
+		t.Fatal("partially migrated directory was accepted")
+	}
+	if _, err := s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err != nil {
+		t.Fatal("migration recovery failed:", err)
+	}
+	verified, err := s.VerifyPlacement(ctx)
+	if err != nil || verified.Present.Value == nil || !*verified.Present.Value || strings.Join(verified.DiscoveryNames, ",") != "sjl-fixture" {
+		t.Fatalf("migration recovery evidence: %+v %v", verified, err)
 	}
 }
 func TestPlacementRecoveryPreservesEditedBackupAndStaging(t *testing.T) {
@@ -121,7 +150,7 @@ func TestPlacementRecoveryPreservesEditedBackupAndStaging(t *testing.T) {
 			if point == "native-backup" {
 				directory = "backups"
 			}
-			file := filepath.Join(s.directory, "native", directory, p.OperationID, "skills/sjl-fixture/SKILL.md")
+			file := filepath.Join(s.directory, "native", directory, p.OperationID, "SKILL.md")
 			if err = os.WriteFile(file, []byte("preserved user edit"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -158,7 +187,7 @@ func TestPlacementCompletedReceiptCleanupPreservesLaterUserEdits(t *testing.T) {
 	if err != nil || original.Phase != "applied" {
 		t.Fatal("completion receipt missing", err)
 	}
-	file := filepath.Join(p.TargetPath, "skills/sjl-fixture/SKILL.md")
+	file := filepath.Join(p.TargetPath, "SKILL.md")
 	if err = os.WriteFile(file, []byte("later user edit"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ type PlacementPlan struct {
 	ExpectedHead             string         `json:"expectedHead"`
 	Before                   *Generation    `json:"before"`
 	After                    *Generation    `json:"after"`
+	NativeLayout             string         `json:"nativeLayout,omitempty"`
 	TargetPath               string         `json:"targetPath"`
 	Changes                  InstallChanges `json:"changes"`
 	DiscoveryNames           []string       `json:"discoveryNames"`

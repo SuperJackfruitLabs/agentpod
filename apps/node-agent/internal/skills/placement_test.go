@@ -20,6 +20,109 @@ func placementFixtureStore(t *testing.T) *InstallStore {
 	applyFixtureInstall(t, s, id)
 	return s
 }
+
+func legacyCodexPlacement(t *testing.T) *InstallStore {
+	t.Helper()
+	s := placementFixtureStore(t)
+	ctx := context.Background()
+	head, err := s.head()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := s.verifyGeneration(ctx, head.Current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("9", 32)
+	if err := makeDirs(s.root, "native/staging"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.stagePlacement(ctx, id, head.Current, manifest, ""); err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.placementTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(s.binding.WorkspacePath, target)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(s.directory, "native/staging", id), filepath.Join(s.binding.WorkspacePath, target)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.writeJSON("native/head.json", installHead{OperationID: id, Current: head.Current}); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestCodexPlacementMigratesVerifiedLegacyDirectory(t *testing.T) {
+	s := legacyCodexPlacement(t)
+	ctx := context.Background()
+	legacy, err := s.VerifyPlacement(ctx)
+	if err != nil || legacy.Present.Value == nil || !*legacy.Present.Value || len(legacy.DiscoveryNames) != 0 || !strings.Contains(legacy.Present.Reason, "legacy grouped") {
+		t.Fatalf("legacy evidence: %+v %v", legacy, err)
+	}
+	p, err := s.PlanPlacement(ctx, strings.Repeat("b", 32), "activate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.NativeLayout != codexDirectLayout || len(p.Changes.Added) == 0 || len(p.Changes.Removed) == 0 || len(p.Changes.Changed) != 0 || p.Before == nil || !sameGeneration(p.Before, p.After) {
+		t.Fatalf("migration review omitted paths: %+v", p)
+	}
+	if _, err := s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(p.TargetPath, "SKILL.md")); err != nil {
+		t.Fatal("direct entrypoint missing:", err)
+	}
+	if _, err := os.Stat(filepath.Join(p.TargetPath, "skills")); !os.IsNotExist(err) {
+		t.Fatal("grouped subtree remains")
+	}
+	if _, err := os.Stat(filepath.Join(s.directory, "native/backups", p.OperationID, "skills/sjl-fixture/SKILL.md")); err != nil {
+		t.Fatal("verified legacy backup missing:", err)
+	}
+	verified, err := s.VerifyPlacement(ctx)
+	if err != nil || strings.Join(verified.DiscoveryNames, ",") != "sjl-fixture" || verified.Present.Value == nil || !*verified.Present.Value {
+		t.Fatalf("direct evidence: %+v %v", verified, err)
+	}
+}
+
+func TestCodexPendingLegacyPlanCanFinishThenMigrate(t *testing.T) {
+	s := placementFixtureStore(t)
+	ctx := context.Background()
+	p, err := s.PlanPlacement(ctx, strings.Repeat("b", 32), "activate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := s.verifyGeneration(ctx, p.After)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.NativeLayout = "" // recorded by nodes before direct publication existed
+	p.Changes = installDiff(nil, manifest)
+	p.DiscoveryNames = []string{"sjl-fixture:sjl-fixture"}
+	p.PlanDigest = placementHash(p)
+	if err := s.savePlacement(&PlacementReceipt{Plan: p}, "planned"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err != nil {
+		t.Fatal("pending legacy plan failed:", err)
+	}
+	if _, err := os.Stat(filepath.Join(p.TargetPath, "skills/sjl-fixture/SKILL.md")); err != nil {
+		t.Fatal("legacy plan did not retain its reviewed layout:", err)
+	}
+	next, err := s.PlanPlacement(ctx, strings.Repeat("c", 32), "activate")
+	if err != nil || next.NativeLayout != codexDirectLayout {
+		t.Fatalf("legacy plan cannot be upgraded: %+v %v", next, err)
+	}
+	if _, err := s.ApplyPlacement(ctx, next.OperationID, next.PlanDigest); err != nil {
+		t.Fatal("legacy upgrade failed:", err)
+	}
+	if _, err := os.Stat(filepath.Join(p.TargetPath, "SKILL.md")); err != nil {
+		t.Fatal("upgraded direct entrypoint missing:", err)
+	}
+}
 func TestPlacementPublishesAndRecoversNativeDiscoveryDirectory(t *testing.T) {
 	s := placementFixtureStore(t)
 	ctx := context.Background()
@@ -34,7 +137,7 @@ func TestPlacementPublishesAndRecoversNativeDiscoveryDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	initial, err := s.VerifyPlacement(ctx)
-	if err != nil || initial.Present.Value == nil || !*initial.Present.Value || initial.Loaded.Value != nil || strings.Join(initial.DiscoveryNames, ",") != "sjl-fixture:sjl-fixture" {
+	if err != nil || initial.Present.Value == nil || !*initial.Present.Value || initial.Loaded.Value != nil || strings.Join(initial.DiscoveryNames, ",") != "sjl-fixture" {
 		t.Fatalf("native evidence: %+v %v", initial, err)
 	}
 	if _, err = s.ApplyPlacement(ctx, plan.OperationID, plan.PlanDigest); err != nil {
@@ -111,7 +214,7 @@ func TestPlacementRefusesUserFilesAndPostReviewCollisions(t *testing.T) {
 	if _, err = s.ApplyPlacement(ctx, p.OperationID, p.PlanDigest); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(p.TargetPath, "skills/sjl-fixture/SKILL.md")
+	file := filepath.Join(p.TargetPath, "SKILL.md")
 	if err = os.WriteFile(file, []byte("user edit"), 0600); err != nil {
 		t.Fatal(err)
 	}
