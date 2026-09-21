@@ -40,3 +40,18 @@ func TestDiscoverACPSkillCommandsRejectsMissingNameMapping(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestDiscoverACPSkillCommandsRetainsAdapterStderrOnEarlyClose(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := filepath.Join(t.TempDir(), "adapter")
+	script := "#!/bin/bash\necho 'unsupported offline provider' >&2\nexit 1\n"
+	if err := os.WriteFile(adapter, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverACPSkillCommands(context.Background(), []string{adapter}, workspace, []string{"PATH=" + os.Getenv("PATH")}, func(name string) (string, bool) {
+		return name, true
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported offline provider") {
+		t.Fatalf("err=%v", err)
+	}
+}
