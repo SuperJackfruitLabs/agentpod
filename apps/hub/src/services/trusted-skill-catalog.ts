@@ -12,6 +12,7 @@ import {
 } from "../db/schema/skills";
 import { tenantScope } from "../db/tenant-scope";
 import { SkillRequestError, type SkillOwner } from "./skill-artifacts";
+import { validateTrustedSkillArchive } from "./trusted-skill-archive";
 
 type CatalogPin = { harness: string; artifactId: string };
 
@@ -73,6 +74,16 @@ export async function importTrustedSkillRelease(
       const [artifact] = await tx.select().from(skillArtifacts).where(tenantScope(skillArtifacts, owner.tenantId, eq(skillArtifacts.userId, owner.userId), eq(skillArtifacts.id, artifactId)));
       if (!artifact || artifact.harness !== expected.harness || artifact.profile !== record.profile || artifact.archiveSHA256 !== expected.archive_sha256)
         throw new SkillRequestError(409, "Pinned artifact does not match the trusted release record");
+      try {
+        validateTrustedSkillArchive(artifact.bytes, {
+          archiveSHA256: expected.archive_sha256,
+          harness: expected.harness,
+          profile: record.profile,
+          bundleDigest: expected.bundle_digest,
+        });
+      } catch {
+        throw new SkillRequestError(409, "Pinned artifact fails trusted archive admission");
+      }
       return { expected, artifact };
     }));
     const [conflict] = await tx.select({ id: trustedSkillReleases.id }).from(trustedSkillReleases).where(and(releaseScope, eq(trustedSkillReleases.version, record.version), eq(trustedSkillReleases.profile, record.profile)));
