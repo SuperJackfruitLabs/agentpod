@@ -69,7 +69,7 @@ def probe(args):
         if Path(resolved).resolve()!=Path(binary):raise ValueError("--binary must be this adapter bundled Codex entrypoint")
         adapter_version=subprocess.run([acp_adapter,'--version'],check=True,capture_output=True,text=True,timeout=10).stdout.strip()
         if adapter_version not in ('@agentclientprotocol/codex-acp 1.1.14', '@agentclientprotocol/codex-acp 1.12.0'):raise ValueError('ACP probe needs review for this adapter version')
-    checks=[];expected='sjl-fixture:sjl-fixture' if args.harness=='codex' else 'sjl-fixture'
+    checks=[];expected='sjl-fixture'
     skills_dir=Path(__file__).resolve().parent.parent
     with tempfile.TemporaryDirectory(prefix='agentpod-native-placement-') as temporary:
         root=Path(temporary).resolve();workspace=root/'workspace';sibling=root/'sibling'
@@ -118,7 +118,7 @@ def probe(args):
             operation('install');check('stored-generation-not-discovered',count=0)
             operation('plan');check('native-plan-does-not-publish',count=0)
             initial=operation('activate');check('native-discovery-after-go-publication','Verify a synthetic bundle.')
-            target=Path(initial['verification']['path']);references=list((target/'skills/sjl-fixture/references').glob('*.md'))
+            target=Path(initial['verification']['path']);references=list((target/('references' if args.harness=='codex' else 'skills/sjl-fixture/references')).glob('*.md'))
             checks.append({'check':'bundled-reference-present','passed':len(references)==1,'sha256':hashlib.sha256(references[0].read_bytes()).hexdigest() if len(references)==1 else None})
             replay=operation('replay');checks.append({'check':'historical-receipt-replay','passed':replay['receipt']==initial['receipt']})
             operation('upgrade');check('stored-upgrade-does-not-reload-native','Verify a synthetic bundle.')
@@ -131,7 +131,7 @@ def probe(args):
             if native:native.close()
     return {'schema_version':1,'harness':args.harness,'version':version,'kind':'go-acp-placement-fixture' if acp_adapter else 'go-native-placement-fixture',
       'adapter_version':adapter_version,'discovery_mode':'fresh ACP session with isolated offline provider' if acp_adapter else 'native discovery',
-      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.',('No model turn, production provider/authentication, native trust decision or existing-session refresh was tested.' if acp_adapter else 'No model turn, ACP, native trust decision or active-session behavior was tested.'),'Pi invokes its installed directory loader, not a trusted session.','Remote activation remains unexposed pending external-process coverage, version/mode gates and the operator workflow.','The node receipt keeps loaded unknown; the separate native probe observes discovery.']}
+      'checks':checks,'limitations':['Only disposable synthetic Git workspaces were changed.',('No model turn, production provider/authentication, native trust decision or existing-session refresh was tested.' if acp_adapter else 'No model turn, ACP, native trust decision or active-session behavior was tested.'),'Pi invokes its installed directory loader, not a trusted session.','This local probe does not establish production deployment or a live station loading result.','The store receipt keeps loaded unknown; the separate native probe observes discovery.']}
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)

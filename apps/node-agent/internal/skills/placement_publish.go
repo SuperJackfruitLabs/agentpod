@@ -12,7 +12,10 @@ import (
 	"sort"
 )
 
-func (s *InstallStore) stagePlacement(ctx context.Context, id string, g *Generation, m *BundleManifest) error {
+func (s *InstallStore) stagePlacement(ctx context.Context, id string, g *Generation, m *BundleManifest, layout string) error {
+	if s.binding.Harness == "codex" && layout == codexDirectLayout {
+		return s.stageCodexPlacement(ctx, id, g, m)
+	}
 	stage := "native/staging/" + id
 	if err := makeDirs(s.root, stage); err != nil {
 		return err
@@ -72,7 +75,7 @@ func (s *InstallStore) stagePlacement(ctx context.Context, id string, g *Generat
 	}
 	return s.checkpoint("native-stage")
 }
-func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt, workspace *InstallStore, target string, before, after *BundleManifest) error {
+func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt, workspace *InstallStore, target string, before, after *BundleManifest, beforeLayout string) error {
 	p := r.Plan
 	namespace, err := filepath.Rel(s.binding.WorkspacePath, s.directory)
 	if err != nil || !managedPath(filepath.ToSlash(namespace)) {
@@ -86,7 +89,7 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 		if p.Before == nil {
 			return fmt.Errorf("%w: unexpected native backup", ErrInstallConflict)
 		}
-		if err = s.verifyPlaced(ctx, workspace, backup, p.Before); err != nil {
+		if err = s.verifyPlaced(ctx, workspace, backup, p.Before, beforeLayout); err != nil {
 			return err
 		}
 		backupExists = true
@@ -101,14 +104,14 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 	}
 	// A previous attempt may already have published the desired bytes. Require
 	// the preserved prior copy whenever the plan started from a present target.
-	if targetExists && p.After != nil && s.verifyPlaced(ctx, workspace, target, p.After) == nil {
+	if targetExists && p.After != nil && s.verifyPlaced(ctx, workspace, target, p.After, p.NativeLayout) == nil {
 		if p.Before != nil && !backupExists {
 			return fmt.Errorf("%w: native prior copy is missing", ErrInstallConflict)
 		}
 		return nil
 	}
 	if targetExists {
-		if err = s.verifyPlaced(ctx, workspace, target, p.Before); err != nil {
+		if err = s.verifyPlaced(ctx, workspace, target, p.Before, beforeLayout); err != nil {
 			return err
 		}
 		if backupExists {
@@ -118,7 +121,7 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 		return fmt.Errorf("%w: native target and prior copy are both missing", ErrInstallConflict)
 	}
 	if p.After != nil {
-		if err = s.stagePlacement(ctx, p.OperationID, p.After, after); err != nil {
+		if err = s.stagePlacement(ctx, p.OperationID, p.After, after, p.NativeLayout); err != nil {
 			return err
 		}
 	}
@@ -132,7 +135,7 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 		return err
 	}
 	if targetExists {
-		if err = s.verifyPlaced(ctx, workspace, target, p.Before); err != nil {
+		if err = s.verifyPlaced(ctx, workspace, target, p.Before, beforeLayout); err != nil {
 			return err
 		}
 		if err = checkComponents(workspace.root, path.Dir(backup)); err != nil {
@@ -155,10 +158,10 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 		if err = makeDirs(workspace.root, path.Dir(target)); err != nil {
 			return err
 		}
-		if err = s.verifyPlaced(ctx, workspace, target, nil); err != nil {
+		if err = s.verifyPlaced(ctx, workspace, target, nil, p.NativeLayout); err != nil {
 			return err
 		}
-		if err = s.verifyPlaced(ctx, workspace, stage, p.After); err != nil {
+		if err = s.verifyPlaced(ctx, workspace, stage, p.After, p.NativeLayout); err != nil {
 			return err
 		}
 		if err = workspace.root.Rename(stage, target); err != nil {
@@ -174,5 +177,5 @@ func (s *InstallStore) publishPlacement(ctx context.Context, r *PlacementReceipt
 			return err
 		}
 	}
-	return s.verifyPlaced(ctx, workspace, target, p.After)
+	return s.verifyPlaced(ctx, workspace, target, p.After, p.NativeLayout)
 }

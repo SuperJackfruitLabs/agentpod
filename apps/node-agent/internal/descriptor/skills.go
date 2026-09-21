@@ -97,19 +97,19 @@ func setCodexLoadingEvidence(inventory *skills.Inventory, advertised []string) {
 	}
 }
 
-// codexAdvertisedSkillName only recognizes the managed grouped layout. Other
+// codexAdvertisedSkillName recognizes AgentPod's direct native layout. Other
 // files retain unknown loading evidence rather than being guessed as an
 // AgentPod-managed command.
 func codexAdvertisedSkillName(entry skills.Entry) string {
 	parts := strings.Split(filepath.ToSlash(entry.ID), "/")
-	if len(parts) != 6 || parts[0] != ".agents" || parts[1] != "skills" || !strings.HasPrefix(parts[2], "sjl-") || parts[3] != "skills" || parts[5] != "SKILL.md" {
+	if len(parts) != 4 || parts[0] != ".agents" || parts[1] != "skills" || !strings.HasPrefix(parts[2], "sjl-") || parts[3] != "SKILL.md" {
 		return ""
 	}
 	name := entry.Name
 	if name == "" || strings.Contains(name, ":") {
 		return ""
 	}
-	return parts[2] + ":" + name
+	return name
 }
 func (d *claudeCodeDescriptor) SkillInventory(ctx context.Context, key string) (skills.Inventory, error) {
 	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: ".claude/skills", Scope: "workspace"}})
