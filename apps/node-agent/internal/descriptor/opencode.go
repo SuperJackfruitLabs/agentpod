@@ -51,6 +51,11 @@ import (
 type openCodeDescriptor struct {
 	dataDir string // absolute path to ~/.local/share/opencode
 
+	// Native publication uses the selected executable and a fresh, isolated ACP
+	// session. Seams keep these checks independent of the developer's host.
+	nativeProcessRunning func() (bool, string)
+	nativeSkillDiscovery func(context.Context, string, string) ([]string, error)
+
 	// mu guards dbFailureReason. Detect runs on the periodic detect loop and
 	// again on every capability call that resolves a key.
 	mu sync.Mutex
@@ -72,7 +77,7 @@ func NewOpenCode(dataDir string) Descriptor {
 		}
 		dataDir = filepath.Join(userHome, ".local", "share", "opencode")
 	}
-	return &openCodeDescriptor{dataDir: dataDir}
+	return &openCodeDescriptor{dataDir: dataDir, nativeProcessRunning: openCodeProcessRunning, nativeSkillDiscovery: openCodeACPDiscoverSkills}
 }
 
 // Harness returns the harness identifier.
