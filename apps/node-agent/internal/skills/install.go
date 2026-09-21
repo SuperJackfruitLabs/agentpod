@@ -16,6 +16,81 @@ type installHead struct {
 	Previous    *Generation `json:"previous"`
 }
 
+// RetentionInspection is observational accounting for a single managed
+// namespace. It deliberately does not prune anything: completed receipts and
+// generations are recovery evidence, and an operator must inspect them before
+// a future retention policy may remove them.
+type RetentionInspection struct {
+	NamespaceExists  bool   `json:"namespaceExists"`
+	Operations       int    `json:"operations"`
+	OperationLimit   int    `json:"operationLimit"`
+	Generations      int    `json:"generations"`
+	Staging          int    `json:"staging"`
+	Pending          int    `json:"pending"`
+	NativeOperations int    `json:"nativeOperations"`
+	NativeStaging    int    `json:"nativeStaging"`
+	NativeBackups    int    `json:"nativeBackups"`
+	ObservedAt       string `json:"observedAt"`
+	Limitation       string `json:"limitation"`
+}
+
+func retentionCount(root *os.Root, name string, limit int) (int, error) {
+	directory, err := root.Open(name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	entries, err := directory.ReadDir(limit + 1)
+	closeErr := directory.Close()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return 0, err
+	}
+	if closeErr != nil {
+		return 0, closeErr
+	}
+	if len(entries) > limit {
+		return 0, fmt.Errorf("%w: retained %s exceeds its limit", ErrInstallConflict, name)
+	}
+	return len(entries), nil
+}
+
+// Retention reports bounded node-owned state without creating a namespace or
+// following user-controlled paths. It is intentionally separate from verify:
+// correct current files do not make stale recovery evidence disposable.
+func (s *InstallStore) Retention(ctx context.Context) (RetentionInspection, error) {
+	if err := ctx.Err(); err != nil {
+		return RetentionInspection{}, err
+	}
+	result := RetentionInspection{
+		NamespaceExists: true,
+		OperationLimit:  256,
+		ObservedAt:      time.Now().UTC().Format(time.RFC3339Nano),
+		Limitation:      "Read-only accounting only; retained operations, generations, and interrupted writes are preserved until a separately reviewed maintenance policy exists",
+	}
+	var err error
+	for _, target := range []struct {
+		name  string
+		limit int
+		into  *int
+	}{
+		{"operations", 256, &result.Operations},
+		{"generations", 256, &result.Generations},
+		{"staging", 16, &result.Staging},
+		{"pending", 16, &result.Pending},
+		{"native/operations", 256, &result.NativeOperations},
+		{"native/staging", 16, &result.NativeStaging},
+		{"native/backups", 256, &result.NativeBackups},
+	} {
+		*target.into, err = retentionCount(s.root, target.name, target.limit)
+		if err != nil {
+			return RetentionInspection{}, err
+		}
+	}
+	return result, nil
+}
+
 func (s *InstallStore) head() (installHead, error) {
 	var head installHead
 	err := s.readJSON("head.json", &head)

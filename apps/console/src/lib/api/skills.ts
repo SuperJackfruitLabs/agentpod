@@ -3,6 +3,7 @@ import {
   SkillHubOperation,
   SkillHubOperationSummary,
   SkillVerifyResult,
+  SkillRetentionResult,
 } from "@agentpod/contract";
 import { http } from "./client";
 
@@ -156,6 +157,14 @@ export const verifySkillFiles = async (stationId: string, profile: string) => {
   );
   if (result.profile !== profile)
     throw new Error("Verification belongs to a different profile");
+  return result;
+};
+export const inspectSkillRetention = async (stationId: string, profile: string) => {
+  const result = SkillRetentionResult.parse(
+    await http(`${stationPath(stationId)}/retention`, post({ profile })),
+  );
+  if (result.profile !== profile)
+    throw new Error("Retention inspection belongs to a different profile");
   return result;
 };
 export const verifyNativeSkillPlacement = async (stationId: string, profile: string) => {

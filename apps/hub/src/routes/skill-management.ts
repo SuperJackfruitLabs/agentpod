@@ -8,6 +8,7 @@ import {
   SkillApplyRequest,
   SkillVerifyParams,
   SkillVerifyResult,
+  SkillRetentionResult,
   SkillNativePlanRequest,
   SkillNativeVerifyResult,
 } from "@agentpod/contract";
@@ -328,6 +329,28 @@ export function createSkillManagementRoutes(
           502,
           "Node verification is unavailable or invalid",
         );
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/retention", async (c) => {
+      const ctx = await stationContext(c);
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillVerifyParams.omit({ key: true }));
+      const response = await broker.request(
+        ctx.station.nodeId,
+        "skills.retention",
+        { key: ctx.station.stationKey, profile: request.profile },
+        { timeoutMs },
+      );
+      const parsed = SkillRetentionResult.safeParse(response.data);
+      if (
+        !response.ok ||
+        !parsed.success ||
+        parsed.data.nodeId !== ctx.station.nodeId ||
+        parsed.data.stationKey !== ctx.station.stationKey ||
+        parsed.data.harness !== ctx.station.harness ||
+        parsed.data.profile !== request.profile
+      )
+        throw new SkillRequestError(502, "Node retention inspection is unavailable or invalid");
       return c.json(parsed.data);
     })
     .post("/stations/:id/skills/native/verify", async (c) => {
