@@ -17,6 +17,7 @@
   let releaseId = $state("");
   let cohortId = $state("");
   let profile = $state("");
+  let uploadHarness = $state("");
   let file = $state<File | null>(null);
   let releaseRecord = $state("");
   let busy = $state<string | null>(null);
@@ -40,7 +41,7 @@
     void harness;
     const ticket = ++epoch;
     artifacts = []; releases = []; cohorts = []; history = []; nativeHistory = []; operation = null; verification = null; retention = null; maintenance = null;
-    artifactId = ""; releaseId = ""; cohortId = ""; profile = ""; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
+    artifactId = ""; releaseId = ""; cohortId = ""; profile = ""; uploadHarness = harness; file = null; pending = null; nativePending = null; error = null; busy = "Loading management data";
     void Promise.all([canManage ? api.listSkillArtifacts() : Promise.resolve([]), canManage ? api.listTrustedSkillReleases() : Promise.resolve([]), canManage ? api.listSkillReleaseCohorts() : Promise.resolve([]), canManage ? api.listSkillOperations(id) : Promise.resolve([]), canNative ? api.listNativeSkillOperations(id) : Promise.resolve([])]).then(([packages, trustedReleases, releaseCohorts, operations, nativeOperations]) => {
       if (ticket !== epoch) return;
       artifacts = packages; releases = trustedReleases; cohorts = releaseCohorts; history = operations; nativeHistory = nativeOperations;
@@ -115,7 +116,7 @@
   }
   function upload() {
     if (locked || !file || !validProfile) return;
-    const archive = file, targetHarness = harness, targetProfile = profile;
+    const archive = file, targetHarness = uploadHarness, targetProfile = profile;
     void perform("Uploading artifact", () => api.uploadSkillArtifact(archive, targetHarness, targetProfile), result => {
       artifacts = [result, ...artifacts.filter(item => item.id !== result.id)]; artifactId = result.id;
     });
@@ -229,6 +230,10 @@
       <Button size="sm" variant="outline" disabled={locked || !validProfile || pending !== null} onclick={previewMaintenance}>Preview safe cleanup</Button>
       <details class="text-sm">
         <summary class="cursor-pointer">Upload an exported artifact</summary>
+        <label class="mt-2 block" for="skill-upload-harness">Archive harness</label>
+        <select id="skill-upload-harness" class="my-2 w-full rounded-md border bg-background p-2 text-sm" bind:value={uploadHarness} disabled={locked}>
+          {#each ["codex", "claude-code", "opencode", "pi", "hermes", "openclaw"] as supportedHarness}<option value={supportedHarness}>{supportedHarness}</option>{/each}
+        </select>
         <label class="mt-2 block" for="skill-file">Archive (up to 32 MiB)</label>
         <input id="skill-file" class="my-2 block max-w-full text-xs" type="file" accept=".tar.gz,.tgz" disabled={locked} onchange={event => { file = event.currentTarget.files?.[0] ?? null; }} />
         <Button size="sm" variant="outline" disabled={locked || !file || !validProfile || pending !== null} onclick={upload}>Upload artifact</Button>
