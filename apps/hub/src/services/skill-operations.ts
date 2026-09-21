@@ -21,6 +21,7 @@ import {
 } from "./skill-artifacts";
 import type { StationRow } from "./station-registry";
 import * as broker from "./broker";
+import { unconfirmedNodeOperationReason } from "./skill-operation-diagnostics";
 
 type Operation = typeof skillOperations.$inferSelect;
 type Mode = "plan" | "apply" | "inspect";
@@ -357,7 +358,8 @@ export async function executeSkillOperation(
       params,
       { timeoutMs },
     );
-    if (!inspection.ok) throw new Error("node inspection unavailable");
+    if (!inspection.ok)
+      throw new Error(inspection.error ?? "node inspection unavailable");
     const observed = isNative(operation)
       ? SkillNativeOperationResult.parse(inspection.data).receipt
       : SkillOperationResult.parse(inspection.data).receipt;
@@ -400,7 +402,7 @@ export async function executeSkillOperation(
           },
           { timeoutMs },
         );
-        if (!reply.ok) throw new Error("node plan unavailable");
+        if (!reply.ok) throw new Error(reply.error ?? "node plan unavailable");
         const plan = checkedPlan(
           reply.data,
           operation,
@@ -424,7 +426,8 @@ export async function executeSkillOperation(
           },
           { timeoutMs },
         );
-        if (!reply.ok) throw new Error("node application outcome unavailable");
+        if (!reply.ok)
+          throw new Error(reply.error ?? "node application outcome unavailable");
         const receipt = checkedReceipt(
           reply.data,
           operation,
@@ -439,13 +442,16 @@ export async function executeSkillOperation(
       }
       auditOK = outcome.state === "applied";
     }
-  } catch {
+  } catch (error) {
     // Broker failures and invalid output cannot establish that nothing changed.
     // Never persist a raw node error or a database query containing package bytes.
     outcome = {
       ...outcome,
       state: "unknown",
-      error: "Node outcome is unknown; inspect the operation before retrying",
+      error: unconfirmedNodeOperationReason(
+        mode,
+        error instanceof Error ? error.message : undefined,
+      ),
     };
   }
   const [saved] = await db
