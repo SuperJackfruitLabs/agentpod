@@ -229,7 +229,13 @@ already running child left behind by a terminated node needs external-process
 inspection before recovery, as does activity managed by another node process.
 Those gaps, actual version/mode gating and operator
 visibility must be resolved before any remote activation capability is enabled.
-No wire verbs, advertised capabilities or production placements change here.
+The node now has strict `skills.native.*` request/result schemas and a separate
+handler boundary for native planning, application, operation inspection and
+verification. Mutation is fail-closed unless the daemon supplies both the shared
+workspace coordinator and a harness-specific runtime authorization callback;
+the current daemon callback rejects every native mutation. Read-only inspection
+remains available for recovery. No advertised capability or production placement
+changes here.
 
 ## Hub, console and verification
 

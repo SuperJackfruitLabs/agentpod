@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
 func skillTestHandler(t *testing.T) (Handler, string, string, *int) {
@@ -38,6 +40,61 @@ func skillTestHandler(t *testing.T) (Handler, string, string, *int) {
 		},
 	})
 	return h, workspace, pin, calls
+}
+
+func TestNativeSkillActivationRequiresAnExplicitRuntimeGate(t *testing.T) {
+	h, _, pin, _ := skillTestHandler(t)
+	base := map[string]string{"key": "codex:fixture", "profile": "fixture"}
+	installID := strings.Repeat("a", 32)
+	planParams := map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": installID, "stationId": "station-fixture", "archiveSHA256": pin}
+	status, err := skillCall(t, h, "skills.plan", planParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	install := status.(skills.InstallPlan)
+	if _, err = skillCall(t, h, "skills.apply", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": installID, "stationId": "station-fixture", "expectedPlanDigest": install.PlanDigest}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = skillCall(t, h, "skills.native.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("b", 32), "action": "activate"}); err == nil {
+		t.Fatal("native publication ran without an explicit runtime gate")
+	}
+
+	archive, err := os.ReadFile("../skills/testdata/export-codex.tar.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	pinned := fmt.Sprintf("%x", sha256.Sum256(archive))
+	enabled := NewSkillManagementHandler(changesetPassthrough(), SkillManagementDeps{
+		NodeID:          "fixture-node",
+		Resolve:         func(context.Context, string) (string, string, error) { return root, "codex", nil },
+		Fetch:           func(context.Context, SkillArtifactRequest) ([]byte, error) { return archive, nil },
+		Workspaces:      workspacegate.New(),
+		AuthorizeNative: func(context.Context, string, string) error { return nil },
+	})
+	installed, err := skillCall(t, enabled, "skills.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("c", 32), "stationId": "station-fixture", "archiveSHA256": pinned})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation := installed.(skills.InstallPlan)
+	if _, err = skillCall(t, enabled, "skills.apply", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("c", 32), "stationId": "station-fixture", "expectedPlanDigest": installation.PlanDigest}); err != nil {
+		t.Fatal(err)
+	}
+	nativePlan, err := skillCall(t, enabled, "skills.native.plan", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("d", 32), "action": "activate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	published := nativePlan.(skills.PlacementPlan)
+	if _, err = skillCall(t, enabled, "skills.native.apply", map[string]string{"key": "codex:fixture", "profile": "fixture", "operationId": strings.Repeat("d", 32), "expectedPlanDigest": published.PlanDigest}); err != nil {
+		t.Fatal(err)
+	}
+	verified, err := skillCall(t, enabled, "skills.native.verify", base)
+	if err != nil || verified.(SkillNativeVerifyResult).Verification.Present.Value == nil || !*verified.(SkillNativeVerifyResult).Verification.Present.Value {
+		t.Fatalf("native verification: %#v %v", verified, err)
+	}
 }
 
 func skillCall(t *testing.T, h Handler, verb string, params map[string]string) (any, error) {
