@@ -8,6 +8,8 @@ import {
   SkillApplyRequest,
   SkillVerifyParams,
   SkillVerifyResult,
+  SkillNativePlanRequest,
+  SkillNativeVerifyResult,
 } from "@agentpod/contract";
 import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
@@ -42,22 +44,22 @@ function owner(c: Context): SkillOwner {
     throw new SkillRequestError(401, "Unauthorized");
   return { userId: user.id, tenantId: user.tenantId };
 }
-async function stationContext(c: Context, mutate = false) {
+async function stationContext(c: Context, mutate = false, capability = "skills.manage") {
   const caller = owner(c),
     station = await getStation(caller.userId, c.req.param("id")!);
   if (!station || station.tenantId !== caller.tenantId)
     throw new SkillRequestError(404, "Station not found");
-  if (!gateCapability(station, "skills.manage"))
+  if (!gateCapability(station, capability))
     throw new SkillRequestError(
       403,
-      "Station does not advertise skill management",
+      capability === "skills.native" ? "Station does not advertise native skill activation" : "Station does not advertise skill management",
     );
   if (mutate) {
     const refusal = await refuseWithoutReach(
       c,
       caller.userId,
       station,
-      "skills.manage",
+      capability as "skills.manage" | "skills.native",
     );
     if (refusal) return { refusal } as const;
   }
@@ -204,7 +206,7 @@ export function createSkillManagementRoutes(
         operation = await createSkillOperation(
           ctx.caller,
           ctx.station,
-          request,
+        request,
         );
       const result = await executeSkillOperation(
         ctx.caller,
@@ -218,6 +220,31 @@ export function createSkillManagementRoutes(
         result,
         result.inFlight || result.state === "unknown" ? 202 : 200,
       );
+    })
+    .post("/stations/:id/skills/native/plan", async (c) => {
+      const ctx = await stationContext(c, true, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillNativePlanRequest);
+      const operation = await createSkillOperation(ctx.caller, ctx.station, request);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, operation.id, "plan", undefined, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .get("/stations/:id/skills/native/operations", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(await listSkillOperations(ctx.caller, ctx.station, "native"));
+    })
+    .get("/stations/:id/skills/native/operations/:operationId", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(operationResult(await getSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "native")));
+    })
+    .post("/stations/:id/skills/native/operations/:operationId/inspect", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      await body(c, z.object({}).strict());
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "inspect", undefined, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
     .get("/stations/:id/skills/operations", async (c) => {
       const ctx = await stationContext(c);
@@ -271,6 +298,13 @@ export function createSkillManagementRoutes(
         result.inFlight || result.state === "unknown" ? 202 : 200,
       );
     })
+    .post("/stations/:id/skills/native/operations/:operationId/apply", async (c) => {
+      const ctx = await stationContext(c, true, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillApplyRequest);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "apply", request.planDigest, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
     .post("/stations/:id/skills/verify", async (c) => {
       const ctx = await stationContext(c);
       if ("refusal" in ctx) return ctx.refusal;
@@ -294,6 +328,16 @@ export function createSkillManagementRoutes(
           502,
           "Node verification is unavailable or invalid",
         );
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/native/verify", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillVerifyParams.omit({ key: true }));
+      const response = await broker.request(ctx.station.nodeId, "skills.native.verify", { key: ctx.station.stationKey, profile: request.profile }, { timeoutMs });
+      const parsed = SkillNativeVerifyResult.safeParse(response.data);
+      if (!response.ok || !parsed.success || parsed.data.nodeId !== ctx.station.nodeId || parsed.data.stationKey !== ctx.station.stationKey || parsed.data.harness !== ctx.station.harness || parsed.data.profile !== request.profile)
+        throw new SkillRequestError(502, "Node native verification is unavailable or invalid");
       return c.json(parsed.data);
     });
 }

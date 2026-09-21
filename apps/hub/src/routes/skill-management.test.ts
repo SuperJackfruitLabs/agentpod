@@ -19,6 +19,7 @@ import {
   readSkillBody,
 } from "./skill-management";
 import { planFixture } from "../../../../packages/contract/src/fixtures/skill-install";
+import { placementFixture } from "../../../../packages/contract/src/fixtures/skill-placement";
 import type { AuthUser } from "../auth/middleware";
 
 const userId = `test-skill-management-${crypto.randomUUID()}`;
@@ -101,7 +102,7 @@ async function setup() {
       stationKey: "codex:fixture",
       kind: "leaf",
       displayName: "Fixture",
-      capabilities: ["skills.manage"],
+      capabilities: ["skills.manage", "skills.native"],
     })
     .returning();
   let reachedPlan: () => void = () => {};
@@ -123,8 +124,32 @@ async function setup() {
     requests.push({ verb: msg.verb, params });
     void (async () => {
       let data: unknown;
-      if (msg.verb === "skills.operation")
+      if (msg.verb === "skills.operation" || msg.verb === "skills.native.operation")
         data = { receipt: receipts.get(params.operationId) ?? null };
+      else if (msg.verb === "skills.native.plan") {
+        const plan = {
+          ...structuredClone(placementFixture),
+          operationId: params.operationId,
+          action: params.action,
+          binding: {
+            ...placementFixture.binding,
+            nodeId,
+            stationKey: station!.stationKey,
+            profile: params.profile,
+          },
+          after: params.action === "deactivate" ? null : {
+            ...placementFixture.after,
+            generation: params.operationId,
+          },
+        };
+        receipts.set(params.operationId, { plan, phase: "planned", updatedAt: plan.createdAt, completedAt: null, error: null });
+        data = plan;
+      } else if (msg.verb === "skills.native.apply") {
+        const receipt = receipts.get(params.operationId);
+        receipt.phase = "applied";
+        receipt.completedAt = receipt.updatedAt;
+        data = receipt;
+      }
       else if (msg.verb === "skills.plan" || msg.verb === "skills.rollback") {
         reachedPlan();
         if (state.holdPlan) return;
@@ -260,6 +285,28 @@ test("upload, authorized plan/download, reviewed apply and inspect form a durabl
     .where(eq(stationAudit.nodeId, c.nodeId));
   expect(JSON.stringify(audit)).not.toContain(secret);
   expect(JSON.stringify(audit)).not.toContain(archive.toString("base64"));
+});
+
+test("native activation uses a separate capability, operation namespace and node verbs", async () => {
+  const c = await setup();
+  let res = await app.request(
+    `/api/stations/${c.station.id}/skills/native/plan`,
+    json({ requestId: crypto.randomUUID(), profile: "fixture", action: "activate" }),
+  );
+  expect(res.status).toBe(200);
+  const planned = SkillHubOperation.parse(await res.json());
+  expect(planned.kind).toBe("native");
+  expect(planned.action).toBe("activate");
+  expect(planned.plan?.activation).toBe("quiescent-project; loading-unverified");
+  expect(c.requests.some((request) => request.verb === "skills.native.plan")).toBe(true);
+  expect((await app.request(`/api/stations/${c.station.id}/skills/operations/${planned.id}`)).status).toBe(404);
+  res = await app.request(
+    `/api/stations/${c.station.id}/skills/native/operations/${planned.id}/apply`,
+    json({ planDigest: planned.plan!.planDigest }),
+  );
+  expect(res.status).toBe(200);
+  expect(SkillHubOperation.parse(await res.json()).state).toBe("applied");
+  expect(c.requests.some((request) => request.verb === "skills.native.apply")).toBe(true);
 });
 
 test("ownership, tenancy, capability and explicit reach gate dispatch", async () => {

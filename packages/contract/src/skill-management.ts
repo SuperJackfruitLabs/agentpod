@@ -4,6 +4,7 @@ import {
   SkillInstallPlan,
   SkillInstallReceipt,
 } from "./skill-install";
+import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
 
 export const SkillArtifactMetadata = z
   .object({
@@ -36,6 +37,24 @@ export const SkillRollbackRequest = z
 export const SkillApplyRequest = z
   .object({ planDigest: z.string().regex(/^[a-f0-9]{64}$/) })
   .strict();
+export const SkillNativePlanRequest = z
+  .object({
+    requestId: z.uuid(),
+    profile: SkillInstallBinding.shape.profile,
+    action: z.enum(["activate", "deactivate", "rollback"]),
+  })
+  .strict();
+export const SkillOperationAction = z.enum([
+  "install",
+  "rollback",
+  "activate",
+  "deactivate",
+]);
+const SkillOperationPlan = z.union([SkillInstallPlan, SkillPlacementPlan]);
+const SkillOperationReceipt = z.union([
+  SkillInstallReceipt,
+  SkillPlacementReceipt,
+]);
 export const SkillHubOperationSummary = z
   .object({
     id: z.string().regex(/^[a-f0-9]{32}$/),
@@ -44,7 +63,8 @@ export const SkillHubOperationSummary = z
     stationKey: SkillInstallBinding.shape.stationKey,
     harness: SkillInstallBinding.shape.harness,
     profile: SkillInstallBinding.shape.profile,
-    action: z.enum(["install", "rollback"]),
+    kind: z.enum(["managed", "native"]),
+    action: SkillOperationAction,
     artifactId: z.uuid().nullable(),
     state: z.enum([
       "requested",
@@ -62,8 +82,19 @@ export const SkillHubOperationSummary = z
   })
   .strict();
 export const SkillHubOperation = SkillHubOperationSummary.extend({
-  plan: SkillInstallPlan.nullable(),
-  receipt: SkillInstallReceipt.nullable(),
+  plan: SkillOperationPlan.nullable(),
+  receipt: SkillOperationReceipt.nullable(),
+}).refine((value) => {
+  const plan = value.plan ?? value.receipt?.plan;
+  return !plan || plan.action === value.action;
+}, {
+  message: "Plan action must match its operation",
+}).refine((value) => {
+  return value.kind === "native"
+    ? value.action !== "install"
+    : value.action === "install" || value.action === "rollback";
+}, {
+  message: "Operation kind must match its action",
 }).refine(
   (value) => value.state !== "applied" || value.receipt?.phase === "applied",
   {

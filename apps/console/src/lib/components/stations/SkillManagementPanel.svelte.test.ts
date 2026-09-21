@@ -1,7 +1,8 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
-import { SkillHubOperation } from "@agentpod/contract";
+import { SkillHubOperation, SkillInstallPlan } from "@agentpod/contract";
 import { planFixture } from "../../../../../../packages/contract/src/fixtures/skill-install";
+import { placementFixture } from "../../../../../../packages/contract/src/fixtures/skill-placement";
 import * as api from "$lib/api/skills";
 import SkillManagementPanel from "./SkillManagementPanel.svelte";
 
@@ -22,6 +23,7 @@ function operation(state = "planned") {
     stationKey: "codex:fixture",
     harness: "codex",
     profile: "fixture",
+    kind: "managed",
     action: "install",
     artifactId: artifact.id,
     state,
@@ -81,6 +83,36 @@ test("shows exact changes before applying the reviewed digest and keeps activati
   );
   await waitFor(() => expect(view.getByText("Files applied")).toBeTruthy());
   expect(view.getByText(/Activation pending/)).toBeTruthy();
+});
+
+test("native placement has its own explicit review action and history", async () => {
+  const native = SkillHubOperation.parse({
+    id: planFixture.operationId,
+    stationId: "station_1",
+    nodeId: "fixture-node",
+    stationKey: "codex:fixture",
+    harness: "codex",
+    profile: "fixture",
+    kind: "native",
+    action: "activate",
+    artifactId: null,
+    state: "planned",
+    error: null,
+    inFlight: false,
+    createdAt: planFixture.createdAt,
+    updatedAt: planFixture.createdAt,
+    plan: placementFixture,
+    receipt: null,
+  });
+  vi.spyOn(api, "listNativeSkillOperations").mockResolvedValue([]);
+  const plan = vi.spyOn(api, "planNativeSkillPlacement").mockResolvedValue(native);
+  const view = render(SkillManagementPanel, { props: { ...props, canNative: true } });
+  await waitFor(() => expect(view.getByRole("button", { name: "Review native activation" })).toBeTruthy());
+  await fireEvent.input(view.getByLabelText("Profile"), { target: { value: "fixture" } });
+  await fireEvent.click(view.getByRole("button", { name: "Review native activation" }));
+  await waitFor(() => expect(plan).toHaveBeenCalledWith("station_1", "fixture", "activate", expect.any(String)));
+  expect(view.getByText(/Native activate/)).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Native placement history" })).toBeTruthy();
 });
 
 test("uncertain application requires inspection before apply becomes available again", async () => {
@@ -198,14 +230,15 @@ test("rollback is a separate reviewed plan and file verification keeps unknown l
   const rollback = operation();
   rollback.action = "rollback";
   rollback.artifactId = null;
-  rollback.plan = {
-    ...rollback.plan!,
+  const rollbackPlan = SkillInstallPlan.parse({
+    ...planFixture,
     action: "rollback",
-    before: rollback.plan!.after,
+    before: planFixture.after,
     after: null,
     targetPath: null,
     changes: { added: [], changed: [], removed: ["skills/fixture/SKILL.md"] },
-  };
+  });
+  rollback.plan = rollbackPlan;
   const plan = vi.spyOn(api, "planSkillRollback").mockResolvedValue(rollback);
   const apply = vi
     .spyOn(api, "applySkillOperation")
@@ -213,7 +246,7 @@ test("rollback is a separate reviewed plan and file verification keeps unknown l
       ...rollback,
       state: "applied",
       receipt: {
-        plan: rollback.plan,
+        plan: rollbackPlan,
         phase: "applied",
         updatedAt: planFixture.createdAt,
         completedAt: planFixture.createdAt,
