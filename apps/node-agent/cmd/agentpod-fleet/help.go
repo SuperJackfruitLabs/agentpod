@@ -18,6 +18,7 @@ Usage: fleet <verb> [flags]
   fleet agents               the agents you may dispatch
   fleet stats                fleet totals
   fleet activity             recent fleet activity
+  fleet skills …             manage skill artifacts, releases and canaries
 
   fleet version              print version and platform
   fleet help                 this text
