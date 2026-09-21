@@ -43,6 +43,7 @@ type codexDescriptor struct {
 	// installed, none touches the host's PATH or filesystem and none spawns a
 	// pgrep-visible child; production wiring in NewCodexFrom uses the real host.
 	processRunning func(projPath string) (running bool, note string)
+	adapterRunning func(adapterPath, projPath string) (running bool, note string)
 	userHome       string                                // OS user home; "" omits home-relative candidates
 	lookPath       func(string) (string, error)          // exec.LookPath
 	isExecutable   func(string) bool                     // isExecutableFile
@@ -94,6 +95,7 @@ func NewCodexFrom(cfg CodexConfig) Descriptor {
 		codexBinary:    cfg.CodexBinary,
 		nodeBinary:     cfg.NodeBinary,
 		processRunning: codexProcessRunning,
+		adapterRunning: codexAdapterProcessRunning,
 		userHome:       userHome,
 		lookPath:       exec.LookPath,
 		isExecutable:   isExecutableFile,

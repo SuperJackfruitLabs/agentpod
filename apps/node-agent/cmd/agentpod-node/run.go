@@ -91,7 +91,7 @@ func runCmd() {
 				if !readiness.Ready {
 					return fmt.Errorf("%s", readiness.Reason)
 				}
-				return fmt.Errorf("external harness-process quiescence is not yet verified")
+				return fmt.Errorf("native activation remains unavailable until a fresh-session loading verifier is configured")
 			},
 		})
 		reg.EnableSkillManagement()

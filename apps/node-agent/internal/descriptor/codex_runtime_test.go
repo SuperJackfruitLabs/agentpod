@@ -71,6 +71,7 @@ func TestCodexNativeSkillReadinessUsesSelectedBundledEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.acpBinary = shim
+	d.adapterRunning = func(string, string) (bool, string) { return false, "" }
 	got, err := d.NativeSkillReadiness(context.Background(), codexKeyFor(project))
 	if err != nil {
 		t.Fatal(err)
@@ -83,6 +84,12 @@ func TestCodexNativeSkillReadinessUsesSelectedBundledEngine(t *testing.T) {
 	got, err = d.NativeSkillReadiness(context.Background(), codexKeyFor(project))
 	if err != nil || got.Ready || !strings.Contains(got.Reason, "CODEX_PATH") {
 		t.Fatalf("override readiness: %+v %v", got, err)
+	}
+	d.codexBinary = ""
+	d.adapterRunning = func(string, string) (bool, string) { return true, "" }
+	got, err = d.NativeSkillReadiness(context.Background(), codexKeyFor(project))
+	if err != nil || got.Ready || !strings.Contains(got.Reason, "codex-acp process is active") {
+		t.Fatalf("active adapter readiness: %+v %v", got, err)
 	}
 }
 
