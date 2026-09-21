@@ -79,5 +79,37 @@ export const SkillReleaseCohortMetadata = z.object({
   createdAt: z.iso.datetime(),
 }).strict();
 
+/**
+ * Selects one already-enrolled station as the first, reviewable run of an
+ * immutable release cohort.  The release identity is repeated deliberately:
+ * callers must never be able to turn a cohort identifier into a moving
+ * "latest" release reference.
+ */
+export const SkillReleaseCanaryPlanRequest = z.object({
+  releaseId: z.uuid(),
+  recordDigest: Digest,
+  stationId: z.string().min(1).max(256),
+  requestId: z.string().min(1).max(128),
+}).strict();
+
+export const SkillReleaseCanaryOperation = z.object({
+  cohortId: z.uuid(),
+  releaseId: z.uuid(),
+  recordDigest: Digest,
+  stationId: z.string().min(1).max(256),
+  operationId: z.string().regex(/^[a-f0-9]{32}$/),
+}).strict();
+
+export const SkillReleaseCanaryOperationRequest = z.object({
+  releaseId: z.uuid(),
+  recordDigest: Digest,
+  stationId: z.string().min(1).max(256),
+  operationId: z.string().regex(/^[a-f0-9]{32}$/),
+}).strict();
+
+export const SkillReleaseCanaryApplyRequest = SkillReleaseCanaryOperationRequest.extend({
+  planDigest: Digest,
+}).strict();
+
 export type TrustedSkillReleaseRecord = z.infer<typeof TrustedSkillReleaseRecord>;
 export type TrustedSkillReleaseMetadata = z.infer<typeof TrustedSkillReleaseMetadata>;

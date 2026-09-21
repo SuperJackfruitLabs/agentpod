@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SkillReleaseCohortCreateRequest, TrustedSkillReleaseRecord } from "./skill-catalog";
+import { SkillReleaseCanaryApplyRequest, SkillReleaseCanaryPlanRequest, SkillReleaseCohortCreateRequest, TrustedSkillReleaseRecord } from "./skill-catalog";
 
 const digest = "a".repeat(64);
 const harnesses = ["codex", "claude-code", "opencode", "pi", "hermes", "openclaw"] as const;
@@ -28,4 +28,20 @@ test("cohorts pin an immutable release identity and unique station list", () => 
   const cohort = { releaseId: "11111111-1111-4111-8111-111111111111", recordDigest: digest, stationIds: ["station_a", "station_b"] };
   expect(SkillReleaseCohortCreateRequest.parse(cohort)).toEqual(cohort);
   expect(SkillReleaseCohortCreateRequest.safeParse({ ...cohort, stationIds: ["station_a", "station_a"] }).success).toBe(false);
+});
+
+test("canary commands bind a plan and its later reviewed apply to one release and station", () => {
+  const plan = {
+    releaseId: "11111111-1111-4111-8111-111111111111", recordDigest: digest,
+    stationId: "station_a", requestId: "first-canary",
+  };
+  expect(SkillReleaseCanaryPlanRequest.parse(plan)).toEqual(plan);
+  expect(SkillReleaseCanaryApplyRequest.safeParse({
+    releaseId: plan.releaseId, recordDigest: plan.recordDigest, stationId: plan.stationId,
+    operationId: "f".repeat(32), planDigest: digest,
+  }).success).toBe(true);
+  expect(SkillReleaseCanaryApplyRequest.safeParse({
+    releaseId: plan.releaseId, recordDigest: plan.recordDigest, stationId: plan.stationId,
+    operationId: "not-an-operation", planDigest: digest,
+  }).success).toBe(false);
 });

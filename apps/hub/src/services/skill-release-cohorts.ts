@@ -38,3 +38,10 @@ export async function listSkillReleaseCohorts(owner: SkillOwner) {
   const rows = await db.select().from(skillReleaseCohorts).where(tenantScope(skillReleaseCohorts, owner.tenantId, eq(skillReleaseCohorts.userId, owner.userId))).orderBy(skillReleaseCohorts.createdAt).limit(128);
   return rows.map(metadata);
 }
+
+export async function getSkillReleaseCohort(owner: SkillOwner, id: string) {
+  const [row] = await db.select().from(skillReleaseCohorts).where(
+    tenantScope(skillReleaseCohorts, owner.tenantId, eq(skillReleaseCohorts.userId, owner.userId), eq(skillReleaseCohorts.id, id)),
+  );
+  return row ?? null;
+}
