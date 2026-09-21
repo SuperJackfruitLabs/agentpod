@@ -102,11 +102,18 @@ func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 	}
 	d.acpBinary = shim
 	d.adapterRunning = func(string, string) (bool, string) { return false, "" }
+	d.nodeBinary = "/opt/agentpod/node/bin/node"
+	d.nodeVersion = func(path string) (string, error) {
+		if path != d.nodeBinary {
+			t.Fatalf("resolved unexpected Node runtime %q", path)
+		}
+		return "v22.14.0", nil
+	}
 	called := false
-	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace string) ([]string, error) {
+	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace, node string) ([]string, error) {
 		called = true
-		if adapter != shim || workspace != project {
-			t.Fatalf("unexpected discovery scope %q %q", adapter, workspace)
+		if adapter != shim || workspace != project || node != d.nodeBinary {
+			t.Fatalf("unexpected discovery scope %q %q node=%q", adapter, workspace, node)
 		}
 		return []string{"sjl-fixture"}, nil
 	}

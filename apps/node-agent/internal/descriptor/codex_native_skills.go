@@ -80,7 +80,11 @@ func (c *codexDescriptor) NativeSkillLoading(ctx context.Context, key string, ex
 	if err != nil {
 		return skills.Observation{}, err
 	}
-	advertised, err := c.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace)
+	nodePath, err := c.nativeSkillDiscoveryNode()
+	if err != nil {
+		return skills.Observation{Reason: err.Error()}, nil
+	}
+	advertised, err := c.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace, nodePath)
 	if err != nil {
 		return skills.Observation{}, fmt.Errorf("fresh isolated Codex session could not establish discovery: %w", err)
 	}
@@ -150,4 +154,29 @@ func codexBundledEngineVersion(root string) string {
 		dir = parent
 	}
 	return ""
+}
+
+// nativeSkillDiscoveryNode finds a usable Node executable for the isolated ACP
+// probe. Node-agent services often have a smaller PATH than the operator's
+// shell, while codex-acp's executable shim invokes `/usr/bin/env node`.
+// Resolve the same supported locations as the adapter and prepend only the
+// selected runtime directory to the disposable process's PATH.
+func (c *codexDescriptor) nativeSkillDiscoveryNode() (string, error) {
+	candidates := make([]string, 0, 2)
+	if c.nodeBinary != "" {
+		candidates = append(candidates, c.nodeBinary)
+	}
+	if resolved, ok := c.locator().locate("node", ""); ok {
+		candidates = append(candidates, resolved)
+	}
+	for _, candidate := range candidates {
+		out, err := c.nodeVersion(candidate)
+		if err != nil {
+			continue
+		}
+		if _, ok := parseNodeMajor(out); ok {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("Codex loading evidence was not collected: a usable Node runtime could not be resolved for codex-acp")
 }
