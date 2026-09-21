@@ -32,6 +32,10 @@ func fleetSkills(args []string) {
   fleet skills canary plan --cohort ID --release ID --digest SHA256 --station ID
   fleet skills canary inspect --cohort ID --release ID --digest SHA256 --station ID --operation ID
   fleet skills canary apply --cohort ID --release ID --digest SHA256 --station ID --operation ID --plan-digest SHA256
+  fleet skills station verify --station ID --profile PROFILE
+  fleet skills station rollback-plan --station ID --profile PROFILE
+  fleet skills station inspect --station ID --operation ID
+  fleet skills station apply --station ID --operation ID --plan-digest SHA256
 
 Every mutation returns the hub's reviewed record. Read that response before an
 apply command; this CLI never turns a plan into an implicit apply.`)
@@ -54,8 +58,54 @@ apply command; this CLI never turns a plan into an implicit apply.`)
 		fleetSkillCohort(args[1:])
 	case "canary":
 		fleetSkillCanary(args[1:])
+	case "station":
+		fleetSkillStation(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown fleet skills command: %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
+func fleetSkillStation(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet skills station <verify|rollback-plan|inspect|apply> …")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("fleet skills station", flag.ExitOnError)
+	station, profile, operation, planDigest := fs.String("station", "", "station ID"), fs.String("profile", "", "profile"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
+	fs.Parse(args[1:])
+	if *station == "" || fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "station commands require --station ID")
+		os.Exit(2)
+	}
+	base := "/api/stations/" + url.PathEscape(*station) + "/skills"
+	switch args[0] {
+	case "verify":
+		if *profile == "" {
+			fmt.Fprintln(os.Stderr, "verify requires --profile PROFILE")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/verify", map[string]string{"profile": *profile})
+	case "rollback-plan":
+		if *profile == "" {
+			fmt.Fprintln(os.Stderr, "rollback-plan requires --profile PROFILE")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/rollback", map[string]string{"requestId": randomHex32(), "profile": *profile})
+	case "inspect":
+		if *operation == "" {
+			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
+			os.Exit(2)
+		}
+		fleetGet(base+"/operations/"+url.PathEscape(*operation), nil)
+	case "apply":
+		if *operation == "" || *planDigest == "" {
+			fmt.Fprintln(os.Stderr, "apply requires --operation ID --plan-digest SHA256")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/operations/"+url.PathEscape(*operation)+"/apply", map[string]string{"planDigest": *planDigest})
+	default:
+		fmt.Fprintln(os.Stderr, "usage: fleet skills station <verify|rollback-plan|inspect|apply> …")
 		os.Exit(2)
 	}
 }
