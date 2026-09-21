@@ -211,3 +211,54 @@ test("a failed save keeps the dialog open with the edits intact", async () => {
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
   expect(getByText(QUILL)).toBeTruthy();
 });
+
+test("search finds agents beyond the first eight suggestions", async () => {
+  const agentOptions = Array.from({ length: 40 }, (_, i) => ({
+    id: `prn_${i.toString(16).padStart(20, "0")}`, label: `Agent ${i}`,
+  }));
+  const { getByLabelText, getByRole } = open({ agentOptions });
+  await fireEvent.input(getByLabelText("Search agents"), { target: { value: "AGENT 39" } });
+  await fireEvent.click(getByRole("button", { name: /\+ Agent 39/ }));
+  await fireEvent.click(getByRole("button", { name: /save/i }));
+  await waitFor(() => expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+    mayDispatch: [agentOptions[39]!.id], mayGrantReach: false,
+  }));
+});
+
+test("filtering selected targets preserves hidden and unknown IDs in the saved grant", async () => {
+  const { getByLabelText, getByRole, getByText, queryByText } = open({
+    grant: { mayDispatch: [QUILL, ECHO], mayGrantReach: true },
+    agentOptions: [{ id: QUILL, label: "Quill" }],
+  });
+  await fireEvent.input(getByLabelText("Search agents"), { target: { value: "quill" } });
+  expect(queryByText(ECHO)).toBeNull();
+  await fireEvent.click(getByRole("button", { name: /remove value/i }));
+  expect(getByText("0 added · 1 removed · Reach unchanged")).toBeTruthy();
+  await fireEvent.click(getByRole("button", { name: /save/i }));
+  await waitFor(() => expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+    mayDispatch: [ECHO], mayGrantReach: true,
+  }));
+});
+
+test("saving includes a valid pending ID without requiring Add", async () => {
+  const { getByLabelText, getByRole } = open();
+  await fireEvent.input(getByLabelText(/add a value/i), { target: { value: QUILL } });
+  await fireEvent.click(getByRole("button", { name: /save/i }));
+  await waitFor(() => expect(grantsApi.setGrant).toHaveBeenCalledWith(PRINCIPAL.id, {
+    mayDispatch: [QUILL], mayGrantReach: false,
+  }));
+});
+
+test("saving freezes edits and prevents Escape from dismissing the pending request", async () => {
+  let resolveSave!: () => void;
+  vi.mocked(grantsApi.setGrant).mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+  const { getByRole, getByLabelText } = open({ grant: { mayDispatch: [QUILL], mayGrantReach: false } });
+  await fireEvent.click(getByRole("button", { name: /save/i }));
+  expect(getByRole("button", { name: /remove value/i }).matches(":disabled")).toBe(true);
+  expect(getByLabelText("Search agents").matches(":disabled")).toBe(true);
+  expect(getByRole("switch").matches(":disabled")).toBe(true);
+  await fireEvent.keyDown(document, { key: "Escape" });
+  expect(getByRole("dialog")).toBeTruthy();
+  resolveSave();
+  await waitFor(() => expect(grantsApi.setGrant).toHaveBeenCalledTimes(1));
+});
