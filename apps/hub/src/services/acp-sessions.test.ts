@@ -572,11 +572,12 @@ test("promptSession persists an ACP rejection before returning the session to id
     const unsub = subscribe(row.id, (event) => liveEvents.push(event));
 
     await promptSession(TEST_USER, row.id, "hello");
-    const { all } = await pollForEvent(
+    await pollForEvent(
       row.id,
       (event) => event.type === "error" && (event.payload as { message?: string }).message === "Provider quota exhausted",
       8_000,
     );
+    const { all } = await pollForEvent(row.id, stateWith("idle"));
     const errorIndex = all.findIndex((event) => event.type === "error");
     const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
     expect(errorIndex).toBeGreaterThan(-1);
