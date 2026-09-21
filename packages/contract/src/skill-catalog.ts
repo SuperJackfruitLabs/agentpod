@@ -63,5 +63,21 @@ export const TrustedSkillReleaseImportRequest = z
   })
   .strict();
 
+export const SkillReleaseCohortCreateRequest = z
+  .object({
+    releaseId: z.uuid(),
+    recordDigest: Digest,
+    stationIds: z.array(z.string().min(1).max(256)).min(1).max(256),
+  })
+  .strict()
+  .refine((value) => new Set(value.stationIds).size === value.stationIds.length, {
+    message: "A cohort cannot name a station more than once",
+  });
+export const SkillReleaseCohortMetadata = z.object({
+  id: z.uuid(), releaseId: z.uuid(), recordDigest: Digest,
+  stationIds: z.array(z.string().min(1).max(256)).min(1).max(256),
+  createdAt: z.iso.datetime(),
+}).strict();
+
 export type TrustedSkillReleaseRecord = z.infer<typeof TrustedSkillReleaseRecord>;
 export type TrustedSkillReleaseMetadata = z.infer<typeof TrustedSkillReleaseMetadata>;

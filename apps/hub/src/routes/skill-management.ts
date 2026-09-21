@@ -37,6 +37,8 @@ import {
   importTrustedSkillRelease,
   listTrustedSkillReleases,
 } from "../services/trusted-skill-catalog";
+import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skill-release-cohorts";
+import { SkillReleaseCohortCreateRequest } from "@agentpod/contract";
 import {
   createSkillOperation,
   getSkillOperation,
@@ -162,6 +164,10 @@ export function createSkillManagementRoutes(
         201,
       );
     })
+    .get("/skills/catalog/cohorts", async (c) => c.json(await listSkillReleaseCohorts(owner(c))))
+    .post("/skills/catalog/cohorts", async (c) =>
+      c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest)), 201),
+    )
     .post("/skills/artifacts", async (c) => {
       const query = new URL(c.req.url).searchParams;
       if ([...query.keys()].some((key) => query.getAll(key).length !== 1))

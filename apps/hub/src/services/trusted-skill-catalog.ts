@@ -102,3 +102,10 @@ export async function listTrustedSkillReleases(owner: SkillOwner): Promise<Trust
     .orderBy(trustedSkillReleases.createdAt).limit(128);
   return rows.map(metadata);
 }
+
+export async function getTrustedSkillRelease(owner: SkillOwner, id: string) {
+  const [row] = await db.select().from(trustedSkillReleases).where(
+    tenantScope(trustedSkillReleases, owner.tenantId, eq(trustedSkillReleases.userId, owner.userId), eq(trustedSkillReleases.id, id)),
+  );
+  return row ?? null;
+}
