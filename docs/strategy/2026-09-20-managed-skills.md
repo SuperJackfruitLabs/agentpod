@@ -333,6 +333,17 @@ persistent and ephemeral Modal, Fly images and local placement separately; sourc
 pins do not establish deployed versions. Follow the current release runbook and
 verify the real deployment before claiming completion.
 
+### Node release evidence (2026-09-21)
+
+`v0.1.43` packages the read-only retained-state inspection from merged change
+`#499` (`3cdbeac4`). Its GitHub release workflow completed successfully and the
+published manifest contains the four `agentpod-node` binaries, four
+`agentpod-fleet` binaries, both installers, the service unit, and
+`SHA256SUMS`. Downloading those public assets and verifying the manifest passed
+for every listed asset. This establishes a reproducible node release; it does
+not establish that any station has installed the version or that retained state
+has been inspected on a live station.
+
 ### Runtime selection follow-up (2026-09-21)
 
 Pi ACP now receives the absolute selected Pi executable through
