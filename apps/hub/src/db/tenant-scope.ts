@@ -56,7 +56,12 @@ import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
-import { skillArtifacts, skillOperations } from "./schema/skills";
+import {
+  skillArtifacts,
+  skillOperations,
+  trustedSkillReleaseArtifacts,
+  trustedSkillReleases,
+} from "./schema/skills";
 import { tenants } from "./schema/tenants";
 import { organizations, principals } from "./schema/organization";
 
@@ -113,6 +118,8 @@ export const TENANT_SCOPED_TABLES = {
   stations,
   skillArtifacts,
   skillOperations,
+  trustedSkillReleases,
+  trustedSkillReleaseArtifacts,
   stationSetups,
   stationAudit,
   acpSessions,

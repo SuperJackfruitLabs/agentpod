@@ -5,7 +5,11 @@ import {
   SkillArtifactUploadQuery,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { skillArtifacts, skillOperations } from "../db/schema/skills";
+import {
+  skillArtifacts,
+  skillOperations,
+  trustedSkillReleaseArtifacts,
+} from "../db/schema/skills";
 import { tenantScope, assertTenantId } from "../db/tenant-scope";
 
 export type SkillOwner = { tenantId: string; userId: string };
@@ -170,6 +174,7 @@ export async function deleteSkillArtifact(
         eq(skillArtifacts.userId, owner.userId),
         eq(skillArtifacts.id, id),
         sql`NOT EXISTS (SELECT 1 FROM ${skillOperations} WHERE ${skillOperations.artifactId}=${skillArtifacts.id})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${trustedSkillReleaseArtifacts} WHERE ${trustedSkillReleaseArtifacts.artifactId}=${skillArtifacts.id} AND ${trustedSkillReleaseArtifacts.tenantId}=${skillArtifacts.tenantId} AND ${trustedSkillReleaseArtifacts.userId}=${skillArtifacts.userId})`,
       ),
     )
     .returning({ id: skillArtifacts.id });

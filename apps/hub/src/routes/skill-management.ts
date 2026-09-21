@@ -13,6 +13,7 @@ import {
   SkillMaintenanceApplyParams,
   SkillNativePlanRequest,
   SkillNativeVerifyResult,
+  TrustedSkillReleaseImportRequest,
 } from "@agentpod/contract";
 import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
@@ -32,6 +33,10 @@ import {
   deleteSkillArtifact,
   type SkillOwner,
 } from "../services/skill-artifacts";
+import {
+  importTrustedSkillRelease,
+  listTrustedSkillReleases,
+} from "../services/trusted-skill-catalog";
 import {
   createSkillOperation,
   getSkillOperation,
@@ -147,6 +152,16 @@ export function createSkillManagementRoutes(
     .get("/skills/artifacts", async (c) =>
       c.json(await listSkillArtifacts(owner(c))),
     )
+    .get("/skills/catalog/releases", async (c) =>
+      c.json(await listTrustedSkillReleases(owner(c))),
+    )
+    .post("/skills/catalog/releases", async (c) => {
+      const request = await body(c, TrustedSkillReleaseImportRequest);
+      return c.json(
+        await importTrustedSkillRelease(owner(c), request.record, request.artifacts),
+        201,
+      );
+    })
     .post("/skills/artifacts", async (c) => {
       const query = new URL(c.req.url).searchParams;
       if ([...query.keys()].some((key) => query.getAll(key).length !== 1))
