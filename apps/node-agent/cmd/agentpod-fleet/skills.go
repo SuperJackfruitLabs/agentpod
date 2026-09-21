@@ -95,7 +95,7 @@ func fleetSkillNative(args []string) {
 			fmt.Fprintln(os.Stderr, "plan requires --profile PROFILE --action activate|deactivate|rollback")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomHex32(), "profile": *profile, "action": *action})
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomUUID(), "profile": *profile, "action": *action})
 	case "inspect":
 		if *operation == "" {
 			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
@@ -145,7 +145,7 @@ func fleetSkillStation(args []string) {
 			fmt.Fprintln(os.Stderr, "rollback-plan requires --profile PROFILE")
 			os.Exit(2)
 		}
-		fleetSkillJSON(http.MethodPost, base+"/rollback", map[string]string{"requestId": randomHex32(), "profile": *profile})
+		fleetSkillJSON(http.MethodPost, base+"/rollback", map[string]string{"requestId": randomUUID(), "profile": *profile})
 	case "inspect":
 		if *operation == "" {
 			fmt.Fprintln(os.Stderr, "inspect requires --operation ID")
@@ -313,6 +313,16 @@ func randomHex32() string {
 		panic(err)
 	}
 	return fmt.Sprintf("%x", bytes)
+}
+
+func randomUUID() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		panic(err)
+	}
+	bytes[6] = (bytes[6] & 0x0f) | 0x40
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", bytes[:4], bytes[4:6], bytes[6:8], bytes[8:10], bytes[10:])
 }
 
 func fleetSkillJSON(method, path string, payload any) {
