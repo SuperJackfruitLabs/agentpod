@@ -71,6 +71,7 @@ import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startSuperpipelineBridge } from './services/bridge/loop.ts';
+import { createGracefulShutdown } from './services/shutdown.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
@@ -487,7 +488,7 @@ registerEnabledProvisioners();
 console.log('Provisioners registered:', enabledProviders().join(', ') || '(none enabled)');
 
 // Expire silent nodes whose TCP close never fired (killed VM, dropped network).
-startNodeSweeper();
+const stopNodeSweeper = startNodeSweeper();
 console.log('Node heartbeat sweeper started (45s threshold)');
 
 // Claim work from a superpipeline board, if this hub has been told to.
@@ -518,16 +519,16 @@ if (matrixBridge) {
   console.log('matrix bridge: (disabled)');
 }
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Shutting down...');
-  process.exit(0);
+// Close native Matrix crypto before Bun tears down napi's Tokio runtime. The
+// shutdown coordinator is shared by both signals so duplicate delivery cannot
+// interrupt cleanup halfway through.
+const shutdown = createGracefulShutdown({
+  stopSweeper: stopNodeSweeper,
+  stopBridge: bridge?.stop.bind(bridge),
+  closeMatrixBridge: matrixBridge?.close.bind(matrixBridge),
 });
-
-process.on('SIGTERM', () => {
-  console.log('Shutting down...');
-  process.exit(0);
-});
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
 // Start server
 const port = config.port;

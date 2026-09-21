@@ -157,6 +157,8 @@ export interface MatrixBridge {
    * never calls it, and the route checks for exactly that.
    */
   onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
+  /** Release native crypto machines before Bun tears down napi during shutdown. */
+  close(): Promise<void>;
 }
 
 /**
@@ -377,6 +379,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           await retryPendingDecrypts(inboundDeps);
         }
       : null,
+
+    async close() {
+      await crypto?.close();
+    },
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);
