@@ -99,6 +99,16 @@ var commands = []struct {
 			"directly for debugging.",
 	},
 	{
+		name: "native-skills", group: "Node",
+		oneline: "Show, enable or disable native skill placement on this node",
+		detail: "apn native-skills <status|enable|disable> — control the separate native\n" +
+			"skill-placement gate for this node.\n\n" +
+			"Native placement writes into a harness-visible skill directory. It is disabled\n" +
+			"by default and must be deliberately enabled by the node operator. `enable` and\n" +
+			"`disable` update only this node's local configuration; restart the node service\n" +
+			"after either change before the hub can observe the new capability.",
+	},
+	{
 		name: "detect", group: "Node",
 		oneline: "Print detected harness stations as JSON",
 		detail: "apn detect — print the harness stations detected on this host as\n" +
