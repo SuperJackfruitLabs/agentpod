@@ -23,6 +23,7 @@ func fleetSkills(args []string) {
 		fmt.Println(`Usage: fleet skills <verb>
 
   fleet skills artifacts
+  fleet skills artifact delete --id ARTIFACT_ID
   fleet skills releases
   fleet skills cohorts
   fleet skills upload --harness H --profile P ARCHIVE.tgz
@@ -39,6 +40,8 @@ apply command; this CLI never turns a plan into an implicit apply.`)
 	switch args[0] {
 	case "artifacts":
 		fleetGet("/api/skills/artifacts", args[1:])
+	case "artifact":
+		fleetSkillArtifact(args[1:])
 	case "releases":
 		fleetGet("/api/skills/catalog/releases", args[1:])
 	case "cohorts":
@@ -55,6 +58,21 @@ apply command; this CLI never turns a plan into an implicit apply.`)
 		fmt.Fprintf(os.Stderr, "unknown fleet skills command: %q\n", args[0])
 		os.Exit(2)
 	}
+}
+
+func fleetSkillArtifact(args []string) {
+	if len(args) == 0 || args[0] != "delete" {
+		fmt.Fprintln(os.Stderr, "usage: fleet skills artifact delete --id ARTIFACT_ID")
+		os.Exit(2)
+	}
+	fs := flag.NewFlagSet("fleet skills artifact delete", flag.ExitOnError)
+	id := fs.String("id", "", "artifact ID")
+	fs.Parse(args[1:])
+	if *id == "" || fs.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "usage: fleet skills artifact delete --id ARTIFACT_ID")
+		os.Exit(2)
+	}
+	fleetSkillRequest(http.MethodDelete, "/api/skills/artifacts/"+url.PathEscape(*id), nil, "")
 }
 
 func fleetSkillUpload(args []string) {
