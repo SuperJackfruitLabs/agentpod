@@ -164,7 +164,8 @@
 
   const hasSkillInventory = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
   const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
-  const hasSkills = $derived(hasSkillInventory || hasSkillManagement);
+  const hasNativeSkillManagement = $derived(station?.capabilities?.includes("skills.native") ?? false);
+  const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement);
 
   const hasChangeset = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
@@ -664,7 +665,7 @@
     {@render mountedPanel("skills", skillsContent)}
     {#snippet skillsContent()}
       {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
-      {#if hasSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={mayGrantReach} />{/if}
+      {#if hasSkillManagement || hasNativeSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={hasSkillManagement && mayGrantReach} canNative={hasNativeSkillManagement && mayGrantReach} />{/if}
     {/snippet}
   {/if}
 

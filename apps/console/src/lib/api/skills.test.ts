@@ -11,6 +11,7 @@ const operation = {
   stationKey: "codex:fixture",
   harness: "codex",
   profile: "fixture",
+  kind: "managed",
   action: "install",
   artifactId: "11111111-1111-4111-8111-111111111111",
   state: "planned",

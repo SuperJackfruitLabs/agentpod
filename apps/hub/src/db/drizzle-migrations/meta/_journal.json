@@ -498,6 +498,13 @@
       "when": 1789975526673,
       "tag": "0070_station_setup",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789996982000,
+      "tag": "0071_native_skill_operations",
+      "breakpoints": true
     }
   ]
 }

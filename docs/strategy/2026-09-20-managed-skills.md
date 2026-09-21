@@ -236,11 +236,13 @@ Those gaps, actual version/mode gating and operator
 visibility must be resolved before any remote activation capability is enabled.
 The node now has strict `skills.native.*` request/result schemas and a separate
 handler boundary for native planning, application, operation inspection and
-verification. Mutation is fail-closed unless the daemon supplies both the shared
-workspace coordinator and a harness-specific runtime authorization callback;
-the current daemon callback rejects every native mutation. Read-only inspection
-remains available for recovery. No advertised capability or production placement
-changes here.
+verification. Mutation is off by default. An operator must set
+`nativeSkillActivation` on the node, the descriptor must supply current runtime
+readiness evidence, and the shared workspace coordinator must acquire the
+repository lease. Only those descriptors advertise `skills.native`; today that
+means Codex, and its readiness remains version- and process-specific. The Hub
+and Console retain native plans, receipts and history separately from managed
+installation, require reach permission, and never restart a station.
 
 ## Hub, console and verification
 
@@ -301,8 +303,9 @@ A lost planning response retains its request UUID for retry. An uncertain apply
 requires node inspection before the UI offers apply again. Navigation discards late
 responses from the previous station. Conflict guidance preserves local edits;
 there is no force-overwrite button. Loading evidence remains separate from applied
-files. The UI currently selects uploaded artifacts; stable catalog/release discovery,
-native activation and rollout cohorts remain unfinished.
+files. The UI now presents native activation, rollback and removal as separate
+reviewed operations only when the node advertises `skills.native`. Stable
+catalog/release discovery and rollout cohorts remain unfinished.
 
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,

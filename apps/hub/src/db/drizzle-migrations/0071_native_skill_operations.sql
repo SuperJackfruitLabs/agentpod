@@ -1,0 +1,3 @@
+ALTER TABLE "skill_operations" ADD COLUMN "kind" text DEFAULT 'managed' NOT NULL;--> statement-breakpoint
+ALTER TABLE "skill_operations" DROP CONSTRAINT "skill_operations_identity_check";--> statement-breakpoint
+ALTER TABLE "skill_operations" ADD CONSTRAINT "skill_operations_identity_check" CHECK ("skill_operations"."id" ~ '^[a-f0-9]{32}$' AND (("skill_operations"."kind"='managed' AND "skill_operations"."action" IN ('install','rollback')) OR ("skill_operations"."kind"='native' AND "skill_operations"."action" IN ('activate','deactivate','rollback'))) AND (("skill_operations"."action"='install')=("skill_operations"."artifact_id" IS NOT NULL)));

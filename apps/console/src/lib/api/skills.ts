@@ -10,6 +10,8 @@ const stationPath = (id: string) =>
   `/api/stations/${encodeURIComponent(id)}/skills`;
 const operationPath = (stationId: string, id: string) =>
   `${stationPath(stationId)}/operations/${encodeURIComponent(id)}`;
+const nativeOperationPath = (stationId: string, id: string) =>
+  `${stationPath(stationId)}/native/operations/${encodeURIComponent(id)}`;
 const post = (body: unknown): RequestInit => ({
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -61,12 +63,31 @@ export const listSkillOperations = async (stationId: string) => {
     throw new Error("History belongs to a different station");
   return operations;
 };
+export const listNativeSkillOperations = async (stationId: string) => {
+  const operations = SkillHubOperationSummary.array().parse(
+    await http(`${stationPath(stationId)}/native/operations`),
+  );
+  if (operations.some((operation) => operation.stationId !== stationId || operation.kind !== "native"))
+    throw new Error("Native history belongs to a different station");
+  return operations;
+};
 export const getSkillOperation = async (stationId: string, id: string) =>
   checkedOperation(stationId, await http(operationPath(stationId, id)), id);
+export const getNativeSkillOperation = async (stationId: string, id: string) => {
+  const operation = checkedOperation(stationId, await http(nativeOperationPath(stationId, id)), id);
+  if (operation.kind !== "native") throw new Error("Operation is not native placement");
+  return operation;
+};
 export const inspectSkillOperation = async (stationId: string, id: string) =>
   checkedOperation(
     stationId,
     await http(`${operationPath(stationId, id)}/inspect`, post({})),
+    id,
+  );
+export const inspectNativeSkillOperation = async (stationId: string, id: string) =>
+  checkedOperation(
+    stationId,
+    await http(`${nativeOperationPath(stationId, id)}/inspect`, post({})),
     id,
   );
 export const planSkillInstall = async (
@@ -93,6 +114,19 @@ export const planSkillRollback = async (
       post({ profile, requestId }),
     ),
   );
+export const planNativeSkillPlacement = async (
+  stationId: string,
+  profile: string,
+  action: "activate" | "deactivate" | "rollback",
+  requestId: string,
+) => {
+  const operation = checkedOperation(
+    stationId,
+    await http(`${stationPath(stationId)}/native/plan`, post({ profile, action, requestId })),
+  );
+  if (operation.kind !== "native") throw new Error("Response is not native placement");
+  return operation;
+};
 export const applySkillOperation = async (
   stationId: string,
   id: string,
@@ -103,11 +137,31 @@ export const applySkillOperation = async (
     await http(`${operationPath(stationId, id)}/apply`, post({ planDigest })),
     id,
   );
+export const applyNativeSkillOperation = async (
+  stationId: string,
+  id: string,
+  planDigest: string,
+) => {
+  const operation = checkedOperation(
+    stationId,
+    await http(`${nativeOperationPath(stationId, id)}/apply`, post({ planDigest })),
+    id,
+  );
+  if (operation.kind !== "native") throw new Error("Response is not native placement");
+  return operation;
+};
 export const verifySkillFiles = async (stationId: string, profile: string) => {
   const result = SkillVerifyResult.parse(
     await http(`${stationPath(stationId)}/verify`, post({ profile })),
   );
   if (result.profile !== profile)
     throw new Error("Verification belongs to a different profile");
+  return result;
+};
+export const verifyNativeSkillPlacement = async (stationId: string, profile: string) => {
+  const result = SkillVerifyResult.parse(
+    await http(`${stationPath(stationId)}/native/verify`, post({ profile })),
+  );
+  if (result.profile !== profile) throw new Error("Verification belongs to a different profile");
   return result;
 };

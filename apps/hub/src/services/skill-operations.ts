@@ -5,7 +5,10 @@ import {
   SkillHubOperationSummary,
   SkillInstallPlan,
   SkillInstallReceipt,
+  SkillPlacementPlan,
+  SkillPlacementReceipt,
   SkillOperationResult,
+  SkillNativeOperationResult,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
@@ -21,6 +24,12 @@ import * as broker from "./broker";
 
 type Operation = typeof skillOperations.$inferSelect;
 type Mode = "plan" | "apply" | "inspect";
+type OperationPlan = SkillInstallPlan | SkillPlacementPlan;
+type OperationReceipt = SkillInstallReceipt | SkillPlacementReceipt;
+type NativeAction = "activate" | "deactivate" | "rollback";
+type OperationKind = "managed" | "native";
+const isNative = (operation: Pick<Operation, "kind">) =>
+  operation.kind === "native";
 const scope = (owner: SkillOwner, id?: string) =>
   tenantScope(
     skillOperations,
@@ -50,6 +59,7 @@ export function operationResult(row: Operation): SkillHubOperation {
     stationKey: row.stationKey,
     harness: row.harness,
     profile: row.profile,
+    kind: row.kind,
     action: row.action,
     artifactId: row.artifactId,
     ...operationStatus(row),
@@ -63,11 +73,12 @@ export async function getSkillOperation(
   owner: SkillOwner,
   station: StationRow,
   id: string,
+  kind: OperationKind = "managed",
 ): Promise<Operation> {
   const [row] = await db
     .select()
     .from(skillOperations)
-    .where(and(scope(owner, id), eq(skillOperations.stationId, station.id)));
+    .where(and(scope(owner, id), eq(skillOperations.stationId, station.id), eq(skillOperations.kind, kind)));
   if (!row) throw new SkillRequestError(404, "Operation not found");
   if (
     row.nodeId !== station.nodeId ||
@@ -83,6 +94,7 @@ export async function getSkillOperation(
 export async function listSkillOperations(
   owner: SkillOwner,
   station: StationRow,
+  kind: OperationKind = "managed",
 ): Promise<SkillHubOperationSummary[]> {
   // Plans can be large; history lists identifiers and status, not every diff.
   const rows = await db
@@ -93,6 +105,7 @@ export async function listSkillOperations(
       stationKey: skillOperations.stationKey,
       harness: skillOperations.harness,
       profile: skillOperations.profile,
+      kind: skillOperations.kind,
       action: skillOperations.action,
       artifactId: skillOperations.artifactId,
       state: skillOperations.state,
@@ -103,7 +116,7 @@ export async function listSkillOperations(
       updatedAt: skillOperations.updatedAt,
     })
     .from(skillOperations)
-    .where(and(scope(owner), eq(skillOperations.stationId, station.id)))
+    .where(and(scope(owner), eq(skillOperations.stationId, station.id), eq(skillOperations.kind, kind)))
     .orderBy(desc(skillOperations.createdAt))
     .limit(50);
   return rows.map(({ leaseToken, leaseExpiresAt, ...row }) =>
@@ -121,7 +134,8 @@ export async function createSkillOperation(
   station: StationRow,
   request:
     | { requestId: string; artifactId: string }
-    | { requestId: string; profile: string },
+    | { requestId: string; profile: string; action?: "rollback" }
+    | { requestId: string; profile: string; action: NativeAction },
 ): Promise<Operation> {
   if (station.userId !== owner.userId || station.tenantId !== owner.tenantId)
     throw new SkillRequestError(404, "Station not found");
@@ -133,7 +147,10 @@ export async function createSkillOperation(
     throw new SkillRequestError(404, "Artifact not found");
   if (artifact && artifact.harness !== station.harness)
     throw new SkillRequestError(409, "Artifact targets a different harness");
-  const action = artifact ? "install" : "rollback";
+  const kind = artifact || !("action" in request) ? "managed" : "native";
+  const action = artifact
+    ? "install"
+    : ("action" in request ? request.action ?? "rollback" : "rollback");
   const profile =
     artifact?.profile ?? ("profile" in request ? request.profile : "");
   const id = createHash("sha256")
@@ -162,6 +179,7 @@ export async function createSkillOperation(
         existing.stationKey !== station.stationKey ||
         existing.harness !== station.harness ||
         existing.profile !== profile ||
+        existing.kind !== kind ||
         existing.action !== action ||
         existing.artifactId !== (artifact?.id ?? null)
       )
@@ -190,6 +208,7 @@ export async function createSkillOperation(
         stationKey: station.stationKey,
         harness: station.harness,
         profile,
+        kind,
         action,
         artifactId: artifact?.id ?? null,
       })
@@ -202,8 +221,10 @@ function checkedPlan(
   data: unknown,
   operation: Operation,
   pin: string | undefined,
-): SkillInstallPlan {
-  const parsed = SkillInstallPlan.safeParse(data);
+): OperationPlan {
+  const parsed = isNative(operation)
+    ? SkillPlacementPlan.safeParse(data)
+    : SkillInstallPlan.safeParse(data);
   if (!parsed.success) throw new Error("invalid node plan");
   const plan = parsed.data,
     binding = plan.binding;
@@ -217,7 +238,7 @@ function checkedPlan(
     (operation.action === "install" && plan.after?.archiveSHA256 !== pin) ||
     (operation.plan !== null &&
       JSON.stringify(plan) !==
-        JSON.stringify(SkillInstallPlan.parse(operation.plan)))
+      JSON.stringify((isNative(operation) ? SkillPlacementPlan : SkillInstallPlan).parse(operation.plan)))
   )
     throw new Error("foreign or changed node plan");
   return plan;
@@ -226,12 +247,14 @@ function checkedReceipt(
   data: unknown,
   operation: Operation,
   pin: string | undefined,
-): SkillInstallReceipt {
-  const receipt = SkillInstallReceipt.parse(data);
+): OperationReceipt {
+  const receipt = isNative(operation)
+    ? SkillPlacementReceipt.parse(data)
+    : SkillInstallReceipt.parse(data);
   checkedPlan(receipt.plan, operation, pin);
   return receipt;
 }
-function receiptState(receipt: SkillInstallReceipt): Operation["state"] {
+function receiptState(receipt: OperationReceipt): Operation["state"] {
   if (receipt.phase === "applied") return "applied";
   if (receipt.phase === "planned") return "planned";
   if (receipt.phase === "conflict") return "conflict";
@@ -248,8 +271,9 @@ export async function executeSkillOperation(
   mode: Mode,
   reviewedDigest?: string,
   timeoutMs = 70_000,
+  kind: OperationKind = "managed",
 ): Promise<SkillHubOperation> {
-  const initial = await getSkillOperation(owner, station, id);
+  const initial = await getSkillOperation(owner, station, id, kind);
   if (
     mode === "apply" &&
     (!initial.plan || initial.plan.planDigest !== reviewedDigest)
@@ -300,7 +324,9 @@ export async function executeSkillOperation(
         ...owner,
         nodeId: station.nodeId,
         stationKey: station.stationKey,
-        verb: `skills.${mode === "plan" && initial.action === "rollback" ? "rollback" : mode}`,
+        verb: isNative(initial)
+          ? `skills.native.${mode}`
+          : `skills.${mode === "plan" && initial.action === "rollback" ? "rollback" : mode}`,
         paramsSummary: {
           operationId: id,
           artifactId: initial.artifactId,
@@ -311,7 +337,7 @@ export async function executeSkillOperation(
     return claimed;
   });
   if (!operation)
-    return operationResult(await getSkillOperation(owner, station, id));
+    return operationResult(await getSkillOperation(owner, station, id, kind));
   const params = {
     key: operation.stationKey,
     profile: operation.profile,
@@ -327,12 +353,14 @@ export async function executeSkillOperation(
   try {
     const inspection = await broker.request(
       operation.nodeId,
-      "skills.operation",
+      isNative(operation) ? "skills.native.operation" : "skills.operation",
       params,
       { timeoutMs },
     );
     if (!inspection.ok) throw new Error("node inspection unavailable");
-    const observed = SkillOperationResult.parse(inspection.data).receipt;
+    const observed = isNative(operation)
+      ? SkillNativeOperationResult.parse(inspection.data).receipt
+      : SkillOperationResult.parse(inspection.data).receipt;
     if (observed) {
       const receipt = checkedReceipt(
         observed,
@@ -358,9 +386,14 @@ export async function executeSkillOperation(
           throw new Error("previously observed plan is absent");
         const reply = await broker.request(
           operation.nodeId,
-          operation.action === "install" ? "skills.plan" : "skills.rollback",
+          isNative(operation)
+            ? "skills.native.plan"
+            : operation.action === "install"
+              ? "skills.plan"
+              : "skills.rollback",
           {
             ...params,
+            ...(isNative(operation) ? { action: operation.action } : {}),
             ...(artifact
               ? { stationId: station.id, archiveSHA256: artifact.archiveSHA256 }
               : {}),
@@ -383,10 +416,10 @@ export async function executeSkillOperation(
       if (observed.phase !== "applied") {
         const reply = await broker.request(
           operation.nodeId,
-          "skills.apply",
+          isNative(operation) ? "skills.native.apply" : "skills.apply",
           {
             ...params,
-            stationId: station.id,
+            ...(isNative(operation) ? {} : { stationId: station.id }),
             expectedPlanDigest: reviewedDigest,
           },
           { timeoutMs },
@@ -444,6 +477,6 @@ export async function executeSkillOperation(
         ),
       );
   return operationResult(
-    saved ?? (await getSkillOperation(owner, station, id)),
+    saved ?? (await getSkillOperation(owner, station, id, kind)),
   );
 }

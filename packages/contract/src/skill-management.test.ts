@@ -4,6 +4,7 @@ import {
   SkillPlanRequest,
   SkillRollbackRequest,
   SkillApplyRequest,
+  SkillNativePlanRequest,
   SkillHubOperation,
 } from "./skill-management";
 
@@ -55,4 +56,12 @@ test("uploaded artifact metadata cannot claim native verification or expose byte
     SkillArtifactMetadata.safeParse({ ...artifact, size: 33554433 }).success,
   ).toBe(false);
   expect(SkillHubOperation.safeParse({ state: "applied" }).success).toBe(false);
+});
+
+test("native placement is an explicit profile action, independent of artifact upload", () => {
+  const requestId = "11111111-1111-4111-8111-111111111111";
+  const request = { requestId, profile: "fixture", action: "activate" };
+  expect(SkillNativePlanRequest.parse(request)).toEqual(request);
+  expect(SkillNativePlanRequest.safeParse({ ...request, artifactId: crypto.randomUUID() }).success).toBe(false);
+  expect(SkillNativePlanRequest.safeParse({ ...request, action: "install" }).success).toBe(false);
 });
