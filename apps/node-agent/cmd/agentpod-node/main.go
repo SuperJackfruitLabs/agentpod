@@ -99,9 +99,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		// Preserve operator-set lifecycle commands across re-enrollment.
-		newCfg := config.Config{Hub: hub, NodeID: id, NodeSecret: sec,
-			HermesStartCmd: existing.HermesStartCmd, OpenClawStartCmd: existing.OpenClawStartCmd}
+		// Re-enrollment rotates only the machine identity. Keep every local
+		// operator setting, including the explicit native-skill activation gate.
+		newCfg := renewedConfig(existing, hub, id, sec)
 		if err := config.Save(config.DefaultPath(), newCfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -112,6 +112,8 @@ func main() {
 			os.Exit(0)
 		}
 		runCmd() // implemented in Task 9
+	case "native-skills":
+		os.Exit(nativeSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)

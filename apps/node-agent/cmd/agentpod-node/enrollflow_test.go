@@ -41,3 +41,19 @@ func TestDecideEnroll(t *testing.T) {
 		})
 	}
 }
+
+func TestRenewedConfigPreservesOperatorSettings(t *testing.T) {
+	existing := config.Config{
+		Hub: "https://old.example", NodeID: "node_old", NodeSecret: "old-secret",
+		HermesStartCmd: "hermes serve", OpenClawStartCmd: "openclaw gateway",
+		CodexAcpBinary: "/opt/bin/codex-acp", CodexBinary: "/opt/bin/codex",
+		NodeBinary: "/opt/bin/node", NativeSkillActivation: true,
+	}
+	got := renewedConfig(existing, "https://new.example", "node_new", "new-secret")
+	if got.Hub != "https://new.example" || got.NodeID != "node_new" || got.NodeSecret != "new-secret" {
+		t.Fatalf("identity = %#v, want refreshed values", got)
+	}
+	if got.HermesStartCmd != existing.HermesStartCmd || got.OpenClawStartCmd != existing.OpenClawStartCmd || got.CodexAcpBinary != existing.CodexAcpBinary || got.CodexBinary != existing.CodexBinary || got.NodeBinary != existing.NodeBinary || !got.NativeSkillActivation {
+		t.Fatalf("operator configuration was not preserved: %#v", got)
+	}
+}

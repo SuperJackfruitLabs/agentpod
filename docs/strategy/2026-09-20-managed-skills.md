@@ -273,6 +273,13 @@ means Codex, and its readiness remains version- and process-specific. The Hub
 and Console retain native plans, receipts and history separately from managed
 installation, require reach permission, and never restart a station.
 
+The supported operator workflow is `apn native-skills status|enable|disable`.
+It changes only the local node gate, preserves the selection across re-enrollment,
+and requires a node-service restart before the hub can observe the capability.
+It deliberately does not activate a release, select a station, bypass readiness,
+or restart a harness. Native canary evidence remains an operational gate after
+the node release is deployed and the operator has explicitly enabled it.
+
 ## Hub, console and verification
 
 Expose inventory at `POST /api/stations/:id/skills/inventory`. Authenticate, resolve
