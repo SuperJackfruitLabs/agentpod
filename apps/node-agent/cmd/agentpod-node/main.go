@@ -101,8 +101,7 @@ func main() {
 		}
 		// Re-enrollment rotates only the machine identity. Keep every local
 		// operator setting, including the explicit native-skill activation gate.
-		newCfg := existing
-		newCfg.Hub, newCfg.NodeID, newCfg.NodeSecret = hub, id, sec
+		newCfg := renewedConfig(existing, hub, id, sec)
 		if err := config.Save(config.DefaultPath(), newCfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
