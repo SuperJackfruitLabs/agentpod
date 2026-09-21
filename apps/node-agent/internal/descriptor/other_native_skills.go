@@ -69,7 +69,7 @@ func (o *openCodeDescriptor) NativeSkillReadiness(ctx context.Context, key strin
 }
 
 // NativeSkillLoading compares the exact names in the verified native receipt
-// with a fresh offline ACP session. It does not refresh a user's active chat.
+// with a fresh, isolated ACP session. It does not refresh a user's active chat.
 func (o *openCodeDescriptor) NativeSkillLoading(ctx context.Context, key string, expected []string) (skills.Observation, error) {
 	if len(expected) == 0 {
 		return skills.Observation{Reason: "No native skill names are selected for this placement"}, nil
@@ -114,6 +114,10 @@ func openCodeACPDiscoverSkills(ctx context.Context, binary, workspace string) ([
 	env := []string{
 		"HOME=" + home,
 		"PATH=/usr/bin:/bin",
+		"OPENCODE_DISABLE_AUTOUPDATE=1",
+		"OPENCODE_DISABLE_MODELS_FETCH=1",
+		"OPENCODE_DISABLE_DEFAULT_PLUGINS=1",
+		"OPENCODE_DISABLE_SHARE=1",
 		"XDG_CONFIG_HOME=" + filepath.Join(root, "config"),
 		"XDG_CACHE_HOME=" + filepath.Join(root, "cache"),
 		"XDG_DATA_HOME=" + filepath.Join(root, "data"),

@@ -120,7 +120,9 @@ func TestOpenCodeInstalledACPSkillDiscovery(t *testing.T) {
 		t.Fatalf("expected reviewed OpenCode 1.18.15, got %q", version)
 	}
 	workspace := t.TempDir()
-	skillDir := filepath.Join(workspace, ".opencode", "skills", "sjl-fixture")
+	// Match the exact grouped projection produced by native placement, not a
+	// hand-written skill directly under the root.
+	skillDir := filepath.Join(workspace, ".opencode", "skills", "sjl-fixture", "skills", "sjl-fixture")
 	if err := os.MkdirAll(skillDir, 0755); err != nil {
 		t.Fatal(err)
 	}
