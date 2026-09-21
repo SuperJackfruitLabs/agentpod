@@ -51,6 +51,7 @@ import {
   operationResult,
 } from "../services/skill-operations";
 import * as broker from "../services/broker";
+import { canaryOperationIdentity } from "./canary-operation";
 
 function owner(c: Context): SkillOwner {
   const user = c.get("user") as AuthUser | undefined;
@@ -58,6 +59,7 @@ function owner(c: Context): SkillOwner {
     throw new SkillRequestError(401, "Unauthorized");
   return { userId: user.id, tenantId: user.tenantId };
 }
+
 async function stationContext(c: Context, mutate = false, capability = "skills.manage") {
   const caller = owner(c),
     station = await getStation(caller.userId, c.req.param("id")!);
@@ -194,7 +196,11 @@ export function createSkillManagementRoutes(
     .post("/skills/catalog/cohorts/:cohortId/canary/operations/apply", async (c) => {
       const caller = owner(c);
       const request = await body(c, SkillReleaseCanaryApplyRequest);
-      const { station, operation } = await getSkillReleaseCanaryOperation(caller, c.req.param("cohortId"), request);
+      const { station, operation } = await getSkillReleaseCanaryOperation(
+        caller,
+        c.req.param("cohortId"),
+        canaryOperationIdentity(request),
+      );
       if (!station.capabilities?.includes("skills.manage"))
         throw new SkillRequestError(409, "Canary station does not advertise skill management");
       await requireGrantReach(caller.userId, station, "skills.manage", "mutate");
