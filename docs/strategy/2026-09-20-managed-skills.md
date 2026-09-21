@@ -164,12 +164,18 @@ eligibility/loading and an exercise separately.
 
 ## Native project placement primitive
 
-The Go node now has a separate placement transaction for the grouped project
-layouts tested on Codex 0.155.0, OpenCode 1.18.15, Pi 0.84.1's directory loader and
-OpenClaw 2026.2.12. Claude's grouped layout is unsupported; Hermes has no local
-runtime evidence. The primitive publishes a complete selected generation to
-`.agents/skills/sjl-<profile>`, `.opencode/skills/sjl-<profile>`,
-`.pi/skills/sjl-<profile>` or `skills/sjl-<profile>` respectively.
+The Go node now has a separate placement transaction for project skills tested
+on Codex, OpenCode 1.18.15, Pi 0.84.1's directory loader and OpenClaw
+2026.2.12. Codex requires each `SKILL.md` directly under an immediate child of
+`.agents/skills`; its earlier grouped bundle was present but did not load as a
+plain skill. The corrected placement projects a verified skill directly to
+`.agents/skills/sjl-<profile>/SKILL.md` and records a layout marker in its
+reviewed plan. Existing grouped Codex placements can be verified and migrated
+with a new reviewed activation; an already saved old plan retains its old
+layout. OpenCode, Pi and OpenClaw continue to publish grouped generations at
+`.opencode/skills/sjl-<profile>`, `.pi/skills/sjl-<profile>` and
+`skills/sjl-<profile>` respectively. Claude's grouped layout is unsupported;
+Hermes has no local native-placement evidence.
 
 Placement has its own typed plan, head, operation receipt, journal and retained
 copies. A plan pins both managed and native heads, the workspace/repository
@@ -191,26 +197,27 @@ There is a brief absence window between renames. Recovery recognizes publication
 before head/receipt completion, preserves edits and refuses competing operations.
 Rollback and deactivation affect native placement without changing the independently
 selected managed generation. Repeated activation preserves useful rollback history.
-Receipts are historical; fresh verification rereads current bytes. For a managed
-Codex placement whose selected adapter/engine pair is covered by the isolated
-probe and whose workspace is quiescent, it also starts an offline disposable ACP
-session and compares the exact qualified command names in the placement receipt.
-That produces a dated loaded yes/no observation. Every other harness, unmanaged
-layout, unknown runtime, busy workspace and probe failure remains unknown with
-its reason; this does not establish active-session refresh.
+Receipts are historical; fresh verification rereads current bytes. For selected
+Codex adapter/engine pairs and OpenCode 1.18.15 in a quiescent workspace, a
+fresh isolated ACP session can compare the exact command names in the verified
+placement receipt. This yields a dated loaded yes/no observation for that new
+session. Unsupported versions, busy workspaces, unmanaged layouts and probe
+failures remain unknown with a reason. It does not establish active-session
+refresh or skill behavior.
 
-This primitive is deliberately **not advertised as a remote capability** yet.
-It requires a quiescent workspace. Before broker/hub/console exposure, complete
-external/lifecycle process coverage, verify actual runtime
-version/mode and expose unsupported or externally busy cases. Advisory locks do
-not control external harnesses or editors. No busy station is restarted and no
-production workspace was changed by this work.
+The broker/hub/console expose native placement only when the node operator has
+enabled its separate local gate. Activation still requires a supported runtime
+and quiescent workspace; the workspace coordinator guards AgentPod-managed
+children, while process preflight covers selected external runtimes. Advisory
+locks do not control external editors. No busy station is restarted.
 
 Tests cover actual process exits at ten publication stages, stale managed/native
 state, changed review digests, nested-root collisions, symlinks, user edits and
 safe deactivation. The optional native probe adds 44 checks using four real
 harnesses and checked-in synthetic exporter fixtures. Pi uses its loader only;
-none establishes model behavior, ACP, session trust or deployed operation. See
+separate Codex and OpenCode ACP probes establish fresh-session discovery for
+specific versions. None establishes model behavior, active-session refresh,
+session trust or deployed operation. See
 `apps/node-agent/internal/skills/testdata/README.md` for reproduction and evidence.
 
 ### Managed session coordination
@@ -452,3 +459,24 @@ human operator login and never substitutes a node credential for fleet access.
 an artifact that is missing or retained by an operation. Its published assets
 were also downloaded and verified against `SHA256SUMS`. Cleanup capability does
 not authorize deleting a live artifact or establish a release canary.
+
+### Managed fixture canaries (2026-09-22)
+
+The operator installed synthetic fixture archives on stopped disposable Hermes,
+Pi and Claude Code stations, reviewed rollback plans, applied rollback and
+freshly verified that each managed generation is absent. The retained operation
+IDs are Hermes `67721628ce4dd797a065840b393fa9aa` / rollback
+`f8a5d43f4a935a5c2f3495ad41a3ca4d`, Pi
+`f26ee8b32d3eb0d93ec8f444e9483cbd` / rollback
+`524fa97dd350bf3876fe21f0fa49c512`, and Claude Code
+`2be445055418452d0700ec5dd76041ef` / rollback
+`23e9e0d437ce802c4420392fb97d242c`. Each fresh verification reports
+`Files present: No` and `Loaded: Unknown`; installation and rollback do not
+establish that a harness session discovered or exercised a skill.
+
+OpenClaw has no safe disposable registered station: the ten registered agents
+are running, and other detections share core paths. OpenCode has no registered
+station; the installed 0.5.5 CLI fails with the user's normal plugin settings,
+and a disposable isolated-config launch did not register a station. Neither
+harness was changed merely to obtain a canary. The managed canary matrix remains
+incomplete, as do native publication, fresh-session loading and exercise gates.
