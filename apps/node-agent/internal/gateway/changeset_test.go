@@ -28,6 +28,26 @@ func TestChangesetHandlerPassesOtherVerbsThrough(t *testing.T) {
 	}
 }
 
+func TestChangesetHandlerPreservesTerminalFrames(t *testing.T) {
+	inner := &frameRecorder{}
+	h := NewChangesetHandler(inner, WorkspaceFunc(func(string) (string, error) {
+		t.Fatal("workspace lookup must not run for a terminal frame")
+		return "", nil
+	}))
+
+	fh, ok := h.(FrameHandler)
+	if !ok {
+		t.Fatal("changesetHandler must implement FrameHandler so it cannot drop terminal input")
+	}
+	raw := json.RawMessage(`{"type":"input","id":"attach-1","data":"aGk="}`)
+	if err := fh.HandleFrame("input", "attach-1", raw); err != nil {
+		t.Fatalf("HandleFrame: %v", err)
+	}
+	if inner.gotType != "input" || inner.gotID != "attach-1" {
+		t.Fatalf("inner frame = %q:%q, want input:attach-1", inner.gotType, inner.gotID)
+	}
+}
+
 func TestChangesetStatusResolvesTheWorkspace(t *testing.T) {
 	var askedFor string
 	h := NewChangesetHandler(changesetPassthrough(), WorkspaceFunc(func(key string) (string, error) {

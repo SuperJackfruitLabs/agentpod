@@ -38,6 +38,17 @@ func (h *changesetHandler) Handle(
 	}
 }
 
+// HandleFrame preserves terminal and ACP input frames while this handler adds
+// only request/response changeset verbs. The gateway dispatcher checks the
+// outermost handler for FrameHandler; omitting this forwarder makes a terminal
+// attach successfully but silently drops every subsequent keystroke.
+func (h *changesetHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {
+	if fh, ok := h.inner.(FrameHandler); ok {
+		return fh.HandleFrame(frameType, id, raw)
+	}
+	return nil
+}
+
 func (h *changesetHandler) workspace(key string) (string, error) {
 	if key == "" {
 		return "", fmt.Errorf("changeset: missing key")

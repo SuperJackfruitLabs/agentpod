@@ -51,3 +51,13 @@ func (h *postureHandler) Handle(
 	}
 	return posture.Scan(ctx, home, posture.KnownHarnesses(), n), false, nil
 }
+
+// HandleFrame preserves terminal and ACP input frames while this handler adds
+// only the node-level posture.scan request. See changesetHandler.HandleFrame
+// for why every wrapper in the production chain must retain FrameHandler.
+func (h *postureHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {
+	if fh, ok := h.inner.(FrameHandler); ok {
+		return fh.HandleFrame(frameType, id, raw)
+	}
+	return nil
+}
