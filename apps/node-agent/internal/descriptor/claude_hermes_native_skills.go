@@ -102,9 +102,9 @@ func (h *hermesDescriptor) NativeSkillReadiness(ctx context.Context, key string)
 		return NativeSkillReadiness{}, os.ErrNotExist
 	}
 	result := NativeSkillReadiness{Harness: h.Harness(), Reason: "Hermes native placement is not verified for this station"}
-	binary, err := exec.LookPath("hermes")
-	if err != nil {
-		result.Reason = "Hermes executable is unavailable on the node service PATH"
+	binary, ok := resolveNativeHarnessBinary("hermes")
+	if !ok {
+		result.Reason = "The hermes executable is unresolved on this node"
 		return result, nil
 	}
 	result.AdapterPath = binary
