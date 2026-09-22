@@ -48,6 +48,28 @@ func nativeExecutableVersion(ctx context.Context, binary string) string {
 // behave like a neighbour.
 var openCodeDiscoveryEvidence = map[string]bool{"1.18.15": true, "1.18.30": true}
 
+// resolveNativeHarnessBinary resolves a harness executable for a native
+// readiness check.
+//
+// PATH alone is not enough. A node started by launchd or systemd inherits a
+// PATH that usually excludes the directories harnesses install into --
+// /opt/homebrew/bin above all -- and `binaryLocator` already carries that
+// knowledge for every other resolution in this package. These readiness paths
+// called exec.LookPath directly, so OpenCode was refused as "unresolved" on a
+// machine where it was installed and on PATH for the operator, while Hermes
+// resolved only because /usr/local/bin happens to sit on the default PATH.
+func resolveNativeHarnessBinary(name string) (string, bool) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	return binaryLocator{
+		userHome:     home,
+		lookPath:     exec.LookPath,
+		isExecutable: isExecutableFile,
+	}.locate(name, "")
+}
+
 func openCodeSupportedVersions() string {
 	versions := make([]string, 0, len(openCodeDiscoveryEvidence))
 	for version := range openCodeDiscoveryEvidence {
@@ -68,11 +90,11 @@ func (o *openCodeDescriptor) NativeSkillReadiness(ctx context.Context, key strin
 		return NativeSkillReadiness{}, err
 	}
 	result := NativeSkillReadiness{Harness: "opencode", Reason: "Selected OpenCode executable is unresolved"}
-	binary, err := exec.LookPath("opencode")
-	if err != nil {
+	binary, ok := resolveNativeHarnessBinary("opencode")
+	if !ok {
 		return result, nil
 	}
-	binary, err = filepath.Abs(binary)
+	binary, err := filepath.Abs(binary)
 	if err != nil {
 		return result, nil
 	}

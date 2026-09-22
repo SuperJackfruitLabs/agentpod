@@ -3,6 +3,7 @@ package descriptor
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -173,5 +174,40 @@ func TestNativeExecutableVersionFindsAnInterpreterBesideTheBinary(t *testing.T) 
 	t.Setenv("PATH", "/usr/bin:/bin")
 	if got := nativeExecutableVersion(context.Background(), harness); got != "9.9.9" {
 		t.Fatalf("version probe could not run a binary whose interpreter sits beside it: %q", got)
+	}
+}
+
+// OpenCode and Hermes resolved their executables with a bare exec.LookPath
+// while every other resolution in this package goes through binaryLocator,
+// which already knows the directories harnesses install into. A node started
+// by launchd or systemd inherits a PATH without /opt/homebrew/bin, so OpenCode
+// was refused as "unresolved" on a machine where it was plainly installed, and
+// Hermes resolved only because /usr/local/bin happens to sit on the default
+// PATH -- luck, not design.
+func TestNativeHarnessBinaryResolvesOutsidePath(t *testing.T) {
+	home := t.TempDir()
+	brew := filepath.Join(home, "opt", "homebrew", "bin")
+	if err := os.MkdirAll(brew, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	installed := filepath.Join(brew, "agentpod-test-harness")
+	if err := os.WriteFile(installed, []byte("#!/bin/sh\necho 1.2.3\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A PATH that finds nothing, as a service-started node's would be.
+	absent := func(string) (string, error) { return "", exec.ErrNotFound }
+	locator := binaryLocator{
+		userHome:     home,
+		lookPath:     absent,
+		isExecutable: isExecutableFile,
+		preferDirs:   []string{brew},
+	}
+	got, ok := locator.locate("agentpod-test-harness", "")
+	if !ok || got != installed {
+		t.Fatalf("locator did not resolve a harness outside PATH: %q ok=%v", got, ok)
+	}
+	// And the bare form this replaces cannot.
+	if _, err := absent("agentpod-test-harness"); err == nil {
+		t.Fatal("expected the bare PATH lookup to fail, making the point moot")
 	}
 }
