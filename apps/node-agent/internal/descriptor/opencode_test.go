@@ -788,3 +788,27 @@ printf '%%s' "$*" > %s
 		t.Errorf("Start must not remove the sentinel when unsupervised, stat err = %v", err)
 	}
 }
+
+// The quiescence gate asked `pgrep -f opencode`, which matches the whole
+// command line. On a developer machine that text can include the process
+// environment, so two unrelated `npm exec` processes whose PATH contained
+// `~/.opencode/bin` were counted as a running OpenCode and native publication
+// was refused with "An OpenCode process is active" while nothing ran.
+func TestOpenCodeProcessCheckDoesNotMatchAPathMention(t *testing.T) {
+	args := openCodeProcessArgs(false)
+	if len(args) != 2 || args[0] != "-x" || args[1] != "opencode" {
+		t.Fatalf("unsupervised check must match the executable name exactly, got %q", args)
+	}
+	// Supervised still reads the command line, because `serve` is an argument
+	// -- but it must be anchored, not a bare substring.
+	sup := openCodeProcessArgs(true)
+	if len(sup) != 2 || sup[0] != "-f" {
+		t.Fatalf("supervised check should read the command line, got %q", sup)
+	}
+	if !strings.Contains(sup[1], "serve") || !strings.Contains(sup[1], "(^|/)") {
+		t.Fatalf("supervised pattern must be anchored so a PATH mention cannot satisfy it, got %q", sup[1])
+	}
+	if sup[1] == "opencode serve" {
+		t.Fatal("supervised pattern is still the bare substring this fix replaces")
+	}
+}
