@@ -2,6 +2,7 @@ package descriptor
 
 import (
 	"context"
+	"sort"
 	"fmt"
 	"os"
 	"os/exec"
@@ -32,6 +33,21 @@ func nativeExecutableVersion(ctx context.Context, binary string) string {
 	return version
 }
 
+// Versions whose fresh isolated ACP session was observed advertising a skill
+// published at .opencode/skills/<name>/SKILL.md. Each entry is one probe that
+// was actually run; a version absent here is refused rather than assumed to
+// behave like a neighbour.
+var openCodeDiscoveryEvidence = map[string]bool{"1.18.15": true, "1.18.30": true}
+
+func openCodeSupportedVersions() string {
+	versions := make([]string, 0, len(openCodeDiscoveryEvidence))
+	for version := range openCodeDiscoveryEvidence {
+		versions = append(versions, version)
+	}
+	sort.Strings(versions)
+	return strings.Join(versions, ", ")
+}
+
 // Native placement fixture probes establish on-disk discovery for particular
 // CLI versions. OpenCode also has a fresh ACP comparison and a process gate;
 // Pi and OpenClaw remain closed until their ACP and quiescence evidence exists.
@@ -55,15 +71,15 @@ func (o *openCodeDescriptor) NativeSkillReadiness(ctx context.Context, key strin
 	result.EngineVersion = nativeExecutableVersion(ctx, binary)
 	if result.EngineVersion == "" {
 		result.Reason = "Selected OpenCode version is unavailable"
-	} else if result.EngineVersion != "1.18.15" {
-		result.Reason = fmt.Sprintf("OpenCode %s has no recorded native ACP discovery evidence; supported version is 1.18.15", result.EngineVersion)
+	} else if !openCodeDiscoveryEvidence[result.EngineVersion] {
+		result.Reason = fmt.Sprintf("OpenCode %s has no recorded native ACP discovery evidence; supported versions are %s", result.EngineVersion, openCodeSupportedVersions())
 	} else if running, note := o.nativeProcessRunning(); note != "" {
 		result.Reason = "OpenCode process inspection failed: " + note
 	} else if running {
 		result.Reason = "An OpenCode process is active; native publication requires a quiescent runtime"
 	} else {
 		result.Ready = true
-		result.Reason = "OpenCode 1.18.15 matches isolated ACP skill discovery evidence and no OpenCode process is active"
+		result.Reason = "OpenCode " + result.EngineVersion + " matches isolated ACP skill discovery evidence and no OpenCode process is active"
 	}
 	return result, nil
 }
@@ -157,10 +173,37 @@ func (p *piDescriptor) NativeSkillReadiness(ctx context.Context, key string) (Na
 	}
 	if result.EngineVersion == "" || result.AdapterVersion == "" {
 		result.Reason = "Selected Pi engine or pi-acp package version is unavailable"
-	} else {
-		result.Reason = fmt.Sprintf("Pi %s through pi-acp %s has no recorded ACP skill-loading and external-process quiescence evidence for native placement", result.EngineVersion, result.AdapterVersion)
+		return result, nil
 	}
+	// This engine is the one whose fresh isolated session was observed
+	// advertising skill:<id> for a skill published under .pi/skills, once the
+	// run trusted project files. Another engine has no such evidence.
+	if !piDiscoveryEvidence[result.EngineVersion] {
+		result.Reason = fmt.Sprintf("Pi %s through pi-acp %s has no recorded ACP skill discovery evidence", result.EngineVersion, result.AdapterVersion)
+		return result, nil
+	}
+	if running, note := piProcessRunning(); note != "" {
+		result.Reason = "Pi process inspection failed: " + note
+		return result, nil
+	} else if running {
+		result.Reason = "A Pi process is active on this host"
+		return result, nil
+	}
+	result.Ready = true
+	result.Reason = fmt.Sprintf("Pi %s through pi-acp %s matches isolated ACP discovery evidence; project trust remains the operator's decision and an untrusting session will not load a placed skill", result.EngineVersion, result.AdapterVersion)
 	return result, nil
+}
+
+// Engines whose fresh isolated ACP session was observed advertising a skill
+// published under .pi/skills. A version absent here is refused rather than
+// assumed to behave like a neighbour.
+var piDiscoveryEvidence = map[string]bool{"0.84.1": true}
+
+// piProcessRunning reports whether any Pi process is active. Pi has no daemon
+// and is invoked per command, so this is a coarse guard against publishing
+// underneath a command that is mid-run.
+func piProcessRunning() (bool, string) {
+	return processRunningInWorkspace("^pi$", "/")
 }
 
 func (o *openclawDescriptor) NativeSkillReadiness(ctx context.Context, key string) (NativeSkillReadiness, error) {

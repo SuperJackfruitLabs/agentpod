@@ -81,8 +81,17 @@ func TestOtherNativePreflightsRequireRecordedDiscoveryAndQuiescence(t *testing.T
 			}
 		}
 		got, err := d.NativeSkillReadiness(ctx, piProjectKey(workspace))
-		if err != nil || got.Ready || got.EngineVersion != "0.84.1" || got.AdapterVersion != "0.0.33" || !strings.Contains(got.Reason, "ACP skill-loading") {
+		// This engine is the one whose fresh isolated session was observed
+		// advertising skill:<id>, so readiness opens. It was asserted closed
+		// while Pi had no such evidence; the assertion moves with it.
+		if err != nil || !got.Ready || got.EngineVersion != "0.84.1" || got.AdapterVersion != "0.0.33" {
 			t.Fatalf("preflight=%+v err=%v", got, err)
+		}
+		// An open gate must still name what it does not cover. Pi loads
+		// project skills only for a run that trusts them, and that decision is
+		// the operator's rather than a placement's.
+		if !strings.Contains(got.Reason, "trust") {
+			t.Fatalf("an open Pi gate does not mention project trust: %q", got.Reason)
 		}
 	})
 	t.Run("openclaw", func(t *testing.T) {
