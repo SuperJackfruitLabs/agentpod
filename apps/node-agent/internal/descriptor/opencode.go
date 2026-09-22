@@ -383,12 +383,31 @@ func (o *openCodeDescriptor) healthAt(projPath string) Health {
 // the entrypoint path "/node-opencode-entrypoint.sh" — so health could never
 // report stopped (live-fleet finding, 2026-08-09). On real hosts the broad
 // pattern is kept: any opencode process (TUI, serve, run) counts as running.
-func openCodeProcessRunning() (running bool, note string) {
-	pattern := "opencode"
-	if openCodeSupervised() {
-		pattern = "opencode serve"
+// openCodeProcessArgs selects how the quiescence check asks about a running
+// OpenCode.
+//
+// `pgrep -f` matches the WHOLE command line, and on a real machine that text
+// can carry the process environment: two `npm exec` processes whose PATH
+// contained `~/.opencode/bin` matched a bare "opencode" and reported the
+// runtime busy while nothing was running, which refused native publication
+// with "An OpenCode process is active". `-x` matches the executable NAME,
+// which is "opencode" for both the TUI and `opencode serve`.
+//
+// This is the hazard CLAUDE.md already records for the Go tests -- a pgrep
+// target is matched more loosely than it reads.
+func openCodeProcessArgs(supervised bool) []string {
+	if !supervised {
+		return []string{"-x", "opencode"}
 	}
-	cmd := exec.Command("pgrep", "-f", pattern)
+	// A supervised container runs exactly one `opencode serve`, and what
+	// distinguishes it from other invocations is the ARGUMENT, so this case
+	// must still read the command line. Anchored on a word boundary either
+	// side so a directory in a PATH cannot satisfy it.
+	return []string{"-f", `(^|/)opencode[[:space:]]+serve([[:space:]]|$)`}
+}
+
+func openCodeProcessRunning() (running bool, note string) {
+	cmd := exec.Command("pgrep", openCodeProcessArgs(openCodeSupervised())...)
 	out, err := cmd.Output()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
