@@ -128,3 +128,22 @@ func TestNonRepositoryBindingDoesNotRelaxCheckoutHarnesses(t *testing.T) {
 		t.Fatal("a codex station bound a workspace with no checkout")
 	}
 }
+
+// An OpenClaw station is the OpenClaw home, not a checkout: `~/.openclaw` has
+// no `.git` and one must never be created there to satisfy a binding. It binds
+// to the workspace itself, for the same reason a Hermes profile does.
+func TestOpenClawBindsToANonRepositoryWorkspace(t *testing.T) {
+	if !nonRepositoryWorkspaces["openclaw"] {
+		t.Fatal("an OpenClaw home is not a source checkout and must not require one")
+	}
+	// Its placement root is the plain skills directory OpenClaw scans.
+	if root := placementRoots["openclaw"]; root != "skills" {
+		t.Fatalf("OpenClaw publishes to the skills directory it scans, got %q", root)
+	}
+	// And it keeps the grouped export: both layouts were probed against an
+	// installed 2026.2.12 and both were discovered by name, so there is no
+	// evidence for forcing the direct one.
+	if _, ok := directLayouts["openclaw"]; ok {
+		t.Error("OpenClaw was given a direct layout without evidence that it needs one")
+	}
+}
