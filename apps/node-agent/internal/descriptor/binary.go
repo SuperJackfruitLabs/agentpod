@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,33 @@ import (
 // PATH, in priority order. userHome is the OS user's home directory; "" omits
 // the home-relative candidates (a relative ".local/share/pnpm/x" candidate
 // would be garbage).
+// nodeVersionManagerBins returns the bin directory of each node installed under
+// nvm, newest version first.
+//
+// Sorting is by descending directory name, which orders the vN.N.N layout nvm
+// uses correctly for every version this will meet in practice. An unreadable or
+// absent ~/.nvm yields nothing rather than an error: this is a set of
+// candidates, and a missing version manager is the ordinary case.
+func nodeVersionManagerBins(userHome string) []string {
+	root := filepath.Join(userHome, ".nvm", "versions", "node")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	dirs := make([]string, 0, len(names))
+	for _, name := range names {
+		dirs = append(dirs, filepath.Join(root, name, "bin"))
+	}
+	return dirs
+}
+
 func wellKnownBinaryDirs(userHome string) []string {
 	var dirs []string
 	if userHome != "" {
@@ -30,6 +58,12 @@ func wellKnownBinaryDirs(userHome string) []string {
 			filepath.Join(userHome, ".local", "share", "pnpm"), // pnpm global
 			filepath.Join(userHome, ".local", "bin"),           // npm --prefix ~/.local
 		)
+		// A harness installed with `npm i -g` under a node version manager
+		// lands in that node's own bin directory rather than any fixed path --
+		// OpenClaw installs exactly this way. Newest version first, so an old
+		// one left behind by an upgrade cannot shadow the CLI the operator
+		// actually uses.
+		dirs = append(dirs, nodeVersionManagerBins(userHome)...)
 	}
 	return append(dirs,
 		"/usr/local/bin",
