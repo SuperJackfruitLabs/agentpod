@@ -523,3 +523,92 @@ Current completion record:
   perform an explicit Codex rollback and re-verification; create safe disposable
   canaries for OpenCode and OpenClaw; capture per-harness native/loading and
   rollback evidence; then choose and operate an explicit trusted-release cohort.
+
+### Addendum — Codex native rollback canary (2026-09-22)
+
+This addendum supersedes the unresolved discovery result recorded in the
+preceding section. That paragraph was written before `#528` was released as
+`v0.1.52`; it is retained as the state at its own timestamp, not as current
+evidence.
+
+`v0.1.52` resolves the isolated Codex discovery failure. On the disposable
+stopped station `new-game` (`codex:e420535d`,
+`station_7ff5dccb-8f21-4a92-8e73-6e7d665f4a8d`, node
+`node_161e685104dc488ebd11`, agent `v0.1.52`) a fresh read-only verification of
+the synthetic `fixture` profile reported **Present: Yes** and **Loaded: Yes** at
+2026-09-22T05:57:28Z, with the reason `A fresh isolated ACP session advertised
+every native skill in this placement`. The earlier failure is not reproducible
+at this revision.
+
+A reviewed native rollback was then planned and applied against that same
+station while it remained stopped:
+
+| Field | Value |
+|---|---|
+| Operation | `b57efa9fe1afbd433091b004a1e85361` |
+| Action | `rollback` (`before` generation `cfd83e8d4a08b3cd19431dbf9d0c92a4`, `after` `null`) |
+| Plan digest | `d981bb49c3795ef539b3ccb9bba4bbff0d4e01e5aeed38e877b9be8e37e05f1a` |
+| Expected installation head | `741b7c492e7c88516cc29ea5616b0d71e6bc88f0bb0482fa8c5754f200cf2dc5` |
+| Expected native head | `65d44fc4ceebae151dde1fa6e9b178774901481603c3194ec289e55d3c985d52` |
+| Layout | `codex-direct-v1` |
+| Diff | removed `SKILL.md` and one fixture reference; nothing added or changed |
+| Applied | 2026-09-22T05:58:26.747107Z, receipt phase `applied`, no error |
+
+Post-rollback verification reported **Present: No** at 2026-09-22T05:59:13Z and
+the owned files are absent from
+`/Users/rakeshgangwar/new-game/.agents/skills/sjl-fixture`. The empty
+`.agents/skills` directory remains, and no unrelated repository content changed.
+
+Node verification returns `Loaded: unknown` for an absent placement, with the
+reason `Native eligibility, project trust and session loading were not queried`.
+That is correct fail-closed behavior, but it means the node alone cannot supply
+the negative loading observation this gate requires. An independent replica of
+`codexACPDiscoverSkills` — disposable `CODEX_HOME`, unreachable local provider,
+`initialize` and `session/new` only, no prompt and no client tools — was run
+against the workspace with adapter `@agentclientprotocol/codex-acp 1.12.0`. At
+2026-09-22T06:00:23Z the fresh session advertised `imagegen`, `openai-docs`,
+`plugin-creator`, `review-agent`, `skill-creator` and `skill-installer`, and did
+**not** advertise `sjl-fixture`. A synthetic positive control in a separate
+disposable workspace advertised its `probe-control` project skill through the
+same probe, so the absence is an observed negative rather than an inert probe.
+
+This establishes, for this one Codex station and adapter version: reviewed
+native publication, fresh-session loading, reviewed rollback, file absence and
+fresh-session non-advertisement. It does not establish model use of the skill,
+active-session refresh, behavior on another node, or any other harness. The
+probe adapter version differs from the `1.1.14` recorded earlier; treat each
+observation as bound to its own stated adapter version.
+
+### Inventory deadline and the observed first-request timeout
+
+The earlier first-request inventory timeout has a structural cause rather than a
+transient one. `skills.inventory` for Codex runs the same fresh-session ACP
+discovery probe whenever the station has at least one present skill and the
+runtime reports ready. That probe is bounded at 45 seconds in
+`discoverACPSkillCommands`. The inventory route calls `broker.request` without a
+timeout override, so it uses the broker's `DEFAULT_TIMEOUT_MS` of 15 seconds.
+The skill *management* routes already override this deliberately with 30 and 70
+seconds; the inventory route was left on the default.
+
+Any probe that takes between 15 and 45 seconds therefore produces a hub
+`timeout` while the node continues working and completes normally. A subsequent
+request succeeds because the adapter is then warm. Measured steady-state cost of
+the isolated probe on this workstation is 0.42–0.77 seconds, and a full
+hub-mediated native verification round trip is 1.6–2.4 seconds, so the condition
+is confined to genuinely cold adapter starts — which is what the original
+observation followed, immediately after a node self-update. The exact cold-cache
+timing was not re-created here, so the reproduction remains unconfirmed while
+the deadline mismatch is confirmed in source.
+
+Recommended resolution, preferring the system's existing honesty contract over a
+longer wait: bound the inventory probe below the hub's deadline so the node
+always answers within the window with `Loaded: unknown` and a stated reason,
+rather than raising the inventory deadline to 45+ seconds and holding an
+operator request open that long. A timeout must continue to surface as unknown
+with a safe retry, and must never render as `Loaded: No` or as an applied-state
+claim. Console behavior for delayed success, true node loss and ambiguous
+outcomes still needs its own tests before this item is closed.
+
+All three nodes — `ashram`, `guild` and the Mac node — report `v0.1.52` with no
+update available as of 2026-09-22T05:56Z. The version drift recorded in the
+22 September completion plan no longer holds; re-observe before relying on it.
