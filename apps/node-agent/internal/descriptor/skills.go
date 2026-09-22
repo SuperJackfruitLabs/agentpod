@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -58,14 +59,40 @@ func (d *codexDescriptor) SkillInventory(ctx context.Context, key string) (skill
 		setCodexLoadingUnknown(&inventory, err.Error())
 		return inventory, nil
 	}
-	advertised, err := d.nativeSkillDiscovery(ctx, readiness.AdapterPath, workspace, nodePath)
+	// Inventory is an operator-facing read that the hub bounds at its own
+	// default request deadline (15s). The probe's own bound inside
+	// discoverACPSkillCommands is 45s, sized for the verify path, so a cold
+	// adapter start could keep the node working past the point where the hub
+	// has already answered `timeout` — the operator sees a failure while the
+	// node finishes fine. Bound the probe below the hub's deadline here, at
+	// the inventory call site only: a shorter parent deadline dominates the
+	// inner one, so the verify path in NativeSkillLoading keeps its full 45s.
+	probeCtx, cancelProbe := context.WithTimeout(ctx, codexInventoryDiscoveryBound)
+	defer cancelProbe()
+	advertised, err := d.nativeSkillDiscovery(probeCtx, readiness.AdapterPath, workspace, nodePath)
 	if err != nil {
+		// Only this bound's expiry gets the named condition. A caller that went
+		// away (ctx already done) is a different condition and keeps the
+		// generic reason rather than being described as a slow adapter.
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			setCodexLoadingUnknown(&inventory, boundedSkillReason(fmt.Sprintf("Fresh isolated Codex discovery exceeded the %s skills.inventory probe bound, which a cold codex-acp adapter start can do; the bound stays below the hub request deadline so inventory still answers", codexInventoryDiscoveryBound)))
+			return inventory, nil
+		}
 		setCodexLoadingUnknown(&inventory, "Fresh isolated Codex session could not establish discovery: "+boundedSkillReason(err.Error()))
 		return inventory, nil
 	}
 	setCodexLoadingEvidence(&inventory, advertised)
 	return inventory, nil
 }
+
+// codexInventoryDiscoveryBound caps the fresh-session ACP probe on the
+// inventory path. It sits below the hub's 15s default broker deadline
+// (apps/hub/src/services/broker.ts) with room to spare for WebSocket
+// transport, broker queueing, the filesystem scan and the readiness checks
+// that run before the probe, while still leaving more than an order of
+// magnitude over the measured 0.42-0.77s steady-state probe. The verify path
+// (NativeSkillLoading) is not bounded here: the hub gives it 70s.
+const codexInventoryDiscoveryBound = 8 * time.Second
 
 func boundedSkillReason(reason string) string {
 	if len(reason) > 512 {

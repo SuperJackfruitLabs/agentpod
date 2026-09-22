@@ -3,10 +3,12 @@ package descriptor
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
@@ -60,7 +62,11 @@ func TestAllSkillInventoryDescriptorsImplementOptionalInterface(t *testing.T) {
 	}
 }
 
-func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
+// newReadyCodexDiscoveryFixture builds a codex station whose native-skill
+// readiness gate passes, so a caller can drive the discovery probe itself. It
+// returns the descriptor, the workspace and the resolved adapter shim.
+func newReadyCodexDiscoveryFixture(t *testing.T) (*codexDescriptor, string, string) {
+	t.Helper()
 	home, project, _ := buildCodexFixture(t)
 	skill := filepath.Join(project, ".agents", "skills", "sjl-fixture")
 	if err := os.MkdirAll(skill, 0700); err != nil {
@@ -109,6 +115,11 @@ func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
 		}
 		return "v22.14.0", nil
 	}
+	return d, project, shim
+}
+
+func TestCodexSkillInventoryUsesFreshIsolatedDiscoveryEvidence(t *testing.T) {
+	d, project, shim := newReadyCodexDiscoveryFixture(t)
 	called := false
 	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace, node string) ([]string, error) {
 		called = true
@@ -148,5 +159,112 @@ func TestSkillInventoryUnsupportedDescriptorDoesNotFallbackToFiles(t *testing.T)
 	_, _, err := NewHandler(reg).Handle(context.Background(), "skills.inventory", json.RawMessage(`{"key":"fake:station"}`), nil)
 	if err == nil {
 		t.Fatal("unsupported descriptor accepted inventory")
+	}
+}
+
+// The hub bounds skills.inventory at its 15s broker default, so the node's
+// probe must answer inside that window. A probe that exceeds the inventory
+// bound has to degrade to unknown loading evidence naming the condition —
+// never a "not loaded" claim, and never a failed inventory.
+func TestCodexSkillInventoryBoundsDiscoveryBelowHubRequestDeadline(t *testing.T) {
+	d, project, _ := newReadyCodexDiscoveryFixture(t)
+	var remaining time.Duration
+	var hadDeadline bool
+	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace, node string) ([]string, error) {
+		deadline, ok := ctx.Deadline()
+		hadDeadline = ok
+		if ok {
+			remaining = time.Until(deadline)
+		}
+		// What discoverACPSkillCommands reports when its context expires.
+		return nil, fmt.Errorf("ACP discovery deadline exceeded: %w", context.DeadlineExceeded)
+	}
+	result, err := d.SkillInventory(context.Background(), codexKeyFor(project))
+	if err != nil {
+		t.Fatalf("a probe timeout must not fail the whole inventory: %v", err)
+	}
+	if !hadDeadline {
+		t.Fatal("inventory probe ran with no deadline of its own")
+	}
+	if remaining > codexInventoryDiscoveryBound || remaining < codexInventoryDiscoveryBound-time.Second {
+		t.Fatalf("probe deadline %s is not the inventory bound %s", remaining, codexInventoryDiscoveryBound)
+	}
+	if codexInventoryDiscoveryBound >= 15*time.Second {
+		t.Fatalf("inventory bound %s does not sit below the hub's 15s broker default", codexInventoryDiscoveryBound)
+	}
+	if len(result.Skills) != 2 {
+		t.Fatalf("filesystem inventory lost on probe timeout: %+v", result.Skills)
+	}
+	for _, entry := range result.Skills {
+		loaded := entry.Evidence.Loaded
+		if loaded.Value != nil {
+			t.Fatalf("%s claimed a loading state after a probe timeout: %+v", entry.Name, loaded)
+		}
+		if loaded.ObservedAt != nil {
+			t.Fatalf("%s carries an observation time with no observation: %+v", entry.Name, loaded)
+		}
+		if !strings.Contains(loaded.Reason, "probe bound") || !strings.Contains(loaded.Reason, "cold codex-acp adapter start") {
+			t.Fatalf("%s reason does not name the condition: %q", entry.Name, loaded.Reason)
+		}
+		if strings.Contains(loaded.Reason, "context deadline exceeded") {
+			t.Fatalf("%s surfaced the bare context error: %q", entry.Name, loaded.Reason)
+		}
+	}
+	if len(result.Coverage.Limitations) == 0 {
+		t.Fatal("probe timeout was not reported as a coverage limitation")
+	}
+}
+
+// The inventory bound belongs to the inventory call site only. The verify path
+// keeps the longer bound that discoverACPSkillCommands applies internally, so
+// NativeSkillLoading must not inherit an 8s deadline from this change.
+func TestCodexNativeSkillLoadingKeepsTheLongerProbeBound(t *testing.T) {
+	d, project, _ := newReadyCodexDiscoveryFixture(t)
+	var deadlines []time.Duration
+	var bounded []bool
+	d.nativeSkillDiscovery = func(ctx context.Context, adapter, workspace, node string) ([]string, error) {
+		deadline, ok := ctx.Deadline()
+		bounded = append(bounded, ok)
+		if ok {
+			deadlines = append(deadlines, time.Until(deadline))
+		}
+		return []string{"sjl-fixture"}, nil
+	}
+	if _, err := d.SkillInventory(context.Background(), codexKeyFor(project)); err != nil {
+		t.Fatal(err)
+	}
+	loading, err := d.NativeSkillLoading(context.Background(), codexKeyFor(project), []string{"sjl-fixture"})
+	if err != nil || loading.Value == nil || !*loading.Value {
+		t.Fatalf("verify path: %+v %v", loading, err)
+	}
+	if len(bounded) != 2 || !bounded[0] {
+		t.Fatalf("inventory probe was not bounded: %v", bounded)
+	}
+	if bounded[1] {
+		t.Fatalf("verify probe inherited a call-site deadline of %s; the 45s inside discoverACPSkillCommands must govern it", deadlines[len(deadlines)-1])
+	}
+}
+
+// A caller that goes away is a different condition from a slow adapter, and
+// must not be described as one.
+func TestCodexSkillInventoryDoesNotBlameTheAdapterForACancelledCaller(t *testing.T) {
+	d, project, _ := newReadyCodexDiscoveryFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	d.nativeSkillDiscovery = func(context.Context, string, string, string) ([]string, error) {
+		cancel()
+		return nil, fmt.Errorf("ACP discovery deadline exceeded: %w", context.DeadlineExceeded)
+	}
+	result, err := d.SkillInventory(ctx, codexKeyFor(project))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range result.Skills {
+		loaded := entry.Evidence.Loaded
+		if loaded.Value != nil {
+			t.Fatalf("%s claimed a loading state: %+v", entry.Name, loaded)
+		}
+		if strings.Contains(loaded.Reason, "cold codex-acp adapter start") {
+			t.Fatalf("%s blamed a cold adapter start for a cancelled caller: %q", entry.Name, loaded.Reason)
+		}
 	}
 }

@@ -2,11 +2,13 @@ package descriptor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDiscoverACPSkillCommandsUsesHarnessCommandMapping(t *testing.T) {
@@ -53,5 +55,36 @@ func TestDiscoverACPSkillCommandsRetainsAdapterStderrOnEarlyClose(t *testing.T) 
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported offline provider") {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+// The inventory bound is applied at its call site and relies on a shorter
+// caller deadline dominating the 45s this function applies internally. If that
+// ever stopped holding, a cold adapter start would again outlive the hub's
+// request deadline, so pin the behaviour here: the probe must give up on the
+// caller's schedule and report an error that wraps context.DeadlineExceeded.
+func TestDiscoverACPSkillCommandsHonorsAShorterCallerDeadline(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := filepath.Join(t.TempDir(), "adapter")
+	// A cold start that never answers initialize.
+	script := "#!/bin/bash\nsleep 120\n"
+	if err := os.WriteFile(adapter, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := discoverACPSkillCommands(ctx, []string{adapter}, workspace, []string{"PATH=" + os.Getenv("PATH")}, func(name string) (string, bool) {
+		return name, true
+	})
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("probe outlived the caller's deadline")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err does not wrap context.DeadlineExceeded: %v", err)
+	}
+	if elapsed > 30*time.Second {
+		t.Fatalf("the inner 45s bound won over the caller's %s deadline (took %s)", 300*time.Millisecond, elapsed)
 	}
 }
