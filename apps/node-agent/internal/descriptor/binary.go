@@ -20,6 +20,25 @@ import (
 // operator's interactive shell. Hence: config override → PATH → well-known
 // absolute paths.
 
+// harnessCommand builds an exec of a harness binary with that binary's own
+// directory leading PATH.
+//
+// Every such exec needs this, not just the version probe. `pi`, `pi-acp` and
+// `openclaw` are Node programs whose interpreter sits beside them, and a
+// node-agent started by launchd or systemd inherits a PATH without it. The
+// version probe was fixed for exactly this reason; the harness REPORT commands
+// were not, so readiness passed on a harness whose inventory then failed with
+// `exit status 127: env: node: No such file or directory`. One helper serves
+// both so the two cannot drift apart again.
+//
+// The binary's directory leads rather than trails, so a same-named binary
+// earlier on the service PATH cannot answer for the one actually selected.
+func harnessCommand(ctx context.Context, binary string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = append(os.Environ(), "PATH="+pathWithDirFirst(filepath.Dir(binary), os.Getenv("PATH")))
+	return cmd
+}
+
 // wellKnownBinaryDirs returns the directories probed when a binary is not on
 // PATH, in priority order. userHome is the OS user's home directory; "" omits
 // the home-relative candidates (a relative ".local/share/pnpm/x" candidate

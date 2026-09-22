@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -66,7 +65,7 @@ func (h *hermesDescriptor) NativeSkillLoading(ctx context.Context, key string, e
 func hermesListedSkills(ctx context.Context, binary, profile string) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, hermesSkillListTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "-p", profile, "skills", "list")
+	cmd := harnessCommand(ctx, binary, "-p", profile, "skills", "list")
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {

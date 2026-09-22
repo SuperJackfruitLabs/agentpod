@@ -1,6 +1,7 @@
 package descriptor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +53,47 @@ func TestWellKnownBinaryDirsIncludeNodeVersionManagerBins(t *testing.T) {
 		if !filepath.IsAbs(dir) || strings.Contains(dir, ".nvm") {
 			t.Errorf("unknown home produced %q", dir)
 		}
+	}
+}
+
+// Every exec of a harness binary needs the harness's own directory on PATH,
+// not just the version probe.
+//
+// `pi`, `pi-acp` and `openclaw` are Node programs whose interpreter sits beside
+// them. #540 fixed the version probe by prepending that directory; the harness
+// REPORT commands were left running with the service environment, so readiness
+// passed on a harness whose inventory then failed with
+// `exit status 127: env: node: No such file or directory`. One helper now
+// serves both, so the two cannot drift apart again.
+func TestHarnessCommandPutsTheBinarysDirectoryOnPath(t *testing.T) {
+	dir := t.TempDir()
+	interpreter := filepath.Join(dir, "agentpod-test-interp")
+	if err := os.WriteFile(interpreter, []byte("#!/bin/sh\necho reported\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	harness := filepath.Join(dir, "agentpod-test-report")
+	if err := os.WriteFile(harness, []byte("#!/usr/bin/env agentpod-test-interp\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	cmd := harnessCommand(context.Background(), harness, "skills", "list")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("a harness report could not find its interpreter: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "reported" {
+		t.Fatalf("unexpected output %q", out)
+	}
+	// The binary's directory must come FIRST, so a same-named binary earlier
+	// on the service PATH cannot answer for this one.
+	var path string
+	for _, kv := range cmd.Env {
+		if strings.HasPrefix(kv, "PATH=") {
+			path = strings.TrimPrefix(kv, "PATH=")
+		}
+	}
+	if !strings.HasPrefix(path, dir+string(os.PathListSeparator)) {
+		t.Fatalf("PATH does not lead with the binary's directory: %q", path)
 	}
 }

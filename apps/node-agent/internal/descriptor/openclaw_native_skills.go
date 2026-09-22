@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -71,7 +70,7 @@ func (o *openclawDescriptor) NativeSkillLoading(ctx context.Context, key string,
 func openclawListedSkills(ctx context.Context, binary string) (map[string]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, openclawSkillListTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "skills", "list", "--json")
+	cmd := harnessCommand(ctx, binary, "skills", "list", "--json")
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	if err := cmd.Run(); err != nil {
