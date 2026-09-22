@@ -30,10 +30,11 @@ const (
 var directLayouts = map[string]string{"codex": codexDirectLayout, "claude-code": claudeDirectLayout, "hermes": hermesDirectLayout}
 
 // Harnesses whose station is not a source checkout. A Hermes station is a
-// profile directory, which is its own Hermes home and its own coordination
-// boundary; it has no .git and one must never be created inside a user's
-// profile to satisfy a binding. These bind to the workspace itself.
-var nonRepositoryWorkspaces = map[string]bool{"hermes": true}
+// profile directory and an OpenClaw station is the OpenClaw home: each is its
+// own coordination boundary rather than a project, has no .git, and one must
+// never be created inside a user's home to satisfy a binding. These bind to
+// the workspace itself.
+var nonRepositoryWorkspaces = map[string]bool{"hermes": true, "openclaw": true}
 
 // directLayout reports the layout this binding's harness requires, and whether
 // it requires one at all. A harness absent from the map keeps the grouped
@@ -63,6 +64,7 @@ func (s *InstallStore) placementTarget() (string, error) {
 	}
 	return target, nil
 }
+
 // placementRepository resolves the root that identifies and coordinates a
 // placement. For a source checkout that is the enclosing Git work tree, whose
 // identity covers a replaced or renamed repository. A harness whose station is

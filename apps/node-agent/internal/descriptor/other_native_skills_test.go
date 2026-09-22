@@ -19,6 +19,20 @@ func nativeVersionStub(t *testing.T, name, version string) string {
 	return path
 }
 
+// openclawReportStub is an OpenClaw that answers the two questions readiness
+// and loading ask of it: its version, and its skill inventory.
+func openclawReportStub(t *testing.T, version, report string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "openclaw")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"skills\" ]; then cat <<'REPORT'\n" + report + "\nREPORT\n  exit 0\nfi\n" +
+		"printf '%s\\n' '" + version + "'\n"
+	if err := os.WriteFile(path, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestOtherNativePreflightsRequireRecordedDiscoveryAndQuiescence(t *testing.T) {
 	ctx := context.Background()
 	t.Run("opencode", func(t *testing.T) {
@@ -100,13 +114,52 @@ func TestOtherNativePreflightsRequireRecordedDiscoveryAndQuiescence(t *testing.T
 		if err := os.MkdirAll(filepath.Join(home, "workspace"), 0755); err != nil {
 			t.Fatal(err)
 		}
-		binary := nativeVersionStub(t, "openclaw", "2026.2.12")
+		// This gate was closed for every version on the stated grounds that
+		// native publication "needs a gateway quiescence and ACP loading
+		// gate". A probe against an installed 2026.2.12 refuted it: a fixture
+		// written to <home>/skills/<name>/SKILL.md was reported ready by
+		// `openclaw skills list --json` with no gateway running, and removing
+		// it dropped the inventory back. The version gate and the REMOTE
+		// gateway refusal both survive that; the blanket local one does not.
+		binary := openclawReportStub(t, "2026.2.12", openclawSkillReport)
 		d := NewOpenClawFrom(OpenClawConfig{Home: home}).(*openclawDescriptor)
 		d.resolveBinary = func() (string, error) { return binary, nil }
 		got, err := d.NativeSkillReadiness(ctx, "openclaw")
-		if err != nil || got.Ready || got.EngineVersion != "2026.2.12" || !strings.Contains(got.Reason, "shared gateway") {
+		if err != nil || !got.Ready || got.EngineVersion != "2026.2.12" {
 			t.Fatalf("preflight=%+v err=%v", got, err)
 		}
+		if strings.Contains(got.Reason, "quiescen") {
+			t.Errorf("an open OpenClaw gate still claims a quiescence requirement: %q", got.Reason)
+		}
+		loaded, err := d.NativeSkillLoading(ctx, "openclaw", []string{"sjl-fixture"})
+		if err != nil || loaded.Value == nil || !*loaded.Value || loaded.ObservedAt == nil {
+			t.Fatalf("loading=%+v err=%v", loaded, err)
+		}
+		// The observation must not pass itself off as a session's account.
+		if !strings.Contains(loaded.Reason, "harness's own report") {
+			t.Errorf("OpenClaw loading does not say whose report it is: %q", loaded.Reason)
+		}
+		loaded, err = d.NativeSkillLoading(ctx, "openclaw", []string{"sjl-missing"})
+		if err != nil || loaded.Value == nil || *loaded.Value {
+			t.Fatalf("missing loading=%+v err=%v", loaded, err)
+		}
+		// Present-but-not-loadable is neither loaded nor absent: no value.
+		for _, name := range []string{"muted", "blocked", "1password"} {
+			loaded, err = d.NativeSkillLoading(ctx, "openclaw", []string{name})
+			if err != nil || loaded.Value != nil {
+				t.Errorf("%s should be indeterminate, got %+v err=%v", name, loaded, err)
+			}
+		}
+		// A version nobody probed stays refused.
+		older := openclawReportStub(t, "2026.1.1", openclawSkillReport)
+		d.resolveBinary = func() (string, error) { return older, nil }
+		got, err = d.NativeSkillReadiness(ctx, "openclaw")
+		if err != nil || got.Ready || !strings.Contains(got.Reason, "no recorded native skill discovery evidence") {
+			t.Fatalf("unrecorded preflight=%+v err=%v", got, err)
+		}
+		// A configured REMOTE gateway is authoritative for its own inventory
+		// and never falls back to client-local skills, so it stays refused.
+		d.resolveBinary = func() (string, error) { return binary, nil }
 		d.gatewayURL = "wss://example.invalid"
 		got, err = d.NativeSkillReadiness(ctx, "openclaw")
 		if err != nil || got.Ready || !strings.Contains(got.Reason, "remote OpenClaw gateway") {
