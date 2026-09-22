@@ -97,7 +97,7 @@ func (c *codexDescriptor) NativeSkillLoading(ctx context.Context, key string, ex
 			return observedNativeSkillLoading(false, "A fresh isolated ACP session did not advertise "+name), nil
 		}
 	}
-	return observedNativeSkillLoading(true, "A fresh isolated ACP session advertised every native skill in this placement"), nil
+	return observedNativeSkillLoading(true, "A fresh isolated ACP session advertised every expected native skill name"), nil
 }
 
 // codexAdapterProcessRunning finds the selected adapter in command lines, then

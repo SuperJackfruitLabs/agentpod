@@ -287,16 +287,59 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		return receipt, false, err
 	case "skills.native.verify":
 		verification, err := store.VerifyPlacement(ctx)
-		if err == nil && h.deps.VerifyNative != nil && len(verification.DiscoveryNames) != 0 {
-			loaded, verifyErr := h.deps.VerifyNative(ctx, params["key"], harness, verification.DiscoveryNames)
-			if verifyErr != nil {
-				loaded = skills.Observation{Reason: "Native loading verification failed: " + boundedNativeVerificationReason(verifyErr.Error())}
-			}
-			verification.Loaded = loaded
+		if err == nil && h.deps.VerifyNative != nil {
+			verification.Loaded = h.nativeLoading(ctx, store, params["key"], harness, verification)
 		}
 		return SkillNativeVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
 	}
 	return nil, false, fmt.Errorf("skills: unknown management verb")
+}
+
+// nativeLoading keeps the three loading outcomes distinct and never collapses
+// them. A probe that ran and answered yields the provider's true or false; a
+// probe that could not run, failed or timed out yields an observation with no
+// value whose reason names the condition. Nothing here can turn a failure into
+// a negative: only h.deps.VerifyNative ever sets a value.
+//
+// A present placement checks that its own discovery names are advertised. An
+// absent placement runs the same read-only fresh-session probe over the names
+// of the last verified generation, because file absence alone is not loading
+// evidence — without it a removal can only report "loaded: unknown", which is
+// what forced an external probe by hand on a real station.
+func (h *skillManagementHandler) nativeLoading(ctx context.Context, store *skills.InstallStore, key, harness string, verification skills.PlacementVerification) skills.Observation {
+	if verification.Present.Value == nil {
+		return verification.Loaded
+	}
+	names, absent := verification.DiscoveryNames, !*verification.Present.Value
+	if !absent {
+		if len(names) == 0 {
+			// A present placement whose advertised names are not established;
+			// VerifyPlacement's own reason already describes that state.
+			return verification.Loaded
+		}
+	} else {
+		determined, indeterminate, err := store.AbsentPlacementNames(ctx)
+		if err != nil {
+			return skills.Observation{Reason: "Native session loading was not queried: " + boundedNativeVerificationReason(err.Error())}
+		}
+		if len(determined) == 0 {
+			if indeterminate == "" {
+				indeterminate = "Native session loading was not queried: the native skill names to check could not be determined"
+			}
+			return skills.Observation{Reason: indeterminate}
+		}
+		names = determined
+	}
+	loaded, err := h.deps.VerifyNative(ctx, key, harness, names)
+	if err != nil {
+		return skills.Observation{Reason: "Native loading verification failed: " + boundedNativeVerificationReason(err.Error())}
+	}
+	if absent && loaded.Value != nil {
+		// Say where the checked names came from: a verdict about an absent
+		// placement is only as good as its record of what used to be there.
+		loaded.Reason = boundedNativeVerificationReason(loaded.Reason + "; the native placement is absent and these names come from the last verified generation")
+	}
+	return loaded
 }
 
 func boundedNativeVerificationReason(reason string) string {

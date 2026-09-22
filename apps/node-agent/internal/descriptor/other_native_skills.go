@@ -98,7 +98,7 @@ func (o *openCodeDescriptor) NativeSkillLoading(ctx context.Context, key string,
 			return observedNativeSkillLoading(false, "A fresh isolated OpenCode ACP session did not advertise "+name), nil
 		}
 	}
-	return observedNativeSkillLoading(true, "A fresh isolated OpenCode ACP session advertised every native skill in this placement"), nil
+	return observedNativeSkillLoading(true, "A fresh isolated OpenCode ACP session advertised every expected native skill name"), nil
 }
 
 func openCodeACPDiscoverSkills(ctx context.Context, binary, workspace string) ([]string, error) {
