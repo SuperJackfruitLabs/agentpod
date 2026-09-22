@@ -101,13 +101,38 @@ func (h *hermesDescriptor) NativeSkillReadiness(ctx context.Context, key string)
 	if !found {
 		return NativeSkillReadiness{}, os.ErrNotExist
 	}
-	result := NativeSkillReadiness{Harness: h.Harness(), Reason: "Hermes project-skill trust, scan verdict, and fresh-session loading are not verified for this station"}
-	if binary, err := exec.LookPath("hermes"); err == nil {
-		result.AdapterPath = binary
-		result.EngineVersion = nativeRuntimeVersion(ctx, binary)
-	} else {
+	result := NativeSkillReadiness{Harness: h.Harness(), Reason: "Hermes native placement is not verified for this station"}
+	binary, err := exec.LookPath("hermes")
+	if err != nil {
 		result.Reason = "Hermes executable is unavailable on the node service PATH"
+		return result, nil
 	}
+	result.AdapterPath = binary
+	result.EngineVersion = nativeRuntimeVersion(ctx, binary)
+	if result.EngineVersion == "" {
+		result.Reason = "The Hermes version is unavailable, so the runtime a session would use has no identity"
+		return result, nil
+	}
+	// The version below is the one a disposable profile was probed on: a skill
+	// published to the managed directory reported as absent until
+	// skills.external_dirs named it, and as enabled afterwards. Another
+	// version has no such evidence and stays closed rather than being assumed
+	// equivalent.
+	if !strings.Contains(result.EngineVersion, "0.21.3") {
+		result.Reason = fmt.Sprintf("Hermes %s has no recorded native placement evidence", result.EngineVersion)
+		return result, nil
+	}
+	// A profile whose gateway is up is reading its own configuration and skill
+	// directories, so publishing into it can change what a live agent sees.
+	if running, err := hermesProcessRunning(key); err != nil {
+		result.Reason = "Hermes process inspection failed: " + err.Error()
+		return result, nil
+	} else if running {
+		result.Reason = "A Hermes gateway is running for this profile"
+		return result, nil
+	}
+	result.Ready = true
+	result.Reason = "Hermes version matches recorded native placement evidence and no gateway is running for this profile; registration in skills.external_dirs remains a separate reviewed operation"
 	return result, nil
 }
 
