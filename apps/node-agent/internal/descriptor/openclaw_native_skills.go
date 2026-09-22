@@ -125,3 +125,22 @@ func parseOpenClawSkillReport(output []byte) (map[string]string, error) {
 	}
 	return listed, nil
 }
+
+// NativeSkillInventory reports the skill names OpenClaw already holds, so a
+// placement can be refused before it overwrites one.
+//
+// This is the same report the loading check reads, and it is used here for the
+// same reason: an OpenClaw home idiomatically holds symlinked skills, which a
+// filesystem walk must refuse to follow rather than guess at.
+func (o *openclawDescriptor) NativeSkillInventory(ctx context.Context, key string) (map[string]string, error) {
+	readiness, err := o.NativeSkillReadiness(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if !readiness.Ready {
+		// Not an error: an unready harness is not a harness that failed to
+		// answer, and placement will refuse on readiness anyway.
+		return nil, nil
+	}
+	return openclawListedSkills(ctx, readiness.AdapterPath)
+}

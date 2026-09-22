@@ -76,3 +76,30 @@ func (r *Registry) NativeSkillReadiness(ctx context.Context, key string) (Native
 	}
 	return result, nil
 }
+
+// nativeSkillInventoryReporter is implemented by a harness that can say which
+// skill names it already holds. Only some can: Codex, Claude, OpenCode and Pi
+// are asked to open a session and do not enumerate a stable inventory, while
+// Hermes and OpenClaw print one on demand.
+type nativeSkillInventoryReporter interface {
+	NativeSkillInventory(ctx context.Context, key string) (map[string]string, error)
+}
+
+// NativeSkillInventory returns the harness's own account of which skill names
+// exist, or nil when this harness cannot give one.
+//
+// A nil inventory and a nil error mean "cannot report", and the caller keeps
+// walking the workspace. That is deliberately distinct from an error, which
+// means the harness could have answered and did not -- placement must refuse
+// on the second and fall back on the first.
+func (r *Registry) NativeSkillInventory(ctx context.Context, key string) (map[string]string, error) {
+	d, err := r.For(key)
+	if err != nil {
+		return nil, err
+	}
+	reporter, ok := d.(nativeSkillInventoryReporter)
+	if !ok {
+		return nil, nil
+	}
+	return reporter.NativeSkillInventory(ctx, key)
+}

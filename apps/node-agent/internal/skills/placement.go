@@ -179,7 +179,7 @@ func (s *InstallStore) PlanPlacement(ctx context.Context, id, action string) (Pl
 	if err = s.verifyPlaced(ctx, workspace, target, head.Current, head.NativeLayout); err != nil {
 		return PlacementPlan{}, err
 	}
-	if err = s.placementCollisions(ctx, repo, filepath.Join(s.binding.WorkspacePath, target), afterManifest); err != nil {
+	if err = s.placementCollisions(ctx, repo, filepath.Join(s.binding.WorkspacePath, target), s.placedNames(ctx, head.Current), afterManifest); err != nil {
 		return PlacementPlan{}, err
 	}
 	for _, dir := range []string{"native/operations", "native/staging", "native/backups"} {
@@ -365,7 +365,7 @@ func (s *InstallStore) applyPlacement(ctx context.Context, r *PlacementReceipt, 
 	if err = s.placementContent(ctx, p.After, after); err != nil {
 		return err
 	}
-	if err = s.placementCollisions(ctx, p.RepositoryPath, p.TargetPath, after); err != nil {
+	if err = s.placementCollisions(ctx, p.RepositoryPath, p.TargetPath, s.placedNames(ctx, p.Before), after); err != nil {
 		return err
 	}
 	if err := s.beginPlacementAdmission(p); err != nil {
