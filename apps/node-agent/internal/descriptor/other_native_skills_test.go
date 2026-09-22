@@ -148,3 +148,30 @@ func TestOpenCodeInstalledACPSkillDiscovery(t *testing.T) {
 		t.Fatalf("sibling ACP discovery names=%q err=%v", names, err)
 	}
 }
+
+// A harness binary is often a script whose interpreter sits beside it — `pi`
+// and `pi-acp` are Node programs in the same directory as `node`. A node-agent
+// started by launchd or systemd inherits a PATH that does not contain it, so
+// the version probe ran the script, the kernel could not find the interpreter,
+// and readiness reported "Selected Pi engine or pi-acp package version is
+// unavailable" — a version refusal for what was really an environment one.
+//
+// The discovery probe already prepends the engine's own directory
+// (piACPDiscoverSkills). This pins the same for the version probe, so the two
+// cannot disagree about whether a harness is runnable.
+func TestNativeExecutableVersionFindsAnInterpreterBesideTheBinary(t *testing.T) {
+	dir := t.TempDir()
+	interpreter := filepath.Join(dir, "agentpod-test-interp")
+	if err := os.WriteFile(interpreter, []byte("#!/bin/sh\necho 9.9.9\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	harness := filepath.Join(dir, "agentpod-test-harness")
+	if err := os.WriteFile(harness, []byte("#!/usr/bin/env agentpod-test-interp\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A PATH that deliberately excludes the directory holding the interpreter.
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if got := nativeExecutableVersion(context.Background(), harness); got != "9.9.9" {
+		t.Fatalf("version probe could not run a binary whose interpreter sits beside it: %q", got)
+	}
+}
