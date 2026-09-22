@@ -37,6 +37,11 @@ type openclawDescriptor struct {
 	tokenFile    string
 	sessionLabel string
 
+	// acpHelp reads the installed build's acp help text, so the node can ask
+	// what the binary accepts instead of guessing from a version. A field so
+	// no test needs OpenClaw installed.
+	acpHelp func(binary string) (string, error)
+
 	// gatewayUp probes whether a local OpenClaw Gateway is running. It is a
 	// field so tests can declare the answer without spawning or pgrep-ing a
 	// process; production wiring in NewOpenClawFrom uses openclawGatewayPID.
@@ -83,6 +88,7 @@ func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
 		gatewayURL:   cfg.GatewayURL,
 		tokenFile:    cfg.TokenFile,
 		sessionLabel: label,
+		acpHelp:      openclawACPHelp,
 		gatewayUp:    func() bool { _, err := openclawGatewayPID(); return err == nil },
 		resolveBinary: func() (string, error) {
 			return resolveOpenClawBinary(binary, userHome, exec.LookPath, isExecutableFile)
@@ -261,6 +267,16 @@ func (o *openclawDescriptor) ACPCommand(key string) ([]string, string, []string,
 	}
 	if o.tokenFile != "" {
 		// --token-file only, never --token: argv is world-readable via ps.
+		// A build that does not accept it is refused rather than downgraded:
+		// putting the token in argv to make the session start would trade a
+		// secret for convenience, silently. OpenClaw 2026.2.12 is such a
+		// build, and an unknown option there closes the stream with an error
+		// that says nothing about tokens.
+		if supported, err := o.acpAcceptsTokenFile(binary); err != nil {
+			return nil, "", nil, fmt.Errorf("openclaw: could not determine whether this build accepts --token-file: %w", err)
+		} else if !supported {
+			return nil, "", nil, fmt.Errorf("openclaw: this build does not accept --token-file, and this node will not pass a gateway token on the command line where any process can read it — upgrade OpenClaw or run the gateway without token auth")
+		}
 		argv = append(argv, "--token-file", o.tokenFile)
 	}
 	argv = append(argv, "--session", fmt.Sprintf("agent:%s:%s", agent, label))
@@ -639,4 +655,29 @@ func collectOpenClawLogFiles(logsDir string) []string {
 		return nil
 	})
 	return files
+}
+
+// acpAcceptsTokenFile asks the installed build what its acp subcommand takes.
+// The flag was added after 2026.2.12, and the node has no way to know from a
+// version string alone which builds carry it, so it reads the help rather than
+// maintaining a version table that would drift.
+func (o *openclawDescriptor) acpAcceptsTokenFile(binary string) (bool, error) {
+	if o.acpHelp == nil {
+		return false, fmt.Errorf("no help reader configured")
+	}
+	help, err := o.acpHelp(binary)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(help, "--token-file"), nil
+}
+
+func openclawACPHelp(binary string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, binary, "acp", "--help").CombinedOutput()
+	if err != nil && len(out) == 0 {
+		return "", err
+	}
+	return string(out), nil
 }
