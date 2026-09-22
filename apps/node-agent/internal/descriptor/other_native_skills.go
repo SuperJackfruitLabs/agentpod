@@ -22,16 +22,10 @@ func nativeExecutableVersion(ctx context.Context, binary string) string {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, binary, "--version")
-	// A harness binary is frequently a script whose interpreter lives beside
-	// it -- `pi` and `pi-acp` are Node programs installed next to `node`. A
-	// node-agent started by launchd or systemd inherits a PATH without that
-	// directory, so the exec fails to find the INTERPRETER and the probe
-	// reports no version, which readiness then states as a version problem.
-	// The discovery probe already prepends this directory; doing the same here
-	// keeps the two from disagreeing about whether a harness can run at all.
-	cmd.Env = append(os.Environ(), "PATH="+pathWithDirFirst(filepath.Dir(binary), os.Getenv("PATH")))
-	out, err := cmd.Output()
+	// Through harnessCommand, which puts the binary's own directory on PATH:
+	// a harness binary is frequently a script whose interpreter lives beside
+	// it, and a service-started node inherits a PATH without that directory.
+	out, err := harnessCommand(ctx, binary, "--version").Output()
 	if err != nil {
 		return ""
 	}
