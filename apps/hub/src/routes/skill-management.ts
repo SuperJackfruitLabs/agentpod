@@ -1,3 +1,4 @@
+import { nodeRefusal } from "../services/skill-operation-diagnostics";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -83,6 +84,22 @@ async function stationContext(c: Context, mutate = false, capability = "skills.m
 }
 
 /** Bounded streaming reads also protect chunked uploads without Content-Length. */
+
+/**
+ * A node refusal the operator can act on, rather than a blanket bad gateway.
+ *
+ * `nodeRefusal` separates a conflict the node NAMED (409, carrying the reason)
+ * from a transport failure where it never answered (502, the generic text
+ * passed in here).
+ */
+function skillNodeRefusal(nodeError: string | undefined, unavailable: string) {
+  const outcome = nodeRefusal(nodeError);
+  return new SkillRequestError(
+    outcome.status,
+    outcome.status === 409 ? outcome.message : unavailable,
+  );
+}
+
 export async function readSkillBody(
   request: Request,
   maxBytes: number,
@@ -412,7 +429,7 @@ export function createSkillManagementRoutes(
         parsed.data.harness !== ctx.station.harness ||
         parsed.data.profile !== request.profile
       )
-        throw new SkillRequestError(502, "Node retention inspection is unavailable or invalid");
+        throw skillNodeRefusal(response.error, "Node retention inspection is unavailable or invalid");
       return c.json(parsed.data);
     })
     .post("/stations/:id/skills/maintenance/plan", async (c) => {
@@ -433,7 +450,7 @@ export function createSkillManagementRoutes(
         parsed.data.stationKey !== ctx.station.stationKey ||
         parsed.data.harness !== ctx.station.harness ||
         parsed.data.profile !== request.profile
-      ) throw new SkillRequestError(502, "Node maintenance preview is unavailable or invalid");
+      ) throw skillNodeRefusal(response.error, "Node maintenance preview is unavailable or invalid");
       return c.json(parsed.data);
     })
     .post("/stations/:id/skills/maintenance/apply", async (c) => {
@@ -443,7 +460,7 @@ export function createSkillManagementRoutes(
       const response = await broker.request(ctx.station.nodeId, "skills.maintenance.apply", { key: ctx.station.stationKey, profile: request.profile, expectedPlanDigest: request.expectedPlanDigest }, { timeoutMs });
       const parsed = SkillMaintenanceResult.safeParse(response.data);
       if (!response.ok || !parsed.success || parsed.data.nodeId !== ctx.station.nodeId || parsed.data.stationKey !== ctx.station.stationKey || parsed.data.harness !== ctx.station.harness || parsed.data.profile !== request.profile)
-        throw new SkillRequestError(502, "Node maintenance apply is unavailable or invalid");
+        throw skillNodeRefusal(response.error, "Node maintenance apply is unavailable or invalid");
       return c.json(parsed.data);
     })
     .post("/stations/:id/skills/native/verify", async (c) => {
