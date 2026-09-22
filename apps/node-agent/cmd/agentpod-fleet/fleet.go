@@ -56,6 +56,8 @@ func fleetCmd(args []string) {
 		fleetGet("/api/nodes", args[1:])
 	case "agents":
 		fleetGet("/api/fleet/agents", args[1:])
+	case "stations":
+		fleetStations(args[1:])
 	case "stats":
 		fleetGet("/api/fleet/stats", args[1:])
 	case "activity":
