@@ -32,6 +32,7 @@ func fleetSkills(args []string) {
   fleet skills canary plan --cohort ID --release ID --digest SHA256 --station ID
   fleet skills canary inspect --cohort ID --release ID --digest SHA256 --station ID --operation ID
   fleet skills canary apply --cohort ID --release ID --digest SHA256 --station ID --operation ID --plan-digest SHA256
+  fleet skills station plan --station ID --artifact ARTIFACT_ID
   fleet skills station verify --station ID --profile PROFILE
   fleet skills station rollback-plan --station ID --profile PROFILE
   fleet skills station inspect --station ID --operation ID
@@ -122,11 +123,12 @@ func fleetSkillNative(args []string) {
 
 func fleetSkillStation(args []string) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: fleet skills station <verify|rollback-plan|inspect|apply> …")
+		fmt.Fprintln(os.Stderr, "usage: fleet skills station <plan|verify|rollback-plan|inspect|apply> …")
 		os.Exit(2)
 	}
 	fs := flag.NewFlagSet("fleet skills station", flag.ExitOnError)
 	station, profile, operation, planDigest := fs.String("station", "", "station ID"), fs.String("profile", "", "profile"), fs.String("operation", "", "operation ID"), fs.String("plan-digest", "", "reviewed plan digest")
+	artifact := fs.String("artifact", "", "uploaded artifact ID")
 	fs.Parse(args[1:])
 	if *station == "" || fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "station commands require --station ID")
@@ -134,6 +136,15 @@ func fleetSkillStation(args []string) {
 	}
 	base := "/api/stations/" + url.PathEscape(*station) + "/skills"
 	switch args[0] {
+	// The Console could plan a managed install from an uploaded artifact and
+	// this CLI could not, so an operator had to open a browser to reach the
+	// first step of every canary. The route is the same one the Console calls.
+	case "plan":
+		if *artifact == "" {
+			fmt.Fprintln(os.Stderr, "plan requires --artifact ID")
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, base+"/plan", map[string]string{"requestId": randomUUID(), "artifactId": *artifact})
 	case "verify":
 		if *profile == "" {
 			fmt.Fprintln(os.Stderr, "verify requires --profile PROFILE")
@@ -159,7 +170,7 @@ func fleetSkillStation(args []string) {
 		}
 		fleetSkillJSON(http.MethodPost, base+"/operations/"+url.PathEscape(*operation)+"/apply", map[string]string{"planDigest": *planDigest})
 	default:
-		fmt.Fprintln(os.Stderr, "usage: fleet skills station <verify|rollback-plan|inspect|apply> …")
+		fmt.Fprintln(os.Stderr, "usage: fleet skills station <plan|verify|rollback-plan|inspect|apply> …")
 		os.Exit(2)
 	}
 }
