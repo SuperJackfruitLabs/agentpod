@@ -93,20 +93,27 @@ func openclawListedSkills(ctx context.Context, binary string) (map[string]string
 // inventory would read as "the skill is not there", which is the one wrong
 // answer a removal check must never be handed.
 func parseOpenClawSkillReport(output []byte) (map[string]string, error) {
-	var rows []struct {
-		Name               string `json:"name"`
-		Eligible           bool   `json:"eligible"`
-		Disabled           bool   `json:"disabled"`
-		BlockedByAllowlist bool   `json:"blockedByAllowlist"`
+	// The report is an OBJECT carrying the two directories OpenClaw resolved
+	// and the inventory under `skills`, not a bare array. Decoding into the
+	// envelope rather than the rows means a future top-level field is ignored
+	// instead of breaking the read.
+	var report struct {
+		ManagedSkillsDir string `json:"managedSkillsDir"`
+		Skills           []struct {
+			Name               string `json:"name"`
+			Eligible           bool   `json:"eligible"`
+			Disabled           bool   `json:"disabled"`
+			BlockedByAllowlist bool   `json:"blockedByAllowlist"`
+		} `json:"skills"`
 	}
-	if err := json.Unmarshal(output, &rows); err != nil {
+	if err := json.Unmarshal(output, &report); err != nil {
 		return nil, fmt.Errorf("openclaw: unreadable skill report: %w", err)
 	}
-	if len(rows) == 0 {
+	if len(report.Skills) == 0 {
 		return nil, fmt.Errorf("openclaw: skill report listed nothing, which is never true of a working install")
 	}
-	listed := make(map[string]string, len(rows))
-	for _, row := range rows {
+	listed := make(map[string]string, len(report.Skills))
+	for _, row := range report.Skills {
 		name := strings.TrimSpace(row.Name)
 		if name == "" {
 			continue
