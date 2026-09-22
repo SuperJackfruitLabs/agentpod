@@ -474,3 +474,56 @@ func (s *InstallStore) VerifyPlacement(ctx context.Context) (PlacementVerificati
 	}
 	return PlacementVerification{Current: head.Current, Path: filepath.Join(s.binding.WorkspacePath, target), DiscoveryNames: names, Present: Observation{Value: &present, ObservedAt: &now, Reason: reason}, Loaded: Observation{Reason: "Native eligibility, project trust and session loading were not queried"}}, nil
 }
+
+// AbsentPlacementNames reports the native discovery names of the generation
+// this station last placed, for the case where no placement is present. A
+// fresh-session probe needs them to establish the negative a removal claims:
+// file absence alone is not loading evidence, and only a new session that does
+// not advertise those exact names closes that gate.
+//
+// The names are read from the recorded head, never invented. When no such
+// generation can be verified the caller has nothing honest to check, so the
+// returned names are empty and the returned reason names the condition; that
+// case is an unknown loading observation, never a negative one.
+func (s *InstallStore) AbsentPlacementNames(ctx context.Context) ([]string, string, error) {
+	unlock, err := s.lock(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	defer unlock()
+	head, err := s.placementHead()
+	if err != nil {
+		return nil, "", err
+	}
+	if head.Current != nil {
+		return nil, "A native placement is present, so its own discovery names apply", nil
+	}
+	const unqueried = "Native session loading was not queried: "
+	if head.OperationID == "" || head.Previous == nil {
+		return nil, unqueried + "no previous verified native generation records the skill names a fresh session must no longer advertise", nil
+	}
+	// The Codex direct layout decides what a session actually advertises, so a
+	// head recorded under the legacy grouped layout cannot name the commands.
+	if s.binding.Harness == "codex" && head.NativeLayout != codexDirectLayout {
+		return nil, unqueried + "the last native placement used the legacy grouped layout, whose advertised command names are not established", nil
+	}
+	manifest, err := s.verifyGeneration(ctx, head.Previous)
+	if err != nil {
+		return nil, unqueried + "the last placed native generation could not be verified, so the skill names to check are not established", nil
+	}
+	if manifest == nil {
+		return nil, unqueried + "the last placed native generation carries no manifest to name the skills to check", nil
+	}
+	if s.binding.Harness == "codex" && (len(manifest.Skills) != 1 || manifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
+		return nil, unqueried + "the last placed native generation does not match this station's Codex placement identity", nil
+	}
+	names := make([]string, 0, len(manifest.Skills))
+	for _, skill := range manifest.Skills {
+		names = append(names, skill.ID)
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		return nil, unqueried + "the last placed native generation names no skills to check", nil
+	}
+	return names, "", nil
+}
