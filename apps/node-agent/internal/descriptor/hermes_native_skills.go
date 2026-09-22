@@ -119,3 +119,20 @@ func hermesProfileName(key string) (string, error) {
 	}
 	return name, nil
 }
+
+// NativeSkillInventory reports the skill names this Hermes profile already
+// holds, from the same report the loading check reads.
+func (h *hermesDescriptor) NativeSkillInventory(ctx context.Context, key string) (map[string]string, error) {
+	readiness, err := h.NativeSkillReadiness(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if !readiness.Ready {
+		return nil, nil
+	}
+	profile, err := hermesProfileName(key)
+	if err != nil {
+		return nil, err
+	}
+	return hermesListedSkills(ctx, readiness.AdapterPath, profile)
+}

@@ -24,6 +24,10 @@ type SkillManagementDeps struct {
 	Workspaces      *workspacegate.Coordinator
 	AuthorizeNative func(context.Context, string, string) error
 	VerifyNative    func(context.Context, string, string, []string) (skills.Observation, error)
+	// ReportInventory is the harness's own account of which skill names exist,
+	// for the harnesses that can give one. Nil, or a nil result, leaves the
+	// workspace walk in charge. See InstallStore.UseHarnessInventory.
+	ReportInventory func(context.Context, string, string) (map[string]string, error)
 }
 type SkillOperationResult struct {
 	Receipt *skills.InstallReceipt `json:"receipt"`
@@ -197,6 +201,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		store, err = skills.OpenInstallStore(binding)
 	} else {
 		store, err = skills.OpenExistingInstallStore(binding)
+	}
+	// A harness that can report its own inventory decides name collisions,
+	// in place of walking the workspace. Only a harness with a reporter is
+	// wired; everything else keeps the walk.
+	if store != nil && h.deps.ReportInventory != nil {
+		key, harness := params["key"], harness
+		store.UseHarnessInventory(func(ctx context.Context) (map[string]string, error) {
+			return h.deps.ReportInventory(ctx, key, harness)
+		})
 	}
 	if errors.Is(err, skills.ErrInstallStoreNotFound) {
 		if verb == "skills.operation" {

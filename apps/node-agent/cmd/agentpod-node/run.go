@@ -100,6 +100,9 @@ func runCmd() {
 			VerifyNative: func(ctx context.Context, key, _ string, names []string) (skills.Observation, error) {
 				return reg.NativeSkillLoading(ctx, key, names)
 			},
+			ReportInventory: func(ctx context.Context, key, _ string) (map[string]string, error) {
+				return reg.NativeSkillInventory(ctx, key)
+			},
 		})
 		reg.EnableSkillManagement()
 		if cfg.NativeSkillActivation {

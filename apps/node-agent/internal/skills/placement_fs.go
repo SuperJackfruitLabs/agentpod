@@ -164,7 +164,50 @@ func (s *InstallStore) placementLock(ctx context.Context) (string, string, func(
 	}
 	return repo, identity, release, nil
 }
-func (s *InstallStore) placementCollisions(ctx context.Context, repo, target string, manifests ...*BundleManifest) error {
+
+// harnessInventoryCollision compares the harness's reported names with the
+// ones this placement introduces.
+//
+// `owned` are the names this placement already publishes, which the harness
+// will of course report; re-placing what we put there is not a collision with
+// ourselves. A report that cannot be read is an ERROR rather than an empty
+// inventory: reading a failed report as "nothing is taken" would publish over
+// a name the harness holds, which is the one outcome this check exists to stop.
+// placedNames are the skill names a generation publishes, used to tell "this
+// name is already ours" from "this name belongs to something else".
+//
+// A generation whose manifest cannot be read yields no names rather than an
+// error: the caller then treats every reported name as foreign, which refuses
+// a re-placement it could have allowed. Failing closed here costs a retry;
+// failing open would publish over a neighbour.
+func (s *InstallStore) placedNames(ctx context.Context, g *Generation) map[string]bool {
+	if g == nil {
+		return nil
+	}
+	manifest, err := s.verifyGeneration(ctx, g)
+	if err != nil || manifest == nil {
+		return nil
+	}
+	owned := make(map[string]bool, len(manifest.Skills))
+	for _, skill := range manifest.Skills {
+		owned[skill.ID] = true
+	}
+	return owned
+}
+
+func harnessInventoryCollision(listed map[string]string, names, owned map[string]bool) error {
+	for name := range names {
+		if owned[name] {
+			continue
+		}
+		if _, taken := listed[name]; taken {
+			return fmt.Errorf("%w: duplicate project skill name %s", ErrInstallConflict, name)
+		}
+	}
+	return nil
+}
+
+func (s *InstallStore) placementCollisions(ctx context.Context, repo, target string, owned map[string]bool, manifests ...*BundleManifest) error {
 	names := map[string]bool{}
 	for _, m := range manifests {
 		if m != nil {
@@ -176,6 +219,18 @@ func (s *InstallStore) placementCollisions(ctx context.Context, repo, target str
 	// Removal introduces no names and must preserve unrelated user drafts.
 	if len(names) == 0 {
 		return nil
+	}
+	// A harness that can report its own inventory is asked instead of walked.
+	// A reporter that answers with no inventory and no error is saying "this
+	// harness cannot report", and the walk stays in charge.
+	if s.reportedSkills != nil {
+		listed, err := s.reportedSkills(ctx)
+		if err != nil {
+			return fmt.Errorf("skills: %s could not report which skill names exist: %w", s.binding.Harness, err)
+		}
+		if listed != nil {
+			return harnessInventoryCollision(listed, names, owned)
+		}
 	}
 	examined, bytesRead := 0, 0
 	for directory := s.binding.WorkspacePath; ; directory = filepath.Dir(directory) {
