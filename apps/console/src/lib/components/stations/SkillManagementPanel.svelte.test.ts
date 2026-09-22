@@ -341,3 +341,106 @@ test("opening a recorded conflict shows recovery guidance without offering apply
     view.queryByRole("button", { name: "Apply reviewed plan" }),
   ).toBeNull();
 });
+
+// An unconfirmed operation has several causes, and the hub already tells them
+// apart -- offline, disconnected, timed out, rejected -- each ending in the
+// same safe instruction. The console must carry that distinction through
+// rather than flattening every one into "Outcome unknown", because the
+// operator's next move differs: a node that is offline needs attention before
+// any retry, while a rejection names something to fix.
+//
+// The invariant underneath is the one that matters most: an unconfirmed
+// outcome must never render as an applied-state claim. Apply stays unavailable
+// until an inspection establishes what actually happened.
+function unconfirmed(reason: string) {
+  return SkillHubOperation.parse({
+    ...JSON.parse(JSON.stringify(operation())),
+    state: "unknown",
+    error: reason,
+    receipt: null,
+  });
+}
+
+test("each cause of an unconfirmed outcome keeps its own reason and offers no applied claim", async () => {
+  for (const reason of [
+    "Node is offline during apply; inspect the operation before retrying",
+    "Node disconnected during apply; inspect the operation before retrying",
+    "Node timed out during apply; inspect the operation before retrying",
+    "Node rejected apply: managed skill namespace not found. Inspect the operation before retrying",
+    "Node outcome is unknown during apply; inspect the operation before retrying",
+  ]) {
+    cleanup();
+    vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());
+    vi.spyOn(api, "applySkillOperation").mockResolvedValue(unconfirmed(reason));
+    const view = render(SkillManagementPanel, { props });
+    await waitFor(() =>
+      expect(view.getByRole("option", { name: /fixture/ })).toBeTruthy(),
+    );
+    await fireEvent.change(view.getByLabelText("Artifact"), {
+      target: { value: artifact.id },
+    });
+    await fireEvent.click(
+      view.getByRole("button", { name: "Review installation" }),
+    );
+    await waitFor(() =>
+      expect(
+        view.getByRole("button", { name: "Apply reviewed plan" }),
+      ).toBeTruthy(),
+    );
+    await fireEvent.click(
+      view.getByRole("button", { name: "Apply reviewed plan" }),
+    );
+
+    // The cause survives to the operator, verbatim.
+    await waitFor(() => expect(view.getByText(reason)).toBeTruthy());
+    // And is still labelled unconfirmed rather than finished.
+    expect(view.getByText("Outcome unknown")).toBeTruthy();
+    // Never an applied-state claim, and never a second apply without looking.
+    expect(view.queryByText("Files applied")).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Apply reviewed plan" }),
+    ).toBeNull();
+    // The safe next step is offered.
+    expect(
+      view.getByRole("button", { name: "Inspect node outcome" }),
+    ).toBeTruthy();
+  }
+});
+
+// Delayed success is a THIRD thing, distinct from both success and failure:
+// the hub still holds the operation. It must not read as applied, and it must
+// not read as failed either.
+test("an operation still in flight reads as neither applied nor failed", async () => {
+  const inFlight = SkillHubOperation.parse({
+    ...JSON.parse(JSON.stringify(operation("applying"))),
+    inFlight: true,
+    receipt: null,
+  });
+  vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());
+  vi.spyOn(api, "applySkillOperation").mockResolvedValue(inFlight);
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() =>
+    expect(view.getByRole("option", { name: /fixture/ })).toBeTruthy(),
+  );
+  await fireEvent.change(view.getByLabelText("Artifact"), {
+    target: { value: artifact.id },
+  });
+  await fireEvent.click(
+    view.getByRole("button", { name: "Review installation" }),
+  );
+  await waitFor(() =>
+    expect(
+      view.getByRole("button", { name: "Apply reviewed plan" }),
+    ).toBeTruthy(),
+  );
+  await fireEvent.click(
+    view.getByRole("button", { name: "Apply reviewed plan" }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("status").textContent).toContain(
+      "The hub is processing this operation",
+    ),
+  );
+  expect(view.queryByText("Files applied")).toBeNull();
+  expect(view.queryByText("Outcome unknown")).toBeNull();
+});
