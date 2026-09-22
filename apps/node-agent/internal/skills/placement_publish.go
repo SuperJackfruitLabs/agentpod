@@ -13,8 +13,8 @@ import (
 )
 
 func (s *InstallStore) stagePlacement(ctx context.Context, id string, g *Generation, m *BundleManifest, layout string) error {
-	if s.binding.Harness == "codex" && layout == codexDirectLayout {
-		return s.stageCodexPlacement(ctx, id, g, m)
+	if want, direct := s.directLayout(); direct && layout == want {
+		return s.stageDirectPlacement(ctx, id, g, m)
 	}
 	stage := "native/staging/" + id
 	if err := makeDirs(s.root, stage); err != nil {

@@ -279,7 +279,9 @@ func TestPlacementRejectsUnsupportedHarnessAndUnownedMatchingTarget(t *testing.T
 	s := placementFixtureStore(t)
 	ctx := context.Background()
 	original := s.binding.Harness
-	s.binding.Harness = "claude-code"
+	// Hermes has no verified native placement root. Claude-code was in this
+	// position until its direct layout was probed, and now has its own test.
+	s.binding.Harness = "hermes"
 	if _, err := s.PlanPlacement(ctx, strings.Repeat("b", 32), "activate"); err == nil {
 		t.Fatal("untested layout accepted")
 	}
