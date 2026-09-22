@@ -13,10 +13,37 @@ import (
 	"time"
 )
 
-var placementRoots = map[string]string{"codex": ".agents/skills", "opencode": ".opencode/skills", "pi": ".pi/skills", "openclaw": "skills"}
+var placementRoots = map[string]string{"codex": ".agents/skills", "claude-code": ".claude/skills", "opencode": ".opencode/skills", "pi": ".pi/skills", "openclaw": "skills"}
 var placementScanRoots = []string{".agents/skills", ".claude/skills", ".opencode/skills", ".pi/skills", ".hermes/skills", "skills"}
 
-const codexDirectLayout = "codex-direct-v1"
+const (
+	codexDirectLayout  = "codex-direct-v1"
+	claudeDirectLayout = "claude-direct-v1"
+)
+
+// Harnesses whose native discovery reads a direct skill directory rather than
+// a grouped bundle export. Codex scans each immediate child of .agents/skills
+// for SKILL.md; Claude reads .claude/skills the same way, and its grouped
+// layout was probed and does not load. Each entry publishes one plain skill at
+// the destination root, so they share a projection.
+var directLayouts = map[string]string{"codex": codexDirectLayout, "claude-code": claudeDirectLayout}
+
+// directLayout reports the layout this binding's harness requires, and whether
+// it requires one at all. A harness absent from the map keeps the grouped
+// export, whose own evidence is recorded separately.
+func (s *InstallStore) directLayout() (string, bool) {
+	layout, ok := directLayouts[s.binding.Harness]
+	return layout, ok
+}
+
+// isDirectLayout reports whether a recorded layout is the one this binding's
+// harness requires. A layout recorded for the wrong harness, or an unknown
+// one, is not accepted: a plan or head carrying it describes a placement this
+// node cannot verify.
+func (s *InstallStore) isDirectLayout(layout string) bool {
+	want, ok := s.directLayout()
+	return ok && layout == want
+}
 
 func (s *InstallStore) placementTarget() (string, error) {
 	root, ok := placementRoots[s.binding.Harness]
@@ -194,12 +221,12 @@ func (s *InstallStore) placementWorkspace() (*InstallStore, error) {
 	return &InstallStore{root: root, binding: s.binding}, nil
 }
 func (s *InstallStore) verifyPlaced(ctx context.Context, workspace *InstallStore, relative string, g *Generation, layout string) error {
-	if s.binding.Harness == "codex" && layout == codexDirectLayout {
+	if want, direct := s.directLayout(); direct && layout == want {
 		manifest, err := s.verifyGeneration(ctx, g)
 		if err != nil {
 			return err
 		}
-		if err := verifyCodexProjection(ctx, workspace.root, relative, s, g, manifest); err != nil {
+		if err := verifyDirectProjection(ctx, workspace.root, relative, s, g, manifest); err != nil {
 			return fmt.Errorf("%w: native files differ: %v", ErrInstallConflict, err)
 		}
 		return nil

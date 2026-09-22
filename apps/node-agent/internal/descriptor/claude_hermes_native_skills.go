@@ -2,6 +2,7 @@ package descriptor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,8 @@ import (
 // Neither harness has verified native placement or station-specific loading,
 // so a resolved binary is never treated as permission to publish a skill.
 func (c *claudeCodeDescriptor) NativeSkillReadiness(ctx context.Context, key string) (NativeSkillReadiness, error) {
-	if _, err := c.projectPathForKey(key); err != nil {
+	workspace, err := c.projectPathForKey(key)
+	if err != nil {
 		return NativeSkillReadiness{}, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -47,9 +49,37 @@ func (c *claudeCodeDescriptor) NativeSkillReadiness(ctx context.Context, key str
 			dir = parent
 		}
 	}
-	if claude, ok := c.locator().locate("claude", c.claudeBinary); ok {
-		result.EngineVersion = nativeRuntimeVersion(ctx, claude)
+	claude, ok := c.locator().locate("claude", c.claudeBinary)
+	if !ok {
+		result.Reason = "The claude CLI is unresolved, so the engine a session would start has no identity"
+		return result, nil
 	}
+	result.EngineVersion = nativeRuntimeVersion(ctx, claude)
+	if result.EngineVersion == "" {
+		result.Reason = "The claude CLI version is unavailable"
+		return result, nil
+	}
+	// The pair below is the one an isolated fresh-session probe was run
+	// against: adapter 0.66.0 started a session under a disposable HOME with
+	// no authentication and advertised a skill published at
+	// .claude/skills/<name>/SKILL.md, while a workspace without that
+	// directory did not advertise it. Any other pair has no such evidence and
+	// stays closed rather than being assumed equivalent.
+	if result.AdapterVersion != "0.66.0" || !strings.HasPrefix(result.EngineVersion, "2.1.") {
+		result.Reason = fmt.Sprintf("Adapter %s and engine %s have no recorded native discovery evidence", result.AdapterVersion, result.EngineVersion)
+		return result, nil
+	}
+	// Publishing into a workspace a session is reading can change what that
+	// session sees mid-run, so a live session closes the gate.
+	if running, note := claudeProcessRunning(workspace); note != "" {
+		result.Reason = "Claude process inspection failed: " + note
+		return result, nil
+	} else if running {
+		result.Reason = "A Claude session is active in this workspace"
+		return result, nil
+	}
+	result.Ready = true
+	result.Reason = "Adapter and engine match isolated native discovery evidence; external-process quiescence is still required"
 	return result, nil
 }
 

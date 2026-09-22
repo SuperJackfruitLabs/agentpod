@@ -22,7 +22,7 @@ func (s *InstallStore) placementHead() (installHead, error) {
 	} else if err != nil {
 		return h, err
 	}
-	if !operationPattern.MatchString(h.OperationID) || !validGeneration(h.Current) || !validGeneration(h.Previous) || (h.NativeLayout != "" && (s.binding.Harness != "codex" || h.NativeLayout != codexDirectLayout)) {
+	if !operationPattern.MatchString(h.OperationID) || !validGeneration(h.Current) || !validGeneration(h.Previous) || (h.NativeLayout != "" && !s.isDirectLayout(h.NativeLayout)) {
 		return h, fmt.Errorf("%w: invalid native head", ErrInstallConflict)
 	}
 	return h, nil
@@ -56,7 +56,7 @@ func (s *InstallStore) placementOperation(id string) (PlacementReceipt, error) {
 	if err != nil {
 		return receipt, err
 	}
-	if p.SchemaVersion != 1 || p.OperationID != id || p.Binding != s.binding || p.TargetPath != filepath.Join(s.binding.WorkspacePath, target) || p.PlanDigest != placementHash(p) || !validGeneration(p.Before) || !validGeneration(p.After) || !digestPattern.MatchString(p.ExpectedHead) || !digestPattern.MatchString(p.ExpectedInstallationHead) || !digestPattern.MatchString(p.RepositoryIdentity) || !filepath.IsAbs(p.RepositoryPath) || p.Activation != placementActivation || (p.NativeLayout != "" && (s.binding.Harness != "codex" || p.NativeLayout != codexDirectLayout)) {
+	if p.SchemaVersion != 1 || p.OperationID != id || p.Binding != s.binding || p.TargetPath != filepath.Join(s.binding.WorkspacePath, target) || p.PlanDigest != placementHash(p) || !validGeneration(p.Before) || !validGeneration(p.After) || !digestPattern.MatchString(p.ExpectedHead) || !digestPattern.MatchString(p.ExpectedInstallationHead) || !digestPattern.MatchString(p.RepositoryIdentity) || !filepath.IsAbs(p.RepositoryPath) || p.Activation != placementActivation || (p.NativeLayout != "" && !s.isDirectLayout(p.NativeLayout)) {
 		return receipt, fmt.Errorf("%w: invalid native operation binding", ErrInstallConflict)
 	}
 	if p.Action != "activate" && p.Action != "deactivate" && p.Action != "rollback" || p.Action == "activate" && p.After == nil || p.Action == "deactivate" && p.After != nil {
@@ -205,7 +205,7 @@ func (s *InstallStore) PlanPlacement(ctx context.Context, id, action string) (Pl
 	}
 	names := []string{}
 	if afterManifest != nil {
-		if s.binding.Harness == "codex" && (len(afterManifest.Skills) != 1 || afterManifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
+		if _, direct := s.directLayout(); direct && (len(afterManifest.Skills) != 1 || afterManifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
 			return PlacementPlan{}, fmt.Errorf("skills: Codex native placement requires exactly one plain skill")
 		}
 		for _, skill := range afterManifest.Skills {
@@ -216,9 +216,9 @@ func (s *InstallStore) PlanPlacement(ctx context.Context, id, action string) (Pl
 	sort.Strings(names)
 	layout := ""
 	changes := installDiff(beforeManifest, afterManifest)
-	if s.binding.Harness == "codex" {
-		layout = codexDirectLayout
-		changes, err = codexPlacementDiff(beforeManifest, afterManifest, head.NativeLayout)
+	if want, direct := s.directLayout(); direct {
+		layout = want
+		changes, err = directPlacementDiff(beforeManifest, afterManifest, head.NativeLayout, want)
 		if err != nil {
 			return PlacementPlan{}, err
 		}
@@ -456,8 +456,8 @@ func (s *InstallStore) VerifyPlacement(ctx context.Context) (PlacementVerificati
 		return PlacementVerification{}, err
 	}
 	names := []string{}
-	if manifest != nil && (s.binding.Harness != "codex" || head.NativeLayout == codexDirectLayout) {
-		if s.binding.Harness == "codex" && (len(manifest.Skills) != 1 || manifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
+	if want, direct := s.directLayout(); manifest != nil && (!direct || head.NativeLayout == want) {
+		if direct && (len(manifest.Skills) != 1 || manifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
 			return PlacementVerification{}, fmt.Errorf("skills: Codex native placement identity differs")
 		}
 		for _, skill := range manifest.Skills {
@@ -469,6 +469,9 @@ func (s *InstallStore) VerifyPlacement(ctx context.Context) (PlacementVerificati
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	present := head.Current != nil
 	reason := "Verified owned files in the native project discovery root"
+	// Only Codex can hold a placement recorded before its direct layout was
+	// corrected. Claude's grouped layout was probed and never published, so it
+	// has no legacy generation to migrate.
 	if s.binding.Harness == "codex" && head.Current != nil && head.NativeLayout == "" {
 		reason = "Verified legacy grouped files; activate again to publish the direct Codex discovery layout"
 	}
@@ -504,7 +507,7 @@ func (s *InstallStore) AbsentPlacementNames(ctx context.Context) ([]string, stri
 	}
 	// The Codex direct layout decides what a session actually advertises, so a
 	// head recorded under the legacy grouped layout cannot name the commands.
-	if s.binding.Harness == "codex" && head.NativeLayout != codexDirectLayout {
+	if want, direct := s.directLayout(); direct && head.NativeLayout != want {
 		return nil, unqueried + "the last native placement used the legacy grouped layout, whose advertised command names are not established", nil
 	}
 	manifest, err := s.verifyGeneration(ctx, head.Previous)
@@ -514,7 +517,7 @@ func (s *InstallStore) AbsentPlacementNames(ctx context.Context) ([]string, stri
 	if manifest == nil {
 		return nil, unqueried + "the last placed native generation carries no manifest to name the skills to check", nil
 	}
-	if s.binding.Harness == "codex" && (len(manifest.Skills) != 1 || manifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
+	if _, direct := s.directLayout(); direct && (len(manifest.Skills) != 1 || manifest.Skills[0].ID != "sjl-"+s.binding.Profile) {
 		return nil, unqueried + "the last placed native generation does not match this station's Codex placement identity", nil
 	}
 	names := make([]string, 0, len(manifest.Skills))

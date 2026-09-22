@@ -46,6 +46,10 @@ type claudeCodeDescriptor struct {
 	isExecutable func(string) bool                     // isExecutableFile
 	nodeVersion  func(nodePath string) (string, error) // `node --version`
 	getenv       func(string) string                   // os.Getenv
+
+	// nativeSkillDiscovery starts a disposable ACP session and returns the
+	// command names it advertises. A field so a test needs no adapter.
+	nativeSkillDiscovery func(ctx context.Context, adapter, workspace, nodePath string) ([]string, error)
 }
 
 // ClaudeCodeConfig carries everything the descriptor needs. Zero values are
@@ -93,6 +97,8 @@ func NewClaudeCodeFrom(cfg ClaudeCodeConfig) Descriptor {
 		isExecutable: isExecutableFile,
 		nodeVersion:  nodeVersionOutput,
 		getenv:       os.Getenv,
+
+		nativeSkillDiscovery: claudeACPDiscoverSkills,
 	}
 }
 

@@ -12,12 +12,13 @@ import (
 	"strings"
 )
 
-// codexNativeProjection is deliberately a direct skill directory.  Codex scans
-// each immediate child of .agents/skills for SKILL.md; a bundled skills/<id>
-// subtree is not a discoverable native skill.
-func codexNativeProjection(m *BundleManifest) (map[string]BundleFile, map[string]string, error) {
+// directNativeProjection is deliberately a direct skill directory. Codex scans
+// each immediate child of .agents/skills for SKILL.md and Claude reads
+// .claude/skills the same way; a bundled skills/<id> subtree is not a
+// discoverable native skill for either.
+func directNativeProjection(m *BundleManifest) (map[string]BundleFile, map[string]string, error) {
 	if m == nil || len(m.Skills) != 1 {
-		return nil, nil, fmt.Errorf("skills: Codex native placement requires exactly one plain skill")
+		return nil, nil, fmt.Errorf("skills: direct native placement requires exactly one plain skill")
 	}
 	prefix := "skills/" + m.Skills[0].ID + "/"
 	files, source := map[string]BundleFile{}, map[string]string{}
@@ -28,7 +29,7 @@ func codexNativeProjection(m *BundleManifest) (map[string]BundleFile, map[string
 		}
 	}
 	if _, ok := files["SKILL.md"]; !ok {
-		return nil, nil, fmt.Errorf("skills: Codex native placement has no skill entrypoint")
+		return nil, nil, fmt.Errorf("skills: direct native placement has no skill entrypoint")
 	}
 	return files, source, nil
 }
@@ -36,11 +37,11 @@ func codexNativeProjection(m *BundleManifest) (map[string]BundleFile, map[string
 // The reviewed native diff uses destination paths, including the migration
 // from a previously published grouped export. The source bundle manifest is
 // unchanged and remains the authority for the bytes in each projected file.
-func codexPlacementDiff(before, after *BundleManifest, beforeLayout string) (InstallChanges, error) {
+func directPlacementDiff(before, after *BundleManifest, beforeLayout, want string) (InstallChanges, error) {
 	old, next := map[string]string{}, map[string]string{}
 	if before != nil {
-		if beforeLayout == codexDirectLayout {
-			files, _, err := codexNativeProjection(before)
+		if beforeLayout == want {
+			files, _, err := directNativeProjection(before)
 			if err != nil {
 				return InstallChanges{}, err
 			}
@@ -56,7 +57,7 @@ func codexPlacementDiff(before, after *BundleManifest, beforeLayout string) (Ins
 		}
 	}
 	if after != nil {
-		files, _, err := codexNativeProjection(after)
+		files, _, err := directNativeProjection(after)
 		if err != nil {
 			return InstallChanges{}, err
 		}
@@ -84,9 +85,9 @@ func codexPlacementDiff(before, after *BundleManifest, beforeLayout string) (Ins
 	return changes, nil
 }
 
-func (s *InstallStore) stageCodexPlacement(ctx context.Context, id string, g *Generation, m *BundleManifest) error {
+func (s *InstallStore) stageDirectPlacement(ctx context.Context, id string, g *Generation, m *BundleManifest) error {
 	stage := "native/staging/" + id
-	files, source, err := codexNativeProjection(m)
+	files, source, err := directNativeProjection(m)
 	if err != nil {
 		return err
 	}
@@ -122,13 +123,13 @@ func (s *InstallStore) stageCodexPlacement(ctx context.Context, id string, g *Ge
 			return err
 		}
 	}
-	if err = verifyCodexProjection(ctx, s.root, stage, s, g, m); err != nil {
+	if err = verifyDirectProjection(ctx, s.root, stage, s, g, m); err != nil {
 		return err
 	}
 	return s.checkpoint("native-stage")
 }
 
-func verifyCodexProjection(ctx context.Context, root *os.Root, directory string, source *InstallStore, g *Generation, m *BundleManifest) error {
+func verifyDirectProjection(ctx context.Context, root *os.Root, directory string, source *InstallStore, g *Generation, m *BundleManifest) error {
 	if g == nil {
 		if _, err := root.Lstat(directory); errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -137,7 +138,7 @@ func verifyCodexProjection(ctx context.Context, root *os.Root, directory string,
 		}
 		return fmt.Errorf("%w: unowned native destination", ErrInstallConflict)
 	}
-	files, paths, err := codexNativeProjection(m)
+	files, paths, err := directNativeProjection(m)
 	if err != nil {
 		return err
 	}
