@@ -109,6 +109,14 @@ var commands = []struct {
 			"after either change before the hub can observe the new capability.",
 	},
 	{
+		name: "hermes-skills", group: "Node",
+		oneline: "Register or remove the managed skills directory in a Hermes profile",
+		detail: "apn hermes-skills <status|register|unregister> --profile NAME [--apply] —\n" +
+			"a published skill is inert until skills.external_dirs names its directory.\n" +
+			"Without --apply the command prints the exact change and writes nothing.\n" +
+			"It edits one profile's own config.yaml and leaves the rest of it alone.",
+	},
+	{
 		name: "detect", group: "Node",
 		oneline: "Print detected harness stations as JSON",
 		detail: "apn detect — print the harness stations detected on this host as\n" +

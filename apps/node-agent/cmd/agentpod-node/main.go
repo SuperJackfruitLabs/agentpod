@@ -114,6 +114,8 @@ func main() {
 		runCmd() // implemented in Task 9
 	case "native-skills":
 		os.Exit(nativeSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "hermes-skills":
+		os.Exit(hermesSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)
