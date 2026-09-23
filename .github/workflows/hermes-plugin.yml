@@ -1,0 +1,128 @@
+name: Hermes plugin
+
+# The agentpod-live plugin runs inside Hermes and leans on its internals: hook
+# names and payloads, stream-hook dispatch, session context, the ACP
+# tool-title helper. None of that is a published API, and Hermes moves fast,
+# so the plugin is proven against a real Hermes rather than trusted.
+#
+# Three Hermes versions, for three questions:
+#   fleet   — the commit our stations run (hermes-fleet.ref). Does it work today?
+#   release — Hermes's latest release. Is the next upgrade safe?
+#   main    — Hermes's main branch. What is about to break?
+#
+# PRs and pushes run fleet and release. The nightly run adds main, and a
+# failure there opens (or updates) an issue, before any station is upgraded.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/hermes/**"
+      - ".github/workflows/hermes-plugin.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "integrations/hermes/**"
+      - ".github/workflows/hermes-plugin.yml"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: hermes-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: integrations/hermes/agentpod-live
+
+jobs:
+  unit:
+    name: hermes-plugin unit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Run unit tests
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: python -m unittest -v test_agentpod_live
+
+  contract:
+    name: hermes-plugin contract (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON((github.event_name == 'pull_request' || github.event_name == 'push') && '["fleet","release"]' || '["fleet","release","main"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve the Hermes ref
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "${{ matrix.target }}" in
+            fleet)   ref="$(tr -d '[:space:]' < "$PLUGIN_DIR/hermes-fleet.ref")" ;;
+            release) ref="$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)" ;;
+            main)    ref="main" ;;
+          esac
+          test -n "$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "Hermes ${{ matrix.target }}: $ref" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout Hermes
+        run: |
+          git clone --quiet --filter=blob:none https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes"
+          git -C "$RUNNER_TEMP/hermes" checkout --quiet "${{ steps.ref.outputs.ref }}"
+          git -C "$RUNNER_TEMP/hermes" log -1 --format='commit %H (%ad)' --date=short | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+
+      - name: Install Hermes
+        run: |
+          uv venv "$RUNNER_TEMP/venv"
+          VIRTUAL_ENV="$RUNNER_TEMP/venv" uv pip install --quiet -e "$RUNNER_TEMP/hermes[acp]"
+
+      - name: Run the contract
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: |
+          # Run from outside the Hermes checkout's cwd, as a gateway would,
+          # so project-local .hermes/plugins cannot leak in.
+          "$RUNNER_TEMP/venv/bin/python" contract/run_in_hermes.py
+
+  report:
+    name: hermes-plugin nightly report
+    needs: contract
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="agentpod-live: Hermes contract broken"
+          existing="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')"
+          body="The nightly contract run against Hermes failed: $RUN_URL
+
+          If only \`main\` failed, Hermes has changed something the plugin relies on and the next release will carry it. Fix the plugin before any station is upgraded. If \`fleet\` failed, stations running today are affected."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
