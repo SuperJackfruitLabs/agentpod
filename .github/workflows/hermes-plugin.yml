@@ -87,7 +87,7 @@ jobs:
           git -C "$RUNNER_TEMP/hermes" log -1 --format='commit %H (%ad)' --date=short | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.12"
 
