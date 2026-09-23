@@ -5,7 +5,7 @@ author: AgentPod
 requires_env:
   - MATRIX_HOMESERVER
   - MATRIX_ACCESS_TOKEN
-hooks:
+provides_hooks:
   - pre_llm_call
   - post_llm_call
   - on_stream_delta
