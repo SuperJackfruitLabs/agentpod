@@ -151,6 +151,7 @@ class MatrixHandler(BaseHTTPRequestHandler):
             MatrixHandler.sent.append({
                 "type": event_type,
                 "auth": self.headers.get("Authorization"),
+                "agent": self.headers.get("User-Agent") or "",
                 "messages": body.get("messages"),
             })
         data = b"{}"
@@ -276,6 +277,8 @@ def _check(sent: list) -> list[str]:
     expect(sent, "no sendToDevice reached the homeserver")
     for e in sent:
         expect(e["auth"] == "Bearer contract-token", f"{e['type']} was not sent with the agent's token")
+        expect(not e["agent"].startswith("Python-urllib"),
+               f"{e['type']} sent urllib's default User-Agent, which Cloudflare answers with 403")
         expect(list((e.get("messages") or {}).keys()) == [READER], f"{e['type']} was not addressed to the reader")
         expect(list((e.get("messages") or {}).get(READER, {}).keys()) == ["*"], f"{e['type']} did not target all devices")
 

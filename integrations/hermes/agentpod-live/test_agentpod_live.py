@@ -198,6 +198,31 @@ class SendFailureTest(unittest.TestCase):
         emitter.end("s1", "t1")
 
 
+class LoggingTest(unittest.TestCase):
+    def test_a_turn_logs_what_it_sent_and_why_it_skipped(self):
+        h = Harness()
+        with self.assertLogs(live.logger, "INFO") as logs:
+            h.emitter.begin("s0", "t0", "", READER)
+            h.emitter.begin("s1", "t1", ROOM, READER)
+            h.emitter.delta("s1", "t1", "A sentence that sends right away.", "text")
+            h.emitter.end("s1", "t1")
+        text = "\n".join(logs.output)
+        self.assertIn("not streaming turn t0: no room id", text)
+        self.assertIn("turn t1 sent stream=2", text)
+
+    def test_send_failures_are_warned_once_per_turn(self):
+        def boom(*_):
+            raise OSError("403 Forbidden")
+
+        emitter = live.LiveEmitter(boom, clock=Clock())
+        emitter.begin("s1", "t1", ROOM, READER)
+        emitter.delta("s1", "t1", "A sentence that tries to send.", "text")
+        with self.assertLogs(live.logger, "WARNING") as logs:
+            emitter.end("s1", "t1")
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("2 send(s) failed, first: dev.agentpod.stream.delta: 403 Forbidden", logs.output[0])
+
+
 class MatrixSenderTest(unittest.TestCase):
     def test_put_send_to_device_with_a_wildcard_device(self):
         seen = {}
@@ -206,6 +231,7 @@ class MatrixSenderTest(unittest.TestCase):
             def do_PUT(self):
                 seen["path"] = self.path
                 seen["auth"] = self.headers["Authorization"]
+                seen["agent"] = self.headers["User-Agent"]
                 seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 self.send_response(200)
                 self.end_headers()
@@ -222,6 +248,9 @@ class MatrixSenderTest(unittest.TestCase):
 
         self.assertTrue(seen["path"].startswith("/_matrix/client/v3/sendToDevice/dev.agentpod.stream.delta/"))
         self.assertEqual(seen["auth"], "Bearer tok")
+        # Cloudflare 403s urllib's default agent; see USER_AGENT.
+        self.assertFalse(seen["agent"].startswith("Python-urllib"), seen["agent"])
+        self.assertEqual(seen["agent"], live.USER_AGENT)
         self.assertEqual(seen["body"], {"messages": {READER: {"*": {"seq": 1}}}})
 
 

@@ -45,6 +45,11 @@ LIVE_DELTA_TYPE = "dev.agentpod.stream.delta"
 THOUGHT_DELTA_TYPE = "dev.agentpod.thought.delta"
 TOOL_UPDATE_TYPE = "dev.agentpod.tool.update"
 
+# Sent on every request. Not cosmetic: id.agentpod.dev sits behind Cloudflare,
+# which answers urllib's default `Python-urllib/3.x` with 403 (error 1010,
+# browser-signature ban). That cost the first live trial every event it sent.
+USER_AGENT = "agentpod-live/0.1.0 (Hermes plugin)"
+
 # Mirrors `live.ts`: a boundary with enough behind it goes at once; anything
 # else waits, until the backstop.
 MIN_DELTA_CHARS = 24
@@ -112,6 +117,10 @@ class _Turn:
     # Calls started without an id, per tool name, oldest first.
     anonymous: Dict[str, List[str]] = field(default_factory=dict)
     touched_at: float = 0.0
+    # What reached the homeserver, for the one log line a turn gets.
+    sent: Dict[str, int] = field(default_factory=dict)
+    failures: int = 0
+    first_error: str = ""
 
     @property
     def live_id(self) -> str:
@@ -169,10 +178,17 @@ class LiveEmitter:
     # Turn lifecycle ---------------------------------------------------------
 
     def begin(self, session_id: str, turn_id: str, room_id: str, reader: str) -> None:
-        if not session_id or not room_id.startswith("!") or not reader.startswith("@"):
+        skip = (
+            "no session id" if not session_id
+            else f"no room id (got {room_id!r})" if not room_id.startswith("!")
+            else f"no reader (got {reader!r})" if not reader.startswith("@")
+            else "the reader is the agent itself" if reader == self._own_user
+            else ""
+        )
+        if skip:
+            logger.info("agentpod-live: not streaming turn %s: %s", turn_id or session_id, skip)
             return
-        if reader == self._own_user:
-            return
+        logger.info("agentpod-live: streaming turn %s in %s to %s", turn_id or session_id, room_id, reader)
         previous = self._turns.get(session_id)
         if previous is not None:
             self._finish(previous)
@@ -196,6 +212,12 @@ class LiveEmitter:
         now = self._clock()
         self._emit_text(turn, turn.answer, LIVE_DELTA_TYPE, done=True, now=now)
         self._emit_text(turn, turn.thought, THOUGHT_DELTA_TYPE, done=True, now=now)
+        sent = ", ".join(f"{k.rsplit('.', 2)[-2]}={v}" for k, v in sorted(turn.sent.items())) or "nothing"
+        if turn.failures:
+            logger.warning("agentpod-live: turn %s sent %s; %d send(s) failed, first: %s",
+                           turn.live_id, sent, turn.failures, turn.first_error)
+        else:
+            logger.info("agentpod-live: turn %s sent %s", turn.live_id, sent)
 
     # Text -------------------------------------------------------------------
 
@@ -280,8 +302,11 @@ class LiveEmitter:
     def _deliver(self, turn: _Turn, event_type: str, content: Dict[str, Any]) -> None:
         try:
             self._send(event_type, turn.reader, content)
+            turn.sent[event_type] = turn.sent.get(event_type, 0) + 1
         except Exception as exc:
-            logger.debug("agentpod-live: could not send %s: %s", event_type, exc)
+            turn.failures += 1
+            if not turn.first_error:
+                turn.first_error = f"{event_type}: {exc}"
 
 
 # ─── Matrix ──────────────────────────────────────────────────────────────────
@@ -298,6 +323,7 @@ def matrix_sender(homeserver: str, access_token: str, timeout_s: float = 5.0) ->
         request = urllib.request.Request(url, data=body, method="PUT", headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         })
         with urllib.request.urlopen(request, timeout=timeout_s) as response:
             response.read()
@@ -360,6 +386,7 @@ def register(ctx: Any) -> None:
         return
 
     worker = _Worker(LiveEmitter(matrix_sender(homeserver, token), own_user=os.environ.get("MATRIX_USER_ID", "")))
+    logger.info("agentpod-live: registered; sending to %s", urllib.parse.urlsplit(homeserver).netloc or homeserver)
 
     def pre_llm_call(session_id: str = "", turn_id: str = "", platform: str = "", sender_id: str = "", **_: Any):
         if str(platform).lower() != "matrix":
