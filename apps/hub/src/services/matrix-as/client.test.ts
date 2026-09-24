@@ -440,3 +440,34 @@ describe("account data — the read-modify-write m.direct needs", () => {
     expect(calls[0]!.body).toEqual({ "@new:h": ["!r:h"] });
   });
 });
+
+describe("downloading media as an agent", () => {
+  test("uses authenticated media, as the agent, with the as_token", async () => {
+    replies.push({ status: 200, body: {} });
+    const bytes = await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123");
+    expect(bytes).not.toBeNull();
+    expect(calls[0]!.url).toBe(
+      `${HS}/_matrix/client/v1/media/download/id.agentpod.dev/Abc123?user_id=${encodeURIComponent(USER)}`
+    );
+    expect(calls[0]!.headers.Authorization).toBe(`Bearer ${AS_TOKEN}`);
+  });
+
+  test("falls back to the legacy path only when the new one is not there", async () => {
+    replies.push({ status: 404, body: { errcode: "M_UNRECOGNIZED" } }, { status: 200, body: {} });
+    const bytes = await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123");
+    expect(bytes).not.toBeNull();
+    expect(calls[1]!.url).toContain("/_matrix/media/v3/download/id.agentpod.dev/Abc123");
+  });
+
+  test("a refusal is not retried elsewhere, and is null rather than a throw", async () => {
+    replies.push({ status: 403, body: { errcode: "M_FORBIDDEN" } });
+    expect(await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123")).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("something that is not an mxc URL is not fetched at all", async () => {
+    expect(await client().downloadMedia(USER, "https://evil.example/x")).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+});
+

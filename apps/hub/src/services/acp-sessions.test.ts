@@ -2114,3 +2114,80 @@ test(
   },
   30_000
 );
+
+// ─── Images from a bridged room ─────────────────────────────────────────────
+//
+// 2026-09-24: an image sent to Krishna reached it as its file name. The room
+// side now fetches the picture; these pin the session side — the picture goes
+// as an ACP image block only to an agent that said, at `initialize`, that it
+// takes one, and the transcript never holds the bytes.
+
+const IMAGE = { mimeType: "image/png", data: "iVBORw0KGgo=", name: "map.png", bytes: 8 };
+
+function lastPrompt(fake: { agentReceived: Array<Record<string, unknown>> }) {
+  const prompts = fake.agentReceived.filter((m) => m.method === "session/prompt");
+  return (prompts.at(-1)?.params as { prompt: Array<Record<string, unknown>> } | undefined)?.prompt;
+}
+
+test(
+  "promptSession: an agent that accepts images gets the image as a block, before the words",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-yes", {
+      stationKey: "acp-image-yes",
+      promptCapabilities: { image: true },
+    });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      expect(lastPrompt(fake)).toEqual([
+        { type: "image", mimeType: "image/png", data: IMAGE.data },
+        { type: "text", text: "What region is this?" },
+      ]);
+
+      // The transcript names the image; it does not keep it.
+      const { all } = await pollForEvent(row.id, (e) => e.type === "user-prompt", 8000);
+      const payload = all.find((e) => e.type === "user-prompt")!.payload as Record<string, unknown>;
+      expect(payload.images).toEqual([{ name: "map.png", mimeType: "image/png", bytes: 8 }]);
+      expect(JSON.stringify(payload)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: an agent that never said it takes images gets a note, not a block it would refuse",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-no", {
+      stationKey: "acp-image-no",
+    });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("What region is this?");
+      expect(prompt[0]!.text).toContain("map.png");
+      expect(prompt[0]!.text).toContain("cannot view images");
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
