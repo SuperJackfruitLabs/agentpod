@@ -59,6 +59,7 @@ import { connectionManager } from "./connection-manager";
 import { recordAudit } from "./audit";
 import { openAcpWire, type AcpWire } from "./acp-transport";
 import * as broker from "./broker";
+import { nodes } from "../db/schema/nodes";
 import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
 
 const log = createLogger("acp-sessions");
@@ -980,6 +981,20 @@ export async function getSession(
 }
 
 /**
+ * Whether a node reads hub frames large enough for an image — it advertised
+ * "frames.large" in its last hello. Read at prompt time, not cached: a node
+ * that updates mid-session should get images from its next turn.
+ */
+async function nodeReadsLargeFrames(nodeId: string): Promise<boolean> {
+  const rows = await db
+    .select({ capabilities: nodes.capabilities })
+    .from(nodes)
+    .where(eq(nodes.id, nodeId));
+  const caps = rows[0]?.capabilities;
+  return Array.isArray(caps) && caps.includes("frames.large");
+}
+
+/**
  * Send one turn's prompt.
  *
  * `images` are the pictures that came with it — from a bridged room, today.
@@ -1039,6 +1054,20 @@ export async function promptSession(
     throw err;
   }
 
+  // Whether this turn's images can travel. Two things must be true: the agent
+  // said at `initialize` that it takes images, and its node reads frames that
+  // large. A node from before "frames.large" closes its whole hub connection
+  // on any frame over 32 KiB — every station on it, mid-turn — which is what
+  // the first image sent to Krishna did (ashram, 2026-09-24).
+  let imageRefusal: string | null = null;
+  if (images.length > 0) {
+    if (!live.acceptsImages) {
+      imageRefusal = "this agent cannot view images";
+    } else if (!(await nodeReadsLargeFrames(live.nodeId))) {
+      imageRefusal = "this agent's machine needs an AgentPod update before it can receive images";
+    }
+  }
+
   // Stale-turn guard: only the completion of the CURRENT turn may transition
   // status (a late response from a cancelled turn must not reset a new one).
   live.turnEpoch += 1;
@@ -1052,7 +1081,7 @@ export async function promptSession(
   agent
     .request("session/prompt", {
       sessionId: live.acpSessionId,
-      prompt: promptBlocks(text, images, live.acceptsImages),
+      prompt: promptBlocks(text, images, imageRefusal),
     })
     .then(async () => {
       if (isCurrentTurn()) {

@@ -192,6 +192,13 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		return err
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
+	// The library's default is 32 KiB, and a frame over it closes the whole
+	// connection. Every frame used to be small; then an image sent to an agent
+	// arrived as one ~2.7 MB ACP prompt, the read loop failed with "message
+	// too big: read limited at 32769 bytes", and the node dropped every
+	// station's connection mid-turn (ashram, 2026-09-24). The same generous
+	// finite cap the ACP proxy has used all along.
+	c.SetReadLimit(gatewayReadLimitBytes)
 
 	hello, _ := json.Marshal(HelloMsg{
 		Type:         "hello",
@@ -270,3 +277,10 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		}
 	}
 }
+
+// gatewayReadLimitBytes caps one inbound hub frame. Large enough for an ACP
+// prompt carrying an image (the hub caps images at 5 MB before base64), and
+// finite so a broken hub cannot exhaust a node's memory. Advertised to the hub
+// as the "frames.large" node capability.
+const gatewayReadLimitBytes = 32 << 20 // 32 MiB
+

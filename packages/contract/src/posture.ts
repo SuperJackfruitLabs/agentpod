@@ -58,7 +58,10 @@ export type PostureReport = z.infer<typeof PostureReport>;
  * refresh on every connect by construction — the staleness bug that station
  * capabilities needed an explicit fix for cannot occur here.
  */
-export const NodeCapability = z.enum(["posture"]);
+// "frames.large": the node reads hub frames far past the websocket default of
+// 32 KiB, so an ACP prompt carrying an image can be sent to it. A node without
+// it drops its connection on such a frame — see the hub's promptSession.
+export const NodeCapability = z.enum(["posture", "frames.large"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**
