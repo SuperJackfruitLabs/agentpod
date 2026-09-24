@@ -32,7 +32,7 @@ import { resolveMatrixId } from "../matrix-identity";
 import { principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
-  answerPermission } from "../acp-sessions";
+  answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
 import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
@@ -338,6 +338,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       },
       promptSession,
       answerPermission,
+      // The room queue's two questions: is a turn running, and when is it
+      // over. Without them a mid-turn message is refused, not held.
+      isBusy: sessionIsBusy,
+      whenIdle: (sessionId: string) => whenIdle(sessionId),
     },
     // The joint between inbound and outbound. Without it a session is created,
     // prompted, and answers into a stream nobody is listening to — which is
