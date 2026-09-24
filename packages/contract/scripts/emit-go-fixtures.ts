@@ -50,7 +50,7 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
     type: "hello",
     hostInfo: { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 },
     version: "v0.1.22",
-    capabilities: ["posture"],
+    capabilities: ["posture", "frames.large"],
   }],
 
   ["heartbeat", HeartbeatMsg, { type: "heartbeat", ts: 1786445000000 }],

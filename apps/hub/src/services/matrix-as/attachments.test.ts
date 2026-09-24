@@ -169,25 +169,25 @@ describe("promptBlocks", () => {
   const image: PromptImage = { mimeType: "image/png", data: "AAAA", name: "map.png", bytes: 3 };
 
   test("the image leads, the words follow", () => {
-    expect(promptBlocks("What is this?", [image], true)).toEqual([
+    expect(promptBlocks("What is this?", [image], null)).toEqual([
       { type: "image", mimeType: "image/png", data: "AAAA" },
       { type: "text", text: "What is this?" },
     ]);
   });
 
   test("a bare image is sent without an empty text block", () => {
-    expect(promptBlocks("", [image], true)).toEqual([
+    expect(promptBlocks("", [image], null)).toEqual([
       { type: "image", mimeType: "image/png", data: "AAAA" },
     ]);
   });
 
   test("plain text is unchanged from before", () => {
-    expect(promptBlocks("hello", [], true)).toEqual([{ type: "text", text: "hello" }]);
-    expect(promptBlocks("hello", [], false)).toEqual([{ type: "text", text: "hello" }]);
+    expect(promptBlocks("hello", [], null)).toEqual([{ type: "text", text: "hello" }]);
+    expect(promptBlocks("hello", [], "never used")).toEqual([{ type: "text", text: "hello" }]);
   });
 
   test("an agent that cannot view images gets a note, never a block it would refuse", () => {
-    expect(promptBlocks("What is this?", [image], false)).toEqual([
+    expect(promptBlocks("What is this?", [image], "this agent cannot view images")).toEqual([
       { type: "text", text: `What is this?\n${imageNote("map.png", "this agent cannot view images")}` },
     ]);
   });

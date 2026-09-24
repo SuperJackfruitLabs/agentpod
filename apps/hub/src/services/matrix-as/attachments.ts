@@ -197,16 +197,17 @@ export function imageNote(name: string, reason: string): string {
  * The ACP prompt for one turn: images first, then the words.
  *
  * Images lead because that is how a person sends them — the picture, then
- * "what is this?". An agent that did not say it accepts images gets a note
- * in the text instead of a block it would reject.
+ * "what is this?". `refusal` is why the images cannot be sent this time — the
+ * agent never said it takes them, or its node would drop a frame that large —
+ * and the agent then gets that reason in the text instead of a block.
  */
 export function promptBlocks(
   text: string,
   images: PromptImage[],
-  acceptsImages: boolean
+  refusal: string | null
 ): Array<{ type: "text"; text: string } | { type: "image"; mimeType: string; data: string }> {
-  if (!acceptsImages) {
-    const notes = images.map((image) => imageNote(image.name, "this agent cannot view images"));
+  if (refusal !== null) {
+    const notes = images.map((image) => imageNote(image.name, refusal));
     const joined = [text, ...notes].filter((part) => part.trim() !== "").join("\n");
     return [{ type: "text", text: joined }];
   }

@@ -12,7 +12,10 @@ import (
 // about a station. Sent in the hello frame on every connect, which is why node
 // capabilities cannot go stale the way station capabilities could — those were
 // written only at adoption and needed an explicit refresh to fix.
-var NodeCapabilities = []string{"posture"}
+// "frames.large": this node reads hub frames up to gatewayReadLimitBytes, so
+// the hub may send it an ACP prompt that carries an image. A node without it
+// closes its connection on any frame over 32 KiB.
+var NodeCapabilities = []string{"posture", "frames.large"}
 
 // postureHandler wraps an inner Handler and adds the node-level posture verb.
 type postureHandler struct {

@@ -48,6 +48,7 @@ import type { AcpEvent, DetectedStation } from "@agentpod/contract";
 // src/ imports — DB URL is already set above
 import { db, rawSql } from "../db/drizzle";
 import { acpSessions, acpEvents } from "../db/schema/acp";
+import { nodes } from "../db/schema/nodes";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeUnregistered } from "../../tests/helpers/wait";
@@ -2124,6 +2125,11 @@ test(
 
 const IMAGE = { mimeType: "image/png", data: "iVBORw0KGgo=", name: "map.png", bytes: 8 };
 
+/** Give a rig's node the capability a real node advertises in its hello. */
+async function nodeReadsLargeFrames(nodeId: string) {
+  await db.update(nodes).set({ capabilities: ["posture", "frames.large"] }).where(eq(nodes.id, nodeId));
+}
+
 function lastPrompt(fake: { agentReceived: Array<Record<string, unknown>> }) {
   const prompts = fake.agentReceived.filter((m) => m.method === "session/prompt");
   return (prompts.at(-1)?.params as { prompt: Array<Record<string, unknown>> } | undefined)?.prompt;
@@ -2137,6 +2143,7 @@ test(
       promptCapabilities: { image: true },
     });
     try {
+      await nodeReadsLargeFrames(station.nodeId);
       const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
 
@@ -2191,3 +2198,36 @@ test(
   },
   20_000
 );
+
+test(
+  "promptSession: a node that never said it reads large frames gets a note — an image would close its connection",
+  async () => {
+    // The adapter takes images; the node does not advertise "frames.large",
+    // as no node did before this fix. Sending the image anyway is what
+    // dropped ashram's whole hub connection on 2026-09-24.
+    const { server, fake, station } = await setupRig("acpsess-image-oldnode", {
+      stationKey: "acp-image-oldnode",
+      promptCapabilities: { image: true },
+    });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("needs an AgentPod update");
+      expect(JSON.stringify(prompt)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
