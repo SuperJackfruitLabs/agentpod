@@ -57,8 +57,15 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 	cmd.Dir = workspace
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Stderr is copied here, not by exec. exec's own copy finishes only at
+	// Wait, which runs after this function returns, so an error built when
+	// stdout closed could read the buffer before the adapter's explanation had
+	// arrived. stderrDone closes when the adapter's stderr reaches EOF.
 	var stderr synchronizedBuffer
-	cmd.Stderr = &stderr
+	errOut, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -72,6 +79,11 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 		in.Close()
 		return nil, err
 	}
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&stderr, errOut)
+		close(stderrDone)
+	}()
 	defer func() {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
 		finished := make(chan struct{})
@@ -166,6 +178,14 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 			return nil, fmt.Errorf("ACP output closed before discovery completed: %w", err)
 		case e, ok := <-events:
 			if !ok {
+				// Let the adapter finish explaining itself. Bounded, because a
+				// child that inherited stderr can hold it open after the
+				// adapter exits.
+				select {
+				case <-stderrDone:
+				case <-time.After(2 * time.Second):
+				case <-ctx.Done():
+				}
 				if summary := stderrSummary(); summary != "" {
 					return nil, fmt.Errorf("ACP output closed before discovery completed: %s", summary)
 				}

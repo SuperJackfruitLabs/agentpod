@@ -58,6 +58,27 @@ func TestDiscoverACPSkillCommandsRetainsAdapterStderrOnEarlyClose(t *testing.T) 
 	}
 }
 
+// The adapter's own explanation must survive when stdout closes before its
+// stderr is written. exec copied stderr on a goroutine that finishes only at
+// Wait, so an error built at stdout EOF could read an empty buffer: CI saw
+// "ACP output closed before discovery completed" with the reason missing. This
+// adapter closes stdout first and writes its refusal a moment later, which
+// made that race certain rather than occasional.
+func TestDiscoverACPSkillCommandsWaitsForStderrAfterStdoutCloses(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := filepath.Join(t.TempDir(), "adapter")
+	script := "#!/bin/bash\nexec 1>&-\nsleep 0.3\necho 'unsupported offline provider' >&2\nexit 1\n"
+	if err := os.WriteFile(adapter, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := discoverACPSkillCommands(context.Background(), []string{adapter}, workspace, []string{"PATH=" + os.Getenv("PATH")}, func(name string) (string, bool) {
+		return name, true
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported offline provider") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 // The inventory bound is applied at its call site and relies on a shorter
 // caller deadline dominating the 45s this function applies internally. If that
 // ever stopped holding, a cold adapter start would again outlive the hub's
