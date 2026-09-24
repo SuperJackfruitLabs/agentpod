@@ -41,6 +41,11 @@ func (b *synchronizedBuffer) String() string {
 // new session advertises. It never creates a prompt or supplies client tools.
 // Callers establish each harness's version, authentication, and environment
 // evidence before selecting this probe.
+// acpDiscoveryBeforeFirstWrite runs just before discovery sends initialize. A
+// no-op in production; a test uses it to let the adapter exit first, which is
+// otherwise a race the test cannot win on purpose.
+var acpDiscoveryBeforeFirstWrite = func() {}
+
 func discoverACPSkillCommands(ctx context.Context, argv []string, workspace string, env []string, normalize func(string) (string, bool)) ([]string, error) {
 	if len(argv) == 0 || argv[0] == "" || !filepath.IsAbs(argv[0]) || !filepath.IsAbs(workspace) {
 		return nil, fmt.Errorf("invalid ACP discovery scope")
@@ -149,6 +154,25 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 		}
 		return message
 	}
+	// earlyClose reports an adapter that went away before discovery finished,
+	// whichever side noticed first: stdout reaching EOF, or a write into a
+	// stdin nobody reads any more. Either way the adapter's own reason is on
+	// stderr, possibly still in flight, so wait for it -- bounded, because a
+	// child that inherited stderr can hold it open after the adapter exits.
+	earlyClose := func(cause error) error {
+		select {
+		case <-stderrDone:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+		if summary := stderrSummary(); summary != "" {
+			return fmt.Errorf("ACP output closed before discovery completed: %s", summary)
+		}
+		if cause != nil {
+			return fmt.Errorf("ACP output closed before discovery completed: %w", cause)
+		}
+		return fmt.Errorf("ACP output closed before discovery completed")
+	}
 	write := func(id int, method string, params any) error {
 		frame, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 		if err != nil {
@@ -157,8 +181,9 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 		_, err = in.Write(append(frame, '\n'))
 		return err
 	}
+	acpDiscoveryBeforeFirstWrite()
 	if err := write(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}, "clientInfo": map[string]string{"name": "agentpod-native-skill-verifier", "version": "1"}}); err != nil {
-		return nil, err
+		return nil, earlyClose(err)
 	}
 	responses := map[float64]bool{}
 	sessionRequested := false
@@ -178,18 +203,7 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 			return nil, fmt.Errorf("ACP output closed before discovery completed: %w", err)
 		case e, ok := <-events:
 			if !ok {
-				// Let the adapter finish explaining itself. Bounded, because a
-				// child that inherited stderr can hold it open after the
-				// adapter exits.
-				select {
-				case <-stderrDone:
-				case <-time.After(2 * time.Second):
-				case <-ctx.Done():
-				}
-				if summary := stderrSummary(); summary != "" {
-					return nil, fmt.Errorf("ACP output closed before discovery completed: %s", summary)
-				}
-				return nil, fmt.Errorf("ACP output closed before discovery completed")
+				return nil, earlyClose(nil)
 			}
 			if e.Method != "" && e.ID != nil {
 				return nil, fmt.Errorf("ACP requested an unsupported client action")
@@ -207,7 +221,7 @@ func discoverACPSkillCommands(ctx context.Context, argv []string, workspace stri
 				// after initialization is acknowledged.
 				if id == 1 && !sessionRequested {
 					if err := write(2, "session/new", map[string]any{"cwd": workspace, "mcpServers": []any{}}); err != nil {
-						return nil, err
+						return nil, earlyClose(err)
 					}
 					sessionRequested = true
 				}

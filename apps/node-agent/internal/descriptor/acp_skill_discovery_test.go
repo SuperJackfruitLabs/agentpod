@@ -79,6 +79,29 @@ func TestDiscoverACPSkillCommandsWaitsForStderrAfterStdoutCloses(t *testing.T) {
 	}
 }
 
+// The other early close: the adapter is gone before discovery writes its first
+// request, so the write fails with a broken pipe. That path returned the raw
+// write error and dropped the adapter's reason (CI on #552 after #558). This
+// adapter closes stdin, states its refusal on stderr, and exits a moment later,
+// which makes the broken pipe certain.
+func TestDiscoverACPSkillCommandsKeepsStderrWhenTheFirstWriteFails(t *testing.T) {
+	workspace := t.TempDir()
+	adapter := filepath.Join(t.TempDir(), "adapter")
+	script := "#!/bin/bash\nexec 0<&-\necho 'unsupported offline provider' >&2\nsleep 0.3\nexit 1\n"
+	if err := os.WriteFile(adapter, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Hold the first write until the adapter has closed stdin, so it fails.
+	acpDiscoveryBeforeFirstWrite = func() { time.Sleep(150 * time.Millisecond) }
+	t.Cleanup(func() { acpDiscoveryBeforeFirstWrite = func() {} })
+	_, err := discoverACPSkillCommands(context.Background(), []string{adapter}, workspace, []string{"PATH=" + os.Getenv("PATH")}, func(name string) (string, bool) {
+		return name, true
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported offline provider") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 // The inventory bound is applied at its call site and relies on a shorter
 // caller deadline dominating the 45s this function applies internally. If that
 // ever stopped holding, a cold adapter start would again outlive the hub's
