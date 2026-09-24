@@ -35,6 +35,7 @@ import {
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
+import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "./attachments";
 
 const log = createLogger("matrix-inbound");
 
@@ -72,6 +73,12 @@ export interface InboundDeps {
   };
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+    /**
+     * Fetch media as `userId`. Optional so a relay-only deployment, and the
+     * tests that predate images, still type-check; without it an image
+     * reaches the agent as a note saying it could not be fetched.
+     */
+    downloadMedia?(userId: string, mxc: string): Promise<Uint8Array | null>;
   };
   acp: {
     createSession(input: {
@@ -79,7 +86,12 @@ export interface InboundDeps {
       userId: string;
       mode: string;
     }): Promise<{ id: string }>;
-    promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+    promptSession(
+      userId: string,
+      sessionId: string,
+      text: string,
+      images?: PromptImage[]
+    ): Promise<void>;
     /**
      * Answer a permission request the agent is parked on. Optional so a
      * deployment (or a test) that only relays messages still type-checks.
@@ -273,10 +285,20 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     return;
   }
 
-  const text = typeof event.content?.body === "string" ? event.content.body : "";
+  // An image's `body` is its file name, not something the sender said — the
+  // bridge used to send that name as the whole message, and the agent could
+  // only guess at a picture it never received (2026-09-24). Its words are the
+  // caption, if there is one; the picture itself is fetched below, once the
+  // room and the agent speaking in it are known.
+  const image = imageSource(event.content);
+  const text = image
+    ? image.caption
+    : typeof event.content?.body === "string"
+      ? event.content.body
+      : "";
   // Whitespace is not a prompt. Sending one would start a turn with nothing in
-  // it and cost an agent a round trip to say so.
-  if (text.trim() === "") return;
+  // it and cost an agent a round trip to say so. A bare image is not nothing.
+  if (text.trim() === "" && !image) return;
 
   const room = await roomContext(event.room_id);
   // A room we do not own is not ours to answer in — anyone can invite the bot
@@ -439,6 +461,28 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     deps.attach(sessionId, room.roomId, agentUser);
     if (event.event_id) deps.noteTrigger?.(sessionId, event.event_id);
 
+    // The picture, fetched as the agent — a member of the room, so allowed to
+    // read what was posted in it — and decrypted when the room is encrypted.
+    // One that cannot be had still reaches the agent, as a note saying why,
+    // rather than as a file name it would try to interpret.
+    let prompt = text;
+    const images: PromptImage[] = [];
+    if (image) {
+      const download = deps.client.downloadMedia;
+      const loaded = download
+        ? await loadImage(image, (mxc) => download(agentUser, mxc))
+        : { reason: "this hub cannot fetch images" };
+      if (isRefusal(loaded)) {
+        log.warn("an image for an agent could not be passed on", {
+          room: room.roomId,
+          reason: loaded.reason,
+        });
+        prompt = [text, imageNote(image.name, loaded.reason)].filter((p) => p.trim() !== "").join("\n");
+      } else {
+        images.push(loaded);
+      }
+    }
+
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
     // The owner again, not the principal: `promptSession` resolves the live
@@ -447,7 +491,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     // "Session not found or not active." The same defect as the station
     // lookup, one call later; it survived the first fix because only the
     // createSession site was corrected.
-    await deps.acp.promptSession(room.stationUserId, sessionId, text);
+    await deps.acp.promptSession(room.stationUserId, sessionId, prompt, images);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
     log.error("matrix message could not reach the station", {

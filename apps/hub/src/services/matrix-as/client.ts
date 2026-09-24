@@ -236,6 +236,14 @@ export interface MatrixClient {
   getAvatar(userId: string): Promise<string | null>;
   /** Upload an image and return its mxc:// URL. */
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
+  /**
+   * Download media as `userId`, or null when the homeserver will not give it.
+   *
+   * For an image sent to an agent: the agent is a member of the room and so
+   * may read what was posted in it. The bytes are ciphertext for an encrypted
+   * room — `attachments.decryptAttachment` makes them an image.
+   */
+  downloadMedia(userId: string, mxc: string): Promise<Uint8Array | null>;
 }
 
 /**
@@ -706,6 +714,26 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       if (!res.ok) return null;
       const body = (await res.json()) as { content_uri?: string };
       return body.content_uri ?? null;
+    },
+
+    async downloadMedia(userId, mxc) {
+      const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(mxc);
+      if (!parsed) return null;
+      const path = `${encodeURIComponent(parsed[1]!)}/${encodeURIComponent(parsed[2]!)}`;
+      // Authenticated media (Matrix 1.11) first: current homeservers serve new
+      // uploads only there. The unauthenticated path is the fallback for one
+      // that predates it.
+      for (const base of ["/_matrix/client/v1/media/download/", "/_matrix/media/v3/download/"]) {
+        const res = await doFetch(asUser(`${base}${path}`, userId), {
+          method: "GET",
+          headers: { Authorization: `Bearer ${deps.asToken}` },
+        });
+        if (res.ok) return new Uint8Array(await res.arrayBuffer());
+        // Only "this endpoint is not here" earns the second try. A 403 or a
+        // missing file is the same answer on both paths.
+        if (res.status !== 404 && res.status !== 400) return null;
+      }
+      return null;
     },
 
     async getAvatar(userId) {

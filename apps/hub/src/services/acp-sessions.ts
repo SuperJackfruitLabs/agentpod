@@ -59,6 +59,7 @@ import { connectionManager } from "./connection-manager";
 import { recordAudit } from "./audit";
 import { openAcpWire, type AcpWire } from "./acp-transport";
 import * as broker from "./broker";
+import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
 
 const log = createLogger("acp-sessions");
 
@@ -191,6 +192,13 @@ interface LiveSession {
    */
   instanceEchoed: boolean | null;
   graceTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * Whether the agent said, at `initialize`, that it accepts image blocks
+   * (`agentCapabilities.promptCapabilities.image`). False until it says so:
+   * an image sent to an agent that never offered to take one is a turn it
+   * fails, where a note in the text is a turn it can answer.
+   */
+  acceptsImages: boolean;
 }
 
 /** Live sessions per station — one-to-many since slice 4b. */
@@ -753,6 +761,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     nodeSessionId: null,
     instanceEchoed: null,
     graceTimer: null,
+    acceptsImages: false,
   };
   // Register before any await so siblings (and the layers above) can see this
   // session while it is starting. Every failure exit below MUST run
@@ -816,7 +825,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
       () => void handleWireClosed(live, "wire error")
     );
 
-    await withDeadline(
+    const initialized = await withDeadline(
       connection.agent.request("initialize", {
         protocolVersion: PROTOCOL_VERSION,
         clientCapabilities: {},
@@ -825,6 +834,11 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
       handshakeTimeoutMs,
       HANDSHAKE_TIMEOUT_MESSAGE
     );
+    // Read, not assumed: every adapter probed on 2026-09-24 says yes, and
+    // the one that someday says no should get a note instead of a failed turn.
+    live.acceptsImages =
+      (initialized as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } } | undefined)
+        ?.agentCapabilities?.promptCapabilities?.image === true;
     const created = await withDeadline(
       connection.agent.request("session/new", {
         // The SDK requires an absolute cwd; the station workspace is the
@@ -965,10 +979,20 @@ export async function getSession(
   return rows[0] ? toContract(rows[0]) : null;
 }
 
+/**
+ * Send one turn's prompt.
+ *
+ * `images` are the pictures that came with it — from a bridged room, today.
+ * They go to the agent as ACP image blocks when it accepts them, and as a
+ * note in the text when it does not. The transcript records each image's
+ * name, type and size, never its bytes: `acp_events` is a log, not a store
+ * of everything anyone ever sent an agent.
+ */
 export async function promptSession(
   userId: string,
   sessionId: string,
-  text: string
+  text: string,
+  images: PromptImage[] = []
 ): Promise<void> {
   const live = requireLive(userId, sessionId);
   if (live.status !== "idle") {
@@ -981,11 +1005,16 @@ export async function promptSession(
   // COALESCE is what makes "first" mean first: an existing title always wins,
   // so a long conversation keeps the label the user recognises no matter how
   // many prompts follow (and a whitespace-only prompt sets nothing at all).
-  const title = deriveSessionTitle(text);
+  const title = deriveSessionTitle(text || images[0]?.name || "");
   const { done: promptWritten } = persistEvent(
     live,
     "user-prompt",
-    { text },
+    images.length === 0
+      ? { text }
+      : {
+          text,
+          images: images.map(({ name, mimeType, bytes }) => ({ name, mimeType, bytes })),
+        },
     title === null ? {} : { title: sql`COALESCE(${acpSessions.title}, ${title})` }
   );
   const { done: statusWritten } = setStatus(live, "working");
@@ -1000,7 +1029,7 @@ export async function promptSession(
       nodeId: live.nodeId,
       stationKey: live.stationKey,
       verb: "acp.prompt",
-      params: { chars: text.length },
+      params: images.length === 0 ? { chars: text.length } : { chars: text.length, images: images.length },
     });
   } catch (err) {
     persistEvent(live, "error", {
@@ -1023,7 +1052,7 @@ export async function promptSession(
   agent
     .request("session/prompt", {
       sessionId: live.acpSessionId,
-      prompt: [{ type: "text", text }],
+      prompt: promptBlocks(text, images, live.acceptsImages),
     })
     .then(async () => {
       if (isCurrentTurn()) {

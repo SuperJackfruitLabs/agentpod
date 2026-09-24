@@ -86,6 +86,12 @@ export interface FakeAcpNodeOpts {
    * Mutable — clear it between createSession attempts to let one succeed.
    */
   hangHandshake?: "initialize" | "session/new";
+  /**
+   * What the scripted agent says it accepts at `initialize`
+   * (`agentCapabilities.promptCapabilities`). Absent: says nothing, as the
+   * fake always did — which the hub must read as "no images".
+   */
+  promptCapabilities?: Record<string, boolean>;
 }
 
 /** One scripted agent process, as spawned by an `acp.open`. */
@@ -342,7 +348,12 @@ export async function connectFakeAcpNode(
       sendAgent(proc, {
         jsonrpc: "2.0",
         id,
-        result: { protocolVersion: 1, agentCapabilities: {} },
+        result: {
+          protocolVersion: 1,
+          agentCapabilities: opts.promptCapabilities
+            ? { promptCapabilities: opts.promptCapabilities }
+            : {},
+        },
       });
     } else if (method === "session/new") {
       if (opts.hangHandshake === "session/new") return; // wedged agent
