@@ -46,6 +46,7 @@ export const REACH_BEARING: Record<Capability, boolean> = {
   "skills.inventory": false, // metadata only; installation is a separate capability
   "skills.manage": true, // plan/apply persist packages that can extend an agent
   "skills.native": true, // native placement changes harness-visible project files
+  "plugins.manage": true, // installs code the harness loads into every turn
   lifecycle: false, // operating an agent, not widening it
   acp: false, // dispatch — mayDispatch already guards it
   inventory: false,

@@ -109,6 +109,17 @@ var commands = []struct {
 			"after either change before the hub can observe the new capability.",
 	},
 	{
+		name: "plugin-management", group: "Node",
+		oneline: "Show, enable or disable Console plugin management on this node",
+		detail: "apn plugin-management <status|enable|disable> — let the Console install and\n" +
+			"remove the agentpod-live plugin in this node's Hermes profiles.\n\n" +
+			"Each change is planned on the node, reviewed in the Console and applied only\n" +
+			"if the profile still matches the review; the node probes Hermes's version\n" +
+			"itself. It is disabled by default. `enable` and `disable` update only this\n" +
+			"node's local configuration; restart the node service after either change.\n" +
+			"Nothing here restarts a gateway.",
+	},
+	{
 		name: "hermes-skills", group: "Node",
 		oneline: "Register or remove the managed skills directory in a Hermes profile",
 		detail: "apn hermes-skills <status|register|unregister> --profile NAME [--apply] —\n" +

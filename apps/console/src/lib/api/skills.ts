@@ -24,7 +24,7 @@ const post = (body: unknown): RequestInit => ({
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
-function checkedOperation(stationId: string, data: unknown, id?: string) {
+export function checkedOperation(stationId: string, data: unknown, id?: string) {
   const operation = SkillHubOperation.parse(data);
   if (operation.stationId !== stationId)
     throw new Error("Operation belongs to a different station");
@@ -38,7 +38,7 @@ function checkedOperation(stationId: string, data: unknown, id?: string) {
         plan.binding.nodeId !== operation.nodeId ||
         plan.binding.stationKey !== operation.stationKey ||
         plan.binding.harness !== operation.harness ||
-        plan.binding.profile !== operation.profile)
+        ("plugin" in plan.binding ? plan.binding.plugin : plan.binding.profile) !== operation.profile)
     )
       throw new Error("Plan identity does not match its operation");
   }

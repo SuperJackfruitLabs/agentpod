@@ -72,3 +72,37 @@ func TestNativeSkillCapabilityRequiresExplicitOperatorEnablementAndReadinessProv
 		t.Fatal("native management advertised without a readiness provider")
 	}
 }
+
+func TestPluginCapabilityIsHermesOnlyAndOperatorEnabled(t *testing.T) {
+	workspace := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "hermes", stations: []Station{{Key: "hermes:fixture", Harness: "hermes", WorkspacePath: &workspace}}})
+	reg.Register(&fakeDescriptor{harness: "codex", stations: []Station{{Key: "codex:fixture", Harness: "codex", WorkspacePath: &workspace}}})
+	advertised := func() []string {
+		var keys []string
+		for _, s := range reg.DetectAll() {
+			if slices.Contains(s.Capabilities, "plugins.manage") {
+				keys = append(keys, s.Key)
+			}
+		}
+		return keys
+	}
+	if got := advertised(); len(got) != 0 {
+		t.Fatalf("plugin management advertised without operator enablement: %v", got)
+	}
+	if _, err := reg.PluginProfileDir(t.Context(), "hermes:fixture"); err == nil {
+		t.Fatal("a profile resolved without operator enablement")
+	}
+	reg.EnablePluginManagement()
+	if got := advertised(); len(got) != 1 || got[0] != "hermes:fixture" {
+		t.Fatalf("plugin management advertised on %v", got)
+	}
+	if dir, err := reg.PluginProfileDir(t.Context(), "hermes:fixture"); err != nil || dir != workspace {
+		t.Fatalf("profile = %q, %v", dir, err)
+	}
+	for _, key := range []string{"codex:fixture", "hermes:absent"} {
+		if _, err := reg.PluginProfileDir(t.Context(), key); err == nil {
+			t.Fatalf("%s resolved", key)
+		}
+	}
+}

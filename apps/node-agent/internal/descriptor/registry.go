@@ -11,6 +11,7 @@ type Registry struct {
 	descriptors           map[string]Descriptor
 	skillManagement       bool
 	nativeSkillManagement bool
+	pluginManagement      bool
 }
 
 // NewRegistry returns an empty Registry.
@@ -40,6 +41,9 @@ func (r *Registry) DetectAll() []Station {
 				}
 				if r.nativeSkillManagement && managed && native && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.native")
+				}
+				if r.pluginManagement && d.Harness() == PluginManagementHarness && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+					station.Capabilities = append(append([]string(nil), station.Capabilities...), "plugins.manage")
 				}
 				all = append(all, station)
 			}
