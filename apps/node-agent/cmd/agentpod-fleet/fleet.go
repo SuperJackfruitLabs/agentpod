@@ -66,6 +66,8 @@ func fleetCmd(args []string) {
 		fleetSkills(args[1:])
 	case "devices":
 		fleetDevices(args[1:])
+	case "update":
+		fleetUpdate(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], helpText(version))
 		os.Exit(2)

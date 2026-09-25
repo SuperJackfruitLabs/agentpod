@@ -588,3 +588,19 @@ func TestUpdate(t *testing.T) {
 		}
 	})
 }
+
+// The asset a self-update fetches must be the binary DOING the updating, never a fixed name.
+//
+// This is the property that lets `fleet update` exist at all. `cmd/agentpod-fleet`'s
+// TestCarriesNoNodeVerbs forbids the node-acting verbs there, and `update` sat in that list
+// because an update built on a hardcoded `agentpod-node-…` asset would have had the fleet binary
+// download the NODE binary — a worker turning itself into a node, which is exactly what that
+// split exists to prevent. Bound to the caller, the objection disappears: fleet fetches fleet.
+func TestAssetNameIsBoundToTheCallingBinary(t *testing.T) {
+	if got := assetNameFor("agentpod-fleet", "linux", "amd64"); got != "agentpod-fleet-linux-amd64" {
+		t.Errorf("got %q want agentpod-fleet-linux-amd64", got)
+	}
+	if got := assetNameFor("agentpod-node", "darwin", "arm64"); got != "agentpod-node-darwin-arm64" {
+		t.Errorf("got %q want agentpod-node-darwin-arm64", got)
+	}
+}

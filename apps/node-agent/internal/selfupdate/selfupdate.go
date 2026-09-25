@@ -28,6 +28,9 @@ var ErrRestartFailed = errors.New("selfupdate: service restart failed")
 
 // Options configures an Update call. Zero values are replaced with safe defaults.
 type Options struct {
+	// Binary is the released binary to fetch and replace. Empty means
+	// DefaultBinary, so existing callers keep updating the node agent.
+	Binary         string
 	CurrentVersion string
 	Force          bool
 	CheckOnly      bool
@@ -69,9 +72,25 @@ func parseSHA256SUMS(data []byte, asset string) (string, error) {
 	return "", fmt.Errorf("selfupdate: asset %q not found in SHA256SUMS", asset)
 }
 
-// assetName returns the release asset filename for the given GOOS/GOARCH.
+// DefaultBinary is the binary a zero-valued Options updates, preserving the
+// behaviour of every caller written before Options carried a name.
+const DefaultBinary = "agentpod-node"
+
+// assetNameFor returns the release asset filename for one binary on a given
+// GOOS/GOARCH.
+//
+// Bound to the binary doing the updating rather than fixed, because the fixed
+// form made an update verb unsafe to give `agentpod-fleet`: it would have
+// fetched `agentpod-node-…` and replaced the fleet binary with a node,
+// which is precisely the split `cmd/agentpod-fleet`'s TestCarriesNoNodeVerbs
+// exists to hold. Fleet now fetches fleet.
+func assetNameFor(binary, goos, goarch string) string {
+	return fmt.Sprintf("%s-%s-%s", binary, goos, goarch)
+}
+
+// assetName returns the release asset filename for the node agent.
 func assetName(goos, goarch string) string {
-	return fmt.Sprintf("agentpod-node-%s-%s", goos, goarch)
+	return assetNameFor(DefaultBinary, goos, goarch)
 }
 
 // releaseRepo is the GitHub repository every release URL is built from.
@@ -143,7 +162,10 @@ func downloadAndVerify(ctx context.Context, client *http.Client, dlBase, tag, as
 	}
 
 	// Create temp file before downloading so we can clean it up on any error.
-	tmp, err := os.CreateTemp(destDir, "agentpod-node-*.tmp")
+	// Named after the asset so a leftover names the update that produced it:
+	// a developer's ~/.local/bin was found holding agentpod-node-*.tmp files
+	// with no way to tell which run had abandoned them.
+	tmp, err := os.CreateTemp(destDir, asset+"-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("selfupdate: create temp: %w", err)
 	}
@@ -284,7 +306,11 @@ func applyTag(ctx context.Context, opts Options, tag string) (Result, error) {
 	}
 	targetDir := filepath.Dir(targetPath)
 
-	asset := assetName(runtime.GOOS, runtime.GOARCH)
+	binary := opts.Binary
+	if binary == "" {
+		binary = DefaultBinary
+	}
+	asset := assetNameFor(binary, runtime.GOOS, runtime.GOARCH)
 
 	tmpPath, err := downloadAndVerify(ctx, opts.HTTPClient, opts.DLBase, tag, asset, targetDir)
 	if err != nil {
