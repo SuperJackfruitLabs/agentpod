@@ -17,23 +17,42 @@ import (
 // session. A bounded, single-line version is diagnostic evidence, not a native
 // loading claim.
 func nativeExecutableVersion(ctx context.Context, binary string) string {
+	return nativeExecutableVersionProbe(ctx, binary).Version
+}
+
+// nativeExecutableVersionProbe is nativeExecutableVersion with its outcome: a
+// query that timed out is retried once and, if it times out again, reported as
+// undetermined rather than as a missing or unsupported harness.
+func nativeExecutableVersionProbe(ctx context.Context, binary string) VersionProbe {
 	if !filepath.IsAbs(binary) || !isExecutableFile(binary) {
-		return ""
+		return VersionProbe{Status: VersionAbsent, Reason: "The executable is not an absolute path to an executable file"}
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	// Through harnessCommand, which puts the binary's own directory on PATH:
-	// a harness binary is frequently a script whose interpreter lives beside
-	// it, and a service-started node inherits a PATH without that directory.
-	out, err := harnessCommand(ctx, binary, "--version").Output()
-	if err != nil {
-		return ""
+	return probeVersion(ctx, 3*time.Second, func(ctx context.Context) (string, error) {
+		// Through harnessCommand, which puts the binary's own directory on PATH:
+		// a harness binary is frequently a script whose interpreter lives beside
+		// it, and a service-started node inherits a PATH without that directory.
+		out, err := harnessCommand(ctx, binary, "--version").Output()
+		if err != nil {
+			return "", err
+		}
+		version := strings.TrimSpace(string(out))
+		if len(version) == 0 || len(version) > 128 || strings.ContainsAny(version, "\r\n\x00") {
+			return "", fmt.Errorf("the version output is not a single short line")
+		}
+		return version, nil
+	})
+}
+
+// versionUnavailableReason words a failed version probe for a readiness
+// refusal. A timeout says "ask again"; it never says the harness is missing.
+func versionUnavailableReason(subject string, probe VersionProbe) string {
+	if probe.TimedOut {
+		return subject + " version could not be determined in time (the query timed out twice); this is undetermined, not missing, so ask again"
 	}
-	version := strings.TrimSpace(string(out))
-	if len(version) == 0 || len(version) > 128 || strings.ContainsAny(version, "\r\n\x00") {
-		return ""
+	if probe.Reason != "" {
+		return subject + " version is unavailable: " + probe.Reason
 	}
-	return version
+	return subject + " version is unavailable"
 }
 
 // Versions whose fresh isolated ACP session was observed advertising a skill
@@ -93,9 +112,10 @@ func (o *openCodeDescriptor) NativeSkillReadiness(ctx context.Context, key strin
 		return result, nil
 	}
 	result.AdapterPath = binary
-	result.EngineVersion = nativeExecutableVersion(ctx, binary)
+	versionProbe := nativeExecutableVersionProbe(ctx, binary)
+	result.EngineVersion = versionProbe.Version
 	if result.EngineVersion == "" {
-		result.Reason = "Selected OpenCode version is unavailable"
+		result.Reason = versionUnavailableReason("Selected OpenCode", versionProbe)
 	} else if !openCodeDiscoveryEvidence[result.EngineVersion] {
 		result.Reason = fmt.Sprintf("OpenCode %s has no recorded native ACP discovery evidence; supported versions are %s", result.EngineVersion, openCodeSupportedVersions())
 	} else if running, note := o.nativeProcessRunning(); note != "" {
@@ -192,12 +212,17 @@ func (p *piDescriptor) NativeSkillReadiness(ctx context.Context, key string) (Na
 		return result, nil
 	}
 	result.AdapterPath = adapter
-	result.EngineVersion = nativeExecutableVersion(ctx, engine)
+	engineProbe := nativeExecutableVersionProbe(ctx, engine)
+	result.EngineVersion = engineProbe.Version
 	if resolved, err := filepath.EvalSymlinks(adapter); err == nil {
 		result.AdapterVersion = packageVersionInParents(resolved, "pi-acp")
 	}
-	if result.EngineVersion == "" || result.AdapterVersion == "" {
-		result.Reason = "Selected Pi engine or pi-acp package version is unavailable"
+	if result.EngineVersion == "" {
+		result.Reason = versionUnavailableReason("Selected Pi engine", engineProbe)
+		return result, nil
+	}
+	if result.AdapterVersion == "" {
+		result.Reason = "Selected pi-acp package version is unavailable"
 		return result, nil
 	}
 	// This engine is the one whose fresh isolated session was observed
@@ -290,11 +315,13 @@ func (o *openclawDescriptor) NativeSkillReadiness(ctx context.Context, key strin
 	if resolved, err := filepath.EvalSymlinks(binary); err == nil {
 		result.EngineVersion = packageVersionInParents(resolved, "openclaw")
 	}
+	versionProbe := VersionProbe{Status: VersionKnown}
 	if result.EngineVersion == "" {
-		result.EngineVersion = nativeExecutableVersion(ctx, binary)
+		versionProbe = nativeExecutableVersionProbe(ctx, binary)
+		result.EngineVersion = versionProbe.Version
 	}
 	if result.EngineVersion == "" {
-		result.Reason = "Selected OpenClaw version is unavailable"
+		result.Reason = versionUnavailableReason("Selected OpenClaw", versionProbe)
 	} else if o.gatewayURL != "" {
 		// A CONFIGURED REMOTE gateway is authoritative for its own inventory
 		// and, per OpenClaw's own documentation, "never falls back to

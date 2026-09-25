@@ -54,9 +54,10 @@ func (c *claudeCodeDescriptor) NativeSkillReadiness(ctx context.Context, key str
 		result.Reason = "The claude CLI is unresolved, so the engine a session would start has no identity"
 		return result, nil
 	}
-	result.EngineVersion = nativeRuntimeVersion(ctx, claude)
+	claudeProbe := nativeRuntimeVersionProbe(ctx, claude)
+	result.EngineVersion = claudeProbe.Version
 	if result.EngineVersion == "" {
-		result.Reason = "The claude CLI version is unavailable"
+		result.Reason = versionUnavailableReason("The claude CLI", claudeProbe)
 		return result, nil
 	}
 	// The pair below is the one an isolated fresh-session probe was run
@@ -108,9 +109,12 @@ func (h *hermesDescriptor) NativeSkillReadiness(ctx context.Context, key string)
 		return result, nil
 	}
 	result.AdapterPath = binary
-	result.EngineVersion = nativeRuntimeVersion(ctx, binary)
+	// Read from the installed package, not from `hermes --version`, which
+	// checks for updates over the network before it answers.
+	hermesProbe := hermesVersionOf(ctx, binary)
+	result.EngineVersion = hermesProbe.Version
 	if result.EngineVersion == "" {
-		result.Reason = "The Hermes version is unavailable, so the runtime a session would use has no identity"
+		result.Reason = versionUnavailableReason("The Hermes", hermesProbe) + ", so the runtime a session would use has no identity"
 		return result, nil
 	}
 	// The version below is the one a disposable profile was probed on: a skill
@@ -118,7 +122,7 @@ func (h *hermesDescriptor) NativeSkillReadiness(ctx context.Context, key string)
 	// skills.external_dirs named it, and as enabled afterwards. Another
 	// version has no such evidence and stays closed rather than being assumed
 	// equivalent.
-	if !strings.Contains(result.EngineVersion, "0.21.3") {
+	if result.EngineVersion != "0.21.3" {
 		result.Reason = fmt.Sprintf("Hermes %s has no recorded native placement evidence", result.EngineVersion)
 		return result, nil
 	}
@@ -137,11 +141,20 @@ func (h *hermesDescriptor) NativeSkillReadiness(ctx context.Context, key string)
 }
 
 func nativeRuntimeVersion(ctx context.Context, binary string) string {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, binary, "--version").Output()
-	if err != nil || len(out) > 256 {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
+	return nativeRuntimeVersionProbe(ctx, binary).Version
+}
+
+// nativeRuntimeVersionProbe is nativeRuntimeVersion with its outcome, retrying
+// a timed-out query once.
+func nativeRuntimeVersionProbe(ctx context.Context, binary string) VersionProbe {
+	return probeVersion(ctx, 5*time.Second, func(ctx context.Context) (string, error) {
+		out, err := exec.CommandContext(ctx, binary, "--version").Output()
+		if err != nil {
+			return "", err
+		}
+		if len(out) > 256 {
+			return "", fmt.Errorf("the version output is longer than 256 bytes")
+		}
+		return strings.TrimSpace(string(out)), nil
+	})
 }
