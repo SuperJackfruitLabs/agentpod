@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 )
 
 // TestSkillHubFixture is an opt-in subprocess for the hub's real HTTP/broker
@@ -30,6 +33,19 @@ func TestSkillHubFixture(t *testing.T) {
 		}
 		return os.Getenv("SJL_SKILL_FIXTURE_WORKSPACE"), "codex", ctx.Err()
 	}})
+	// The plugin verbs go through the real handler and installer, against a
+	// fixture Hermes profile; the version gate is fixed, since no Hermes runs.
+	h = NewPluginManagementHandler(h, PluginManagementDeps{NodeID: nodeID,
+		ProfileDir: func(ctx context.Context, key string) (string, error) {
+			if key != "hermes:fixture" {
+				return "", fmt.Errorf("fixture station not detected")
+			}
+			return os.Getenv("SJL_SKILL_FIXTURE_PROFILE"), ctx.Err()
+		},
+		Gate: func(context.Context) hermeslive.Gate {
+			return hermeslive.CheckHermes("known", strings.TrimPrefix(hermeslive.EmbeddedManifest().RequiresHermes, ">="), "")
+		},
+	})
 	decoder, encoder := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
 	for {
 		var request struct {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"io"
 	"os"
 	"path/filepath"
@@ -114,35 +115,6 @@ func readOrEmpty(path string) string {
 	return string(data)
 }
 
-// diffLines prints only the lines that differ, with context, so an operator
-// reviewing a configuration change sees the change rather than the file.
-func diffLines(before, after string) string {
-	oldLines, newLines := strings.Split(before, "\n"), strings.Split(after, "\n")
-	var b strings.Builder
-	i, j := 0, 0
-	for i < len(oldLines) || j < len(newLines) {
-		switch {
-		case i < len(oldLines) && j < len(newLines) && oldLines[i] == newLines[j]:
-			i++
-			j++
-		case j < len(newLines) && (i >= len(oldLines) || !contains(oldLines[i:], newLines[j])):
-			fmt.Fprintf(&b, "  + %s\n", newLines[j])
-			j++
-		case i < len(oldLines):
-			fmt.Fprintf(&b, "  - %s\n", oldLines[i])
-			i++
-		default:
-			j++
-		}
-	}
-	return b.String()
-}
-
-func contains(lines []string, want string) bool {
-	for _, line := range lines {
-		if line == want {
-			return true
-		}
-	}
-	return false
-}
+// diffLines prints only the lines that differ, so an operator reviewing a
+// configuration change sees the change rather than the file.
+func diffLines(before, after string) string { return hermeslive.DiffLines(before, after) }

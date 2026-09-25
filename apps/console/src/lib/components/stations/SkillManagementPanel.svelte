@@ -28,6 +28,8 @@
   const eligible = $derived(artifacts.filter(artifact => artifact.harness === harness));
   const selectedRelease = $derived(releases.find(release => release.id === releaseId) ?? null);
   const selectedCohort = $derived(cohorts.find(cohort => cohort.id === cohortId) ?? null);
+  // Plugin operations have their own panel; this one reviews skill plans only.
+  const skillPlan = $derived(operation?.plan && !("refusal" in operation.plan) ? operation.plan : null);
   const locked = $derived(busy !== null || !canManage);
   const nativeLocked = $derived(busy !== null || !canNative);
   const needsNativeActivation = $derived(canManage && harness === "codex" && !canNative);
@@ -291,15 +293,15 @@
       {#if operation.error}<p class="text-destructive">{operation.error}</p>{/if}
       {#if operation.state === "unknown"}<p>Completion is unconfirmed. Inspect the node before deciding whether to retry.</p>{/if}
       {#if operation.state === "conflict"}<p>Existing files or state differ from the reviewed plan. Preserve local edits, inspect the station, then prepare a new plan after resolving the conflict.</p>{/if}
-      {#if operation.plan}
-        <p class="break-all">Workspace: {operation.plan.binding.workspacePath}</p>
-        <p class="break-all">Destination: {operation.plan.targetPath ?? "No managed revision selected after rollback"}</p>
+      {#if skillPlan}
+        <p class="break-all">Workspace: {skillPlan.binding.workspacePath}</p>
+        <p class="break-all">Destination: {skillPlan.targetPath ?? "No managed revision selected after rollback"}</p>
         <p>{operation.kind === "native" ? "Native publication is reviewed and quiescent-only. It does not restart an active session." : "Activation pending. Applying files does not establish that the harness loaded them or restart an active session."}</p>
         <div class="grid gap-3 sm:grid-cols-3">
           {#each ["added", "changed", "removed"] as kind}
-            <div><h4 class="font-medium capitalize">{kind} ({operation.plan.changes[kind as "added" | "changed" | "removed"].length})</h4>
+            <div><h4 class="font-medium capitalize">{kind} ({skillPlan.changes[kind as "added" | "changed" | "removed"].length})</h4>
               <ul class="mt-1 max-h-48 space-y-1 overflow-auto break-all font-mono text-xs">
-                {#each operation.plan.changes[kind as "added" | "changed" | "removed"] as path}<li>{path}</li>{/each}
+                {#each skillPlan.changes[kind as "added" | "changed" | "removed"] as path}<li>{path}</li>{/each}
               </ul>
             </div>
           {/each}
@@ -307,9 +309,9 @@
         <details><summary class="cursor-pointer">Revision and review identifiers</summary>
           <dl class="mt-2 space-y-1 break-all font-mono text-xs">
             <div><dt>Operation</dt><dd>{operation.id}</dd></div>
-            <div><dt>Previous archive</dt><dd>{operation.plan.before?.archiveSHA256 ?? "None"}</dd></div>
-            <div><dt>Selected archive</dt><dd>{operation.plan.after?.archiveSHA256 ?? "None"}</dd></div>
-            <div><dt>Reviewed plan</dt><dd>{operation.plan.planDigest}</dd></div>
+            <div><dt>Previous archive</dt><dd>{skillPlan.before?.archiveSHA256 ?? "None"}</dd></div>
+            <div><dt>Selected archive</dt><dd>{skillPlan.after?.archiveSHA256 ?? "None"}</dd></div>
+            <div><dt>Reviewed plan</dt><dd>{skillPlan.planDigest}</dd></div>
           </dl>
         </details>
       {/if}

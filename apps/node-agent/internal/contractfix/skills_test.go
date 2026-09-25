@@ -1,6 +1,8 @@
 package contractfix
 
 import (
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"testing"
 )
@@ -17,4 +19,10 @@ func TestSkillInstallRoundTrips(t *testing.T) {
 func TestSkillPlacementRoundTrips(t *testing.T) {
 	roundTrip(t, "skill_placement_plan.json", &skills.PlacementPlan{})
 	roundTrip(t, "skill_placement_receipt.json", &skills.PlacementReceipt{})
+}
+
+func TestPluginOperationRoundTrips(t *testing.T) {
+	roundTrip(t, "plugin_operation_plan.json", &hermeslive.OperationPlan{})
+	roundTrip(t, "plugin_operation_refusal.json", &hermeslive.OperationPlan{})
+	roundTrip(t, "plugin_operation_result.json", &gateway.PluginOperationResult{})
 }

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "operationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "action": "enable",
+  "binding": {
+    "nodeId": "node_fixture",
+    "stationKey": "hermes:fixture",
+    "harness": "hermes",
+    "plugin": "agentpod-live"
+  },
+  "version": "0.3.0",
+  "gate": {
+    "allowed": true,
+    "version": "0.21.3",
+    "reason": "Hermes 0.21.3 is within the tested range"
+  },
+  "files": "absent",
+  "filesDigest": "",
+  "fileAction": "add",
+  "fileNames": [
+    "__init__.py",
+    "plugin.yaml"
+  ],
+  "config": {
+    "path": "config.yaml",
+    "beforeSHA256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "afterSHA256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "diff": "  + plugins:\n  +   enabled:\n  +     - agentpod-live\n",
+    "diffTruncated": false,
+    "restoresBackup": false
+  },
+  "noOp": false,
+  "notes": [],
+  "refusal": null,
+  "restartRequired": true,
+  "createdAt": "2026-09-25T10:00:00Z",
+  "planDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+}

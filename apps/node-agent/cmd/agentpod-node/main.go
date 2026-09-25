@@ -118,6 +118,8 @@ func main() {
 		os.Exit(hermesSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "hermes-live":
 		os.Exit(hermesLiveCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "plugin-management":
+		os.Exit(pluginManagementCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)

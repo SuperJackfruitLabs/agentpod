@@ -14,6 +14,7 @@ import {
   SkillMaintenanceApplyParams,
   SkillNativePlanRequest,
   SkillNativeVerifyResult,
+  PluginPlanRequest,
   TrustedSkillReleaseImportRequest,
   SkillReleaseCanaryPlanRequest,
   SkillReleaseCanaryOperationRequest,
@@ -50,6 +51,7 @@ import {
   executeSkillOperation,
   listSkillOperations,
   operationResult,
+  MANAGED_PLUGIN,
 } from "../services/skill-operations";
 import * as broker from "../services/broker";
 import { canaryOperationIdentity } from "./canary-operation";
@@ -69,14 +71,18 @@ async function stationContext(c: Context, mutate = false, capability = "skills.m
   if (!gateCapability(station, capability))
     throw new SkillRequestError(
       403,
-      capability === "skills.native" ? "Station does not advertise native skill activation" : "Station does not advertise skill management",
+      capability === "skills.native"
+        ? "Station does not advertise native skill activation"
+        : capability === "plugins.manage"
+          ? "Station does not advertise plugin management"
+          : "Station does not advertise skill management",
     );
   if (mutate) {
     const refusal = await refuseWithoutReach(
       c,
       caller.userId,
       station,
-      capability as "skills.manage" | "skills.native",
+      capability as "skills.manage" | "skills.native" | "plugins.manage",
     );
     if (refusal) return { refusal } as const;
   }
@@ -174,6 +180,7 @@ export function createSkillManagementRoutes(
   return routesBase()
     .use("/skills/*", authenticateSkillRequest)
     .use("/stations/:id/skills/*", authenticateSkillRequest)
+    .use("/stations/:id/plugins/*", authenticateSkillRequest)
     .get("/skills/artifacts", async (c) =>
       c.json(await listSkillArtifacts(owner(c))),
     )
@@ -324,6 +331,41 @@ export function createSkillManagementRoutes(
       if ("refusal" in ctx) return ctx.refusal;
       await body(c, z.object({}).strict());
       const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "inspect", undefined, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    // Plugin management (#553): the node plans enabling or disabling the one
+    // plugin its apn embeds; the Console reviews and applies by digest. Reads
+    // need only the capability; planning and applying need reach.
+    .post("/stations/:id/plugins/plan", async (c) => {
+      const ctx = await stationContext(c, true, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, PluginPlanRequest);
+      const operation = await createSkillOperation(ctx.caller, ctx.station, { ...request, plugin: MANAGED_PLUGIN });
+      const result = await executeSkillOperation(ctx.caller, ctx.station, operation.id, "plan", undefined, timeoutMs, "plugin");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .get("/stations/:id/plugins/operations", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(await listSkillOperations(ctx.caller, ctx.station, "plugin"));
+    })
+    .get("/stations/:id/plugins/operations/:operationId", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(operationResult(await getSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "plugin")));
+    })
+    .post("/stations/:id/plugins/operations/:operationId/inspect", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      await body(c, z.object({}).strict());
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "inspect", undefined, timeoutMs, "plugin");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/stations/:id/plugins/operations/:operationId/apply", async (c) => {
+      const ctx = await stationContext(c, true, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillApplyRequest);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "apply", request.planDigest, timeoutMs, "plugin");
       return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
     .get("/stations/:id/skills/operations", async (c) => {
