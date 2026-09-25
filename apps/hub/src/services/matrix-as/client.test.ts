@@ -105,9 +105,39 @@ describe("acting as a station", () => {
 
     await client().ensureUser("agent_box_pi-x", "renamed (pi @ box)");
 
-    const profile = calls.find((c) => c.url.includes("/displayname"));
+    const profile = calls.find((c) => c.url.includes("/displayname") && c.method === "PUT");
     expect(profile).toBeTruthy();
     expect(profile!.body).toEqual({ displayname: "renamed (pi @ box)" });
+  });
+
+  test("does not rewrite a display name that is already right", async () => {
+    // Every PUT to /displayname makes the homeserver write a fresh
+    // m.room.member event into every room the agent is in — tuwunel does so
+    // even when the name is identical. Provisioning runs on every node
+    // reconnect, so krishna's room collected eight "updated their membership"
+    // lines on 2026-09-24 whose displayname equalled prev_content's.
+    replies = [
+      { status: 400, body: { errcode: "M_USER_IN_USE" } },
+      { status: 200, body: { displayname: "x (pi @ box)" } },
+    ];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    expect(calls.some((c) => c.url.includes("/displayname") && c.method === "PUT")).toBe(false);
+  });
+
+  test("writes the display name when the current one cannot be read", async () => {
+    // Not knowing is not the same as knowing it is right. A rename that never
+    // lands is the failure the unconditional write existed to prevent.
+    replies = [
+      { status: 400, body: { errcode: "M_USER_IN_USE" } },
+      { status: 500, body: { errcode: "M_UNKNOWN" } },
+    ];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    const put = calls.find((c) => c.url.includes("/displayname") && c.method === "PUT");
+    expect(put?.body).toEqual({ displayname: "x (pi @ box)" });
   });
 
   test("treats M_ROOM_IN_USE on create as success", async () => {
