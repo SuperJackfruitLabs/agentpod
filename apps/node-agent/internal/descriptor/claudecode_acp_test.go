@@ -167,6 +167,7 @@ func TestClaudeCodeACPCommand_ProbesWellKnownPathsInOrder(t *testing.T) {
 	want := []string{
 		filepath.Join(testStubHome, ".local", "share", "pnpm", "claude-agent-acp"),
 		filepath.Join(testStubHome, ".local", "bin", "claude-agent-acp"),
+		filepath.Join(testStubHome, ".npm-global", "bin", "claude-agent-acp"),
 		"/usr/local/bin/claude-agent-acp",
 		"/usr/bin/claude-agent-acp",
 		"/opt/homebrew/bin/claude-agent-acp",

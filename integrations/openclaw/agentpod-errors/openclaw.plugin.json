@@ -1,0 +1,7 @@
+{
+  "id": "agentpod-errors",
+  "name": "AgentPod errors",
+  "description": "Reports why a turn failed to the AgentPod node on this machine.",
+  "activation": { "onStartup": true },
+  "configSchema": { "type": "object", "additionalProperties": false }
+}

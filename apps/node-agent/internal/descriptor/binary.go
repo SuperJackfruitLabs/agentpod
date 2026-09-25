@@ -77,6 +77,7 @@ func wellKnownBinaryDirs(userHome string) []string {
 		dirs = append(dirs,
 			filepath.Join(userHome, ".local", "share", "pnpm"), // pnpm global
 			filepath.Join(userHome, ".local", "bin"),           // npm --prefix ~/.local
+			filepath.Join(userHome, ".npm-global", "bin"),      // npm's documented no-sudo prefix
 		)
 		// A harness installed with `npm i -g` under a node version manager
 		// lands in that node's own bin directory rather than any fixed path --
