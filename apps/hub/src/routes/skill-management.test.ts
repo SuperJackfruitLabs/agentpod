@@ -20,6 +20,7 @@ import {
 } from "./skill-management";
 import { planFixture } from "../../../../packages/contract/src/fixtures/skill-install";
 import { placementFixture } from "../../../../packages/contract/src/fixtures/skill-placement";
+import { pluginPlanFixture } from "../../../../packages/contract/src/fixtures/plugin-operation";
 import type { AuthUser } from "../auth/middleware";
 
 const userId = `test-skill-management-${crypto.randomUUID()}`;
@@ -78,7 +79,7 @@ async function upload(headers: Record<string, string> = {}) {
   expect(res.status).toBe(201);
   return res.json() as Promise<{ id: string; archiveSHA256: string }>;
 }
-async function setup() {
+async function setup(overrides: Partial<typeof stations.$inferInsert> = {}) {
   const nodeId = `node_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
   made.push(nodeId);
   await db.insert(nodes).values({
@@ -103,6 +104,7 @@ async function setup() {
       kind: "leaf",
       displayName: "Fixture",
       capabilities: ["skills.manage", "skills.native"],
+      ...overrides,
     })
     .returning();
   let reachedPlan: () => void = () => {};
@@ -115,6 +117,7 @@ async function setup() {
     dropApply: false,
     foreignReply: false,
     holdPlan: false,
+    pluginRefusal: null as string | null,
     downloadStatus: 0,
     auditSeen: false,
   };
@@ -124,7 +127,25 @@ async function setup() {
     requests.push({ verb: msg.verb, params });
     void (async () => {
       let data: unknown;
-      if (msg.verb === "skills.operation" || msg.verb === "skills.native.operation")
+      if (msg.verb === "plugins.plan") {
+        const refused = state.pluginRefusal;
+        const plan = {
+          ...structuredClone(pluginPlanFixture),
+          operationId: params.operationId,
+          action: params.action,
+          binding: { ...pluginPlanFixture.binding, nodeId, stationKey: station!.stationKey, plugin: params.plugin },
+          gate: params.action === "enable" ? pluginPlanFixture.gate : null,
+          ...(refused ? { files: null, fileAction: null, fileNames: [], config: null, refusal: refused, restartRequired: false } : {}),
+        };
+        receipts.set(params.operationId, { plan, phase: refused ? "conflict" : "planned", updatedAt: plan.createdAt, completedAt: null, error: refused });
+        data = plan;
+      } else if (msg.verb === "plugins.apply") {
+        const receipt = receipts.get(params.operationId);
+        if (receipt.plan.planDigest !== params.expectedPlanDigest) throw new Error("digest");
+        receipt.phase = "applied";
+        receipt.completedAt = receipt.updatedAt;
+        data = receipt;
+      } else if (msg.verb === "skills.operation" || msg.verb === "skills.native.operation" || msg.verb === "plugins.operation")
         data = { receipt: receipts.get(params.operationId) ?? null };
       else if (msg.verb === "skills.maintenance.plan") {
         data = { nodeId, stationKey: station!.stationKey, harness: "codex", profile: params.profile, maintenance: { preview: { generations: [], operations: [], nativeOperations: [], nativeBackups: [] }, planDigest: "a".repeat(64), observedAt: "2026-09-21T15:00:00Z", limitation: "Read-only preview" } };
@@ -256,7 +277,7 @@ test("upload, authorized plan/download, reviewed apply and inspect form a durabl
   expect(res.status).toBe(200);
   const planned = SkillHubOperation.parse(await res.json());
   expect(planned.state).toBe("planned");
-  expect(planned.plan?.activation).toBe("pending");
+  expect(planned.plan && "activation" in planned.plan ? planned.plan.activation : undefined).toBe("pending");
   expect(c.state.downloadStatus).toBe(200);
   expect(c.state.auditSeen).toBe(true);
   res = await app.request(
@@ -311,7 +332,7 @@ test("native activation uses a separate capability, operation namespace and node
   const planned = SkillHubOperation.parse(await res.json());
   expect(planned.kind).toBe("native");
   expect(planned.action).toBe("activate");
-  expect(planned.plan?.activation).toBe("quiescent-project; loading-unverified");
+  expect(planned.plan && "activation" in planned.plan ? planned.plan.activation : undefined).toBe("quiescent-project; loading-unverified");
   expect(c.requests.some((request) => request.verb === "skills.native.plan")).toBe(true);
   expect((await app.request(`/api/stations/${c.station.id}/skills/operations/${planned.id}`)).status).toBe(404);
   res = await app.request(
@@ -321,6 +342,63 @@ test("native activation uses a separate capability, operation namespace and node
   expect(res.status).toBe(200);
   expect(SkillHubOperation.parse(await res.json()).state).toBe("applied");
   expect(c.requests.some((request) => request.verb === "skills.native.apply")).toBe(true);
+});
+
+const hermes = { harness: "hermes", stationKey: "hermes:fixture", capabilities: ["plugins.manage"] };
+
+test("plugin management plans, reviews and applies through its own capability and verbs", async () => {
+  const c = await setup(hermes);
+  let res = await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }));
+  expect(res.status).toBe(200);
+  const planned = SkillHubOperation.parse(await res.json());
+  expect(planned).toMatchObject({ kind: "plugin", action: "enable", profile: "agentpod-live", state: "planned" });
+  const plan = c.requests.find((request) => request.verb === "plugins.plan");
+  // The node is told only the station key, the plugin and the operation.
+  expect(Object.keys(plan!.params).sort()).toEqual(["action", "key", "operationId", "plugin"]);
+  expect(plan!.params).toMatchObject({ key: "hermes:fixture", plugin: "agentpod-live" });
+  // Plugin operations are their own namespace.
+  expect((await app.request(`/api/stations/${c.station.id}/skills/native/operations/${planned.id}`)).status).toBe(403);
+  expect((await app.request(`/api/stations/${c.station.id}/plugins/operations/${planned.id}`)).status).toBe(200);
+  res = await app.request(`/api/stations/${c.station.id}/plugins/operations/${planned.id}/apply`, json({ planDigest: "0".repeat(64) }));
+  expect(res.status).toBe(409);
+  res = await app.request(`/api/stations/${c.station.id}/plugins/operations/${planned.id}/apply`, json({ planDigest: planned.plan!.planDigest }));
+  expect(res.status).toBe(200);
+  expect(SkillHubOperation.parse(await res.json()).state).toBe("applied");
+  const apply = c.requests.find((request) => request.verb === "plugins.apply");
+  expect(Object.keys(apply!.params).sort()).toEqual(["expectedPlanDigest", "key", "operationId", "plugin"]);
+  const history = (await (await app.request(`/api/stations/${c.station.id}/plugins/operations`)).json()) as { id: string }[];
+  expect(history.map((operation) => operation.id)).toEqual([planned.id]);
+  const audit = await db.select().from(stationAudit).where(eq(stationAudit.nodeId, c.nodeId));
+  expect(audit.map((row) => `${row.verb}:${row.result}`).sort()).toEqual(["plugins.apply:ok", "plugins.plan:ok"]);
+});
+
+test("a node's refusal of a plugin plan is a conflict carrying its reason", async () => {
+  const c = await setup(hermes);
+  c.state.pluginRefusal = "hermes-live: The Hermes version could not be determined";
+  const res = await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }));
+  expect(res.status).toBe(200);
+  const refused = SkillHubOperation.parse(await res.json());
+  expect(refused.state).toBe("conflict");
+  expect(refused.error).toContain("could not be determined");
+  const inspected = await app.request(`/api/stations/${c.station.id}/plugins/operations/${refused.id}/inspect`, json({}));
+  expect(SkillHubOperation.parse(await inspected.json()).state).toBe("conflict");
+  const apply = await app.request(`/api/stations/${c.station.id}/plugins/operations/${refused.id}/apply`, json({ planDigest: refused.plan!.planDigest }));
+  expect(SkillHubOperation.parse(await apply.json()).state).toBe("conflict");
+  expect(c.requests.some((request) => request.verb === "plugins.apply")).toBe(false);
+});
+
+test("plugin routes need the station's capability and refuse other plugins or actions", async () => {
+  const c = await setup({ ...hermes, capabilities: ["skills.manage"] });
+  expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }))).status).toBe(403);
+  await db.update(stations).set({ capabilities: ["plugins.manage"] }).where(eq(stations.id, c.station.id));
+  for (const body of [
+    { requestId: crypto.randomUUID(), action: "activate" },
+    { requestId: crypto.randomUUID(), action: "enable", plugin: "other" },
+    { requestId: crypto.randomUUID(), action: "enable", path: "/etc" },
+  ])
+    expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json(body))).status).toBe(400);
+  expect((await app.request(`/api/stations/${c.station.id}/plugins/plan`, json({ requestId: crypto.randomUUID(), action: "enable" }, { "X-Test-User": otherUser }))).status).toBe(404);
+  expect(c.requests).toHaveLength(0);
 });
 
 test("ownership, tenancy, capability and explicit reach gate dispatch", async () => {

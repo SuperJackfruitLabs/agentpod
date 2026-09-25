@@ -60,6 +60,9 @@ type Config struct {
   // NativeSkillActivation is an explicit operator opt-in for the separate
   // native-placement transaction. It is off by default.
   NativeSkillActivation bool `json:"nativeSkillActivation,omitempty"`
+  // PluginManagement lets the Console install and remove the agentpod-live
+  // Hermes plugin through reviewed plans. It is off by default.
+  PluginManagement bool `json:"pluginManagement,omitempty"`
 }
 
 func DefaultPath() string {

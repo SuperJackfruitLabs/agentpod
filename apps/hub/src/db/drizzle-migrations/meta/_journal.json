@@ -519,6 +519,13 @@
       "when": 1790009079202,
       "tag": "0073_flowery_ikaris",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790332910862,
+      "tag": "0074_plugin_operations",
+      "breakpoints": true
     }
   ]
 }

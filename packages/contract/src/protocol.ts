@@ -6,6 +6,7 @@ import { SkillInventory, SkillInventoryParams } from "./skills";
 import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillRetentionParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult, SkillRetentionResult, SkillMaintenanceResult, SkillMaintenanceApplyParams } from "./skill-install";
 import { SkillNativePlanParams, SkillNativeApplyParams, SkillNativeOperationParams, SkillNativeVerifyParams, SkillNativeOperationResult, SkillNativeVerifyResult } from "./skill-native";
 import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
+import { PluginPlanParams, PluginApplyParams, PluginInspectParams, PluginOperationPlan, PluginOperationReceipt, PluginOperationResult } from "./plugin-operation";
 
 export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
@@ -41,6 +42,9 @@ export const VERB_PARAMS = {
   "skills.native.apply": SkillNativeApplyParams,
   "skills.native.operation": SkillNativeOperationParams,
   "skills.native.verify": SkillNativeVerifyParams,
+  "plugins.plan": PluginPlanParams,
+  "plugins.apply": PluginApplyParams,
+  "plugins.operation": PluginInspectParams,
   "skills.inventory": SkillInventoryParams,
   "detect": z.object({}),
   "health": z.object({ key: z.string() }),
@@ -101,6 +105,9 @@ export const VERB_RESULTS = {
   "skills.native.apply": SkillPlacementReceipt,
   "skills.native.operation": SkillNativeOperationResult,
   "skills.native.verify": SkillNativeVerifyResult,
+  "plugins.plan": PluginOperationPlan,
+  "plugins.apply": PluginOperationReceipt,
+  "plugins.operation": PluginOperationResult,
   "skills.inventory": SkillInventory,
   "detect": z.array(Station),
   "health": StationHealth,

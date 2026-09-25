@@ -5,6 +5,7 @@ import {
   SkillInstallReceipt,
 } from "./skill-install";
 import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
+import { PluginOperationPlan, PluginOperationReceipt } from "./plugin-operation";
 
 export const SkillArtifactMetadata = z
   .object({
@@ -49,11 +50,14 @@ export const SkillOperationAction = z.enum([
   "rollback",
   "activate",
   "deactivate",
+  "enable",
+  "disable",
 ]);
-const SkillOperationPlan = z.union([SkillInstallPlan, SkillPlacementPlan]);
+const SkillOperationPlan = z.union([SkillInstallPlan, SkillPlacementPlan, PluginOperationPlan]);
 const SkillOperationReceipt = z.union([
   SkillInstallReceipt,
   SkillPlacementReceipt,
+  PluginOperationReceipt,
 ]);
 export const SkillHubOperationSummary = z
   .object({
@@ -63,7 +67,7 @@ export const SkillHubOperationSummary = z
     stationKey: SkillInstallBinding.shape.stationKey,
     harness: SkillInstallBinding.shape.harness,
     profile: SkillInstallBinding.shape.profile,
-    kind: z.enum(["managed", "native"]),
+    kind: z.enum(["managed", "native", "plugin"]),
     action: SkillOperationAction,
     artifactId: z.uuid().nullable(),
     state: z.enum([
@@ -90,9 +94,11 @@ export const SkillHubOperation = SkillHubOperationSummary.extend({
 }, {
   message: "Plan action must match its operation",
 }).refine((value) => {
-  return value.kind === "native"
-    ? value.action !== "install"
-    : value.action === "install" || value.action === "rollback";
+  if (value.kind === "plugin")
+    return value.action === "enable" || value.action === "disable";
+  if (value.kind === "native")
+    return ["activate", "deactivate", "rollback"].includes(value.action);
+  return value.action === "install" || value.action === "rollback";
 }, {
   message: "Operation kind must match its action",
 }).refine(

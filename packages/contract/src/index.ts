@@ -19,3 +19,4 @@ export * from "./posture";
 export * from "./matrix-events";
 export * from "./skill-placement";
 export * from "./skill-native";
+export * from "./plugin-operation";

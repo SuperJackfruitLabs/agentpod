@@ -9,6 +9,9 @@ import {
   SkillPlacementReceipt,
   SkillOperationResult,
   SkillNativeOperationResult,
+  PluginOperationPlan,
+  PluginOperationReceipt,
+  PluginOperationResult,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
@@ -25,12 +28,27 @@ import { unconfirmedNodeOperationReason } from "./skill-operation-diagnostics";
 
 type Operation = typeof skillOperations.$inferSelect;
 type Mode = "plan" | "apply" | "inspect";
-type OperationPlan = SkillInstallPlan | SkillPlacementPlan;
-type OperationReceipt = SkillInstallReceipt | SkillPlacementReceipt;
+type OperationPlan = SkillInstallPlan | SkillPlacementPlan | PluginOperationPlan;
+type OperationReceipt = SkillInstallReceipt | SkillPlacementReceipt | PluginOperationReceipt;
 type NativeAction = "activate" | "deactivate" | "rollback";
-type OperationKind = "managed" | "native";
+type PluginAction = "enable" | "disable";
+type OperationKind = "managed" | "native" | "plugin";
 const isNative = (operation: Pick<Operation, "kind">) =>
   operation.kind === "native";
+const isPlugin = (operation: Pick<Operation, "kind">) =>
+  operation.kind === "plugin";
+/** The one plugin a node can manage: the agentpod-live plugin its apn embeds.
+ * It is stored in the operation's profile column, which names what is managed. */
+export const MANAGED_PLUGIN = "agentpod-live";
+// Each kind's node verbs. A plugin operation names its plugin, not a profile.
+const VERBS = {
+  managed: { inspect: "skills.operation", apply: "skills.apply" },
+  native: { inspect: "skills.native.operation", plan: "skills.native.plan", apply: "skills.native.apply" },
+  plugin: { inspect: "plugins.operation", plan: "plugins.plan", apply: "plugins.apply" },
+} as const;
+function planSchema(operation: Pick<Operation, "kind">) {
+  return isPlugin(operation) ? PluginOperationPlan : isNative(operation) ? SkillPlacementPlan : SkillInstallPlan;
+}
 const scope = (owner: SkillOwner, id?: string) =>
   tenantScope(
     skillOperations,
@@ -136,7 +154,8 @@ export async function createSkillOperation(
   request:
     | { requestId: string; artifactId: string }
     | { requestId: string; profile: string; action?: "rollback" }
-    | { requestId: string; profile: string; action: NativeAction },
+    | { requestId: string; profile: string; action: NativeAction }
+    | { requestId: string; plugin: typeof MANAGED_PLUGIN; action: PluginAction },
 ): Promise<Operation> {
   if (station.userId !== owner.userId || station.tenantId !== owner.tenantId)
     throw new SkillRequestError(404, "Station not found");
@@ -148,12 +167,13 @@ export async function createSkillOperation(
     throw new SkillRequestError(404, "Artifact not found");
   if (artifact && artifact.harness !== station.harness)
     throw new SkillRequestError(409, "Artifact targets a different harness");
-  const kind = artifact || !("action" in request) ? "managed" : "native";
+  const kind: OperationKind =
+    "plugin" in request ? "plugin" : artifact || !("action" in request) ? "managed" : "native";
   const action = artifact
     ? "install"
     : ("action" in request ? request.action ?? "rollback" : "rollback");
   const profile =
-    artifact?.profile ?? ("profile" in request ? request.profile : "");
+    artifact?.profile ?? ("plugin" in request ? request.plugin : "profile" in request ? request.profile : "");
   const id = createHash("sha256")
     .update(
       JSON.stringify([
@@ -223,11 +243,9 @@ function checkedPlan(
   operation: Operation,
   pin: string | undefined,
 ): OperationPlan {
-  const parsed = isNative(operation)
-    ? SkillPlacementPlan.safeParse(data)
-    : SkillInstallPlan.safeParse(data);
+  const parsed = planSchema(operation).safeParse(data);
   if (!parsed.success) throw new Error("invalid node plan");
-  const plan = parsed.data,
+  const plan: OperationPlan = parsed.data,
     binding = plan.binding;
   if (
     plan.operationId !== operation.id ||
@@ -235,11 +253,10 @@ function checkedPlan(
     binding.nodeId !== operation.nodeId ||
     binding.stationKey !== operation.stationKey ||
     binding.harness !== operation.harness ||
-    binding.profile !== operation.profile ||
-    (operation.action === "install" && plan.after?.archiveSHA256 !== pin) ||
+    ("plugin" in binding ? binding.plugin : binding.profile) !== operation.profile ||
+    (operation.action === "install" && "after" in plan && plan.after?.archiveSHA256 !== pin) ||
     (operation.plan !== null &&
-      JSON.stringify(plan) !==
-      JSON.stringify((isNative(operation) ? SkillPlacementPlan : SkillInstallPlan).parse(operation.plan)))
+      JSON.stringify(plan) !== JSON.stringify(planSchema(operation).parse(operation.plan)))
   )
     throw new Error("foreign or changed node plan");
   return plan;
@@ -249,13 +266,18 @@ function checkedReceipt(
   operation: Operation,
   pin: string | undefined,
 ): OperationReceipt {
-  const receipt = isNative(operation)
-    ? SkillPlacementReceipt.parse(data)
-    : SkillInstallReceipt.parse(data);
+  const receipt: OperationReceipt = isPlugin(operation)
+    ? PluginOperationReceipt.parse(data)
+    : isNative(operation)
+      ? SkillPlacementReceipt.parse(data)
+      : SkillInstallReceipt.parse(data);
   checkedPlan(receipt.plan, operation, pin);
   return receipt;
 }
 function receiptState(receipt: OperationReceipt): Operation["state"] {
+  // A node that answered a plugin plan with a refusal has decided: it is a
+  // conflict naming the reason, not an unknown outcome to retry.
+  if ("refusal" in receipt.plan && receipt.plan.refusal !== null) return "conflict";
   if (receipt.phase === "applied") return "applied";
   if (receipt.phase === "planned") return "planned";
   if (receipt.phase === "conflict") return "conflict";
@@ -325,7 +347,9 @@ export async function executeSkillOperation(
         ...owner,
         nodeId: station.nodeId,
         stationKey: station.stationKey,
-        verb: isNative(initial)
+        verb: isPlugin(initial)
+          ? `plugins.${mode}`
+          : isNative(initial)
           ? `skills.native.${mode}`
           : `skills.${mode === "plan" && initial.action === "rollback" ? "rollback" : mode}`,
         paramsSummary: {
@@ -339,11 +363,10 @@ export async function executeSkillOperation(
   });
   if (!operation)
     return operationResult(await getSkillOperation(owner, station, id, kind));
-  const params = {
-    key: operation.stationKey,
-    profile: operation.profile,
-    operationId: id,
-  };
+  const verbs = VERBS[operation.kind];
+  const params = isPlugin(operation)
+    ? { key: operation.stationKey, plugin: operation.profile, operationId: id }
+    : { key: operation.stationKey, profile: operation.profile, operationId: id };
   let outcome: Pick<Operation, "state" | "plan" | "receipt" | "error"> = {
     state: "unknown",
     plan: operation.plan,
@@ -354,15 +377,17 @@ export async function executeSkillOperation(
   try {
     const inspection = await broker.request(
       operation.nodeId,
-      isNative(operation) ? "skills.native.operation" : "skills.operation",
+      verbs.inspect,
       params,
       { timeoutMs },
     );
     if (!inspection.ok)
       throw new Error(inspection.error ?? "node inspection unavailable");
-    const observed = isNative(operation)
-      ? SkillNativeOperationResult.parse(inspection.data).receipt
-      : SkillOperationResult.parse(inspection.data).receipt;
+    const observed = isPlugin(operation)
+      ? PluginOperationResult.parse(inspection.data).receipt
+      : isNative(operation)
+        ? SkillNativeOperationResult.parse(inspection.data).receipt
+        : SkillOperationResult.parse(inspection.data).receipt;
     if (observed) {
       const receipt = checkedReceipt(
         observed,
@@ -388,14 +413,14 @@ export async function executeSkillOperation(
           throw new Error("previously observed plan is absent");
         const reply = await broker.request(
           operation.nodeId,
-          isNative(operation)
-            ? "skills.native.plan"
+          "plan" in verbs
+            ? verbs.plan
             : operation.action === "install"
               ? "skills.plan"
               : "skills.rollback",
           {
             ...params,
-            ...(isNative(operation) ? { action: operation.action } : {}),
+            ...(isNative(operation) || isPlugin(operation) ? { action: operation.action } : {}),
             ...(artifact
               ? { stationId: station.id, archiveSHA256: artifact.archiveSHA256 }
               : {}),
@@ -408,20 +433,28 @@ export async function executeSkillOperation(
           operation,
           artifact?.archiveSHA256,
         );
-        outcome = { state: "planned", plan, receipt: null, error: null };
+        outcome =
+          "refusal" in plan && plan.refusal !== null
+            ? { state: "conflict", plan, receipt: null, error: plan.refusal }
+            : { state: "planned", plan, receipt: null, error: null };
         auditOK = true;
       }
     } else {
       if (!observed) throw new Error("reviewed plan absent on node");
       if (observed.plan.planDigest !== reviewedDigest)
         throw new Error("node changed reviewed plan");
-      if (observed.phase !== "applied") {
+      // A plugin conflict is the node's final word on that operation (a
+      // refusal, or a profile that changed after review): a new plan is the
+      // way forward, so it is not dispatched again.
+      const settled =
+        observed.phase === "applied" || (isPlugin(operation) && observed.phase === "conflict");
+      if (!settled) {
         const reply = await broker.request(
           operation.nodeId,
-          isNative(operation) ? "skills.native.apply" : "skills.apply",
+          verbs.apply,
           {
             ...params,
-            ...(isNative(operation) ? {} : { stationId: station.id }),
+            ...(operation.kind === "managed" ? { stationId: station.id } : {}),
             expectedPlanDigest: reviewedDigest,
           },
           { timeoutMs },

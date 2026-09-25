@@ -11,7 +11,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import type { SkillInstallPlan, SkillInstallReceipt, SkillPlacementPlan, SkillPlacementReceipt } from "@agentpod/contract";
+import type { PluginOperationPlan, PluginOperationReceipt, SkillInstallPlan, SkillInstallReceipt, SkillPlacementPlan, SkillPlacementReceipt } from "@agentpod/contract";
 import { tenants } from "./tenants";
 import { user } from "./auth";
 import { stations } from "./stations";
@@ -131,8 +131,8 @@ export const skillOperations = pgTable(
     stationKey: text("station_key").notNull(),
     harness: text("harness").notNull(),
     profile: text("profile").notNull(),
-    kind: text("kind").$type<"managed" | "native">().notNull().default("managed"),
-    action: text("action").$type<"install" | "rollback" | "activate" | "deactivate">().notNull(),
+    kind: text("kind").$type<"managed" | "native" | "plugin">().notNull().default("managed"),
+    action: text("action").$type<"install" | "rollback" | "activate" | "deactivate" | "enable" | "disable">().notNull(),
     artifactId: text("artifact_id"),
     state: text("state")
       .$type<
@@ -146,8 +146,8 @@ export const skillOperations = pgTable(
       >()
       .notNull()
       .default("requested"),
-    plan: jsonb("plan").$type<SkillInstallPlan | SkillPlacementPlan>(),
-    receipt: jsonb("receipt").$type<SkillInstallReceipt | SkillPlacementReceipt>(),
+    plan: jsonb("plan").$type<SkillInstallPlan | SkillPlacementPlan | PluginOperationPlan>(),
+    receipt: jsonb("receipt").$type<SkillInstallReceipt | SkillPlacementReceipt | PluginOperationReceipt>(),
     error: text("error"),
     leaseToken: text("lease_token"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
@@ -182,7 +182,7 @@ export const skillOperations = pgTable(
     }),
     check(
       "skill_operations_identity_check",
-      sql`${t.id} ~ '^[a-f0-9]{32}$' AND ((${t.kind}='managed' AND ${t.action} IN ('install','rollback')) OR (${t.kind}='native' AND ${t.action} IN ('activate','deactivate','rollback'))) AND ((${t.action}='install')=(${t.artifactId} IS NOT NULL))`,
+      sql`${t.id} ~ '^[a-f0-9]{32}$' AND ((${t.kind}='managed' AND ${t.action} IN ('install','rollback')) OR (${t.kind}='native' AND ${t.action} IN ('activate','deactivate','rollback')) OR (${t.kind}='plugin' AND ${t.action} IN ('enable','disable'))) AND ((${t.action}='install')=(${t.artifactId} IS NOT NULL))`,
     ),
     check(
       "skill_operations_state_check",
