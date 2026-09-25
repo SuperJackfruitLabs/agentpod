@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,6 +51,46 @@ func TestSkillInventoryIsOptionalAndScopedToDetectedStation(t *testing.T) {
 	value, stream, err := h.Handle(context.Background(), "skills.inventory", json.RawMessage(`{"key":"hermes:writer"}`), nil)
 	if err != nil || stream || value == nil {
 		t.Fatalf("dispatch: %v", err)
+	}
+}
+
+// A Hermes profile's inventory carries the agentpod-live plugin beside its
+// skills when the plugin is there, and nothing when it is not.
+func TestHermesInventoryReportsTheLivePluginWhenPresent(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "writer")
+	if err := os.MkdirAll(filepath.Join(profile, "skills"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("plugins:\n  enabled:\n    - agentpod-live\n  stream_reasoning_deltas: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewHermes(home).(SkillInventoryProvider)
+	result, err := provider.SkillInventory(context.Background(), "hermes:writer")
+	if err != nil || len(result.Plugins) != 0 {
+		t.Fatalf("a profile without the plugin reported %+v (%v)", result.Plugins, err)
+	}
+	for name, data := range hermeslive.Files() {
+		target := filepath.Join(profile, "plugins", hermeslive.Name, name)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err = provider.SkillInventory(context.Background(), "hermes:writer")
+	if err != nil || len(result.Plugins) != 1 {
+		t.Fatalf("plugins = %+v (%v)", result.Plugins, err)
+	}
+	plugin := result.Plugins[0]
+	if plugin.Name != hermeslive.Name || plugin.Scope != "profile" || plugin.Source.Kind != "plugin" ||
+		plugin.Evidence.Present.Value == nil || !*plugin.Evidence.Present.Value ||
+		plugin.Activation.Value == nil || !*plugin.Activation.Value {
+		t.Fatalf("plugin = %+v", plugin)
+	}
+	if data, err := json.Marshal(result); err != nil || !strings.Contains(string(data), `"plugins":[{`) {
+		t.Fatalf("inventory JSON lost the plugin: %v", err)
 	}
 }
 
