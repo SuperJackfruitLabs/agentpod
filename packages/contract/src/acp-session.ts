@@ -38,6 +38,48 @@ export const AcpEvent = z.object({
 });
 export type AcpEvent = z.infer<typeof AcpEvent>;
 
+// ─── Turn error ─────────────────────────────────────────────────────────────
+
+// What went wrong in a turn, in one shape whichever harness failed. The six
+// harnesses fail six ways over ACP (a rejection with the text in `message`, in
+// `data`, as an ordinary answer, or not at all), so the hub reduces all of them
+// to this. See docs/superpowers/specs/2026-09-25-harness-error-standard-design.md.
+export const TurnErrorKind = z.enum([
+  "quota", "rate_limit", "auth", "bad_request", "context_exhausted", "timeout",
+  "provider_unavailable", "refusal", "max_tokens", "cancelled", "node_offline",
+  "harness_exited", "unknown",
+]);
+export type TurnErrorKind = z.infer<typeof TurnErrorKind>;
+
+export const TurnErrorSource = z.enum(["acp-rejection", "acp-stop-reason", "session-state", "hub", "plugin"]);
+export type TurnErrorSource = z.infer<typeof TurnErrorSource>;
+
+export const TurnErrorAttempt = z.object({
+  provider: z.string(), model: z.string(), kind: TurnErrorKind, message: z.string(),
+});
+export type TurnErrorAttempt = z.infer<typeof TurnErrorAttempt>;
+
+export const TurnError = z.object({
+  /** The provider's or harness's own words. Never summarised. */
+  message: z.string(),
+  kind: TurnErrorKind,
+  harness: z.string(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  /** Each model the harness tried, in order, when it fell back. */
+  attempts: z.array(TurnErrorAttempt).optional(),
+  /** Whether sending the same message again could work. Absent when unknown. */
+  retryable: z.boolean().optional(),
+  source: TurnErrorSource,
+});
+export type TurnError = z.infer<typeof TurnError>;
+
+// The payload of an `error` event. `message` is the one field every reader has
+// always used, so it stays required at the top level; the rest of TurnError is
+// additive, and absent on events written before it existed.
+export const TurnErrorPayload = TurnError.partial().extend({ message: z.string() });
+export type TurnErrorPayload = z.infer<typeof TurnErrorPayload>;
+
 // ─── ACP session WS protocol ─────────────────────────────────────────────────
 
 // Console → hub over the session WS:

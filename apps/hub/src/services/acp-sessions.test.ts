@@ -599,6 +599,42 @@ test("promptSession persists an ACP rejection before returning the session to id
   }
 });
 
+test("promptSession keeps the words a harness put in the error's data (Codex quota)", async () => {
+  // codex-acp rejects a quota failure with message "Internal error" and the
+  // provider's sentence in data. The room used to show "Internal error".
+  const { server, fake, station } = await setupRig("acpsess-prompt-error-data", {
+    stationKey: "acp-prompt-error-data-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    failPromptData: {
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      codexErrorInfo: "usageLimitExceeded",
+    },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+    expect(hit.payload).toMatchObject({
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      kind: "quota",
+      harness: "opencode",
+      retryable: false,
+      source: "acp-rejection",
+    });
+
+    const audits = await rawSql`
+      SELECT error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.error).toContain("usage limit");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
 test("promptSession reports an adapter that completes without any visible update", async () => {
   const { server, fake, station } = await setupRig("acpsess-silent-prompt", {
     stationKey: "acp-silent-prompt-station",
@@ -618,6 +654,11 @@ test("promptSession reports an adapter that completes without any visible update
     const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
     expect(all.some((event) => event.type === "agent-update")).toBe(false);
     expect(idleIndex).toBeGreaterThan(errorIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      kind: "unknown",
+      harness: "opencode",
+      source: "acp-stop-reason",
+    });
 
     const audits = await rawSql`
       SELECT result, error FROM station_audit
