@@ -39,16 +39,16 @@ them being accepted.
 ```ts
 interface TurnError {
   kind:
-    | "quota" | "rate_limit" | "auth" | "bad_request" | "timeout"
-    | "provider_unavailable" | "refusal" | "max_tokens" | "cancelled"
-    | "node_offline" | "harness_exited" | "unknown";
+    | "quota" | "rate_limit" | "auth" | "bad_request" | "context_exhausted"
+    | "timeout" | "provider_unavailable" | "refusal" | "max_tokens"
+    | "cancelled" | "node_offline" | "harness_exited" | "unknown";
   message: string;          // the provider's or harness's own words, untrimmed
   harness: string;          // "openclaw", "pi", …
   provider?: string;        // "kimi-coding"
   model?: string;           // "k2p6"
   attempts?: Array<{ provider: string; model: string; kind: TurnError["kind"]; message: string }>;
   retryable?: boolean;
-  source: "acp-rejection" | "acp-stop-reason" | "session-state" | "plugin";
+  source: "acp-rejection" | "acp-stop-reason" | "session-state" | "hub" | "plugin";
 }
 ```
 
@@ -58,9 +58,13 @@ level so every current reader keeps working, and the rest is additive.
 **Classification** is typed where the harness gives types and a heuristic where
 it does not:
 
-1. Typed fields in `data` when present: Claude Code's `data.errorKind`,
-   OpenCode's `data.errorName`, Codex's `data.message` / `data.additionalDetails`.
+1. Typed fields in `data` when present: Claude Code's `data.errorKind`
+   (claude-agent-sdk `SDKAssistantMessageError`) and Codex's
+   `data.codexErrorInfo` (a string, or an object keyed by one category).
+   Codex's words are in `data.message` / `data.additionalDetails`.
 2. `stopReason` → `refusal`, `max_tokens`, `cancelled`.
+   ACP's auth code (-32000) decides only when the text does not: adapters
+   reuse it for other failures.
 3. Session `state` reasons → `node_offline` ("node offline", "Couldn't reach
    the node."), `harness_exited`.
 4. Text: HTTP status and fixed phrases ("usage limit", "rate limit", "401",
