@@ -77,6 +77,8 @@ fixes Codex's "Internal error" and OpenCode's generic auth error.
 
 A harness plugin reports a failed turn to its node, and the node forwards it to
 the hub on the existing gateway connection as a new frame, `turn.error`.
+The frame's zod schema, and `TurnError` itself, go into `packages/contract`
+first, so the hub and node validate the same shape.
 
 - **Transport:** a Unix socket owned by the node-agent,
   `$XDG_RUNTIME_DIR/agentpod/turn-errors.sock` (on macOS, under the node's
