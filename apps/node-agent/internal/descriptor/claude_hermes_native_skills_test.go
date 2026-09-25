@@ -67,7 +67,7 @@ func TestHermesNativeReadinessOpensOnTheProbedVersion(t *testing.T) {
 	// This version is the one a disposable profile was probed on, so readiness
 	// opens. It was asserted closed while Hermes had no verified placement
 	// root; the assertion moves with the behaviour.
-	if err != nil || !got.Ready || got.AdapterPath != bin || got.EngineVersion != "Hermes Agent v0.21.3" {
+	if err != nil || !got.Ready || got.AdapterPath != bin || got.EngineVersion != "0.21.3" {
 		t.Fatalf("readiness = %+v, err = %v", got, err)
 	}
 	// An open gate must still name what it does not cover.

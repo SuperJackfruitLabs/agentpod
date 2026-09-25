@@ -2,6 +2,7 @@ package descriptor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -161,14 +162,19 @@ func nodeVersionOutput(nodePath string) (string, error) {
 
 // nodeVersionOutputWithin is nodeVersionOutput with an explicit deadline. A
 // timeout surfaces as an error, which callers treat as "version unknown".
+//
+// A query that times out is retried once: under load a cold `node --version`
+// can overrun the bound, and reading that as "version unknown" silently drops
+// the configured runtime from PATH.
 func nodeVersionOutputWithin(timeout time.Duration, nodePath string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
-	if err != nil {
-		return "", err
+	probe := probeVersion(context.Background(), timeout, func(ctx context.Context) (string, error) {
+		out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
+		return string(out), err
+	})
+	if probe.Status != VersionKnown {
+		return "", errors.New(probe.Reason)
 	}
-	return string(out), nil
+	return probe.Version, nil
 }
 
 // parseNodeMajor extracts the major version from `node --version` output
