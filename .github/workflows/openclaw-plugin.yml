@@ -1,0 +1,107 @@
+name: OpenClaw plugin
+
+# The agentpod-errors plugin runs inside OpenClaw and leans on its plugin API:
+# the agent_end hook, its event shape (one event per model attempt, success
+# true even for a failed one), ctx.sessionKey, and the config key that lets a
+# non-bundled plugin see a conversation at all. The plugin is proven against a
+# real OpenClaw driven over ACP, as the node drives it, rather than trusted.
+#
+#   fleet   — the version our stations run (openclaw-fleet.version).
+#   release — npm's latest. Is the next upgrade safe?
+#
+# A nightly failure opens (or updates) an issue before any station upgrades.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/openclaw/**"
+      - ".github/workflows/openclaw-plugin.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "integrations/openclaw/**"
+      - ".github/workflows/openclaw-plugin.yml"
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: openclaw-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PLUGIN_DIR: integrations/openclaw/agentpod-errors
+
+jobs:
+  unit:
+    name: openclaw-plugin unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run unit tests
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: node --test test/*.test.js
+
+  contract:
+    name: openclaw-plugin contract (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The fleet runs Node 22 (ashram: 22.23). OpenClaw 2026.9.x needs 24.16+.
+          - target: fleet
+            node: "22"
+          - target: release
+            node: "24"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Resolve the OpenClaw version
+        id: ver
+        run: |
+          case "${{ matrix.target }}" in
+            fleet)   v="$(tr -d '[:space:]' < "$PLUGIN_DIR/openclaw-fleet.version")" ;;
+            release) v="$(npm view openclaw version)" ;;
+          esac
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "OpenClaw ${{ matrix.target }}: $v (Node $(node --version))" >> "$GITHUB_STEP_SUMMARY"
+      - name: Install OpenClaw
+        run: npm install -g "openclaw@${{ steps.ver.outputs.version }}"
+      - name: Run the contract
+        working-directory: ${{ env.PLUGIN_DIR }}
+        run: node contract/run-in-openclaw.mjs
+
+  report:
+    name: openclaw-plugin nightly report
+    needs: contract
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="agentpod-errors: OpenClaw contract broken"
+          existing="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')"
+          body="The nightly contract run against OpenClaw failed: $RUN_URL
+
+          If only \`release\` failed, OpenClaw has changed something the plugin relies on. Fix the plugin before any station upgrades. If \`fleet\` failed, stations running today are affected."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi

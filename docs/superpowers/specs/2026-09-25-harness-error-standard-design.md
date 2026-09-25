@@ -123,7 +123,7 @@ arrives after the window is persisted and posted as a follow-up, never dropped.
 
 | Plugin | Hook | Sends |
 |---|---|---|
-| `integrations/openclaw/agentpod-errors` | `agent_end` with `success === false` → `error`; `model_call_ended` collects `attempts` | `TurnError` keyed by `ctx.sessionKey` |
+| `integrations/openclaw/agentpod-errors` | `agent_end`, once per model attempt; a failed attempt's last assistant message has `stopReason: "error"` and the provider's `errorMessage` (`success` is `true` regardless). Reports a run after 750 ms quiet. Needs `plugins.entries.agentpod-errors.hooks.allowConversationAccess: true`, or OpenClaw blocks the hook. `model_call_ended` is no use: its `outcome` was `completed` for a 403. | `TurnErrorReport` keyed by `ctx.sessionKey`, leading with the first attempt, listing all |
 | `integrations/pi/agentpod-errors` (extension) | `message_end` where `role === "assistant"` and `stopReason === "error"` → `errorMessage`; sent at `agent_settled`, so Pi's own retries finish first | `TurnError` keyed by `AGENTPOD_TURN_KEY` |
 | `integrations/hermes/agentpod-live` (existing) | the failure hook is to be confirmed against Hermes (whether `post_llm_call` fires on a failed call) | a `dev.agentpod.turn.error` to-device event beside its stream events, so harness-mode Hermes rooms get the same card. Hermes goes to Matrix directly, not through the hub, so it does not use the socket. |
 
@@ -217,8 +217,10 @@ turn.
 
 1. ~~Socket permissions on ashram.~~ Resolved 2026-09-25: the node-agent and
    the OpenClaw gateway both run as `openclaw`, so a 0600 socket suffices.
-2. **Grace window length.** Measure OpenClaw's gap between resolving the prompt
-   and running `agent_end` on ashram before settling on 3 s.
+2. ~~Grace window length.~~ Measured 2026-09-25 against real OpenClaw
+   2026.7.1-2 over ACP: the last `agent_end` fires ~130 ms before the prompt
+   resolves. With the plugin's 750 ms quiet period the report lands ~0.6 s
+   after, inside the hub's 3 s.
 3. **Retry action.** Resending the trigger re-prompts with the same text. Is
    that acceptable when the error was quota, where it will certainly fail
    again? Proposal: hide "try again" for non-retryable kinds.
