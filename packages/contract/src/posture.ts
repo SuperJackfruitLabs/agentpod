@@ -61,7 +61,9 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // "frames.large": the node reads hub frames far past the websocket default of
 // 32 KiB, so an ACP prompt carrying an image can be sent to it. A node without
 // it drops its connection on such a frame — see the hub's promptSession.
-export const NodeCapability = z.enum(["posture", "frames.large"]);
+// "turn.errors": the node listens on its turn-error intake socket and forwards
+// what harness plugins report as `turn.error` frames (see gateway.ts).
+export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**

@@ -78,6 +78,7 @@ import {
   clampSessionLimit,
   deriveSessionTitle,
   _setOfflineGraceMsForTest,
+  _setTurnErrorGraceMsForTest,
   _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
 } from "./acp-sessions";
@@ -636,6 +637,8 @@ test("promptSession keeps the words a harness put in the error's data (Codex quo
 });
 
 test("promptSession reports an adapter that completes without any visible update", async () => {
+  // No plugin reports here; the wait for one only slows the suite.
+  _setTurnErrorGraceMsForTest(50);
   const { server, fake, station } = await setupRig("acpsess-silent-prompt", {
     stationKey: "acp-silent-prompt-station",
     silentPrompt: true,
@@ -643,13 +646,16 @@ test("promptSession reports an adapter that completes without any visible update
   try {
     const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
     await promptSession(TEST_USER, row.id, "hello");
-    const { all } = await pollForEvent(
+    const { hit: error } = await pollForEvent(
       row.id,
       (event) =>
         event.type === "error" &&
         (event.payload as { message?: string }).message === "The agent completed without a reply.",
       8_000,
     );
+    // The idle state is written just after the error; wait for it rather than
+    // assume the snapshot that found the error already holds it.
+    const { all } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > error.seq);
     const errorIndex = all.findIndex((event) => event.type === "error");
     const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
     expect(all.some((event) => event.type === "agent-update")).toBe(false);
@@ -669,6 +675,7 @@ test("promptSession reports an adapter that completes without any visible update
     await endSession(TEST_USER, row.id, "cleanup");
     fake.close();
   } finally {
+    _setTurnErrorGraceMsForTest();
     server.stop(true);
   }
 });
@@ -2272,3 +2279,212 @@ test(
   20_000
 );
 
+
+
+// ─── Turn errors a harness plugin reports (spec §2–3) ──────────────────────────
+
+/** What krishna's plugin would have sent at 2026-09-25 05:47. */
+function krishnaReport(key: { harnessSessionKey?: string; acpSessionId?: string }) {
+  return {
+    type: "turn.error",
+    report: {
+      ...key,
+      error: {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+      },
+    },
+  };
+}
+
+const errorEvents = (all: EventLike[]) => all.filter((e) => e.type === "error");
+const sawSessionKey = (e: EventLike) =>
+  e.type === "agent-update" &&
+  (e.payload as { sessionUpdate?: string }).sessionUpdate === "session_info_update";
+
+test("a plugin's report becomes a silent turn's error, arriving after the prompt resolved", async () => {
+  // OpenClaw's bridge resolves end_turn before its agent_end hook has run, so
+  // the report lands after the hub has seen the turn end with nothing.
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-late", {
+    stationKey: "acp-plugin-late-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({
+      message: "⚠️ You've reached your weekly (7-day) usage limit.",
+      kind: "quota",
+      provider: "kimi-coding",
+      model: "k2p6",
+      harness: "opencode",
+      source: "plugin",
+      retryable: false,
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report during the turn is used as soon as the turn ends, with no wait", async () => {
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-early", {
+    stationKey: "acp-plugin-early-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+    await new Promise((r) => setTimeout(r, 150));
+    const releasedAt = Date.now();
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    expect(Date.now() - releasedAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ kind: "quota", source: "plugin" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report keyed by the hub session id matches that session (Pi's way)", async () => {
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-acpid", {
+    stationKey: "acp-plugin-acpid-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    expect(errorEvents(all).map((e) => (e.payload as { source?: string }).source)).toEqual(["plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node cannot report into a session on another node", async () => {
+  // Anyone who can write a turn.error can put words in a room. A node speaks
+  // only for its own sessions.
+  _setTurnErrorGraceMsForTest(400);
+  const { server, fake, station } = await setupRig("acpsess-plugin-owner", {
+    stationKey: "acp-plugin-owner-station",
+    silentPrompt: true,
+  });
+  const intruderEnrol = await enrollTestNode("acpsess-plugin-intruder");
+  const intruder = await connectFakeAcpNode(server.port!, intruderEnrol.nodeId, intruderEnrol.nodeSecret, {});
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    intruder.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ message: "The agent completed without a reply." });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+    intruder.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("with no report, the wait ends in the error the hub already had", async () => {
+  _setTurnErrorGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-plugin-none", {
+    stationKey: "acp-plugin-none-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    expect(errorEvents(all)[0]!.payload).toMatchObject({
+      message: "The agent completed without a reply.",
+      source: "acp-stop-reason",
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node lost mid-turn records why the turn failed, before the session ends", async () => {
+  // The #565 review: "Couldn't reach the node." was only an ended-state reason,
+  // so no error event carried it and the node_offline kind was never produced.
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-midturn", {
+    stationKey: "acp-lost-midturn-station",
+    hangPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(row.id, stateWith("working"));
+    fake.close();
+
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    const errorIndex = all.findIndex((e) => e.type === "error");
+    const endedIndex = all.findIndex(stateWith("ended"));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(errorIndex).toBeLessThan(endedIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      message: "Couldn't reach the node.",
+      kind: "node_offline",
+      source: "session-state",
+    });
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});
+
+test("a node lost between turns is not a failed turn", async () => {
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-idle", {
+    stationKey: "acp-lost-idle-station",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    fake.close();
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    expect(errorEvents(all)).toHaveLength(0);
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});

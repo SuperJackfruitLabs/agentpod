@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
@@ -175,9 +177,35 @@ func runCmd() {
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
 	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
 	h = gateway.NewUpdateHandler(h, version)
-	gateway.Run(ctx, cfg, h, version, func() []gateway.HealthReport {
+	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
-	})
+	}, startTurnErrorIntake(ctx))
+}
+
+// startTurnErrorIntake opens the socket harness plugins report failed turns
+// on (OpenClaw and Pi drop them over ACP). It is not essential: a node that
+// cannot open it runs as before, and does not advertise "turn.errors", so
+// nothing tells a plugin installer this node can take reports.
+func startTurnErrorIntake(ctx context.Context) gateway.Extras {
+	outbox := make(chan []byte, 64)
+	extras := gateway.Extras{Outbox: outbox}
+
+	path, err := turnerror.DefaultSocketPath()
+	if err != nil {
+		log.Printf("turn-error intake disabled: %v", err)
+		return extras
+	}
+	intake, err := turnerror.Listen(path, outbox)
+	if err != nil {
+		log.Printf("turn-error intake disabled: %v", err)
+		return extras
+	}
+	go func() {
+		intake.Serve(ctx)
+	}()
+	log.Printf("turn-error intake listening on %s", path)
+	extras.Capabilities = []string{"turn.errors"}
+	return extras
 }
 
 // gatherHealthReports enumerates all detected stations and collects a

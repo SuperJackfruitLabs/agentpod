@@ -67,6 +67,12 @@ export interface FakeAcpNodeOpts {
   failPromptData?: unknown;
   /** Complete session/prompt without emitting an update (adapter false success). */
   silentPrompt?: boolean;
+  /**
+   * Open each turn with a session_info_update carrying this as
+   * `_meta.sessionKey`, as OpenClaw does ("agent:krishna:main"). It is how the
+   * hub learns the harness's own name for a session.
+   */
+  harnessSessionKey?: string;
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
@@ -254,6 +260,20 @@ export async function connectFakeAcpNode(
     msg: { id: string | number; params: { sessionId: string } }
   ) => {
     proc.pendingPrompts.push(msg.id);
+    if (opts.harnessSessionKey) {
+      sendAgent(proc, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: proc.agentSessionId,
+          update: {
+            sessionUpdate: "session_info_update",
+            title: "Are you here?",
+            _meta: { kind: "direct", sessionKey: opts.harnessSessionKey },
+          },
+        },
+      });
+    }
     if (opts.failPrompt) {
       const id = proc.pendingPrompts.shift();
       if (id !== undefined) {

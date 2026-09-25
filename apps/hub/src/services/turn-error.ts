@@ -15,7 +15,7 @@
  *
  * Spec: docs/superpowers/specs/2026-09-25-harness-error-standard-design.md.
  */
-import type { TurnError, TurnErrorKind, TurnErrorSource } from "@agentpod/contract";
+import type { TurnError, TurnErrorKind, TurnErrorReport, TurnErrorSource } from "@agentpod/contract";
 
 /**
  * An HTTP status, only where it reads as one: leading the message ("400
@@ -207,4 +207,20 @@ export function turnErrorForSilentTurn(harness: string, stopReason: unknown): Tu
 /** A failure the hub itself names: a node gone, an adapter exited, a failed write. */
 export function turnErrorFromReason(reason: string, harness: string, source: TurnErrorSource): TurnError {
   return build(reason, classifyText(reason), harness, source);
+}
+
+/**
+ * What a harness plugin reported through its node (OpenClaw, Pi). The plugin
+ * saw the failure; the hub names whose harness it was and where it came from,
+ * because a report must not be able to claim another harness's identity.
+ */
+export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness: string): TurnError {
+  const kind = reported.kind ?? classifyText(reported.message);
+  const { message, kind: _kind, retryable, attempts, ...rest } = reported;
+  const classified = attempts?.map((a) => ({ ...a, kind: a.kind ?? classifyText(a.message) }));
+  const error = build(message, kind, harness, "plugin", {
+    ...rest,
+    ...(classified ? { attempts: classified } : {}),
+  });
+  return retryable === undefined ? error : { ...error, retryable };
 }

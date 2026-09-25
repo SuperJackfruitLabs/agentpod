@@ -5,6 +5,7 @@ import {
   turnErrorFromReason,
   turnErrorFromRejection,
   turnErrorForSilentTurn,
+  turnErrorFromPlugin,
 } from "./turn-error";
 
 /**
@@ -203,5 +204,55 @@ describe("turnErrorFromReason — the hub's own failures", () => {
   test("a node that went away", () => {
     const err = turnErrorFromReason("Couldn't reach the node.", "openclaw", "session-state");
     expect(err).toMatchObject({ kind: "node_offline", retryable: true, source: "session-state" });
+  });
+});
+
+describe("turnErrorFromPlugin — what a harness plugin reported", () => {
+  test("keeps what the plugin knew, and the hub names harness and source", () => {
+    const err = turnErrorFromPlugin(
+      {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+        attempts: [{ provider: "kimi-coding", model: "k2p6", kind: "quota", message: "403" }],
+      },
+      "openclaw"
+    );
+    expect(err).toEqual({
+      message: "⚠️ You've reached your weekly (7-day) usage limit.",
+      kind: "quota",
+      provider: "kimi-coding",
+      model: "k2p6",
+      attempts: [{ provider: "kimi-coding", model: "k2p6", kind: "quota", message: "403" }],
+      harness: "openclaw",
+      source: "plugin",
+      retryable: false,
+    });
+  });
+
+  test("classifies the words when the plugin gave no kind", () => {
+    const err = turnErrorFromPlugin({ message: "FailoverError: LLM request timed out." }, "openclaw");
+    expect(err).toMatchObject({ kind: "timeout", retryable: true, source: "plugin" });
+  });
+
+  test("classifies each attempt the plugin listed without a kind", () => {
+    const err = turnErrorFromPlugin(
+      {
+        message: "You've reached your weekly (7-day) usage limit.",
+        attempts: [
+          { provider: "kimi-coding", model: "k2p6", message: "You've reached your weekly (7-day) usage limit." },
+          { provider: "opencode-go", model: "hy3-preview", message: "400 Request is missing x-opencode-session" },
+        ],
+      },
+      "openclaw"
+    );
+    expect(err.kind).toBe("quota");
+    expect(err.attempts!.map((a) => a.kind)).toEqual(["quota", "bad_request"]);
+  });
+
+  test("a plugin's own retryable wins over the kind's default", () => {
+    const err = turnErrorFromPlugin({ message: "quota", kind: "quota", retryable: true }, "pi");
+    expect(err.retryable).toBe(true);
   });
 });

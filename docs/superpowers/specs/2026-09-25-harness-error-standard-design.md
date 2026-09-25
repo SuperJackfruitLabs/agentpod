@@ -84,12 +84,19 @@ the hub on the existing gateway connection as a new frame, `turn.error`.
 The frame's zod schema, and `TurnError` itself, go into `packages/contract`
 first, so the hub and node validate the same shape.
 
-- **Transport:** a Unix socket owned by the node-agent,
-  `$XDG_RUNTIME_DIR/agentpod/turn-errors.sock` (on macOS, under the node's
-  state dir), mode 0660, with the group set so the harness's user can write.
-  The payload is one JSON line holding the `TurnError` fields plus a
-  correlation key. The node validates it, caps its size (8 KiB), and forwards
-  it.
+- **Transport:** a Unix socket owned by the node-agent, at
+  `~/.agentpod/turn-errors.sock` (override: `AGENTPOD_TURN_ERROR_SOCKET`),
+  mode 0600. The path comes from the home directory alone, so the node and a
+  plugin running as the same user find the same path without either being
+  told, whatever kind of service started them. On ashram the node and the
+  OpenClaw gateway are both the `openclaw` user (checked 2026-09-25).
+  - A plugin writes one JSON line (a `TurnErrorReport`, at most 16 KiB) and
+    reads one line back: `ok`, or `error: <why>`.
+  - The node refuses the obvious (not JSON, no message, no key to match by),
+    wraps the rest unchanged as a `turn.error` frame, and queues it (64 deep)
+    for the hub connection. A full queue answers `error: busy` rather than
+    blocking the plugin.
+  - The node advertises `turn.errors` in `hello` only when the socket opened.
 - **Why not HTTP to the hub directly:** the plugin would need a hub credential.
   The node already has one, and it already knows which stations it runs.
 - **Correlation:**
@@ -208,10 +215,8 @@ turn.
 
 ## Open questions
 
-1. **Socket permissions on ashram.** The node-agent and the OpenClaw gateway
-   run as different users. A shared group is proposed. The alternative is a
-   spool directory that the node watches. Decide at step 3, against ashram's
-   real users.
+1. ~~Socket permissions on ashram.~~ Resolved 2026-09-25: the node-agent and
+   the OpenClaw gateway both run as `openclaw`, so a 0600 socket suffices.
 2. **Grace window length.** Measure OpenClaw's gap between resolving the prompt
    and running `agent_end` on ashram before settling on 3 s.
 3. **Retry action.** Resending the trigger re-prompts with the same text. Is
