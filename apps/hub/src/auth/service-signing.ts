@@ -153,6 +153,17 @@ export interface SignServiceTokenInput {
    * decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`.
    */
   amr?: string[];
+
+  /**
+   * Where the token may be spent, when that is not this hub alone.
+   *
+   * Only ever a registered client's own `OAuthClient.audiences` — the caller
+   * resolves the client and passes what it declares, so an arbitrary audience
+   * cannot be requested here. Omitted keeps `config.publicUrl`, which is what
+   * every caller written before this signed and what the hub's own middleware
+   * checks (`auth/hub-token.ts` verifies `audience: config.publicUrl`).
+   */
+  audiences?: readonly string[];
 }
 
 /**
@@ -182,7 +193,12 @@ export async function signServiceToken(input: SignServiceTokenInput): Promise<st
     .setSubject(input.subject)
     .setIssuedAt()
     .setIssuer(config.publicUrl)
-    .setAudience(config.publicUrl)
+    .setAudience(
+      // A list, not a join: `aud` is plural in the registry because one stored
+      // credential legitimately reaches several planes, and narrowing it to one
+      // would trade `supi boards` for `fleet nodes`.
+      input.audiences && input.audiences.length > 0 ? [...input.audiences] : config.publicUrl,
+    )
     .setExpirationTime(input.ttl)
     .sign(privateKey);
 }
