@@ -964,4 +964,87 @@ describe("a turn that ends without saying anything", () => {
 
     expect(sent).toHaveLength(0);
   });
+
+  test("a session ending between turns does not fail the last, answered message", async () => {
+    // krishna, 2026-09-24 10:21: a turn answered at 08:48 (✅). The node then
+    // dropped, the session went `waiting` ("node offline") and a minute later
+    // `ended` ("Couldn't reach the node."). The room put ❌ on the 08:48
+    // message and said it had ended without a reply — about a turn that had
+    // replied, and was over, 90 minutes earlier.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-answered");
+
+    emit(state("working"));
+    emit(chunk("Here you go."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+    const before = { reactions: reactions.length, sent: sent.length };
+
+    emit({ ...state("waiting"), payload: { status: "waiting", reason: "node offline" } });
+    await settle();
+    emit({ ...state("ended"), payload: { status: "ended", reason: "Couldn't reach the node." } });
+    await settle();
+
+    expect(reactions.slice(before.reactions).some((r) => r.key === "❌")).toBe(false);
+    expect(sent.length).toBe(before.sent);
+  });
+
+  test("a turn after an unprompted one does not reuse the previous reader's message", async () => {
+    // The trigger belongs to the turn that consumed it. A later turn nobody in
+    // the room asked for (a cron job) must not mark the earlier message.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-first");
+
+    emit(state("working"));
+    emit(chunk("Answered."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+    const before = reactions.length;
+
+    emit(state("working"));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(reactions.slice(before)).toEqual([]);
+    expect(sent.some((m) => /without a reply/i.test(m.body))).toBe(false);
+  });
+
+  test("a turn that pauses for permission keeps the message that started it", async () => {
+    // working → waiting → working is still one turn. Its second `working` has
+    // no fresh trigger, and must not lose the one it already has.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-asks");
+
+    emit(state("working"));
+    await settle();
+    emit(permission());
+    emit(state("waiting"));
+    await settle();
+    emit(state("working"));
+    emit(chunk("Done, with your say-so."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-asks", key: "✅" });
+  });
+
+  test("a turn cut off by its session ending says why, not just that it was silent", async () => {
+    // The hub knows this one: the state carries the reason. "Its own logs will
+    // say why" sends the reader looking for something the hub already had.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-cut");
+
+    emit(state("working"));
+    await settle();
+    emit({ ...state("ended"), payload: { status: "ended", reason: "Couldn't reach the node." } });
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-cut", key: "❌" });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toContain("Couldn't reach the node.");
+  });
 });

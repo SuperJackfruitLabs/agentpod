@@ -610,7 +610,16 @@ export function attachRoomToSession(
             // Without this the room looks dead for the ten seconds an agent
             // spends thinking. The trigger is picked up here rather than at
             // attach time, because a room outlives any one turn.
-            state.triggerEventId = triggers.get(sessionId) ?? null;
+            //
+            // Taken, not read: a trigger belongs to the one turn it started. Left
+            // in the map, a later turn nobody asked for would mark it again. And
+            // only replaced when there is a new one — `working` after a
+            // permission pause is the same turn, still owned by its message.
+            const noted = triggers.get(sessionId);
+            if (noted !== undefined) {
+              state.triggerEventId = noted;
+              triggers.delete(sessionId);
+            }
             await startTyping();
             await mark(REACTION.working);
             return;
@@ -637,14 +646,29 @@ export function attachRoomToSession(
             //
             // Nothing is said when nobody asked: an unprompted turn (a cron
             // job speaking) has no reader waiting and no message to mark.
+            //
+            // A session that ends mid-turn usually says why (the node went
+            // away, the harness exited), and that beats "its own logs will say".
             if (!state.produced && !state.reportedError) {
               await mark(REACTION.failed);
-              if (state.triggerEventId) await say(SILENT_TURN_NOTICE);
+              if (state.triggerEventId) {
+                const reason = isRecord(event.payload) ? event.payload.reason : undefined;
+                await say(
+                  typeof reason === "string" && reason.trim() !== ""
+                    ? `This turn ended without a reply — ${reason.trim()}`
+                    : SILENT_TURN_NOTICE
+                );
+              }
             } else if (!state.reportedError) {
               await mark(REACTION.done);
             }
             state.produced = false;
             state.reportedError = false;
+            // The turn is over, and so is its claim on the message that started
+            // it. A session that later goes `ended` between turns — a node that
+            // dropped, 90 minutes after krishna answered — must not come back
+            // and fail a message that was answered.
+            state.triggerEventId = null;
           }
 
           if (status === "ended") {
