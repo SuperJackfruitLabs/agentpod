@@ -24,6 +24,7 @@ import (
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/host"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 )
 
 // normalise decodes JSON into generic maps so comparison ignores key order and
@@ -128,4 +129,35 @@ func TestHelloRoundTrips(t *testing.T) {
 func TestSkillManagementResultsRoundTrip(t *testing.T) {
 	roundTrip(t, "skill_verify.json", &gateway.SkillVerifyResult{})
 	roundTrip(t, "skill_operation_missing.json", &gateway.SkillOperationResult{})
+}
+
+// The node wraps a plugin's report without reading it. This pins the envelope
+// against the contract's TurnErrorMsg, and that the report arrives unchanged.
+func TestTurnErrorFrameMatchesContract(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("testdata", "turn_error_frame.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var fixture struct {
+		Report json.RawMessage `json:"report"`
+	}
+	if err := json.Unmarshal(src, &fixture); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+
+	frame, err := turnerror.Frame(fixture.Report)
+	if err != nil {
+		t.Fatalf("Frame refused the contract's own fixture: %v", err)
+	}
+
+	var got, want any
+	if err := json.Unmarshal(frame, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(src, &want); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("node frame differs from the contract fixture:\n got %s\nwant %s", frame, src)
+	}
 }
