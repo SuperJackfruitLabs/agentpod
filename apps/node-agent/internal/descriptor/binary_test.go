@@ -97,3 +97,19 @@ func TestHarnessCommandPutsTheBinarysDirectoryOnPath(t *testing.T) {
 		t.Fatalf("PATH does not lead with the binary's directory: %q", path)
 	}
 }
+
+// npm's documented prefix for global installs without sudo is ~/.npm-global
+// (npm docs, "Resolving EACCES permissions errors"). ashram's openclaw and pi
+// live in ~/.npm-global/bin. A node whose service PATH lacks it found them
+// only by luck, and `apn openclaw-errors` run under sudo -u openclaw reported
+// OpenClaw "not installed" (2026-09-25).
+func TestWellKnownBinaryDirsIncludeNpmGlobalPrefix(t *testing.T) {
+	home := t.TempDir()
+	want := filepath.Join(home, ".npm-global", "bin")
+	for _, dir := range wellKnownBinaryDirs(home) {
+		if dir == want {
+			return
+		}
+	}
+	t.Fatalf("wellKnownBinaryDirs(%q) lacks %s", home, want)
+}

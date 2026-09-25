@@ -138,6 +138,16 @@ var commands = []struct {
 			"and undoes the configuration edit. Neither restarts the gateway; that is yours to do.",
 	},
 	{
+		name: "openclaw-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors plugin in OpenClaw",
+		detail: "apn openclaw-errors <status|enable|disable> [--apply] —\n" +
+			"OpenClaw's ACP bridge drops why a turn failed; this plugin reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on an OpenClaw the CI contract tested,\n" +
+			"into ~/.agentpod/openclaw and adds it to ~/.openclaw/openclaw.json with\n" +
+			"hooks.allowConversationAccess. Without --apply it prints the exact change and writes\n" +
+			"nothing. disable removes both. Neither restarts the gateway; that is yours to do.",
+	},
+	{
 		name: "detect", group: "Node",
 		oneline: "Print detected harness stations as JSON",
 		detail: "apn detect — print the harness stations detected on this host as\n" +

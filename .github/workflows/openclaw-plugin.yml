@@ -16,11 +16,13 @@ on:
     branches: [main]
     paths:
       - "integrations/openclaw/**"
+      - "apps/node-agent/internal/openclawerrors/plugin/**"
       - ".github/workflows/openclaw-plugin.yml"
   pull_request:
     branches: [main]
     paths:
       - "integrations/openclaw/**"
+      - "apps/node-agent/internal/openclawerrors/plugin/**"
       - ".github/workflows/openclaw-plugin.yml"
   schedule:
     - cron: "37 3 * * *"
@@ -48,6 +50,18 @@ jobs:
       - name: Run unit tests
         working-directory: ${{ env.PLUGIN_DIR }}
         run: node --test test/*.test.js
+
+      # apn embeds the plugin it installs (apn openclaw-errors). It must be this
+      # exact copy, on this tested range, or apn would install something the
+      # contract never ran.
+      - name: The copy apn ships is this one
+        run: |
+          shipped=apps/node-agent/internal/openclawerrors/plugin
+          for f in index.js openclaw.plugin.json package.json; do
+            cmp "$PLUGIN_DIR/$f" "$shipped/agentpod-errors/$f"
+          done
+          cmp "$PLUGIN_DIR/openclaw-fleet.version" "$shipped/openclaw-tested.min"
+          cmp "$PLUGIN_DIR/openclaw-tested.max" "$shipped/openclaw-tested.max"
 
   contract:
     name: openclaw-plugin contract (${{ matrix.target }})
