@@ -396,18 +396,29 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       });
       assertOkOrAlready(`register ${localpart}`, res);
 
-      // Set the display name EVERY time, not only on creation. The user is
+      // Check the display name EVERY time, not only on creation. The user is
       // created exactly once and provisioning runs forever, so a name set only
       // at creation means a renamed station keeps introducing itself by its old
       // name — and the display name is what carries the readability a derived
       // mxid does not have.
+      //
+      // But only WRITE it when it differs. Each PUT makes the homeserver post a
+      // new m.room.member event into every room the agent is in, identical name
+      // or not, and provisioning runs on every node reconnect: that was the
+      // stream of "updated their membership" lines in agent rooms.
       //
       // The register reply has no `user_id` when the user already existed, so
       // the mxid is composed rather than read back.
       const userId =
         String(res.body.user_id ?? "") ||
         (deps.domain ? `@${localpart}:${deps.domain}` : "");
-      if (userId) await this.setDisplayName(userId, displayName);
+      if (!userId) return;
+      const current = await call(
+        `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+        { method: "GET", userId }
+      );
+      if (current.status === 200 && current.body.displayname === displayName) return;
+      await this.setDisplayName(userId, displayName);
     },
 
     async registerWithCredentials(localpart) {
