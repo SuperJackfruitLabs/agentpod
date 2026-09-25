@@ -117,6 +117,16 @@ var commands = []struct {
 			"It edits one profile's own config.yaml and leaves the rest of it alone.",
 	},
 	{
+		name: "hermes-live", group: "Node",
+		oneline: "Install, enable or remove the agentpod-live streaming plugin in a Hermes profile",
+		detail: "apn hermes-live <status|enable|disable> --profile NAME [--apply] [--replace-unmanaged] —\n" +
+			"a harness-mode Hermes profile streams into AgentPod clients only with this plugin.\n" +
+			"enable installs the copy shipped in this apn, on a Hermes the CI contract tested,\n" +
+			"and adds it to plugins.enabled with plugins.stream_reasoning_deltas: true.\n" +
+			"Without --apply it prints the exact change and writes nothing. disable removes it\n" +
+			"and undoes the configuration edit. Neither restarts the gateway; that is yours to do.",
+	},
+	{
 		name: "detect", group: "Node",
 		oneline: "Print detected harness stations as JSON",
 		detail: "apn detect — print the harness stations detected on this host as\n" +

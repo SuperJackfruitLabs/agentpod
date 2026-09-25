@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 )
 
@@ -153,7 +154,20 @@ func (d *piDescriptor) SkillInventory(ctx context.Context, key string) (skills.I
 	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: ".pi/skills", Scope: "workspace"}, {RelativePath: ".agents/skills", Scope: "workspace"}})
 }
 func (d *hermesDescriptor) SkillInventory(ctx context.Context, key string) (skills.Inventory, error) {
-	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: "skills", Scope: "profile"}, {RelativePath: ".hermes/skills", Scope: "workspace"}, {RelativePath: ".agents/skills", Scope: "workspace"}})
+	inventory, err := localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: "skills", Scope: "profile"}, {RelativePath: ".hermes/skills", Scope: "workspace"}, {RelativePath: ".agents/skills", Scope: "workspace"}})
+	if err != nil {
+		return inventory, err
+	}
+	// The agentpod-live plugin is reported beside the skills (#553) whenever it
+	// is in the profile or apn has a record of installing it: its files, whether
+	// the configuration enables it, and what the gateway's log says of its load
+	// and last turn. The key was matched against a detected station above.
+	if dir, err := d.workspaceFor(key); err == nil {
+		if plugin, st := hermeslive.Observe(dir, time.Now()); st.Present || st.Managed {
+			inventory.Plugins = append(inventory.Plugins, plugin)
+		}
+	}
+	return inventory, nil
 }
 func (d *openclawDescriptor) SkillInventory(ctx context.Context, key string) (skills.Inventory, error) {
 	return localSkillInventory(ctx, d, key, []skills.RootSpec{{RelativePath: "skills", Scope: "workspace"}, {RelativePath: ".agents/skills", Scope: "workspace"}})

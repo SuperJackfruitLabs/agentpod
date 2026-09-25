@@ -19,25 +19,36 @@ The event bodies and the pacing are the same as the hub's; see `apps/hub/src/ser
 
 ## Install on one profile
 
+`apn` ships this plugin and installs it. On the host that runs the profile:
+
 ```sh
-P=/root/.hermes/profiles/<profile>
-cp "$P/config.yaml" "$P/config.yaml.bak-$(date +%Y%m%d%H%M)"
-mkdir -p "$P/plugins" && cp -r agentpod-live "$P/plugins/"
+apn hermes-live status  --profile <profile>           # what is there, and whether it loaded
+apn hermes-live enable  --profile <profile>           # review: the files and the config diff
+apn hermes-live enable  --profile <profile> --apply   # install and enable
 ```
 
-Then add to `$P/config.yaml`:
+`enable` does three things:
 
-```yaml
-plugins:
-  enabled: [agentpod-live]      # merge into any existing list
-  stream_reasoning_deltas: true # reasoning deltas reach plugins only with this
-```
+- **Version gate.** It refuses a Hermes outside the range the CI contract tested, and says why. If the version cannot be determined, it holds rather than refuses.
+- **Plugin files.** It installs the copy embedded in this `apn` at `<profile>/plugins/agentpod-live/`.
+- **Configuration.** It adds the plugin to `plugins.enabled` and sets `plugins.stream_reasoning_deltas: true`, which reasoning deltas need in order to reach plugins. Every other line of `config.yaml` is left byte for byte, and the file is backed up beside itself first.
 
-Restart the profile's gateway: `systemctl --user restart hermes-gateway-<profile>.service`.
+It never restarts the gateway. Restart it from the Console, or with `systemctl --user restart hermes-gateway-<profile>.service`. After that, `status` shows the gateway's `agentpod-live: registered` line and each turn's outcome.
+
+`apn hermes-live disable --profile <profile> --apply` removes the plugin and undoes the configuration edit. If nothing else changed since enable, it restores the backup exactly.
+
+A copy installed by hand is handled in one of two ways:
+
+- If it is byte-identical to this plugin, `enable` adopts it.
+- If it differs, `enable` refuses until you pass `--replace-unmanaged`, which sets it aside; `disable` restores it.
 
 The plugin needs `MATRIX_HOMESERVER` and `MATRIX_ACCESS_TOKEN`, which the Matrix platform already requires. When either is missing, it registers no hooks. That matters because a registered stream hook makes Hermes stream every model call.
 
-**To remove it**, restore the config backup and restart the gateway.
+## Supported Hermes versions
+
+- `requires_hermes` in `plugin.yaml` is the oldest Hermes the contract tests (`hermes-fleet.ref`). Hermes itself refuses to load the plugin below it.
+- `hermes-tested.max` is the newest Hermes the contract passed on. Only `apn hermes-live enable` enforces it. An upper bound in `requires_hermes` would stop streaming on the next `hermes update`.
+- Raise `hermes-tested.max` only after the contract's `release` job passes on that Hermes. Copy `__init__.py`, `plugin.yaml` and `hermes-tested.max` into `apps/node-agent/internal/hermeslive/plugin/` in the same change; CI checks that they match.
 
 ## Test
 
