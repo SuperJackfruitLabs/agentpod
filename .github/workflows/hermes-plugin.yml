@@ -18,11 +18,13 @@ on:
     branches: [main]
     paths:
       - "integrations/hermes/**"
+      - "apps/node-agent/internal/hermeslive/plugin/**"
       - ".github/workflows/hermes-plugin.yml"
   pull_request:
     branches: [main]
     paths:
       - "integrations/hermes/**"
+      - "apps/node-agent/internal/hermeslive/plugin/**"
       - ".github/workflows/hermes-plugin.yml"
   schedule:
     - cron: "17 3 * * *"
@@ -54,6 +56,15 @@ jobs:
       - name: Run unit tests
         working-directory: ${{ env.PLUGIN_DIR }}
         run: python -m unittest -v test_agentpod_live
+
+      # apn embeds the plugin it installs (apn hermes-live). It must be this
+      # exact copy, or apn would install something the contract never ran.
+      - name: The copy apn ships is this one
+        run: |
+          shipped=apps/node-agent/internal/hermeslive/plugin
+          cmp "$PLUGIN_DIR/__init__.py" "$shipped/agentpod-live/__init__.py"
+          cmp "$PLUGIN_DIR/plugin.yaml" "$shipped/agentpod-live/plugin.yaml"
+          cmp "$PLUGIN_DIR/hermes-tested.max" "$shipped/hermes-tested.max"
 
   contract:
     name: hermes-plugin contract (${{ matrix.target }})
