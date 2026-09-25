@@ -52,6 +52,29 @@ describe("classifyText — the words a failure arrives in", () => {
     });
   }
 
+  // PR #565 review: ordinary text that merely contains a number or the letters
+  // "log in" must not become a confident kind. `auth` is not retryable, so a
+  // wrong `auth` would hide "try again" from someone who only needed it.
+  const notErrors: Array<[string, string]> = [
+    ["Model kimi-k3 not found in the model catalog in this provider", "'catalog in' is not 'log in'"],
+    ["Error: could not read file /var/log in workspace", "a path is not a login"],
+    ["tool output truncated after 500 lines", "a count is not a status code"],
+    ["retried 3 times over 401 ms", "a duration is not a status code"],
+  ];
+  for (const [text, why] of notErrors) {
+    test(`${why} → unknown`, () => {
+      expect(classifyText(text)).toBe("unknown");
+    });
+  }
+
+  test("a status code still counts where it reads as one", () => {
+    expect(classifyText("HTTP 503 Service Unavailable")).toBe("provider_unavailable");
+    expect(classifyText("upstream returned status 401")).toBe("auth");
+    expect(classifyText("Error code: 429")).toBe("rate_limit");
+    // claude-agent-acp: "Please run /login" is its not-signed-in result.
+    expect(classifyText("Invalid API key · Please run /login")).toBe("auth");
+  });
+
   test("text that matches nothing is unknown, not a guess", () => {
     expect(classifyText("Something odd happened in the flux capacitor")).toBe("unknown");
   });
@@ -165,6 +188,10 @@ describe("turnErrorForSilentTurn — a prompt that resolved with nothing", () =>
 
   test("a refusal says so", () => {
     expect(turnErrorForSilentTurn("claude-code", "refusal").kind).toBe("refusal");
+  });
+
+  test("a turn the harness cancelled itself says so", () => {
+    expect(turnErrorForSilentTurn("codex", "cancelled").kind).toBe("cancelled");
   });
 
   test("an output limit hit before any reply says so", () => {

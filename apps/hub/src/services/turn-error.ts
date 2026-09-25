@@ -17,17 +17,41 @@
  */
 import type { TurnError, TurnErrorKind, TurnErrorSource } from "@agentpod/contract";
 
+/**
+ * An HTTP status, only where it reads as one: leading the message ("400
+ * Request is missing…", opencode-go) or after HTTP / status / code / API
+ * Error. A bare number anywhere else is a count or a duration — "truncated
+ * after 500 lines" is not a server error (PR #565 review).
+ */
+function status(codes: string): string {
+  return String.raw`(?:^\s*|\b(?:https?\/?[\d.]*|status(?:\s+code)?|code|api error|error)\s*[:=]?\s*)(?:${codes})\b`;
+}
+
 /** Order matters: the first match wins. */
 const TEXT_RULES: Array<[RegExp, TurnErrorKind]> = [
   // Before rate_limit: Kimi's quota message says "usage limit".
   [/usage limit|quota|billing|credit balance|insufficient (credit|balance|funds)/i, "quota"],
-  [/rate.?limit|too many requests|\b429\b/i, "rate_limit"],
+  [new RegExp(String.raw`rate.?limit|too many requests|${status("429")}`, "i"), "rate_limit"],
   // Before bad_request: an auth failure can carry a 400 in some providers.
-  [/authenticat|unauthori[sz]ed|\b401\b|api key|sign in|log ?in\b|\/login/i, "auth"],
+  // "log in" only as words of its own: not "catalog in", not "/var/log in".
+  // "/login" is claude-agent-acp's not-signed-in result ("Please run /login").
+  [
+    new RegExp(
+      String.raw`authenticat|unauthori[sz]ed|api key|sign in|(?<![\w/.-])log ?in\b|\/login\b|${status("401")}`,
+      "i"
+    ),
+    "auth",
+  ],
   [/context (window|length)|maximum context|too many tokens/i, "context_exhausted"],
   [/timed? ?out\b/i, "timeout"],
-  [/overloaded|service unavailable|\b50[0234]\b/i, "provider_unavailable"],
-  [/\b400\b|bad request|invalid request/i, "bad_request"],
+  [
+    new RegExp(
+      String.raw`overloaded|service unavailable|internal server error|bad gateway|gateway timeout|${status("50[0234]")}`,
+      "i"
+    ),
+    "provider_unavailable",
+  ],
+  [new RegExp(String.raw`bad request|invalid request|${status("400")}`, "i"), "bad_request"],
   [/couldn't reach the node|node (is )?offline/i, "node_offline"],
   [/^exit$|exit status \d+|^signal: \w+/i, "harness_exited"],
 ];
@@ -164,6 +188,9 @@ export function turnErrorFromRejection(err: unknown, harness: string): TurnError
 const SILENT: Record<string, { message: string; kind: TurnErrorKind }> = {
   refusal: { message: "The agent declined to answer.", kind: "refusal" },
   max_tokens: { message: "The agent reached its output limit before replying.", kind: "max_tokens" },
+  // A user's cancel never reaches here (cancelTurn idles the session first), so
+  // this is a harness that stopped its own turn.
+  cancelled: { message: "The agent stopped the turn before replying.", kind: "cancelled" },
 };
 
 /**
