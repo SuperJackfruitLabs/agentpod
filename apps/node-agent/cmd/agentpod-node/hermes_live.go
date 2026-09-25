@@ -117,9 +117,13 @@ func hermesLiveCmd(args []string, out, errOut io.Writer) int {
 			return 1
 		}
 		fmt.Fprintf(out, "\n%s: %sd %s\n", profile, action, hermeslive.Name)
-		fmt.Fprintf(out, "The gateway reads plugins and configuration at start. Nothing was restarted; to load this change,\n"+
+		effect := "load"
+		if action == "disable" {
+			effect = "unload"
+		}
+		fmt.Fprintf(out, "The gateway reads plugins and configuration at start. Nothing was restarted; to %s the plugin,\n"+
 			"restart the station from the Console, or run: systemctl --user restart %s\n"+
-			"Then `apn hermes-live status --profile %s` shows whether it loaded.\n", unit, profile)
+			"Then `apn hermes-live status --profile %s` shows what the gateway has.\n", effect, unit, profile)
 		return 0
 
 	default:

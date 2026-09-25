@@ -105,6 +105,11 @@ func TestEnableThenDisableRestoresTheProfileExactly(t *testing.T) {
 	if _, err := os.Stat(statePath(dir)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("install record survived disable: %v", err)
 	}
+	for _, made := range []string{filepath.Join(dir, "plugins"), filepath.Join(dir, stateDirName)} {
+		if _, err := os.Stat(made); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("disable left the empty %s that enable made", made)
+		}
+	}
 }
 
 // strategy-sam: copied by hand, byte-identical, already enabled.

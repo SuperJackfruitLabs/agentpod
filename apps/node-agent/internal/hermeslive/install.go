@@ -40,6 +40,9 @@ type State struct {
 	Config        ConfigChange `json:"config"`
 	Adopted       bool         `json:"adopted,omitempty"`
 	Displaced     string       `json:"displaced,omitempty"`
+	// PluginsDirCreated records that enable created plugins/, so disable can
+	// remove it again when it is left empty.
+	PluginsDirCreated bool `json:"pluginsDirCreated,omitempty"`
 }
 
 // What the plugin directory holds, relative to what this apn ships.
@@ -229,6 +232,7 @@ func applyEnable(plan Plan, now time.Time) error {
 			state.Config = prior.Config
 		}
 		state.Adopted = state.Adopted || prior.Adopted
+		state.PluginsDirCreated = prior.PluginsDirCreated
 	}
 	// The files end up apn's, so disable removes them and their enable entry;
 	// a dangling plugins.enabled entry for a removed plugin helps no one.
@@ -285,6 +289,9 @@ func placeFiles(plan Plan, stamp string, state *State) error {
 			return err
 		}
 	}
+	if _, err := os.Stat(filepath.Dir(pluginDir(plan.ProfileDir))); err != nil {
+		state.PluginsDirCreated = true
+	}
 	if err := os.MkdirAll(filepath.Dir(pluginDir(plan.ProfileDir)), 0o755); err != nil {
 		return err
 	}
@@ -319,7 +326,16 @@ func applyDisable(plan Plan) error {
 			return err
 		}
 	}
-	return os.Remove(statePath(plan.ProfileDir))
+	if err := os.Remove(statePath(plan.ProfileDir)); err != nil {
+		return err
+	}
+	// Leave no empty directory that enable made. os.Remove refuses a
+	// non-empty one, so anything else placed there stays.
+	if plan.state.PluginsDirCreated {
+		_ = os.Remove(filepath.Dir(pluginDir(plan.ProfileDir)))
+	}
+	_ = os.Remove(filepath.Join(plan.ProfileDir, stateDirName))
+	return nil
 }
 
 // ---- observation of the directory -----------------------------------------
