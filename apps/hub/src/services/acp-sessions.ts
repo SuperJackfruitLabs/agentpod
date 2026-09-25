@@ -61,6 +61,7 @@ import { openAcpWire, type AcpWire } from "./acp-transport";
 import * as broker from "./broker";
 import { nodes } from "../db/schema/nodes";
 import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
+import { turnErrorForSilentTurn, turnErrorFromReason, turnErrorFromRejection } from "./turn-error";
 
 const log = createLogger("acp-sessions");
 
@@ -162,6 +163,8 @@ interface LiveSession {
   userId: string;
   nodeId: string;
   stationKey: string;
+  /** Which harness answers, so an error can say whose failure it was. */
+  harness: string;
   mode: AcpSessionMode;
   status: AcpSessionStatus;
   /** Last assigned event seq (assigned synchronously; writes are chained). */
@@ -719,7 +722,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   if (!connectionManager.isOnline(station.nodeId)) {
     throw new Error("Node is offline.");
   }
-  const { nodeId, stationKey, workspacePath } = station;
+  const { nodeId, stationKey, workspacePath, harness } = station;
 
   // ── Compatibility layer 1 (pre-open) ───────────────────────────────────────
   // A concurrent session is only safe when the node keys its agent processes on
@@ -747,6 +750,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     userId,
     nodeId,
     stationKey,
+    harness,
     mode,
     status: "starting",
     seq: 0,
@@ -868,7 +872,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     return toContract(rows[0]!);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    persistEvent(live, "error", { message: reason });
+    persistEvent(live, "error", turnErrorFromRejection(err, live.harness));
     await finalizeEnd(live, reason);
     throw err;
   }
@@ -1093,9 +1097,11 @@ export async function promptSession(
       params: images.length === 0 ? { chars: text.length } : { chars: text.length, images: images.length },
     });
   } catch (err) {
-    persistEvent(live, "error", {
-      message: "Couldn't record the audit entry — prompt aborted.",
-    });
+    persistEvent(
+      live,
+      "error",
+      turnErrorFromReason("Couldn't record the audit entry — prompt aborted.", live.harness, "hub")
+    );
     await setStatus(live, "idle").done;
     throw err;
   }
@@ -1129,12 +1135,15 @@ export async function promptSession(
       sessionId: live.acpSessionId,
       prompt: promptBlocks(text, images, imageRefusal),
     })
-    .then(async () => {
+    .then(async (response) => {
       if (isCurrentTurn()) {
         if (!live.turnProduced) {
-          const message = "The agent completed without a reply.";
-          await audit.done("error", message).catch(() => {});
-          const { done: errorWritten } = persistEvent(live, "error", { message });
+          const error = turnErrorForSilentTurn(
+            live.harness,
+            (response as { stopReason?: unknown } | undefined)?.stopReason
+          );
+          await audit.done("error", error.message).catch(() => {});
+          const { done: errorWritten } = persistEvent(live, "error", error);
           const { done: idleWritten } = setStatus(live, "idle");
           await Promise.all([errorWritten, idleWritten]);
           return;
@@ -1146,16 +1155,18 @@ export async function promptSession(
       }
     })
     .catch(async (err) => {
-      const message = err instanceof Error ? err.message : String(err);
+      // The harness's words, with what it put in `data` — Codex's quota
+      // sentence is only there — classified into one shape for every reader.
+      const error = turnErrorFromRejection(err, live.harness);
       await audit
-        .done("error", message)
+        .done("error", error.message)
         .catch(() => {});
       // Wire-level failures transition the session via handleWireClosed; only
       // recover to idle when this turn is still the live one. A normal ACP
       // request rejection is different: persist it in the transcript so every
       // client sees the provider or adapter error instead of an idle empty turn.
       if (isCurrentTurn()) {
-        const { done: errorWritten } = persistEvent(live, "error", { message });
+        const { done: errorWritten } = persistEvent(live, "error", error);
         const { done: idleWritten } = setStatus(live, "idle");
         await Promise.all([errorWritten, idleWritten]);
       }

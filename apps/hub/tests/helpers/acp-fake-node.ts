@@ -62,6 +62,9 @@ export interface FakeAcpNodeOpts {
   ignoreCancel?: boolean;
   /** Reject session/prompt without emitting an agent update (provider failure). */
   failPrompt?: string;
+  /** With failPrompt: the JSON-RPC error's code and data, as a real adapter sends them. */
+  failPromptCode?: number;
+  failPromptData?: unknown;
   /** Complete session/prompt without emitting an update (adapter false success). */
   silentPrompt?: boolean;
   /** Respond to acp.open with ok:false and this error. */
@@ -257,7 +260,11 @@ export async function connectFakeAcpNode(
         sendAgent(proc, {
           jsonrpc: "2.0",
           id,
-          error: { code: -32000, message: opts.failPrompt },
+          error: {
+            code: opts.failPromptCode ?? -32000,
+            message: opts.failPrompt,
+            ...(opts.failPromptData === undefined ? {} : { data: opts.failPromptData }),
+          },
         });
       }
       return;
