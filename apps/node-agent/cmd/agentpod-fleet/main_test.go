@@ -13,7 +13,7 @@ import (
 // TestFleetHelpListsEveryVerb this file replaces made exactly that point, and its replacement
 // here restated wantVerbs by hand without wiring dispatched ⊆ listed AND listed ⊆ dispatched,
 // which is the bug that comment warned about).
-var wantVerbs = []string{"login", "whoami", "logout", "nodes", "agents", "stats", "activity", "devices"}
+var wantVerbs = []string{"login", "whoami", "logout", "nodes", "agents", "stats", "activity", "devices", "update"}
 
 // dispatchedVerbs reads fleet.go's switch directly: the verbs this binary actually dispatches.
 func dispatchedVerbs(t *testing.T) map[string]bool {
@@ -62,12 +62,24 @@ func TestDispatchesEveryFleetVerb(t *testing.T) {
 
 // The split, asserted from the outside: this binary must not carry the verbs
 // that act on a host. A worker holds this and cannot become a node.
+//
+// `update` was in this list and is not a host verb. It was here because
+// selfupdate fetched a FIXED asset name — `agentpod-node-…` — so a fleet
+// update really would have replaced the fleet binary with a node, which is
+// the thing this test protects. The asset is now bound to the binary doing
+// the updating (selfupdate.assetNameFor), so fleet fetches fleet and can
+// never install a node. The verbs below still act on a host and still cannot
+// be here.
+//
+// Leaving it out had a measurable cost: fleet was found at v0.1.52 on a
+// developer's machine while agentpod-node, which self-updates, was current at
+// v0.1.66 — fourteen releases, all published by the workflow that builds both.
 func TestCarriesNoNodeVerbs(t *testing.T) {
 	src, err := os.ReadFile("fleet.go")
 	if err != nil {
 		t.Fatalf("read fleet.go: %v", err)
 	}
-	for _, forbidden := range []string{"enroll", "run", "service", "update"} {
+	for _, forbidden := range []string{"enroll", "run", "service"} {
 		if regexp.MustCompile(`(?m)^\tcase "` + forbidden + `":`).MatchString(string(src)) {
 			t.Errorf("node verb %q is dispatched in the fleet binary", forbidden)
 		}

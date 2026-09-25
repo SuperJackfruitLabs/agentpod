@@ -21,6 +21,7 @@ Usage: fleet <verb> [flags]
   fleet activity             recent fleet activity
   fleet skills …             manage skill artifacts, releases and canaries
 
+  fleet update [--check]     replace this binary with the newest release
   fleet version              print version and platform
   fleet help                 this text
 
