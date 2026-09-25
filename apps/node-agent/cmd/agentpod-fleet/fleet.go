@@ -64,6 +64,8 @@ func fleetCmd(args []string) {
 		fleetGet("/api/activity", args[1:])
 	case "skills":
 		fleetSkills(args[1:])
+	case "plugins":
+		fleetPlugins(args[1:])
 	case "devices":
 		fleetDevices(args[1:])
 	default:
