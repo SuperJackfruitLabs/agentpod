@@ -216,7 +216,11 @@ export function turnErrorFromReason(reason: string, harness: string, source: Tur
  */
 export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness: string): TurnError {
   const kind = reported.kind ?? classifyText(reported.message);
-  const { message, kind: _kind, retryable, ...rest } = reported;
-  const error = build(message, kind, harness, "plugin", rest);
+  const { message, kind: _kind, retryable, attempts, ...rest } = reported;
+  const classified = attempts?.map((a) => ({ ...a, kind: a.kind ?? classifyText(a.message) }));
+  const error = build(message, kind, harness, "plugin", {
+    ...rest,
+    ...(classified ? { attempts: classified } : {}),
+  });
   return retryable === undefined ? error : { ...error, retryable };
 }

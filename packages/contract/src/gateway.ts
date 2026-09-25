@@ -2,7 +2,7 @@ import { z } from "zod";
 import { HostInfo } from "./node";
 import { RequestMsg, ResponseMsg, StreamMsg, CancelMsg, InputMsg, ResizeMsg } from "./protocol";
 import { NodeCapabilityList } from "./posture";
-import { TurnError } from "./acp-session";
+import { TurnError, TurnErrorKind } from "./acp-session";
 
 export const HelloMsg = z.object({
   type: z.literal("hello"),
@@ -70,7 +70,23 @@ export const TurnErrorReport = z
     harnessSessionKey: z.string().min(1).optional(),
     error: TurnError.omit({ harness: true, source: true })
       .partial({ kind: true })
-      .extend({ message: z.string().min(1).max(TURN_ERROR_MESSAGE_MAX) }),
+      .extend({
+        message: z.string().min(1).max(TURN_ERROR_MESSAGE_MAX),
+        // Each model the harness tried. A plugin reports the words; the hub
+        // classifies an attempt that arrives without a kind, as it does the
+        // report itself.
+        attempts: z
+          .array(
+            z.object({
+              provider: z.string(),
+              model: z.string(),
+              kind: TurnErrorKind.optional(),
+              message: z.string().max(TURN_ERROR_MESSAGE_MAX),
+            })
+          )
+          .max(16)
+          .optional(),
+      }),
   })
   .refine((r) => r.acpSessionId !== undefined || r.harnessSessionKey !== undefined, {
     message: "a report needs acpSessionId or harnessSessionKey to be matched to a session",

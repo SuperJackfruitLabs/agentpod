@@ -236,6 +236,21 @@ describe("turnErrorFromPlugin — what a harness plugin reported", () => {
     expect(err).toMatchObject({ kind: "timeout", retryable: true, source: "plugin" });
   });
 
+  test("classifies each attempt the plugin listed without a kind", () => {
+    const err = turnErrorFromPlugin(
+      {
+        message: "You've reached your weekly (7-day) usage limit.",
+        attempts: [
+          { provider: "kimi-coding", model: "k2p6", message: "You've reached your weekly (7-day) usage limit." },
+          { provider: "opencode-go", model: "hy3-preview", message: "400 Request is missing x-opencode-session" },
+        ],
+      },
+      "openclaw"
+    );
+    expect(err.kind).toBe("quota");
+    expect(err.attempts!.map((a) => a.kind)).toEqual(["quota", "bad_request"]);
+  });
+
   test("a plugin's own retryable wins over the kind's default", () => {
     const err = turnErrorFromPlugin({ message: "quota", kind: "quota", retryable: true }, "pi");
     expect(err.retryable).toBe(true);

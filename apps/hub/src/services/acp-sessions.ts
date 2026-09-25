@@ -1311,7 +1311,9 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
     candidates.sort((a, b) => b.lastTurnSettledAt - a.lastTurnSettledAt)[0];
 
   if (!live) {
-    log.warn("a turn error was reported for no live session on its node", {
+    // Info, not warn: a plugin sees every channel its harness serves, and a
+    // failed turn in a Telegram chat has no hub session to belong to.
+    log.info("a turn error was reported for no live session on its node", {
       nodeId,
       acpSessionId: report.acpSessionId,
       harnessSessionKey: report.harnessSessionKey,

@@ -42,6 +42,15 @@ describe("TurnErrorReport — what a plugin writes to its node", () => {
     expect("source" in parsed.error).toBe(false);
   });
 
+  it("lets a plugin list attempts without classifying them: the hub does that", () => {
+    // OpenClaw's agent_end gives each attempt's words, never a kind.
+    const r = {
+      harnessSessionKey: "agent:krishna:main",
+      error: { message: "quota", attempts: [{ provider: "kimi-coding", model: "k2p6", message: "quota" }] },
+    };
+    expect(TurnErrorReport.parse(r)).toEqual(r);
+  });
+
   it("needs something to match a session by", () => {
     expect(TurnErrorReport.safeParse({ error: { message: "x" } }).success).toBe(false);
   });
