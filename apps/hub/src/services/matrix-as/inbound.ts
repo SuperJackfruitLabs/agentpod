@@ -41,10 +41,12 @@ import {
   isVoiceRefusal,
   loadVoice,
   transcriptContent,
+  MAX_VOICE_SECONDS,
   transcriptNotice,
   voiceNote,
   voicePrompt,
   type Transcriber,
+  type VoiceResult,
 } from "./voice";
 import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
 import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
@@ -105,8 +107,16 @@ export interface InboundDeps {
     ): Promise<string | null>;
   };
   /**
-   * Speech to text for voice notes. Optional: without it a voice note reaches
-   * the agent as a note that it could not be heard — see `voice.ts`.
+   * Speech to text for voice notes, asked per voice note for the room's
+   * station — the console's station and hub settings, then TRANSCRIBE_* env
+   * (`services/transcription-settings.ts`). Null: none for that station.
+   */
+  transcriberFor?(stationId: string): Promise<{ transcriber: Transcriber; maxSeconds: number } | null>;
+  /**
+   * One transcriber for every station, at the default length limit. Used when
+   * `transcriberFor` is absent — the tests that predate per-station settings.
+   * Without either, a voice note reaches the agent as a note that it could
+   * not be heard — see `voice.ts`.
    */
   transcriber?: Transcriber | null;
   acp: {
@@ -260,6 +270,28 @@ function remember(event: InboundEvent): void {
     if (oldest) pending.delete(oldest);
   }
   pending.set(id, { event, first: Date.now() });
+}
+
+/**
+ * The transcription service for a station's voice note, and its length limit.
+ * A lookup that fails is a voice note that cannot be heard — reported like
+ * any other reason — never a message that is lost.
+ */
+async function voiceServiceFor(
+  deps: InboundDeps,
+  stationId: string
+): Promise<{ transcriber: Transcriber | null; maxSeconds: number } | { reason: string }> {
+  if (!deps.transcriberFor) return { transcriber: deps.transcriber ?? null, maxSeconds: MAX_VOICE_SECONDS };
+  try {
+    const found = await deps.transcriberFor(stationId);
+    return found ?? { transcriber: null, maxSeconds: MAX_VOICE_SECONDS };
+  } catch (err) {
+    log.error("could not read a station's transcription settings", {
+      stationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { reason: "its transcription settings could not be read" };
+  }
 }
 
 /**
@@ -490,9 +522,12 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // told the same.
   if (audio) {
     const download = deps.client.downloadMedia;
-    const heard = download
-      ? await loadVoice(audio, (mxc) => download(agentUser, mxc), deps.transcriber ?? null)
-      : { reason: "this hub cannot fetch audio" };
+    const service = download ? await voiceServiceFor(deps, room.stationId) : null;
+    const heard: VoiceResult = !download || !service
+      ? { reason: "this hub cannot fetch audio" }
+      : "reason" in service
+        ? service
+        : await loadVoice(audio, (mxc) => download(agentUser, mxc), service.transcriber, service.maxSeconds);
     if (isVoiceRefusal(heard)) {
       log.warn("a voice note for an agent could not be transcribed", {
         room: room.roomId,

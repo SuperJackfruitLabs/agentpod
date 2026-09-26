@@ -56,6 +56,7 @@ import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
+import { stationTranscription } from "./schema/transcription";
 import {
   skillArtifacts,
   skillOperations,
@@ -123,6 +124,7 @@ export const TENANT_SCOPED_TABLES = {
   trustedSkillReleaseArtifacts,
   skillReleaseCohorts,
   stationSetups,
+  stationTranscription,
   stationAudit,
   acpSessions,
   acpEvents,

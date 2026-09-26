@@ -62,3 +62,6 @@ export * from "./matrix-credentials";
 export * from "./oauth";
 
 export * from "./station-setup";
+
+// Voice-note transcription, per station (hub-wide lives in system_settings).
+export * from "./transcription";

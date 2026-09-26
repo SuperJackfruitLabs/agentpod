@@ -7,8 +7,12 @@ import {
   isVoiceRefusal,
   loadVoice,
   openAiTranscriber,
+  silentWav,
+  testTranscription,
   transcriberFromEnv,
   transcriptContent,
+  transcriptionFromEnv,
+  TranscriptionHttpError,
   transcriptNotice,
   voiceNote,
   voicePrompt,
@@ -138,6 +142,20 @@ describe("loadVoice", () => {
     expect(isVoiceRefusal(result) && result.reason).toBe("it is longer than 5 minutes");
   });
 
+  test("the limit is the caller's when it gives one — a station or hub setting", async () => {
+    const ninety = { ...source, seconds: 91 };
+    const refused = await loadVoice(ninety, async () => AUDIO, heard("x"), 90);
+    expect(isVoiceRefusal(refused) && refused.reason).toBe("it is longer than 90 seconds");
+
+    const twoMin = { ...source, seconds: 121 };
+    const r2 = await loadVoice(twoMin, async () => AUDIO, heard("x"), 120);
+    expect(isVoiceRefusal(r2) && r2.reason).toBe("it is longer than 2 minutes");
+
+    // Raised above the old five-minute ceiling, a six-minute note is heard.
+    const six = { ...source, seconds: 360 };
+    expect(isVoiceRefusal(await loadVoice(six, async () => AUDIO, heard("x"), 600))).toBe(false);
+  });
+
   test("no transcriber, a failed download, a failed service, or silence each give a reason", async () => {
     expect(await loadVoice(source, async () => AUDIO, null)).toEqual({
       reason: "this hub has no transcription service set up",
@@ -220,9 +238,69 @@ describe("openAiTranscriber", () => {
     );
   });
 
+  test("a non-2xx answer carries its status for a caller that wants it", async () => {
+    const fakeFetch = (async () => new Response("bad key", { status: 401 })) as unknown as typeof fetch;
+    const t = openAiTranscriber({ baseUrl: "http://x", apiKey: "k", model: "m", fetch: fakeFetch });
+    const err = await t.transcribe(AUDIO, { mimeType: "", name: "v" }).catch((e) => e);
+    expect(err).toBeInstanceOf(TranscriptionHttpError);
+    expect(err.status).toBe(401);
+  });
+
   test("configured only when TRANSCRIBE_URL is set", () => {
     expect(transcriberFromEnv({})).toBeNull();
     expect(transcriberFromEnv({ TRANSCRIBE_URL: "  " })).toBeNull();
     expect(transcriberFromEnv({ TRANSCRIBE_URL: "http://foundry:8840" })).not.toBeNull();
+  });
+});
+
+describe("transcriptionFromEnv", () => {
+  test("reads url, key and model, defaulting the model", () => {
+    expect(transcriptionFromEnv({})).toBeNull();
+    expect(transcriptionFromEnv({ TRANSCRIBE_URL: " http://t " })).toEqual({ url: "http://t", apiKey: "", model: "large-v3-turbo" });
+    expect(
+      transcriptionFromEnv({ TRANSCRIBE_URL: "http://t", TRANSCRIBE_API_KEY: "k", TRANSCRIBE_MODEL: "whisper-1" })
+    ).toEqual({ url: "http://t", apiKey: "k", model: "whisper-1" });
+  });
+});
+
+describe("testTranscription", () => {
+  test("silentWav is one second of 16 kHz mono 16-bit PCM", () => {
+    const wav = silentWav();
+    expect(wav.length).toBe(44 + 32_000);
+    expect(new TextDecoder().decode(wav.slice(0, 4))).toBe("RIFF");
+    expect(new TextDecoder().decode(wav.slice(8, 12))).toBe("WAVE");
+    const view = new DataView(wav.buffer);
+    expect(view.getUint32(24, true)).toBe(16_000);
+    expect(view.getUint16(22, true)).toBe(1);
+  });
+
+  test("a 200 with empty text is a working service — silence has no words", async () => {
+    let posted: File | null = null;
+    const fakeFetch = (async (_url: string, init: RequestInit) => {
+      posted = (init.body as FormData).get("file") as File;
+      return new Response(JSON.stringify({ text: "" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await testTranscription({ url: "http://t", apiKey: "k", model: "m" }, { fetch: fakeFetch });
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe(200);
+    expect(typeof result.elapsedMs).toBe("number");
+    expect(posted!.type).toBe("audio/wav");
+  });
+
+  test("a refusal reports its status and why", async () => {
+    const fakeFetch = (async () => new Response("invalid api key", { status: 401 })) as unknown as typeof fetch;
+    const result = await testTranscription({ url: "http://t", apiKey: "k", model: "m" }, { fetch: fakeFetch });
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe(401);
+    expect(result.error).toContain("401");
+  });
+
+  test("an unreachable service is an error with no status", async () => {
+    const fakeFetch = (async () => {
+      throw new Error("connect ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    const result = await testTranscription({ url: "http://t", apiKey: "k", model: "m" }, { fetch: fakeFetch });
+    expect(result).toMatchObject({ ok: false, error: "connect ECONNREFUSED" });
+    expect(result.status).toBeUndefined();
   });
 });
