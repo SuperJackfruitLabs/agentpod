@@ -90,3 +90,21 @@ export const saveStationTranscription = (stationId: string, input: StationTransc
     `/api/stations/${encodeURIComponent(stationId)}/transcription`,
     jsonInit("PUT", input)
   );
+
+/** What a harness-mode station's node wrote into its profile. No url, no key. */
+export interface TranscriptionApplyResult {
+  applied: boolean;
+  mode: "on" | "off";
+  model: string | null;
+  /** False when the station may not be restarted from here (a profile sharing the root gateway). */
+  restarted: boolean;
+}
+
+/**
+ * Push the station's saved setting into its harness profile (harness-mode
+ * Hermes stations). No body: the node fetches the setting from the hub itself.
+ */
+export const applyStationTranscription = (stationId: string) =>
+  http<TranscriptionApplyResult>(`/api/stations/${encodeURIComponent(stationId)}/transcription/apply`, {
+    method: "POST",
+  });

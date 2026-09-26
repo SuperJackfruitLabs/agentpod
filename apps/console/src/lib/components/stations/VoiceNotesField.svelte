@@ -7,8 +7,9 @@
    *
    * For a bridge-mode station the hub transcribes, so saving here takes
    * effect on the next voice note. A harness-mode station runs its own Matrix
-   * client and hears voice notes itself; handing this setting to the harness
-   * is not built yet, and the section says so rather than implying it works.
+   * client and hears voice notes itself, so the saved setting reaches it only
+   * when its node writes it into the harness profile — "Apply to harness"
+   * (`transcription.apply`), which says whether the harness was restarted.
    */
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
@@ -24,12 +25,14 @@
     urlProblem,
   } from "$lib/components/transcription/transcription";
   import {
+    applyStationTranscription,
     getStationTranscription,
     saveStationTranscription,
     type ApiKeyWrite,
     type StationTranscription,
     type StationTranscriptionInput,
     type StationTranscriptionMode,
+    type TranscriptionApplyResult,
   } from "$lib/api/transcription";
 
   let {
@@ -37,13 +40,33 @@
     harnessMode = false,
     load = getStationTranscription,
     save = saveStationTranscription,
+    apply = applyStationTranscription,
   }: {
     stationId: string;
     /** `matrixIdentityMode === "harness"`: the harness hears voice notes itself. */
     harnessMode?: boolean;
     load?: (stationId: string) => Promise<StationTranscription>;
     save?: (stationId: string, input: StationTranscriptionInput) => Promise<StationTranscription>;
+    apply?: (stationId: string) => Promise<TranscriptionApplyResult>;
   } = $props();
+
+  let applying = $state(false);
+  let applied = $state<TranscriptionApplyResult | null>(null);
+  let applyError = $state<string | null>(null);
+
+  async function onApply() {
+    if (applying) return;
+    applying = true;
+    applied = null;
+    applyError = null;
+    try {
+      applied = await apply(stationId);
+    } catch (e) {
+      applyError = e instanceof Error ? e.message : "Couldn’t apply the setting to the harness.";
+    } finally {
+      applying = false;
+    }
+  }
 
   let loaded = $state<StationTranscription | null>(null);
   let loadError = $state<string | null>(null);
@@ -155,10 +178,28 @@
     </Button>
 
     {#if harnessMode}
-      <p class="text-xs text-muted-foreground" data-testid="voice-harness-note">
-        This agent runs its own Matrix client, so its harness transcribes voice notes itself. Pushing this
-        setting to the harness is coming soon; until then it applies only to bridge-mode stations.
-      </p>
+      <div class="space-y-2 border-t border-border pt-3">
+        <p class="text-xs text-muted-foreground" data-testid="voice-harness-note">
+          This agent runs its own Matrix client, so its harness transcribes voice notes itself. Save, then
+          apply to write the setting into its harness profile.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onclick={() => void onApply()}
+          disabled={applying || saving || changed}
+          title={changed ? "Save your changes first" : undefined}
+        >
+          {applying ? "Applying…" : "Apply to harness"}
+        </Button>
+        {#if applyError}
+          <p class="text-xs text-destructive" role="alert">{applyError}</p>
+        {:else if applied}
+          <p class="text-xs text-muted-foreground" data-testid="voice-apply-result" aria-live="polite">
+            {applied.restarted ? "Applied — restarted." : "Applied — restart the gateway to pick it up."}
+          </p>
+        {/if}
+      </div>
     {/if}
   {/if}
 </div>
