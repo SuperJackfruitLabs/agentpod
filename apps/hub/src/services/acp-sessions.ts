@@ -46,6 +46,7 @@ import type {
   AcpSessionStatus,
   TurnError,
   TurnErrorReport,
+  TurnResolution,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
@@ -234,7 +235,12 @@ interface LiveSession {
   /** When the agent last produced something a reader sees, this turn. */
   lastProducedAt: number;
   /** Set while a silent turn waits for a plugin's report. */
-  awaitingTurnError: ((error: TurnError) => void) | null;
+  awaitingTurnError: ((outcome: TurnError | TurnResolution) => void) | null;
+  /**
+   * A plugin said this turn's run ended well after all: a fallback answered,
+   * or the agent chose silence (OpenClaw's NO_REPLY).
+   */
+  turnResolution: TurnResolution | null;
   /** When the last turn settled, for placing a late report. */
   lastTurnSettledAt: number;
   /**
@@ -830,6 +836,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     pendingTurnErrorAt: 0,
     lastProducedAt: 0,
     awaitingTurnError: null,
+    turnResolution: null,
     lastTurnSettledAt: 0,
     acceptsImages: false,
   };
@@ -1195,6 +1202,7 @@ export async function promptSession(
   live.pendingTurnError = null;
   live.pendingTurnErrorAt = 0;
   live.lastProducedAt = 0;
+  live.turnResolution = null;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
     !live.ended && live.turnEpoch === epoch && live.status === "working";
@@ -1242,9 +1250,18 @@ export async function promptSession(
         }
         if (!live.turnProduced) {
           // Nothing came back. A harness that drops its errors over ACP may
-          // have a plugin about to say why; give it a moment.
-          const reported = await awaitTurnError(live);
+          // have a plugin about to say why; give it a moment — unless its
+          // plugin has already said the run ended well.
+          const reported = live.turnResolution ?? (await awaitTurnError(live));
           if (!isCurrentTurn()) {
+            settled();
+            return;
+          }
+          if (reported === "answered" || reported === "silent") {
+            // The agent chose to say nothing (NO_REPLY). An empty turn it
+            // chose is not a failed one: no error, and the room says done.
+            await audit.done("ok");
+            await setStatus(live, "idle", { extra: { silent: true } }).done;
             settled();
             return;
           }
@@ -1297,7 +1314,7 @@ export async function promptSession(
 }
 
 /** Wait, up to the grace window, for a plugin to report this turn's error. */
-function awaitTurnError(live: LiveSession): Promise<TurnError | null> {
+function awaitTurnError(live: LiveSession): Promise<TurnError | TurnResolution | null> {
   if (turnErrorGraceMs <= 0) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -1313,7 +1330,7 @@ function awaitTurnError(live: LiveSession): Promise<TurnError | null> {
   });
 }
 
-export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "late" | "duplicate" | "unmatched";
+export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "resolved" | "late" | "duplicate" | "unmatched";
 
 /**
  * One turn's reports, as one error. The first report leads — it is about the
@@ -1367,6 +1384,24 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
     return "unmatched";
   }
 
+  if (report.resolution) {
+    // The run this plugin reported (or is watching) ended well: whatever it
+    // said failed was recovered. A pending report goes; a waiting turn wakes.
+    live.pendingTurnError = null;
+    live.pendingTurnErrorAt = 0;
+    if (live.awaitingTurnError) {
+      live.awaitingTurnError(report.resolution);
+      return "resolved";
+    }
+    if (live.turnInFlight) {
+      live.turnResolution = report.resolution;
+      return "resolved";
+    }
+    // Too late to take back what the room was already told.
+    log.info("a turn resolution arrived after its turn ended", { nodeId, sessionId: live.id, resolution: report.resolution });
+    return "late";
+  }
+  if (!report.error) return "unmatched";
   const error = turnErrorFromPlugin(report.error, live.harness);
   if (live.awaitingTurnError) {
     live.awaitingTurnError(error);

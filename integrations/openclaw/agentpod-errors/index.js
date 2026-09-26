@@ -189,23 +189,63 @@ function send(socket, report) {
 }
 
 /** Collects failed attempts per run and reports each failed run once. */
+/**
+ * OpenClaw's silent-reply tokens: a model that has nothing to say answers
+ * with one, and OpenClaw sends nothing (krishna, 2026-09-26: "NO_REPLY" to
+ * "Okay."). An empty answer is the same.
+ */
+const SILENT_REPLIES = new Set(["", "NO_REPLY", "HEARTBEAT_OK"]);
+
+/** Whether a successful attempt's answer is a deliberate silence. */
+export function isSilent(event) {
+  const last = lastAssistant(event?.messages);
+  if (!last) return false;
+  const text = Array.isArray(last.content)
+    ? last.content.filter((c) => c?.type === "text").map((c) => c.text ?? "").join("")
+    : String(last.content ?? "");
+  return SILENT_REPLIES.has(text.trim());
+}
+
+/** How long a sent failure stays open to a later success in the same run. */
+const REPORTED_RUN_TTL_MS = 10 * 60_000;
+
+/**
+ * Collects failed attempts per run and reports each failed run once — and,
+ * when a run it has already reported ends well after all, says so. The quiet
+ * window cannot know a slower fallback is still thinking: on 2026-09-26 the
+ * fallback took 3.4 s, the failure had gone out at 2.5 s, and the fallback's
+ * success (a deliberate NO_REPLY) left the room showing Kimi's failure.
+ */
 export function createReporter({ socket = socketPath(), quietMs = QUIET_MS, logger = console } = {}) {
   const runs = new Map();
+  /** runId → { sessionKey, at } for runs whose failure has been sent. */
+  const reported = new Map();
+  /** runId → when its resolution went out; one per run (2026.9.6 ends some runs twice). */
+  const resolved = new Map();
   let warnedNoNode = false;
+
+  const deliver = async (report, what) => {
+    const outcome = await send(socket, report);
+    if (outcome.ok) return true;
+    if (outcome.why === "no AgentPod node is listening") {
+      // Said once: a machine without a node is a normal place to run OpenClaw.
+      if (warnedNoNode) return false;
+      warnedNoNode = true;
+    }
+    logger.warn?.(`agentpod-errors: ${what} was not reported (${outcome.why})`);
+    return false;
+  };
 
   const flush = async (runId) => {
     const run = runs.get(runId);
     runs.delete(runId);
     if (!run || run.attempts.length === 0) return;
-    const outcome = await send(socket, reportFor(run.sessionKey, run.attempts));
-    if (outcome.ok) return;
-    if (outcome.why === "no AgentPod node is listening") {
-      // Said once: a machine without a node is a normal place to run OpenClaw.
-      if (warnedNoNode) return;
-      warnedNoNode = true;
-    }
-    logger.warn?.(`agentpod-errors: a failed turn was not reported (${outcome.why})`);
+    reported.set(runId, { sessionKey: run.sessionKey, at: Date.now() });
+    await deliver(reportFor(run.sessionKey, run.attempts), "a failed turn");
   };
+
+  const resolve = (sessionKey, resolution) =>
+    void deliver({ harnessSessionKey: sessionKey, resolution }, "how a turn ended");
 
   return {
     onAgentEnd(event, ctx = {}) {
@@ -213,13 +253,32 @@ export function createReporter({ socket = socketPath(), quietMs = QUIET_MS, logg
       const sessionKey = ctx.sessionKey;
       if (!runId || !sessionKey) return;
 
+      for (const [id, r] of reported) {
+        if (Date.now() - r.at > REPORTED_RUN_TTL_MS) reported.delete(id);
+      }
+      for (const [id, at] of resolved) {
+        if (Date.now() - at > REPORTED_RUN_TTL_MS) resolved.delete(id);
+      }
+
       const attempt = attemptFrom(event, ctx);
       const run = runs.get(runId);
       if (attempt === null) {
-        // A fallback answered: the run did not fail, whatever came before.
+        // An attempt succeeded: the run did not fail, whatever came before.
         if (run) {
           clearTimeout(run.timer);
           runs.delete(runId);
+        }
+        const silent = isSilent(event);
+        if (resolved.has(runId)) return;
+        if (reported.has(runId) || silent) resolved.set(runId, Date.now());
+        if (reported.has(runId)) {
+          // Its failure already went out; say the run recovered.
+          reported.delete(runId);
+          resolve(sessionKey, silent ? "silent" : "answered");
+        } else if (silent) {
+          // Nothing went out, but the turn will reach AgentPod empty; say
+          // that was the agent's choice, not a failure.
+          resolve(sessionKey, "silent");
         }
         return;
       }
