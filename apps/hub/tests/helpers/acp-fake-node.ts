@@ -58,6 +58,11 @@ export interface FakeAcpNodeOpts {
   permission?: FakePermissionConfig | null;
   /** Hold the prompt turn open until session/cancel arrives (or releasePrompt). */
   hangPrompt?: boolean;
+  /**
+   * With hangPrompt: open the turn without the opening "Working on it" chunk,
+   * so a test decides when (and whether) the agent says anything.
+   */
+  quietHang?: boolean;
   /** Ignore session/cancel: a hanging prompt stays open until releasePrompt(). */
   ignoreCancel?: boolean;
   /** Reject session/prompt without emitting an agent update (provider failure). */
@@ -132,6 +137,8 @@ export interface FakeAcpNode {
   processFor(instance: string): FakeAgentProcess | undefined;
   /** Complete the OLDEST still-hanging prompt turn with the given stopReason. */
   releasePrompt(stopReason?: string): void;
+  /** The oldest hanging turn's agent says `text` (an agent_message_chunk). */
+  agentSays(text: string): void;
   close(): void;
 }
 
@@ -293,6 +300,7 @@ export async function connectFakeAcpNode(
       respondOldest(proc, { stopReason: "end_turn" });
       return;
     }
+    if (opts.hangPrompt && opts.quietHang) return;
     sendAgent(proc, {
       jsonrpc: "2.0",
       method: "session/update",
@@ -575,6 +583,18 @@ export async function connectFakeAcpNode(
     releasePrompt: (stopReason = "end_turn") => {
       const proc = processes.find((p) => p.pendingPrompts.length > 0);
       if (proc) respondOldest(proc, { stopReason });
+    },
+    agentSays: (text: string) => {
+      const proc = processes.find((p) => p.pendingPrompts.length > 0);
+      if (!proc) return;
+      sendAgent(proc, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: proc.agentSessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        },
+      });
     },
     close: () => ws.close(),
   };
