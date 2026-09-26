@@ -82,6 +82,8 @@ export const TurnErrorReport = z
               model: z.string(),
               kind: TurnErrorKind.optional(),
               message: z.string().max(TURN_ERROR_MESSAGE_MAX),
+              providerErrorType: z.string().max(200).optional(),
+              httpStatus: z.number().int().min(100).max(599).optional(),
             })
           )
           .max(16)

@@ -256,3 +256,56 @@ describe("turnErrorFromPlugin — what a harness plugin reported", () => {
     expect(err.retryable).toBe(true);
   });
 });
+
+describe("the provider's own error type classifies before any words", () => {
+  test("opencode-go's MissingSessionID is a bad request, though the sentence never says 400", () => {
+    // krishna, ashram, 2026-09-26 05:05: the room said "unknown".
+    const err = turnErrorFromPlugin(
+      {
+        message: "Request is missing x-opencode-session and cannot be routed efficiently.",
+        providerErrorType: "MissingSessionID",
+        attempts: [
+          { provider: "opencode-go", model: "qwen3.7-plus", message: "Request is missing x-opencode-session", providerErrorType: "MissingSessionID" },
+        ],
+      },
+      "openclaw"
+    );
+    expect(err.kind).toBe("bad_request");
+    expect(err.attempts![0]!.kind).toBe("bad_request");
+  });
+
+  test("Anthropic's standard error types map to kinds", () => {
+    const kind = (providerErrorType: string) =>
+      turnErrorFromPlugin({ message: "Something failed", providerErrorType }, "openclaw").kind;
+    expect(kind("invalid_request_error")).toBe("bad_request");
+    expect(kind("authentication_error")).toBe("auth");
+    expect(kind("rate_limit_error")).toBe("rate_limit");
+    expect(kind("overloaded_error")).toBe("provider_unavailable");
+    expect(kind("api_error")).toBe("provider_unavailable");
+  });
+
+  test("permission_error is left to the words: Kimi sends it for a used-up quota", () => {
+    const err = turnErrorFromPlugin(
+      { message: "You've reached your weekly (7-day) usage limit.", providerErrorType: "permission_error" },
+      "openclaw"
+    );
+    expect(err.kind).toBe("quota");
+  });
+});
+
+describe("the HTTP status decides only when type and words cannot", () => {
+  const kind = (message: string, httpStatus: number, providerErrorType?: string) =>
+    turnErrorFromPlugin({ message, httpStatus, ...(providerErrorType ? { providerErrorType } : {}) }, "openclaw").kind;
+
+  test("a status the words say nothing about", () => {
+    expect(kind("Something went wrong upstream", 401)).toBe("auth");
+    expect(kind("Something went wrong upstream", 429)).toBe("rate_limit");
+    expect(kind("Something went wrong upstream", 503)).toBe("provider_unavailable");
+    expect(kind("Something went wrong upstream", 400)).toBe("bad_request");
+  });
+
+  test("403 alone is not a verdict: Kimi sends it for a used-up quota", () => {
+    expect(kind("You've reached your weekly (7-day) usage limit.", 403)).toBe("quota");
+    expect(kind("Something went wrong upstream", 403)).toBe("unknown");
+  });
+});
