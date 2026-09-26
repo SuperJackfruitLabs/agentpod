@@ -120,6 +120,8 @@ func main() {
 		os.Exit(hermesLiveCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "openclaw-errors":
 		os.Exit(openclawErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "pi-errors":
+		os.Exit(piErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "plugin-management":
 		os.Exit(pluginManagementCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":

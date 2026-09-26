@@ -34,6 +34,11 @@ import (
 // SocketEnv overrides where the socket lives, for the node and for plugins.
 const SocketEnv = "AGENTPOD_TURN_ERROR_SOCKET"
 
+// SessionEnv names the hub session an ACP process serves. The node sets it on
+// every adapter it spawns; a plugin inside a harness the adapter spawns (Pi)
+// reports with it as acpSessionId.
+const SessionEnv = "AGENTPOD_ACP_SESSION"
+
 // MaxLineBytes caps one report. The contract caps the message at 8 KiB; the
 // rest is room for the fallback chain.
 const MaxLineBytes = 16 << 10
