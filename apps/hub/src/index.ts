@@ -47,6 +47,7 @@ import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
 import { purposeRoutes } from './routes/purpose.ts';
+import { stationTranscriptionRoutes } from './routes/transcription-settings.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
 // Station activity endpoint (audit log, fleet console)
@@ -283,6 +284,7 @@ const app = new Hono()
   // Station routes (detect, adopt, list, unadopt)
   .route('/api', stationRoutes)                            // GET/POST/DELETE /api/nodes/:id/... and /api/stations/:id
   .route('/api', purposeRoutes)                            // PUT /api/stations/:id/purpose, /api/nodes/:id/purpose
+  .route('/api', stationTranscriptionRoutes())             // GET/PUT /api/stations/:id/transcription
   // Station terminal WebSocket bridge (fleet console ↔ node PTY)
   .route('/api', stationTerminalRoutes)                    // WS /api/stations/:id/terminal
   // Station activity log (audit rows, fleet console)

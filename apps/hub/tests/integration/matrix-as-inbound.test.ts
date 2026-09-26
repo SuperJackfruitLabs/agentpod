@@ -486,6 +486,67 @@ describe("a voice note", () => {
     expect(prompts[0]!.text).not.toContain("never heard");
   });
 
+  test("the service is looked up per voice note, for the room's station, with that station's limit", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+    const askedFor: string[] = [];
+    const heardBy: string[] = [];
+    const withLookup = {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async (stationId: string) => {
+        askedFor.push(stationId);
+        return {
+          transcriber: {
+            transcribe: async () => {
+              heardBy.push(stationId);
+              return { text: "from the station's own service", language: "en" };
+            },
+          },
+          maxSeconds: 30,
+        };
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), withLookup);
+    // 42 s is over this station's 30 s limit: named, not heard.
+    expect(askedFor).toEqual([STATION]);
+    expect(heardBy).toEqual([]);
+    expect(prompts[0]!.text).toContain("it is longer than 30 seconds");
+
+    prompts.length = 0;
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 20_000 } }), withLookup);
+    expect(heardBy).toEqual([STATION]);
+    expect(prompts[0]!.text).toBe("[Voice note, 0:20, transcribed] from the station's own service");
+  });
+
+  test("a station whose lookup answers none is told the hub has no service", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), { ...d, transcriber: undefined, transcriberFor: async () => null });
+
+    expect(prompts[0]!.text).toBe(
+      "[The user sent a voice note, Voice message.m4a, but this hub has no transcription service set up.]"
+    );
+  });
+
+  test("a lookup that throws is a voice note that cannot be heard, not a lost message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toContain("but its transcription settings could not be read");
+  });
+
   test("a sender who may not dispatch the agent gets no transcription either", async () => {
     // Transcribing is work done as the agent; it follows the same grant.
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });

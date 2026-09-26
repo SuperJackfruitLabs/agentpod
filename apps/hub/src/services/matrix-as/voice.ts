@@ -17,7 +17,10 @@
 import { VOICE_TRANSCRIPT_CONTENT_KEY, type VoiceTranscript } from "@agentpod/contract";
 import { decryptAttachment, parseMxc, type EncryptedFile } from "./attachments";
 
-/** The longest voice note transcribed. Longer ones are named, not heard. */
+/**
+ * The longest voice note transcribed by default. Longer ones are named, not
+ * heard. A hub or station setting can move it (`transcription-settings.ts`).
+ */
 export const MAX_VOICE_SECONDS = 300;
 
 /**
@@ -106,11 +109,12 @@ function asEncryptedFile(value: unknown): EncryptedFile | null {
 export async function loadVoice(
   source: AudioSource,
   download: (mxc: string) => Promise<Uint8Array | null>,
-  transcriber: Transcriber | null
+  transcriber: Transcriber | null,
+  maxSeconds: number = MAX_VOICE_SECONDS
 ): Promise<VoiceResult> {
   if (!transcriber) return { reason: "this hub has no transcription service set up" };
-  if (source.seconds !== null && source.seconds > MAX_VOICE_SECONDS) {
-    return { reason: `it is longer than ${MAX_VOICE_SECONDS / 60} minutes` };
+  if (source.seconds !== null && source.seconds > maxSeconds) {
+    return { reason: `it is longer than ${duration(maxSeconds)}` };
   }
   if (source.size !== null && source.size > MAX_VOICE_BYTES) {
     return { reason: `it is larger than ${MAX_VOICE_BYTES / (1024 * 1024)} MB` };
@@ -143,6 +147,15 @@ export async function loadVoice(
   }
 }
 
+/** `5 minutes`, `90 seconds` — whichever is exact. */
+function duration(seconds: number): string {
+  if (seconds % 60 === 0) {
+    const m = seconds / 60;
+    return m === 1 ? "1 minute" : `${m} minutes`;
+  }
+  return `${seconds} seconds`;
+}
+
 export function isVoiceRefusal(value: VoiceResult): value is { reason: string } {
   return "reason" in value;
 }
@@ -172,6 +185,17 @@ export function voiceNote(name: string, reason: string): string {
 /** The notice posted under the voice note, so the sender sees what was heard. */
 export function transcriptNotice(transcript: Transcript): string {
   return `Transcript: ${transcript.text.trim()}`;
+}
+
+/** The service answered, and not with a 2xx. The message names the status. */
+export class TranscriptionHttpError extends Error {
+  constructor(
+    readonly status: number,
+    detail: string
+  ) {
+    super(`the transcription service answered ${status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+    this.name = "TranscriptionHttpError";
+  }
 }
 
 /**
@@ -222,7 +246,7 @@ export function openAiTranscriber(opts: {
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
-        throw new Error(`the transcription service answered ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+        throw new TranscriptionHttpError(res.status, detail);
       }
       const body = (await res.json()) as { text?: unknown; language?: unknown };
       if (typeof body.text !== "string") throw new Error("the transcription service returned no text");
@@ -231,16 +255,98 @@ export function openAiTranscriber(opts: {
   };
 }
 
+/** The model asked for when nobody named one — what `deploy/transcriber` serves. */
+export const DEFAULT_TRANSCRIBE_MODEL = "large-v3-turbo";
+
+/** Where a transcription service is and how to ask it. */
+export interface TranscriptionEndpoint {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+
 /**
- * The configured transcriber, or null. `TRANSCRIBE_URL` turns it on;
- * `TRANSCRIBE_API_KEY` and `TRANSCRIBE_MODEL` go with it.
+ * The service the environment names, or null. `TRANSCRIBE_URL` turns it on;
+ * `TRANSCRIBE_API_KEY` and `TRANSCRIBE_MODEL` go with it. This is the fallback
+ * beneath the console's settings (`services/transcription-settings.ts`).
  */
-export function transcriberFromEnv(env: Record<string, string | undefined> = process.env): Transcriber | null {
-  const baseUrl = env.TRANSCRIBE_URL?.trim();
-  if (!baseUrl) return null;
-  return openAiTranscriber({
-    baseUrl,
+export function transcriptionFromEnv(env: Record<string, string | undefined> = process.env): TranscriptionEndpoint | null {
+  const url = env.TRANSCRIBE_URL?.trim();
+  if (!url) return null;
+  return {
+    url,
     apiKey: env.TRANSCRIBE_API_KEY?.trim() ?? "",
-    model: env.TRANSCRIBE_MODEL?.trim() || "large-v3-turbo",
+    model: env.TRANSCRIBE_MODEL?.trim() || DEFAULT_TRANSCRIBE_MODEL,
+  };
+}
+
+/** The transcriber the environment configures, or null. */
+export function transcriberFromEnv(env: Record<string, string | undefined> = process.env): Transcriber | null {
+  const endpoint = transcriptionFromEnv(env);
+  if (!endpoint) return null;
+  return openAiTranscriber({ baseUrl: endpoint.url, apiKey: endpoint.apiKey, model: endpoint.model });
+}
+
+/**
+ * One second of silence: 16 kHz, mono, 16-bit PCM WAV. The smallest audio
+ * every OpenAI-compatible service accepts, so a connection test proves the
+ * URL, the key and the model without anyone having to record anything.
+ */
+export function silentWav(): Uint8Array {
+  const rate = 16_000;
+  const dataBytes = rate * 2;
+  const buf = new ArrayBuffer(44 + dataBytes);
+  const v = new DataView(buf);
+  const ascii = (at: number, s: string) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(at + i, s.charCodeAt(i));
+  };
+  ascii(0, "RIFF");
+  v.setUint32(4, 36 + dataBytes, true);
+  ascii(8, "WAVE");
+  ascii(12, "fmt ");
+  v.setUint32(16, 16, true); // fmt chunk size
+  v.setUint16(20, 1, true); // PCM
+  v.setUint16(22, 1, true); // mono
+  v.setUint32(24, rate, true);
+  v.setUint32(28, rate * 2, true); // byte rate
+  v.setUint16(32, 2, true); // block align
+  v.setUint16(34, 16, true); // bits per sample
+  ascii(36, "data");
+  v.setUint32(40, dataBytes, true);
+  return new Uint8Array(buf);
+}
+
+export interface TranscriptionTestResult {
+  ok: boolean;
+  /** The HTTP status, when the service answered at all. */
+  status?: number;
+  error?: string;
+  elapsedMs: number;
+}
+
+/**
+ * Send one second of silence to a service and say whether it worked. A 200
+ * with empty text is a pass — there were no words to hear.
+ */
+export async function testTranscription(
+  endpoint: TranscriptionEndpoint,
+  opts: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number } = {}
+): Promise<TranscriptionTestResult> {
+  const now = opts.now ?? (() => performance.now());
+  const started = now();
+  const transcriber = openAiTranscriber({
+    baseUrl: endpoint.url,
+    apiKey: endpoint.apiKey,
+    model: endpoint.model,
+    fetch: opts.fetch,
+    timeoutMs: opts.timeoutMs ?? 30_000,
   });
+  try {
+    await transcriber.transcribe(silentWav(), { mimeType: "audio/wav", name: "agentpod-test.wav" });
+    return { ok: true, status: 200, elapsedMs: Math.round(now() - started) };
+  } catch (err) {
+    const elapsedMs = Math.round(now() - started);
+    if (err instanceof TranscriptionHttpError) return { ok: false, status: err.status, error: err.message, elapsedMs };
+    return { ok: false, error: err instanceof Error ? err.message : String(err), elapsedMs };
+  }
 }
