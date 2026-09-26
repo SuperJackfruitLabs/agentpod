@@ -501,3 +501,30 @@ func TestACPInputFrameChainPassthrough(t *testing.T) {
 		t.Fatalf("acp-session input leaked to inner handler: %v", got)
 	}
 }
+
+// A harness plugin that reports a failed turn (internal/turnerror) has to name
+// the hub session it belongs to. The node spawns the adapter, and the adapter
+// spawns the harness (pi-acp → pi) with its own environment, so the hub's
+// session id — acp.open's instance — reaches the plugin as an env var.
+func TestACPOpenGivesTheAdapterItsHubSession(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+	dir := t.TempDir()
+	cmd := func(key string) ([]string, string, []string, error) {
+		return []string{"/bin/sh", "-c", `echo "hub-session=[$AGENTPOD_ACP_SESSION]"; cat`}, dir, nil, nil
+	}
+	h := NewACPHandler(failInner(t), mgr, cmd)
+	rig := newACPTestRig(t, h)
+
+	rig.writeHub(`{"type":"req","id":"open-1","verb":"acp.open","params":{"key":"pi:test","instance":"acps_0f3c"}}`)
+	msg := rig.readFrame()
+	data, _ := msg["data"].(map[string]any)
+	sessionID, _ := data["sessionId"].(string)
+	if sessionID == "" {
+		t.Fatalf("acp.open failed: %v", msg)
+	}
+	rig.writeHub(fmt.Sprintf(`{"type":"req","id":"attach-1","verb":"acp.attach","params":{"sessionId":"%s"}}`, sessionID))
+	if !rig.awaitStreamContaining("hub-session=[acps_0f3c]") {
+		t.Fatal("the adapter did not see AGENTPOD_ACP_SESSION set to the hub session")
+	}
+}
