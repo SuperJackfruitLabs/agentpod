@@ -139,7 +139,16 @@ export function attemptFrom(event, ctx = {}) {
  * agent was configured to use — because the fallbacks failing is a consequence;
  * the first failure is usually the cause (krishna: Kimi's quota).
  */
-export function reportFor(sessionKey, attempts) {
+/** The contract's bound on attempts in one report (TurnErrorReport). */
+export const MAX_ATTEMPTS = 16;
+
+export function reportFor(sessionKey, allAttempts) {
+  // Over the bound the whole report is refused, so keep the first — the model
+  // that was asked for — and the latest.
+  const attempts =
+    allAttempts.length <= MAX_ATTEMPTS
+      ? allAttempts
+      : [allAttempts[0], ...allAttempts.slice(allAttempts.length - (MAX_ATTEMPTS - 1))];
   const [first] = attempts;
   return {
     harnessSessionKey: sessionKey,

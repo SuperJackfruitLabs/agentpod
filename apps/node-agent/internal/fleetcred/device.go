@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,13 @@ func ForgetDevice() error {
 	return nil
 }
 
+// ClientID is this CLI's entry in the hub's OAuth client registry.
+//
+// Defined here rather than in `cmd/agentpod-fleet` because the credential package is what spends
+// it: the authorize flow that creates a device and every later renewal must name the SAME client,
+// or a renewal silently changes which planes the token reaches.
+const ClientID = "apn"
+
 // ExchangeDevice trades the device credential for a five-minute token.
 //
 // `Authorization: Bearer <deviceId>:<secret>` — the same scheme the node uses for
@@ -119,7 +127,21 @@ func ForgetDevice() error {
 // was revoked" on a 401 would be inventing a fact from a status code chosen precisely so it
 // could not be read that way.
 func ExchangeDevice(hub string, d Device) (string, error) {
-	req, err := http.NewRequest("POST", strings.TrimRight(hub, "/")+"/api/auth/devices/token", nil)
+	// `client`, and the same registry entry `fleet login` authorizes as.
+	//
+	// Without it the hub mints for itself alone, so a renewal returned a NARROWER token than the
+	// sign-in it renewed: good at the hub, refused by superpipeline. `supi boards` answered 401 with
+	// a credential that was valid, fresh and correctly located. A client's reachable planes are
+	// declared in the registry (`OAuthClient.audiences`); naming the client is how this asks for them.
+	//
+	// Not `client_id` — the hub reads `client`, and `auth-authorize.ts` records that the other
+	// spelling is refused as "unknown client": a message that reads like a registry problem and is
+	// a spelling one.
+	req, err := http.NewRequest(
+		"POST",
+		strings.TrimRight(hub, "/")+"/api/auth/devices/token?client="+url.QueryEscape(ClientID),
+		nil,
+	)
 	if err != nil {
 		return "", err
 	}

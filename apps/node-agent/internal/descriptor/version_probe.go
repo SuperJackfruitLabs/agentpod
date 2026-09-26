@@ -187,3 +187,13 @@ func openclawVersionOf(ctx context.Context, binary string) VersionProbe {
 		return strings.TrimSpace(string(out)), nil
 	})
 }
+
+// PiVersion reports the version of the Pi this node would run, from
+// `pi --version` (a single line, e.g. "0.84.1").
+func PiVersion(ctx context.Context) VersionProbe {
+	binary, ok := resolveNativeHarnessBinary("pi")
+	if !ok {
+		return VersionProbe{Status: VersionAbsent, Reason: "The pi executable is unresolved on this node"}
+	}
+	return nativeExecutableVersionProbe(ctx, binary)
+}

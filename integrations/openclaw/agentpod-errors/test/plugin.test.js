@@ -229,6 +229,19 @@ test("krishna's real run, replayed at a tenth of the speed, is one report of six
   assert.equal(lines[0].error.attempts.length, 6);
 });
 
+test("never more attempts than the contract takes: the first and the latest are kept", async (t) => {
+  // TurnErrorReport caps attempts at 16; a report over it is refused whole.
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 40 });
+  reporter.onAgentEnd(failedAttempt("kimi-coding", "first", KIMI_403), ctx);
+  for (let i = 0; i < 30; i++) reporter.onAgentEnd(failedAttempt("opencode-go", `m${i}`, OPENCODE_400), ctx);
+  await sleep(200);
+  const attempts = lines[0].error.attempts;
+  assert.equal(attempts.length, 16);
+  assert.equal(attempts[0].model, "first");
+  assert.equal(attempts.at(-1).model, "m29");
+});
+
 test("a run whose fallback answered is not reported", async (t) => {
   const { sock, lines } = fakeIntake(t);
   const reporter = createReporter({ socket: sock, quietMs: 50 });
