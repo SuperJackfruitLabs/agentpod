@@ -125,6 +125,13 @@ export async function enableSignup(updatedBy: string): Promise<void> {
 }
 
 /**
+ * Settings that are not dumped by `getAllSettings`: they carry a secret (an
+ * encrypted API key), and have their own write-only endpoints instead.
+ * `transcription` — see `services/transcription-settings.ts`.
+ */
+export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set(["transcription"]);
+
+/**
  * Get all settings
  */
 export async function getAllSettings(): Promise<Record<string, { value: string; description?: string | null }>> {
@@ -139,6 +146,7 @@ export async function getAllSettings(): Promise<Record<string, { value: string; 
   
   // Override with actual values
   for (const row of results) {
+    if (PRIVATE_SETTING_KEYS.has(row.key)) continue;
     settings[row.key] = { value: row.value, description: row.description };
   }
   

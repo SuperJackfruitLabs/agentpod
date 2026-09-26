@@ -29,6 +29,8 @@
   import StationOnboarding from "$lib/components/stations/StationOnboarding.svelte";
   import MatrixIdentityPanel from "$lib/components/stations/MatrixIdentityPanel.svelte";
   import PurposeField from "$lib/components/purpose/PurposeField.svelte";
+  import VoiceNotesField from "$lib/components/stations/VoiceNotesField.svelte";
+  import type { StationTranscription } from "$lib/api/transcription";
 
   interface Props {
     station: StationRow | null;
@@ -42,6 +44,8 @@
     isAdmin?: boolean;
     listGrants?: typeof defaultListGrants;
     listPrincipals?: typeof defaultListPrincipals;
+    /** Injected by tests. Defaults to the hub's station transcription endpoint. */
+    loadTranscription?: (stationId: string) => Promise<StationTranscription>;
   }
 
   let {
@@ -53,6 +57,7 @@
     isAdmin,
     listGrants = defaultListGrants,
     listPrincipals = defaultListPrincipals,
+    loadTranscription,
   }: Props = $props();
 
   const admin = $derived(isAdmin ?? auth.user?.role === "admin");
@@ -253,6 +258,23 @@
           <p>{station.purpose ?? "—"}</p>
         </div>
       {/if}
+    </section>
+
+    <!-- ── Voice notes ──────────────────────────────────────────────────── -->
+    <!-- Keyed on the station: the field reads its setting on mount, and a
+         rail that moves to another station must read that one's. -->
+    <section class="border-t border-border pt-4" data-testid="rail-voice-notes">
+      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        Voice notes
+      </h2>
+      {#key station.id}
+        <!-- An undefined `load` falls back to the hub call. -->
+        <VoiceNotesField
+          stationId={station.id}
+          harnessMode={station.matrixIdentityMode === "harness"}
+          load={loadTranscription}
+        />
+      {/key}
     </section>
 
     <!-- ── Who may dispatch it ──────────────────────────────────────────── -->

@@ -985,7 +985,7 @@ never spoken Matrix can be talked to from a phone. Design:
 |---|---|
 | switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
 | config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
-| voice notes | `TRANSCRIBE_URL`, `TRANSCRIBE_API_KEY`, `TRANSCRIBE_MODEL` (default `large-v3-turbo`). Any OpenAI-compatible `/v1/audio/transcriptions`: the self-hosted transcriber on foundry (`deploy/transcriber`), or a hosted provider. Unset, a voice note reaches the agent as a note that it could not be heard |
+| voice notes | Set in the console: **Admin → Transcription** (the hub default: provider, URL, model, API key, longest note, 10–600 s; *Test connection* sends one second of silence) and per station in the station page's **Voice notes** section (inherit / off / custom). API keys are stored encrypted with `ENCRYPTION_KEY` and never shown again. Until an admin saves the hub default, the hub falls back to `TRANSCRIBE_URL`, `TRANSCRIBE_API_KEY`, `TRANSCRIBE_MODEL` (default `large-v3-turbo`); once saved, the env is ignored. Any OpenAI-compatible `/v1/audio/transcriptions`: the self-hosted transcriber on foundry (`deploy/transcriber`), or a hosted provider. None configured, a voice note reaches the agent as a note that it could not be heard. Settings are cached for 30 s per hub process; a save clears the cache |
 | a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
 | its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
 
@@ -996,9 +996,39 @@ form — `krishna (openclaw @ superchotu)`.
 
 **Voice notes** are transcribed before the agent sees them: the transcript is
 posted in the room as a reply to the note, and the agent gets it marked
-`[Voice note, 0:42, transcribed]`. Five minutes at most. The self-hosted
-transcriber takes ~13 s for a short note and ~80 s for five minutes on
-foundry's CPU; a hosted provider is seconds. See `deploy/transcriber/README.md`.
+`[Voice note, 0:42, transcribed]`. Five minutes at most by default (the
+longest note is a setting). The self-hosted transcriber takes ~13 s for a
+short note and ~80 s for five minutes on foundry's CPU; a hosted provider is
+seconds. See `deploy/transcriber/README.md`.
+
+**Harness-mode stations** hear voice notes through their own Matrix client and
+transcribe them with their harness's own STT config, so saving the setting does
+not reach them by itself. For a harness-mode **Hermes** station the station
+page's **Voice notes** section has **Apply to harness** (save first): the hub
+sends `transcription.apply` to the station's node, carrying only the station
+key and id. The node fetches the resolved setting — key included — from
+`POST /api/nodes/:nodeId/stations/:stationId/transcription` with its own node
+credential (the same split as `matrix.adopt`: no secret in a broker frame), and
+writes it into the profile (`~/.hermes/config.yaml` + `.env` for the root
+station, `~/.hermes/profiles/<name>/` for a profile):
+
+- `config.yaml`: `stt.enabled`, `stt.provider: openai`, `stt.openai.model` —
+  edited in place, everything else in the file kept. Off writes
+  `stt.enabled: false` and nothing else.
+- `.env`: `STT_OPENAI_BASE_URL=<url>/v1` and `VOICE_TOOLS_OPENAI_KEY=<key>`,
+  replaced or appended, every other line untouched (0600). Off leaves `.env`
+  alone.
+
+It then restarts the harness and the console says **Applied — restarted**. A
+profile that shares the root gateway's Matrix identity has no `lifecycle`
+capability (#273): the config is written but nothing restarts, and the console
+says **Applied — restart the gateway to pick it up** — restart the root
+`hermes` station. A profile without both `config.yaml` and `.env` is refused
+untouched. Other harnesses are refused (400). Needs a node-agent release that
+contains `transcription.apply`; an older node answers the verb as unknown and
+the console shows that error — roll the node first (`apn update`, or
+**Update** in the console). Changing the hub default later does not re-push:
+apply again on each harness station.
 
 **Who may talk to an agent** is the control pair, unchanged. A refusal arrives
 **in the room**, saying which of the three things happened: the hub does not

@@ -1,7 +1,7 @@
 # agentpod-transcriber
 
 Speech to text for voice notes sent into bridged rooms. The hub posts the
-audio here (`TRANSCRIBE_URL`), posts the transcript under the voice note, and
+audio here, posts the transcript under the voice note, and
 prompts the agent with it. See `server.py` for the benchmark behind the
 defaults.
 
@@ -29,12 +29,20 @@ The first start downloads the model (~1.6 GB) into `models/`.
 
 ## Hub
 
+Configure it in the console: **Admin → Transcription**, provider
+*Self-hosted*, URL `http://<foundry tailscale ip>:8840`, the token as the API
+key, model `large-v3-turbo`. *Test connection* sends one second of silence and
+reports the answer. A station can override the hub default (or turn voice
+notes off) in its **Voice notes** section.
+
+The environment is the fallback, used only until an admin saves the form:
+
 ```
 TRANSCRIBE_URL=http://<foundry tailscale ip>:8840
 TRANSCRIBE_API_KEY=<the token>
 TRANSCRIBE_MODEL=large-v3-turbo
 ```
 
-A hosted provider works the same way: point `TRANSCRIBE_URL` at it
-(`https://api.openai.com`, `https://api.groq.com/openai`) with its key and
-model name.
+A hosted provider works the same way — pick *OpenAI*
+(`https://api.openai.com`, `whisper-1` or `gpt-4o-transcribe`) or *Groq*
+(`https://api.groq.com/openai`, `whisper-large-v3-turbo`) and give its key.
