@@ -147,6 +147,20 @@ interface Attachment {
   produced: boolean;
   /** Whether the harness already explained a failure this turn. */
   reportedError: boolean;
+  /**
+   * An error the harness reported this turn, held until the turn ends.
+   *
+   * Not posted when it arrives: a harness with a fallback chain reports each
+   * failed attempt and then retries on the next model. Posted at once, the
+   * first attempt's error reached the room as the outcome — "This agent
+   * reported an error: weekly usage limit" and a ❌ on the message — and the
+   * real answer from the fallback arrived underneath it (Krishna, 2026-09-26,
+   * issue #583). Held, it is dropped if the agent says anything after it, and
+   * posted exactly as before if the turn ends with nothing more.
+   */
+  pendingError: unknown;
+  /** Between `working` and `idle`/`ended`: whether a held error has a turn end to wait for. */
+  inTurn: boolean;
 }
 
 /**
@@ -306,6 +320,8 @@ export function attachRoomToSession(
     toolSeq: 0,
     produced: false,
     reportedError: false,
+    pendingError: null,
+    inTurn: false,
   };
 
   const say = async (body: string, extra?: Record<string, unknown>) => {
@@ -551,6 +567,24 @@ export function attachRoomToSession(
     if (key === REACTION.working) state.workingReactionId = id ?? null;
   };
 
+  /** Post the held error as the turn's outcome: ❌ on the message and the notice. */
+  const reportError = async () => {
+    const payload = state.pendingError;
+    state.pendingError = null;
+    // The error path explains itself; the silence check must not repeat the
+    // same news less specifically.
+    state.reportedError = true;
+    await stopTyping();
+    await mark(REACTION.failed);
+    // A client that knows the key draws a card from it: what failed, which
+    // model, each fallback. Every other client shows the body.
+    const card = turnErrorCard(payload);
+    await say(
+      `This agent reported an error: ${errorMessage(payload)}`,
+      card ? { [TURN_ERROR_CONTENT_KEY]: card } : undefined
+    );
+  };
+
   const detach = () => {
     if (state.ended) return;
     state.ended = true;
@@ -570,6 +604,17 @@ export function attachRoomToSession(
         case "agent-update": {
           const text = messageChunkText(event.payload);
           if (text !== undefined) {
+            if (state.pendingError !== null) {
+              // The agent is answering after all: the error was an attempt the
+              // harness recovered from, not the turn's outcome. See
+              // `pendingError`.
+              log.info("an agent error was followed by an answer; not reporting it", {
+                sessionId,
+                roomId,
+                error: errorMessage(state.pendingError),
+              });
+              state.pendingError = null;
+            }
             state.produced = true;
             state.buffer.push(text);
             void streamLive(false);
@@ -621,6 +666,7 @@ export function attachRoomToSession(
               state.triggerEventId = noted;
               triggers.delete(sessionId);
             }
+            state.inTurn = true;
             await startTyping();
             await mark(REACTION.working);
             return;
@@ -639,6 +685,10 @@ export function attachRoomToSession(
           await stopTyping();
 
           if (status === "idle" || status === "ended") {
+            state.inTurn = false;
+            // An error nothing came after is the turn's outcome: report it now,
+            // as it used to be reported the moment it arrived.
+            if (state.pendingError !== null) await reportError();
             // A turn that said nothing, ran nothing, and reported nothing is
             // not a turn that worked. The hub cannot know *why* — the harness
             // that failed did not say — but it can refuse to call silence
@@ -728,19 +778,13 @@ export function attachRoomToSession(
         }
 
         case "error": {
-          const message = isRecord(event.payload) ? event.payload.message : undefined;
-          // The error path explains itself; the silence check below must not
-          // repeat the same news less specifically.
-          state.reportedError = true;
-          await stopTyping();
-          await mark(REACTION.failed);
-          // A client that knows the key draws a card from it: what failed,
-          // which model, each fallback. Every other client shows the body.
-          const card = turnErrorCard(event.payload);
-          await say(
-            `This agent reported an error: ${String(message ?? "unknown")}`,
-            card ? { [TURN_ERROR_CONTENT_KEY]: card } : undefined
-          );
+          // Held, not posted: the harness may be about to retry on a fallback
+          // model. Reported at turn end if nothing follows — see
+          // `pendingError`. The latest one wins: when every attempt fails, the
+          // last error is the one that describes the whole chain.
+          state.pendingError = event.payload ?? {};
+          // Outside a turn there is no end to wait for: said now, as before.
+          if (!state.inTurn) await reportError();
           return;
         }
 
@@ -754,6 +798,12 @@ export function attachRoomToSession(
   });
 
   attached.set(sessionId, state);
+}
+
+/** An error event's words, or "unknown". */
+function errorMessage(payload: unknown): string {
+  const message = isRecord(payload) ? payload.message : undefined;
+  return String(message ?? "unknown");
 }
 
 /** Stop streaming a session into its room. Idempotent. */
