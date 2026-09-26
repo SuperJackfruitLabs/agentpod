@@ -21,6 +21,7 @@ import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
+import { transcriberFromEnv } from "./voice";
 import {
   handleGateDecision,
   projectionForGate,
@@ -327,6 +328,9 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       : undefined,
     gates,
     client: speakingClient,
+    // Voice notes to text: TRANSCRIBE_URL, TRANSCRIBE_API_KEY, TRANSCRIBE_MODEL.
+    // Unset, a voice note is named to the agent, as before.
+    transcriber: transcriberFromEnv(),
     acp: {
       createSession: async (input: { stationId: string; userId: string; mode: string }) => {
         const session = await createSession({

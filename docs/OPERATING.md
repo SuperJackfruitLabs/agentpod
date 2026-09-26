@@ -985,6 +985,7 @@ never spoken Matrix can be talked to from a phone. Design:
 |---|---|
 | switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
 | config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
+| voice notes | `TRANSCRIBE_URL`, `TRANSCRIBE_API_KEY`, `TRANSCRIBE_MODEL` (default `large-v3-turbo`). Any OpenAI-compatible `/v1/audio/transcriptions`: the self-hosted transcriber on foundry (`deploy/transcriber`), or a hosted provider. Unset, a voice note reaches the agent as a note that it could not be heard |
 | a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
 | its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
 
@@ -992,6 +993,12 @@ never spoken Matrix can be talked to from a phone. Design:
 key, so `openclaw:krishna` on `superchotu` is
 `#agentpod_superchotu__openclaw_krishna`. The member list shows the readable
 form — `krishna (openclaw @ superchotu)`.
+
+**Voice notes** are transcribed before the agent sees them: the transcript is
+posted in the room as a reply to the note, and the agent gets it marked
+`[Voice note, 0:42, transcribed]`. Five minutes at most. The self-hosted
+transcriber takes ~13 s for a short note and ~80 s for five minutes on
+foundry's CPU; a hosted provider is seconds. See `deploy/transcriber/README.md`.
 
 **Who may talk to an agent** is the control pair, unchanged. A refusal arrives
 **in the room**, saying which of the three things happened: the hub does not
