@@ -115,11 +115,17 @@ export function withEncryption(
   return {
     ...client,
 
-    async sendText(userId, roomId, body) {
+    // `extra` carries namespaced keys beside the body — the turn error card,
+    // `dev.agentpod.turn_error`. It must survive both branches: every agent
+    // room is encrypted, and rebuilding the content from `body` alone is how
+    // no room received a card until 2026-09-26. As in the plain client, it
+    // can never replace msgtype or body.
+    async sendText(userId, roomId, body, extra) {
       if (!(await isEncrypted(roomId, userId))) {
-        return client.sendText(userId, roomId, body);
+        return client.sendText(userId, roomId, body, extra);
       }
       return sendEncrypted(userId, roomId, 'm.room.message', {
+        ...(extra ?? {}),
         msgtype: 'm.text',
         body,
       });

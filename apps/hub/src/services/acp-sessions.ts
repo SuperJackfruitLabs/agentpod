@@ -229,6 +229,10 @@ interface LiveSession {
   turnErrorSource: TurnError["source"] | null;
   /** A plugin's report that arrived while the turn was still running. */
   pendingTurnError: TurnError | null;
+  /** When the latest plugin report for this turn arrived. */
+  pendingTurnErrorAt: number;
+  /** When the agent last produced something a reader sees, this turn. */
+  lastProducedAt: number;
   /** Set while a silent turn waits for a plugin's report. */
   awaitingTurnError: ((error: TurnError) => void) | null;
   /** When the last turn settled, for placing a late report. */
@@ -558,6 +562,7 @@ function handleSessionUpdate(live: LiveSession, params: SessionNotification): vo
     update.sessionUpdate === "tool_call_update"
   ) {
     live.turnProduced = true;
+    live.lastProducedAt = Date.now();
   }
   const meta = (params.update as { _meta?: unknown })._meta;
   if (meta && typeof meta === "object") {
@@ -822,6 +827,8 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     turnErrorRecorded: false,
     turnErrorSource: null,
     pendingTurnError: null,
+    pendingTurnErrorAt: 0,
+    lastProducedAt: 0,
     awaitingTurnError: null,
     lastTurnSettledAt: 0,
     acceptsImages: false,
@@ -1186,6 +1193,8 @@ export async function promptSession(
   live.turnErrorRecorded = false;
   live.turnErrorSource = null;
   live.pendingTurnError = null;
+  live.pendingTurnErrorAt = 0;
+  live.lastProducedAt = 0;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
     !live.ended && live.turnEpoch === epoch && live.status === "working";
@@ -1212,8 +1221,20 @@ export async function promptSession(
     })
     .then(async (response) => {
       if (isCurrentTurn()) {
-        // A plugin already said why, during the turn: that is the error, even
-        // when the harness managed some words before failing.
+        // A plugin already said why, during the turn — unless the agent spoke
+        // after that report. OpenClaw's plugin reports a failed model once its
+        // attempts go quiet, and the next model in the chain can still answer
+        // (krishna, 2026-09-26 08:09: Kimi's quota, then a fallback's "Hey
+        // Rakesh"). Words after the report mean the chain recovered; a report
+        // after the last words (a partial answer, or Pi reporting at settled
+        // after "Retrying…") is the turn's error.
+        if (live.pendingTurnError && live.lastProducedAt > live.pendingTurnErrorAt) {
+          log.info("a plugin's turn error was followed by an answer; the fallback recovered", {
+            sessionId: live.id,
+            kind: live.pendingTurnError.kind,
+          });
+          live.pendingTurnError = null;
+        }
         if (live.pendingTurnError) {
           await recordError(live.pendingTurnError);
           settled();
@@ -1354,6 +1375,7 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
   if (live.turnInFlight && !live.turnErrorRecorded) {
     // More than one report for a turn: merge, never replace. Replacing lost
     // Kimi's quota — the cause — behind the fallbacks' errors (2026-09-26).
+    live.pendingTurnErrorAt = Date.now();
     if (live.pendingTurnError) {
       live.pendingTurnError = mergeTurnErrors(live.pendingTurnError, error);
       return "merged";
