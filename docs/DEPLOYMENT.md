@@ -535,7 +535,7 @@ to the hub — which `Lax` permits — and hand the plane's server a one-time co
 
 | Variable | Meaning |
 |---|---|
-| `HUB_OAUTH_CLIENTS` | Who may **receive** a token. Comma-separated `client\|redirect_uri`; repeat the client key for several URIs. **Empty by default**, and a hub that has not opted in refuses every authorize. |
+| `HUB_OAUTH_CLIENTS` | Who may **receive** a token, and **where that token may be spent**. Comma-separated `client\|redirect_uri` or `client\|redirect_uri\|audiences`; repeat the client key for several URIs. **Empty by default**, and a hub that has not opted in refuses every authorize. |
 
 **This is deliberately not `ALLOWED_ORIGINS`.** They answer different questions: that list says
 who may *call* the hub from a browser; this one says who may *be handed a credential for whoever
@@ -564,8 +564,23 @@ what it cannot find. The refusal names this variable.
 Example, registering the web plane and the CLI:
 
 ```
-HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback
+HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev
 ```
+
+**The third field is the audiences**, comma-separated, and it decides which planes a token
+minted for that client is accepted by. A client that declares none gets the hub alone.
+
+That default is why `apn` needs one. The CLI reaches two planes from one stored credential —
+`fleet nodes` presents its token to the hub, `supi boards` presents the same token to
+superpipeline — and superpipeline verifies `aud` against its own `APP_URL`. With no third
+field on `apn`, `fleet login` worked and `supi boards` answered 401 with a credential that was
+valid, fresh and correctly located. **Keep the hub in the list**: dropping it to add
+superpipeline would fix `supi` and break `fleet`.
+
+An audience is only reachable by a client that declares it. The device exchange
+(`POST /api/auth/devices/token?client=<id>`) mints that client's declared audiences and refuses
+a client this registry does not know, so widening what a CLI can reach is a deployment decision
+here and nowhere else.
 
 ## 5. Hub — build + deploy
 
