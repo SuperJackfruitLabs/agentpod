@@ -199,3 +199,53 @@ describe("station routes", () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+describe("POST /api/stations/:id/transcription/apply over the stations table", () => {
+  const HERMES = "station_transcription_hermes";
+  const sent: Array<{ nodeId: string; verb: string; params: unknown }> = [];
+
+  function applyApp(userId: string) {
+    return new Hono().use("*", as(userId)).route(
+      "/api",
+      stationTranscriptionRoutes({
+        settings,
+        brokerRequest: async (nodeId, verb, params) => {
+          sent.push({ nodeId, verb, params });
+          return { ok: true, data: { applied: true, mode: "on", model: "large-v3-turbo", restarted: true } };
+        },
+      })
+    );
+  }
+
+  beforeAll(async () => {
+    const tenant = await resolveTenantForUser(OWNER);
+    await rawSql`
+      INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, matrix_identity_mode, adopted_at, created_at)
+      VALUES (${HERMES}, ${tenant}, ${OWNER}, ${NODE}, 'hermes', 'hermes:analyst-echo', 'composite', 'analyst-echo', '["lifecycle"]'::jsonb, 'harness', now(), now())`;
+  });
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+
+  test("a harness-mode Hermes station's owner sends transcription.apply to its node", async () => {
+    const res = await applyApp(OWNER).request(`/api/stations/${HERMES}/transcription/apply`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ applied: true, mode: "on", model: "large-v3-turbo", restarted: true });
+    expect(sent).toEqual([
+      { nodeId: NODE, verb: "transcription.apply", params: { key: "hermes:analyst-echo", stationId: HERMES } },
+    ]);
+  });
+
+  test("another user's station is a 404 and nothing is sent", async () => {
+    const res = await applyApp(OTHER).request(`/api/stations/${HERMES}/transcription/apply`, { method: "POST" });
+    expect(res.status).toBe(404);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("a bridge-mode (here: openclaw) station is a 400 and nothing is sent", async () => {
+    const res = await applyApp(OWNER).request(`/api/stations/${STATION}/transcription/apply`, { method: "POST" });
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+});

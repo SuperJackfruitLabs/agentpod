@@ -83,3 +83,41 @@ it("matrix.adopt's result strips unknown fields — the credential does not come
     VERB_RESULTS["matrix.adopt"].parse({ accepted: true, matrixId: "@a:h", accessToken: "syt_x" })
   ).toEqual({ accepted: true, matrixId: "@a:h" });
 });
+it("transcription.apply carries a station key AND its database id — the node needs the key, the hub's config endpoint needs the id", () => {
+  expect(
+    VERB_PARAMS["transcription.apply"].parse({ key: "hermes:analyst-echo", stationId: "station_abc123" })
+  ).toEqual({ key: "hermes:analyst-echo", stationId: "station_abc123" });
+});
+it("transcription.apply strips unknown fields — an API key cannot ride along on this channel", () => {
+  expect(
+    VERB_PARAMS["transcription.apply"].parse({
+      key: "k",
+      stationId: "s",
+      apiKey: "sk-secret",
+      url: "http://stt.internal:8840",
+    })
+  ).toEqual({ key: "k", stationId: "s" });
+});
+it("transcription.apply's result says what the profile now holds and whether the harness restarted", () => {
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "on", model: "large-v3-turbo", restarted: true })
+  ).toEqual({ applied: true, mode: "on", model: "large-v3-turbo", restarted: true });
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "off", model: null, restarted: false })
+  ).toEqual({ applied: true, mode: "off", model: null, restarted: false });
+  expect(() =>
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "maybe", model: null, restarted: false })
+  ).toThrow();
+});
+it("transcription.apply's result strips unknown fields — neither the key nor the url comes back", () => {
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({
+      applied: true,
+      mode: "on",
+      model: "m",
+      restarted: true,
+      apiKey: "sk-secret",
+      url: "http://stt.internal:8840/v1",
+    })
+  ).toEqual({ applied: true, mode: "on", model: "m", restarted: true });
+});

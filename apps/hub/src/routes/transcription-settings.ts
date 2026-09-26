@@ -6,6 +6,9 @@
  *   POST /api/admin/settings/transcription/test   one second of silence, sent
  *   GET  /api/stations/:stationId/transcription   a station's override (owner)
  *   PUT  /api/stations/:stationId/transcription
+ *   POST /api/stations/:stationId/transcription/apply
+ *                                                 push it into a harness-mode
+ *                                                 Hermes profile (owner)
  *
  * The admin router has no guard of its own: it is mounted inside `adminRouter`
  * (`routes/admin.ts`), behind the same auth + admin middleware as every other
@@ -29,6 +32,8 @@ import {
   type TranscriptionSettings,
 } from "../services/transcription-settings";
 import { testTranscription } from "../services/matrix-as/voice";
+import { VERB_RESULTS } from "@agentpod/contract";
+import * as broker from "../services/broker";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("transcription-settings-routes");
@@ -152,9 +157,53 @@ export function adminTranscriptionRoutes(deps: AdminTranscriptionDeps = {}) {
 // Owner: one station's override
 // =============================================================================
 
+/** What the apply route needs to know about a station the caller owns. */
+export interface TranscriptionApplyTarget {
+  id: string;
+  nodeId: string;
+  stationKey: string;
+  harness: string;
+  matrixIdentityMode: string;
+}
+
+type BrokerRequest = (
+  nodeId: string,
+  verb: string,
+  params: unknown,
+  opts?: { timeoutMs?: number }
+) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
+
+/** A node gets this long to fetch, write and restart — matrix.adopt's budget. */
+export const TRANSCRIPTION_APPLY_TIMEOUT_MS = 120_000;
+
+/**
+ * Harnesses whose node-agent can write a transcription setting — the hub's
+ * copy of `transcriptionHarnesses` in the node-agent's transcriptionapply.go.
+ */
+const HARNESSES_WITH_STT_WRITER: ReadonlySet<string> = new Set(["hermes"]);
+
 export interface StationTranscriptionDeps {
   settings?: TranscriptionSettings;
   ownsStation?: (userId: string, stationId: string) => Promise<boolean>;
+  /** The station, if the caller owns it. Defaults to the stations table. */
+  applyTarget?: (userId: string, stationId: string) => Promise<TranscriptionApplyTarget | null>;
+  /** Injected by tests; defaults to the broker. */
+  brokerRequest?: BrokerRequest;
+}
+
+async function applyTargetInDb(userId: string, stationId: string): Promise<TranscriptionApplyTarget | null> {
+  const [row] = await db
+    .select({
+      id: stations.id,
+      nodeId: stations.nodeId,
+      stationKey: stations.stationKey,
+      harness: stations.harness,
+      matrixIdentityMode: stations.matrixIdentityMode,
+    })
+    .from(stations)
+    .where(and(eq(stations.id, stationId), eq(stations.userId, userId)))
+    .limit(1);
+  return row ?? null;
 }
 
 async function ownsStationInDb(userId: string, stationId: string): Promise<boolean> {
@@ -169,6 +218,8 @@ async function ownsStationInDb(userId: string, stationId: string): Promise<boole
 export function stationTranscriptionRoutes(deps: StationTranscriptionDeps = {}) {
   const settings = deps.settings ?? transcriptionSettings;
   const ownsStation = deps.ownsStation ?? ownsStationInDb;
+  const applyTarget = deps.applyTarget ?? applyTargetInDb;
+  const request: BrokerRequest = deps.brokerRequest ?? broker.request;
 
   return new Hono()
     .get("/stations/:stationId/transcription", async (c) => {
@@ -186,5 +237,73 @@ export function stationTranscriptionRoutes(deps: StationTranscriptionDeps = {}) 
         // The one rule zod cannot see: `custom` with no url sent AND none saved.
         return c.json({ error: err instanceof Error ? err.message : "invalid transcription setting" }, 400);
       }
+    })
+    /**
+     * A harness-mode station runs its own Matrix client and transcribes voice
+     * notes itself, so the saved setting reaches it only when its node writes
+     * it into the harness profile. This asks the node to (`transcription.apply`).
+     * The frame carries the station key and id only; the node fetches the
+     * setting, key included, from its own authenticated endpoint
+     * (routes/station-transcription-node.ts).
+     */
+    .post("/stations/:stationId/transcription/apply", async (c) => {
+      const userId = c.get("user").id;
+      const stationId = c.req.param("stationId");
+      const station = await applyTarget(userId, stationId);
+      if (!station) return c.json({ error: "Not Found" }, 404);
+
+      if (station.matrixIdentityMode !== "harness") {
+        return c.json(
+          {
+            error:
+              "This station is bridge-mode: the hub transcribes its voice notes, so the saved " +
+              "setting already applies. Only a harness-mode station needs it pushed.",
+          },
+          400
+        );
+      }
+      if (!HARNESSES_WITH_STT_WRITER.has(station.harness)) {
+        return c.json(
+          {
+            error:
+              `Pushing the voice-note setting to a ${station.harness} harness is not supported; ` +
+              "only Hermes stations can take it.",
+          },
+          400
+        );
+      }
+
+      const result = await request(
+        station.nodeId,
+        "transcription.apply",
+        { key: station.stationKey, stationId: station.id },
+        { timeoutMs: TRANSCRIPTION_APPLY_TIMEOUT_MS }
+      );
+      if (!result.ok) {
+        log.warn("a node could not apply a station's transcription setting", {
+          stationId: station.id,
+          nodeId: station.nodeId,
+          error: result.error,
+        });
+        return c.json({ error: result.error ?? "the node could not apply the setting" }, 502);
+      }
+      const parsed = VERB_RESULTS["transcription.apply"].safeParse(result.data);
+      if (!parsed.success) {
+        return c.json(
+          {
+            error:
+              "The node answered in a shape this hub does not understand — its node-agent may " +
+              "predate transcription.apply.",
+          },
+          502
+        );
+      }
+      log.info("applied a station's transcription setting to its harness", {
+        stationId: station.id,
+        nodeId: station.nodeId,
+        mode: parsed.data.mode,
+        restarted: parsed.data.restarted,
+      });
+      return c.json(parsed.data);
     });
 }

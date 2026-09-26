@@ -87,6 +87,13 @@ export const VERB_PARAMS = {
   // sending both keeps this on the broker's own constraint that a
   // credential never rides along here.
   "matrix.adopt": z.object({ key: z.string(), stationId: z.string() }),
+  // Push a station's resolved voice-note transcription setting into its
+  // harness profile. Same shape and the same rule as matrix.adopt: the node
+  // needs the key (profile dir), the hub's config endpoint
+  // (POST /api/nodes/:nodeId/stations/:stationId/transcription) needs the
+  // database id, and the STT API key is fetched over that endpoint with the
+  // node's own credential — it never rides in a broker frame.
+  "transcription.apply": z.object({ key: z.string(), stationId: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -159,5 +166,18 @@ export const VERB_RESULTS = {
   "matrix.adopt": z.object({
     accepted: z.boolean(),
     matrixId: z.string().nullable().optional(),
+  }),
+  /**
+   * What the node wrote into the harness profile, and whether the harness was
+   * restarted to pick it up. `restarted: false` with `applied: true` is a
+   * station without the `lifecycle` capability (a Hermes profile sharing the
+   * root gateway, issue #273): the config is written, and takes effect when
+   * that gateway next restarts. No url or key comes back.
+   */
+  "transcription.apply": z.object({
+    applied: z.boolean(),
+    mode: z.enum(["on", "off"]),
+    model: z.string().nullable(),
+    restarted: z.boolean(),
   }),
 } as const;

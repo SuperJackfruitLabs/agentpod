@@ -46,6 +46,8 @@ import { stationRoutes } from './routes/stations.ts';
 import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
+// A node reading its station's voice-note setting (transcription.apply)
+import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 import { stationTranscriptionRoutes } from './routes/transcription-settings.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
@@ -235,6 +237,14 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/transcription — a node
+   * reading its station's voice-note setting (API key included) for
+   * `transcription.apply`. Same self-authenticating Bearer as the two above,
+   * so it is registered here, ahead of `authMiddleware`. Always mounted: the
+   * setting exists with or without a Matrix bridge.
+   */
+  .route('/api', createNodeTranscriptionRoutes())
   /**
    * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
    * may dispatch, for superpipeline's agent picker
