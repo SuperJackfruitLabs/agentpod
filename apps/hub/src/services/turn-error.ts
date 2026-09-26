@@ -116,8 +116,31 @@ const PROVIDER_ERROR_TYPES: Record<string, TurnErrorKind> = {
   MissingSessionID: "bad_request",
 };
 
-function kindOfReported(message: string, kind?: TurnErrorKind, providerErrorType?: string): TurnErrorKind {
-  return kind ?? (providerErrorType ? PROVIDER_ERROR_TYPES[providerErrorType] : undefined) ?? classifyText(message);
+/**
+ * The HTTP status, last: it only decides when the type and the words cannot.
+ * 403 is absent on purpose — Kimi returns it for a used-up quota, and a 403
+ * alone says "forbidden", not why.
+ */
+function kindOfStatus(status?: number): TurnErrorKind | undefined {
+  if (status === undefined) return undefined;
+  if (status === 401) return "auth";
+  if (status === 429) return "rate_limit";
+  if (status === 400 || status === 404 || status === 413 || status === 422) return "bad_request";
+  if (status >= 500) return "provider_unavailable";
+  return undefined;
+}
+
+function kindOfReported(
+  message: string,
+  kind?: TurnErrorKind,
+  providerErrorType?: string,
+  httpStatus?: number
+): TurnErrorKind {
+  if (kind) return kind;
+  const typed = providerErrorType ? PROVIDER_ERROR_TYPES[providerErrorType] : undefined;
+  if (typed) return typed;
+  const worded = classifyText(message);
+  return worded !== "unknown" ? worded : kindOfStatus(httpStatus) ?? "unknown";
 }
 
 /** ACP's `auth_required` JSON-RPC code. */
@@ -238,9 +261,12 @@ export function turnErrorFromReason(reason: string, harness: string, source: Tur
  * because a report must not be able to claim another harness's identity.
  */
 export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness: string): TurnError {
-  const kind = kindOfReported(reported.message, reported.kind, reported.providerErrorType);
+  const kind = kindOfReported(reported.message, reported.kind, reported.providerErrorType, reported.httpStatus);
   const { message, kind: _kind, retryable, attempts, ...rest } = reported;
-  const classified = attempts?.map((a) => ({ ...a, kind: kindOfReported(a.message, a.kind, a.providerErrorType) }));
+  const classified = attempts?.map((a) => ({
+    ...a,
+    kind: kindOfReported(a.message, a.kind, a.providerErrorType, a.httpStatus),
+  }));
   const error = build(message, kind, harness, "plugin", {
     ...rest,
     ...(classified ? { attempts: classified } : {}),

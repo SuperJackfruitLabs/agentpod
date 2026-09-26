@@ -292,3 +292,20 @@ describe("the provider's own error type classifies before any words", () => {
     expect(err.kind).toBe("quota");
   });
 });
+
+describe("the HTTP status decides only when type and words cannot", () => {
+  const kind = (message: string, httpStatus: number, providerErrorType?: string) =>
+    turnErrorFromPlugin({ message, httpStatus, ...(providerErrorType ? { providerErrorType } : {}) }, "openclaw").kind;
+
+  test("a status the words say nothing about", () => {
+    expect(kind("Something went wrong upstream", 401)).toBe("auth");
+    expect(kind("Something went wrong upstream", 429)).toBe("rate_limit");
+    expect(kind("Something went wrong upstream", 503)).toBe("provider_unavailable");
+    expect(kind("Something went wrong upstream", 400)).toBe("bad_request");
+  });
+
+  test("403 alone is not a verdict: Kimi sends it for a used-up quota", () => {
+    expect(kind("You've reached your weekly (7-day) usage limit.", 403)).toBe("quota");
+    expect(kind("Something went wrong upstream", 403)).toBe("unknown");
+  });
+});

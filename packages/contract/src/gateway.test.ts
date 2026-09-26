@@ -64,6 +64,15 @@ describe("TurnErrorReport — what a plugin writes to its node", () => {
     expect(TurnErrorReport.parse(r)).toEqual(r);
   });
 
+  it("carries the HTTP status, on the report and on each attempt", () => {
+    const r = {
+      harnessSessionKey: "agent:krishna:main",
+      error: { message: "usage limit", httpStatus: 403, attempts: [{ provider: "kimi-coding", model: "k2p6", message: "usage limit", httpStatus: 403 }] },
+    };
+    expect(TurnErrorReport.parse(r)).toEqual(r);
+    expect(TurnErrorReport.safeParse({ ...r, error: { ...r.error, httpStatus: 42 } }).success).toBe(false);
+  });
+
   it("needs something to match a session by", () => {
     expect(TurnErrorReport.safeParse({ error: { message: "x" } }).success).toBe(false);
   });

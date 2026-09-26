@@ -41,40 +41,58 @@ export function socketPath(env = process.env, home = os.homedir()) {
   return override !== "" ? override : path.join(home, ".agentpod", "turn-errors.sock");
 }
 
-/**
- * The sentence a person should read. Anthropic-style providers put the raw
- * response body in errorMessage (Kimi: {"type":"error","error":{"message":…}});
- * OpenAI-style ones give the text itself.
- */
-export function readableError(raw) {
-  if (typeof raw !== "string" || raw.trim() === "") return undefined;
-  const text = raw.trim();
-  if (text.startsWith("{")) {
-    try {
-      const body = JSON.parse(text);
-      const inner = body?.error?.message ?? body?.message;
-      if (typeof inner === "string" && inner.trim() !== "") return inner.trim();
-    } catch {
-      // Not JSON after all; the text is the message.
-    }
-  }
-  return text;
-}
+/** A leading HTTP status: "403: {…}" (OpenClaw 2026.9.x) or "400 Request …". */
+const LEADING_STATUS = /^([1-5]\d\d)(?::\s*|\s+)/;
 
-/**
- * The provider's own name for the failure, when its body has one: Anthropic's
- * `invalid_request_error`, opencode-go's `MissingSessionID`. The hub classifies
- * by it before it reads any words, so it travels beside the message.
- */
-export function providerErrorType(raw) {
-  if (typeof raw !== "string" || !raw.trim().startsWith("{")) return undefined;
+function parseBody(text) {
+  if (typeof text !== "string") return undefined;
+  const t = text.trim().replace(LEADING_STATUS, "");
+  if (!t.startsWith("{")) return undefined;
   try {
-    const body = JSON.parse(raw.trim());
-    const type = body?.error?.type ?? (body?.type !== "error" ? body?.type : undefined);
-    return typeof type === "string" && type.trim() !== "" ? type.trim() : undefined;
+    return JSON.parse(t);
   } catch {
     return undefined;
   }
+}
+
+function sentenceOf(body) {
+  const inner = body?.error?.message ?? body?.message;
+  return typeof inner === "string" && inner.trim() !== "" ? inner.trim() : undefined;
+}
+
+/**
+ * The sentence a person should read. OpenClaw hands a provider's failure over
+ * in more than one shape: the raw response body (2026.7.1-2, Kimi:
+ * {"type":"error","error":{"message":…}}), the body behind a status
+ * ("403: {…}", 2026.9.6), or plain text ("400 Request is missing …").
+ */
+export function readableError(raw, rawBody) {
+  const fromBody = sentenceOf(parseBody(rawBody)) ?? sentenceOf(parseBody(raw));
+  if (fromBody) return fromBody;
+  if (typeof raw !== "string" || raw.trim() === "") return undefined;
+  return raw.trim();
+}
+
+/**
+ * The provider's own name for the failure: OpenClaw's errorType field when it
+ * sets one, else the body's (Anthropic's `invalid_request_error`, opencode-go's
+ * `MissingSessionID`). The hub classifies by it before any words.
+ */
+export function providerErrorType(raw, rawBody, errorType) {
+  if (typeof errorType === "string" && errorType.trim() !== "") return errorType.trim();
+  for (const body of [parseBody(rawBody), parseBody(raw)]) {
+    const type = body?.error?.type ?? (body?.type !== "error" ? body?.type : undefined);
+    if (typeof type === "string" && type.trim() !== "") return type.trim();
+  }
+  return undefined;
+}
+
+/** The HTTP status, from OpenClaw's errorCode (2026.9.x) or a leading one in the text. */
+export function httpStatus(raw, errorCode) {
+  const fromCode = Number.parseInt(String(errorCode ?? ""), 10);
+  if (fromCode >= 100 && fromCode <= 599) return fromCode;
+  const m = typeof raw === "string" ? raw.trim().match(LEADING_STATUS) : null;
+  return m ? Number.parseInt(m[1], 10) : undefined;
 }
 
 function lastAssistant(messages) {
@@ -93,13 +111,15 @@ function lastAssistant(messages) {
 export function attemptFrom(event, ctx = {}) {
   const last = lastAssistant(event?.messages);
   if (last && last.stopReason === "error") {
-    const message = readableError(last.errorMessage) ?? "The model call failed without a message.";
-    const type = providerErrorType(last.errorMessage);
+    const message = readableError(last.errorMessage, last.errorBody) ?? "The model call failed without a message.";
+    const type = providerErrorType(last.errorMessage, last.errorBody, last.errorType);
+    const status = httpStatus(last.errorMessage, last.errorCode);
     return {
       provider: String(last.provider ?? ctx.modelProviderId ?? "unknown"),
       model: String(last.model ?? ctx.modelId ?? "unknown"),
       message,
       ...(type ? { providerErrorType: type } : {}),
+      ...(status ? { httpStatus: status } : {}),
     };
   }
   if (last) return null;
@@ -128,6 +148,7 @@ export function reportFor(sessionKey, attempts) {
       provider: first.provider,
       model: first.model,
       ...(first.providerErrorType ? { providerErrorType: first.providerErrorType } : {}),
+      ...(first.httpStatus ? { httpStatus: first.httpStatus } : {}),
       attempts,
     },
   };

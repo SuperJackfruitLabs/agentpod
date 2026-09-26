@@ -100,6 +100,54 @@ test("reportFor leads with the first attempt, the one that was asked for, and li
   });
 });
 
+// OpenClaw 2026.9.6 (npm latest, 2026-09-26) shapes the same failures
+// differently from the fleet's 2026.7.1-2: a status in front of the JSON, and
+// separate errorBody / errorCode / errorType fields. Recorded from a real
+// 2026.9.6 driven over ACP against the same fake provider.
+function failed96(provider, model, fields) {
+  return {
+    messages: [
+      { role: "user", content: [{ type: "text", text: "Are you here?" }] },
+      { role: "assistant", stopReason: "error", provider, model, content: [], ...fields },
+    ],
+    success: true,
+    runId: "run-1",
+  };
+}
+
+test("OpenClaw 2026.9.6's '403: {json}' reads as the sentence, with its status", () => {
+  const a = attemptFrom(
+    failed96("kimi-coding", "k2p6", {
+      errorMessage: '403: {"error":{"message":"You\'ve reached your weekly (7-day) usage limit."}}',
+      errorBody: '{"error":{"message":"You\'ve reached your weekly (7-day) usage limit."}}',
+      errorCode: "403",
+    })
+  );
+  assert.equal(a.message, "You've reached your weekly (7-day) usage limit.");
+  assert.equal(a.httpStatus, 403);
+  assert.equal("providerErrorType" in a, false);
+});
+
+test("OpenClaw's own errorType is used, and the body gives the sentence without its status", () => {
+  const a = attemptFrom(
+    failed96("opencode-go", "qwen3.7-plus", {
+      errorMessage: "400 Request is missing x-opencode-session and cannot be routed efficiently.",
+      errorBody: '{"message":"Request is missing x-opencode-session and cannot be routed efficiently.","type":"MissingSessionID"}',
+      errorCode: "400",
+      errorType: "MissingSessionID",
+    })
+  );
+  assert.equal(a.message, "Request is missing x-opencode-session and cannot be routed efficiently.");
+  assert.equal(a.providerErrorType, "MissingSessionID");
+  assert.equal(a.httpStatus, 400);
+});
+
+test("a leading status in plain text is read, and the text kept whole", () => {
+  const a = attemptFrom(failedAttempt("opencode-go", "hy3-preview", OPENCODE_400));
+  assert.equal(a.message, OPENCODE_400);
+  assert.equal(a.httpStatus, 400);
+});
+
 test("the quiet window outlasts the gaps OpenClaw really leaves between attempts", () => {
   // krishna, ashram, 2026-09-26 05:05, run 26fed3f8: agent_end at 08.361,
   // 09.951, 11.143, 12.378, 13.194, 14.094 — a widest gap of 1.59 s. At 750 ms
