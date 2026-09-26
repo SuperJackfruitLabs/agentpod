@@ -700,7 +700,13 @@ export function attachRoomToSession(
             //
             // A session that ends mid-turn usually says why (the node went
             // away, the harness exited), and that beats "its own logs will say".
-            if (!state.produced && !state.reportedError) {
+            // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
+            // hub marks its idle state `silent`) is done, not failed: no
+            // notice, and a ✅ on the message it answered by saying nothing.
+            const choseSilence = isRecord(event.payload) && event.payload.silent === true;
+            if (!state.produced && !state.reportedError && choseSilence) {
+              await mark(REACTION.done);
+            } else if (!state.produced && !state.reportedError) {
               await mark(REACTION.failed);
               if (state.triggerEventId) {
                 const reason = isRecord(event.payload) ? event.payload.reason : undefined;

@@ -73,13 +73,22 @@ func Frame(line []byte) ([]byte, error) {
 		return nil, errors.New("a report is one JSON object")
 	}
 
-	var errorObj map[string]json.RawMessage
-	if raw, ok := report["error"]; !ok || json.Unmarshal(raw, &errorObj) != nil {
-		return nil, errors.New(`a report needs an "error" object`)
-	}
-	var message string
-	if raw, ok := errorObj["message"]; !ok || json.Unmarshal(raw, &message) != nil || strings.TrimSpace(message) == "" {
-		return nil, errors.New(`a report needs error.message: the words the harness would not send`)
+	// A report carries an error, or a resolution: the run it is about ended
+	// well after all (a fallback answered, or chose silence).
+	if raw, ok := report["resolution"]; ok {
+		var resolution string
+		if json.Unmarshal(raw, &resolution) != nil || (resolution != "answered" && resolution != "silent") {
+			return nil, errors.New(`resolution is "answered" or "silent"`)
+		}
+	} else {
+		var errorObj map[string]json.RawMessage
+		if raw, ok := report["error"]; !ok || json.Unmarshal(raw, &errorObj) != nil {
+			return nil, errors.New(`a report needs an "error" object, or a resolution`)
+		}
+		var message string
+		if raw, ok := errorObj["message"]; !ok || json.Unmarshal(raw, &message) != nil || strings.TrimSpace(message) == "" {
+			return nil, errors.New(`a report needs error.message: the words the harness would not send`)
+		}
 	}
 
 	if !nonEmptyString(report["acpSessionId"]) && !nonEmptyString(report["harnessSessionKey"]) {

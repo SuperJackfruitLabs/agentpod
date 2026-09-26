@@ -242,6 +242,72 @@ test("never more attempts than the contract takes: the first and the latest are 
   assert.equal(attempts.at(-1).model, "m29");
 });
 
+// krishna, 2026-09-26 08:56: Kimi failed at :25.9; the fallback succeeded at
+// :29.3 with NO_REPLY (OpenClaw's deliberate silence). The quiet window had
+// already sent Kimi's failure, and nothing followed to say the run ended well.
+function succeeded(text, model = "@cf/moonshotai/kimi-k2.6") {
+  return {
+    messages: [
+      { role: "user", content: [{ type: "text", text: "Okay." }] },
+      { role: "assistant", stopReason: "stop", provider: "cloudflare-workers-ai", model,
+        content: [{ type: "thinking", thinking: "Nothing to say." }, { type: "text", text }] },
+    ],
+    success: true,
+    runId: "run-1",
+  };
+}
+
+test("a reported run that later succeeds says it recovered", async (t) => {
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 30 });
+  reporter.onAgentEnd(failedAttempt("kimi-coding", "k2p6", KIMI_403), ctx);
+  await sleep(120); // the quiet window has already sent the failure
+  reporter.onAgentEnd(succeeded("Hey Rakesh. I'm here."), ctx);
+  await sleep(120);
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0].error.provider, "kimi-coding");
+  assert.deepEqual(lines[1], { harnessSessionKey: "agent:krishna:main", resolution: "answered" });
+});
+
+test("a reported run that later chooses silence says so", async (t) => {
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 30 });
+  reporter.onAgentEnd(failedAttempt("kimi-coding", "k2p6", KIMI_403), ctx);
+  await sleep(120);
+  reporter.onAgentEnd(succeeded("NO_REPLY"), ctx);
+  await sleep(120);
+  assert.deepEqual(lines[1], { harnessSessionKey: "agent:krishna:main", resolution: "silent" });
+});
+
+test("a silent reply with no failure is said too: an empty turn is not a failed one", async (t) => {
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 30 });
+  reporter.onAgentEnd(succeeded("  NO_REPLY \n"), ctx);
+  await sleep(120);
+  assert.deepEqual(lines, [{ harnessSessionKey: "agent:krishna:main", resolution: "silent" }]);
+});
+
+test("one resolution per run, though OpenClaw 2026.9.6 ends a silent run twice", async (t) => {
+  // Seen in the real-OpenClaw contract on 2026.9.6: the NO_REPLY success
+  // fired agent_end twice for one run.
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 30 });
+  reporter.onAgentEnd(failedAttempt("kimi-coding", "k2p6", KIMI_403), ctx);
+  await sleep(120);
+  reporter.onAgentEnd(succeeded("NO_REPLY"), ctx);
+  reporter.onAgentEnd(succeeded("NO_REPLY"), ctx);
+  await sleep(120);
+  assert.equal(lines.filter((l) => l.resolution).length, 1);
+});
+
+test("an ordinary answer with no failure sends nothing", async (t) => {
+  const { sock, lines } = fakeIntake(t);
+  const reporter = createReporter({ socket: sock, quietMs: 30 });
+  reporter.onAgentEnd(succeeded("Hey Rakesh."), ctx);
+  await sleep(120);
+  assert.equal(lines.length, 0);
+});
+
 test("a run whose fallback answered is not reported", async (t) => {
   const { sock, lines } = fakeIntake(t);
   const reporter = createReporter({ socket: sock, quietMs: 50 });

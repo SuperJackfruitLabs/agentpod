@@ -1171,3 +1171,19 @@ describe("a failed turn a client can draw", () => {
     expect(card.attempts!.length).toBe(16);
   });
 });
+
+describe("a turn that chose silence", () => {
+  test("is marked done, with no notice: the agent decided to say nothing", async () => {
+    // OpenClaw's NO_REPLY (krishna, 2026-09-26 08:56, to "Okay."). The hub
+    // marks such a turn's idle state `silent`; it is not a failed turn.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-okay");
+    emit(state("working"));
+    await settle();
+    emit({ ...state("idle"), payload: { status: "idle", silent: true } });
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-okay", key: "✅" });
+    expect(sent).toHaveLength(0);
+  });
+});

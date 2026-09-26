@@ -261,7 +261,7 @@ export function turnErrorFromReason(reason: string, harness: string, source: Tur
  * saw the failure; the hub names whose harness it was and where it came from,
  * because a report must not be able to claim another harness's identity.
  */
-export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness: string): TurnError {
+export function turnErrorFromPlugin(reported: NonNullable<TurnErrorReport["error"]>, harness: string): TurnError {
   const kind = kindOfReported(reported.message, reported.kind, reported.providerErrorType, reported.httpStatus);
   const { message, kind: _kind, retryable, attempts, ...rest } = reported;
   const classified = attempts?.map((a) => ({
