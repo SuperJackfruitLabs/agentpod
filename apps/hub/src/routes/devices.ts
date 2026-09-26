@@ -25,6 +25,7 @@ import { verifyHubToken } from "../auth/hub-token";
 import { buildTokenPayload, TOKEN_TTL } from "../auth/jwt-claims";
 import { signServiceToken } from "../auth/service-signing";
 import { resolveTenantForUser } from "../auth/tenant";
+import { findOAuthClient, oauthClients, type OAuthClient } from "../config";
 import { db } from "../db/drizzle";
 import { user as userTable } from "../db/schema/auth";
 import { eq } from "drizzle-orm";
@@ -89,7 +90,26 @@ async function resolveCaller(c: Context): Promise<Caller | null> {
   return { userId: row.id, tenantId: await resolveTenantForUser(row.id) };
 }
 
-export const deviceRoutes = new Hono()
+export interface DeviceRoutesDeps {
+  /**
+   * Which clients a token may be minted for, and what each may reach. Defaults
+   * to the hub's own registry, so production reads `HUB_OAUTH_CLIENTS` exactly
+   * as it always has; a test injects instead of setting module-scope env, the
+   * same reason `createAuthorizeRoutes` takes it.
+   */
+  clients?: readonly OAuthClient[];
+}
+
+/**
+ * The device routes, over a given client registry.
+ *
+ * A factory for one reason: the exchange now has to ask the registry what a
+ * named client may reach, and a registry computed at module scope cannot be
+ * varied by a test without a fresh process.
+ */
+export function createDeviceRoutes(deps: DeviceRoutesDeps = {}): Hono {
+  const registry = deps.clients ?? oauthClients;
+  return new Hono()
   /**
    * Exchange a device credential for a five-minute token.
    *
@@ -133,11 +153,32 @@ export const deviceRoutes = new Hono()
     // superpipeline reads this and refuses to mint a thirty-day session cookie from
     // such a token (shipped there BEFORE this could produce one). The credential
     // is authority to work; it is not evidence anybody was present.
+    // Which plane(s) this token is for. Absent means the hub alone, which is
+    // what every caller written before this sent and still sends.
+    //
+    // `client`, not `client_id` — the same spelling `auth-authorize.ts` reads,
+    // because a CLI that already sends `client` there should not have to
+    // remember that this endpoint wanted the other name.
+    const requestedClient = c.req.query("client");
+    let audiences: readonly string[] | undefined;
+    if (requestedClient !== undefined) {
+      const client = findOAuthClient(requestedClient, registry);
+      // Refused, never narrowed to the hub. A fallback here would hand back a
+      // token that verifies perfectly at the hub and then 401s at the plane it
+      // was asked for, with nothing to say why — which is the exact failure
+      // this parameter exists to end, reintroduced one layer up.
+      if (!client) {
+        return c.json({ error: "this hub does not know that client" }, 400);
+      }
+      audiences = client.audiences;
+    }
+
     const token = await signServiceToken({
       payload,
       subject: device.userId,
       ttl: TOKEN_TTL,
       amr: ["device"],
+      audiences,
     });
 
     return c.json({
@@ -195,3 +236,7 @@ export const deviceRoutes = new Hono()
     if (!revoked) return c.json({ error: "no such live device" }, 404);
     return c.json({ revoked: true });
   });
+}
+
+/** The hub's own device routes, reading the hub's own registry. */
+export const deviceRoutes = createDeviceRoutes();
