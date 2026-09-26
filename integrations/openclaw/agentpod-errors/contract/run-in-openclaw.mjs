@@ -175,15 +175,19 @@ async function main() {
       console.log(`NOTE  ACP prompt rejected: ${e.message} — OpenClaw now reports errors over ACP itself`);
     }
 
-    for (let i = 0; i < 50 && reports.length === 0; i++) await sleep(100);
-    await sleep(1500); // a second report would land here
+    for (let i = 0; i < 80 && reports.length === 0; i++) await sleep(100);
+    await sleep(3000); // a second report would land here
 
     check(reports.length === 1, `exactly one report reached the node (got ${reports.length})`);
     const [report] = reports;
     if (report) {
       check(report.harnessSessionKey === SESSION_KEY, `keyed by the ACP session's key (${report.harnessSessionKey})`);
-      check(/weekly \(7-day\) usage limit/.test(report.error?.message ?? ""), "leads with the first model's words, unwrapped from its JSON body");
+      // What a reader sees first: the sentence alone. OpenClaw 2026.9.x hands
+      // it over as "403: {json}"; 2026.7.x as the bare JSON body.
+      check((report.error?.message ?? "").startsWith("You've reached your weekly (7-day) usage limit"), "leads with the first model's sentence, with no status or JSON around it");
       check(report.error?.provider === "fakeq" && report.error?.model === "quota", "names the first model");
+      check(Boolean(report.error?.providerErrorType || report.error?.httpStatus), "gives the hub something typed to classify the first model's failure by");
+      check(report.error?.attempts?.[1]?.providerErrorType === "MissingSessionID", "carries the fallback's own error type, MissingSessionID");
       check(
         JSON.stringify((report.error?.attempts ?? []).map((a) => a.provider)) === JSON.stringify(["fakeq", "fakeb"]),
         "lists every attempt, in order"

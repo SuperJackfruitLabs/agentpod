@@ -114,7 +114,7 @@ first, so the hub and node validate the same shape.
 
 OpenClaw's bridge can resolve `session/prompt` before its `agent_end` hook
 runs. When a turn ends with nothing produced, the hub holds its verdict for a
-grace window (default 3 s). If a plugin `turn.error` for that session arrives
+grace window (default 5 s). If a plugin `turn.error` for that session arrives
 inside the window, it becomes the turn's error. If nothing arrives, the
 existing "completed without a reply" path runs, unchanged. A `turn.error` that
 arrives after the window is persisted and posted as a follow-up, never dropped.
@@ -123,7 +123,7 @@ arrives after the window is persisted and posted as a follow-up, never dropped.
 
 | Plugin | Hook | Sends |
 |---|---|---|
-| `integrations/openclaw/agentpod-errors` | `agent_end`, once per model attempt; a failed attempt's last assistant message has `stopReason: "error"` and the provider's `errorMessage` (`success` is `true` regardless). Reports a run after 750 ms quiet. Needs `plugins.entries.agentpod-errors.hooks.allowConversationAccess: true`, or OpenClaw blocks the hook. `model_call_ended` is no use: its `outcome` was `completed` for a 403. | `TurnErrorReport` keyed by `ctx.sessionKey`, leading with the first attempt, listing all |
+| `integrations/openclaw/agentpod-errors` | `agent_end`, once per model attempt; a failed attempt's last assistant message has `stopReason: "error"` and the provider's `errorMessage` (`success` is `true` regardless). Reports a run after 2.5 s quiet (750 ms was too short on ashram: real attempts land 0.8–1.6 s apart, and the room got one error per attempt, 2026-09-26). Sends the provider's own error type (`providerErrorType`), which the hub classifies before the words. Needs `plugins.entries.agentpod-errors.hooks.allowConversationAccess: true`, or OpenClaw blocks the hook. `model_call_ended` is no use: its `outcome` was `completed` for a 403. | `TurnErrorReport` keyed by `ctx.sessionKey`, leading with the first attempt, listing all |
 | `integrations/pi/agentpod-errors` (extension) | `message_end` where `role === "assistant"` and `stopReason === "error"` → `errorMessage`; sent at `agent_settled`, so Pi's own retries finish first | `TurnError` keyed by `AGENTPOD_TURN_KEY` |
 | `integrations/hermes/agentpod-live` (existing) | the failure hook is to be confirmed against Hermes (whether `post_llm_call` fires on a failed call) | a `dev.agentpod.turn.error` to-device event beside its stream events, so harness-mode Hermes rooms get the same card. Hermes goes to Matrix directly, not through the hub, so it does not use the socket. |
 
@@ -219,8 +219,10 @@ turn.
    the OpenClaw gateway both run as `openclaw`, so a 0600 socket suffices.
 2. ~~Grace window length.~~ Measured 2026-09-25 against real OpenClaw
    2026.7.1-2 over ACP: the last `agent_end` fires ~130 ms before the prompt
-   resolves. With the plugin's 750 ms quiet period the report lands ~0.6 s
-   after, inside the hub's 3 s.
+   resolves. With the plugin's 2.5 s quiet period (raised from 750 ms after
+   ashram's real 0.8–1.6 s gaps) the report lands ~2.4 s after, inside the
+   hub's 5 s. Several reports for one turn are merged, first leading; a report
+   after a turn already shows a plugin's error is dropped.
 3. **Retry action.** Resending the trigger re-prompts with the same text. Is
    that acceptable when the error was quota, where it will certainly fail
    again? Proposal: hide "try again" for non-retryable kinds.
