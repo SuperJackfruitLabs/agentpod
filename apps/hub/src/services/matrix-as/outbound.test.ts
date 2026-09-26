@@ -401,9 +401,67 @@ describe("live feedback, so a room is not a black box", () => {
       payload: { message: "harness exited" },
       createdAt: new Date().toISOString(),
     });
+    // Held until the turn ends: a harness may retry after an error (#583).
+    emit(state("idle"));
     await settle();
 
     expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-2", key: "❌" });
+  });
+
+  test("an error the harness recovers from is not reported: the answer after it wins", async () => {
+    // Krishna, 2026-09-26: Kimi's quota error, then the fallback's answer. The
+    // room showed the error and a ❌, then the answer underneath (#583).
+    noteTurnTrigger(SESSION, "$user-msg-recovered");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    emit({
+      sessionId: SESSION,
+      seq: 3,
+      type: "error",
+      payload: { message: "You've reached your weekly (7-day) usage limit." },
+      createdAt: new Date().toISOString(),
+    });
+    emit(chunk("Hey Rakesh. I'm here."));
+    emit(state("idle"));
+    await settle();
+
+    expect(sent.some((m) => /reported an error/.test(m.body))).toBe(false);
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-recovered", key: "✅" });
+  });
+
+  test("an error after part of an answer, with nothing after it, is still reported", async () => {
+    noteTurnTrigger(SESSION, "$user-msg-cut");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    emit(chunk("Let me check"));
+    emit({
+      sessionId: SESSION,
+      seq: 4,
+      type: "error",
+      payload: { message: "harness exited" },
+      createdAt: new Date().toISOString(),
+    });
+    emit(state("idle"));
+    await settle();
+
+    expect(sent.some((m) => /reported an error: harness exited/.test(m.body))).toBe(true);
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-cut", key: "❌" });
+  });
+
+  test("an error outside a turn has no end to wait for, so it is said at once", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+    emit({
+      sessionId: SESSION,
+      seq: 5,
+      type: "error",
+      payload: { message: "node went away" },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+
+    expect(sent.some((m) => /reported an error: node went away/.test(m.body))).toBe(true);
   });
 
   test("reacts to the message that started THIS turn, not the previous one", async () => {
@@ -1072,6 +1130,7 @@ describe("a failed turn a client can draw", () => {
     noteTurnTrigger(SESSION, "$user-msg-card");
     emit(state("working"));
     emit({ sessionId: SESSION, seq: 2, type: "error", payload: krishna, createdAt: new Date().toISOString() });
+    emit(state("idle"));
     await settle();
 
     const notice = sent.find((m) => /reported an error/.test(m.body))!;
@@ -1089,6 +1148,7 @@ describe("a failed turn a client can draw", () => {
     noteTurnTrigger(SESSION, "$user-msg-old");
     emit(state("working"));
     emit({ sessionId: SESSION, seq: 2, type: "error", payload: { message: "harness exited" }, createdAt: new Date().toISOString() });
+    emit(state("idle"));
     await settle();
     const notice = sent.find((m) => /harness exited/.test(m.body))!;
     expect(notice.extra).toBeUndefined();
@@ -1104,6 +1164,7 @@ describe("a failed turn a client can draw", () => {
       attempts: Array.from({ length: 40 }, () => ({ ...krishna.attempts[1], message: "y".repeat(9_000) })),
     };
     emit({ sessionId: SESSION, seq: 2, type: "error", payload: huge, createdAt: new Date().toISOString() });
+    emit(state("idle"));
     await settle();
     const notice = sent.find((m) => /reported an error/.test(m.body))!;
     const card = TurnErrorCard.parse(notice.extra?.[TURN_ERROR_CONTENT_KEY]);
