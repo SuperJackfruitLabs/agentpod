@@ -11,7 +11,8 @@
  * needs to see: the answer, a permission question, and an error.
  */
 
-import type { AcpEvent } from "@agentpod/contract";
+import { TURN_ERROR_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
+import { turnErrorCard } from "../turn-error";
 import { subscribe as subscribeToSession } from "../acp-sessions";
 import {
   deltaContent,
@@ -42,7 +43,7 @@ const log = createLogger("matrix-outbound");
 
 export interface OutboundDeps {
   client: {
-    sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+    sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
     sendTyping(userId: string, roomId: string, typing: boolean): Promise<void>;
     sendReaction?(
       userId: string,
@@ -307,9 +308,9 @@ export function attachRoomToSession(
     reportedError: false,
   };
 
-  const say = async (body: string) => {
+  const say = async (body: string, extra?: Record<string, unknown>) => {
     try {
-      await deps.client.sendText(agentUser, roomId, body);
+      await deps.client.sendText(agentUser, roomId, body, extra);
     } catch (err) {
       // A homeserver hiccup must not silently detach the room: the next turn
       // should still arrive. Losing one message loudly beats losing the
@@ -733,7 +734,13 @@ export function attachRoomToSession(
           state.reportedError = true;
           await stopTyping();
           await mark(REACTION.failed);
-          await say(`This agent reported an error: ${String(message ?? "unknown")}`);
+          // A client that knows the key draws a card from it: what failed,
+          // which model, each fallback. Every other client shows the body.
+          const card = turnErrorCard(event.payload);
+          await say(
+            `This agent reported an error: ${String(message ?? "unknown")}`,
+            card ? { [TURN_ERROR_CONTENT_KEY]: card } : undefined
+          );
           return;
         }
 

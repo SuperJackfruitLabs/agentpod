@@ -162,6 +162,20 @@ describe("acting as a station", () => {
     await expect(client().ensureUser("agent_nope", "nope")).rejects.toThrow(/M_FORBIDDEN|namespace/);
   });
 
+  test("sendText carries extra content keys, but they cannot replace msgtype or body", async () => {
+    await client().sendText(USER, ROOM, "readable", {
+      "dev.agentpod.turn_error": { schema_version: 1 },
+      body: "hijacked",
+      msgtype: "m.image",
+    });
+    const send = calls.find((c) => c.url.includes("/send/m.room.message/"))!;
+    expect(send.body).toEqual({
+      "dev.agentpod.turn_error": { schema_version: 1 },
+      msgtype: "m.text",
+      body: "readable",
+    });
+  });
+
   test("typing is sent as the agent, so the room shows the agent thinking", async () => {
     await client().sendTyping(USER, ROOM, true);
 
