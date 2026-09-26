@@ -177,3 +177,28 @@ export const TurnErrorCard = z.object({
   attempts: z.array(TurnErrorCardAttempt).max(16).optional(),
 });
 export type TurnErrorCard = z.infer<typeof TurnErrorCard>;
+
+/**
+ * A voice note's transcript, structured so a client can draw it under the
+ * note it transcribes.
+ *
+ * Carried inside the hub's transcript notice — an `m.notice` that is a reply
+ * (`m.in_reply_to`) to the voice note — under this one namespaced key. The
+ * notice's `body` ("Transcript: …") stays the readable fallback every Matrix
+ * client shows; a client that knows the key draws the text as part of the
+ * voice note rather than as a separate line. Which note it belongs to is the
+ * reply relation, not a field here: a key cannot point at a message the
+ * event does not already relate to.
+ */
+export const VOICE_TRANSCRIPT_CONTENT_KEY = "dev.agentpod.voice_transcript";
+
+export const VoiceTranscript = z.object({
+  schema_version: z.literal(1),
+  /** What was heard, as the agent received it. */
+  text: z.string().max(20_000),
+  /** The language the service heard, as an ISO code, when it said. */
+  language: z.string().max(16).optional(),
+  /** Length of the note in seconds, when the sender's client said. */
+  seconds: z.number().int().nonnegative().max(3600).optional(),
+});
+export type VoiceTranscript = z.infer<typeof VoiceTranscript>;

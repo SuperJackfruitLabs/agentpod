@@ -402,6 +402,8 @@ describe("an inbound room message", () => {
   });
 });
 
+let transcriptKeys: unknown[] = [];
+
 describe("a voice note", () => {
   function voice(sender: string, extra: Record<string, unknown> = {}) {
     return {
@@ -423,6 +425,7 @@ describe("a voice note", () => {
   function voiceDeps(heard: string | Error) {
     const base = deps();
     const notices: Array<{ body: string; replyTo: string | null }> = [];
+    transcriptKeys = [];
     return {
       notices,
       deps: {
@@ -433,6 +436,7 @@ describe("a voice note", () => {
           sendCustomEvent: async (_u: string, _r: string, _t: string, content: Record<string, unknown>) => {
             const rel = content["m.relates_to"] as { "m.in_reply_to"?: { event_id?: string } } | undefined;
             notices.push({ body: String(content.body), replyTo: rel?.["m.in_reply_to"]?.event_id ?? null });
+            if (content["dev.agentpod.voice_transcript"]) transcriptKeys.push(content["dev.agentpod.voice_transcript"]);
             return "$notice";
           },
         },
@@ -457,6 +461,7 @@ describe("a voice note", () => {
     expect(prompts[0]!.text).toBe("[Voice note, 0:42, transcribed] send the report by Friday");
     expect(prompts[0]!.text).not.toContain("Voice message.m4a");
     expect(notices).toEqual([{ body: "Transcript: send the report by Friday", replyTo: "$voice1" }]);
+    expect(transcriptKeys).toEqual([{ schema_version: 1, text: "send the report by Friday", language: "en", seconds: 42 }]);
   });
 
   test("one that cannot be transcribed still reaches the agent, with the reason, and the room is told", async () => {

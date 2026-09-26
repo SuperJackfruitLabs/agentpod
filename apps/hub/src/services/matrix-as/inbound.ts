@@ -40,6 +40,7 @@ import {
   audioSource,
   isVoiceRefusal,
   loadVoice,
+  transcriptContent,
   transcriptNotice,
   voiceNote,
   voicePrompt,
@@ -505,7 +506,14 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
         seconds: heard.seconds,
         language: heard.transcript.language,
       });
-      await notice(deps, agentUser, room.roomId, transcriptNotice(heard.transcript), event.event_id);
+      await notice(
+        deps,
+        agentUser,
+        room.roomId,
+        transcriptNotice(heard.transcript),
+        event.event_id,
+        transcriptContent(heard.transcript, heard.seconds)
+      );
       prompt = voicePrompt(heard.transcript, heard.seconds, text);
     }
   }
@@ -532,9 +540,19 @@ type RoomRow = NonNullable<Awaited<ReturnType<typeof roomContext>>>;
  * marked as a notice so a client can show it as the room speaking: posted as
  * ordinary text, "Session is busy" read as the agent turning the person away.
  */
-function notice(deps: InboundDeps, agentUser: string, roomId: string, body: string, replyTo?: string) {
+function notice(
+  deps: InboundDeps,
+  agentUser: string,
+  roomId: string,
+  body: string,
+  replyTo?: string,
+  extra?: Record<string, unknown>
+) {
   if (deps.client.sendCustomEvent) {
     return deps.client.sendCustomEvent(agentUser, roomId, "m.room.message", {
+      // Extra keys beside the body, never over it: `msgtype` and `body` below
+      // are what every client falls back to.
+      ...(extra ?? {}),
       msgtype: "m.notice",
       body,
       // A reply, when it is about one message — a voice note's transcript —
