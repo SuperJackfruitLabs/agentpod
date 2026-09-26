@@ -89,7 +89,11 @@ export interface MatrixClient {
       isDirect?: boolean;
     }
   ): Promise<string | null>;
-  sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  /**
+   * `extra` adds namespaced keys to the message content (a client-drawable
+   * card beside the readable body). It can never replace `msgtype` or `body`.
+   */
+  sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
   /**
    * Send a message-like event of any type into a room.
    *
@@ -583,13 +587,13 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       return String(retry.body.room_id ?? "") || null;
     },
 
-    async sendText(userId, roomId, body) {
+    async sendText(userId, roomId, body, extra) {
       // A fresh transaction id per send: the homeserver deduplicates on it, so
       // reusing one would silently drop a genuinely new message.
       const txn = `apb-${crypto.randomUUID()}`;
       const res = await call(
         `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txn}`,
-        { method: "PUT", userId, body: { msgtype: "m.text", body } }
+        { method: "PUT", userId, body: { ...(extra ?? {}), msgtype: "m.text", body } }
       );
       assertOkOrAlready("send", res);
       return String(res.body.event_id ?? "") || null;

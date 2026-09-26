@@ -185,3 +185,41 @@ describe("PermissionRequestEvent", () => {
     ).toBe(false);
   });
 });
+
+
+import { TURN_ERROR_CONTENT_KEY, TurnErrorCard } from "./matrix-events";
+
+describe("TurnErrorCard — a failed turn, drawable, on the room's error notice", () => {
+  // krishna, ashram, 2026-09-26 05:43: what the hub recorded for that turn.
+  const krishna = {
+    schema_version: 1,
+    kind: "quota",
+    message: "You've reached your weekly (7-day) usage limit.",
+    harness: "openclaw",
+    provider: "kimi-coding",
+    model: "k2p6",
+    retryable: false,
+    attempts: [
+      { provider: "kimi-coding", model: "k2p6", kind: "quota", message: "You've reached your weekly (7-day) usage limit." },
+      { provider: "opencode-go", model: "hy3-preview", kind: "bad_request", message: "Request is missing x-opencode-session" },
+    ],
+  };
+
+  it("rides under one namespaced key on the notice", () => {
+    expect(TURN_ERROR_CONTENT_KEY).toBe("dev.agentpod.turn_error");
+  });
+
+  it("parses krishna's failed turn", () => {
+    expect(TurnErrorCard.parse(krishna)).toEqual(krishna);
+  });
+
+  it("needs only what every error has", () => {
+    const bare = { schema_version: 1, kind: "node_offline", message: "Couldn't reach the node.", harness: "pi" };
+    expect(TurnErrorCard.parse(bare)).toEqual(bare);
+  });
+
+  it("is bounded: a client draws every attempt it is given", () => {
+    const many = { ...krishna, attempts: Array.from({ length: 17 }, () => krishna.attempts[0]) };
+    expect(TurnErrorCard.safeParse(many).success).toBe(false);
+  });
+});

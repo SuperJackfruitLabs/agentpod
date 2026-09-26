@@ -15,7 +15,8 @@
  *
  * Spec: docs/superpowers/specs/2026-09-25-harness-error-standard-design.md.
  */
-import type { TurnError, TurnErrorKind, TurnErrorReport, TurnErrorSource } from "@agentpod/contract";
+import { TurnErrorKind as TurnErrorKindSchema } from "@agentpod/contract";
+import type { TurnError, TurnErrorCard, TurnErrorKind, TurnErrorReport, TurnErrorSource } from "@agentpod/contract";
 
 /**
  * An HTTP status, only where it reads as one: leading the message ("400
@@ -272,4 +273,51 @@ export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness:
     ...(classified ? { attempts: classified } : {}),
   });
   return retryable === undefined ? error : { ...error, retryable };
+}
+
+const clip = (s: string, max: number) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
+
+/**
+ * The card a room's error notice carries (`dev.agentpod.turn_error`), from an
+ * `error` event's payload — or null for a payload from before TurnError, which
+ * has only words and is sent as words alone. Bounded to what the contract
+ * allows, clipped rather than dropped: a long error is still a card.
+ */
+export function turnErrorCard(payload: unknown): TurnErrorCard | null {
+  if (!isRecord(payload)) return null;
+  const kind = TurnErrorKindSchema.safeParse(payload.kind);
+  const message = nonEmpty(payload.message);
+  const harness = nonEmpty(payload.harness);
+  if (!kind.success || !message || !harness) return null;
+
+  const attempts = Array.isArray(payload.attempts)
+    ? payload.attempts
+        .filter(isRecord)
+        .map((a) => {
+          const k = TurnErrorKindSchema.safeParse(a.kind);
+          const m = nonEmpty(a.message);
+          if (!k.success || !m) return null;
+          return {
+            provider: clip(nonEmpty(a.provider) ?? "unknown", 200),
+            model: clip(nonEmpty(a.model) ?? "unknown", 200),
+            kind: k.data,
+            message: clip(m, 2000),
+          };
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+        .slice(0, 16)
+    : undefined;
+
+  const provider = nonEmpty(payload.provider);
+  const model = nonEmpty(payload.model);
+  return {
+    schema_version: 1,
+    kind: kind.data,
+    message: clip(message, 4000),
+    harness: clip(harness, 100),
+    ...(provider ? { provider: clip(provider, 200) } : {}),
+    ...(model ? { model: clip(model, 200) } : {}),
+    ...(typeof payload.retryable === "boolean" ? { retryable: payload.retryable } : {}),
+    ...(attempts && attempts.length > 0 ? { attempts } : {}),
+  };
 }
