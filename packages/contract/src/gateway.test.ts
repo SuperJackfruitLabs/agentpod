@@ -51,6 +51,19 @@ describe("TurnErrorReport — what a plugin writes to its node", () => {
     expect(TurnErrorReport.parse(r)).toEqual(r);
   });
 
+  it("carries the provider's own error type, on the report and on each attempt", () => {
+    // opencode-go's body said MissingSessionID; its sentence never says 400.
+    const r = {
+      harnessSessionKey: "agent:krishna:main",
+      error: {
+        message: "Request is missing x-opencode-session",
+        providerErrorType: "MissingSessionID",
+        attempts: [{ provider: "opencode-go", model: "qwen3.7-plus", message: "Request is missing x-opencode-session", providerErrorType: "MissingSessionID" }],
+      },
+    };
+    expect(TurnErrorReport.parse(r)).toEqual(r);
+  });
+
   it("needs something to match a session by", () => {
     expect(TurnErrorReport.safeParse({ error: { message: "x" } }).success).toBe(false);
   });

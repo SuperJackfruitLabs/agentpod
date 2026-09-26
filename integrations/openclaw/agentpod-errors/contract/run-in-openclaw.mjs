@@ -175,8 +175,8 @@ async function main() {
       console.log(`NOTE  ACP prompt rejected: ${e.message} — OpenClaw now reports errors over ACP itself`);
     }
 
-    for (let i = 0; i < 50 && reports.length === 0; i++) await sleep(100);
-    await sleep(1500); // a second report would land here
+    for (let i = 0; i < 80 && reports.length === 0; i++) await sleep(100);
+    await sleep(3000); // a second report would land here
 
     check(reports.length === 1, `exactly one report reached the node (got ${reports.length})`);
     const [report] = reports;
@@ -184,6 +184,7 @@ async function main() {
       check(report.harnessSessionKey === SESSION_KEY, `keyed by the ACP session's key (${report.harnessSessionKey})`);
       check(/weekly \(7-day\) usage limit/.test(report.error?.message ?? ""), "leads with the first model's words, unwrapped from its JSON body");
       check(report.error?.provider === "fakeq" && report.error?.model === "quota", "names the first model");
+      check(report.error?.providerErrorType === "permission_error", "carries the provider's own error type from its JSON body");
       check(
         JSON.stringify((report.error?.attempts ?? []).map((a) => a.provider)) === JSON.stringify(["fakeq", "fakeb"]),
         "lists every attempt, in order"

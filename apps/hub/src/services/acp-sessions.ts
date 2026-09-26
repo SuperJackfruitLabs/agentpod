@@ -77,9 +77,10 @@ export function _setOfflineGraceMsForTest(ms: number): void {
 }
 
 // How long a turn that ended with nothing waits for a harness plugin to say
-// why. OpenClaw's bridge resolves `end_turn` before its `agent_end` hook runs,
-// so the report the plugin sends arrives just after the turn it explains.
-const TURN_ERROR_GRACE_DEFAULT_MS = 3_000;
+// why. OpenClaw's bridge resolves `end_turn` before the plugin's report
+// arrives: the plugin waits 2.5 s of quiet after the last model attempt (see
+// integrations/openclaw/agentpod-errors), and real attempts land ~1 s apart.
+const TURN_ERROR_GRACE_DEFAULT_MS = 5_000;
 let turnErrorGraceMs = TURN_ERROR_GRACE_DEFAULT_MS;
 
 /** Test hook: change the wait. Pass nothing to restore the default. */
@@ -224,6 +225,8 @@ interface LiveSession {
   turnInFlight: boolean;
   /** This turn already has its error event; a second would say it twice. */
   turnErrorRecorded: boolean;
+  /** Where the last turn's recorded error came from, to tell a follow-up from a repeat. */
+  turnErrorSource: TurnError["source"] | null;
   /** A plugin's report that arrived while the turn was still running. */
   pendingTurnError: TurnError | null;
   /** Set while a silent turn waits for a plugin's report. */
@@ -472,12 +475,10 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
   // went away, or the harness exited. Recorded before the ended state, so
   // every reader meets the reason before the end.
   if (live.turnInFlight && !live.turnErrorRecorded) {
+    const error = live.pendingTurnError ?? turnErrorFromReason(reason, live.harness, "session-state");
     live.turnErrorRecorded = true;
-    persistEvent(
-      live,
-      "error",
-      live.pendingTurnError ?? turnErrorFromReason(reason, live.harness, "session-state")
-    );
+    live.turnErrorSource = error.source;
+    persistEvent(live, "error", error);
   }
   const hadParked = live.pending.size > 0;
   rejectPendingPermissions(live);
@@ -819,6 +820,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     harnessSessionKey: null,
     turnInFlight: false,
     turnErrorRecorded: false,
+    turnErrorSource: null,
     pendingTurnError: null,
     awaitingTurnError: null,
     lastTurnSettledAt: 0,
@@ -1182,6 +1184,7 @@ export async function promptSession(
   live.turnProduced = false;
   live.turnInFlight = true;
   live.turnErrorRecorded = false;
+  live.turnErrorSource = null;
   live.pendingTurnError = null;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
@@ -1193,6 +1196,7 @@ export async function promptSession(
   };
   const recordError = async (error: TurnError) => {
     live.turnErrorRecorded = true;
+    live.turnErrorSource = error.source;
     await audit.done("error", error.message).catch(() => {});
     const { done: errorWritten } = persistEvent(live, "error", error);
     const { done: idleWritten } = setStatus(live, "idle");
@@ -1254,8 +1258,10 @@ export async function promptSession(
       if (isCurrentTurn()) {
         // A plugin's report knows the provider and the fallback chain; the
         // rejection, when both exist, is the less specific of the two.
+        const recorded = live.pendingTurnError ?? error;
         live.turnErrorRecorded = true;
-        const { done: errorWritten } = persistEvent(live, "error", live.pendingTurnError ?? error);
+        live.turnErrorSource = recorded.source;
+        const { done: errorWritten } = persistEvent(live, "error", recorded);
         const { done: idleWritten } = setStatus(live, "idle");
         await Promise.all([errorWritten, idleWritten]);
         settled();
@@ -1286,7 +1292,26 @@ function awaitTurnError(live: LiveSession): Promise<TurnError | null> {
   });
 }
 
-export type TurnErrorReportOutcome = "awaited" | "pending" | "late" | "unmatched";
+export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "late" | "duplicate" | "unmatched";
+
+/**
+ * One turn's reports, as one error. The first report leads — it is about the
+ * model the agent was asked to use, and the rest are its fallbacks failing in
+ * turn — and every attempt is kept, in order.
+ */
+function mergeTurnErrors(first: TurnError, next: TurnError): TurnError {
+  const attemptsOf = (e: TurnError) =>
+    e.attempts ?? [
+      {
+        provider: e.provider ?? "unknown",
+        model: e.model ?? "unknown",
+        kind: e.kind,
+        message: e.message,
+        ...(e.providerErrorType ? { providerErrorType: e.providerErrorType } : {}),
+      },
+    ];
+  return { ...first, attempts: [...attemptsOf(first), ...attemptsOf(next)] };
+}
 
 /**
  * A harness plugin's report of a failed turn, forwarded by the node it runs on.
@@ -1326,13 +1351,25 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
     live.awaitingTurnError(error);
     return "awaited";
   }
-  if (live.turnInFlight) {
+  if (live.turnInFlight && !live.turnErrorRecorded) {
+    // More than one report for a turn: merge, never replace. Replacing lost
+    // Kimi's quota — the cause — behind the fallbacks' errors (2026-09-26).
+    if (live.pendingTurnError) {
+      live.pendingTurnError = mergeTurnErrors(live.pendingTurnError, error);
+      return "merged";
+    }
     live.pendingTurnError = error;
     return "pending";
+  }
+  if (live.turnErrorSource === "plugin") {
+    // The room already shows a plugin's account of this turn. Another would be
+    // the same news twice, which is exactly what krishna's room showed.
+    return "duplicate";
   }
   if (Date.now() - live.lastTurnSettledAt < LATE_TURN_ERROR_MS) {
     // The turn already has its error ("completed without a reply"). This one
     // says why, so it follows rather than being lost.
+    live.turnErrorSource = error.source;
     persistEvent(live, "error", error);
     return "late";
   }

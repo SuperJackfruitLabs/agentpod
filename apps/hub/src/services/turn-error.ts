@@ -97,6 +97,29 @@ const CODEX_ERROR_KINDS: Record<string, TurnErrorKind> = {
   responseTooManyFailedAttempts: "provider_unavailable",
 };
 
+/**
+ * A provider's own name for a failure, from its response body, as a plugin
+ * reports it. Anthropic's standard error types, and those seen from providers
+ * behind OpenClaw. `permission_error` is absent on purpose: Kimi sends it for a
+ * used-up quota, so the words decide.
+ */
+const PROVIDER_ERROR_TYPES: Record<string, TurnErrorKind> = {
+  invalid_request_error: "bad_request",
+  not_found_error: "bad_request",
+  request_too_large: "bad_request",
+  authentication_error: "auth",
+  rate_limit_error: "rate_limit",
+  api_error: "provider_unavailable",
+  overloaded_error: "provider_unavailable",
+  // opencode-go over anthropic-messages, ashram 2026-09-26: HTTP 400 for a
+  // request without its x-opencode-session header.
+  MissingSessionID: "bad_request",
+};
+
+function kindOfReported(message: string, kind?: TurnErrorKind, providerErrorType?: string): TurnErrorKind {
+  return kind ?? (providerErrorType ? PROVIDER_ERROR_TYPES[providerErrorType] : undefined) ?? classifyText(message);
+}
+
 /** ACP's `auth_required` JSON-RPC code. */
 const ACP_AUTH_REQUIRED = -32000;
 
@@ -215,9 +238,9 @@ export function turnErrorFromReason(reason: string, harness: string, source: Tur
  * because a report must not be able to claim another harness's identity.
  */
 export function turnErrorFromPlugin(reported: TurnErrorReport["error"], harness: string): TurnError {
-  const kind = reported.kind ?? classifyText(reported.message);
+  const kind = kindOfReported(reported.message, reported.kind, reported.providerErrorType);
   const { message, kind: _kind, retryable, attempts, ...rest } = reported;
-  const classified = attempts?.map((a) => ({ ...a, kind: a.kind ?? classifyText(a.message) }));
+  const classified = attempts?.map((a) => ({ ...a, kind: kindOfReported(a.message, a.kind, a.providerErrorType) }));
   const error = build(message, kind, harness, "plugin", {
     ...rest,
     ...(classified ? { attempts: classified } : {}),

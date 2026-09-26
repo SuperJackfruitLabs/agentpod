@@ -56,6 +56,7 @@ export type TurnErrorSource = z.infer<typeof TurnErrorSource>;
 
 export const TurnErrorAttempt = z.object({
   provider: z.string(), model: z.string(), kind: TurnErrorKind, message: z.string(),
+  providerErrorType: z.string().optional(),
 });
 export type TurnErrorAttempt = z.infer<typeof TurnErrorAttempt>;
 
@@ -66,6 +67,12 @@ export const TurnError = z.object({
   harness: z.string(),
   provider: z.string().optional(),
   model: z.string().optional(),
+  /**
+   * The provider's own name for the failure, from its response body
+   * (Anthropic's `invalid_request_error`, opencode-go's `MissingSessionID`).
+   * Classified before any words are read; not shown to the reader.
+   */
+  providerErrorType: z.string().optional(),
   /** Each model the harness tried, in order, when it fell back. */
   attempts: z.array(TurnErrorAttempt).optional(),
   /** Whether sending the same message again could work. Absent when unknown. */

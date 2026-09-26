@@ -21,11 +21,16 @@ import path from "node:path";
 
 /**
  * How long a run must be quiet before its failure is reported. OpenClaw fires
- * agent_end for every fallback attempt; waiting lets one report carry the
- * whole chain. Measured on 2026-09-25: the last agent_end lands ~130 ms before
- * the ACP prompt resolves, and the hub waits 3 s after that for a report.
+ * agent_end for every fallback attempt and every retry; waiting lets one report
+ * carry the whole chain.
+ *
+ * 750 ms was measured against a fake provider that failed instantly. On ashram
+ * (2026-09-26, krishna, run 26fed3f8) real attempts landed 0.8–1.6 s apart, so
+ * 750 ms sent a report after nearly every one: the room got the last model's
+ * error twice and never the first's. 2.5 s clears the widest real gap with room
+ * to spare; the hub waits 5 s after the prompt resolves.
  */
-export const QUIET_MS = 750;
+export const QUIET_MS = 2_500;
 
 /** Bound on one socket exchange, so a wedged node cannot hold a report open. */
 const SEND_TIMEOUT_MS = 2_000;
@@ -56,6 +61,22 @@ export function readableError(raw) {
   return text;
 }
 
+/**
+ * The provider's own name for the failure, when its body has one: Anthropic's
+ * `invalid_request_error`, opencode-go's `MissingSessionID`. The hub classifies
+ * by it before it reads any words, so it travels beside the message.
+ */
+export function providerErrorType(raw) {
+  if (typeof raw !== "string" || !raw.trim().startsWith("{")) return undefined;
+  try {
+    const body = JSON.parse(raw.trim());
+    const type = body?.error?.type ?? (body?.type !== "error" ? body?.type : undefined);
+    return typeof type === "string" && type.trim() !== "" ? type.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function lastAssistant(messages) {
   if (!Array.isArray(messages)) return undefined;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -73,10 +94,12 @@ export function attemptFrom(event, ctx = {}) {
   const last = lastAssistant(event?.messages);
   if (last && last.stopReason === "error") {
     const message = readableError(last.errorMessage) ?? "The model call failed without a message.";
+    const type = providerErrorType(last.errorMessage);
     return {
       provider: String(last.provider ?? ctx.modelProviderId ?? "unknown"),
       model: String(last.model ?? ctx.modelId ?? "unknown"),
       message,
+      ...(type ? { providerErrorType: type } : {}),
     };
   }
   if (last) return null;
@@ -100,7 +123,13 @@ export function reportFor(sessionKey, attempts) {
   const [first] = attempts;
   return {
     harnessSessionKey: sessionKey,
-    error: { message: first.message, provider: first.provider, model: first.model, attempts },
+    error: {
+      message: first.message,
+      provider: first.provider,
+      model: first.model,
+      ...(first.providerErrorType ? { providerErrorType: first.providerErrorType } : {}),
+      attempts,
+    },
   };
 }
 

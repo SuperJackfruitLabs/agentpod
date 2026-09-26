@@ -2488,3 +2488,100 @@ test("a node lost between turns is not a failed turn", async () => {
     server.stop(true);
   }
 });
+
+// ─── One turn, one error (krishna, ashram, 2026-09-26 05:05) ───────────────────
+
+function report(key: string, provider: string, model: string, message: string) {
+  return {
+    type: "turn.error",
+    report: { harnessSessionKey: key, error: { message, provider, model, attempts: [{ provider, model, message }] } },
+  };
+}
+
+test("two reports during one turn become one error, led by the first, with every attempt", async () => {
+  // The plugin sent after nearly every attempt; the hub kept only the last, so
+  // the room showed opencode-go's 400 and never Kimi's used-up quota.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-merge-reports", {
+    stationKey: "acp-merge-reports-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    await new Promise((r) => setTimeout(r, 300));
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ provider: "kimi-coding", kind: "quota" });
+    expect((errors[0]!.payload as { attempts: Array<{ provider: string }> }).attempts.map((a) => a.provider)).toEqual([
+      "kimi-coding",
+      "opencode-go",
+    ]);
+    void all;
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a second report after the turn already shows the plugin's error is not posted again", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-dup-report", {
+    stationKey: "acp-dup-report-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(1);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the generic error still follows it: it says why", async () => {
+  _setTurnErrorGraceMsForTest(100);
+  const { server, fake, station } = await setupRig("acpsess-late-after-generic", {
+    stationKey: "acp-late-after-generic-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors.map((e) => (e.payload as { source: string }).source)).toEqual(["acp-stop-reason", "plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
