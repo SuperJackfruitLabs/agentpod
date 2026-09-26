@@ -14,6 +14,7 @@
  * as before. Pure apart from the injected download and fetch.
  */
 
+import { VOICE_TRANSCRIPT_CONTENT_KEY, type VoiceTranscript } from "@agentpod/contract";
 import { decryptAttachment, parseMxc, type EncryptedFile } from "./attachments";
 
 /** The longest voice note transcribed. Longer ones are named, not heard. */
@@ -171,6 +172,21 @@ export function voiceNote(name: string, reason: string): string {
 /** The notice posted under the voice note, so the sender sees what was heard. */
 export function transcriptNotice(transcript: Transcript): string {
   return `Transcript: ${transcript.text.trim()}`;
+}
+
+/**
+ * The structured transcript that rides on the notice under
+ * `dev.agentpod.voice_transcript`, so a client that knows the key draws the
+ * words as part of the voice note. The `body` stays the fallback.
+ */
+export function transcriptContent(transcript: Transcript, seconds: number | null): Record<string, unknown> {
+  const card: VoiceTranscript = {
+    schema_version: 1,
+    text: transcript.text.trim().slice(0, 20_000),
+    ...(transcript.language ? { language: transcript.language.slice(0, 16) } : {}),
+    ...(seconds !== null ? { seconds: Math.min(3600, Math.max(0, Math.round(seconds))) } : {}),
+  };
+  return { [VOICE_TRANSCRIPT_CONTENT_KEY]: card };
 }
 
 /**

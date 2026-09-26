@@ -8,6 +8,7 @@ import {
   loadVoice,
   openAiTranscriber,
   transcriberFromEnv,
+  transcriptContent,
   transcriptNotice,
   voiceNote,
   voicePrompt,
@@ -169,6 +170,16 @@ describe("what the agent and the room are told", () => {
 
   test("the room's notice carries the transcript", () => {
     expect(transcriptNotice({ text: " hello there ", language: "en" })).toBe("Transcript: hello there");
+  });
+
+  test("the notice carries the transcript structured, under the namespaced key", () => {
+    const content = transcriptContent({ text: " hello there ", language: "en" }, 42);
+    expect(content).toEqual({
+      "dev.agentpod.voice_transcript": { schema_version: 1, text: "hello there", language: "en", seconds: 42 },
+    });
+    expect(transcriptContent({ text: "hi", language: null }, null)).toEqual({
+      "dev.agentpod.voice_transcript": { schema_version: 1, text: "hi" },
+    });
   });
 
   test("clock", () => {

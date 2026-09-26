@@ -223,3 +223,23 @@ describe("TurnErrorCard — a failed turn, drawable, on the room's error notice"
     expect(TurnErrorCard.safeParse(many).success).toBe(false);
   });
 });
+
+import { VOICE_TRANSCRIPT_CONTENT_KEY, VoiceTranscript } from "./matrix-events";
+
+describe("VoiceTranscript — a voice note's words, drawable under the note", () => {
+  it("the key is namespaced and versioned", () => {
+    expect(VOICE_TRANSCRIPT_CONTENT_KEY).toBe("dev.agentpod.voice_transcript");
+    const t = { schema_version: 1, text: "send the report by Friday", language: "en", seconds: 42 };
+    expect(VoiceTranscript.parse(t)).toEqual(t);
+  });
+
+  it("only text is required beside the version", () => {
+    expect(VoiceTranscript.parse({ schema_version: 1, text: "hi" })).toEqual({ schema_version: 1, text: "hi" });
+  });
+
+  it("an unknown version or an unbounded field is refused", () => {
+    expect(() => VoiceTranscript.parse({ schema_version: 2, text: "hi" })).toThrow();
+    expect(() => VoiceTranscript.parse({ schema_version: 1, text: "x".repeat(20_001) })).toThrow();
+    expect(() => VoiceTranscript.parse({ schema_version: 1, text: "hi", seconds: -1 })).toThrow();
+  });
+});
