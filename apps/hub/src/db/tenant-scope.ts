@@ -50,6 +50,7 @@ import {
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
+import { stationGitIdentities } from "./schema/git-identities";
 import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
@@ -138,6 +139,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixMissionMembers,
   matrixSpaces,
   matrixCredentialAuthorizations,
+  stationGitIdentities,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**
