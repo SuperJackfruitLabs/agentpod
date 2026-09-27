@@ -20,6 +20,7 @@ Usage: fleet <verb> [flags]
   fleet stats                fleet totals
   fleet activity             recent fleet activity
   fleet skills …             manage skill artifacts, releases and canaries
+  fleet plugins …            review and apply plugin changes on a station
 
   fleet update [--check]     replace this binary with the newest release
   fleet version              print version and platform
