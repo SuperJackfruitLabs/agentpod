@@ -7,7 +7,7 @@ import { AcpRunId } from "./ids";
 /**
  * A2A's `TaskState`, adopted verbatim.
  *
- * Not our own vocabulary, deliberately. kaambaan's state machine is A2A-exact
+ * Not our own vocabulary, deliberately. superpipeline's state machine is A2A-exact
  * (its `primitives.ts` notes `canceled` is spelled with one "l" to match), and
  * inventing a parallel enum here would mean a translation table between our
  * runs and the board's tasks — the exact drift §10 warns about, made worse by
@@ -47,7 +47,7 @@ export const isRunInterrupted = (s: RunState): boolean =>
  * blocking on approval is mid-attempt, and closing there would fragment one
  * piece of work into three runs and make any per-run accounting meaningless.
  *
- * `externalRunId` carries kaambaan's `runId` when the attempt came from a claim,
+ * `externalRunId` carries superpipeline's `runId` when the attempt came from a claim,
  * and is absent when it did not. We never mint a rival id: the board already has
  * one, and two id spaces for the same concept across two repos is the failure
  * §10 calls the highest-leverage ordering risk. The console must keep working
@@ -57,7 +57,7 @@ export const isRunInterrupted = (s: RunState): boolean =>
  * `id` is AgentPod's own key and lives in a **different id space** — `attempt_`,
  * not `run_` — so which system minted a value is legible from the value itself
  * rather than from the column it happens to sit in. Both directions are refused
- * below: a kaambaan work run id cannot be this row's `id` (`AcpRunId` rejects
+ * below: a superpipeline work run id cannot be this row's `id` (`AcpRunId` rejects
  * it), and one of AgentPod's own attempt ids cannot be an `externalRunId`. That
  * is the invariant §3 states, made executable — the comment that used to say
  * "we never mint a rival id" sat six lines under a schema comment declaring the
@@ -72,14 +72,14 @@ export const isRunInterrupted = (s: RunState): boolean =>
  * can be joined to.
  */
 const Run_ = z.object({
-  /** AgentPod's own key for this attempt — `attempt_<uuid>`, never kaambaan's `run_`. */
+  /** AgentPod's own key for this attempt — `attempt_<uuid>`, never superpipeline's `run_`. */
   id: AcpRunId,
   sessionId: z.string().min(1),
   stationId: z.string().min(1),
 
-  /** kaambaan's runId, when this attempt came from a claim. */
+  /** superpipeline's runId, when this attempt came from a claim. */
   externalRunId: z.string().min(1).optional(),
-  /** Which orchestrator minted `externalRunId`. Open, so we are not kaambaan-only (§7). */
+  /** Which orchestrator minted `externalRunId`. Open, so we are not superpipeline-only (§7). */
   externalSource: z.string().min(1).optional(),
 
   state: RunState,

@@ -129,9 +129,12 @@ test("renders runtime rows with name, provider, and status after loading", async
   const rows = getAllByTestId("runtime-row");
   expect(rows.length).toBe(2);
 
+  // Sentence-cased, because the state vocabulary is sentence-cased everywhere
+  // else in the console — but the RUNTIME's own word, never the generic state
+  // label the colour token is shared with.
   const badges = getAllByTestId("status-badge");
-  expect(badges[0].textContent).toContain("online");
-  expect(badges[1].textContent).toContain("stopped");
+  expect(badges[0].textContent).toMatch(/online/i);
+  expect(badges[1].textContent).toMatch(/stopped/i);
 });
 
 test("shows provider in each row", async () => {
@@ -403,9 +406,11 @@ test("a starting runtime reads as starting, not online", async () => {
   ]);
 
   const { getByTestId } = render(RuntimesPage);
-  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("starting"));
-  // Styled as in-flight, not as running — an unmapped status would render bare.
-  expect(getByTestId("status-badge").className).toContain("status-starting");
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toMatch(/starting/i));
+  // Coloured as in-flight, not as running. The dot's class is the assertion
+  // because vitest.config.ts strips <style> and sets css:false — computed
+  // styles are not observable here, class names are.
+  expect(getByTestId("status-badge").innerHTML).toContain("bg-status-starting");
 });
 
 test("a starting runtime offers no Start or Stop, but can still be destroyed", async () => {
@@ -461,9 +466,13 @@ test("a stopping runtime reads as stopping, not stopped", async () => {
   ]);
 
   const { getByTestId } = render(RuntimesPage);
-  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("stopping"));
-  // Styled as in-flight, like `starting` — the same "ask sent, not yet true".
-  expect(getByTestId("status-badge").className).toContain("status-starting");
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toMatch(/stopping/i));
+  // Coloured as in-flight, like `starting` — the same "ask sent, not yet true".
+  expect(getByTestId("status-badge").innerHTML).toContain("bg-status-starting");
+  // Sharing a COLOUR token with `starting` must never mean sharing its WORD.
+  // "Starting" against a container winding down would send an operator looking
+  // for a boot that is not happening.
+  expect(getByTestId("status-badge").textContent).not.toMatch(/starting/i);
 });
 
 test("a stopping runtime offers no Start or Stop, but can still be destroyed", async () => {
@@ -511,7 +520,7 @@ test("a stop nobody could verify is stopped, with the caveat attached", async ()
   ]);
 
   const { getByTestId } = render(RuntimesPage);
-  await waitFor(() => expect(getByTestId("status-badge").textContent).toContain("stopped"));
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toMatch(/stopped/i));
   expect(getByTestId("status-reason").textContent).toMatch(/unverified/);
 });
 
@@ -522,4 +531,43 @@ test("an online runtime offers no Wake", async () => {
   const { queryByTestId, getByText } = render(RuntimesPage);
   await waitFor(() => expect(getByText("awake")).toBeTruthy());
   expect(queryByTestId("wake-btn")).toBeNull();
+});
+
+test("a destroyed runtime says destroyed, not stopped", async () => {
+  // `stopped` and `destroyed` share the off-coloured token, and must not share
+  // the word: a destroyed runtime reading "Stopped" invites a Start that can
+  // never work, against a container that no longer exists.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    { ...mockRuntimes[0]!, id: "rt-gone", name: "gone", status: "destroyed" as never },
+  ]);
+
+  const { getByTestId, queryByTestId } = render(RuntimesPage);
+  await waitFor(() => expect(getByTestId("status-badge").textContent).toMatch(/destroyed/i));
+  expect(getByTestId("status-badge").textContent).not.toMatch(/stopped/i);
+  expect(queryByTestId("start-btn")).toBeNull();
+  expect(queryByTestId("destroy-btn")).toBeNull();
+});
+
+test("a long statusReason wraps inside the table rather than widening it", async () => {
+  // Trap this table hit before: an unbroken 62-character node name took 425px
+  // of a 918px table. `statusReason` is prose and longer still, so the cell is
+  // capped and wraps; the table's own scroller owns any remaining overflow.
+  vi.spyOn(api, "listRuntimes").mockResolvedValue([
+    {
+      ...mockRuntimes[0]!,
+      id: "rt-wordy",
+      name: "wordy",
+      status: "error" as const,
+      statusReason:
+        "no node enrolled within 2m of the start request — the container was asked to run but never came back",
+    },
+  ]);
+
+  const { getByTestId } = render(RuntimesPage);
+  const reason = await waitFor(() => getByTestId("status-reason"));
+  expect(reason.className).toContain("max-w-[22rem]");
+  expect(reason.className).toContain("break-words");
+  // And the whole table lives in its own horizontal scroller, so a wide row
+  // never drags the document sideways.
+  expect(getByTestId("runtimes-table-scroller").className).toContain("overflow-x-auto");
 });

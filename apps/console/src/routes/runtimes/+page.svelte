@@ -1,4 +1,21 @@
 <script lang="ts">
+  /**
+   * Runtimes — the containers this hub has provisioned.
+   *
+   * The page used to be a generic data table of coloured word-badges: eight
+   * substrate statuses rendered as eight differently-tinted pills, with the one
+   * thing an operator actually needs — *why* a runtime is in that status —
+   * present but buried under the badge's own styling. It is a plain table now,
+   * in the same shape as the muster's nodes table, with the reason as prose
+   * under the state.
+   *
+   * The status word is the RUNTIME's own, not the generic state label. Colour
+   * comes from `runtimeState` so a stopping runtime is the same in-flight blue
+   * as a starting one — but calling it "Starting" would be a lie, and a
+   * `stopping` runtime read as started is exactly the class of lie the
+   * statusReason work existed to end. Same rule `nodeState` follows for a
+   * machine that is offline rather than "errored".
+   */
   import { onMount } from "svelte";
   import {
     listRuntimes,
@@ -9,15 +26,13 @@
     type DriverManifest,
   } from "$lib/api/client";
   import type { ProvisionedRuntime } from "@agentpod/contract";
-  import type { ColumnDef } from "@tanstack/table-core";
   import PageHeader from "$lib/components/page-header.svelte";
-  import { Badge } from "$lib/components/ui/badge";
+  import StateDot from "$lib/components/shell/StateDot.svelte";
+  import { runtimeState, type StateInfo } from "$lib/fleet/state";
   import { Button } from "$lib/components/ui/button";
   import { Skeleton } from "$lib/components/ui/skeleton";
   import { Empty } from "$lib/components/ui/empty";
-  import { DataTable, renderSnippet } from "$lib/components/ui/data-table";
   import TypeToConfirmDialog from "$lib/components/ui/TypeToConfirmDialog.svelte";
-  import { statusBadgeClass } from "$lib/utils/status-badge";
   import { relativeTime } from "$lib/utils/relative-time";
   import NewRuntimeDialog from "$lib/components/fleet/NewRuntimeDialog.svelte";
   import PlusIcon from "@lucide/svelte/icons/plus";
@@ -38,6 +53,32 @@
 
   /** Per-runtime in-flight flag for start/stop to disable buttons. */
   let actionInFlight = $state<Record<string, boolean>>({});
+
+  // ── The eight words a runtime can be in ─────────────────────────────────────
+
+  /**
+   * The runtime's own vocabulary, sentence-cased.
+   *
+   * Eight statuses collapse to six states for COLOUR; they must not collapse
+   * for the WORD. `stopping` and `starting` share a token because both are an
+   * ask in flight, and `stopped` and `destroyed` share one because both are
+   * off — but a destroyed runtime that read "Stopped" would invite a Start
+   * that can never work.
+   */
+  const RUNTIME_LABEL: Record<string, string> = {
+    provisioning: "Provisioning",
+    starting: "Starting",
+    online: "Online",
+    stopping: "Stopping",
+    stopped: "Stopped",
+    asleep: "Asleep",
+    error: "Error",
+    destroyed: "Destroyed",
+  };
+
+  function stateOf(status: string): StateInfo {
+    return { ...runtimeState(status), label: RUNTIME_LABEL[status] ?? status };
+  }
 
   // ── Data loading ─────────────────────────────────────────────────────────────
 
@@ -138,170 +179,11 @@
       delete actionInFlight[rt.id];
     }
   }
-
-  // ── Columns ──────────────────────────────────────────────────────────────────
-  // Cell snippets (nameCell, nodeCell, statusCell, createdCell, actionsCell) are
-  // declared in the markup below; referencing them here is safe because these
-  // arrow functions only run later, when FlexRender invokes them — by then the
-  // snippet bindings are already initialized.
-  const columns: ColumnDef<ProvisionedRuntime>[] = [
-    {
-      accessorKey: "name",
-      header: "Name",
-      cell: (ctx) => renderSnippet(nameCell, { value: ctx.getValue<string>() }),
-    },
-    {
-      accessorKey: "provider",
-      header: "Provider",
-    },
-    {
-      id: "runtime",
-      header: "Isolation",
-      enableSorting: false,
-      // The runtime the provider REPORTED, not the one requested — blank when
-      // not recorded rather than defaulting to "runc", which would be a guess
-      // presented as a fact.
-      accessorFn: (row) => row.runtime ?? "",
-      cell: (ctx) => renderSnippet(runtimeCell, { value: ctx.getValue<string>() }),
-    },
-    {
-      id: "node",
-      header: "Node",
-      enableSorting: false,
-      accessorFn: (row) => row.nodeId ?? "",
-      cell: (ctx) => renderSnippet(nodeCell, { value: ctx.getValue<string>() }),
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      enableSorting: false,
-      cell: (ctx) =>
-        renderSnippet(statusCell, {
-          value: ctx.getValue<string>(),
-          reason: ctx.row.original.statusReason ?? null,
-        }),
-    },
-    {
-      accessorKey: "createdAt",
-      header: "Created",
-      cell: (ctx) => renderSnippet(createdCell, { value: ctx.getValue<string>() }),
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: (ctx) => renderSnippet(actionsCell, { rt: ctx.row.original }),
-    },
-  ];
 </script>
 
 <svelte:head>
   <title>Runtimes · AgentPod</title>
 </svelte:head>
-
-{#snippet nameCell({ value }: { value: string })}
-  <span class="font-mono text-sm font-medium">{value}</span>
-{/snippet}
-
-{#snippet runtimeCell({ value }: { value: string })}
-  {#if value}
-    <Badge variant="outline" class="font-mono text-xs">{value}</Badge>
-  {/if}
-{/snippet}
-
-{#snippet nodeCell({ value }: { value: string })}
-  {#if value}
-    <a
-      href="/nodes/{value}"
-      class="font-mono text-xs text-muted-foreground truncate hover:text-primary transition-colors"
-    >
-      {value.slice(0, 8)}
-    </a>
-  {:else}
-    <span class="text-muted-foreground/30">—</span>
-  {/if}
-{/snippet}
-
-{#snippet statusCell({ value, reason }: { value: string; reason: string | null })}
-  <div class="flex flex-col items-start gap-1">
-    <Badge variant="outline" class={statusBadgeClass(value)} data-testid="status-badge">
-      {value}
-    </Badge>
-    <!-- Why, when the status alone doesn't say. An operator who sees only
-         "error" restarts things; one who reads "no node enrolled within 2m of
-         the start request" goes and looks at the container instead. -->
-    {#if reason}
-      <span
-        class="max-w-[22rem] text-xs leading-snug text-muted-foreground"
-        title={reason}
-        data-testid="status-reason"
-      >
-        {reason}
-      </span>
-    {/if}
-  </div>
-{/snippet}
-
-{#snippet createdCell({ value }: { value: string })}
-  <span class="whitespace-nowrap text-xs text-muted-foreground">{relativeTime(value)}</span>
-{/snippet}
-
-{#snippet actionsCell({ rt }: { rt: ProvisionedRuntime })}
-  <div class="flex items-center gap-1.5">
-    <!-- Start: shown when runtime is stopped or in error -->
-    {#if rt.status === "stopped" || rt.status === "error"}
-      <button
-        type="button"
-        disabled={!!actionInFlight[rt.id]}
-        onclick={() => handleStart(rt)}
-        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
-        data-testid="start-btn"
-      >
-        {actionInFlight[rt.id] ? "Starting…" : "Start"}
-      </button>
-    {/if}
-
-    <!-- Wake: shown when the substrate idled the runtime out. Distinct from
-         Start, which is for a runtime an operator stopped — the label should
-         match what actually happened. -->
-    {#if rt.status === "asleep"}
-      <button
-        type="button"
-        disabled={!!actionInFlight[rt.id]}
-        onclick={() => handleWake(rt)}
-        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-running/50 text-status-running hover:bg-status-running/10 disabled:cursor-not-allowed disabled:opacity-50"
-        data-testid="wake-btn"
-      >
-        {actionInFlight[rt.id] ? "Waking…" : "Wake"}
-      </button>
-    {/if}
-
-    <!-- Stop: shown when runtime is online -->
-    {#if rt.status === "online"}
-      <button
-        type="button"
-        disabled={!!actionInFlight[rt.id]}
-        onclick={() => handleStop(rt)}
-        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
-        data-testid="stop-btn"
-      >
-        {actionInFlight[rt.id] ? "Stopping…" : "Stop"}
-      </button>
-    {/if}
-
-    <!-- Destroy: hidden during provisioning or when already destroyed -->
-    {#if rt.status !== "provisioning" && rt.status !== "destroyed"}
-      <button
-        type="button"
-        onclick={() => (destroyTarget = rt)}
-        class="rounded-md border px-2 py-1 text-xs whitespace-nowrap transition-colors border-status-error/50 text-status-error hover:bg-status-error/10"
-        data-testid="destroy-btn"
-      >
-        Destroy
-      </button>
-    {/if}
-  </div>
-{/snippet}
 
 <!-- ── Page header with "New runtime" CTA ─────────────────────────────────── -->
 <PageHeader title="Runtimes" subtitle="Provisioned containers">
@@ -314,7 +196,7 @@
 </PageHeader>
 
 <!-- ── Main content ───────────────────────────────────────────────────────── -->
-<div class="container mx-auto px-4 sm:px-6 max-w-7xl py-6">
+<div class="container mx-auto max-w-7xl px-4 py-6 sm:px-6">
   {#if isLoading}
     <!-- Loading skeletons -->
     <div class="space-y-2">
@@ -326,10 +208,10 @@
   {:else if error}
     <!-- Error state -->
     <div
-      class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4"
+      class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"
       role="alert"
     >
-      <p class="text-sm text-destructive">{error}</p>
+      <p class="text-sm text-status-error">{error}</p>
       <Button variant="outline" size="sm" onclick={loadRuntimes}>Retry</Button>
     </div>
 
@@ -349,8 +231,162 @@
     </div>
 
   {:else}
-    <!-- Runtimes table -->
-    <DataTable {columns} data={runtimes} rowTestId="runtime-row" />
+    <!-- Seven columns do not fit a phone; they scroll in here rather than
+         dragging the document sideways. -->
+    <div data-testid="runtimes-table-scroller" class="overflow-x-auto rounded-lg border border-border">
+      <table class="w-full min-w-[880px] text-sm">
+        <thead>
+          <tr class="border-b border-border text-left text-xs text-muted-foreground">
+            <th scope="col" class="px-3 py-2 font-medium">Runtime</th>
+            <th scope="col" class="px-3 py-2 font-medium">Provider</th>
+            <th scope="col" class="px-3 py-2 font-medium">Isolation</th>
+            <th scope="col" class="px-3 py-2 font-medium">Node</th>
+            <th scope="col" class="px-3 py-2 font-medium">Status</th>
+            <th scope="col" class="px-3 py-2 font-medium">Created</th>
+            <!--
+              `relative` is load-bearing: an sr-only span is position:absolute,
+              and with no positioned ancestor its containing block is the
+              initial one — so it escapes the overflow-x-auto above and adds to
+              the DOCUMENT's scroll width. Measured at 414px on the muster.
+            -->
+            <th scope="col" class="relative px-3 py-2 font-medium">
+              <span class="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each runtimes as rt (rt.id)}
+            {@const state = stateOf(rt.status)}
+            <tr
+              data-testid="runtime-row"
+              class="relative border-b border-border/50 align-top last:border-b-0"
+            >
+              <!-- Capped and truncating: a runtime name is free text, and an
+                   uncapped one eats the rest of the table. -->
+              <td class="max-w-[220px] px-3 py-3">
+                <span class="block truncate font-mono font-medium" title={rt.name}>{rt.name}</span>
+                {#if rt.harness && rt.harness !== "none"}
+                  <span class="block truncate font-mono text-xs text-muted-foreground">
+                    {rt.harness} · {rt.resourceTier}
+                  </span>
+                {:else}
+                  <span class="block truncate font-mono text-xs text-muted-foreground">
+                    {rt.resourceTier}
+                  </span>
+                {/if}
+              </td>
+
+              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">{rt.provider}</td>
+
+              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">
+                <!-- The runtime the provider REPORTED, not the one requested —
+                     blank when not recorded rather than defaulting to "runc",
+                     which would be a guess presented as a fact. -->
+                {rt.runtime ?? ""}
+              </td>
+
+              <td class="max-w-[140px] px-3 py-3">
+                {#if rt.nodeId}
+                  <a
+                    href="/nodes/{rt.nodeId}"
+                    title={rt.nodeId}
+                    class="block truncate font-mono text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground"
+                  >
+                    {rt.nodeId.slice(0, 8)}
+                  </a>
+                {:else}
+                  <span class="text-xs text-muted-foreground">—</span>
+                {/if}
+              </td>
+
+              <td class="px-3 py-3">
+                <div class="flex flex-col items-start gap-1" data-testid="status-badge">
+                  <StateDot {state} withLabel size="sm" />
+                  <!-- Why, when the status alone doesn't say. An operator who
+                       sees only "Error" restarts things; one who reads "no node
+                       enrolled within 2m of the start request" goes and looks
+                       at the container instead. Wrapped, not truncated: the
+                       sentence is the whole value of the cell. -->
+                  {#if rt.statusReason}
+                    <span
+                      class="max-w-[22rem] text-xs leading-snug break-words text-muted-foreground"
+                      title={rt.statusReason}
+                      data-testid="status-reason"
+                    >
+                      {rt.statusReason}
+                    </span>
+                  {/if}
+                </div>
+              </td>
+
+              <td class="px-3 py-3 font-mono text-xs whitespace-nowrap text-muted-foreground">
+                {relativeTime(rt.createdAt)}
+              </td>
+
+              <td class="px-3 py-3">
+                <div class="flex items-center justify-end gap-1.5">
+                  <!-- Start: a runtime an operator stopped, or one that failed -->
+                  {#if rt.status === "stopped" || rt.status === "error"}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      disabled={!!actionInFlight[rt.id]}
+                      onclick={() => handleStart(rt)}
+                      data-testid="start-btn"
+                    >
+                      {actionInFlight[rt.id] ? "Starting…" : "Start"}
+                    </Button>
+                  {/if}
+
+                  <!-- Wake: the substrate idled this one out. Distinct from
+                       Start on purpose — the label should match what happened. -->
+                  {#if rt.status === "asleep"}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      disabled={!!actionInFlight[rt.id]}
+                      onclick={() => handleWake(rt)}
+                      data-testid="wake-btn"
+                    >
+                      {actionInFlight[rt.id] ? "Waking…" : "Wake"}
+                    </Button>
+                  {/if}
+
+                  <!-- Stop: only something that is up can be stopped -->
+                  {#if rt.status === "online"}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      disabled={!!actionInFlight[rt.id]}
+                      onclick={() => handleStop(rt)}
+                      data-testid="stop-btn"
+                    >
+                      {actionInFlight[rt.id] ? "Stopping…" : "Stop"}
+                    </Button>
+                  {/if}
+
+                  <!-- Destroy: hidden during provisioning or when already gone -->
+                  {#if rt.status !== "provisioning" && rt.status !== "destroyed"}
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      class="h-7 px-2 text-xs"
+                      onclick={() => (destroyTarget = rt)}
+                      data-testid="destroy-btn"
+                    >
+                      Destroy
+                    </Button>
+                  {/if}
+                </div>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {/if}
 </div>
 

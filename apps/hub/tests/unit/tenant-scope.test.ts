@@ -134,7 +134,7 @@ describe("tenant guard — a scoped predicate cannot be built without a tenant",
   const TENANT = BOOTSTRAP_TENANT_ID;
 
   test("refuses a table that is not registered as tenant-scoped", () => {
-    // The kaambaan principle, transferred: the helper is not a convenience that
+    // The superpipeline principle, transferred: the helper is not a convenience that
     // also happens to filter. Asking it to scope `user` is a bug, and it says so
     // rather than quietly building a predicate against a column that is absent.
     expect(() => tenantScope(schema.user as never, TENANT)).toThrow(TenantIsolationError);
@@ -148,7 +148,7 @@ describe("tenant guard — a scoped predicate cannot be built without a tenant",
   });
 
   test("refuses an id that is not an AgentPod tenant id", () => {
-    // `tnt_…` is kaambaan's tenant, for rows in a different database. A value
+    // `tnt_…` is superpipeline's tenant, for rows in a different database. A value
     // that arrived across the seam must not silently become a predicate here.
     expect(() => tenantScope(schema.nodes, "tnt_5f2b8c1a9d3e4076")).toThrow(TenantIsolationError);
     expect(() => tenantScope(schema.nodes, "node_9f1c2ab04d7e6b3a5c88")).toThrow(
@@ -157,7 +157,7 @@ describe("tenant guard — a scoped predicate cannot be built without a tenant",
   });
 
   test("binds tenant_id as the first predicate, ahead of the caller's own", () => {
-    // Ordering is the kaambaan invariant and it costs nothing to keep: the
+    // Ordering is the superpipeline invariant and it costs nothing to keep: the
     // tenant is never one condition among several that a later edit might
     // reorder away. Rendered rather than inspected — what matters is the SQL
     // that reaches Postgres, not the shape of the builder that produced it.
@@ -191,7 +191,7 @@ describe("the bootstrap tenant", () => {
     expect(BOOTSTRAP_TENANT_ID).toBe("fleet_00000000000000000000");
   });
 
-  test("is not kaambaan's tenant id space", () => {
+  test("is not superpipeline's tenant id space", () => {
     expect(BOOTSTRAP_TENANT_ID.startsWith("tnt_")).toBe(false);
   });
 });

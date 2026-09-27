@@ -141,11 +141,28 @@ export async function initConnection(): Promise<void> {
         error: null,
       };
       setAuthApiUrl(normalised);
+    } else {
+      // Disconnected, but NAME the hub we failed to reach. The top bar's hub
+      // pill exists to end the case where a console pointed at nothing looks
+      // exactly like a working one — and a null apiUrl made it say "No hub",
+      // which is the same lie in a different font. Every consumer that acts on
+      // a connection gates on `connected` as well (the login screen, the admin
+      // guard), so carrying the address here changes nothing but what the
+      // operator is told.
+      connectionStatus = {
+        connected: false,
+        apiUrl: storedUrl.replace(/\/$/, ""),
+        lastTested: new Date().toISOString(),
+        error: "Hub did not answer its health probe",
+      };
     }
-    // On failure: leave disconnected; keep the stored URL so the connect
-    // screen can prefill the last-used address.
-  } catch {
-    // Network error — stay disconnected, URL remains in localStorage.
+  } catch (err) {
+    connectionStatus = {
+      connected: false,
+      apiUrl: storedUrl.replace(/\/$/, ""),
+      lastTested: new Date().toISOString(),
+      error: err instanceof Error ? err.message : "Connection failed",
+    };
   } finally {
     isLoading = false;
     isInitialized = true;

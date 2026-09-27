@@ -148,6 +148,7 @@ func TestCodexACPCommand_ProbesWellKnownPathsInOrder(t *testing.T) {
 	want := []string{
 		filepath.Join(testStubHome, ".local", "share", "pnpm", "codex-acp"),
 		filepath.Join(testStubHome, ".local", "bin", "codex-acp"),
+		filepath.Join(testStubHome, ".npm-global", "bin", "codex-acp"),
 		"/usr/local/bin/codex-acp",
 		"/usr/bin/codex-acp",
 		"/opt/homebrew/bin/codex-acp",
@@ -170,7 +171,7 @@ func TestCodexACPCommand_NpxFallbackIsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ACPCommand: %v", err)
 	}
-	want := []string{"/usr/bin/npx", "-y", "@agentclientprotocol/codex-acp@1.1.14"}
+	want := []string{"/usr/bin/npx", "-y", "@agentclientprotocol/codex-acp@1.12.0"}
 	if !reflect.DeepEqual(argv, want) {
 		t.Errorf("argv = %v, want %v", argv, want)
 	}

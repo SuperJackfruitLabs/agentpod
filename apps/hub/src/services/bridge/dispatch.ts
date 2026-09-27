@@ -8,12 +8,12 @@
  * Three things here exist because the spike measured them and could not fix
  * them in throwaway code:
  *
- * 1. **A 409 ends the ACP session.** kaambaan fences its own state — the
+ * 1. **A 409 ends the ACP session.** superpipeline fences its own state — the
  *    reclaim experiment came back with `leaseEpoch: 2` and the old run locked
  *    out of every write. But nothing fences the *machine*: the original harness
  *    kept executing with no idea its lease had been revoked, and in a task that
  *    outlives the 15-minute reclaim two harnesses would be writing the same
- *    directory while kaambaan correctly ignored one of them. The lease is
+ *    directory while superpipeline correctly ignored one of them. The lease is
  *    learned to be stale on a verb; that is where the session is ended.
  *
  * 2. **A 403 is not a 409.** `NOT_RUN_OWNER` means this run belongs to another
@@ -57,7 +57,7 @@
  * something died exactly there.
  *
  * 6. **A permission request is a question, and the bridge waits for the
- *    answer.** kaambaan PR #36 built the return path, so the request becomes an
+ *    answer.** superpipeline PR #36 built the return path, so the request becomes an
  *    elicitation carrying its options, the bridge heartbeats while a human
  *    decides, and the answer is delivered to the harness on the same lease —
  *    the run never lets go of the card to ask. The wait is bounded by policy
@@ -74,10 +74,10 @@ import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
   isForeignRun,
   isLeaseSuperseded,
-  KaambaanClient,
+  SuperpipelineClient,
   type ClaimedWork,
   type RunElicitation,
-} from "./kaambaan";
+} from "./superpipeline";
 import {
   endAttempt,
   findUnreportedOutput,
@@ -120,7 +120,7 @@ export interface AcpPort {
 }
 
 export interface DispatchDeps {
-  client: KaambaanClient;
+  client: SuperpipelineClient;
   acp: AcpPort;
   agent: BridgeAgentConfig;
   tenantId: string;
@@ -169,7 +169,7 @@ export interface DispatchResult {
   reason?: string;
 }
 
-/** kaambaan reclaims at 15 minutes; RQ3 measured 12.3s as the longest silence. */
+/** superpipeline reclaims at 15 minutes; RQ3 measured 12.3s as the longest silence. */
 const DEFAULT_HEARTBEAT_MS = 60_000;
 /** A harness that never yields still has to end somewhere. */
 const DEFAULT_TURN_TIMEOUT_MS = 30 * 60_000;
@@ -193,7 +193,7 @@ type TurnEnd =
 /** How a question ended. Only `answered` resumes the harness. */
 type PermissionResolution =
   | { kind: "answered"; optionId: string }
-  /** kaambaan cancelled it: the run ended, the card moved, or it was superseded. */
+  /** superpipeline cancelled it: the run ended, the card moved, or it was superseded. */
   | { kind: "cancelled" }
   /** Answered, but with nothing that maps to an option the harness offered. */
   | { kind: "unmappable" }
@@ -228,6 +228,49 @@ function whyNoAnswer(resolution: PermissionResolution): string {
   }
 }
 
+/**
+ * How long the readiness probe may take before the station counts as not ready.
+ *
+ * The probe asks a node over the broker whether its station can run work. That is a question
+ * about *right now*, so a slow answer is not a useful answer — and an unbounded one is worse
+ * than useless: on 2026-09-08 the bridge logged a single cycle and then nothing at all, for
+ * hours, because this call never returned. The loop was neither erroring nor idling; it was
+ * never coming back, which is the one failure shape that looks exactly like a quiet fleet.
+ *
+ * **A timed-out probe is a negative answer, not an error.** If a station cannot say it is ready
+ * within ten seconds, it is not ready, and the loop's ordinary not-ready backoff is the correct
+ * response. That keeps the failure inside the state machine that already handles it.
+ */
+export const READINESS_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * Bounded readiness. Deliberately narrow: this is the ONE call in a cycle that must be fast.
+ *
+ * The claim itself is bounded by `fetchAdapter`'s own signal, and everything after it — the
+ * session, the prompt, the activity stream — is the agent's work, which legitimately takes as
+ * long as it takes. Bounding the whole cycle would abandon a running agent mid-task.
+ */
+async function probeReadiness(
+  acp: AcpPort,
+  agent: { stationId: string; hubUserId: string },
+): Promise<{ ready: boolean; reason?: string }> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<{ ready: boolean; reason?: string }>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ ready: false, reason: `the station did not answer a readiness probe within ${READINESS_PROBE_TIMEOUT_MS}ms` }),
+      READINESS_PROBE_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([
+      acp.stationReady({ stationId: agent.stationId, userId: agent.hubUserId }),
+      timeout,
+    ]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   const { client, acp, agent, tenantId, source } = deps;
   const log = deps.log ?? (() => {});
@@ -237,7 +280,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
   // minutes except by asking. Checking first is what removes the race entirely,
   // including the restart case that produced it — the bridge starts with the
   // hub, the node-agents dial back in seconds later.
-  const readiness = await acp.stationReady({ stationId: agent.stationId, userId: agent.hubUserId });
+  const readiness = await probeReadiness(acp, agent);
   if (!readiness.ready) {
     const reason = readiness.reason ?? "the station cannot run work right now";
     log("not claiming: the station is not ready", { station: agent.stationId, reason });
@@ -246,7 +289,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
 
   const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey });
   // A bare "not claimed" covers an empty queue, an over-budget board and an
-  // agent at its concurrency cap alike. kaambaan does not say which.
+  // agent at its concurrency cap alike. superpipeline does not say which.
   if (!work) return { status: "idle" };
 
   const key: DispatchKey = {
@@ -415,7 +458,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     let attemptStarted = false;
 
     // Started before the turn and stopped only when every segment is over —
-    // including the stretches spent waiting on a person. kaambaan reclaims a
+    // including the stretches spent waiting on a person. superpipeline reclaims a
     // lease that goes quiet for 15 minutes; a waiting lease is not quiet, which
     // is exactly why the wait can be bounded by policy instead of by the lease.
     beat = setInterval(() => {
@@ -536,7 +579,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       // nothing recording it; `block` would park the card AND cancel the
       // question, so the one thing a human could still usefully do disappears.
       // `fail` re-queues the card with the reason and a failure count, so the
-      // question is asked again on the next attempt and kaambaan's circuit
+      // question is asked again on the next attempt and superpipeline's circuit
       // breaker parks it for a human if nobody ever answers.
       //
       // Ending the session first also resolves the parked ACP request as
@@ -730,7 +773,7 @@ async function afterTheBoardWasTold(
  *
  * Safe precisely because no session was opened — no harness process exists, no
  * command ran, no file changed — so the card returns to the queue exactly as it
- * left it. kaambaan's `release` is the unpenalised verb for that (board-do.ts:
+ * left it. superpipeline's `release` is the unpenalised verb for that (board-do.ts:
  * card back to `submitted`, delegate cleared, no failure count), and the card is
  * claimable in seconds instead of after the 15-minute heartbeat reclaim.
  *
@@ -809,17 +852,17 @@ async function handBack(
  * A session had already opened, and then something failed.
  *
  * **Not released.** The harness may have edited the workspace before the wire
- * dropped, and kaambaan's reclaim is at-least-once: a `release` puts the card
+ * dropped, and superpipeline's reclaim is at-least-once: a `release` puts the card
  * straight back in the queue, unpenalised, for a claimer with no way to learn
  * that part of the work was already done. `fail` re-queues it too — but carries
  * the reason and increments the card's failure count, so a station that keeps
- * dying trips kaambaan's circuit breaker into `input-required` for a human
+ * dying trips superpipeline's circuit breaker into `input-required` for a human
  * (board-do.ts `endAttempt`) rather than looping forever. `block` would put a
  * transient node blip in front of a human every time; letting the lease lapse
  * costs 15 minutes and tells the board nothing at all.
  *
  * The ACP session is ended first, for the same reason a superseded lease ends
- * it: kaambaan fences its own state, and nothing else fences the machine.
+ * it: superpipeline fences its own state, and nothing else fences the machine.
  */
 async function failStarted(
   deps: DispatchDeps,
@@ -878,7 +921,7 @@ async function abort(
     : "the lease was superseded: it lapsed or was reassigned, and the card has been re-queued";
 
   if (sessionId) {
-    // The concrete deliverable of the spike. kaambaan fenced its data; this is
+    // The concrete deliverable of the spike. superpipeline fenced its data; this is
     // what fences the machine.
     await deps.acp
       .endSession(deps.agent.hubUserId, sessionId, reason)

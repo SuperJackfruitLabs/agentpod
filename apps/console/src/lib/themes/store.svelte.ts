@@ -24,9 +24,6 @@ const THEME_COLOR_SCHEME_KEY = "agentpod-color-scheme";
 const THEME_FONT_PAIRING_KEY = "agentpod-font-pairing";
 const THEME_CUSTOM_THEMES_KEY = "agentpod-custom-themes";
 
-// Legacy key (for migration from old codeopen keys)
-const LEGACY_THEME_PRESET_KEY = "codeopen-theme-preset";
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -65,12 +62,6 @@ function initialize() {
   const savedFontPairing = localStorage.getItem(THEME_FONT_PAIRING_KEY);
   const savedCustomThemes = localStorage.getItem(THEME_CUSTOM_THEMES_KEY);
 
-  // Check for legacy preset and migrate
-  const legacyPreset = localStorage.getItem(LEGACY_THEME_PRESET_KEY);
-  if (legacyPreset && !savedColorScheme && !savedFontPairing) {
-    migrateFromLegacyPreset(legacyPreset);
-  }
-
   if (savedMode && ["light", "dark", "system", "auto"].includes(savedMode)) {
     themeMode = savedMode;
   }
@@ -99,30 +90,6 @@ function initialize() {
   startAutoModeTimer();
 
   applyTheme();
-}
-
-/**
- * Migrate from legacy preset system to new modular system
- */
-function migrateFromLegacyPreset(presetId: string) {
-  // Map legacy preset ID to color scheme
-  if (colorSchemesMap.has(presetId)) {
-    colorSchemeId = presetId;
-    localStorage.setItem(THEME_COLOR_SCHEME_KEY, presetId);
-  }
-
-  // Map legacy preset ID to appropriate font pairing
-  const preset = themePresetsMap.get(presetId);
-  if (preset) {
-    const mappedFontPairing = mapPresetToFontPairing(preset);
-    if (mappedFontPairing) {
-      fontPairingId = mappedFontPairing;
-      localStorage.setItem(THEME_FONT_PAIRING_KEY, mappedFontPairing);
-    }
-  }
-
-  // Clean up legacy key
-  localStorage.removeItem(LEGACY_THEME_PRESET_KEY);
 }
 
 /**
@@ -254,12 +221,8 @@ function applyColorScheme(colorScheme: ColorScheme) {
     "sidebar-accent-foreground": "--sidebar-accent-foreground",
     "sidebar-border": "--sidebar-border",
     "sidebar-ring": "--sidebar-ring",
-    // Fleet status tokens derive from the scheme's accent colors
-    "cyber-emerald": "--status-running",
-    "cyber-amber": "--status-degraded",
-    "cyber-red": "--status-error",
-    "cyber-cyan": "--status-starting",
-    "cyber-magenta": "--status-sleeping",
+    // Fleet status tokens are NOT here: colour means state, so a scheme may not
+    // recolour it — --status-* is fixed in app.css and never scheme-derived.
   };
 
   // Apply each style property
@@ -273,6 +236,19 @@ function applyColorScheme(colorScheme: ColorScheme) {
   // Radius is a fixed design token (app.css), not a per-scheme value; guard against
   // a stale inline value left over from before this change within a live session.
   root.style.removeProperty("--radius");
+
+  // Not a no-op, and not for persistence — inline styles die with the document.
+  // This clears a value set EARLIER IN THIS SESSION: a dev hot-reload, or any
+  // future code that sets one. Dropping the writes above is what stops new
+  // ones; this is what guarantees app.css governs even so, which is the whole
+  // point of taking these six away from the schemes.
+  root.style.removeProperty("--status-running");
+  root.style.removeProperty("--status-starting");
+  root.style.removeProperty("--status-error");
+  root.style.removeProperty("--status-sleeping");
+  root.style.removeProperty("--status-stopped");
+  root.style.removeProperty("--status-unknown");
+  root.style.removeProperty("--status-degraded");
 }
 
 function applyFontPairing(fontPairing: FontPairing) {

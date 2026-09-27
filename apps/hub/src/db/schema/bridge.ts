@@ -22,7 +22,7 @@
  *
  * The primary key is `(external_source, external_run_id)` — the orchestrator's
  * own identifier for the work. No id is minted here: AgentPod is the executor,
- * and a second id space for a thing kaambaan already names is the failure the
+ * and a second id space for a thing superpipeline already names is the failure the
  * `run_`/`attempt_` split exists to prevent.
  */
 
@@ -51,9 +51,9 @@ export type DispatchOutcome = (typeof DISPATCH_OUTCOMES)[number];
 export const bridgeDispatches = pgTable(
   "bridge_dispatches",
   {
-    /** The orchestrator that minted `external_run_id` — "kaambaan" today. */
+    /** The orchestrator that minted `external_run_id` — "superpipeline" today. */
     externalSource: text("external_source").notNull(),
-    /** kaambaan's work run id. Never one of ours; the CHECK below says so. */
+    /** superpipeline's work run id. Never one of ours; the CHECK below says so. */
     externalRunId: text("external_run_id").notNull(),
 
     tenantId: text("tenant_id")

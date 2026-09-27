@@ -16,7 +16,7 @@ import (
 // present because *codexDescriptor implements ACPCommander (via the external
 // codex-acp adapter — see ACPCommand), which is what the contract in
 // descriptor.go ties the capability to.
-var codexExpectedCaps = []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+var codexExpectedCaps = []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 
 // buildCodexFixture writes a realistic ~/.codex/config.toml containing three
 // [projects."<path>"] tables — one path with a space in it, one that does not
@@ -427,8 +427,8 @@ func TestCodexHealth(t *testing.T) {
 	if !h.Running {
 		t.Error("Health.Running = false, want true (stubbed probe)")
 	}
-	if h.Note != nil {
-		t.Errorf("Health.Note = %q, want nil", *h.Note)
+	if h.Note == nil || !strings.Contains(*h.Note, "Next chat:") {
+		t.Errorf("Health.Note = %v, want chat runtime diagnostics", h.Note)
 	}
 
 	d2 := newTestCodex(t, home, false)

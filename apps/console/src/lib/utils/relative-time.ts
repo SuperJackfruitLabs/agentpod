@@ -2,9 +2,9 @@
  * relative-time.ts
  *
  * Human-readable relative time: "just now", "5m ago", "2h ago", "3d ago".
- * Shared by RecentActivity (fleet overview), the activity page, and
- * file-preview's "modified" timestamp — all previously carried identical
- * (or near-identical) copies of this helper.
+ * Shared by ActivityFeed (the muster and the activity page), the nodes
+ * table's "last seen", and file-preview's "modified" timestamp — all
+ * previously carried identical (or near-identical) copies of this helper.
  *
  * `null` (file-preview's "no timestamp available" case) → "unknown".
  * Unparseable date strings → "?" (also covers `new Date()` throwing, which

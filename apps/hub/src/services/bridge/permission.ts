@@ -2,12 +2,12 @@
  * Translating one decision between two vocabularies.
  *
  * ACP's permission option is `{optionId, name, kind}`: `optionId` is what the
- * harness is answered with, `name` is what a human reads. kaambaan's option is
+ * harness is answered with, `name` is what a human reads. superpipeline's option is
  * `{name, title}`, and its answer echoes back the chosen option's **`name`**
  * (`elicitation.answer.option`). So the mapping is forced:
  *
- *     ACP optionId  ⟷  kaambaan name     — the identity, round-tripped
- *     ACP name      →   kaambaan title   — the label, one-way
+ *     ACP optionId  ⟷  superpipeline name     — the identity, round-tripped
+ *     ACP name      →   superpipeline title   — the label, one-way
  *
  * Get that backwards and nothing throws. The board would echo back a human
  * label, the label would match no `optionId`, and the harness would be answered
@@ -15,7 +15,7 @@
  * how a command a human refused gets run. Every function here is written so the
  * failure mode is "no answer", never "some answer".
  *
- * kaambaan also accepts `{id, label}` and bare strings for an option; this
+ * superpipeline also accepts `{id, label}` and bare strings for an option; this
  * sends the canonical `{name, title}` and nothing else, because the other two
  * spellings exist for callers that already had those shapes and we do not.
  */
@@ -27,13 +27,13 @@ interface AcpOption {
   name?: string;
 }
 
-/** One option as kaambaan stores it, and as a human sees it on the card. */
+/** One option as superpipeline stores it, and as a human sees it on the card. */
 export interface BoardOption {
   name: string;
   title: string;
 }
 
-/** What kaambaan returns once a human has answered. */
+/** What superpipeline returns once a human has answered. */
 export interface BoardAnswer {
   /** The `name` of the chosen option, or null when the human only typed text. */
   option?: string | null;
@@ -61,7 +61,7 @@ function readOptions(raw: unknown): Array<{ optionId: string; label: string }> {
   return out;
 }
 
-/** ACP's options, in the shape kaambaan stores and shows to a human. */
+/** ACP's options, in the shape superpipeline stores and shows to a human. */
 export function toBoardOptions(raw: unknown): BoardOption[] {
   return readOptions(raw).map((o) => ({ name: o.optionId, title: o.label }));
 }

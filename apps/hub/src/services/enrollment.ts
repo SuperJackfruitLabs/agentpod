@@ -2,15 +2,12 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { nodes, enrollmentTokens, provisionedRuntimes } from "../db/schema/nodes";
+import { prefixedId } from "../utils/ids";
 import type { HostInfo, EnrollResponse } from "@agentpod/contract";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Generate a prefixed ID: e.g. "node_a1b2c3d4e5f6..." */
-const prefixedId = (prefix: string) =>
-  `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 
 /** SHA-256 hex digest of a string */
 const sha256 = async (s: string): Promise<string> =>

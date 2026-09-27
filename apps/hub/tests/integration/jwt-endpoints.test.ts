@@ -53,7 +53,7 @@ describe("the issuer's endpoints (#332)", () => {
     // wipes the table first: without that, it passes for the wrong reason,
     // because the test above already caused a key to exist.
     //
-    // What is being established: kaambaan caches this set on its first verify.
+    // What is being established: superpipeline caches this set on its first verify.
     // If the hub minted a signing key only when someone asked for a *token*, a
     // consumer that started first would cache an EMPTY set and reject every
     // token until that cache expired — indistinguishable, from the consumer's

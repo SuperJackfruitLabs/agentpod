@@ -34,6 +34,23 @@ function app(opts: { onEvent?: (e: any) => Promise<void> } = {}) {
   );
 }
 
+/** Like `app()`, but also records the MSC3202 side-channels. */
+function appWithCrypto(seen: any[]) {
+  return new Hono().route(
+    "/_matrix/app/v1",
+    createMatrixAsRoutes({
+      hsToken: HS_TOKEN,
+      domain: DOMAIN,
+      onEvent: async (e: any) => {
+        handled.push({ type: e.type, sender: e.sender });
+      },
+      onCryptoTransaction: async (tx: any) => {
+        seen.push(tx);
+      },
+    })
+  );
+}
+
 function message(sender: string, body: string, roomId = "!r:id.agentpod.dev") {
   return {
     type: "m.room.message",
@@ -201,5 +218,86 @@ describe("PUT /_matrix/app/v1/transactions/:txnId", () => {
     });
 
     expect(res.status).toBe(403);
+  });
+});
+
+describe("the encryption side-channels", () => {
+  test("MSC3202 fields reach the crypto handler", async () => {
+    const seen: any[] = [];
+    await appWithCrypto(seen).request("/_matrix/app/v1/transactions/test-txn-crypto-1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${HS_TOKEN}` },
+      body: JSON.stringify({
+        events: [],
+        to_device: [{ type: "m.room.key", sender: "@someone:id.agentpod.dev" }],
+        device_lists: { changed: ["@a:id.agentpod.dev"], left: ["@b:id.agentpod.dev"] },
+        // Keyed by user and then by device — MSC3202's shape, not /sync's.
+        // An appservice holds many users where a client holds one.
+        device_one_time_keys_count: {
+          "@agent_x:id.agentpod.dev": { AGENTPOD: { signed_curve25519: 12 } },
+        },
+        device_unused_fallback_key_types: {
+          "@agent_x:id.agentpod.dev": { AGENTPOD: ["signed_curve25519"] },
+        },
+      }),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].toDevice).toHaveLength(1);
+    expect(seen[0].deviceLists).toEqual({
+      changed: ["@a:id.agentpod.dev"],
+      left: ["@b:id.agentpod.dev"],
+    });
+    expect(seen[0].otkCounts).toEqual({
+      "@agent_x:id.agentpod.dev": { AGENTPOD: { signed_curve25519: 12 } },
+    });
+    expect(seen[0].unusedFallbackKeys).toEqual({
+      "@agent_x:id.agentpod.dev": { AGENTPOD: ["signed_curve25519"] },
+    });
+  });
+
+  test("a transaction with no encryption fields still reaches the handler, empty", async () => {
+    // The homeserver omits these entirely when nothing changed, and an
+    // appservice that only fed the machine when they were present would stop
+    // flushing its outbox on a quiet server.
+    const seen: any[] = [];
+    await appWithCrypto(seen).request("/_matrix/app/v1/transactions/test-txn-crypto-2", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${HS_TOKEN}` },
+      body: JSON.stringify({ events: [] }),
+    });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].toDevice).toEqual([]);
+    expect(seen[0].otkCounts).toEqual({});
+  });
+
+  test("a REPLAYED transaction still feeds the machine, though its events are skipped", async () => {
+    // The design decision worth a test. A retry carries the *current* key
+    // counts, and dropping them because the events were already applied would
+    // leave the machine believing it holds keys the server has since handed
+    // out — it would then stop replenishing and, eventually, be unable to
+    // receive anything. Feeding olm the same to-device twice is survivable;
+    // missing one is not.
+    const seen: any[] = [];
+    const body = JSON.stringify({
+      events: [message("@someone:id.agentpod.dev", "hello")],
+      device_one_time_keys_count: {
+        "@agent_x:id.agentpod.dev": { AGENTPOD: { signed_curve25519: 3 } },
+      },
+    });
+    const send = () =>
+      appWithCrypto(seen).request("/_matrix/app/v1/transactions/test-txn-crypto-replay", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${HS_TOKEN}` },
+        body,
+      });
+
+    await send();
+    const afterFirst = handled.length;
+    await send();
+
+    expect(seen).toHaveLength(2);
+    expect(handled.length).toBe(afterFirst);
   });
 });

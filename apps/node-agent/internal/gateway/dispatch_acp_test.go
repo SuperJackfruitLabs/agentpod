@@ -66,12 +66,26 @@ func newACPTestRig(t *testing.T, h Handler) *acpTestRig {
 	var hubConn *websocket.Conn
 	select {
 	case hubConn = <-hubConnCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(acpTestBarrier):
 		t.Fatal("hub connection timeout")
 	}
 
 	return &acpTestRig{t: t, frames: frames, hub: hubConn}
 }
+
+// acpTestBarrier is how long a rig helper waits before calling the node broken.
+//
+// These bound a FAILURE. They do not assert a speed, and treating them as though they do is how
+// this package reported `TestACPOpenGivesTheAdapterItsHubSession` as failing on a pull request
+// that touched no Go at all — the same test passing locally every time it was run. The job that
+// runs this package also runs `internal/skills`, which alone takes about twenty-four seconds, so a
+// loaded runner can exceed a small deadline while everything works exactly as intended.
+//
+// Generous on purpose, and `CLAUDE.md`'s "never sleep for a barrier" is the same lesson from the
+// other direction: the cost of a long deadline is paid only when something is genuinely broken,
+// and the cost of a short one is paid at random, on unrelated work, by whoever is least equipped
+// to recognise it as noise.
+const acpTestBarrier = 30 * time.Second
 
 // writeHub sends a raw JSON string to the node.
 func (r *acpTestRig) writeHub(msg string) {
@@ -81,7 +95,7 @@ func (r *acpTestRig) writeHub(msg string) {
 	}
 }
 
-// readFrame waits for the next frame from the node with a 3-second timeout.
+// readFrame waits for the next frame from the node, bounded by acpTestBarrier.
 func (r *acpTestRig) readFrame() map[string]any {
 	r.t.Helper()
 	select {
@@ -91,7 +105,7 @@ func (r *acpTestRig) readFrame() map[string]any {
 			r.t.Fatalf("bad JSON frame: %v – raw: %s", err, data)
 		}
 		return m
-	case <-time.After(3 * time.Second):
+	case <-time.After(acpTestBarrier):
 		r.t.Fatal("timeout waiting for frame from node")
 		return nil
 	}
@@ -101,7 +115,15 @@ func (r *acpTestRig) readFrame() map[string]any {
 // contains want, or the deadline passes.
 func (r *acpTestRig) awaitStreamContaining(want string) bool {
 	r.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	return r.awaitStreamContainingWithin(want, acpTestBarrier)
+}
+
+// awaitStreamContainingWithin is awaitStreamContaining with a caller-chosen window, for a test
+// that retries the thing producing the output instead of waiting longer for output that may
+// already have been dropped.
+func (r *acpTestRig) awaitStreamContainingWithin(want string, window time.Duration) bool {
+	r.t.Helper()
+	deadline := time.Now().Add(window)
 	for time.Now().Before(deadline) {
 		select {
 		case data := <-r.frames:
@@ -290,8 +312,18 @@ func TestACPCloseEmitsExitEvent(t *testing.T) {
 		t.Fatal(`no stream frame with "event":"exit" received after acp.close`)
 	}
 
-	if _, ok := mgr.Get(sessionID); ok {
-		t.Fatal("session should be removed from the manager after acp.close")
+	// The exit event is emitted by an OnExit callback. It can reach the hub
+	// just before the close request returns and removes the session, so assert
+	// the documented eventual post-close state rather than scheduler timing.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, ok := mgr.Get(sessionID); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session should be removed from the manager after acp.close")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -490,4 +522,50 @@ func TestACPInputFrameChainPassthrough(t *testing.T) {
 	if got := inner.recorded(); len(got) != 1 {
 		t.Fatalf("acp-session input leaked to inner handler: %v", got)
 	}
+}
+
+// A harness plugin that reports a failed turn (internal/turnerror) has to name
+// the hub session it belongs to. The node spawns the adapter, and the adapter
+// spawns the harness (pi-acp → pi) with its own environment, so the hub's
+// session id — acp.open's instance — reaches the plugin as an env var.
+func TestACPOpenGivesTheAdapterItsHubSession(t *testing.T) {
+	mgr := acp.NewManager()
+	t.Cleanup(mgr.Shutdown)
+	dir := t.TempDir()
+	// Answers on demand rather than announcing at startup.
+	//
+	// `acp.Session` fans a chunk out only to the subscribers present when it is READ — there is no
+	// replay buffer — and `acp.attach` subscribes after `acp.open` has already spawned this. So a
+	// command that echoed once at startup was asserting on a chunk that quite possibly never had a
+	// listener, and no amount of waiting can recover a dropped one. That is why raising the barrier
+	// from 5s to 30s in #593 did not fix this test: it was never slow, it was losing the line, and
+	// it went on failing at exactly the new barrier.
+	cmd := func(key string) ([]string, string, []string, error) {
+		return []string{"/bin/sh", "-c",
+			`while read _; do echo "hub-session=[$AGENTPOD_ACP_SESSION]"; done`}, dir, nil, nil
+	}
+	h := NewACPHandler(failInner(t), mgr, cmd)
+	rig := newACPTestRig(t, h)
+
+	rig.writeHub(`{"type":"req","id":"open-1","verb":"acp.open","params":{"key":"pi:test","instance":"acps_0f3c"}}`)
+	msg := rig.readFrame()
+	data, _ := msg["data"].(map[string]any)
+	sessionID, _ := data["sessionId"].(string)
+	if sessionID == "" {
+		t.Fatalf("acp.open failed: %v", msg)
+	}
+	rig.writeHub(fmt.Sprintf(`{"type":"req","id":"attach-1","verb":"acp.attach","params":{"sessionId":"%s"}}`, sessionID))
+
+	// Ask repeatedly rather than sleeping for the subscribe. The attach subscribes on its own
+	// goroutine, so an early poke can still be answered into the void; the next one is heard, and
+	// the loop turns a race that had to be won once into one that only has to be won eventually.
+	poke := base64.StdEncoding.EncodeToString([]byte("\n"))
+	deadline := time.Now().Add(acpTestBarrier)
+	for time.Now().Before(deadline) {
+		rig.writeHub(fmt.Sprintf(`{"type":"input","id":"%s","data":"%s"}`, sessionID, poke))
+		if rig.awaitStreamContainingWithin("hub-session=[acps_0f3c]", 250*time.Millisecond) {
+			return
+		}
+	}
+	t.Fatal("the adapter did not see AGENTPOD_ACP_SESSION set to the hub session")
 }

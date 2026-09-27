@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { RunState, TERMINAL_RUN_STATES, isRunTerminal, Run, Change } from "./run";
-import { AcpRunId, KaambaanRunId } from "./ids";
+import { AcpRunId, SuperpipelineRunId } from "./ids";
 
 describe("RunState — A2A vocabulary, adopted verbatim", () => {
   test("is exactly the A2A task state set", () => {
-    // Must match A2A (and kaambaan's packages/contract/src/primitives.ts) with no
+    // Must match A2A (and superpipeline's packages/contract/src/primitives.ts) with no
     // additions and no renames. A translation table between our states and the
     // board's is precisely what this is meant to avoid.
     expect(RunState.options).toEqual([
@@ -48,10 +48,10 @@ describe("Run — a station attempt", () => {
     startedAt: "2026-08-11T10:00:00.000Z",
   };
 
-  test("mints its own id under `attempt_`, an id space kaambaan does not claim", () => {
-    // The rename. `run_` belonged to kaambaan's work run and AgentPod reserved
+  test("mints its own id under `attempt_`, an id space superpipeline does not claim", () => {
+    // The rename. `run_` belonged to superpipeline's work run and AgentPod reserved
     // the same prefix for this primary key, so the two were indistinguishable
-    // strings. An AgentPod row's own key is now `attempt_<uuid>` and a kaambaan
+    // strings. An AgentPod row's own key is now `attempt_<uuid>` and a superpipeline
     // run id cannot be one.
     expect(Run.parse(base).id).toBe("attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90");
     expect(Run.safeParse({ ...base, id: "run_e074a2160c4b4f28" }).success).toBe(false);
@@ -61,7 +61,7 @@ describe("Run — a station attempt", () => {
     // Told apart by shape, not by which column they happen to sit in.
     expect(AcpRunId.safeParse("run_e074a2160c4b4f28").success).toBe(false);
     expect(
-      KaambaanRunId.safeParse("attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90").success,
+      SuperpipelineRunId.safeParse("attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90").success,
     ).toBe(false);
   });
 
@@ -72,7 +72,7 @@ describe("Run — a station attempt", () => {
       Run.safeParse({
         ...base,
         externalRunId: "attempt_3d4e5f60-7182-4a4b-8c56-51b6c7e8f0a2",
-        externalSource: "kaambaan",
+        externalSource: "superpipeline",
       }).success,
     ).toBe(false);
   });
@@ -84,20 +84,20 @@ describe("Run — a station attempt", () => {
     expect(r.externalSource).toBeUndefined();
   });
 
-  test("carries kaambaan's runId when the attempt came from a claim", () => {
-    const r = Run.parse({ ...base, externalRunId: "run_e074a216", externalSource: "kaambaan" });
+  test("carries superpipeline's runId when the attempt came from a claim", () => {
+    const r = Run.parse({ ...base, externalRunId: "run_e074a216", externalSource: "superpipeline" });
     expect(r.externalRunId).toBe("run_e074a216");
-    expect(r.externalSource).toBe("kaambaan");
+    expect(r.externalSource).toBe("superpipeline");
   });
 
   test("rejects an external run id with no source, and a source with no id", () => {
     // Regression: both fields were independently optional, so a run could record
-    // kaambaan's id without saying it was kaambaan's. Disjoint prefixes now say
+    // superpipeline's id without saying it was superpipeline's. Disjoint prefixes now say
     // the id is not AgentPod's, but not which of several possible orchestrators
     // it belongs to — `externalSource` is open (§7), so the reverse join through
     // acp_runs_external_idx still needs the source to reach the right board.
     expect(Run.safeParse({ ...base, externalRunId: "run_e074a2160c4b4f28" }).success).toBe(false);
-    expect(Run.safeParse({ ...base, externalSource: "kaambaan" }).success).toBe(false);
+    expect(Run.safeParse({ ...base, externalSource: "superpipeline" }).success).toBe(false);
   });
 
   test("endSeq and endedAt are absent while the run is live", () => {
@@ -150,7 +150,7 @@ describe("Change — the thing that lands", () => {
 
   test("runIds holds AgentPod attempts, never a board's work run", () => {
     // A change is assembled from attempts that ran here. A `run_…` in this list
-    // would be a kaambaan work run standing in for the attempts that produced
+    // would be a superpipeline work run standing in for the attempts that produced
     // the commit — the same conflation the prefix split exists to prevent.
     expect(Change.safeParse({ ...base, runIds: ["run_e074a2160c4b4f28"] }).success).toBe(false);
   });

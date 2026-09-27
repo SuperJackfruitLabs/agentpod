@@ -50,6 +50,10 @@ import (
 // directory with no readable *.jsonl is SKIPPED rather than guessed at
 // (observed: `pi --mode rpc` creates the directory without writing a session).
 type piDescriptor struct {
+	// nativeSkillDiscovery starts a disposable ACP session and returns the
+	// skill commands it advertises. A field so a test needs no adapter.
+	nativeSkillDiscovery func(ctx context.Context, adapter, engine, workspace string) ([]string, error)
+
 	dataDir    string // absolute path to ~/.pi/agent
 	sessionDir string // absolute path to the sessions directory
 
@@ -123,6 +127,8 @@ func NewPi(dataDir string) Descriptor {
 		lookPath:     exec.LookPath,
 		isExecutable: isExecutableFile,
 		getenv:       os.Getenv,
+
+		nativeSkillDiscovery: piACPDiscoverSkills,
 	}
 	// userHome is "" when it can't be determined, which the binary locator
 	// reads as "skip the home-relative candidates".
@@ -252,7 +258,7 @@ func piStation(wsPath string, caps []string) Station {
 func (p *piDescriptor) Detect() ([]Station, error) {
 	// "lifecycle" is NEVER advertised: Pi has no persistent process to stop or
 	// start, so this descriptor does not implement Lifecycle at all.
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup"}
 
 	// "acp" is advertised ONLY when BOTH halves of the chat path resolve: the
 	// pi-acp adapter, and the `pi` it spawns. The console gates the Chat tab on
@@ -554,11 +560,18 @@ func (p *piDescriptor) ACPCommand(key string) ([]string, string, []string, error
 			"pi: found the %s adapter but no `pi` executable for it to drive — install Pi or set %s",
 			piACPBinaryName, piBinaryEnv)
 	}
-	piDir := filepath.Dir(piPath)
-	if abs, err := filepath.Abs(piDir); err == nil {
-		piDir = abs
+	// Resolve before switching to the station cwd. The adapter otherwise uses
+	// an inherited PI_ACP_PI_COMMAND, or searches for a binary literally named
+	// pi, neither of which necessarily matches the executable we selected.
+	piPath, err = filepath.Abs(piPath)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("pi: resolve selected executable: %w", err)
 	}
-	env := []string{"PATH=" + pathWithDirFirst(piDir, p.getenv("PATH"))}
+	piDir := filepath.Dir(piPath)
+	env := []string{
+		"PATH=" + pathWithDirFirst(piDir, p.getenv("PATH")),
+		"PI_ACP_PI_COMMAND=" + piPath,
+	}
 
 	return []string{adapter}, wsPath, env, nil
 }

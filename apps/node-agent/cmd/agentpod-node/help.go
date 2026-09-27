@@ -16,6 +16,15 @@ var commands = []struct {
 	name, group, oneline, detail string
 }{
 	{
+		name: "node", group: "Node",
+		oneline: "Explicit spelling for the machine-scoped verbs (apn node status, …)",
+		detail: "apn node <verb> — the explicit form of the machine-scoped verbs.\n\n" +
+			"Every verb apn dispatches is a node verb — this binary is machine-scoped only,\n" +
+			"the fleet-acting verbs live in the separate `fleet` binary — and both spellings\n" +
+			"work here: `apn status` and `apn node status` are the same command. The bare\n" +
+			"forms are kept because existing runbooks name them.",
+	},
+	{
 		name: "status", group: "Service",
 		oneline: "Show local service + hub connection state (--json for scripts)",
 		detail: "apn status — show local service state and hub connection state.\n\n" +
@@ -88,6 +97,64 @@ var commands = []struct {
 			"handles terminal sessions until interrupted (Ctrl-C).\n\n" +
 			"This is what the installed service runs under the hood; run it\n" +
 			"directly for debugging.",
+	},
+	{
+		name: "native-skills", group: "Node",
+		oneline: "Show, enable or disable native skill placement on this node",
+		detail: "apn native-skills <status|enable|disable> — control the separate native\n" +
+			"skill-placement gate for this node.\n\n" +
+			"Native placement writes into a harness-visible skill directory. It is disabled\n" +
+			"by default and must be deliberately enabled by the node operator. `enable` and\n" +
+			"`disable` update only this node's local configuration; restart the node service\n" +
+			"after either change before the hub can observe the new capability.",
+	},
+	{
+		name: "plugin-management", group: "Node",
+		oneline: "Show, enable or disable Console plugin management on this node",
+		detail: "apn plugin-management <status|enable|disable> — let the Console install and\n" +
+			"remove the agentpod-live plugin in this node's Hermes profiles.\n\n" +
+			"Each change is planned on the node, reviewed in the Console and applied only\n" +
+			"if the profile still matches the review; the node probes Hermes's version\n" +
+			"itself. It is disabled by default. `enable` and `disable` update only this\n" +
+			"node's local configuration; restart the node service after either change.\n" +
+			"Nothing here restarts a gateway.",
+	},
+	{
+		name: "hermes-skills", group: "Node",
+		oneline: "Register or remove the managed skills directory in a Hermes profile",
+		detail: "apn hermes-skills <status|register|unregister> --profile NAME [--apply] —\n" +
+			"a published skill is inert until skills.external_dirs names its directory.\n" +
+			"Without --apply the command prints the exact change and writes nothing.\n" +
+			"It edits one profile's own config.yaml and leaves the rest of it alone.",
+	},
+	{
+		name: "hermes-live", group: "Node",
+		oneline: "Install, enable or remove the agentpod-live streaming plugin in a Hermes profile",
+		detail: "apn hermes-live <status|enable|disable> --profile NAME [--apply] [--replace-unmanaged] —\n" +
+			"a harness-mode Hermes profile streams into AgentPod clients only with this plugin.\n" +
+			"enable installs the copy shipped in this apn, on a Hermes the CI contract tested,\n" +
+			"and adds it to plugins.enabled with plugins.stream_reasoning_deltas: true.\n" +
+			"Without --apply it prints the exact change and writes nothing. disable removes it\n" +
+			"and undoes the configuration edit. Neither restarts the gateway; that is yours to do.",
+	},
+	{
+		name: "openclaw-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors plugin in OpenClaw",
+		detail: "apn openclaw-errors <status|enable|disable> [--apply] —\n" +
+			"OpenClaw's ACP bridge drops why a turn failed; this plugin reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on an OpenClaw the CI contract tested,\n" +
+			"into ~/.agentpod/openclaw and adds it to ~/.openclaw/openclaw.json with\n" +
+			"hooks.allowConversationAccess. Without --apply it prints the exact change and writes\n" +
+			"nothing. disable removes both. Neither restarts the gateway; that is yours to do.",
+	},
+	{
+		name: "pi-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors extension in Pi",
+		detail: "apn pi-errors <status|enable|disable> [--apply] —\n" +
+			"pi-acp drops why a turn failed; this extension reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on a Pi the CI contract tested,\n" +
+			"as ~/.pi/agent/extensions/agentpod-errors.ts. Without --apply it prints what it\n" +
+			"would do and writes nothing. Nothing needs restarting: each new Pi session loads it.",
 	},
 	{
 		name: "detect", group: "Node",

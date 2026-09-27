@@ -148,7 +148,7 @@ describe("ActivityCoalescer — boundaries", () => {
   });
 
   test("reasoning and speech never merge into one activity", () => {
-    // kaambaan has no reasoning affordance, so both land as text — but merging
+    // superpipeline has no reasoning affordance, so both land as text — but merging
     // them would put the agent's private reasoning inside what it said.
     const activities = drain([
       chunk("agent_thought_chunk", "The user wants a listing. "),
@@ -185,12 +185,12 @@ describe("ActivityCoalescer — boundaries", () => {
 });
 
 describe("ActivityCoalescer — projection", () => {
-  test("a permission request carries its options where kaambaan actually stores them", () => {
+  test("a permission request carries its options where superpipeline actually stores them", () => {
     // The spike put them in `signalMetadata`, which the REST handler does not
-    // read (kaambaan index.ts:390-403 destructures parameter/result/signal and
+    // read (superpipeline index.ts:390-403 destructures parameter/result/signal and
     // no metadata field), so the options were silently dropped on the wire.
     //
-    // And they are translated on the way: kaambaan's option is `{name, title}`
+    // And they are translated on the way: superpipeline's option is `{name, title}`
     // and it echoes `name` back as the answer, so `name` has to be the ACP
     // optionId. Sending the ACP option verbatim would make the human's LABEL
     // the identity, and the answer would map to no option at all.

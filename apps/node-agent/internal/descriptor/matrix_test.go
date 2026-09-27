@@ -57,3 +57,81 @@ func TestMatrixIDFromConfigYAML(t *testing.T) {
 		t.Fatalf("want mxid from config.yaml, got %v", got)
 	}
 }
+
+// TestMatrixIDIgnoresNestedUserID is the regression for a real incident.
+//
+// A Hermes profile with a home channel carries a `user_id` naming the human
+// counterpart of that DM. The parser matched `user_id:` at any indentation and
+// reported it as the STATION's own identity, so:
+//
+//   - the operator's mxid was claimed by both a principal and a station, which
+//     made `resolveMatrixId` ambiguous and meant nothing they sent could be
+//     attributed — approving a gate from their phone was silently refused
+//   - the agent's messages were attributable to the operator
+//   - fleet liveness checked the operator's phone to decide whether the agent
+//     was alive, and reported the fleet fully healthy throughout
+//
+// Correcting the database did not hold: the node re-reports on every adoption,
+// so the row was rewritten within minutes. The config is the source.
+func TestMatrixIDIgnoresNestedUserID(t *testing.T) {
+	dir := t.TempDir()
+	const cfg = `_config_version: 37
+platforms:
+  matrix:
+    enabled: true
+    home_channel:
+      platform: matrix
+      chat_id: '!6HOezBXFk71L5hqwm9:id.agentpod.dev'
+      name: writer-quill
+      user_id: '@rakesh:id.agentpod.dev'
+      scope_id: id.agentpod.dev
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	if got := MatrixIDFromProfile(dir, "id.agentpod.dev"); got != nil {
+		t.Fatalf("a home channel's user_id is the human it talks to, not this station: got %q", *got)
+	}
+}
+
+// TestMatrixIDFromMatrixSection keeps the case the fix must not break.
+func TestMatrixIDFromMatrixSection(t *testing.T) {
+	dir := t.TempDir()
+	const cfg = `platforms:
+  matrix:
+    enabled: true
+    user_id: '@agent_guild_hermes-writer-quill:id.agentpod.dev'
+    home_channel:
+      user_id: '@rakesh:id.agentpod.dev'
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	got := MatrixIDFromProfile(dir, "id.agentpod.dev")
+	if got == nil || *got != "@agent_guild_hermes-writer-quill:id.agentpod.dev" {
+		t.Fatalf("an immediate child of matrix: is the station's own identity, got %v", got)
+	}
+}
+
+// TestMatrixIDPrefersEnvOverNestedNoise is the shape the live fleet was in:
+// no usable id in config.yaml, the right one in .env.
+func TestMatrixIDPrefersEnvOverNestedNoise(t *testing.T) {
+	dir := t.TempDir()
+	const cfg = `platforms:
+  matrix:
+    enabled: true
+    home_channel:
+      user_id: '@rakesh:id.agentpod.dev'
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	env := "MATRIX_USER_ID=@agent_guild_hermes-writer-quill:id.agentpod.dev\nMATRIX_ACCESS_TOKEN=secret\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(env), 0600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	got := MatrixIDFromProfile(dir, "id.agentpod.dev")
+	if got == nil || *got != "@agent_guild_hermes-writer-quill:id.agentpod.dev" {
+		t.Fatalf("want the .env identity once config.yaml offers nothing usable, got %v", got)
+	}
+}

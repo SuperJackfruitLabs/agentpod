@@ -1,4 +1,4 @@
-import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats } from "@agentpod/contract";
+import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory } from "@agentpod/contract";
 import { goto } from "$app/navigation";
 import { clearAuthSession } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
@@ -169,11 +169,43 @@ export type StationRow = {
   capabilities: string[] | null;
   matrixId: string | null;
   /**
+   * What the appservice minted for this station — never re-derived here, only
+   * read, and for a harness-mode station **not** the address it is moving
+   * toward.
+   *
+   * This used to say `matrixId <> bridgeMatrixId` was the fleet's signal that
+   * a station runs under a retired identity. It is not: `provision.ts` fills
+   * the column from `names.ts`'s `stationSpeaker`, which for a harness station
+   * answers the harness's OWN mxid — so on the fleet the two columns agree,
+   * both holding the retired station-derived address, and everything that
+   * compared them read "converged" for exactly the 14 stations that had not
+   * moved. Whether a station is on its principal's address is a question about
+   * the agent's HANDLE, which the browser cannot derive; ask the hub
+   * (`stationMoveState` below).
+   */
+  bridgeMatrixId: string | null;
+  /**
+   * Who answers for this station on Matrix — `bridge` (the appservice speaks
+   * for it) or `harness` (it runs its own client). The hub has always sent it;
+   * it was simply never typed here, so the console inferred the answer from a
+   * null `matrixId` instead of reading it.
+   */
+  matrixIdentityMode: "bridge" | "harness";
+  /**
    * What this agent is FOR — the operator's word, not where it runs. Null when
    * nobody has said, which files it under no Matrix space at all and leaves it
    * in All rooms.
    */
   purpose: string | null;
+  /**
+   * The agent occupying this station, or null.
+   *
+   * The hub's row already carries this (`stations.principal_id`); it was just
+   * never typed here. Null is not an unhealthy station — it is a station
+   * dispatchable by nobody, which is a real and legitimate state the console
+   * must be able to tell apart from "assigned and running".
+   */
+  principalId: string | null;
   adoptedAt: string | Date;
   createdAt: string | Date;
 };
@@ -220,6 +252,59 @@ export const setNodePurpose = (nodeId: string, purpose: string | null) =>
       body: JSON.stringify({ purpose }),
     }
   );
+
+/**
+ * The operator's half of moving a harness-mode station off a retired identity
+ * and onto its own, principal-derived one (`matrix/authorize-move` on the
+ * hub). Puts the new identity in the station's room, mints a single-use
+ * authorization, and signals the node — fire-and-forget on the hub's side, so
+ * this call resolving is not convergence. There is no token in the response
+ * by design: the node redeems the authorization on its own long-term
+ * credential, never one that passed through this browser.
+ *
+ * Refusals carry the hub's own sentence (a 403 names which grant refused, a
+ * 409 names the harness with no writer) — `http()` surfaces it verbatim as
+ * `Error.message`, so callers must not replace it with a generic string.
+ */
+export const authorizeMove = (stationId: string) =>
+  http<{ expiresAt: string }>(`/api/stations/${stationId}/matrix/authorize-move`, {
+    method: "POST",
+  });
+
+/**
+ * Where the HUB says a station stands in the §1 invariant.
+ *
+ * **Only one of these states is derivable in the browser** — `bridge`, which
+ * is `matrixId === null` and nothing else. Every other one turns on the
+ * address the station's occupying principal's HANDLE implies, and the console
+ * holds neither the handle nor the homeserver domain to build it. The panel
+ * used to derive three of them by comparing `matrixId` with `bridgeMatrixId`,
+ * which answers a different question and answered it wrong for every station
+ * on the fleet (see `StationRow.bridgeMatrixId`).
+ *
+ * `waiting` was never derivable at all: an authorization record lives only in
+ * the hub, so a component-local flag died on reload and the one state §6 asks
+ * an operator to WATCH was the one a refresh threw away.
+ *
+ * `converged` means the station answers as its principal's address, and
+ * nothing more. It is not a health check, and nothing in this payload is one:
+ * whether a station's identity can actually post in its room is a Matrix fact
+ * in no column at all, and the hub's gate sweep is what checks it.
+ */
+export type StationMoveState =
+  | { status: "unknown" }
+  | { status: "bridge" }
+  | { status: "converged"; mxid: string }
+  /**
+   * Harness mode, nobody occupying the station: no handle, so no address to
+   * move to and no move to offer. Not `converged`, and not a blank.
+   */
+  | { status: "no-agent"; runningAs: string }
+  | { status: "waiting"; runningAs: string; willBecome: string; since: string }
+  | { status: "retired-identity"; runningAs: string; willBecome: string };
+
+export const stationMoveState = (stationId: string) =>
+  http<StationMoveState>(`/api/stations/${stationId}/matrix/move-state`);
 
 export const stationHealth = (stationId: string) =>
   http<StationHealth>(`/api/stations/${stationId}/health`);
@@ -458,4 +543,11 @@ export const nodePosture = (nodeId: string) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
+  });
+
+// Station-local skill observations, independently of runtime health.
+export type SkillInventoryResult = SkillInventory;
+export const skillsInventory = (stationId: string) =>
+  http<SkillInventoryResult>(`/api/stations/${stationId}/skills/inventory`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
   });

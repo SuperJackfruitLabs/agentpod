@@ -7,6 +7,8 @@ import {
   AcpEvent,
   AcpClientMsg,
   AcpServerMsg,
+  TurnError,
+  TurnErrorPayload,
 } from "./acp-session";
 
 it("AcpSessionRow round-trips a full row", () => {
@@ -110,5 +112,41 @@ describe("AcpServerMsg round-trips each variant", () => {
   });
   it("rejects an unknown discriminant", () => {
     expect(() => AcpServerMsg.parse({ t: "nope" })).toThrow();
+  });
+});
+
+describe("TurnError — one error shape, whichever harness failed", () => {
+  const openclawQuota = {
+    message: "You've reached your weekly (7-day) usage limit.",
+    kind: "quota",
+    harness: "openclaw",
+    provider: "kimi-coding",
+    model: "k2p6",
+    retryable: false,
+    source: "plugin",
+    attempts: [
+      { provider: "kimi-coding", model: "k2p6", kind: "quota", message: "403 weekly usage limit" },
+      { provider: "opencode-go", model: "qwen3.7-plus", kind: "bad_request", message: "400 MissingSessionID" },
+    ],
+  };
+
+  it("parses a full error, fallback chain included", () => {
+    expect(TurnError.parse(openclawQuota)).toEqual(openclawQuota);
+  });
+
+  it("needs only message, kind, harness and source", () => {
+    const bare = { message: "The agent completed without a reply.", kind: "unknown", harness: "pi", source: "acp-stop-reason" };
+    expect(TurnError.parse(bare)).toEqual(bare);
+  });
+
+  it("an old error payload, message only, is still a valid error event payload", () => {
+    // Every reader before this change reads `payload.message`. It must stay the
+    // one field that is always there, at the top level.
+    expect(TurnErrorPayload.safeParse({ message: "harness exited" }).success).toBe(true);
+    expect(TurnErrorPayload.safeParse({ kind: "quota" }).success).toBe(false);
+  });
+
+  it("refuses a kind it does not know rather than guessing one", () => {
+    expect(TurnError.safeParse({ ...openclawQuota, kind: "cosmic_rays" }).success).toBe(false);
   });
 });

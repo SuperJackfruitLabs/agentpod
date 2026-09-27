@@ -2,11 +2,12 @@
   import { auth, loginWithEmail, signUp, clearError, initAuth } from "$lib/stores/auth.svelte";
   import { connection, connect, disconnect } from "$lib/stores/connection.svelte";
   import { goto } from "$app/navigation";
+  import { resolveReturnTo, hardNavigate, RETURN_PARAM } from "$lib/utils/return-to";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Field } from "$lib/components/ui/field";
   import { Spinner } from "$lib/components/ui/spinner";
-  import Server from "@lucide/svelte/icons/server";
+  import Mark from "$lib/components/brand/Mark.svelte";
   import Circle from "@lucide/svelte/icons/circle";
   import { statusTextClass } from "$lib/utils/status-badge";
 
@@ -80,6 +81,27 @@
     isConnecting = false;
   }
 
+  /**
+   * Go wherever this sign-in was for.
+   *
+   * Usually `/`. Sometimes the hub's `GET /api/auth/authorize` sent the operator here to sign in
+   * and named the authorize URL to resume — a plane on another domain waiting for a token, which
+   * before this landed on the console home instead and quietly dead-ended
+   * (`apps/hub/src/routes/auth-authorize.ts`).
+   *
+   * `resolveReturnTo` allows only this origin and the connected hub's; a path comes back for the
+   * first and an absolute URL for the second, because `goto` refuses to leave the origin.
+   */
+  function goAfterSignIn() {
+    const target = resolveReturnTo(
+      new URL(window.location.href).searchParams.get(RETURN_PARAM),
+      connection.apiUrl,
+      window.location.origin
+    );
+    if (target.startsWith("/")) goto(target);
+    else hardNavigate(target);
+  }
+
   async function handleEmailSubmit(e: Event) {
     e.preventDefault();
     clearError();
@@ -94,7 +116,7 @@
     if (success) {
       // Redirect immediately after successful auth
       // The session cookie is set, so we're authenticated
-      goto("/");
+      goAfterSignIn();
     }
   }
 
@@ -107,10 +129,11 @@
     clearError();
   }
 
-  // Redirect to homepage if already authenticated
+  // Redirect if already authenticated — to the return path too, not only home: a session restored
+  // from the cookie after landing here is the same operator with the same errand.
   $effect(() => {
     if (auth.isAuthenticated && connection.isConnected) {
-      goto("/");
+      goAfterSignIn();
     }
   });
 </script>
@@ -129,9 +152,7 @@
   <div class="w-full max-w-md rounded-lg border bg-card p-6 space-y-6">
     <!-- Brand -->
     <div class="flex flex-col items-center gap-3 text-center">
-      <div class="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
-        <Server class="size-5" />
-      </div>
+      <Mark class="size-10" />
       <div>
         <h1 class="text-lg font-semibold">AgentPod</h1>
         <p class="mt-1 text-sm text-muted-foreground">

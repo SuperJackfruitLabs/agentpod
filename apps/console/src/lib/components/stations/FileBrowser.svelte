@@ -1,7 +1,7 @@
 <script lang="ts">
   import { readFile } from "$lib/api/client";
   import type { FsEntry } from "@agentpod/contract";
-  import { X, RefreshCw } from "@lucide/svelte";
+  import { X, RefreshCw, ChevronLeft } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { ResizablePaneGroup, ResizablePane, ResizableHandle } from "$lib/components/ui/resizable";
   import * as Breadcrumb from "$lib/components/ui/breadcrumb";
@@ -39,6 +39,33 @@
 
   // ── File tabs / preview state ────────────────────────────────────────────────
   let openFiles = $state<{ path: string; name: string }[]>([]);
+
+  /**
+   * A phone gets ONE pane, not two.
+   *
+   * This is a horizontal split: 28% tree, 72% preview. At a 414px viewport the
+   * tree column resolves to about 110px — enough for a chevron and a file icon
+   * and nothing else, so the tree rendered as a column of anonymous icons with
+   * every filename clipped to zero width. The two-pane split needs roughly
+   * 700px before the narrow side is worth having.
+   *
+   * matchMedia rather than a Tailwind variant because the choice is structural
+   * (which pane exists at all), not cosmetic, and because this codebase's
+   * convention is mobile-first `min-[...]` variants — a `max-[...]` here would
+   * be the exclusive-boundary trap the shell already hit once.
+   */
+  const SPLIT_FITS = "(min-width: 701px)";
+  let splitFits = $state(true);
+  let mobilePane = $state<"tree" | "file">("tree");
+
+  $effect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(SPLIT_FITS);
+    splitFits = mq.matches;
+    const onChange = (e: MediaQueryListEvent) => (splitFits = e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  });
   let activePath = $state<string | null>(null);
   let contentCache = $state<Map<string, { content: string; truncated: boolean }>>(new Map());
   let isLoadingFile = $state(false);
@@ -138,6 +165,9 @@
     }
     activePath = path;
     fileError = null;
+    // On a phone the preview replaces the tree, so opening a file has to
+    // navigate to it — otherwise the tap appears to do nothing.
+    mobilePane = "file";
 
     if (isBinaryPath(path) || contentCache.has(path)) return;
 
@@ -199,29 +229,28 @@
   class="flex h-full min-h-[300px] border border-border rounded-md overflow-hidden bg-background"
   onkeydown={handleKeydown}
 >
-  <ResizablePaneGroup direction="horizontal">
-    <ResizablePane defaultSize={28} minSize={15} class="flex flex-col overflow-hidden bg-muted/10">
-      <FileTree
-        {stationId}
-        {canWrite}
-        {activePath}
-        onEntryClick={openFile}
-        onEntriesLoaded={handleEntriesLoaded}
-        onDeleted={handleDeleted}
-        onRenamed={handleRenamed}
-        bind:revealRequest
-      />
-    </ResizablePane>
+  {#snippet treePane()}
+    <FileTree
+      {stationId}
+      {canWrite}
+      {activePath}
+      onEntryClick={openFile}
+      onEntriesLoaded={handleEntriesLoaded}
+      onDeleted={handleDeleted}
+      onRenamed={handleRenamed}
+      bind:revealRequest
+    />
+  {/snippet}
 
-    <ResizableHandle withHandle />
-
-    <ResizablePane defaultSize={72} class="flex flex-col overflow-hidden">
+  {#snippet previewPane()}
       <!-- ── Preview pane ── -->
       {#if openFiles.length === 0}
         <div class="flex flex-1 items-center justify-center p-6">
           <Empty
             title="Select a file to preview"
-            description="Choose a file from the tree, or press ⌘P to quick-open."
+            description={splitFits
+              ? "Choose a file from the tree, or press ⌘P to quick-open."
+              : "Choose a file from the tree."}
           />
         </div>
       {:else}
@@ -310,8 +339,39 @@
           />
         {/if}
       {/if}
-    </ResizablePane>
-  </ResizablePaneGroup>
+  {/snippet}
+
+  {#if splitFits}
+    <ResizablePaneGroup direction="horizontal">
+      <ResizablePane defaultSize={28} minSize={15} class="flex flex-col overflow-hidden bg-muted/10">
+        {@render treePane()}
+      </ResizablePane>
+
+      <ResizableHandle withHandle />
+
+      <ResizablePane defaultSize={72} class="flex flex-col overflow-hidden">
+        {@render previewPane()}
+      </ResizablePane>
+    </ResizablePaneGroup>
+  {:else if mobilePane === "tree"}
+    <div data-testid="file-browser-tree-only" class="flex min-w-0 flex-1 flex-col overflow-hidden bg-muted/10">
+      {@render treePane()}
+    </div>
+  {:else}
+    <div data-testid="file-browser-file-only" class="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <!-- The only way back to the tree once a file fills the screen. -->
+      <button
+        type="button"
+        data-testid="file-browser-back"
+        class="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+        onclick={() => (mobilePane = "tree")}
+      >
+        <ChevronLeft class="h-3.5 w-3.5" />
+        Files
+      </button>
+      {@render previewPane()}
+    </div>
+  {/if}
 </div>
 
 <FileQuickOpen

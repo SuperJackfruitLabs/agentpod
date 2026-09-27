@@ -84,18 +84,43 @@ const mockNodes = [
   },
 ];
 
-test("renders both node cards with hostname and status badge", async () => {
+test("renders a row per node: the name it is known by, its hostname, and its link state", async () => {
   vi.spyOn(api, "listNodes").mockResolvedValue(mockNodes);
 
-  const { getByText } = render(NodesOverview);
+  const { getByText, getAllByTestId } = render(NodesOverview);
 
   await waitFor(() => {
+    // The NAME leads, as it does in the roster rail and on the muster — the
+    // fleet knows a machine as "superchotu", not as its FQDN. The hostname is
+    // still there, under it.
+    expect(getByText("vps1")).toBeTruthy();
+    expect(getByText("vps2")).toBeTruthy();
     expect(getByText("vps1.example.com")).toBeTruthy();
     expect(getByText("vps2.example.com")).toBeTruthy();
   });
 
-  expect(getByText("online")).toBeTruthy();
-  expect(getByText("offline")).toBeTruthy();
+  expect(getAllByTestId("node-row").length).toBe(2);
+});
+
+test("a node's link cell says Online / Offline — the node's own words, not the generic state label", async () => {
+  // The muster shipped this bug first: `nodeState` shares the ERROR token with
+  // a failed station, so rendering the generic label put "Error" against a
+  // laptop somebody had simply closed the lid on. Only a process runs; a
+  // machine is online or it is not.
+  vi.spyOn(api, "listNodes").mockResolvedValue(mockNodes);
+
+  const { getByTestId, getByText } = render(NodesOverview);
+
+  await waitFor(() => expect(getByText("vps1")).toBeTruthy());
+
+  expect(getByTestId("node-link-node_1").textContent).toMatch(/online/i);
+  expect(getByTestId("node-link-node_2").textContent).toMatch(/offline/i);
+  expect(getByTestId("node-link-node_2").textContent).not.toMatch(/error/i);
+
+  // Colour still comes from the shared vocabulary: an unreachable machine is
+  // as red as a failed agent, it just isn't called the same thing.
+  expect(getByTestId("node-link-node_1").innerHTML).toContain("bg-status-running");
+  expect(getByTestId("node-link-node_2").innerHTML).toContain("bg-status-error");
 });
 
 test("each node card links to /nodes/<id>", async () => {
@@ -236,7 +261,7 @@ test("error branch's Retry button refetches and renders nodes on success", async
 
 // ── Update button TDD tests ────────────────────────────────────────────────────
 
-test("node with updateAvailable:true renders Update button and version upgrade text", async () => {
+test("a node behind on its agent shows both versions, and the button that closes the gap", async () => {
   const updatableNode = {
     id: "node_upd",
     name: "updatable",
@@ -500,4 +525,71 @@ test("a node that failed is reported as a failure, never as success", async () =
   // operator must not read that as a fleet that moved.
   await waitFor(() => expect(toast.error).toHaveBeenCalled());
   expect(toast.success).not.toHaveBeenCalled();
+});
+
+// ── The table's shape ────────────────────────────────────────────────────────
+
+test("the nodes table scrolls inside its own box, and its sr-only header is positioned", async () => {
+  // Two traps this table has already sprung. Wide content must scroll in its
+  // own container, never drag the document sideways (constraint 7); and an
+  // `sr-only` span is position:absolute, so with no positioned ancestor it
+  // escapes that container entirely and sets the DOCUMENT's scroll width —
+  // measured at 667px on a 414px viewport before `relative` was added.
+  vi.spyOn(api, "listNodes").mockResolvedValue(mockNodes);
+
+  const { getByTestId, container } = render(NodesOverview);
+
+  const scroller = await waitFor(() => getByTestId("nodes-table-scroller"));
+  expect(scroller.className).toContain("overflow-x-auto");
+
+  const srOnly = container.querySelector(".sr-only");
+  expect(srOnly).toBeTruthy();
+  expect(srOnly!.closest(".relative")).toBeTruthy();
+});
+
+test("a node with a very long name is capped rather than allowed to eat the table", async () => {
+  // Measured: a 62-character name took 425px of a 918px table and squeezed
+  // every other column into unreadability.
+  const longName = "a-really-quite-unreasonably-long-node-name-that-someone-typed";
+  vi.spyOn(api, "listNodes").mockResolvedValue([{ ...mockNodes[0]!, name: longName }]);
+
+  const { getByText } = render(NodesOverview);
+
+  const link = await waitFor(() => getByText(longName));
+  expect(link.className).toContain("truncate");
+  // The full name survives on hover — capped is not the same as lost.
+  expect(link.getAttribute("title")).toBe(longName);
+  expect(link.closest("td")!.className).toContain("max-w-[220px]");
+});
+
+test("the Agents cell counts what is running out of what is there", async () => {
+  vi.spyOn(api, "listNodes").mockResolvedValue([mockNodes[0]!]);
+  vi.spyOn(api, "getFleet").mockResolvedValue({
+    agents: [
+      { stationId: "s1", nodeId: "node_1", agentName: "a", status: "running" },
+      { stationId: "s2", nodeId: "node_1", agentName: "b", status: "stopped" },
+      { stationId: "s3", nodeId: "node_1", agentName: "c", status: "unknown" },
+    ],
+    stats: null,
+  } as never);
+
+  const { getByTestId } = render(NodesOverview);
+
+  await waitFor(() => expect(getByTestId("node-agents-node_1").textContent).toMatch(/1\/3/));
+});
+
+test("a node whose agent doesn't report posture says so, rather than showing a grade it never measured", async () => {
+  // Posture is a live scan that writes an audit row, so this column can only
+  // ever be a link. Scanning every node on page load would be a
+  // denial-of-service on your own fleet, dressed as a column.
+  vi.spyOn(api, "listNodes").mockResolvedValue([
+    { ...mockNodes[0]!, capabilities: ["posture"] },
+    { ...mockNodes[1]! },
+  ]);
+
+  const { getAllByTestId, getByText } = render(NodesOverview);
+
+  await waitFor(() => expect(getAllByTestId("node-row").length).toBe(2));
+  expect(getByText("Scan")).toBeTruthy();
+  expect(getByText("Scan").getAttribute("href")).toBe("/nodes/node_1");
 });

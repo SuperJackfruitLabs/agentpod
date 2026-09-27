@@ -372,6 +372,174 @@
       "when": 1786687171202,
       "tag": "0052_node_spaces",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786687172202,
+      "tag": "0053_matrix_gate_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1786687173202,
+      "tag": "0054_service_signing_keys",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1788110577341,
+      "tag": "0055_spotty_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788111076830,
+      "tag": "0056_left_darwin",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1788112729533,
+      "tag": "0057_motionless_professor_monster",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1788118319157,
+      "tag": "0058_matrix_rooms_principal_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788141024903,
+      "tag": "0059_abandoned_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1788165015180,
+      "tag": "0060_matrix_rooms_backfill_principal_id",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1788167041109,
+      "tag": "0061_occupancy_exclusive",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788176000000,
+      "tag": "0062_matrix_rooms_rebackfill_after_dedupe",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1788241900470,
+      "tag": "0063_matrix_credential_authorizations",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1788248855087,
+      "tag": "0064_matrix_credential_authorizations_drop_token_hash",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1788341982305,
+      "tag": "0065_oauth_codes",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1789567032380,
+      "tag": "0066_kaambaan_is_now_superpipeline",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1789648322149,
+      "tag": "0067_better_auth_1_7_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1789887373428,
+      "tag": "0068_device_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1789924932771,
+      "tag": "0069_managed_skills",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1789975526673,
+      "tag": "0070_station_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1789996982000,
+      "tag": "0071_native_skill_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1790008044519,
+      "tag": "0072_remarkable_robin_chapel",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1790009079202,
+      "tag": "0073_flowery_ikaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1790332910862,
+      "tag": "0074_plugin_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1790412440387,
+      "tag": "0075_station_transcription",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1790515949022,
+      "tag": "0076_station_git_identities",
+      "breakpoints": true
     }
   ]
 }

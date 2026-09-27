@@ -17,11 +17,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixAsTransactions } from "../db/schema/matrix";
 import { isBridgeUser } from "../services/matrix-as/names";
-import {
-  stationForLocalpart,
-  localpartFromUserId,
-  localpartFromAlias,
-} from "../services/matrix-as/stations";
+import { stationForAgentUserId, stationForAlias } from "../services/matrix-as/stations";
 import { recordTransaction } from "../services/matrix-as/health";
 import { createLogger } from "../utils/logger";
 
@@ -51,6 +47,96 @@ export interface MatrixAsDeps {
    * would send the asker to a room that is not there.
    */
   onProvisionAlias?: (alias: string) => Promise<void>;
+  /**
+   * The encryption side-channels the homeserver attaches to a transaction.
+   *
+   * MSC3202 and MSC2409, and the *only* way an appservice learns that a
+   * device changed or that its one-time keys are running out — there is no
+   * `/sync` for an appservice to read them from. Optional, so a hub with no
+   * crypto configured behaves exactly as it did before.
+   */
+  onCryptoTransaction?: (tx: AppserviceCryptoTransaction) => Promise<void>;
+}
+
+/**
+ * The encryption fields of an appservice transaction.
+ *
+ * The wire names are the spec's and are not the names anything else here
+ * uses, so they are translated once rather than at every reader. `tuwunel`
+ * 1.8.2 is what started sending them; before that they are simply absent and
+ * everything below reads as "nothing changed".
+ */
+/**
+ * The crypto half of a transaction, under both the names it can arrive with.
+ *
+ * **The homeserver does not use the stable names, and this cost a working
+ * bridge.** MSC3202 and MSC4203 are unstable, so tuwunel (via ruma) puts their
+ * fields on the wire prefixed — `org.matrix.msc3202.device_one_time_keys_count`,
+ * `de.sorunome.msc2409.to_device` (that MSC2409-era key is what MSC4203 kept).
+ * The first version of this file read `to_device` and `device_lists`, which are
+ * what the *merged* spec will call them one day and what nothing sends today.
+ *
+ * Nothing failed. Every transaction parsed, every field defaulted to empty, and
+ * the bridge encrypted outbound messages perfectly while receiving no room keys
+ * and no one-time-key counts at all — so agents could speak and never listen,
+ * and would in time run out of one-time keys and become unreachable. The
+ * end-to-end test missed it because its recipient read `/sync` directly rather
+ * than going through an appservice transaction.
+ *
+ * Both names are read, preferring the unstable one, so this keeps working when
+ * the MSCs land and the homeserver switches.
+ */
+type CryptoFields = {
+  to_device: unknown[];
+  device_lists: { changed?: string[]; left?: string[] };
+  device_one_time_keys_count: Record<string, Record<string, Record<string, number>>>;
+  device_unused_fallback_key_types: Record<string, Record<string, string[]>>;
+};
+
+/** The unstable name each field actually arrives under. */
+const UNSTABLE: Record<keyof CryptoFields, string> = {
+  to_device: "de.sorunome.msc2409.to_device",
+  device_lists: "org.matrix.msc3202.device_lists",
+  device_one_time_keys_count: "org.matrix.msc3202.device_one_time_keys_count",
+  device_unused_fallback_key_types:
+    "org.matrix.msc3202.device_unused_fallback_key_types",
+};
+
+export type CryptoTransactionBody = Partial<CryptoFields> & Record<string, unknown>;
+
+function cryptoField<K extends keyof CryptoFields>(
+  body: CryptoTransactionBody,
+  field: K
+): CryptoFields[K] | undefined {
+  const unstable = body[UNSTABLE[field]] as CryptoFields[K] | undefined;
+  return unstable ?? (body[field] as CryptoFields[K] | undefined);
+}
+
+export interface AppserviceCryptoTransaction {
+  /** `to_device` — olm key exchange arrives here and nowhere else. */
+  toDevice: unknown[];
+  /** `device_lists` — whose devices changed, and who left. Flat, as in /sync. */
+  deviceLists: { changed: string[]; left: string[] };
+  /**
+   * `device_one_time_keys_count`, keyed **by user and then by device**.
+   *
+   * Not the `/sync` shape, and this was typed as the `/sync` shape first.
+   * MSC3202 says why it differs: "the format is slightly different from the
+   * client-server API to better map the appservice's user namespace users to
+   * the counts." An appservice holds many users where a client holds one, so
+   * a flat `{ algorithm: count }` has nowhere to say *whose* count it is —
+   * and feeding one agent's counts to another's machine is how an agent
+   * stops replenishing keys and quietly becomes unreachable.
+   *
+   *     { "@agent_x:server": { "AGENTPOD": { "signed_curve25519": 20 } } }
+   */
+  otkCounts: Record<string, Record<string, Record<string, number>>>;
+  /**
+   * `device_unused_fallback_key_types`, keyed by user and then by device.
+   *
+   *     { "@agent_x:server": { "AGENTPOD": ["signed_curve25519"] } }
+   */
+  unusedFallbackKeys: Record<string, Record<string, string[]>>;
 }
 
 /**
@@ -121,12 +207,49 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
 
         const txnId = c.req.param("txnId");
 
-        let body: { events?: MatrixEvent[]; ephemeral?: MatrixEvent[] };
+        let body: CryptoTransactionBody & {
+          events?: MatrixEvent[];
+          ephemeral?: MatrixEvent[];
+        };
         try {
           body = await c.req.json();
         } catch {
           // Malformed JSON from the homeserver is not something a retry fixes.
           return c.json({}, 200);
+        }
+
+        // Before the replay guard, and before any event.
+        //
+        // Before the guard because a retried transaction still carries the
+        // current key counts, and dropping them because the *events* were
+        // already applied would leave the machine believing it holds keys the
+        // server has since handed out. Feeding the same to-device message twice
+        // is something olm is built to survive; missing one is not.
+        //
+        // Before the events because an event may be encrypted with a key that
+        // arrived in this very transaction's `to_device`.
+        if (deps.onCryptoTransaction) {
+          try {
+            const deviceLists = cryptoField(body, "device_lists") ?? {};
+            await deps.onCryptoTransaction({
+              toDevice: cryptoField(body, "to_device") ?? [],
+              deviceLists: {
+                changed: deviceLists.changed ?? [],
+                left: deviceLists.left ?? [],
+              },
+              otkCounts: cryptoField(body, "device_one_time_keys_count") ?? {},
+              unusedFallbackKeys:
+                cryptoField(body, "device_unused_fallback_key_types") ?? {},
+            });
+          } catch (err) {
+            // Same reasoning as the event handlers: a throw here is reported to
+            // the homeserver as an undelivered transaction and retried forever,
+            // so a broken crypto step must not take plaintext traffic with it.
+            log.error("appservice crypto handler threw", {
+              txnId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
 
         if (!(await claimTransaction(txnId))) {
@@ -183,11 +306,10 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
       .get("/users/:userId", async (c) => {
         if (!authorised(c, deps)) return c.json({ errcode: "M_FORBIDDEN" }, 403);
 
-        const localpart = localpartFromUserId(
-          decodeURIComponent(c.req.param("userId")),
-          deps.domain
-        );
-        const station = localpart ? await stationForLocalpart(localpart) : null;
+        // An agent's user id is built from its occupying principal's handle
+        // now, not from `(nodeName, stationKey)` — see `stationForAgentUserId`.
+        const userId = decodeURIComponent(c.req.param("userId"));
+        const station = await stationForAgentUserId(userId, deps.domain);
         if (!station) return c.json({ errcode: "M_NOT_FOUND" }, 404);
 
         return c.json({}, 200);
@@ -203,9 +325,17 @@ export function createMatrixAsRoutes(deps: MatrixAsDeps) {
       .get("/rooms/:alias", async (c) => {
         if (!authorised(c, deps)) return c.json({ errcode: "M_FORBIDDEN" }, 403);
 
+        // Both alias shapes, through the one resolver `onProvisionAlias`
+        // uses — fix round 4. This gate used to ask `stationForLocalpart`
+        // alone, which knows only the station-derived form: an
+        // occupant-derived alias (`bridgeAliasForHandle`, the shape every
+        // occupied station's room carries now) was 404'd HERE, before
+        // `onProvisionAlias` and its two-shape lookup ever ran. Nothing live
+        // broke, because a legacy alias still resolved — but the path that
+        // creates a missing room for an agent addressed by its handle could
+        // never heal itself.
         const alias = decodeURIComponent(c.req.param("alias"));
-        const localpart = localpartFromAlias(alias, deps.domain);
-        const station = localpart ? await stationForLocalpart(localpart) : null;
+        const station = await stationForAlias(alias, deps.domain);
         if (!station) return c.json({ errcode: "M_NOT_FOUND" }, 404);
 
         if (deps.onProvisionAlias) await deps.onProvisionAlias(alias);

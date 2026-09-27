@@ -15,6 +15,9 @@ import { adminMiddleware, getRequestContext } from "../auth/admin-middleware";
 import { authMiddleware } from "../auth/middleware";
 import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
+import { adminPrincipalsRouter } from "./admin-principals";
+import { agentsAdminRouter } from "./agents-admin";
+import { adminTranscriptionRoutes } from "./transcription-settings";
 
 // Models
 import {
@@ -49,6 +52,16 @@ adminRouter.use("*", adminMiddleware);
 // surface the control is operable only by someone with a database client, and
 // an authorization system nobody can inspect is one people route around.
 adminRouter.route("/grants", adminGrantsRouter);
+
+// The vocabulary those grants are written in. A grant names a `prn_` id on both
+// sides and nothing else in this API says what those ids are, so without this
+// the console can offer only a text box for a twenty-hex string.
+adminRouter.route("/principals", adminPrincipalsRouter);
+
+// Creating an agent, and putting it in a station. Mounted at the root of
+// `/api/admin` because it owns two path families — `/agents` and
+// `/stations/:stationId/agent` — not one subtree.
+adminRouter.route("/", agentsAdminRouter);
 
 // =============================================================================
 // Validation Schemas
@@ -313,6 +326,13 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
 // =============================================================================
 // Settings Routes
 // =============================================================================
+
+/**
+ * /admin/settings/transcription — the hub's default speech-to-text service
+ * for voice notes (GET, PUT, POST /test). Inside this router so it sits
+ * behind the same admin guard; see `routes/transcription-settings.ts`.
+ */
+adminRouter.route("/settings/transcription", adminTranscriptionRoutes());
 
 /**
  * GET /admin/settings

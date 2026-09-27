@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -150,5 +151,20 @@ func TestMaybeShowHelpCoversEveryRegisteredCommand(t *testing.T) {
 				t.Errorf("maybeShowHelp(%q, [--json]) wrote output, want none:\n%s", c.name, buf.String())
 			}
 		})
+	}
+}
+
+// The removal, asserted rather than assumed. `apn fleet` was a one-release
+// surface (v0.1.33) and is gone; the fleet verbs live in agentpod-fleet.
+func TestApnDoesNotDispatchFleet(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read main.go: %v", err)
+	}
+	if strings.Contains(string(src), `case "fleet":`) {
+		t.Error("main.go still dispatches `fleet`; it belongs to agentpod-fleet now")
+	}
+	if commandHelp("fleet") != "" {
+		t.Error("`fleet` is still registered in apn's help table")
 	}
 }

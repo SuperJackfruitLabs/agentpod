@@ -1,0 +1,18 @@
+name: agentpod-live
+version: "0.1.1"
+description: "Streams a Matrix turn to the reader's devices as AgentPod live events (answer, reasoning, tool calls), the same events the hub sends for bridge-mode stations."
+author: AgentPod
+# The oldest Hermes the CI contract runs against (hermes-fleet.ref). Hermes
+# refuses to load the plugin below it. The newest tested version is in
+# hermes-tested.max and is enforced by `apn hermes-live` at install, not here:
+# an upper bound here would stop streaming on the next `hermes update`.
+requires_hermes: ">=0.21.3"
+requires_env:
+  - MATRIX_HOMESERVER
+  - MATRIX_ACCESS_TOKEN
+provides_hooks:
+  - pre_llm_call
+  - post_llm_call
+  - on_stream_delta
+  - pre_tool_call
+  - post_tool_call

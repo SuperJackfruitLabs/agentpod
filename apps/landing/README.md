@@ -8,8 +8,18 @@ which documented a project structure this app does not have.
 
 ## Pages
 
-`src/pages/` — `index.astro`, `features.astro`, `developers.astro`, `download.astro`, plus a
-`blog/` collection rendered from MDX.
+`src/pages/` — `index.astro` (the home page, standalone and self-styled), `404.astro`, and
+`blog/`, rendered from the MDX collection in `src/content/blog/`. The blog and 404 share
+`layouts/ModernLayout.astro` and the header and footer in `components/modern/`.
+
+`src/components/Mark.astro` is the logo; `public/favicon.svg` is the same mark on a tile.
+`public/og.png` is the link preview image — see `og/README.md` to regenerate it.
+`@astrojs/sitemap` writes `sitemap-index.xml`, which `public/robots.txt` names.
+
+## Deploying
+
+The `deploy-landing` job in `.github/workflows/ci.yml` publishes `dist/` to the Cloudflare
+Pages project `agentpod-site` (agentpod.dev) on every push to `main`. Nothing else deploys it.
 
 ## Commands
 

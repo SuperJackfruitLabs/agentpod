@@ -26,7 +26,6 @@ Environment=NODE_ENV=production
 Environment=PUBLIC_URL=https://hub.agentpod.dev
 Environment=COOKIE_DOMAIN=.agentpod.dev
 Environment=COOKIE_SECURE=true
-Environment=ALLOWED_ORIGINS=https://app.agentpod.dev
 
 Restart=always
 RestartSec=5

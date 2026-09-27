@@ -15,6 +15,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
+import { PrincipalId } from "@agentpod/contract";
 import { createLogger } from "../utils/logger";
 import { getGrant, setGrant, deleteGrant, listGrants, NO_GRANT } from "../services/grants";
 import { isControlPairEnforced } from "../services/control-pair";
@@ -22,46 +23,21 @@ import { isControlPairEnforced } from "../services/control-pair";
 const log = createLogger("admin-grants");
 
 /**
- * The planes a grant may name.
+ * A grant value: one principal id, and nothing else.
  *
- * An explicit list, not a shape. The obvious implementation — "anything before a
- * colon is a namespace" — accepts `hermes:*`, which is precisely the retired
- * `CONTROL_PAIR_GRANTS` format this is meant to stop: `hermes` looks exactly
- * like a plane name. It would store happily, match nothing anywhere, and read as
- * a working grant, which is the worst of the three outcomes.
- *
- * `org-plane` is here before it exists, for the same reason it is in the
- * identity systems: adopting it should be a data move.
+ * The same `PrincipalId` grammar the mint site and the cross-repo corpus pin
+ * (`fixtures/ecosystem-identity/id_grammar.json` → `agentpod.principal`), not a
+ * hand-rolled shape check — a second regex here would be a second place for the
+ * grammar to drift from the one that actually mints ids.
  *
  * Note the asymmetry with the reader, and that it is deliberate. A READER
- * ignores a namespace it does not recognise, because a claim is read by more
- * planes over time. A WRITER refuses one, because this is where a human types a
- * value and a typo should come back as an error rather than as silence.
+ * ignores a value it does not recognise, because a claim is read by more planes
+ * over time. A WRITER refuses one, because this is where a human types a value
+ * and a typo should come back as an error rather than as silence — `*` or
+ * `prn_*` would store happily and match nothing anywhere, which is the worst of
+ * the three outcomes.
  */
-const KNOWN_PLANES = ["agentpod", "kaambaan", "org-plane"] as const;
-
-const grantValue = z
-  .string()
-  .min(3)
-  .refine(
-    (v) => KNOWN_PLANES.some((p) => v.startsWith(`${p}:`) && v.length > p.length + 1),
-    `a grant value must name a known plane: ${KNOWN_PLANES.map((p) => `${p}:…`).join(", ")}`
-  )
-  /**
-   * An AgentPod value names a node as well as a station.
-   *
-   * `agentpod:hermes:*` is the shape everyone writes first and it matches no
-   * station on any node, because uniqueness is `(node, stationKey)`
-   * (`charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`,
-   * amended). The reader already ignores it; refusing it here is the difference
-   * between a typo answered in a form and a grant that looks live and permits
-   * nothing. Fleet-wide is still available — it just has to be said out loud,
-   * with an explicit wildcard in the node half.
-   */
-  .refine(
-    (v) => !v.startsWith("agentpod:") || v.slice("agentpod:".length).includes("/"),
-    "an agentpod value must name a node too: agentpod:<node>/<stationKey>, e.g. agentpod:*/hermes:*"
-  );
+const grantValue = PrincipalId;
 
 const grantBody = z.object({
   mayDispatch: z.array(grantValue),

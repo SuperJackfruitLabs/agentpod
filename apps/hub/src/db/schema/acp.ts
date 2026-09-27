@@ -67,7 +67,7 @@ export const acpEvents = pgTable("acp_events", {
   // Retention shape (Horizon 0 settles the shape; Horizon 3 enforces the policy).
   //
   // This table is authoritative for transcripts, permission decisions and usage,
-  // it is the projection source for kaambaan's activity envelope, and §11 calls
+  // it is the projection source for superpipeline's activity envelope, and §11 calls
   // it a legal record. It only grows. Without an index on created_at, pruning or
   // exporting by age means a full scan of the largest table in the database —
   // so the index is the schema decision that has to land before the data does.
@@ -93,7 +93,7 @@ export const acpEvents = pgTable("acp_events", {
  * Not a FK to stations.id, for the same reason acp_sessions is not: destroying a
  * throwaway runtime must not erase the record of what ran on it.
  *
- * **The id space is `attempt_`, not `run_`.** `run_` is kaambaan's, for the work
+ * **The id space is `attempt_`, not `run_`.** `run_` is superpipeline's, for the work
  * run it mints and dispatches; this row is one prompt-turn spent executing one
  * of those, and a claimed card takes as many prompt-turns as the work takes, so
  * the two never counted 1:1. This file used to declare `"run_" +
@@ -108,11 +108,11 @@ export const acpRuns = pgTable("acp_runs", {
   sessionId: text("session_id").notNull().references(() => acpSessions.id, { onDelete: "cascade" }),
   stationId: text("station_id").notNull(),
 
-  // kaambaan's runId when this attempt came from a claim; null when it did not.
+  // superpipeline's runId when this attempt came from a claim; null when it did not.
   // We never mint a rival id — and since the two id spaces are now disjoint,
   // that is checked rather than asserted. See packages/contract/src/run.ts.
   externalRunId: text("external_run_id"),
-  externalSource: text("external_source"),                            // "kaambaan", or another orchestrator
+  externalSource: text("external_source"),                            // "superpipeline", or another orchestrator
 
   state: text("state").notNull(),                                     // A2A vocabulary, verbatim
 
@@ -123,7 +123,7 @@ export const acpRuns = pgTable("acp_runs", {
 }, (t) => [
   index("acp_runs_session_idx").on(t.sessionId),
   index("acp_runs_station_started_idx").on(t.stationId, t.startedAt.desc()),
-  // The join from the board's side: given kaambaan's runId, find what ran.
+  // The join from the board's side: given superpipeline's runId, find what ran.
   index("acp_runs_external_idx").on(t.externalRunId),
   index("acp_runs_tenant_id_idx").on(t.tenantId),
   foreignKey({

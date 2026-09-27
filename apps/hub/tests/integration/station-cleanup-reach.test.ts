@@ -5,6 +5,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { stationCleanupRoutes } from "../../src/routes/station-cleanup";
 import { stationChangesetRoutes } from "../../src/routes/station-changeset";
 import { stationLifecycleRoutes } from "../../src/routes/station-lifecycle";
@@ -24,6 +25,10 @@ const USER = "test-user-cleanup-reach";
 const NODE = "node_cleanup_reach";
 const STATION = "station_cleanup_reach";
 
+let USER_PRINCIPAL: string;
+/** The agent occupying STATION — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+
 function mount(routes: Hono) {
   const a = new Hono();
   a.use("*", async (c, next) => {
@@ -37,6 +42,8 @@ function mount(routes: Hono) {
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "cleanup-reach@example.com", name: "CR" });
+  USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "cleanup-reach-it-user", userId: USER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "cleanup-reach-it-agent" });
   const tenant = await resolveTenantForUser(USER);
   await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
@@ -44,9 +51,9 @@ beforeAll(async () => {
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${USER}, 'cleanup-box', 'cleanup-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
   await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
     VALUES (${STATION}, ${tenant}, ${USER}, ${NODE}, 'hermes', 'hermes:cleanup', 'leaf', 'Cleanup',
-            '["cleanup","changeset","lifecycle"]'::jsonb, now(), now())`;
+            '["cleanup","changeset","lifecycle"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
 
@@ -55,7 +62,9 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM station_audit WHERE user_id = ${USER}`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER}`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id = ${USER_PRINCIPAL}`;
+    await rawSql`DELETE FROM principal_identities WHERE external_id = ${USER}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('cleanup-reach-it-user', 'cleanup-reach-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
   } catch {
@@ -73,7 +82,7 @@ function post(routes: Hono, path: string, body: Record<string, unknown> = {}) {
 
 /** Dispatch as wide as it goes, and no reach — the principal this control is for. */
 async function dispatchOnly() {
-  await setGrant(USER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+  await setGrant(USER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 }
 
 describe("cleanup splits on the effect, not the capability", () => {

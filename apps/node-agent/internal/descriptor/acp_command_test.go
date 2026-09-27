@@ -128,6 +128,11 @@ func stubOpenClawHost(t *testing.T, d Descriptor, gatewayUp bool) *openclawDescr
 	}
 	o.gatewayUp = func() bool { return gatewayUp }
 	o.resolveBinary = func() (string, error) { return "openclaw", nil }
+	// These tests describe a build that accepts --token-file. A build that
+	// does not is refused rather than downgraded, which has its own tests.
+	o.acpHelp = func(string) (string, error) {
+		return "Options:\n  --token <token>\n  --token-file <path>\n  --url <url>\n", nil
+	}
 	return o
 }
 

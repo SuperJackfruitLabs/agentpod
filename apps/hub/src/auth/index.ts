@@ -165,7 +165,10 @@ export const auth = betterAuth({
   advanced: {
     // Use secure cookies in production
     useSecureCookies: config.nodeEnv === "production",
-    // Cookie prefix - use 'better-auth' to match MetaMCP for SSO compatibility
+    // Cookie prefix. The value is load-bearing and must not change: every live
+    // session cookie carries it, so renaming it signs out every operator at once.
+    // It was originally chosen to match a MetaMCP SSO integration that no longer
+    // exists; the integration is gone, the prefix stays.
     cookiePrefix: "better-auth",
     // Generate unique session IDs
     generateId: () => crypto.randomUUID(),

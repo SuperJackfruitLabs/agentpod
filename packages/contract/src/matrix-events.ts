@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnErrorKind } from "./acp-session";
 
 // ─── Matrix event payloads the hub sends ─────────────────────────────────────
 //
@@ -140,3 +141,64 @@ export const PermissionRequestEvent = z.object({
   options: z.array(z.object({ option_id: z.string(), name: z.string() })).min(1).max(4),
 });
 export type PermissionRequestEvent = z.infer<typeof PermissionRequestEvent>;
+
+/**
+ * A failed turn, structured so a client can draw it: what failed, which model,
+ * and each model the harness fell back to.
+ *
+ * Carried **inside** the room's error notice, under this one namespaced key,
+ * rather than as a separate event beside it. The notice's `body` stays the
+ * readable fallback every Matrix client shows; a client that knows the key
+ * draws a card in its place. A second event would put the same failure in the
+ * room twice — the duplicate the one-error-per-turn work removed (2026-09-26).
+ *
+ * The same `TurnError` the hub records (`acp-session.ts`), minus what a reader
+ * does not need (`source`, the provider's own error type, the HTTP status),
+ * and bounded: a client draws every attempt it is given.
+ */
+export const TURN_ERROR_CONTENT_KEY = "dev.agentpod.turn_error";
+
+export const TurnErrorCardAttempt = z.object({
+  provider: z.string().max(200),
+  model: z.string().max(200),
+  kind: TurnErrorKind,
+  message: z.string().max(2000),
+});
+export type TurnErrorCardAttempt = z.infer<typeof TurnErrorCardAttempt>;
+
+export const TurnErrorCard = z.object({
+  schema_version: z.literal(1),
+  kind: TurnErrorKind,
+  message: z.string().max(4000),
+  harness: z.string().max(100),
+  provider: z.string().max(200).optional(),
+  model: z.string().max(200).optional(),
+  retryable: z.boolean().optional(),
+  attempts: z.array(TurnErrorCardAttempt).max(16).optional(),
+});
+export type TurnErrorCard = z.infer<typeof TurnErrorCard>;
+
+/**
+ * A voice note's transcript, structured so a client can draw it under the
+ * note it transcribes.
+ *
+ * Carried inside the hub's transcript notice — an `m.notice` that is a reply
+ * (`m.in_reply_to`) to the voice note — under this one namespaced key. The
+ * notice's `body` ("Transcript: …") stays the readable fallback every Matrix
+ * client shows; a client that knows the key draws the text as part of the
+ * voice note rather than as a separate line. Which note it belongs to is the
+ * reply relation, not a field here: a key cannot point at a message the
+ * event does not already relate to.
+ */
+export const VOICE_TRANSCRIPT_CONTENT_KEY = "dev.agentpod.voice_transcript";
+
+export const VoiceTranscript = z.object({
+  schema_version: z.literal(1),
+  /** What was heard, as the agent received it. */
+  text: z.string().max(20_000),
+  /** The language the service heard, as an ISO code, when it said. */
+  language: z.string().max(16).optional(),
+  /** Length of the note in seconds, when the sender's client said. */
+  seconds: z.number().int().nonnegative().max(3600).optional(),
+});
+export type VoiceTranscript = z.infer<typeof VoiceTranscript>;

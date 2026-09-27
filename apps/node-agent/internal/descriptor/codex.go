@@ -42,20 +42,22 @@ type codexDescriptor struct {
 	// Host seams. These are fields so no test needs codex, node or npx
 	// installed, none touches the host's PATH or filesystem and none spawns a
 	// pgrep-visible child; production wiring in NewCodexFrom uses the real host.
-	processRunning func(projPath string) (running bool, note string)
-	userHome       string                                // OS user home; "" omits home-relative candidates
-	lookPath       func(string) (string, error)          // exec.LookPath
-	isExecutable   func(string) bool                     // isExecutableFile
-	nodeVersion    func(nodePath string) (string, error) // `node --version`
-	getenv         func(string) string                   // os.Getenv
+	processRunning       func(projPath string) (running bool, note string)
+	adapterRunning       func(adapterPath, projPath string) (running bool, note string)
+	nativeSkillDiscovery func(context.Context, string, string, string) ([]string, error)
+	userHome             string                                // OS user home; "" omits home-relative candidates
+	lookPath             func(string) (string, error)          // exec.LookPath
+	isExecutable         func(string) bool                     // isExecutableFile
+	nodeVersion          func(nodePath string) (string, error) // `node --version`
+	getenv               func(string) string                   // os.Getenv
 }
 
 // CodexConfig carries everything the descriptor needs. Zero values are valid: an
 // unconfigured host still detects stations, and an ACP session still starts as
 // long as the adapter (or npx) is reachable on PATH.
 type CodexConfig struct {
-	Home        string // path to the ~/.codex directory; default <user home>/.codex
-	AcpBinary   string // a codex-acp executable; empty = resolve it
+	Home      string // path to the ~/.codex directory; default <user home>/.codex
+	AcpBinary string // a codex-acp executable; empty = resolve it
 	// CodexBinary is opt-in: naming a codex CLI here sets CODEX_PATH, which
 	// overrides the Codex the adapter bundles. Empty means "don't set it" —
 	// never "discover one". Discovery would find CLIs older than the
@@ -89,16 +91,18 @@ func NewCodexFrom(cfg CodexConfig) Descriptor {
 		home = filepath.Join(base, ".codex")
 	}
 	return &codexDescriptor{
-		home:           home,
-		acpBinary:      cfg.AcpBinary,
-		codexBinary:    cfg.CodexBinary,
-		nodeBinary:     cfg.NodeBinary,
-		processRunning: codexProcessRunning,
-		userHome:       userHome,
-		lookPath:       exec.LookPath,
-		isExecutable:   isExecutableFile,
-		nodeVersion:    nodeVersionOutput,
-		getenv:         os.Getenv,
+		home:                 home,
+		acpBinary:            cfg.AcpBinary,
+		codexBinary:          cfg.CodexBinary,
+		nodeBinary:           cfg.NodeBinary,
+		processRunning:       codexProcessRunning,
+		adapterRunning:       codexAdapterProcessRunning,
+		nativeSkillDiscovery: codexACPDiscoverSkills,
+		userHome:             userHome,
+		lookPath:             exec.LookPath,
+		isExecutable:         isExecutableFile,
+		nodeVersion:          nodeVersionOutput,
+		getenv:               os.Getenv,
 	}
 }
 
@@ -132,7 +136,7 @@ func (c *codexDescriptor) Detect() ([]Station, error) {
 
 	// "acp" is advertised because *codexDescriptor implements ACPCommander (via
 	// the external codex-acp adapter — see ACPCommand).
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 
 	stations := []Station{}
 	for _, projPath := range parseCodexProjectPaths(data) {
@@ -321,7 +325,7 @@ const (
 	// unpinned `npx -y <pkg>` would silently change every node's adapter the
 	// moment a new version is published, mid-flight, with no way to tell which
 	// version a session actually ran.
-	codexACPPackage = "@agentclientprotocol/codex-acp@1.1.14"
+	codexACPPackage = "@agentclientprotocol/codex-acp@1.12.0"
 	// codexACPMinNodeMajor is 0 — "no minimum" — NOT an oversight: unlike
 	// claude-agent-acp (node >= 22), codex-acp declares no `engines` field at
 	// all, so there is no documented requirement to enforce. The runtime is
@@ -457,7 +461,22 @@ func (c *codexDescriptor) Health(key string) (Health, error) {
 	if err != nil {
 		return Health{}, err
 	}
+	return c.healthAt(projPath), nil
+}
 
+// HealthFor implements HealthForStation: it reads the workspace off the station
+// the caller already detected instead of re-running Detect to find it again,
+// which is what turns a health sweep from O(N²) host scans into O(N).
+func (c *codexDescriptor) HealthFor(s Station) (Health, error) {
+	if s.WorkspacePath == nil || *s.WorkspacePath == "" {
+		return c.Health(s.Key)
+	}
+	return c.healthAt(*s.WorkspacePath), nil
+}
+
+// healthAt is the shared body of Health and HealthFor, keyed on a workspace
+// path the caller has already resolved.
+func (c *codexDescriptor) healthAt(projPath string) Health {
 	health := Health{}
 
 	// Disk usage from the shared async cache — never walk on the request path
@@ -470,7 +489,12 @@ func (c *codexDescriptor) Health(key string) (Health, error) {
 		health.Note = &note
 	}
 
-	return health, nil
+	runtime := c.chatRuntimeNote()
+	if health.Note != nil {
+		runtime = *health.Note + "; " + runtime
+	}
+	health.Note = &runtime
+	return health
 }
 
 // codexProcessRunning reports whether a codex CLI session is running with its

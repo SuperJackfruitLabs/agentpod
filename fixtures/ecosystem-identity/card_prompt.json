@@ -13,11 +13,11 @@
   ],
 
   "grammarSource": [
-    "kaambaan apps/api/src/board/board-do.ts:145-161 — RunContext {run, card, stage, handoff, references}",
-    "kaambaan apps/api/src/board/board-do.ts:68-84 — CardView {id, title, spec, currentStageKey, state, attemptCount, ...}",
-    "kaambaan apps/api/src/board/board-do.ts:30-40 — StageDef {key, name, order, ownerKind, owner, gate, wipLimit, routing}",
-    "kaambaan apps/api/src/board/board-do.ts:227-242 — ReferenceView {id, cardId, url, title, subtitle, provider, sourceType, ...}",
-    "kaambaan apps/api/src/board/board-do.ts:1505-1512 — a `request_changes` gate decision merges `{feedback}` into the card's existing handoff, which is why `feedback` is the one handoff key this contract renders specially",
+    "superpipeline apps/api/src/board/board-do.ts:145-161 — RunContext {run, card, stage, handoff, references}",
+    "superpipeline apps/api/src/board/board-do.ts:68-84 — CardView {id, title, spec, currentStageKey, state, attemptCount, ...}",
+    "superpipeline apps/api/src/board/board-do.ts:30-40 — StageDef {key, name, order, ownerKind, owner, gate, wipLimit, routing}",
+    "superpipeline apps/api/src/board/board-do.ts:227-242 — ReferenceView {id, cardId, url, title, subtitle, provider, sourceType, ...}",
+    "superpipeline apps/api/src/board/board-do.ts:1505-1512 — a `request_changes` gate decision merges `{feedback}` into the card's existing handoff, which is why `feedback` is the one handoff key this contract renders specially",
     "agentpod packages/contract/src/card-prompt.ts — CardPrompt + renderCardPrompt, the validator and renderer this corpus drives"
   ],
 
@@ -37,7 +37,7 @@
       "why": "Every input present. This is the shape a second-stage card has: a spec from the human, a handoff from the stage before it, and references the first agent attached.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": {
@@ -60,7 +60,7 @@
         ],
         "attempt": { "number": 2 }
       },
-      "rendered": "# Add a retry to the webhook sender\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Review (review) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502. Retry with backoff, five attempts, then dead-letter.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\",\n  \"branch\": \"feat/webhook-retry\"\n}\n```\n\n## References\n\n- feat: retry webhook delivery — https://github.com/acme/api/pull/412 (github/pull_request)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+      "rendered": "# Add a retry to the webhook sender\n\nsuperpipeline board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Review (review) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502. Retry with backoff, five attempts, then dead-letter.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\",\n  \"branch\": \"feat/webhook-retry\"\n}\n```\n\n## References\n\n- feat: retry webhook delivery — https://github.com/acme/api/pull/412 (github/pull_request)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
     },
     {
       "name": "bare_card_first_attempt",
@@ -68,7 +68,7 @@
       "why": "The minimum a board can hand over: a title and nothing else. Every optional section must vanish rather than render empty, or the harness is told there was no spec, no handoff and no references when it was only told a title.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "List the files in this directory, then stop." },
@@ -76,7 +76,7 @@
         "references": [],
         "attempt": { "number": 1 }
       },
-      "rendered": "# List the files in this directory, then stop.\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+      "rendered": "# List the files in this directory, then stop.\n\nsuperpipeline board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
     },
     {
       "name": "rework_after_request_changes",
@@ -84,7 +84,7 @@
       "why": "THE CASE THAT EARNS THE CONTRACT. A `request_changes` gate decision merges `{feedback}` into the handoff the agent itself produced and re-queues the card. Rendered as an undifferentiated JSON blob, a reviewer's instruction sits below the agent's own summary of what it already did — so the most important sentence on the card is the least prominent. It is lifted out.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_a1b2c3d4e5f60718",
         "card": {
@@ -100,15 +100,15 @@
         "references": [],
         "attempt": { "number": 2 }
       },
-      "rendered": "# Add a retry to the webhook sender\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502.\n\n## Review feedback\n\nBackoff is linear — make it exponential and cap it at 60s.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\"\n}\n```\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+      "rendered": "# Add a retry to the webhook sender\n\nsuperpipeline board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 2.\n\n## Task\n\nDeliveries fail permanently on a 502.\n\n## Review feedback\n\nBackoff is linear — make it exponential and cap it at 60s.\n\n## Handoff from the previous stage\n\n```json\n{\n  \"summary\": \"Implemented in src/push/deliver.ts; tests added.\"\n}\n```\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
     },
     {
       "name": "structured_spec_and_untitled_reference",
       "mustParse": true,
-      "why": "`spec` is `JsonValue` on kaambaan's side, so it is routinely an object, and a reference's `title` is nullable. Both are the paths where a naive renderer prints `[object Object]` or the word `null` into a harness's instruction.",
+      "why": "`spec` is `JsonValue` on superpipeline's side, so it is routinely an object, and a reference's `title` is nullable. Both are the paths where a naive renderer prints `[object Object]` or the word `null` into a harness's instruction.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": {
@@ -122,15 +122,15 @@
         ],
         "attempt": { "number": 1 }
       },
-      "rendered": "# Upgrade the pinned Go toolchain\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Task\n\n```json\n{\n  \"from\": \"1.22\",\n  \"to\": \"1.23\",\n  \"files\": [\n    \"go.mod\",\n    \".github/workflows/ci.yml\"\n  ]\n}\n```\n\n## References\n\n- https://go.dev/doc/go1.23 (web/document)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+      "rendered": "# Upgrade the pinned Go toolchain\n\nsuperpipeline board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · stage Work (work) · attempt 1.\n\n## Task\n\n```json\n{\n  \"from\": \"1.22\",\n  \"to\": \"1.23\",\n  \"files\": [\n    \"go.mod\",\n    \".github/workflows/ci.yml\"\n  ]\n}\n```\n\n## References\n\n- https://go.dev/doc/go1.23 (web/document)\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
     },
     {
       "name": "no_stage",
       "mustParse": true,
-      "why": "kaambaan returns `stage: null` when the board's stage list no longer contains the card's stage (board-do.ts:157). The prompt must still render — a board edited mid-run must not strand a harness.",
+      "why": "superpipeline returns `stage: null` when the board's stage list no longer contains the card's stage (board-do.ts:157). The prompt must still render — a board edited mid-run must not strand a harness.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
@@ -138,7 +138,7 @@
         "references": [],
         "attempt": { "number": 1 }
       },
-      "rendered": "# Rebuild the index\n\nkaambaan board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+      "rendered": "# Rebuild the index\n\nsuperpipeline board brd_9c1d4e5f6a7b8c9d · card crd_1a2b3c4d5e6f7a8b · attempt 1.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
     },
 
     {
@@ -146,7 +146,7 @@
       "mustParse": false,
       "why": "A prompt with no version cannot be told from a prompt built by a renderer that predates a section. The version is the whole point of writing the contract down.",
       "value": {
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
@@ -161,7 +161,7 @@
       "why": "A hub must refuse a version it cannot render rather than render it as though it were v1. Accepting an unknown version is how a section silently goes missing on one side of the seam.",
       "value": {
         "version": "card-prompt/2",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
@@ -176,7 +176,7 @@
       "why": "The title is the one field always rendered and is the harness's whole instruction when there is no spec. An empty one produces a prompt that asks for nothing and gets a confident answer anyway.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "" },
@@ -188,10 +188,10 @@
     {
       "name": "attempt_zero",
       "mustParse": false,
-      "why": "kaambaan's `attemptCount` increments on claim, so the agent working a card is always on attempt 1 or later (spike finding RQ4). A zero means the count was read from the wrong field, and 'attempt 0' invites a harness to treat a retry as a first run.",
+      "why": "superpipeline's `attemptCount` increments on claim, so the agent working a card is always on attempt 1 or later (spike finding RQ4). A zero means the count was read from the wrong field, and 'attempt 0' invites a harness to treat a retry as a first run.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },
@@ -206,7 +206,7 @@
       "why": "The same rule `Run.externalRunId` carries, applied where the id enters rather than where it is stored. An `attempt_…` here means AgentPod's own key was passed off as the board's work run, and the prompt would be built for a run no board has.",
       "value": {
         "version": "card-prompt/1",
-        "source": "kaambaan",
+        "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
         "card": { "id": "crd_1a2b3c4d5e6f7a8b", "title": "Rebuild the index" },

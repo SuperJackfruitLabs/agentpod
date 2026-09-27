@@ -8,6 +8,9 @@
 > not because it is current. **The deployment guide is
 > [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md).**
 >
+> `app.agentpod.dev` itself was retired on 2026-09-17 (SuperJackfruitLabs/estate#2): the hub no
+> longer trusts it as an origin and nothing serves it.
+>
 > Three things in here are known-wrong today and are left as written rather than patched:
 > `SESSION_SECRET` (step 4) is read by nothing — the hub uses `BETTER_AUTH_SECRET`;
 > `PUBLIC_URL` (step 4) is read by nothing; and `redesign/fleet-console` no longer exists —

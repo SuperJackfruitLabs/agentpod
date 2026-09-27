@@ -26,8 +26,8 @@ an executable corpus that caught four real cross-repo disagreements on its first
 
 | Document | Covers |
 |----------|--------|
-| [DEPLOYMENT.md](./DEPLOYMENT.md) | Deploying from scratch: VPS hub (systemd + Postgres/pgvector + nginx), console on Cloudflare Pages, node-agent images, every hub environment variable, the kaambaan bridge |
-| [OPERATING.md](./OPERATING.md) | Day-2: enrolling nodes, adopting stations, driving capability panels, provisioning on Docker/Cloudflare/Modal/Fly, the kaambaan bridge ledger, troubleshooting |
+| [DEPLOYMENT.md](./DEPLOYMENT.md) | Deploying from scratch: VPS hub (systemd + Postgres/pgvector + nginx), console on Cloudflare Pages, node-agent images, every hub environment variable, the superpipeline bridge |
+| [OPERATING.md](./OPERATING.md) | Day-2: enrolling nodes, adopting stations, driving capability panels, provisioning on Docker/Cloudflare/Modal/Fly, the superpipeline bridge ledger, troubleshooting |
 
 ## Working on the repo
 
@@ -39,6 +39,8 @@ an executable corpus that caught four real cross-repo disagreements on its first
 | [../CHANGELOG.md](../CHANGELOG.md) | Release history (`v0.1.x`) |
 
 ## Dated decisions
+
+- [2026-09-20 — Skill inventory and managed installation](./strategy/2026-09-20-managed-skills.md) — proposed; optional capabilities, independent evidence states and rollout gates
 
 [`strategy/`](./strategy/) — point-in-time arguments about where the product goes. **Read the
 date.** These are proposals and decisions as of the day they were written; where one and the

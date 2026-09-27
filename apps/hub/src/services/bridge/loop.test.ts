@@ -11,7 +11,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { BRIDGE_ENV_FLAG } from "./config";
 import type { DispatchResult } from "./dispatch";
-import { startAgentLoop, startKaambaanBridge } from "./loop";
+import { SuperpipelineApiError } from "./superpipeline";
+import { startAgentLoop, startSuperpipelineBridge } from "./loop";
 
 const saved = process.env[BRIDGE_ENV_FLAG];
 afterEach(() => {
@@ -175,7 +176,91 @@ describe("off by default", () => {
       },
     });
 
-    expect(await startKaambaanBridge({ acp })).toBeNull();
+    expect(await startSuperpipelineBridge({ acp })).toBeNull();
     expect(touched).toBe(false);
+  });
+});
+
+describe("a credential superpipeline will not accept", () => {
+  /**
+   * Found on the live fleet, 2026-09-04: the hub had been claiming against a board with a
+   * token whose agent was deleted three days earlier. Every thirty seconds, a 401, logged and
+   * retried — 8,640 identical lines a day, and no signal beyond noise nobody reads.
+   *
+   * A 401 does not improve by being asked again. It halts on the same terms as `foreign-run`:
+   * stop, say why once, make somebody look.
+   */
+  test("halts instead of retrying forever", async () => {
+    let calls = 0;
+    const lines: string[] = [];
+    const handle = startAgentLoop({
+      run: async () => {
+        calls++;
+        throw new SuperpipelineApiError(401, "/v1/boards/brd_x/claims", null, "a valid agent token is required");
+      },
+      log: (m) => lines.push(m),
+      sleep: async () => {},
+    });
+    await handle.done;
+
+    expect(calls).toBe(1); // not two, not forever
+    expect(lines.some((l) => l.includes("refused this agent's credential"))).toBe(true);
+  });
+
+  test("halts on a 403 too — a refusal is not a transient error", async () => {
+    let calls = 0;
+    const handle = startAgentLoop({
+      run: async () => {
+        calls++;
+        throw new SuperpipelineApiError(403, "/v1/boards/brd_x/claims", null, "forbidden");
+      },
+      log: () => {},
+      sleep: async () => {},
+    });
+    await handle.done;
+    expect(calls).toBe(1);
+  });
+
+  test("a 500 still backs off and retries, because that one can come right", async () => {
+    let calls = 0;
+    const handle = startAgentLoop({
+      run: async () => {
+        calls++;
+        if (calls >= 3) handle.stop();
+        throw new SuperpipelineApiError(500, "/v1/boards/brd_x/claims", null, "upstream exploded");
+      },
+      log: () => {},
+      sleep: async () => {},
+    });
+    await handle.done;
+    expect(calls).toBeGreaterThan(1);
+  });
+});
+
+describe("a cycle is not bounded, and that is deliberate", () => {
+  /**
+   * `runOnce` drives the claimed run to completion — session, prompt, activity stream,
+   * heartbeats — so a legitimate cycle lasts as long as the agent's work, and `permissionWaitMs`
+   * alone defaults to thirty minutes.
+   *
+   * A whole-cycle deadline was written on 2026-09-08 and reverted the same hour, because it
+   * would have abandoned a running agent mid-task. What must be fast is the readiness probe,
+   * and that is bounded in `dispatch.ts` where it is made. This test exists so the idea does
+   * not come back.
+   */
+  test("a long cycle is left alone", async () => {
+    let finished = false;
+    const handle = startAgentLoop({
+      run: async (): Promise<DispatchResult> => {
+        await new Promise((r) => setTimeout(r, 120));
+        finished = true;
+        handle.stop();
+        return { status: "idle" } as DispatchResult;
+      },
+      log: () => {},
+      sleep: async () => {},
+    });
+    await handle.done;
+    expect(finished).toBe(true); // not cut short
   });
 });

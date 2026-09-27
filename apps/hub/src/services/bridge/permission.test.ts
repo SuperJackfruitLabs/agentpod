@@ -23,9 +23,9 @@ const OFFERED = [
   { optionId: "reject_once", name: "No", kind: "reject_once" },
 ];
 
-describe("ACP options → kaambaan options", () => {
+describe("ACP options → superpipeline options", () => {
   test("the machine identity is the name; the human label is the title", () => {
-    // kaambaan echoes the chosen option's `name` back in `answer.option`, and
+    // superpipeline echoes the chosen option's `name` back in `answer.option`, and
     // ACP answers by `optionId`. So `name` MUST be the optionId — putting the
     // human label there produces an answer that maps to nothing.
     expect(toBoardOptions(OFFERED)).toEqual([
@@ -55,7 +55,7 @@ describe("ACP options → kaambaan options", () => {
   });
 });
 
-describe("kaambaan's answer → the ACP option", () => {
+describe("superpipeline's answer → the ACP option", () => {
   test("an approval round-trips to the option the human chose", () => {
     const chosen = toBoardOptions(OFFERED)[0]!;
     expect(selectedOptionId(OFFERED, { option: chosen.name })).toBe("allow_once");

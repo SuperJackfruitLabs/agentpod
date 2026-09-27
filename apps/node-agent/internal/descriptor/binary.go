@@ -2,9 +2,11 @@ package descriptor
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,17 +21,70 @@ import (
 // operator's interactive shell. Hence: config override → PATH → well-known
 // absolute paths.
 
+// harnessCommand builds an exec of a harness binary with that binary's own
+// directory leading PATH.
+//
+// Every such exec needs this, not just the version probe. `pi`, `pi-acp` and
+// `openclaw` are Node programs whose interpreter sits beside them, and a
+// node-agent started by launchd or systemd inherits a PATH without it. The
+// version probe was fixed for exactly this reason; the harness REPORT commands
+// were not, so readiness passed on a harness whose inventory then failed with
+// `exit status 127: env: node: No such file or directory`. One helper serves
+// both so the two cannot drift apart again.
+//
+// The binary's directory leads rather than trails, so a same-named binary
+// earlier on the service PATH cannot answer for the one actually selected.
+func harnessCommand(ctx context.Context, binary string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = append(os.Environ(), "PATH="+pathWithDirFirst(filepath.Dir(binary), os.Getenv("PATH")))
+	return cmd
+}
+
 // wellKnownBinaryDirs returns the directories probed when a binary is not on
 // PATH, in priority order. userHome is the OS user's home directory; "" omits
 // the home-relative candidates (a relative ".local/share/pnpm/x" candidate
 // would be garbage).
+// nodeVersionManagerBins returns the bin directory of each node installed under
+// nvm, newest version first.
+//
+// Sorting is by descending directory name, which orders the vN.N.N layout nvm
+// uses correctly for every version this will meet in practice. An unreadable or
+// absent ~/.nvm yields nothing rather than an error: this is a set of
+// candidates, and a missing version manager is the ordinary case.
+func nodeVersionManagerBins(userHome string) []string {
+	root := filepath.Join(userHome, ".nvm", "versions", "node")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(names)))
+	dirs := make([]string, 0, len(names))
+	for _, name := range names {
+		dirs = append(dirs, filepath.Join(root, name, "bin"))
+	}
+	return dirs
+}
+
 func wellKnownBinaryDirs(userHome string) []string {
 	var dirs []string
 	if userHome != "" {
 		dirs = append(dirs,
 			filepath.Join(userHome, ".local", "share", "pnpm"), // pnpm global
 			filepath.Join(userHome, ".local", "bin"),           // npm --prefix ~/.local
+			filepath.Join(userHome, ".npm-global", "bin"),      // npm's documented no-sudo prefix
 		)
+		// A harness installed with `npm i -g` under a node version manager
+		// lands in that node's own bin directory rather than any fixed path --
+		// OpenClaw installs exactly this way. Newest version first, so an old
+		// one left behind by an upgrade cannot shadow the CLI the operator
+		// actually uses.
+		dirs = append(dirs, nodeVersionManagerBins(userHome)...)
 	}
 	return append(dirs,
 		"/usr/local/bin",
@@ -108,14 +163,19 @@ func nodeVersionOutput(nodePath string) (string, error) {
 
 // nodeVersionOutputWithin is nodeVersionOutput with an explicit deadline. A
 // timeout surfaces as an error, which callers treat as "version unknown".
+//
+// A query that times out is retried once: under load a cold `node --version`
+// can overrun the bound, and reading that as "version unknown" silently drops
+// the configured runtime from PATH.
 func nodeVersionOutputWithin(timeout time.Duration, nodePath string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
-	if err != nil {
-		return "", err
+	probe := probeVersion(context.Background(), timeout, func(ctx context.Context) (string, error) {
+		out, err := exec.CommandContext(ctx, nodePath, "--version").Output()
+		return string(out), err
+	})
+	if probe.Status != VersionKnown {
+		return "", errors.New(probe.Reason)
 	}
-	return string(out), nil
+	return probe.Version, nil
 }
 
 // parseNodeMajor extracts the major version from `node --version` output

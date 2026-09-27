@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "harness": "opencode",
+  "engine_version": "1.18.15",
+  "adapter": "opencode acp",
+  "fixture": "synthetic grouped .opencode/skills/sjl-fixture/skills/sjl-fixture/SKILL.md",
+  "method": "fresh ACP initialize, then session/new; no prompt or client tools",
+  "isolation": "disposable workspace, HOME and XDG directories; empty inherited environment; default plugins, sharing, model fetch and auto-update disabled",
+  "checks": [
+    {"name": "target-workspace-advertises-exact-name", "passed": true, "advertised": "sjl-fixture"},
+    {"name": "sibling-workspace-excludes-name", "passed": true, "advertised": "sjl-fixture", "present": false}
+  ],
+  "reproduce": "AGENTPOD_OPENCODE_ACP_BINARY=/absolute/path/to/opencode-1.18.15 go test ./internal/descriptor -run '^TestOpenCodeInstalledACPSkillDiscovery$' -count=1 -v",
+  "limitations": [
+    "The check proves fresh-session command advertisement, not model execution or an active-session refresh.",
+    "The installed executable was a temporary npm opencode-ai@1.18.15 platform binary; it was not a deployed station binary.",
+    "A live native canary, rollback and production network observation remain separate gates."
+  ]
+}

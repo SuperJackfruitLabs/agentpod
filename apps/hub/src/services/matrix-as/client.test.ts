@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { createMatrixClient } from "./client";
+import { createMatrixClient, isMatrixExclusiveNamespace, isMatrixUserInUse } from "./client";
 
 /**
  * Speaking to a homeserver *as* a station.
@@ -80,6 +80,23 @@ describe("acting as a station", () => {
     await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
   });
 
+  test("registering an agent inhibits login, or MSC4190 refuses the whole call", async () => {
+    // A homeserver whose appservice registration enables MSC4190 manages
+    // devices itself and will not issue one at registration: without this the
+    // register fails with `400 M_APPSERVICE_LOGIN_UNSUPPORTED` and the station
+    // never gets an identity. Found in production, where turning MSC4190 on
+    // for bridge encryption left 16 of 30 stations unprovisioned at the next
+    // boot. Provisioning wants an identity and never a token, so there is
+    // nothing here that wanted a login.
+    replies = [{ status: 200, body: { user_id: USER } }];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    const register = calls.find((c) => c.url.includes("/register"));
+    expect(register).toBeTruthy();
+    expect((register!.body as Record<string, unknown>).inhibit_login).toBe(true);
+  });
+
   test("sets the display name even when the user already existed", async () => {
     // A station that was renamed must stop introducing itself by its old name.
     // Setting the name only on creation would mean the rename never lands,
@@ -88,9 +105,39 @@ describe("acting as a station", () => {
 
     await client().ensureUser("agent_box_pi-x", "renamed (pi @ box)");
 
-    const profile = calls.find((c) => c.url.includes("/displayname"));
+    const profile = calls.find((c) => c.url.includes("/displayname") && c.method === "PUT");
     expect(profile).toBeTruthy();
     expect(profile!.body).toEqual({ displayname: "renamed (pi @ box)" });
+  });
+
+  test("does not rewrite a display name that is already right", async () => {
+    // Every PUT to /displayname makes the homeserver write a fresh
+    // m.room.member event into every room the agent is in — tuwunel does so
+    // even when the name is identical. Provisioning runs on every node
+    // reconnect, so krishna's room collected eight "updated their membership"
+    // lines on 2026-09-24 whose displayname equalled prev_content's.
+    replies = [
+      { status: 400, body: { errcode: "M_USER_IN_USE" } },
+      { status: 200, body: { displayname: "x (pi @ box)" } },
+    ];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    expect(calls.some((c) => c.url.includes("/displayname") && c.method === "PUT")).toBe(false);
+  });
+
+  test("writes the display name when the current one cannot be read", async () => {
+    // Not knowing is not the same as knowing it is right. A rename that never
+    // lands is the failure the unconditional write existed to prevent.
+    replies = [
+      { status: 400, body: { errcode: "M_USER_IN_USE" } },
+      { status: 500, body: { errcode: "M_UNKNOWN" } },
+    ];
+
+    await client().ensureUser("agent_box_pi-x", "x (pi @ box)");
+
+    const put = calls.find((c) => c.url.includes("/displayname") && c.method === "PUT");
+    expect(put?.body).toEqual({ displayname: "x (pi @ box)" });
   });
 
   test("treats M_ROOM_IN_USE on create as success", async () => {
@@ -113,6 +160,20 @@ describe("acting as a station", () => {
     replies = [{ status: 403, body: { errcode: "M_FORBIDDEN", error: "not in namespace" } }];
 
     await expect(client().ensureUser("agent_nope", "nope")).rejects.toThrow(/M_FORBIDDEN|namespace/);
+  });
+
+  test("sendText carries extra content keys, but they cannot replace msgtype or body", async () => {
+    await client().sendText(USER, ROOM, "readable", {
+      "dev.agentpod.turn_error": { schema_version: 1 },
+      body: "hijacked",
+      msgtype: "m.image",
+    });
+    const send = calls.find((c) => c.url.includes("/send/m.room.message/"))!;
+    expect(send.body).toEqual({
+      "dev.agentpod.turn_error": { schema_version: 1 },
+      msgtype: "m.text",
+      body: "readable",
+    });
   });
 
   test("typing is sent as the agent, so the room shows the agent thinking", async () => {
@@ -214,3 +275,243 @@ describe("an alias that is already taken", () => {
     expect(roomId).toBeNull();
   });
 });
+
+describe("rotateCredentials", () => {
+  test("invalidates every existing token before issuing a new one", async () => {
+    replies = [
+      { status: 200, body: {} },
+      {
+        status: 200,
+        body: {
+          user_id: "@agent_box_pi-x:id.agentpod.dev",
+          access_token: "syt_new",
+          device_id: "DEV2",
+        },
+      },
+    ];
+
+    const out = await client().rotateCredentials("agent_box_pi-x");
+
+    expect(calls).toHaveLength(2);
+    // logout/all first, or rotation accumulates devices forever.
+    expect(calls[0]!.url).toContain("/_matrix/client/v3/logout/all");
+    expect(calls[1]!.url).toContain("/_matrix/client/v3/login");
+    expect(out).toEqual({
+      userId: "@agent_box_pi-x:id.agentpod.dev",
+      accessToken: "syt_new",
+      deviceId: "DEV2",
+    });
+  });
+
+  test("impersonates for logout/all and does not for login", async () => {
+    replies = [
+      { status: 200, body: {} },
+      { status: 200, body: { access_token: "syt_new", device_id: "DEV2" } },
+    ];
+
+    await client().rotateCredentials("agent_box_pi-x");
+
+    // The appservice acts AS the user to clear its sessions...
+    expect(calls[0]!.url).toContain("user_id=%40agent_box_pi-x%3Aid.agentpod.dev");
+    // ...but the login body names the user, and impersonating there is rejected.
+    expect(calls[1]!.url).not.toContain("user_id=");
+    expect(calls[1]!.body).toEqual({
+      type: "m.login.application_service",
+      identifier: { type: "m.id.user", user: "agent_box_pi-x" },
+    });
+  });
+
+  test("does not issue credentials when the old ones could not be cleared", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    await expect(client().rotateCredentials("agent_box_pi-x")).rejects.toThrow(
+      /logout\/all/
+    );
+    // Crucially it stopped: a login here would have added a device to an
+    // identity whose existing tokens are still live.
+    expect(calls).toHaveLength(1);
+  });
+
+  test("refuses a login that comes back without a token", async () => {
+    replies = [
+      { status: 200, body: {} },
+      { status: 200, body: { user_id: "@agent_box_pi-x:id.agentpod.dev" } },
+    ];
+
+    await expect(client().rotateCredentials("agent_box_pi-x")).rejects.toThrow(
+      /no access_token/
+    );
+  });
+});
+
+describe("registerWithCredentials", () => {
+  test("throws a typed error when the identity already exists", async () => {
+    replies = [{ status: 400, body: { errcode: "M_USER_IN_USE" } }];
+
+    const err = await client()
+      .registerWithCredentials("agent_box_pi-x")
+      .catch((e: unknown) => e);
+
+    // Typed, so the caller can branch on it without matching a message.
+    expect(isMatrixUserInUse(err)).toBe(true);
+  });
+
+  test("any other failure stays an ordinary error", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    const err = await client()
+      .registerWithCredentials("agent_box_pi-x")
+      .catch((e: unknown) => e);
+
+    expect(isMatrixUserInUse(err)).toBe(false);
+    expect(String(err)).toContain("M_FORBIDDEN");
+  });
+});
+
+describe("join, leave, isJoined — what the mxid migration needs", () => {
+  test("join impersonates the new user against the join endpoint", async () => {
+    await client().join(USER, ROOM);
+
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toContain(`/join/${encodeURIComponent(ROOM)}`);
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("joining a room the user is already in is not an error", async () => {
+    // What makes it safe to call unconditionally on a re-run: the endpoint's
+    // own idempotence, not a flag this script keeps.
+    replies = [{ status: 200, body: { room_id: ROOM } }];
+
+    await client().join(USER, ROOM);
+  });
+
+  test("a real failure to join surfaces", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN", error: "not in namespace" } }];
+
+    await expect(client().join(USER, ROOM)).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("leave impersonates the old user against the room's leave endpoint", async () => {
+    await client().leave(USER, ROOM);
+
+    expect(calls[0]!.method).toBe("POST");
+    expect(calls[0]!.url).toContain(`/rooms/${encodeURIComponent(ROOM)}/leave`);
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("isJoined reads the user's own joined_rooms, not a room membership list", async () => {
+    replies = [{ status: 200, body: { joined_rooms: [ROOM, "!other:id.agentpod.dev"] } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(true);
+    expect(calls[0]!.url).toContain("/joined_rooms");
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+  });
+
+  test("isJoined is false once the room drops out of joined_rooms", async () => {
+    replies = [{ status: 200, body: { joined_rooms: ["!other:id.agentpod.dev"] } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(false);
+  });
+
+  test("a homeserver that could not answer is not the same as 'already left'", async () => {
+    // This is the idempotency check on the only irreversible step in the slice.
+    // Read as `false`, a transient 502 says "the new user never joined" and
+    // "the old user has already left" in the same breath — so the migration
+    // re-joins a user that is already in, then reports the room as done while
+    // the old identity is still sitting in it. Thirty-two rooms with two agents
+    // in them, and a report saying there is nothing left to do.
+    replies = [{ status: 502, body: {} }];
+
+    await expect(client().isJoined(USER, ROOM)).rejects.toThrow(/502/);
+  });
+
+  test("a refusal is not 'already left' either", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN", error: "not in namespace" } }];
+
+    await expect(client().isJoined(USER, ROOM)).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("a 404 is still a clean 'not joined' — the user has no rooms to be in", async () => {
+    // The one non-200 that is an answer rather than a failure to answer: the
+    // homeserver knows nothing of this user, which for the migration's purposes
+    // is exactly "not in that room".
+    replies = [{ status: 404, body: { errcode: "M_NOT_FOUND" } }];
+
+    expect(await client().isJoined(USER, ROOM)).toBe(false);
+  });
+});
+
+describe("account data — the read-modify-write m.direct needs", () => {
+  test("a type never set answers null, not an error", async () => {
+    replies = [{ status: 404, body: { errcode: "M_NOT_FOUND" } }];
+
+    expect(await client().getAccountData(USER, "m.direct")).toBeNull();
+  });
+
+  test("existing content comes back as-is, for the caller to merge", async () => {
+    replies = [{ status: 200, body: { "@old:h": ["!r:h"] } }];
+
+    expect(await client().getAccountData(USER, "m.direct")).toEqual({ "@old:h": ["!r:h"] });
+  });
+
+  test("a real failure reading account data surfaces", async () => {
+    replies = [{ status: 403, body: { errcode: "M_FORBIDDEN" } }];
+
+    await expect(client().getAccountData(USER, "m.direct")).rejects.toThrow(/M_FORBIDDEN/);
+  });
+
+  test("reading account data as a user outside the AS's namespace throws a typed error", async () => {
+    // Confirmed live against tuwunel: GET account_data as the human operator
+    // (who is outside the AS's exclusive @agent_.* namespace) answers 400
+    // M_EXCLUSIVE. Typed, like MatrixUserInUse, so a caller can branch on it
+    // without matching a message — the migration report needs to tell this
+    // permanent case apart from a transient failure.
+    replies = [{ status: 400, body: { errcode: "M_EXCLUSIVE", error: "User is not in namespace." } }];
+
+    const err = await client()
+      .getAccountData("@rakesh:id.agentpod.dev", "m.direct")
+      .catch((e: unknown) => e);
+
+    expect(isMatrixExclusiveNamespace(err)).toBe(true);
+  });
+
+  test("setAccountData writes the whole object as the given user", async () => {
+    await client().setAccountData(USER, "m.direct", { "@new:h": ["!r:h"] });
+
+    expect(calls[0]!.method).toBe("PUT");
+    expect(calls[0]!.url).toContain("/account_data/m.direct");
+    expect(calls[0]!.url).toContain(`user_id=${encodeURIComponent(USER)}`);
+    expect(calls[0]!.body).toEqual({ "@new:h": ["!r:h"] });
+  });
+});
+
+describe("downloading media as an agent", () => {
+  test("uses authenticated media, as the agent, with the as_token", async () => {
+    replies.push({ status: 200, body: {} });
+    const bytes = await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123");
+    expect(bytes).not.toBeNull();
+    expect(calls[0]!.url).toBe(
+      `${HS}/_matrix/client/v1/media/download/id.agentpod.dev/Abc123?user_id=${encodeURIComponent(USER)}`
+    );
+    expect(calls[0]!.headers.Authorization).toBe(`Bearer ${AS_TOKEN}`);
+  });
+
+  test("falls back to the legacy path only when the new one is not there", async () => {
+    replies.push({ status: 404, body: { errcode: "M_UNRECOGNIZED" } }, { status: 200, body: {} });
+    const bytes = await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123");
+    expect(bytes).not.toBeNull();
+    expect(calls[1]!.url).toContain("/_matrix/media/v3/download/id.agentpod.dev/Abc123");
+  });
+
+  test("a refusal is not retried elsewhere, and is null rather than a throw", async () => {
+    replies.push({ status: 403, body: { errcode: "M_FORBIDDEN" } });
+    expect(await client().downloadMedia(USER, "mxc://id.agentpod.dev/Abc123")).toBeNull();
+    expect(calls).toHaveLength(1);
+  });
+
+  test("something that is not an mxc URL is not fetched at all", async () => {
+    expect(await client().downloadMedia(USER, "https://evil.example/x")).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+});
+

@@ -12,7 +12,10 @@ import (
 // about a station. Sent in the hello frame on every connect, which is why node
 // capabilities cannot go stale the way station capabilities could — those were
 // written only at adoption and needed an explicit refresh to fix.
-var NodeCapabilities = []string{"posture"}
+// "frames.large": this node reads hub frames up to gatewayReadLimitBytes, so
+// the hub may send it an ACP prompt that carries an image. A node without it
+// closes its connection on any frame over 32 KiB.
+var NodeCapabilities = []string{"posture", "frames.large"}
 
 // postureHandler wraps an inner Handler and adds the node-level posture verb.
 type postureHandler struct {
@@ -50,4 +53,14 @@ func (h *postureHandler) Handle(
 		n = h.stationCount()
 	}
 	return posture.Scan(ctx, home, posture.KnownHarnesses(), n), false, nil
+}
+
+// HandleFrame preserves terminal and ACP input frames while this handler adds
+// only the node-level posture.scan request. See changesetHandler.HandleFrame
+// for why every wrapper in the production chain must retain FrameHandler.
+func (h *postureHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {
+	if fh, ok := h.inner.(FrameHandler); ok {
+		return fh.HandleFrame(frameType, id, raw)
+	}
+	return nil
 }

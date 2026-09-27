@@ -136,13 +136,13 @@ export const auth = betterAuth({
      * "Offline" is the load-bearing word, and it was established by running it
      * rather than by reading documentation: a Cloudflare Worker verified a token
      * from this plugin with the issuer process killed (#331). That is what lets
-     * kaambaan check a caller at the edge with no network hop, which
+     * superpipeline check a caller at the edge with no network hop, which
      * decisions/2026-08-13-ecosystem-identity.md requires — enforcement local,
      * the token as carrier, and explicitly not a policy-service call in the hot
      * path.
      *
      * The claims live in ./jwt-claims.ts rather than inline here, because their
-     * NAMES are a contract the moment kaambaan reads one, and a contract inside
+     * NAMES are a contract the moment superpipeline reads one, and a contract inside
      * a plugin's options object cannot be checked against the shared fixture.
      */
     jwt({
@@ -263,7 +263,7 @@ export const auth = betterAuth({
     return {
       // Controls the __Secure- prefix on cookie names (requires HTTPS).
       useSecureCookies: cookieOpts.secure,
-      // Cross-subdomain sharing (app.agentpod.dev ↔ hub.agentpod.dev).
+      // Cross-subdomain sharing (console.agentpod.dev ↔ hub.agentpod.dev).
       // Only enabled when COOKIE_DOMAIN is set (never in dev).
       ...(cookieOpts.domain
         ? {
@@ -277,7 +277,8 @@ export const auth = betterAuth({
       defaultCookieAttributes: {
         sameSite: cookieOpts.sameSite,
       },
-      // Cookie prefix — keeps MetaMCP SSO compatibility.
+      // Cookie prefix. Load-bearing: live session cookies carry it, so a rename
+      // signs everyone out. Chosen for an SSO integration since removed.
       cookiePrefix: "better-auth",
       // Generate unique session IDs.
       generateId: () => crypto.randomUUID(),

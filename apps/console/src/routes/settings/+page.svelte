@@ -4,6 +4,7 @@
   import { connection, disconnect } from "$lib/stores/connection.svelte";
   import ThemeSettings from "$lib/components/theme-settings.svelte";
   import PageHeader from "$lib/components/page-header.svelte";
+  import DeviceList from "$lib/components/device-list.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
 
@@ -44,6 +45,11 @@
     <Button variant="outline" onclick={handleDisconnect}>
       Use a different hub
     </Button>
+  </div>
+
+  <!-- Devices — the revocation surface the device-credential record asks for -->
+  <div class="rounded-lg border bg-card p-6">
+    <DeviceList />
   </div>
 
   <!-- Account -->

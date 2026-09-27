@@ -61,7 +61,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		return []Station{}, nil
 	}
 
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "lifecycle", "cleanup", "acp"}
 	homeCopy := h.home
 
 	// The root gateway's messaging identity. It is also the value a profile is
@@ -74,7 +74,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			Key:           "hermes",
 			Harness:       "hermes",
 			Kind:          "composite",
-			DisplayName:   "Hermes",
+			DisplayName:   h.rootDisplayName(),
 			ParentKey:     nil,
 			WorkspacePath: &homeCopy,
 			Capabilities:  AppendChangesetCap(caps, &homeCopy),
@@ -124,6 +124,46 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 	}
 
 	return stations, nil
+}
+
+// rootDisplayName is the name shown for the root station — the agent the bare
+// `hermes gateway run` serves.
+//
+// It was the literal "Hermes" until 2026-08-29. On a host where the root gateway
+// IS the operator's primary agent that is simply the wrong name, and there was no
+// way to correct it: profile stations take their name from their directory, but
+// the root has no directory to rename, and the hub overwrites `display_name`
+// from this value on every re-adoption — so renaming it in the console does not
+// survive either.
+//
+// Hermes already has the answer. `hermes profile rename default "<name>"` is a
+// supported command whose own help reads "for 'default': a display name — the
+// canonical id stays 'default'", and it writes that name to <home>/profile.yaml.
+// Reading it here means the operator names the agent with Hermes' own tool and
+// the name reaches the console unchanged.
+//
+// Falls back to "Hermes" whenever the file is absent or unreadable, so hosts
+// that have never been renamed behave exactly as before.
+func (h *hermesDescriptor) rootDisplayName() string {
+	const fallback = "Hermes"
+	data, err := os.ReadFile(filepath.Join(h.home, "profile.yaml"))
+	if err != nil {
+		return fallback
+	}
+	// Line-by-line, for the same reason mxidFromConfigYAML is: no YAML
+	// dependency, and only the intended field is ever read.
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "display_name:") {
+			continue
+		}
+		name := strings.TrimSpace(strings.TrimPrefix(trimmed, "display_name:"))
+		name = strings.Trim(name, `"'`)
+		if name != "" {
+			return name
+		}
+	}
+	return fallback
 }
 
 // hermesMatrixDomain is the default Matrix homeserver domain hint passed to the
@@ -290,7 +330,7 @@ func hermesUnitName(key string) string {
 // `systemctl --user cat <unit>` exits 0 iff the unit file can be read, and
 // non-zero when absent or when systemctl/the user session is unavailable.
 func hermesUnitKnown(unit string) bool {
-	return exec.Command("systemctl", "--user", "cat", unit).Run() == nil
+	return userSystemctl("cat", unit).Run() == nil
 }
 
 // hermesPattern returns the pgrep -f (ERE) pattern for a Hermes station key.
@@ -353,7 +393,7 @@ func hermesProcessRunning(key string) (bool, error) {
 func (h *hermesDescriptor) Stop(key string) error {
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
-		return exec.Command("systemctl", "--user", "stop", unit).Run()
+		return userSystemctl("stop", unit).Run()
 	}
 	// Fallback: locate the process via pgrep and send SIGTERM/SIGKILL.
 	pid, err := hermesPID(key)
@@ -386,7 +426,7 @@ func (h *hermesDescriptor) Start(key string) error {
 	}
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
-		return exec.Command("systemctl", "--user", "start", unit).Run()
+		return userSystemctl("start", unit).Run()
 	}
 	// An operator-configured start command takes precedence over the native
 	// fallback (it can encode a site-specific launcher).

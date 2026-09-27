@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
+import { redactUrlSecrets } from './utils/redact-url-secrets.ts';
 import { config, allowedOrigins, isAllowedOrigin } from './config.ts';
 import { validateConfig } from './utils/validate-config.ts';
 import { describeDatabase } from './utils/describe-database.ts';
@@ -8,9 +9,17 @@ import { initDatabase } from './db/drizzle.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
+// A human at a terminal exchanging a device credential for a short-lived token
+import { deviceRoutes } from './routes/devices.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
+import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
+import { servicePublicJwks } from './auth/service-signing.ts';
+// GET /api/auth/authorize — the cross-domain handoff's front door (see below)
+import { authorizeRoutes } from './routes/auth-authorize.ts';
+import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
+import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -26,12 +35,22 @@ import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
 import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
 // Fleet aggregate read (Overview home — control-plane P1)
 import { fleetRoutes } from './routes/fleet.ts';
+// GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
+import { dispatchableRoutes } from './routes/fleet-dispatchable.ts';
 import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 // Runtime provisioning routes
 import { runtimeRoutes } from './routes/runtimes.ts';
 // Station routes (detect, adopt, list, unadopt)
 import { stationRoutes } from './routes/stations.ts';
+// A node exchanging its credential for a station-scoped agent token
+import { stationTokenRoutes } from './routes/station-token.ts';
+// A node redeeming a human's authorization for a station's Matrix credential
+import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
+import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
+// A node reading its station's voice-note setting (transcription.apply)
+import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
+import { stationTranscriptionRoutes } from './routes/transcription-settings.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
 import { stationTerminalRoutes } from './routes/station-terminal.ts';
 // Station activity endpoint (audit log, fleet console)
@@ -42,6 +61,8 @@ import { fleetActivityRoutes } from './routes/activity-fleet.ts';
 import { stationWriteRoutes } from './routes/station-writes.ts';
 import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
+import { stationSkillsRoutes } from './routes/station-skills.ts';
+import { createSkillManagementRoutes, skillArtifactDownloadRoutes } from './routes/skill-management.ts';
 import { stationChangesetRoutes } from './routes/station-changeset.ts';
 import { nodePostureRoutes } from './routes/node-posture.ts';
 import { runtimeCallbackRoutes } from './routes/runtime-callback.ts';
@@ -53,9 +74,14 @@ import { activityLoggerMiddleware } from './middleware/activity-logger.ts';
 import { registerEnabledProvisioners } from './services/provisioner/bootstrap.ts';
 import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
-import { startKaambaanBridge } from './services/bridge/loop.ts';
+import { startSuperpipelineBridge } from './services/bridge/loop.ts';
+import { createGracefulShutdown } from './services/shutdown.ts';
+import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
+import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
-import { onStationsAdopted } from './services/matrix-as/hooks.ts';
+import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
+import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
+import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
@@ -86,7 +112,12 @@ const matrixBridge = createMatrixBridge();
 
 const app = new Hono()
   // Middleware
-  .use('*', logger())
+  //
+  // The print function is not decoration. The homeserver authenticates appservice
+  // transactions with `?access_token=…`, and Hono's logger prints the whole path — so every
+  // Matrix event wrote a live credential into journald in clear. Redacting here closes the
+  // recurrence; rotating the token alone would not (estate BACKLOG, 2026-09-01).
+  .use('*', logger((message, ...rest) => console.log(redactUrlSecrets(message), ...rest)))
   // CORS configuration - allow credentials for Better Auth cookies
   .use('*', cors({
     // Origin list lives in config.ts (corsAllowedOrigins) so station-terminal.ts
@@ -111,10 +142,142 @@ const app = new Hono()
   .route('/public/nodes', gatewayRoutes)     // GET /public/nodes/gateway (WSS)
   // Signup check middleware - block signup if disabled (runs before auth handler)
   .use('/api/auth/*', signupCheckMiddleware)
+  /**
+   * GET /api/auth/jwks — Better Auth's key set, plus this hub's service
+   * signing keys.
+   *
+   * Registered BEFORE the catch-all below, because Hono matches in
+   * registration order and the catch-all would otherwise swallow it.
+   *
+   * Merged here rather than published separately so consumers keep fetching
+   * exactly one URL. superpipeline asks for `${issuer}/api/auth/jwks` and verifies
+   * against whatever comes back; teaching it about a second endpoint would put
+   * a deployment detail of this hub into another repository's code.
+   *
+   * If the plugin's own response cannot be parsed, this returns it untouched
+   * rather than substituting a set of its own — a JWKS endpoint that starts
+   * serving only half the keys would fail as "not authorized" at every
+   * consumer, which is the least diagnosable outcome available.
+   */
+  .get('/api/auth/jwks', async (c) => {
+    const upstream = await auth.handler(c.req.raw);
+    try {
+      const body = (await upstream.clone().json()) as { keys?: unknown[] };
+      if (!Array.isArray(body.keys)) return upstream;
+      return c.json({ ...body, keys: [...body.keys, ...(await servicePublicJwks())] });
+    } catch {
+      return upstream;
+    }
+  })
+  /**
+   * GET /api/auth/authorize — the door a browser on another registrable domain
+   * walks through to get a hub token
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, beside the jwks route above, for both of the reasons that
+   * route is: Hono matches in registration order, so the Better Auth catch-all
+   * immediately below would otherwise swallow every `/api/auth/*` path this
+   * hub adds of its own; and `authMiddleware` further down 401s anything that
+   * is not a session or the static API_TOKEN, before a route's own logic runs.
+   *
+   * This route authenticates itself — it reads the caller's Better Auth
+   * session and answers a browser that has none with a redirect to sign in
+   * rather than a 401, which is the entire point of it. `stationTokenRoutes`
+   * below sits ahead of the middleware for the same structural reason.
+   */
+  .route('/', authorizeRoutes)
+  /**
+   * /api/auth/devices* — the device credential a human exchanges at a terminal
+   * (`charter → decisions/2026-09-18-a-human-at-a-terminal-has-nothing-to-exchange.md`,
+   * accepted 2026-09-20; `docs/superpowers/specs/2026-09-20-device-credential-design.md`).
+   *
+   * **HERE, above the Better Auth catch-all, and this position is the whole
+   * route.** It shipped below it on 2026-09-20 and every one of these paths
+   * answered 404 in production: Hono matches in registration order, and the
+   * `.on(['GET','POST'], '/api/auth/*', …)` immediately below swallows every
+   * `/api/auth/*` path this hub adds of its own. That is precisely what the
+   * `authorizeRoutes` comment above warns about, and the first version of this
+   * block cited that warning while sitting on the wrong side of it.
+   *
+   * Above `authMiddleware` too, for two reasons rather than one: the exchange
+   * route's credential is `dev_…:secret`, which is no kind of session; and the
+   * three management routes have to accept a hub JWT, because `fleet login`
+   * holds exactly that at the moment it creates a device. They resolve a
+   * session OR a verified hub token themselves, refusing an agent, a bridge
+   * assertion, and — the one that matters — a token that was itself minted
+   * from a device, so a stolen credential cannot mint a replacement that
+   * outlives its revocation.
+   */
+  .route('/api/auth', deviceRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
   })
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/token — a node exchanging its
+   * long-term `<nodeId>:<nodeSecret>` credential for a short-lived agent
+   * token. `Bearer <nodeId>:<nodeSecret>` is not a Better Auth session and is
+   * never the static API_TOKEN either, so `authMiddleware` below would 401 it
+   * before the route's own credential check ever ran — the same reason the
+   * jwks route and `/api/auth/*` above are registered here, ahead of it. The
+   * route authenticates itself; `/api` is still right for it (Bearer passes
+   * CSRF, unlike the HMAC-signed `superpipeline-push` receiver under `/public`),
+   * it just cannot sit behind a middleware built for a session.
+   */
+  .route('/api', stationTokenRoutes)
+  .route('/api', skillArtifactDownloadRoutes)
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/matrix-credential — this
+   * route's sibling redeeming a Matrix credential instead of a JWT. Same
+   * self-authenticating Bearer, so it is registered here too, ahead of
+   * `authMiddleware`. Mounted only when a Matrix bridge is configured —
+   * with none, there is no homeserver to register or rotate an identity on,
+   * so the route simply does not exist rather than 500ing on every call.
+   * The mount decision itself lives in `stationMatrixCredentialRoutesFor`
+   * (`station-matrix-credential.ts`) rather than inline here, so it has a
+   * unit test that does not need to boot this whole file to run.
+   */
+  .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/transcription — a node
+   * reading its station's voice-note setting (API key included) for
+   * `transcription.apply`. Same self-authenticating Bearer as the two above,
+   * so it is registered here, ahead of `authMiddleware`. Always mounted: the
+   * setting exists with or without a Matrix bridge.
+   */
+  .route('/api', createNodeTranscriptionRoutes())
+  /**
+   * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
+   * may dispatch, for superpipeline's agent picker
+   * (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
+   *
+   * Registered HERE, ahead of `authMiddleware`, for the same reason
+   * `stationTokenRoutes` above is: the credential it takes is a hub JWT in
+   * `Authorization: Bearer`, which is neither a Better Auth session nor the
+   * static API_TOKEN, so the middleware would 401 it before the route's own
+   * verification ever ran. The route verifies the token itself, against the
+   * key set `/api/auth/jwks` publishes.
+   *
+   * It shares a prefix with `.route('/api/fleet', fleetRoutes)` further down
+   * and does not collide with it today — that router serves `/agents` and
+   * `/stats` — but it stays above it regardless, so that a wildcard added
+   * there later cannot quietly pull this path behind the middleware.
+   */
+  .route('/', dispatchableRoutes)
+  /**
+   * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
+   *
+   * The same position and the same reason as `dispatchableRoutes` above: `authMiddleware`
+   * refuses any non-human principal, which is correct for the operator API and wrong for a
+   * surface whose entire purpose is letting an agent see itself. What an agent may reach is
+   * decided by which tools it is offered, not by which routes exist — see `mcp/tools.ts`.
+   */
+  .all('/mcp', async (c) => {
+    const caller = await resolveMcpCaller(c.req.raw);
+    if (!caller) return mcpUnauthorized();
+    return handleMcpRequest(c.req.raw, caller);
+  })
+
   .use('/api/*', authMiddleware)
   .use('/api/*', banCheckMiddleware) // Block banned users
   .use('/api/*', csrfMiddleware)
@@ -132,6 +295,7 @@ const app = new Hono()
   // Station routes (detect, adopt, list, unadopt)
   .route('/api', stationRoutes)                            // GET/POST/DELETE /api/nodes/:id/... and /api/stations/:id
   .route('/api', purposeRoutes)                            // PUT /api/stations/:id/purpose, /api/nodes/:id/purpose
+  .route('/api', stationTranscriptionRoutes())             // GET/PUT /api/stations/:id/transcription
   // Station terminal WebSocket bridge (fleet console ↔ node PTY)
   .route('/api', stationTerminalRoutes)                    // WS /api/stations/:id/terminal
   // Station activity log (audit rows, fleet console)
@@ -142,7 +306,21 @@ const app = new Hono()
   .route('/api', stationWriteRoutes)                       // POST /api/stations/:id/fs/{write,mkdir,move,delete}
   .route('/api', stationLifecycleRoutes)                   // POST /api/stations/:id/lifecycle
   .route('/api', stationCleanupRoutes)                     // POST /api/stations/:id/cleanup/{plan,apply}
+  .route('/api', stationSkillsRoutes)
+  .route('/api', createSkillManagementRoutes())
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
+  /**
+   * Giving one station a forge push key, and taking it away.
+   *
+   * BELOW `authMiddleware`, unlike most forge-adjacent wiring: this is an operator acting on a
+   * station they own, so it wants the same `getStation` ownership check every other station route
+   * uses. The predecessor in #594 was a node calling in with its own credential and sat above.
+   */
+  .route('/api', createStationGitIdentityRoutes({
+    forge: config.forge.url && config.forge.adminToken
+      ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
+      : null,
+  }))
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
@@ -155,6 +333,63 @@ const app = new Hono()
 // unconfigured hub answers a homeserver with 404 rather than with a bridge that
 // cannot act.
 if (matrixBridge) {
+  // Everything the ordered identity move needs, in one place: the appservice
+  // client that can act as any `@agent_.*` user, and this homeserver's name.
+  // Two call sites read it — the operator's authorise route (step 2) and the
+  // convergence listener below (steps 5 and 6) — and they must be the same
+  // deps or the two halves of one move could act on different homeservers.
+  const identityMove = { domain: matrixBridge.config.domain, client: matrixBridge.client };
+
+  // What the node reports on every detect, and the only thing that may set
+  // the irreversible last step of a move going: convergence is `matrix_id`
+  // becoming the address the station's occupying principal's handle implies
+  // (design §1), and until it holds, the station keeps working under the
+  // identity it already has. The registration itself lives in
+  // `wireConvergenceListener` (`identity-move.ts`) rather than inline here,
+  // so it has a unit test that does not need to boot this whole file to run.
+  wireConvergenceListener(identityMove);
+
+  // How a gate reaches a room, however it got here. Shared by the push
+  // receiver and the sweep beneath it, so a swept gate and a pushed one cannot
+  // be posted by two slightly different projections.
+  const gateProjection = {
+    domain: matrixBridge.config.domain,
+    boardBaseUrl: process.env.SUPERPIPELINE_BOARD_URL,
+    sendText: (userId: string, roomId: string, body: string) =>
+      matrixBridge.client.sendText(userId, roomId, body),
+    sendCustomEvent: (
+      userId: string,
+      roomId: string,
+      eventType: string,
+      content: Record<string, unknown>,
+    ) => matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+  };
+
+  // POST /public/bridge/superpipeline/push — a board telling us a gate is open.
+  //
+  // Under /public, not /api, because the caller is a Worker holding a signing
+  // secret rather than a browser holding a session — and /api/* carries the
+  // CSRF middleware, which passes Bearer and would reject an HMAC-signed body.
+  // `runtime-callback.ts` is already mounted here for the same reason.
+  app.route(
+    '/public',
+    createSuperpipelinePushRoutes({
+      secret: process.env.SUPERPIPELINE_PUSH_SECRET,
+      tenantIdFor: tenantForBoard,
+      ...gateProjection,
+    }),
+  );
+
+  // …and the floor beneath it. superpipeline retries a push five times and then
+  // dead-letters it, at which point the gate is silent on both sides: a card
+  // blocked on an approval nobody was told about. This asks each board what it
+  // is still waiting on. `projectGate` is idempotent on `gate_id`, so the two
+  // paths are meant to overlap rather than to be arbitrated between.
+  startGateSweeper({
+    tenantIdFor: tenantForBoard,
+    project: (tenantId, delivery) => projectGate(tenantId, delivery, gateProjection),
+  });
+
   app.route(
     '/_matrix/app/v1',
     createMatrixAsRoutes({
@@ -162,6 +397,10 @@ if (matrixBridge) {
       domain: matrixBridge.config.domain,
       onEvent: (event) => matrixBridge.onEvent(event),
       onProvisionAlias: (alias) => matrixBridge.onProvisionAlias(alias),
+      // Null unless a crypto store is configured, in which case the route
+      // skips the step entirely — a deployment that has not opted in pays
+      // nothing and behaves exactly as it did.
+      onCryptoTransaction: matrixBridge.onCryptoTransaction ?? undefined,
     }),
   );
 
@@ -173,12 +412,31 @@ if (matrixBridge) {
       provisionStation: (stationId) => matrixBridge.provision(stationId),
       credentials: {
         // An appservice registration returns an access_token directly — no
-        // admin command, no password, no login round-trip. `rotate` is
-        // deliberately absent: replacing an existing identity's credentials
-        // needs the homeserver's admin account, and the route says so plainly
-        // rather than pretending.
+        // admin command, no password, no login round-trip.
         register: (localpart) => matrixBridge.client.registerWithCredentials(localpart),
+        // And an appservice may LOG IN as any user in its own namespace, which
+        // is how an identity that already exists gets new credentials without
+        // the homeserver admin account this service exists to do away with.
+        rotate: (localpart) => matrixBridge.client.rotateCredentials(localpart),
       },
+      // Step 2 of the ordered move: the new identity goes into the room
+      // before anything switches the credential. Wired here rather than
+      // reached for inside the route, so the route stays testable and so a
+      // hub with no bridge — which is where this route is not mounted at all
+      // — cannot half-perform a move.
+      preJoinNewIdentity: (stationId) => preJoinNewIdentity(stationId, identityMove),
+      // Steps 3-5: the node is told to adopt, and whatever identity its
+      // profile then reads as is announced through the SAME hook a detect
+      // announces through — the one `wireConvergenceListener` above wired
+      // `onNodeReportedMatrixId` to. That is the whole of convergence's
+      // trigger; §4's "on its next detect" describes a detect that never
+      // happens, because matrix.adopt restarts the harness rather than the
+      // node-agent.
+      signalNodeToAdopt: (args, signalDeps) => signalNodeToAdopt(args, signalDeps),
+      // The four states of §1's invariant, for the console's panel. Same
+      // function `moveInProgress` reads, so the operator's view and the gate
+      // sweep's attribution can never disagree about what `waiting` means.
+      moveState: (stationId) => moveState(stationId, matrixBridge.config.domain),
     }),
   );
 
@@ -255,15 +513,15 @@ registerEnabledProvisioners();
 console.log('Provisioners registered:', enabledProviders().join(', ') || '(none enabled)');
 
 // Expire silent nodes whose TCP close never fired (killed VM, dropped network).
-startNodeSweeper();
+const stopNodeSweeper = startNodeSweeper();
 console.log('Node heartbeat sweeper started (45s threshold)');
 
-// Claim work from a kaambaan board, if this hub has been told to.
-// Off unless ENABLE_KAAMBAAN_BRIDGE=true — a hub that has not opted in
+// Claim work from a superpipeline board, if this hub has been told to.
+// Off unless ENABLE_SUPERPIPELINE_BRIDGE=true — a hub that has not opted in
 // constructs nothing here, exactly like an unregistered provisioner driver.
-const bridge = await startKaambaanBridge();
+const bridge = await startSuperpipelineBridge();
 console.log(
-  'kaambaan bridge:',
+  'superpipeline bridge:',
   bridge ? `claiming as ${bridge.agents.join(', ')}` : '(disabled)',
 );
 
@@ -275,21 +533,27 @@ if (matrixBridge) {
   onStationsAdopted(async (stationIds) => {
     for (const id of stationIds) await matrixBridge.provision(id);
   });
+  // Nor must an agent assigned at noon. Adoption fires before a station has
+  // an occupant, and a bridge-mode station with none is exactly what
+  // `provision.ts` returns early from — so without this the console could
+  // create an agent, put it in a station, and leave it with no room at all
+  // until the next restart. `routes/agents-admin.ts` awaits this one.
+  onProvisionStation((stationId) => matrixBridge.provision(stationId), matrixBridge.config.domain);
   await startMatrixBridge(matrixBridge);
 } else {
   console.log('matrix bridge: (disabled)');
 }
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Shutting down...');
-  process.exit(0);
+// Close native Matrix crypto before Bun tears down napi's Tokio runtime. The
+// shutdown coordinator is shared by both signals so duplicate delivery cannot
+// interrupt cleanup halfway through.
+const shutdown = createGracefulShutdown({
+  stopSweeper: stopNodeSweeper,
+  stopBridge: bridge?.stop.bind(bridge),
+  closeMatrixBridge: matrixBridge?.close.bind(matrixBridge),
 });
-
-process.on('SIGTERM', () => {
-  console.log('Shutting down...');
-  process.exit(0);
-});
+process.on('SIGINT', () => { void shutdown('SIGINT'); });
+process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 
 // Start server
 const port = config.port;

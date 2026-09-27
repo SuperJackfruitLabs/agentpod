@@ -5,19 +5,23 @@
    * Edits one principal's control pair — what they may dispatch, and whether
    * they may grant an agent its reach.
    *
-   * The form is deliberately a list of exact strings rather than a set of
-   * checkboxes over live stations. A grant outlives the station it names: nodes
-   * are reprovisioned, stations are re-adopted, and a permission that quietly
-   * disappeared with its station would be a silent widening or narrowing nobody
-   * ordered. Live stations appear as *suggestions* instead, so the common case is
-   * one click and the uncommon case is still expressible.
+   * The form is deliberately a list of exact ids rather than a set of checkboxes
+   * over the live directory. A grant outlives the thing it names — an agent can
+   * be retired, a principal can be deleted — and a permission that quietly
+   * disappeared with it would be a silent narrowing nobody ordered, just as a
+   * checkbox list would make a grant on an id this hub does not know
+   * unexpressible. Known agents appear as *suggestions* instead, so the common
+   * case is one click and the uncommon case is still typable.
+   *
+   * A value is one agent's principal id and nothing else. There are no
+   * wildcards and no plane prefixes; `agentpod:<node>/<stationKey>` is deleted,
+   * not deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3).
    */
   import * as Dialog from "$lib/components/ui/dialog";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Label } from "$lib/components/ui/label";
   import { Switch } from "$lib/components/ui/switch";
-  import { Badge } from "$lib/components/ui/badge";
   import { toast } from "svelte-sonner";
   import XIcon from "@lucide/svelte/icons/x";
   import { setGrant, grantValueProblem, type Grant } from "$lib/api/grants";
@@ -31,8 +35,11 @@
     open: boolean;
     principal: GrantPrincipal | null;
     grant: Grant;
-    /** Live `agentpod:<node>/<stationKey>` values, offered as suggestions. */
-    stationValues: string[];
+    /**
+     * The agents this fleet knows, offered as suggestions — `id` is what goes
+     * into the grant, `label` is what a person can recognise.
+     */
+    agentOptions: Array<{ id: string; label: string }>;
     onSaved: () => void;
   }
 
@@ -40,13 +47,14 @@
     open = $bindable(false),
     principal,
     grant,
-    stationValues = [],
+    agentOptions = [],
     onSaved,
   }: Props = $props();
 
   let values = $state<string[]>([]);
   let mayGrantReach = $state(false);
   let draft = $state("");
+  let search = $state("");
   let problem = $state<string | null>(null);
   let isSaving = $state(false);
 
@@ -57,11 +65,26 @@
       values = [...grant.mayDispatch];
       mayGrantReach = grant.mayGrantReach;
       draft = "";
+      search = "";
       problem = null;
     }
   });
 
-  let unusedSuggestions = $derived(stationValues.filter((v) => !values.includes(v)).slice(0, 8));
+  let query = $derived(search.trim().toLowerCase());
+  const matches = (id: string, label = "") => `${id} ${label}`.toLowerCase().includes(query);
+  let visibleValues = $derived(values.filter((id) => matches(id, labelOf(id) ?? "")));
+  let unusedSuggestions = $derived(agentOptions.filter((a) => !values.includes(a.id) && matches(a.id, a.label)));
+  let added = $derived(values.filter((id) => !grant.mayDispatch.includes(id)).length);
+  let removed = $derived(grant.mayDispatch.filter((id) => !values.includes(id)).length);
+
+  /**
+   * A recognisable name for an id, when this hub knows one.
+   *
+   * The id itself is always shown, never replaced by the label: this is the
+   * exact string that will be stored and compared by equality, and a row that
+   * showed only "Quill" would hide a typo'd id that grants nothing.
+   */
+  let labelOf = $derived((id: string) => agentOptions.find((a) => a.id === id)?.label ?? null);
 
   function addValue(value: string): boolean {
     const trimmed = value.trim();
@@ -109,105 +132,105 @@
   }
 </script>
 
-<Dialog.Root {open} onOpenChange={(v) => (open = v)}>
-  <Dialog.Portal>
-    <Dialog.Overlay />
-    <Dialog.Content showCloseButton={false} class="max-w-lg">
-      <Dialog.Header>
-        <Dialog.Title>Grant</Dialog.Title>
-        <Dialog.Description>
-          What {principal?.label ?? "this principal"} may dispatch. Replaces the current grant.
-        </Dialog.Description>
-      </Dialog.Header>
+<Dialog.Root {open} onOpenChange={(v) => { if (!isSaving) open = v; }}>
+  <Dialog.Content
+    onEscapeKeydown={(event) => { if (isSaving) event.preventDefault(); }}
+    onInteractOutside={(event) => { if (isSaving) event.preventDefault(); }}
+    showCloseButton={false} class="flex w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+    <Dialog.Header class="shrink-0 border-b p-4 text-left">
+      <Dialog.Title>Edit grant</Dialog.Title>
+      <Dialog.Description class="break-words">
+        Manage what {principal?.label ?? "this principal"} may dispatch. Changes apply when you save.
+      </Dialog.Description>
+    </Dialog.Header>
 
-      <div class="space-y-4 py-2">
+    <div class="min-h-0 overflow-y-auto overscroll-contain p-4" data-testid="grant-scroll-body">
+      <fieldset disabled={isSaving} class="min-w-0 space-y-5">
         <div class="space-y-2">
-          <Label>May dispatch</Label>
+          <Label for="grant-search">Search agents</Label>
+          <Input id="grant-search" bind:value={search} placeholder="Filter by name or principal ID" />
+          <p class="text-xs text-muted-foreground">Search filters both lists. Hidden targets stay selected.</p>
+        </div>
+
+        <section class="space-y-2" aria-label="Selected dispatch targets">
+          <h3 class="text-sm font-medium">May dispatch <span class="text-muted-foreground">({values.length} selected)</span></h3>
           {#if values.length === 0}
-            <p class="text-xs text-muted-foreground" data-testid="grant-empty">
-              Nothing. Under enforcement this principal is refused everywhere.
+            <p class="rounded-lg border border-dashed p-3 text-sm text-muted-foreground" data-testid="grant-empty">
+              No dispatch targets. Under enforcement this principal cannot dispatch any agent.
             </p>
+          {:else if visibleValues.length === 0}
+            <p class="text-sm text-muted-foreground">No selected targets match your search.</p>
           {:else}
-            <ul class="flex flex-wrap gap-2">
-              {#each values as value (value)}
-                <li>
-                  <Badge variant="outline" class="gap-1 font-mono text-xs">
-                    {value}
-                    <button
-                      type="button"
-                      aria-label="Remove value {value}"
-                      class="text-muted-foreground hover:text-destructive"
-                      onclick={() => removeValue(value)}
-                    >
-                      <XIcon class="h-3 w-3" />
-                    </button>
-                  </Badge>
+            <ul class="divide-y rounded-lg border">
+              {#each visibleValues as value (value)}
+                <li class="flex min-w-0 items-center gap-3 px-3 py-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="break-words text-sm font-medium">{labelOf(value) ?? "Not in agent directory"}</p>
+                    <p class="break-all font-mono text-xs text-muted-foreground">{value}</p>
+                  </div>
+                  <Button variant="ghost" size="icon" aria-label="Remove value {value}" onclick={() => removeValue(value)}>
+                    <XIcon class="size-4" />
+                  </Button>
                 </li>
               {/each}
             </ul>
           {/if}
-        </div>
+        </section>
+
+        <section class="space-y-2" aria-label="Available agents">
+          <h3 class="text-sm font-medium">Available agents <span class="text-muted-foreground">({unusedSuggestions.length})</span></h3>
+          {#if unusedSuggestions.length > 0}
+            <ul class="divide-y rounded-lg border">
+              {#each unusedSuggestions as suggestion (suggestion.id)}
+                <li>
+                  <button type="button" class="w-full rounded-md px-3 py-2 text-left hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50"
+                    onclick={() => addValue(suggestion.id)}>
+                    <span class="block break-words text-sm font-medium">+ {suggestion.label}</span>
+                    <span class="block break-all font-mono text-xs text-muted-foreground">{suggestion.id}</span>
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="text-sm text-muted-foreground">{query ? "No available agents match your search." : "No other agents in the directory. You can still add an exact ID below."}</p>
+          {/if}
+        </section>
 
         <div class="space-y-2">
-          <Label for="grant-value">Add a value</Label>
+          <Label for="grant-value">Add a value by principal ID</Label>
           <div class="flex gap-2">
-            <Input
-              id="grant-value"
-              bind:value={draft}
-              placeholder="agentpod:node/hermes:agent — or kaambaan:agt_…"
-              class="font-mono text-xs"
+            <Input id="grant-value" bind:value={draft} placeholder="prn_0123456789abcdef0123" class="min-w-0 font-mono text-xs"
+              aria-invalid={!!problem} aria-describedby="grant-value-help"
               onkeydown={(e: KeyboardEvent) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addValue(draft);
-                }
-              }}
-            />
+                if (e.key === "Enter") { e.preventDefault(); addValue(draft); }
+              }} />
             <Button variant="outline" onclick={() => addValue(draft)}>Add</Button>
           </div>
-          {#if problem}
-            <p class="text-xs text-destructive" role="alert">{problem}</p>
-          {:else}
-            <p class="text-xs text-muted-foreground">
-              An AgentPod value names a node as well as a station — station keys repeat across
-              nodes. Fleet-wide is written out: <code>agentpod:*/hermes:*</code>.
-            </p>
-          {/if}
-
-          {#if unusedSuggestions.length > 0}
-            <div class="flex flex-wrap gap-1 pt-1">
-              {#each unusedSuggestions as suggestion (suggestion)}
-                <button
-                  type="button"
-                  class="rounded border border-dashed px-2 py-0.5 font-mono text-[11px] text-muted-foreground hover:border-primary hover:text-primary"
-                  onclick={() => addValue(suggestion)}
-                >
-                  + {suggestion}
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <p id="grant-value-help" class={problem ? "text-xs text-destructive" : "text-xs text-muted-foreground"} role={problem ? "alert" : undefined}>
+            {problem ?? "Use prn_ followed by 20 hex characters. IDs match exactly; wildcards are not supported."}
+          </p>
         </div>
 
         <div class="flex items-start justify-between gap-4 rounded-lg border p-3">
-          <div class="space-y-0.5">
+          <div class="min-w-0 space-y-1">
             <Label for="may-grant-reach">May grant reach</Label>
             <p class="text-xs text-muted-foreground">
-              The second half of the pair: whether this principal may change what an agent
-              <em>is</em> — write into its workspace, open a terminal on it, delete its files, or
-              add a machine to the fleet. Dispatching an agent needs only the values above.
+              Allow changes to an agent’s reach: workspace writes, terminals, file deletion, or adding a machine. Dispatch targets above do not require this permission.
             </p>
           </div>
-          <Switch id="may-grant-reach" bind:checked={mayGrantReach} />
+          <Switch id="may-grant-reach" bind:checked={mayGrantReach} disabled={isSaving} class="shrink-0" />
         </div>
-      </div>
+      </fieldset>
+    </div>
 
-      <Dialog.Footer>
+    <div class="shrink-0 space-y-3 border-t bg-popover p-4">
+      <p class="text-xs text-muted-foreground" role="status">
+        {added} added · {removed} removed · Reach {mayGrantReach === grant.mayGrantReach ? "unchanged" : mayGrantReach ? "enabled" : "disabled"}
+      </p>
+      <Dialog.Footer class="flex-row justify-end">
         <Button variant="outline" onclick={() => (open = false)} disabled={isSaving}>Cancel</Button>
-        <Button onclick={handleSave} disabled={isSaving}>
-          {isSaving ? "Saving…" : "Save grant"}
-        </Button>
+        <Button onclick={handleSave} disabled={isSaving}>{isSaving ? "Saving…" : "Save grant"}</Button>
       </Dialog.Footer>
-    </Dialog.Content>
-  </Dialog.Portal>
+    </div>
+  </Dialog.Content>
 </Dialog.Root>

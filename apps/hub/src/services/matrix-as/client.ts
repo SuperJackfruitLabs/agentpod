@@ -26,6 +26,20 @@ export interface MatrixClientDeps {
 /** The two "it was already done" answers, which are successes for us. */
 const ALREADY: Record<string, true> = { M_USER_IN_USE: true, M_ROOM_IN_USE: true };
 
+/**
+ * Appended when a homeserver refuses appservice login.
+ *
+ * Minting or rotating an agent's own access token needs appservice login, and
+ * a registration with MSC4190 enabled turns that off for the whole
+ * appservice. Both features are wanted and the homeserver offers a choice of
+ * one; the bare errcode says none of that, and whoever meets it is usually
+ * rotating a credential rather than reading MSCs.
+ */
+const CREDENTIALS_NEED_LOGIN =
+  " — the appservice registration has MSC4190 device management enabled, which" +
+  " disables appservice login on this homeserver. Bridge encryption needs" +
+  " MSC4190; per-agent credentials need login. See OPERATING.md.";
+
 export interface MatrixClient {
   ensureUser(localpart: string, displayName: string): Promise<void>;
   /**
@@ -37,6 +51,23 @@ export interface MatrixClient {
    * exists — replacing credentials is a different, privileged act.
    */
   registerWithCredentials(
+    localpart: string
+  ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
+  /**
+   * Replace the credentials of an identity that already exists.
+   *
+   * An Application Service may log in as any user inside its own namespace, so
+   * this needs no homeserver admin account — which matters, because the admin
+   * credential this service exists to eliminate may not exist at all.
+   *
+   * Every existing token is invalidated first. Login alone would MINT a device
+   * rather than replace one, so repeated rotations would accumulate devices and
+   * live tokens on an identity forever, and nothing can delete them afterwards:
+   * `DELETE /devices/{id}` requires User-Interactive Auth, which an appservice
+   * session has no password to satisfy. `rotate` therefore means replace, and
+   * an identity ends every rotation holding exactly one device.
+   */
+  rotateCredentials(
     localpart: string
   ): Promise<{ userId: string; accessToken: string; deviceId: string }>;
   ensureRoom(
@@ -58,7 +89,11 @@ export interface MatrixClient {
       isDirect?: boolean;
     }
   ): Promise<string | null>;
-  sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  /**
+   * `extra` adds namespaced keys to the message content (a client-drawable
+   * card beside the readable body). It can never replace `msgtype` or `body`.
+   */
+  sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
   /**
    * Send a message-like event of any type into a room.
    *
@@ -88,6 +123,86 @@ export interface MatrixClient {
   ): Promise<void>;
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
+  /**
+   * Join a room as a virtual user.
+   *
+   * **An invite is still required for an invite-only room.** This used to say
+   * the AS owning the whole `@agent_.*` namespace meant a join needed no
+   * invite, and that is false: namespace ownership lets the appservice *act
+   * as* a user, it does not exempt that user from a room's join rules. Every
+   * room `ensureRoom` creates is `preset: "private_chat"`, and a bare join is
+   * refused `403 M_FORBIDDEN — cannot join a room that is not 'public'`
+   * (agentpod#397, reproduced against a real tuwunel). `identity-move.ts`
+   * invites as the old member first, which is what makes its join land.
+   *
+   * Idempotent by the ordinary meaning of the Matrix endpoint: joining a room
+   * you are already in succeeds rather than erroring, which is what makes it
+   * safe for the migration to call unconditionally on a re-run.
+   */
+  join(userId: string, roomId: string): Promise<void>;
+  /**
+   * Leave a room as a virtual user.
+   *
+   * Must be safe to call on a user who is not currently a member — a run that
+   * crashed after a previous leave, and is simply run again, must not throw
+   * over a departure that already happened.
+   */
+  leave(userId: string, roomId: string): Promise<void>;
+  /**
+   * Whether `userId` is currently a member of `roomId`.
+   *
+   * The migration's way of asking "which of this room's steps are already
+   * done" — live membership, not a database flag nothing writes yet
+   * (`matrix_rooms.principal_id` is reserved ahead of its first writer).
+   *
+   * **Throws when the homeserver did not answer.** Only a 200 and a clean 404
+   * produce a boolean; see the implementation for why "could not ask" must not
+   * collapse into "already left".
+   */
+  isJoined(userId: string, roomId: string): Promise<boolean>;
+  /**
+   * Retire an identity: revoke every credential it holds, then ask the
+   * homeserver to deactivate the account itself.
+   *
+   * **Named for what it does, not for what it asks.** This was
+   * `deactivateUser`, which names the one half the appservice cannot perform
+   * and will not be able to — see below — while its docs and its return value
+   * were already honest about that. A method whose name promises more than it
+   * delivers is how a caller comes to believe an account is gone.
+   *
+   * **Two halves, because only one of them works on this homeserver.**
+   * `logout/all` as the user is accepted (the same call `rotateCredentials`
+   * already relies on), and it is the half that matters operationally — §5 of
+   * the uniform-identity design asks that "an unused credential on a node
+   * stops being a live login", and after this the token in a harness's
+   * profile is dead.
+   *
+   * `POST /account/deactivate` is then attempted and, on tuwunel today, is
+   * refused: probed against 1.9.0 on 2026-09-01, masquerading answers `401
+   * M_MISSING_TOKEN`, and with an appservice-minted user token it answers a
+   * User-Interactive Auth challenge whose `flows` list is EMPTY — a challenge
+   * with no satisfiable flow. tuwunel implements no Synapse admin API either
+   * (`/_synapse/admin/v1/deactivate` → 403). So the account row survives,
+   * holding no usable credential, and this returns that fact rather than
+   * claiming a deactivation it did not get. Neither half throws: retirement
+   * runs after the room has already moved, and a station that is working must
+   * not be broken by the cleanup behind it.
+   */
+  retireAccount(
+    userId: string
+  ): Promise<{ credentialsRevoked: boolean; accountDeactivated: boolean }>;
+  /** A user's account data of the given type, or null when it was never set. */
+  getAccountData(userId: string, type: string): Promise<Record<string, unknown> | null>;
+  /**
+   * Replace a user's account data of the given type outright.
+   *
+   * Not a merge: `m.direct` is a map covering every DM the owner has, and a
+   * caller that must preserve the entries it did not come to change — which is
+   * every caller of this for `m.direct` — reads first with `getAccountData`
+   * and writes back the whole object. Blindly writing one entry here is the
+   * single most destructive thing available to a caller of this client.
+   */
+  setAccountData(userId: string, type: string, content: Record<string, unknown>): Promise<void>;
   /** Mark another event — 👀 while working, ✅ done, ❌ failed. */
   sendReaction(
     userId: string,
@@ -125,7 +240,55 @@ export interface MatrixClient {
   getAvatar(userId: string): Promise<string | null>;
   /** Upload an image and return its mxc:// URL. */
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
+  /**
+   * Download media as `userId`, or null when the homeserver will not give it.
+   *
+   * For an image sent to an agent: the agent is a member of the room and so
+   * may read what was posted in it. The bytes are ciphertext for an encrypted
+   * room — `attachments.decryptAttachment` makes them an image.
+   */
+  downloadMedia(userId: string, mxc: string): Promise<Uint8Array | null>;
 }
+
+/**
+ * A registration refused because the identity already exists.
+ *
+ * Typed rather than a string match, for the same reason `GrantReachDenied` is:
+ * the caller has to *decide* what to do about it, and deciding on a substring of
+ * an error message is how that breaks silently later.
+ */
+export class MatrixUserInUse extends Error {
+  readonly errcode = "M_USER_IN_USE";
+  constructor(localpart: string) {
+    super(`matrix register ${localpart} refused: the identity already exists`);
+    this.name = "MatrixUserInUse";
+  }
+}
+
+export const isMatrixUserInUse = (e: unknown): e is MatrixUserInUse =>
+  e instanceof MatrixUserInUse;
+
+/**
+ * The appservice tried to act as a user outside its own exclusive namespace.
+ *
+ * Confirmed live against tuwunel on 2026-08-30: `GET account_data` as the
+ * human operator answers `400 M_EXCLUSIVE — User is not in namespace.` This
+ * is permanent, not transient — the AS's exclusive namespace is `@agent_.*`,
+ * the operator's own mxid is outside it, and no retry changes that. Typed,
+ * like `MatrixUserInUse`, so a caller (the mxid migration's report, in
+ * particular) can tell this apart from a real, retriable failure without
+ * matching an error message.
+ */
+export class MatrixExclusiveNamespace extends Error {
+  readonly errcode = "M_EXCLUSIVE";
+  constructor(what: string, userId: string) {
+    super(`matrix ${what} refused: ${userId} is outside the appservice's exclusive namespace`);
+    this.name = "MatrixExclusiveNamespace";
+  }
+}
+
+export const isMatrixExclusiveNamespace = (e: unknown): e is MatrixExclusiveNamespace =>
+  e instanceof MatrixExclusiveNamespace;
 
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
   const doFetch = deps.fetch ?? fetch;
@@ -187,10 +350,33 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     return String(res.body.room_id ?? "") || null;
   }
 
-  /** Whether `userId` is still in `roomId`. */
+  /**
+   * Whether `userId` is still in `roomId`.
+   *
+   * **Anything that is not a 200 or a clean 404 throws.** This used to answer
+   * `false` for every non-200, which quietly conflated "the homeserver says
+   * no" with "the homeserver did not say" — and this is the idempotency check
+   * on the only irreversible step in the mxid migration. A transient 502 read
+   * as `false` tells the migration both that the new user never joined and
+   * that the old one has already left: it re-joins an identity that is already
+   * in the room, skips the leave it still owes, and reports the room finished
+   * with two agents sitting in it. A failure to answer must stop the run and
+   * be retried, which is what a re-run is for; the same failure swallowed
+   * strands the room with nothing left looking at it.
+   *
+   * A 404 is the one non-200 that IS an answer: the homeserver knows nothing
+   * of this user, so it is in no rooms, so it is not in this one.
+   */
   async function isJoined(userId: string, roomId: string): Promise<boolean> {
     const res = await call("/_matrix/client/v3/joined_rooms", { method: "GET", userId });
-    if (res.status !== 200) return false;
+    if (res.status === 404) return false;
+    if (res.status !== 200) {
+      throw new Error(
+        `matrix joined_rooms ${userId} failed: ${res.status} ${String(
+          res.body.errcode ?? ""
+        )} ${String(res.body.error ?? "")}`.trim()
+      );
+    }
     const rooms = Array.isArray(res.body.joined_rooms) ? res.body.joined_rooms : [];
     return rooms.some((r) => r === roomId);
   }
@@ -199,22 +385,44 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     async ensureUser(localpart, displayName) {
       const res = await call("/_matrix/client/v3/register", {
         method: "POST",
-        body: { type: "m.login.application_service", username: localpart },
+        body: {
+          type: "m.login.application_service",
+          username: localpart,
+          // Required once the registration enables MSC4190, and harmless
+          // before it: a homeserver with appservice device management on
+          // refuses to issue a device at registration and fails the whole
+          // call with `400 M_APPSERVICE_LOGIN_UNSUPPORTED`. Provisioning
+          // wants an identity, never a token, so there is nothing to inhibit
+          // that this path wanted. Turning MSC4190 on without this left 16 of
+          // 30 stations unprovisioned at the next boot.
+          inhibit_login: true,
+        },
       });
       assertOkOrAlready(`register ${localpart}`, res);
 
-      // Set the display name EVERY time, not only on creation. The user is
+      // Check the display name EVERY time, not only on creation. The user is
       // created exactly once and provisioning runs forever, so a name set only
       // at creation means a renamed station keeps introducing itself by its old
       // name — and the display name is what carries the readability a derived
       // mxid does not have.
+      //
+      // But only WRITE it when it differs. Each PUT makes the homeserver post a
+      // new m.room.member event into every room the agent is in, identical name
+      // or not, and provisioning runs on every node reconnect: that was the
+      // stream of "updated their membership" lines in agent rooms.
       //
       // The register reply has no `user_id` when the user already existed, so
       // the mxid is composed rather than read back.
       const userId =
         String(res.body.user_id ?? "") ||
         (deps.domain ? `@${localpart}:${deps.domain}` : "");
-      if (userId) await this.setDisplayName(userId, displayName);
+      if (!userId) return;
+      const current = await call(
+        `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+        { method: "GET", userId }
+      );
+      if (current.status === 200 && current.body.displayname === displayName) return;
+      await this.setDisplayName(userId, displayName);
     },
 
     async registerWithCredentials(localpart) {
@@ -228,8 +436,15 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       // for credentials to an identity that already has some, and answering with
       // nothing would leave a harness holding no token while believing it does.
       if (res.status < 200 || res.status >= 300) {
+        // Distinguished from every other failure because it is the one the
+        // caller can act on: the identity exists, so rotate it instead.
+        if (String(res.body.errcode ?? "") === "M_USER_IN_USE") {
+          throw new MatrixUserInUse(localpart);
+        }
+        const errcode = String(res.body.errcode ?? "");
         throw new Error(
-          `matrix register ${localpart} failed: ${res.status} ${String(res.body.errcode ?? "")}`.trim()
+          `matrix register ${localpart} failed: ${res.status} ${errcode}`.trim() +
+            (errcode === "M_APPSERVICE_LOGIN_UNSUPPORTED" ? CREDENTIALS_NEED_LOGIN : "")
         );
       }
 
@@ -243,6 +458,54 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
 
       return {
         userId: String(res.body.user_id ?? `@${localpart}:${deps.domain ?? ""}`),
+        accessToken,
+        deviceId: String(res.body.device_id ?? ""),
+      };
+    },
+
+    async rotateCredentials(localpart) {
+      const userId = `@${localpart}:${deps.domain ?? ""}`;
+
+      // Impersonated, so no admin account is involved: an appservice may act as
+      // any user in its namespace. Verified against tuwunel 1.8.3.
+      const out = await call("/_matrix/client/v3/logout/all", {
+        method: "POST",
+        body: {},
+        userId,
+      });
+      if (out.status < 200 || out.status >= 300) {
+        throw new Error(
+          `matrix logout/all ${localpart} failed: ${out.status} ${String(out.body.errcode ?? "")}`.trim()
+        );
+      }
+
+      // Not impersonated — the login body names the user, and passing
+      // `?user_id=` as well is rejected.
+      const res = await call("/_matrix/client/v3/login", {
+        method: "POST",
+        body: {
+          type: "m.login.application_service",
+          identifier: { type: "m.id.user", user: localpart },
+        },
+      });
+      if (res.status < 200 || res.status >= 300) {
+        const errcode = String(res.body.errcode ?? "");
+        throw new Error(
+          `matrix login ${localpart} failed: ${res.status} ${errcode}`.trim() +
+            (errcode === "M_APPSERVICE_LOGIN_UNSUPPORTED" ? CREDENTIALS_NEED_LOGIN : "")
+        );
+      }
+
+      const accessToken = String(res.body.access_token ?? "");
+      if (!accessToken) {
+        throw new Error(
+          `matrix login ${localpart} returned no access_token — this homeserver ` +
+            "does not issue appservice credentials this way"
+        );
+      }
+
+      return {
+        userId: String(res.body.user_id ?? userId),
         accessToken,
         deviceId: String(res.body.device_id ?? ""),
       };
@@ -282,6 +545,12 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       const existing = await resolveAlias(alias);
       if (!existing) return null;
 
+      // Left to throw on a homeserver that could not answer, and deliberately.
+      // The branch below this line DELETES the alias directory entry, so a
+      // swallowed 502 answering "not joined" would release the alias of a room
+      // this agent is still living in. `provisionAll` counts a thrown station
+      // as a failure and the next boot retries it; a released alias is not
+      // retried, it is gone.
       if (await isJoined(opts.creator, existing)) return existing;
 
       log.info("reclaiming an alias from a room this agent has left", {
@@ -318,13 +587,13 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       return String(retry.body.room_id ?? "") || null;
     },
 
-    async sendText(userId, roomId, body) {
+    async sendText(userId, roomId, body, extra) {
       // A fresh transaction id per send: the homeserver deduplicates on it, so
       // reusing one would silently drop a genuinely new message.
       const txn = `apb-${crypto.randomUUID()}`;
       const res = await call(
         `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txn}`,
-        { method: "PUT", userId, body: { msgtype: "m.text", body } }
+        { method: "PUT", userId, body: { ...(extra ?? {}), msgtype: "m.text", body } }
       );
       assertOkOrAlready("send", res);
       return String(res.body.event_id ?? "") || null;
@@ -462,6 +731,26 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       return body.content_uri ?? null;
     },
 
+    async downloadMedia(userId, mxc) {
+      const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(mxc);
+      if (!parsed) return null;
+      const path = `${encodeURIComponent(parsed[1]!)}/${encodeURIComponent(parsed[2]!)}`;
+      // Authenticated media (Matrix 1.11) first: current homeservers serve new
+      // uploads only there. The unauthenticated path is the fallback for one
+      // that predates it.
+      for (const base of ["/_matrix/client/v1/media/download/", "/_matrix/media/v3/download/"]) {
+        const res = await doFetch(asUser(`${base}${path}`, userId), {
+          method: "GET",
+          headers: { Authorization: `Bearer ${deps.asToken}` },
+        });
+        if (res.ok) return new Uint8Array(await res.arrayBuffer());
+        // Only "this endpoint is not here" earns the second try. A 403 or a
+        // missing file is the same answer on both paths.
+        if (res.status !== 404 && res.status !== 400) return null;
+      }
+      return null;
+    },
+
     async getAvatar(userId) {
       const res = await call(
         `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/avatar_url`,
@@ -490,6 +779,92 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
         body: { user_id: invitee },
       });
       assertOkOrAlready("invite", res);
+    },
+
+    async join(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/join/${encodeURIComponent(roomId)}`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("join", res);
+    },
+
+    async leave(userId, roomId) {
+      const res = await call(`/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave`, {
+        method: "POST",
+        userId,
+        body: {},
+      });
+      assertOkOrAlready("leave", res);
+    },
+
+    isJoined,
+
+    async retireAccount(userId) {
+      // Impersonated, exactly as `rotateCredentials` does it: an appservice may
+      // act as any user in its own namespace, so no admin account is involved.
+      const out = await call("/_matrix/client/v3/logout/all", {
+        method: "POST",
+        body: {},
+        userId,
+      });
+      const credentialsRevoked = out.status >= 200 && out.status < 300;
+      if (!credentialsRevoked) {
+        log.warn("could not revoke a retired identity's credentials", {
+          userId,
+          status: out.status,
+          errcode: String(out.body.errcode ?? ""),
+        });
+      }
+
+      const gone = await call("/_matrix/client/v3/account/deactivate", {
+        method: "POST",
+        body: { erase: false },
+        userId,
+      });
+      const accountDeactivated = gone.status >= 200 && gone.status < 300;
+      if (!accountDeactivated) {
+        // Expected on tuwunel — see this method's doc comment. Info, not warn:
+        // a refusal that is structural gets reported once as a fact, not
+        // raised as an alarm on every retirement forever, which is the lesson
+        // `migrate-agent-mxids-run.ts` recorded about `M_EXCLUSIVE`.
+        log.info("this homeserver does not let the appservice deactivate an account", {
+          userId,
+          status: gone.status,
+          errcode: String(gone.body.errcode ?? ""),
+        });
+      }
+
+      return { credentialsRevoked, accountDeactivated };
+    },
+
+    async getAccountData(userId, type) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "GET", userId }
+      );
+      // No account data of this type yet — the map this migration reads and
+      // rewrites simply starts empty, same as a profile with no avatar.
+      if (res.status === 404) return null;
+      if (res.status < 200 || res.status >= 300) {
+        const errcode = String(res.body.errcode ?? "");
+        if (errcode === "M_EXCLUSIVE") {
+          throw new MatrixExclusiveNamespace(`account_data GET ${type}`, userId);
+        }
+        throw new Error(
+          `matrix account_data GET ${type} failed: ${res.status} ${errcode}`.trim()
+        );
+      }
+      return res.body;
+    },
+
+    async setAccountData(userId, type, content) {
+      const res = await call(
+        `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(type)}`,
+        { method: "PUT", userId, body: content }
+      );
+      assertOkOrAlready("account_data", res);
     },
   };
 }

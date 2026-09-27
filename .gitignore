@@ -56,3 +56,8 @@ docs/reference/agentic-space/
 
 # brainstorming visual companion (mockups)
 .superpowers/
+
+# Astro build cache. Kept at the ROOT and not only in docs-site/, because a
+# .gitignore that lives on one branch disappears when you check out another —
+# which is exactly how these files reached main in 20dc588e.
+.astro/

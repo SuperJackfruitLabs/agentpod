@@ -92,6 +92,8 @@ async function connectFakeNode(
   nodeSecret: string,
   opts: {
     streamChunks?: string[];
+    /** Override the node's normally contiguous stream sequence numbers. */
+    streamSeqs?: number[];
     capturedNodeMsgs?: string[];
     attachIdRef?: [string | null];
     holdStream?: boolean;
@@ -112,7 +114,10 @@ async function connectFakeNode(
     ws.onerror = () => rej(new Error("Node WS connection error"));
   });
 
-  let echoSeq = 1000; // scripted chunks use low seqs; echoes use high ones
+  // The real node starts each attach stream at zero and increments every frame,
+  // including input echoes. The fixture must preserve that contract so a test
+  // does not manufacture a transcript-loss alarm of its own.
+  let echoSeq = 0;
 
   ws.onmessage = (e) => {
     const raw = String(e.data);
@@ -207,7 +212,7 @@ async function connectFakeNode(
                   JSON.stringify({
                     type: "stream",
                     id: msg.id,
-                    seq: i,
+                    seq: opts.streamSeqs?.[i] ?? i,
                     chunk,
                     eof: false,
                     enc: "base64",
@@ -218,7 +223,7 @@ async function connectFakeNode(
                 JSON.stringify({
                   type: "stream",
                   id: msg.id,
-                  seq: chunks.length,
+                seq: opts.streamSeqs?.at(-1)! + 1 || chunks.length,
                   chunk: null,
                   eof: true,
                 })
@@ -348,6 +353,35 @@ test(
       fakeNode.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "reports a missing ACP stream chunk instead of silently storing a corrupted transcript",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (message: string) => errors.push(message);
+
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("acpwire-gap-host");
+      const fakeNode = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        streamChunks: [b64("first"), b64("third")],
+        streamSeqs: [0, 2],
+      });
+
+      const wire = await openAcpWire(nodeId, STATION_KEY, HUB_SESSION);
+      expect(await readAllText(wire.readable)).toBe("firstthird");
+      expect(errors.some((entry) => entry.includes("ACP stream sequence gap"))).toBe(true);
+
+      await wire.close();
+      fakeNode.close();
+    } finally {
+      console.error = originalError;
       server.stop(true);
     }
   },

@@ -1,0 +1,35 @@
+---
+/**
+ * Not found.
+ *
+ * Without this page Cloudflare Pages treats the site as a single-page app and answers
+ * every unknown path with the home page and a 200 — so a mistyped or rotted link looked
+ * like it worked, and crawlers indexed the home page under every URL anyone ever linked.
+ * With a top-level 404.html present, Pages serves it with a real 404 status instead.
+ */
+import ModernLayout from '../layouts/ModernLayout.astro';
+import Header from '../components/modern/Header.astro';
+import Footer from '../components/modern/Footer.astro';
+---
+
+<ModernLayout title="Not found — AgentPod" description="There is no page at this address.">
+  <Header slot="header" variant="solid" />
+
+  <section class="px-6 pt-32 pb-32">
+    <div class="container-narrow mx-auto">
+      <p class="font-mono text-sm text-accent-sienna mb-4">404</p>
+      <h1 class="display-lg mb-6 text-balance">There is no page here.</h1>
+      <p class="subheadline mb-10">
+        The link may be old — this site was rewritten in September 2026, and several pages
+        it used to have are gone rather than moved.
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/" class="btn btn-primary">Home</a>
+        <a href="https://docs.agentpod.dev" class="btn btn-secondary">Documentation</a>
+        <a href="/blog" class="btn btn-secondary">Blog</a>
+      </div>
+    </div>
+  </section>
+
+  <Footer slot="footer" />
+</ModernLayout>

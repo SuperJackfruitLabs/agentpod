@@ -4,6 +4,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant, deleteGrant } from "../../src/services/grants";
+import { createPrincipal } from "../../src/services/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
 import {
   clearPendingPermission,
@@ -33,6 +34,13 @@ const ROOM = "!inbound:id.agentpod.dev";
 const DOMAIN = "id.agentpod.dev";
 const OWNER_MXID = "@owner-inbound:id.agentpod.dev";
 const OTHER_MXID = "@other-inbound:id.agentpod.dev";
+
+let OWNER_PRINCIPAL: string;
+let OTHER_PRINCIPAL: string;
+/** The agent occupying STATION — the matcher compares a grant against this now. */
+let AGENT_PRINCIPAL: string;
+/** Some other agent, granted where a test wants to prove the scope check is real. */
+const OTHER_AGENT = "prn_ffffffffffffffffffff";
 
 let sent: Array<{ roomId: string; body: string }> = [];
 let created: Array<{ stationId: string; userId: string }> = [];
@@ -125,18 +133,25 @@ beforeAll(async () => {
   await rawSql`
     INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, cpu_count, status, secret_hash, created_at)
     VALUES (${NODE}, ${tenant}, ${OWNER}, 'inbound-box', 'inbound-box', 'linux', 'amd64', 2, 'online', 'x', now())`;
-  await rawSql`
-    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, adopted_at, created_at)
-    VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
-            '["acp"]'::jsonb, now(), now())`;
+  OWNER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mx-inbound-it-owner", userId: OWNER });
+  OTHER_PRINCIPAL = await createPrincipal({ kind: "human", handle: "mx-inbound-it-other", userId: OTHER });
+  AGENT_PRINCIPAL = await createPrincipal({ kind: "agent", handle: "mx-inbound-it-agent" });
 
-  // Both principals are known to this hub by their Matrix ids.
-  for (const [p, mxid] of [[OWNER, OWNER_MXID], [OTHER, OTHER_MXID]] as const) {
+  await rawSql`
+    INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, capabilities, principal_id, adopted_at, created_at)
+    VALUES (${STATION}, ${tenant}, ${OWNER}, ${NODE}, 'openclaw', 'openclaw:krishna', 'leaf', 'krishna',
+            '["acp"]'::jsonb, ${AGENT_PRINCIPAL}, now(), now())`;
+
+  // Both principals are known to this hub by their Matrix ids. Keyed by the
+  // real principal id now — `principal_identities.principal_id` is a foreign
+  // key onto `principals.id`, not the Better Auth user id.
+  for (const [p, mxid] of [[OWNER_PRINCIPAL, OWNER_MXID], [OTHER_PRINCIPAL, OTHER_MXID]] as const) {
     await rawSql`DELETE FROM principal_identities WHERE principal_id = ${p}`;
     await rawSql`
       INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
       VALUES (${`pid_${p}`}, ${p}, 'matrix', ${mxid}, now())`;
   }
+
 
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
@@ -164,9 +179,10 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM acp_sessions WHERE id LIKE 'acps_mx_inbound_%'`;
     await rawSql`DELETE FROM matrix_rooms WHERE room_id = ${ROOM}`;
-    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER}, ${OTHER})`;
-    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER}, ${OTHER})`;
+    await rawSql`DELETE FROM principal_identities WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
+    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${OWNER_PRINCIPAL}, ${OTHER_PRINCIPAL})`;
     await rawSql`DELETE FROM stations WHERE id = ${STATION}`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('mx-inbound-it-owner', 'mx-inbound-it-other', 'mx-inbound-it-agent')`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
     await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER})`;
   } catch {
@@ -176,26 +192,41 @@ afterAll(async () => {
 
 describe("an inbound room message", () => {
   test("prompts the station when the sender's grant covers it", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
     expect(created).toHaveLength(1);
+    // The station is scoped on `stations.user_id`, a Better Auth id. Asserting
+    // only that A session was created is what let the bridge pass a `prn_…`
+    // here and fail on every real room: `getStation` matched nothing, and the
+    // hub reported "Station not found." for a message it had just authorised.
+    expect(created[0]!.userId).toBe(OWNER);
+    expect(created[0]!.userId).not.toBe(OWNER_PRINCIPAL);
     expect(prompts).toHaveLength(1);
     expect(prompts[0]!.text).toBe("status?");
+    // `promptSession` scopes on the session's user the same way the station
+    // lookup does. The fake recorded this id from the beginning and nothing
+    // asserted it, so the bridge could create a session correctly and then be
+    // unable to prompt it.
+    expect(prompts[0]!.userId).toBe(OWNER);
+    expect(prompts[0]!.userId).not.toBe(OWNER_PRINCIPAL);
   });
+
 
   test("attaches the room to the session, or the answer has nowhere to go", async () => {
     // The gap that live verification found: a session was created and prompted
     // and the agent answered into a stream nobody was listening to. Both halves
     // had tests; the joint did not.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
     expect(attached).toHaveLength(1);
     expect(attached[0]!.roomId).toBe(ROOM);
-    expect(attached[0]!.agentUser).toBe("@agent_inbound-box_openclaw-krishna:id.agentpod.dev");
+    // Built from the occupying agent's principal handle now, not from where
+    // the station runs.
+    expect(attached[0]!.agentUser).toBe("@agent_mx-inbound-it-agent:id.agentpod.dev");
     expect(attached[0]!.sessionId).toBe(prompts[0]!.sessionId);
   });
 
@@ -203,7 +234,7 @@ describe("an inbound room message", () => {
     // Attachments live in memory. After a hub restart the session row survives
     // and the listener does not, so a room whose session predates the restart
     // would go permanently quiet.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     await handleRoomMessage(message(OWNER_MXID, "second"), deps());
@@ -213,7 +244,7 @@ describe("an inbound room message", () => {
   });
 
   test("does not attach when the message was refused", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -223,7 +254,7 @@ describe("an inbound room message", () => {
   test("refuses IN THE ROOM when the grant does not cover this station", async () => {
     // Silence would read as a broken agent and send the operator to the console,
     // the node and the harness — everywhere except the grant.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/hermes:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
 
@@ -235,11 +266,11 @@ describe("an inbound room message", () => {
   test("checks every message, not only the one that opened the session", async () => {
     // A room is shared. Without a per-message check, the first permitted person
     // to speak would open a session that everyone else in the room could drive.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     expect(prompts).toHaveLength(1);
 
-    await deleteGrant(OTHER);
+    await deleteGrant(OTHER_PRINCIPAL);
     await handleRoomMessage(message(OTHER_MXID, "and me"), deps());
 
     expect(prompts).toHaveLength(1);
@@ -256,7 +287,7 @@ describe("an inbound room message", () => {
   test("reuses the room's session instead of starting one per message", async () => {
     // A conversation is a conversation. One session per message would throw away
     // the agent's context between two consecutive sentences.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     await handleRoomMessage(message(OWNER_MXID, "second"), deps());
@@ -270,7 +301,7 @@ describe("an inbound room message", () => {
     // this the room keeps prompting a corpse and every bridged room dies
     // permanently at the first restart — the agent simply stops answering, with
     // 'Session not found or not active' as the only clue.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await handleRoomMessage(message(OWNER_MXID, "first"), deps());
     const dead = prompts[0]!.sessionId;
 
@@ -284,7 +315,7 @@ describe("an inbound room message", () => {
   });
 
   test("says so when the station cannot be reached, rather than swallowing it", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     createFails = new Error("node offline");
 
     await handleRoomMessage(message(OWNER_MXID, "hi"), deps());
@@ -305,7 +336,7 @@ describe("an inbound room message", () => {
   test("stays out of a harness-mode station's room entirely", async () => {
     // That station answers for itself. Two answerers on one address is the
     // failure the mode exists to prevent.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     await rawSql`UPDATE stations SET matrix_identity_mode = 'harness' WHERE id = ${STATION}`;
 
     await handleRoomMessage(message(OWNER_MXID, "hi"), deps());
@@ -315,7 +346,7 @@ describe("an inbound room message", () => {
   });
 
   test("ignores anything that is not a text message", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(
       { type: "m.room.member", sender: OWNER_MXID, room_id: ROOM, content: { membership: "join" } },
@@ -327,7 +358,7 @@ describe("an inbound room message", () => {
   });
 
   test("ignores an empty message rather than prompting with nothing", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "   "), deps());
 
@@ -337,21 +368,201 @@ describe("an inbound room message", () => {
   test("passes the message through unchanged, including its exact text", async () => {
     // The prompt is the user's words. Trimming, prefixing or decorating them
     // would put the bridge's voice into the agent's input.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "deploy  the thing\nnow"), deps());
 
     expect(prompts[0]!.text).toBe("deploy  the thing\nnow");
   });
 
-  test("prompts as the principal who sent it, not as the station's owner", async () => {
-    // The ACP session belongs to whoever is talking, so the transcript and the
-    // control pair both attribute the turn correctly.
-    await setGrant(OTHER, { mayDispatch: ["agentpod:*/openclaw:*"], mayGrantReach: false });
+  test("opens the session as the station's OWNER, even when another principal sent it", async () => {
+    // This test used to assert the opposite — that the session is opened as the
+    // sending principal, "so the transcript and the control pair both attribute
+    // the turn correctly". The intent was right and the mechanism was not:
+    // `createSession` resolves the station with `getStation(userId, stationId)`,
+    // which scopes on `stations.user_id`. A `prn_…` matches no row there, so in
+    // production EVERY bridged room answered "Station not found." for a message
+    // the hub had already received, resolved and authorised. The fake here
+    // accepted any id, which is why the suite stayed green while no real room
+    // worked.
+    //
+    // Authorisation is still the principal's: OTHER_PRINCIPAL dispatches this
+    // station on a grant, and is not its owner. Only the station LOOKUP uses
+    // the owner.
+    //
+    // What is genuinely lost is attribution — `acp_sessions.user_id` no longer
+    // records which principal asked. That needs its own column rather than this
+    // one serving two masters, and it is written down as a gap, not fixed here.
+    await setGrant(OTHER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OTHER_MXID, "hello"), deps());
 
-    expect(created[0]!.userId).toBe(OTHER);
+    expect(created[0]!.userId).toBe(OWNER);
+    expect(created[0]!.userId).not.toBe(OTHER_PRINCIPAL);
+  });
+});
+
+let transcriptKeys: unknown[] = [];
+
+describe("a voice note", () => {
+  function voice(sender: string, extra: Record<string, unknown> = {}) {
+    return {
+      type: "m.room.message",
+      sender,
+      room_id: ROOM,
+      event_id: "$voice1",
+      content: {
+        msgtype: "m.audio",
+        body: "Voice message.m4a",
+        url: "mxc://id.agentpod.dev/voice1",
+        info: { mimetype: "audio/mp4", duration: 42_000 },
+        ...extra,
+      },
+    };
+  }
+
+  /** `deps()` with media, notices and a transcriber that hears `heard`. */
+  function voiceDeps(heard: string | Error) {
+    const base = deps();
+    const notices: Array<{ body: string; replyTo: string | null }> = [];
+    transcriptKeys = [];
+    return {
+      notices,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          downloadMedia: async () => new Uint8Array([1, 2, 3]),
+          sendCustomEvent: async (_u: string, _r: string, _t: string, content: Record<string, unknown>) => {
+            const rel = content["m.relates_to"] as { "m.in_reply_to"?: { event_id?: string } } | undefined;
+            notices.push({ body: String(content.body), replyTo: rel?.["m.in_reply_to"]?.event_id ?? null });
+            if (content["dev.agentpod.voice_transcript"]) transcriptKeys.push(content["dev.agentpod.voice_transcript"]);
+            return "$notice";
+          },
+        },
+        transcriber: {
+          transcribe: async () => {
+            if (heard instanceof Error) throw heard;
+            return { text: heard, language: "en" };
+          },
+        },
+      },
+    };
+  }
+
+  test("is transcribed: the agent gets the words, and the room gets the transcript under the note", async () => {
+    // The 2026-09-24 report: a voice note reached Krishna as its file name.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notices } = voiceDeps("send the report by Friday");
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toBe("[Voice note, 0:42, transcribed] send the report by Friday");
+    expect(prompts[0]!.text).not.toContain("Voice message.m4a");
+    expect(notices).toEqual([{ body: "Transcript: send the report by Friday", replyTo: "$voice1" }]);
+    expect(transcriptKeys).toEqual([{ schema_version: 1, text: "send the report by Friday", language: "en", seconds: 42 }]);
+  });
+
+  test("one that cannot be transcribed still reaches the agent, with the reason, and the room is told", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notices } = voiceDeps(new Error("the transcription service answered 503"));
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(prompts[0]!.text).toBe(
+      "[The user sent a voice note, Voice message.m4a, but the transcription service answered 503.]"
+    );
+    expect(notices[0]!.body).toBe("I could not transcribe this voice note: the transcription service answered 503.");
+  });
+
+  test("over five minutes is not transcribed", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never heard");
+
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 301_000 } }), d);
+
+    expect(prompts[0]!.text).toContain("it is longer than 5 minutes");
+    expect(prompts[0]!.text).not.toContain("never heard");
+  });
+
+  test("the service is looked up per voice note, for the room's station, with that station's limit", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+    const askedFor: string[] = [];
+    const heardBy: string[] = [];
+    const withLookup = {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async (stationId: string) => {
+        askedFor.push(stationId);
+        return {
+          transcriber: {
+            transcribe: async () => {
+              heardBy.push(stationId);
+              return { text: "from the station's own service", language: "en" };
+            },
+          },
+          maxSeconds: 30,
+        };
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), withLookup);
+    // 42 s is over this station's 30 s limit: named, not heard.
+    expect(askedFor).toEqual([STATION]);
+    expect(heardBy).toEqual([]);
+    expect(prompts[0]!.text).toContain("it is longer than 30 seconds");
+
+    prompts.length = 0;
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 20_000 } }), withLookup);
+    expect(heardBy).toEqual([STATION]);
+    expect(prompts[0]!.text).toBe("[Voice note, 0:20, transcribed] from the station's own service");
+  });
+
+  test("a station whose lookup answers none is told the hub has no service", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), { ...d, transcriber: undefined, transcriberFor: async () => null });
+
+    expect(prompts[0]!.text).toBe(
+      "[The user sent a voice note, Voice message.m4a, but this hub has no transcription service set up.]"
+    );
+  });
+
+  test("a lookup that throws is a voice note that cannot be heard, not a lost message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toContain("but its transcription settings could not be read");
+  });
+
+  test("a sender who may not dispatch the agent gets no transcription either", async () => {
+    // Transcribing is work done as the agent; it follows the same grant.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
+    let transcribed = false;
+    const { deps: d } = voiceDeps("x");
+    d.transcriber = {
+      transcribe: async () => {
+        transcribed = true;
+        return { text: "x", language: "en" };
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(transcribed).toBe(false);
+    expect(prompts).toHaveLength(0);
   });
 });
 
@@ -368,11 +579,15 @@ describe("answering a permission request from the room", () => {
     // While a permission is pending the session is PARKED — it cannot take a
     // prompt. Treating the answer as a message would lose the answer and fail
     // the prompt in the same breath.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
 
+    // The OWNER, not the principal: `answerPermission` resolves the live
+    // session with `requireLive(userId, sessionId)`, scoped on a Better Auth
+    // id. This assertion named the principal and passed, while in production
+    // the same value produced "Session not found or not active."
     expect(answered).toEqual([
       { userId: OWNER, sessionId: "acps_parked", requestSeq: 7, optionId: "allow_once" },
     ]);
@@ -381,7 +596,7 @@ describe("answering a permission request from the room", () => {
   });
 
   test("the option's name answers it too", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "Reject"), depsWithPermissions());
@@ -393,7 +608,7 @@ describe("answering a permission request from the room", () => {
     // "yes" against options named "Allow once" and "Allow always" does not say
     // which. Resolving it to the nearest-looking one is the failure this must
     // never have.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "yes go ahead"), depsWithPermissions());
@@ -406,7 +621,7 @@ describe("answering a permission request from the room", () => {
 
   test("someone who may not dispatch the agent may not approve for it either", async () => {
     // Approving an action IS dispatching the agent, by another name.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:other/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
     parkOn();
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
@@ -418,7 +633,7 @@ describe("answering a permission request from the room", () => {
   test("a refused answer leaves the question standing", async () => {
     // A cleared question plus a failed answer would park the agent forever
     // with nothing able to release it.
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     parkOn();
     answerFails = new Error("No pending permission request.");
 
@@ -429,7 +644,7 @@ describe("answering a permission request from the room", () => {
   });
 
   test("an ordinary message is still an ordinary message when nothing is pending", async () => {
-    await setGrant(OWNER, { mayDispatch: ["agentpod:*/*"], mayGrantReach: false });
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
 
     await handleRoomMessage(message(OWNER_MXID, "1"), depsWithPermissions());
 

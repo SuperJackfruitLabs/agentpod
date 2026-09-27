@@ -28,11 +28,14 @@ type Session struct {
 	cmd *exec.Cmd
 
 	mu     sync.Mutex
-	ring   []byte          // scrollback ring buffer (last ringBytes)
+	ring   []byte // scrollback ring buffer (last ringBytes)
 	subs   map[int]*subscriber
-	subSeq int             // monotonic key for subs map
+	subSeq int  // monotonic key for subs map
+	exited bool // read loop finished; late subscriptions close immediately
 
-	done chan struct{} // closed when the read loop exits
+	closeOnce sync.Once
+	readDone  chan struct{}
+	done      chan struct{} // closed after read loop exit AND child reaping
 }
 
 // newSession spawns a PTY-attached process and returns a running Session.
@@ -54,13 +57,20 @@ func newSession(id, shell, cwd string, cols, rows uint16) (*Session, error) {
 	}
 
 	s := &Session{
-		ID:   id,
-		ptm:  ptm,
-		cmd:  cmd,
-		subs: make(map[int]*subscriber),
-		done: make(chan struct{}),
+		ID:       id,
+		ptm:      ptm,
+		cmd:      cmd,
+		subs:     make(map[int]*subscriber),
+		done:     make(chan struct{}),
+		readDone: make(chan struct{}),
 	}
 	go s.readLoop()
+	go func() {
+		<-s.readDone
+		_ = s.cmd.Wait()
+		_ = s.ptm.Close()
+		close(s.done)
+	}()
 	return s, nil
 }
 
@@ -68,7 +78,7 @@ func newSession(id, shell, cwd string, cols, rows uint16) (*Session, error) {
 // It exits when the PTY file returns an error (closed or EOF), which is
 // triggered by Close() calling ptm.Close().
 func (s *Session) readLoop() {
-	defer close(s.done)
+	defer close(s.readDone)
 
 	buf := make([]byte, 4096)
 	for {
@@ -96,6 +106,7 @@ func (s *Session) readLoop() {
 
 	// Notify remaining subscribers that the session has ended.
 	s.mu.Lock()
+	s.exited = true
 	for id, sub := range s.subs {
 		close(sub.ch)
 		delete(s.subs, id)
@@ -141,6 +152,11 @@ func (s *Session) Subscribe() (<-chan []byte, func()) {
 		copy(snap, s.ring)
 		ch <- snap // always succeeds: fresh channel, guaranteed capacity >= 1
 	}
+	if s.exited {
+		close(ch)
+		s.mu.Unlock()
+		return ch, func() {}
+	}
 	// Register the subscriber so the read loop starts delivering live chunks.
 	id := s.subSeq
 	s.subSeq++
@@ -156,28 +172,26 @@ func (s *Session) Subscribe() (<-chan []byte, func()) {
 }
 
 // Close kills the child process (by its process group) and closes the PTY
-// file. It blocks until the read loop has exited to avoid goroutine leaks.
+// file. Every caller waits until the read loop exits and the child is reaped.
 func (s *Session) Close() error {
-	// PTY-started processes become their own session / process group leader,
-	// so pgid == pid. Kill the whole group to reap any grandchildren.
-	if s.cmd.Process != nil {
-		pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
-		if err == nil {
-			_ = syscall.Kill(-pgid, syscall.SIGKILL)
-		} else {
-			_ = s.cmd.Process.Kill()
+	s.closeOnce.Do(func() {
+		select {
+		case <-s.done:
+			return
+		default:
 		}
-	}
-
-	// Closing the master PTY causes Read in the read loop to fail, stopping
-	// the loop.
-	err := s.ptm.Close()
-
-	// Wait for the read loop to exit — no goroutine leak.
+		// PTY children lead their own process group. This signals that group;
+		// only the direct child is reaped here, not arbitrary detached children.
+		if s.cmd.Process != nil {
+			pgid, err := syscall.Getpgid(s.cmd.Process.Pid)
+			if err == nil {
+				_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			} else {
+				_ = s.cmd.Process.Kill()
+			}
+		}
+		_ = s.ptm.Close()
+	})
 	<-s.done
-
-	// Reap the child to avoid zombies.
-	_ = s.cmd.Wait()
-
-	return err
+	return nil
 }

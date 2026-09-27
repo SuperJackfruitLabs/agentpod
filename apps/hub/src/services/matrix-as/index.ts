@@ -7,7 +7,7 @@
  * which is also the off switch.
  *
  * Gated on `ENABLE_MATRIX_BRIDGE` being the **literal lowercase `"true"`**,
- * matching `ENABLE_KAAMBAAN_BRIDGE` and `ENFORCE_CONTROL_PAIR`. This codebase has
+ * matching `ENABLE_SUPERPIPELINE_BRIDGE` and `ENFORCE_CONTROL_PAIR`. This codebase has
  * already learned that a looser boolean lets `=1` pass validation and start
  * nothing.
  */
@@ -19,12 +19,30 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
-import { provisionStation, provisionAll } from "./provision";
-import { handleRoomMessage } from "./inbound";
+import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
+import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
+import { transcriberFor } from "../transcription-settings";
+import {
+  handleGateDecision,
+  projectionForGate,
+  resolveGateAtSuperpipeline,
+  roomAgentUser,
+} from "./gates";
+import { mintPrincipalAssertion } from "../../auth/service-signing";
+import { resolveMatrixId } from "../matrix-identity";
+import { principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
-  answerPermission } from "../acp-sessions";
+  answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
+import { bridgeModeOnly } from "./bridge-agents";
+import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
+import {
+  createCryptoTransport,
+  createDeviceProvisioner,
+  createSigningKeyUploader,
+} from "./crypto-transport";
+import { withEncryption } from "./crypto-send";
 
 const log = createLogger("matrix-bridge");
 
@@ -43,6 +61,19 @@ export interface MatrixBridgeConfig {
   domain: string;
   asToken: string;
   hsToken: string;
+  /**
+   * Where each agent's crypto store lives, or "" for a plaintext bridge.
+   *
+   * Opt-in rather than defaulted to a path, because a store that appears by
+   * accident is worse than no store: agents would start advertising device
+   * keys the deployment has no backup for, and the rooms they encrypt with
+   * them cannot be un-encrypted afterwards.
+   *
+   * **Whatever this points at must be backed up.** Losing it loses every
+   * agent's keys to every encrypted room they are in, unrecoverably, and the
+   * nightly tuwunel backup does not cover it.
+   */
+  cryptoStoreDir: string;
 }
 
 /** What the deployment says. Read once, at boot, like every other switch here. */
@@ -52,26 +83,36 @@ export interface MatrixBridgeConfig {
  *
  * A turn's text is pushed to that person's own devices while it is being
  * written (see `live.ts`), so this answers "whose devices". `null` — a room
- * whose owner has no Matrix identity mapped — simply means no live view; the
- * room still gets its message.
+ * whose owner has no principal, or a principal with no Matrix identity mapped —
+ * simply means no live view; the room still gets its message.
  *
- * Looked up once per attachment rather than per chunk: this is three joins and
- * an agent can emit hundreds of chunks in a turn.
+ * Two lookups rather than one join, because `stations.userId` is a Better Auth
+ * id and `principal_identities.principal_id` is a `prn_…` value now — joining
+ * them directly would silently match nothing for every station. Still looked
+ * up once per attachment rather than per chunk: an agent can emit hundreds of
+ * chunks in a turn.
  */
 async function readerForRoom(roomId: string): Promise<string | null> {
   const [row] = await db
-    .select({ externalId: principalIdentities.externalId })
+    .select({ userId: stations.userId })
     .from(matrixRooms)
     .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
-    .innerJoin(
-      principalIdentities,
+    .where(eq(matrixRooms.roomId, roomId));
+  if (!row) return null;
+
+  const principal = await principalForUser(row.userId);
+  if (!principal) return null;
+
+  const [identity] = await db
+    .select({ externalId: principalIdentities.externalId })
+    .from(principalIdentities)
+    .where(
       and(
-        eq(principalIdentities.principalId, stations.userId),
+        eq(principalIdentities.principalId, principal.id),
         eq(principalIdentities.system, "matrix")
       )
-    )
-    .where(eq(matrixRooms.roomId, roomId));
-  return row?.externalId ?? null;
+    );
+  return identity?.externalId ?? null;
 }
 
 export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
@@ -82,6 +123,7 @@ export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
     domain: env.MATRIX_SERVER_NAME ?? "id.agentpod.dev",
     asToken: env.MATRIX_AS_TOKEN ?? "",
     hsToken: env.MATRIX_HS_TOKEN ?? "",
+    cryptoStoreDir: env.MATRIX_CRYPTO_STORE_DIR ?? "",
   };
 }
 
@@ -110,6 +152,14 @@ export interface MatrixBridge {
   onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
+  /**
+   * Feed the encryption side-channels of one transaction to the agents it
+   * concerns. Null when no crypto store is configured — a plaintext bridge
+   * never calls it, and the route checks for exactly that.
+   */
+  onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
+  /** Release native crypto machines before Bun tears down napi during shutdown. */
+  close(): Promise<void>;
 }
 
 /**
@@ -171,11 +221,117 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     };
   };
 
+  /**
+   * The crypto, or null for a plaintext bridge.
+   *
+   * Built once here rather than per transaction: an `OlmMachine` generates
+   * keys and opens a store on construction, and rebuilding one per
+   * transaction would rotate every agent's device on every message.
+   *
+   * `isOurs` is the namespace the registration claims. Anyone else in a
+   * transaction — a human, an agent on another server — is described *to* our
+   * machines but never has one of their own, because we hold no keys for
+   * them and could not act as them if we did.
+   */
+  const crypto: AgentCrypto | null = cfg.cryptoStoreDir
+    ? (() => {
+        // One provisioner, shared by everything that has to name a device:
+        // it caches per agent, so the login happens once rather than once
+        // per request that mentions them.
+        const deviceIdFor = createDeviceProvisioner({
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          storeDir: cfg.cryptoStoreDir,
+        });
+        const wire = {
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+          deviceIdFor,
+        };
+        return createAgentCrypto({
+          storeDir: cfg.cryptoStoreDir,
+          domain: cfg.domain,
+          send: createCryptoTransport(wire),
+          deviceIdFor,
+          uploadSigningKeys: createSigningKeyUploader(wire),
+        });
+      })()
+    : null;
+
+  if (crypto) {
+    log.info("matrix bridge crypto is on", { storeDir: cfg.cryptoStoreDir });
+  }
+
+  /**
+   * The client every agent speaks through.
+   *
+   * Wrapped once, here, so nothing downstream has to remember to encrypt.
+   * `outbound.ts`, the gate sweeper, the mission runner and everything else
+   * keep calling `sendText` — the difference is decided by the room, not by
+   * the caller, which is the only arrangement where a new send site cannot
+   * accidentally ship plaintext into an encrypted room.
+   */
+  const speakingClient = crypto
+    ? withEncryption(client, crypto, {
+        homeserverUrl: cfg.homeserverUrl,
+        asToken: cfg.asToken,
+      })
+    : client;
+
+
   const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
+
+  /**
+   * Answering a gate, wired only when a board is configured.
+   *
+   * `SUPERPIPELINE_BASE_URL` absent means no board, which means no gate could have
+   * been projected in the first place — so leaving this undefined is the
+   * honest state rather than a half-built path that fails at the last step.
+   */
+  const superpipelineBaseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim();
+  const gates = superpipelineBaseUrl
+    ? {
+        handle: (
+          event: { sender: string; content: Record<string, unknown> },
+          roomId: string
+        ) =>
+          handleGateDecision(event, roomId, {
+            // The subject comes from here and from nowhere else. This is the
+            // control that makes minting an assertion for another principal
+            // safe to have at all — see `mintPrincipalAssertion`.
+            principalForMatrixId: async (mxid: string) => {
+              const identity = await resolveMatrixId(mxid);
+              return identity?.kind === "principal" ? identity.principalId : null;
+            },
+            projectionFor: projectionForGate,
+            resolveGate: (input) =>
+              resolveGateAtSuperpipeline(input, {
+                baseUrl: superpipelineBaseUrl,
+                mint: (principalId) => mintPrincipalAssertion({ principalId }),
+              }),
+            reply: async (roomId: string, body: string) => {
+              const room = await roomAgentUser(roomId, cfg.domain);
+              return room ? speakingClient.sendText(room, roomId, body) : null;
+            },
+          }),
+      }
+    : undefined;
 
   const inboundDeps = {
     domain: cfg.domain,
-    client,
+    // Absent for a plaintext bridge, which is the default. The
+    // handler then treats an encrypted event as nothing to act on
+    // rather than pretending to read it.
+    decrypt: crypto
+      ? async (roomId: string, asUserId: string, event: any) =>
+          (await crypto.decrypt(asUserId, roomId, event)) as any
+      : undefined,
+    gates,
+    client: speakingClient,
+    // Voice notes to text, looked up per voice note for the room's station:
+    // its own setting, then the hub's (both in the console), then the
+    // TRANSCRIBE_* env. None, and a voice note is named to the agent.
+    transcriberFor: (stationId: string) => transcriberFor(stationId),
     acp: {
       createSession: async (input: { stationId: string; userId: string; mode: string }) => {
         const session = await createSession({
@@ -187,22 +343,55 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       },
       promptSession,
       answerPermission,
+      // The room queue's two questions: is a turn running, and when is it
+      // over. Without them a mid-turn message is refused, not held.
+      isBusy: sessionIsBusy,
+      whenIdle: (sessionId: string) => whenIdle(sessionId),
     },
     // The joint between inbound and outbound. Without it a session is created,
     // prompted, and answers into a stream nobody is listening to — which is
     // exactly what happened the first time this ran against the real fleet.
     attach: (sessionId: string, roomId: string, agentUser: string) =>
       attachRoomToSession(sessionId, roomId, agentUser, {
-        client,
+        // `speakingClient`, not `client`. This is the path an agent's answers
+        // travel, and it was the one still sending them in the clear: the
+        // first encrypted exchange with an agent had the human's question
+        // encrypted and the agent's reply in plaintext, in the same room.
+        client: speakingClient,
         readerFor: readerForRoom,
       }),
     noteTrigger: noteTurnTrigger,
   };
 
   return {
-    client,
+    client: speakingClient,
     config: cfg,
     provisionDeps,
+
+    onCryptoTransaction: crypto
+      ? async (tx) => {
+          // Our namespace, minus the agents that keep their own keys. A
+          // harness-mode station reads its own rooms; a machine built here for
+          // one of those takes an identity it then cannot use.
+          const notHarness = await bridgeModeOnly();
+          await feedAgents(
+            crypto,
+            tx,
+            (userId) =>
+              userId.startsWith("@agent_") &&
+              userId.endsWith(`:${cfg.domain}`) &&
+              notHarness(userId),
+          );
+          // New keys have just landed, which is the only thing that can turn a
+          // message we could not read into one we can. Anything still waiting
+          // gets another try here rather than staying unread forever.
+          await retryPendingDecrypts(inboundDeps);
+        }
+      : null,
+
+    async close() {
+      await crypto?.close();
+    },
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);
@@ -213,13 +402,12 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     },
 
     async onProvisionAlias(alias: string) {
-      // The homeserver asks about an alias when somebody tried to resolve it.
-      // Answering yes without creating the room would send them somewhere that
-      // is not there.
-      const { stationForLocalpart, localpartFromAlias } = await import("./stations");
-      const localpart = localpartFromAlias(alias, cfg.domain);
-      const station = localpart ? await stationForLocalpart(localpart) : null;
-      if (station) await provisionStation(station.stationId, provisionDeps);
+      // Both alias shapes, resolved by the same `stationForAlias` the route
+      // in front of this one gates on — fix round 4. Round 3 wrote the
+      // two-shape lookup out longhand here, and the route kept its own
+      // narrower one, which is how an occupant-derived alias came to be
+      // 404'd before this ever ran.
+      await provisionStationForAlias(alias, provisionDeps);
     },
   };
 }

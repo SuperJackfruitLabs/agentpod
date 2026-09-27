@@ -4,11 +4,11 @@
  *
  * One process, not one per agent — the hub already owns the station connections
  * and the ACP session machinery, and a second process would need a second copy
- * of both. What is *not* shared is identity: each loop holds its own `kbn_`
+ * of both. What is *not* shared is identity: each loop holds its own `spa_`
  * token, because an agent's authority is its own rather than a projection of
  * whoever dispatched it.
  *
- * Off unless `ENABLE_KAAMBAAN_BRIDGE=true`. A hub that has not opted in
+ * Off unless `ENABLE_SUPERPIPELINE_BRIDGE=true`. A hub that has not opted in
  * constructs nothing here and behaves exactly as it does today.
  */
 
@@ -16,7 +16,7 @@ import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
 import { isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
-import { KaambaanClient } from "./kaambaan";
+import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -65,11 +65,52 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
   const controller = new AbortController();
 
   const done = (async () => {
+    let cycle = 0;
     while (!controller.signal.aborted) {
+      // **Liveness, not decoration.** Twice now a bridge agent has stopped and left nothing
+      // behind: a 401 retried into noise, then a cycle that never came back. Both were invisible
+      // because a loop that is neither erroring nor idling logs nothing at all, and a silent
+      // agent is indistinguishable from a quiet board.
+      //
+      // One line per cycle at DEBUG-ish volume — a cycle is at minimum five seconds — is a cheap
+      // price for being able to answer "is it still going round?" without attaching a debugger
+      // to production, which is exactly the question that could not be answered on 2026-09-08.
+      log("cycle", { n: ++cycle });
       let result: DispatchResult;
       try {
+        // NOT bounded by a deadline, and that is deliberate. `runOnce` drives the claimed run
+        // to completion — it creates the session, prompts, streams activities and heartbeats —
+        // so a legitimate cycle lasts as long as the agent's work, and `permissionWaitMs`
+        // alone defaults to thirty minutes. A cycle deadline here would abandon real work
+        // mid-run. What must be fast is the READINESS PROBE, and that is bounded where it is
+        // made, in `dispatch.ts`.
         result = await opts.run();
       } catch (err) {
+        // **An authentication failure is not retryable, and retrying hides it.**
+        //
+        // A 401 means superpipeline does not recognise this agent's credential; a 403 means it
+        // refuses the act. Neither improves by being asked again, and the loop's own backoff
+        // turns a misconfiguration into an error line every thirty seconds forever — which is
+        // exactly what it did. On 2026-09-04 the hub was found polling a board with a token
+        // whose agent had been deleted three days earlier: 8,640 identical 401s a day, and no
+        // signal that anything was wrong beyond noise nobody reads.
+        //
+        // Halts on the same terms as `foreign-run` below: stop, say why once, and let
+        // `onFault` surface it. An operator has to change something, so make them look.
+        if (err instanceof SuperpipelineApiError && (err.status === 401 || err.status === 403)) {
+          log("halting: superpipeline refused this agent's credential", {
+            status: err.status,
+            path: err.path,
+            hint:
+              "the token no longer resolves to an agent on that board — re-mint it, or remove " +
+              "this agent from SUPERPIPELINE_BRIDGE_AGENTS",
+          });
+          // Deliberately NOT reported through `onFault`, which takes a DispatchResult: this
+          // is not a dispatch outcome, and inventing a status member for it from a catch
+          // block would put a fault into the enum every switch has to answer for. The halt
+          // is the signal — the agent stops claiming, and the line above says why.
+          return;
+        }
         log("a claim cycle threw", { error: String(err) });
         await sleep(opts.backoffMs ?? DEFAULT_BACKOFF_MS, controller.signal);
         continue;
@@ -135,7 +176,7 @@ export interface BridgeHandle {
  * Called from `src/index.ts` after the sweeper, mirroring
  * `registerEnabledProvisioners()`: a subsystem that is off is not constructed.
  */
-export async function startKaambaanBridge(
+export async function startSuperpipelineBridge(
   deps: { acp?: AcpPort; log?: (m: string, meta?: Record<string, unknown>) => void } = {},
 ): Promise<BridgeHandle | null> {
   if (!isBridgeEnabled()) return null;
@@ -148,7 +189,7 @@ export async function startKaambaanBridge(
   const loops: LoopHandle[] = [];
   for (const agent of config.agents) {
     const tenantId = await resolveTenantForUser(agent.hubUserId);
-    const client = new KaambaanClient({
+    const client = new SuperpipelineClient({
       baseUrl: config.baseUrl,
       boardId: agent.boardId,
       token: agent.token,
@@ -179,12 +220,3 @@ const describe = (agent: BridgeAgentConfig, baseUrl: string) => ({
   mode: agent.mode,
   baseUrl,
 });
-
-/** Global `fetch`, narrowed to the shape the client injects. */
-const fetchAdapter = async (
-  url: string,
-  init: { method: string; headers: Record<string, string>; body?: string },
-) => {
-  const res = await fetch(url, init);
-  return { status: res.status, ok: res.ok, json: () => res.json() as Promise<unknown> };
-};

@@ -2,9 +2,9 @@
  * The tenant isolation guard.
  *
  * Isolation is a property of the data-access layer, not a filter every caller
- * has to remember to add. The principle is kaambaan's — *"there is NO unscoped
+ * has to remember to add. The principle is superpipeline's — *"there is NO unscoped
  * query builder"* — and it is the strongest thing in either codebase; the
- * implementation is not, because kaambaan builds raw SQL strings for D1 and this
+ * implementation is not, because superpipeline builds raw SQL strings for D1 and this
  * is Drizzle over Postgres. What transfers is the shape: a tenant predicate that
  * is built first, a table whitelist that refuses anything not registered, and a
  * tenant that cannot be absent.
@@ -38,8 +38,10 @@ import { bridgeDispatches } from "./schema/bridge";
 import { adminAuditLog, systemSettings } from "./schema/admin";
 import { stationAudit } from "./schema/audit";
 import { account, session, user, verification, jwks } from "./schema/auth";
+import { serviceSigningKeys } from "./schema/service-keys";
 import {
   matrixAsTransactions,
+  matrixGateEvents,
   matrixRooms,
   matrixMissions,
   matrixMissionMembers,
@@ -47,10 +49,24 @@ import {
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
+import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
+import { stationGitIdentities } from "./schema/git-identities";
+import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
+import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
+import { stationSetups } from "./schema/station-setup";
+import { stationTranscription } from "./schema/transcription";
+import {
+  skillArtifacts,
+  skillOperations,
+  trustedSkillReleaseArtifacts,
+  trustedSkillReleases,
+  skillReleaseCohorts,
+} from "./schema/skills";
 import { tenants } from "./schema/tenants";
+import { organizations, principals } from "./schema/organization";
 
 export { BOOTSTRAP_TENANT_ID } from "./schema/tenants";
 
@@ -64,9 +80,9 @@ export class TenantIsolationError extends Error {
 /**
  * Narrow `tenantId` to a real AgentPod tenant id or throw.
  *
- * Stricter than kaambaan's equivalent, which only checks for a non-empty string.
+ * Stricter than superpipeline's equivalent, which only checks for a non-empty string.
  * The extra check earns its place across the seam: `tnt_5f2b8c1a9d3e4076` is a
- * perfectly well-formed *kaambaan* tenant naming a boundary in a different
+ * perfectly well-formed *superpipeline* tenant naming a boundary in a different
  * database, and once a bridge exists it is a value that can reach this function.
  * A non-empty-string check would accept it and build a predicate that matches
  * nothing — a query that returns zero rows and looks like an empty fleet rather
@@ -99,9 +115,17 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
  */
 export const TENANT_SCOPED_TABLES = {
   nodes,
+  deviceCredentials,
   provisionedRuntimes,
   enrollmentTokens,
   stations,
+  skillArtifacts,
+  skillOperations,
+  trustedSkillReleases,
+  trustedSkillReleaseArtifacts,
+  skillReleaseCohorts,
+  stationSetups,
+  stationTranscription,
   stationAudit,
   acpSessions,
   acpEvents,
@@ -110,9 +134,12 @@ export const TENANT_SCOPED_TABLES = {
   agentTasks,
   cloudflareSandboxes,
   matrixRooms,
+  matrixGateEvents,
   matrixMissions,
   matrixMissionMembers,
   matrixSpaces,
+  matrixCredentialAuthorizations,
+  stationGitIdentities,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**
@@ -128,6 +155,31 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
     reason:
       "It IS the boundary. A tenant inside a tenant is the membership/hierarchy model the " +
       "Organization plane owns, and building it here is what MT-1 (#145) was rewritten to avoid.",
+  },
+
+  // ── The Organization plane, living in the hub before extraction ─────────────
+  //
+  // `tenants.externalId` maps a tenant to the organisation it stands for; these
+  // two tables ARE that organisation, not a tenant's contents. Scoping either by
+  // tenant_id would put the boundary's own referent inside the boundary — the
+  // same shape the `tenants` exemption above refuses, one level out.
+  organizations: {
+    table: organizations,
+    reason:
+      "The real thing `tenants.externalId` points at, not a row belonging to a tenant. An " +
+      "organisation is not inside a fleet — a fleet optionally names one via its external " +
+      "mapping — so a tenant_id column here would have the referent carry a pointer back to " +
+      "one of its own referrers, which is backwards. Same shape as the `tenants` exemption " +
+      "above, one level out.",
+  },
+  principals: {
+    table: principals,
+    reason:
+      "Belongs to an organization (orgId), not a fleet, for the same reason `user` and " +
+      "`principal_identities` are exempt above: a principal is not inside a tenant, it reaches " +
+      "one. This is the Organization-plane table `user`'s exemption comment already points at — " +
+      "'principals belong to the Organization plane, which owns Principal, Team, Role, " +
+      "identity mappings, authority' — now given a home instead of only a forward reference.",
   },
 
   // ── The Better Auth family ────────────────────────────────────────────────
@@ -163,7 +215,7 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
     table: principalIdentities,
     reason:
       "Hangs off `user`, which is exempt for the same reason: a principal is not INSIDE a fleet, " +
-      "it reaches one. The mapping says a person here is the same person on Matrix or kaambaan, " +
+      "it reaches one. The mapping says a person here is the same person on Matrix or superpipeline, " +
       "which is true regardless of which fleet they reach — a tenant column would imply an " +
       "identity could differ per fleet, and it cannot. " +
       "REVISIT IF THIS BECOMES REACHABLE OVER AN API: nothing today lists these rows, and every " +
@@ -202,6 +254,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "re-deliver another's.",
   },
 
+  service_signing_keys: {
+    table: serviceSigningKeys,
+    reason:
+      "The key this deployment signs service assertions with. A signing key belongs to the " +
+      "installation, not to a fleet — scoping it would mean asking which tenant a key belongs " +
+      "to before verifying a token that names one, which is backwards. Same reasoning as jwks " +
+      "below, and it sits beside it for that reason.",
+  },
+
   jwks: {
     table: jwks,
     reason:
@@ -211,6 +272,19 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "check the signature that tells it, which is backwards. The tenant a token names travels " +
       "INSIDE it, as the `tenant` claim " +
       "(fixtures/ecosystem-identity/token_claims.json).",
+  },
+
+  oauth_codes: {
+    table: oauthCodes,
+    reason:
+      "A 60-second claim ticket for the cross-domain handoff, exempt for the same reason `user` " +
+      "and `principal_identities` are: it records that a PERSON authorized a plane to be handed " +
+      "a token, and a person is not inside a fleet — they reach one. Which tenant the resulting " +
+      "token names is answered where it has always been answered, by buildTokenPayload from the " +
+      "principal at mint time; putting a tenant on the ticket would mean deciding that before " +
+      "the exchange asks, and would imply a code could mean different things in different " +
+      "fleets. Isolation is not weakened: the code carries no authority of its own, and the " +
+      "token it is exchanged for is the same one GET /api/auth/token already issues.",
   },
 
   verification: {
@@ -241,7 +315,7 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
 /**
  * The tenant predicate, always bound first.
  *
- * Ordering is kaambaan's invariant and it costs nothing to keep: the tenant is
+ * Ordering is superpipeline's invariant and it costs nothing to keep: the tenant is
  * never one condition among several that a later edit might reorder away.
  */
 export function tenantScope<T extends TenantScopedTable>(

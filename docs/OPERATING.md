@@ -99,15 +99,115 @@ single-use (`enrollment_tokens.used_at`) and scoped to the operator account
 
 ---
 
+## The fleet client
+
+`fleet` acts on the fleet as *you*, not as a machine. It is a separate binary
+from `apn`: install it on a laptop, in CI, or in an agent's workspace — anywhere
+that is **not** an enrolled node.
+
+```sh
+curl -fsSL https://github.com/SuperJackfruitLabs/agentpod/releases/latest/download/install-fleet.sh | sh
+fleet login
+fleet nodes
+```
+
+It enrols nothing and installs no service. Its credential is a hub token in
+`<UserConfigDir>/agentpod/token.json`, separate from a node's
+`<UserConfigDir>/agentpod-node/config.json`, and neither binary can read the
+other's — they share no code.
+
+Removed in the release following v0.1.33: `apn fleet <verb>`. Use `fleet <verb>`.
+
+---
+
+## 1a. Two modes: acting as a machine, or as yourself
+
+`apn` is the node agent, and every verb above acts on **the machine it runs on**, authenticating
+as that machine with the `<nodeId>:<nodeSecret>` written by `apn enroll`. On a laptop, in CI, or
+inside an agent's workspace there is nothing to act *as* — which is where `fleet`, a separate
+binary, comes in.
+
+| mode | acts as | credential |
+|---|---|---|
+| `apn node …` | this machine | `<nodeId>:<nodeSecret>` from the node's config |
+| `fleet …` | you, or an agent | a hub token |
+
+`apn node <verb>` is the explicit spelling; the bare forms keep working, so `apn status` and
+`apn node status` are the same command and every existing runbook still reads correctly.
+
+### Signing in
+
+```sh
+fleet login          # opens a browser, stores a token
+fleet whoami         # who that token says you are, and when it expires
+fleet logout
+```
+
+`login` is authorization-code with PKCE against the hub, and the browser only ever performs a
+top-level navigation — which is what makes it work at all, since the hub's session cookie is
+`SameSite=Lax` and would not be sent on a cross-site fetch. The token is exchanged by `fleet`
+itself, so it never enters a URL, your shell history, or a `Referer`.
+
+The hub must have the CLI registered — `apn|loopback` in `HUB_OAUTH_CLIENTS`, see
+[DEPLOYMENT.md](./DEPLOYMENT.md#the-oauth-client-registry). Without
+it, authorize refuses, which is the correct posture for a hub that has not opted in.
+
+### Reading the fleet
+
+```sh
+fleet nodes
+fleet agents
+fleet stats
+fleet activity
+```
+
+Output is the hub's own JSON, passed through rather than reformatted — a client that summarises a
+payload it does not fully model silently drops the field somebody needed.
+
+### Settings
+
+| Variable | Meaning |
+|---|---|
+| `AGENTPOD_TOKEN` | A hub token, used instead of the stored one. What CI and an agent harness set. |
+| `AGENTPOD_HUB` | The hub to talk to. Defaults to `https://hub.agentpod.dev`. |
+| `AGENTPOD_LOGIN_TIMEOUT` | How long `login` waits for the browser. Defaults to five minutes — right for a person, wrong for anything scripted. |
+| `BROWSER` | The command `login` opens. May carry arguments. `BROWSER=none` opens nothing and leaves the printed URL as the whole interface, which is what you want over SSH. |
+
+```sh
+AGENTPOD_TOKEN=… fleet nodes
+```
+
+### The rule worth knowing
+
+**A fleet command never falls back to the node's credential.** With no token it fails and tells
+you to sign in; it does not quietly act as the machine. A node secret says *"I am this host"* and
+is not an authority to operate the fleet — and since `apn` and `fleet` are separate binaries that
+share no code, even run on the same machine as an enrolled node, `fleet` cannot reach the node's
+credential at all.
+
+Two failures that look alike and are not: **401 means sign in**, **403 means your principal may
+not do this**. `fleet` reports them differently on purpose. In particular a hub token naming an
+**agent** is refused from the operator API with 403 — agents reach the hub through its MCP
+endpoint, not these verbs.
+
 ## 2. Adopt stations
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.
 
-**Detect → Adopt:**
+**Detect → Register → Assign:**
 
-1. Open the node in the console. The station list shows discovered runtimes with status `detected`.
-2. Click **Adopt** on a station to bring it under management. Adopting does not restart or modify the runtime.
-3. The station moves to `adopted` status and its capability panels become active.
+1. Open the node in the console. Discovered workspaces appear in its station list.
+2. As an administrator, click **Add agent**. Review a new identity or select an unassigned identity, then explicitly choose whether your account should gain dispatch access. Existing permissions stay unchanged; setup never moves an occupied identity.
+3. **Complete setup** registers the workspace, assigns its identity, and provisions or reuses its Matrix room when the bridge is configured. A Matrix failure keeps the assignment: use **Retry Matrix setup**. Native harness Matrix client adoption, where required, remains a separate step in the identity panel.
+4. Existing unoccupied stations expose **Assign agent**. **Register workspace only (advanced)** and **Register all workspaces** deliberately leave workspaces unoccupied. Non-administrators can register workspaces but cannot assign identities or grant dispatch access.
+
+An administrator can use **Remove station** in the station detail panel to unregister it. This does not stop processes, delete workspace files or installed skills, delete the agent identity, or revoke existing grants. It does delete station skill-operation history and Matrix routing records; homeserver messages remain. Re-registering does not restore deleted records.
+
+Implementation: `apps/hub/src/routes/station-setup.ts` and
+`apps/console/src/lib/components/stations/StationSetup.svelte`. Setup uses a durable
+request receipt so a response-loss retry cannot create a second identity or restore a
+subsequently revoked grant. Deploy the hub (including migration `0070_station_setup`)
+before the console. No node-agent release is required.
 
 Stations are discovered per harness:
 
@@ -270,7 +370,7 @@ The same **PATH gotcha as OpenClaw** applies, and bites harder here: under a `sy
 
 Codex has **no ACP mode of its own** either. Its stations get a **Chat** tab via [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp) — a Node program that speaks ACP on stdio and drives `codex app-server` underneath. The node-agent runs it in the station's **project directory**, the same path the Files, Health and Cleanup tabs use.
 
-- **The adapter must be reachable.** Resolution order: the `codexAcpBinary` config key (used verbatim) → a `codex-acp` on `PATH` → the well-known install paths `~/.local/share/pnpm/`, `~/.local/bin/`, `/usr/local/bin/`, `/usr/bin/`, `/opt/homebrew/bin/` → a version-pinned `npx -y @agentclientprotocol/codex-acp@1.1.14`. If not even `npx` resolves, opening a session fails immediately with `Couldn't start the agent process — codex: couldn't find codex-acp or npx on this node — set codexAcpBinary in the node config`. The pin exists for the same reason as claude-code's, and bumping it is a node-agent release.
+- **The adapter must be reachable.** Resolution order: the `codexAcpBinary` config key (used verbatim) → a `codex-acp` on `PATH` → the well-known install paths `~/.local/share/pnpm/`, `~/.local/bin/`, `/usr/local/bin/`, `/usr/bin/`, `/opt/homebrew/bin/` → a version-pinned `npx -y @agentclientprotocol/codex-acp@1.12.0`. If not even `npx` resolves, opening a session fails immediately with `Couldn't start the agent process — codex: couldn't find codex-acp or npx on this node — set codexAcpBinary in the node config`. The pin exists for the same reason as claude-code's, and bumping it is a node-agent release.
 - **No Node version gate.** Unlike `claude-agent-acp` (which declares `node >= 22`), `codex-acp` declares **no `engines` field at all** — so the node-agent selects a runtime but never refuses a session over its version: inventing a floor the package never asked for would cost sessions on hosts it actually supports. `nodeBinary` still works exactly as it does for claude-code, with one difference that follows from the missing requirement: since there is no minimum to judge an "old" runtime against, a configured `nodeBinary` always wins the spawn (its directory is prepended to the session's `PATH` and its `npx` is preferred over `PATH`'s) rather than being stepped over in favour of a newer `PATH` node. A `nodeBinary` that can't report a version at all — a typo — still falls through to `PATH` untouched. With **no** `nodeBinary` set, no `node --version` runs at all on the Codex path: with nothing to enforce and nothing to prefer, the result couldn't change the command, and a node on a stalled mount would otherwise cost every session opening the full 2s probe timeout.
 - **`NO_BROWSER=1` is always set.** It hides the browser-based ChatGPT login, which is meaningless on a headless fleet node: nobody is sitting at that host to complete an OAuth round trip, and offering the method only produces a session that hangs on auth. A live handshake against the adapter confirms the consequence — with it set, the only auth method advertised is `api-key` (`initialize` → `protocolVersion: 1`, `authMethods: ["api-key"]`, `loadSession: true`), which is what makes the service-environment key below the practical route on a fleet node.
 - **`INITIAL_AGENT_MODE=agent` is always set** — the approval-seeking mode, chosen by us and never inherited from the adapter's default. This matters more than it looks: the console gives a station its **Chat** tab based on the `acp` capability alone, so every Codex project on a node gains one as soon as that node updates, and the hub's `ask` / `accept-edits` / `full-auto` modes are only a safety net *if the agent actually sends a permission request*. AgentPod **never** opts a fleet node into Codex's `agent-full-access` mode, and there is no config key to do so: an unattended host is the worst place to hand an agent unprompted write-and-execute. If you want a Codex station to act without asking, that is a decision to make per turn in the console, not a default baked into the node.
@@ -291,7 +391,7 @@ Codex has **no ACP mode of its own** either. Its stations get a **Chat** tab via
 
 > **There is deliberately no `codexApiKey` config key, and there never will be.** The node config feeds argv and child environments, and argv is world-readable via `ps` — a key there would be visible to every process on the host. The node-agent passes **no** key, token or secret in argv or in the environment it adds; it only ever lets the service's own environment through.
 
-> **The adapter brings its own Codex, and by default we let it.** `codex-acp` bundles a Codex build it is known to work with (1.1.14 ships 0.147.0), and AgentPod deliberately does **not** point it at the node's own `codex` CLI. That is the reverse of the claude-code case, for a concrete reason: `codex-acp` drives one specific interface, `codex app-server`, and a CLI that predates it has no such subcommand — it falls into interactive mode and dies instantly on a TTY a fleet node doesn't have. The symptom, if you ever see it:
+> **The adapter brings its own Codex, and by default we let it.** `codex-acp` bundles a Codex build it is known to work with (the tested 1.12.0 installation resolves Codex 0.154.0), and AgentPod deliberately does **not** point it at the node's own `codex` CLI. That is the reverse of the claude-code case, for a concrete reason: `codex-acp` drives one specific interface, `codex app-server`, and a CLI that predates it has no such subcommand — it falls into interactive mode and dies instantly on a TTY a fleet node doesn't have. The symptom, if you ever see it:
 >
 > ```
 > Codex process has exited with code 1: Error: Device not configured (os error 6)
@@ -299,7 +399,7 @@ Codex has **no ACP mode of its own** either. Its stations get a **Chat** tab via
 >
 > That is a Codex older than `app-server` (confirmed on Homebrew's `codex 0.36.0`, where `codex --help` lists no `app-server`). Check with `codex app-server --help` on the node.
 >
-> `codexBinary` is the **opt-in** escape hatch for the opposite case — your `codex` is recent enough, and you want the session on the same install the Health tab reports on. Set it and it is used verbatim; leave it unset and nothing is volunteered, because auto-discovery cannot tell a new CLI from one that will kill every session. There is no version probe: naming the key is the assertion.
+> `codexBinary` is the **opt-in** escape hatch for the opposite case — your `codex` is recent enough, and you want the session on that explicitly selected install. Set it and it is used verbatim; leave it unset and nothing is volunteered, because auto-discovery cannot tell a new CLI from one that will kill every session. There is no version probe: naming the key is the assertion.
 
 A host with node (or just `npx`) on the service's `PATH` needs **no configuration** — and note that a node's own `codex` install is not required at all, since the adapter brings its own. The optional keys:
 
@@ -318,6 +418,24 @@ A host with node (or just `npx`) on the service's `PATH` needs **no configuratio
 | `nodeBinary` | Shared with claude-code: the `node` runtime to use instead of the service `PATH`'s. |
 
 Restart the node-agent (`apn restart`) after changing any of these keys.
+
+**Model says it requires a newer Codex:** check the Health note's **Next chat**
+engine selection, not your shell's `codex --version`. An installed adapter wins
+over the npx fallback, so updating `apn` alone does not replace it. For an npm
+installation under `~/.local`, update it explicitly:
+
+```sh
+npm install --global --prefix "$HOME/.local" @agentclientprotocol/codex-acp@1.12.0
+```
+
+Use the matching package manager/prefix for other installations. Alternatively,
+set `codexBinary` to an explicitly tested current CLI. Start a fresh chat after
+updating: existing sessions retain their running engine. Health reports the
+resolved adapter package and bundled engine versions when package metadata is
+available, or the configured override path; standalone binaries are marked
+unknown. These are next-session diagnostics, not proof of an existing session's
+process version. Source: `internal/descriptor/codex_runtime.go`.
+
 
 ### Cleanup
 
@@ -758,6 +876,81 @@ systemctl start tuwunel
 
 Only one process may hold the RocksDB lock, which is why this needs the stop.
 
+### 7b-bis. The agents' crypto stores
+
+When the bridge runs with `MATRIX_CRYPTO_STORE_DIR` set, each agent keeps an
+olm/megolm store under `/var/lib/agentpod/crypto/<localpart>/`. These hold the
+**only** copy of that agent's device keys and of every megolm session it has
+been given. Lose one and every encrypted room that agent is in becomes
+permanently unreadable to it — there is no server-side copy to fall back on,
+because that is the point of end-to-end encryption.
+
+`backup-infra.sh` covers them, and **not by copying the files**. Each store is
+SQLite with a write-ahead log, so the directory holds a `.sqlite3` beside a
+`-wal` and a `-shm`; handing those three live files to restic can catch them
+at different instants and produce a set that does not reconstitute. A crypto
+store that half-restores is worse than one that is missing, because an agent
+holds keys for some rooms and not others with no way to tell which.
+
+So the backup takes SQLite's own online snapshot first:
+
+```sh
+sqlite3 "$db" ".backup '$CRYPTO_DUMP/$agent.sqlite3'"
+```
+
+which is consistent against a database being written to — the same reason
+tuwunel gets a checkpoint rather than a file copy.
+
+The staging copies are plaintext key material outside the encrypted
+repository, so the script's `trap` removes them on exit, success or failure.
+
+Verified end to end rather than by reading: a store was created, backed up,
+restored from the repository, and its contents and `PRAGMA integrity_check`
+confirmed on the restored copy.
+
+**If a store is lost and there is no backup, the agent gets a new device.** A
+Matrix device's identity keys are write-once: a store that comes back without
+its `device` file logs in again, is issued a *different* device, and holds keys
+that device never uploaded. Senders then fail to start olm sessions and
+withhold the room key with `m.no_olm` — nothing errors, the agent simply stops
+being able to read anything new.
+
+That is why the backup copies `device` beside the database, and why the two
+must be restored together. With both gone, delete the agent's crypto store
+directory and let it log in afresh; its old encrypted history stays unreadable
+and only new messages recover.
+
+### 7b-ter. Why MSC4190 is off
+
+`io.element.msc4190` lets an appservice create a device for a virtual user
+(`PUT /_matrix/client/v3/devices/{id}`), which is how the bridge first gave
+each agent a crypto device. **Enabling it also switches appservice login off
+for the entire appservice**, and tuwunel says so once asked:
+
+```
+M_APPSERVICE_LOGIN_UNSUPPORTED: Appservice has MSC4190 device management
+enabled; appservice login is unsupported.
+```
+
+That broke two things at once: station provisioning (`ensureUser`, which never
+wanted a token and now sends `inhibit_login: true`), and minting or rotating an
+agent's own credential — which has no replacement under MSC4190 and is how the
+14 harness-mode stations are given a Matrix account at all.
+
+**So the flag is off, and the bridge takes its device from an appservice login
+instead** — the same mechanism harness credentials already use. The device id
+is written to `device` inside the agent's crypto store; the access token the
+login returns is discarded, because crypto requests still go out as the
+appservice with `?user_id=&device_id=`. Verified against tuwunel 1.8.3 with the
+flag off: MSC3202 bookkeeping and MSC4203 to-device delivery both keep working,
+and the end-to-end test passes.
+
+> **`org.matrix.msc3202` must stay on.** It is a separate switch, and it is
+> what carries device-list changes and one-time-key counts to the bridge.
+> To-device delivery (MSC4203) rides along with it.
+
+Closed by [#435](https://github.com/SuperJackfruitLabs/agentpod/issues/435).
+
 ### 7c. Backups, and restoring one
 
 `backup-database` writes a **RocksDB checkpoint while the server keeps running** —
@@ -792,6 +985,7 @@ never spoken Matrix can be talked to from a phone. Design:
 |---|---|
 | switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
 | config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
+| voice notes | Set in the console: **Admin → Transcription** (the hub default: provider, URL, model, API key, longest note, 10–600 s; *Test connection* sends one second of silence) and per station in the station page's **Voice notes** section (inherit / off / custom). API keys are stored encrypted with `ENCRYPTION_KEY` and never shown again. Until an admin saves the hub default, the hub falls back to `TRANSCRIBE_URL`, `TRANSCRIBE_API_KEY`, `TRANSCRIBE_MODEL` (default `large-v3-turbo`); once saved, the env is ignored. Any OpenAI-compatible `/v1/audio/transcriptions`: the self-hosted transcriber on foundry (`deploy/transcriber`), or a hosted provider. None configured, a voice note reaches the agent as a note that it could not be heard. Settings are cached for 30 s per hub process; a save clears the cache |
 | a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
 | its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
 
@@ -799,6 +993,42 @@ never spoken Matrix can be talked to from a phone. Design:
 key, so `openclaw:krishna` on `superchotu` is
 `#agentpod_superchotu__openclaw_krishna`. The member list shows the readable
 form — `krishna (openclaw @ superchotu)`.
+
+**Voice notes** are transcribed before the agent sees them: the transcript is
+posted in the room as a reply to the note, and the agent gets it marked
+`[Voice note, 0:42, transcribed]`. Five minutes at most by default (the
+longest note is a setting). The self-hosted transcriber takes ~13 s for a
+short note and ~80 s for five minutes on foundry's CPU; a hosted provider is
+seconds. See `deploy/transcriber/README.md`.
+
+**Harness-mode stations** hear voice notes through their own Matrix client and
+transcribe them with their harness's own STT config, so saving the setting does
+not reach them by itself. For a harness-mode **Hermes** station the station
+page's **Voice notes** section has **Apply to harness** (save first): the hub
+sends `transcription.apply` to the station's node, carrying only the station
+key and id. The node fetches the resolved setting — key included — from
+`POST /api/nodes/:nodeId/stations/:stationId/transcription` with its own node
+credential (the same split as `matrix.adopt`: no secret in a broker frame), and
+writes it into the profile (`~/.hermes/config.yaml` + `.env` for the root
+station, `~/.hermes/profiles/<name>/` for a profile):
+
+- `config.yaml`: `stt.enabled`, `stt.provider: openai`, `stt.openai.model` —
+  edited in place, everything else in the file kept. Off writes
+  `stt.enabled: false` and nothing else.
+- `.env`: `STT_OPENAI_BASE_URL=<url>/v1` and `VOICE_TOOLS_OPENAI_KEY=<key>`,
+  replaced or appended, every other line untouched (0600). Off leaves `.env`
+  alone.
+
+It then restarts the harness and the console says **Applied — restarted**. A
+profile that shares the root gateway's Matrix identity has no `lifecycle`
+capability (#273): the config is written but nothing restarts, and the console
+says **Applied — restart the gateway to pick it up** — restart the root
+`hermes` station. A profile without both `config.yaml` and `.env` is refused
+untouched. Other harnesses are refused (400). Needs a node-agent release that
+contains `transcription.apply`; an older node answers the verb as unknown and
+the console shows that error — roll the node first (`apn update`, or
+**Update** in the console). Changing the hub default later does not re-push:
+apply again on each harness station.
 
 **Who may talk to an agent** is the control pair, unchanged. A refusal arrives
 **in the room**, saying which of the three things happened: the hub does not
@@ -919,12 +1149,12 @@ against a *copy* — never against the original.
 
 ---
 
-## 8. The kaambaan bridge
+## 8. The superpipeline bridge
 
-The bridge lets this hub **claim work from a kaambaan board** and run it on a station. It is
+The bridge lets this hub **claim work from a superpipeline board** and run it on a station. It is
 outbound-only: it adds no HTTP route, opens no port, and nothing about a hub with it off is
 different from a hub built before it existed. See
-[DEPLOYMENT.md → kaambaan bridge](./DEPLOYMENT.md#kaambaan-bridge) for the three variables
+[DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for the three variables
 and how the hub refuses a bad roster at boot.
 
 ### Is it on?
@@ -932,14 +1162,14 @@ and how the hub refuses a bad roster at boot.
 The hub prints one line at boot, always, on or off:
 
 ```bash
-journalctl -u agentpod-hub | grep 'kaambaan bridge:'
-# kaambaan bridge: claiming as codex-mac, pi-vps
-# kaambaan bridge: (disabled)
+journalctl -u agentpod-hub | grep 'superpipeline bridge:'
+# superpipeline bridge: claiming as codex-mac, pi-vps
+# superpipeline bridge: (disabled)
 ```
 
 Then one `claiming` line per roster entry with its board, station, mode and base URL.
 
-> **`ENABLE_KAAMBAAN_BRIDGE=1` does not turn it on.** `isBridgeEnabled()` compares against
+> **`ENABLE_SUPERPIPELINE_BRIDGE=1` does not turn it on.** `isBridgeEnabled()` compares against
 > the literal lowercase string `"true"` — `1`, `TRUE` and `yes` all read as off. Boot
 > validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation
 > *and* starts nothing; the boot line above is what tells you which happened.
@@ -952,10 +1182,10 @@ None of these are configurable — they are constants in `services/bridge/`:
 |---|---|---|
 | poll | 5s | after a cycle that found nothing to claim |
 | backoff | 30s | after a thrown cycle, and after `not-ready` or `released` — claim/release/claim is not a fix |
-| heartbeat | 60s | while a card is being worked (kaambaan reclaims an unheartbeated run at 15 min) |
+| heartbeat | 60s | while a card is being worked (superpipeline reclaims an unheartbeated run at 15 min) |
 | turn timeout | 30 min | one prompt turn; on expiry the run is failed on the board and the session ended |
 
-**One status halts a loop permanently: `foreign-run`** (kaambaan answered 403 `NOT_RUN_OWNER`).
+**One status halts a loop permanently: `foreign-run`** (superpipeline answered 403 `NOT_RUN_OWNER`).
 The agent stops claiming and only a hub restart resumes it — there is no route or metric that
 reports this, so `grep 'halting: a run belonged to another agent'` in the hub log is the only
 signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the loop claims again.
@@ -963,7 +1193,7 @@ signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed
-`(external_source, external_run_id)`; `external_source` is always `kaambaan`.
+`(external_source, external_run_id)`; `external_source` is always `superpipeline`.
 
 | `outcome` | Means |
 |---|---|
@@ -977,7 +1207,7 @@ There is no API for the ledger — Postgres is the read path. One row per claime
 whether a workspace was touched, and `acp_run_id` cannot carry it (that column is only written
 once the first ACP event arrives).
 
-Two id spaces meet in this table and must never be confused: `external_run_id` is kaambaan's
+Two id spaces meet in this table and must never be confused: `external_run_id` is superpipeline's
 `run_…`, and `acp_run_id` is AgentPod's own `attempt_<uuid>` — one prompt-turn on a station,
 minted locally. A claimed card takes as many attempts as the work takes. Both directions are
 enforced in the database, not just in code: `acp_runs.id` must start `attempt_`, and both
@@ -985,7 +1215,7 @@ tables refuse an `external_run_id` that starts `attempt_`.
 
 Every row carries `tenant_id`, and every ledger read and write is built through
 `tenantScope()`, which binds the tenant as the *first* predicate and refuses a tenant id that
-is not AgentPod's own `fleet_<20 hex>` grammar — a kaambaan `tnt_…` cannot become a predicate
+is not AgentPod's own `fleet_<20 hex>` grammar — a superpipeline `tnt_…` cannot become a predicate
 here. Today `resolveTenantForUser` returns the bootstrap tenant `fleet_00000000000000000000`
 for everyone; the boundary is in place ahead of the mapping.
 
@@ -1035,7 +1265,7 @@ are under [Troubleshooting](#9-troubleshooting).
 **A Fly runtime is `stopped` but still billing:**
 - Also expected. A stopped Fly machine still bills its rootfs, and the volume bills for as long as the **app** exists. Only **Destroy** ends the charge. `flyctl apps list` shows what is still there.
 
-**Is the kaambaan bridge's coalescing working, and by how much?**
+**Is the superpipeline bridge's coalescing working, and by how much?**
 
 The bridge projects a harness's ACP transcript into board activities, and it must not do so 1:1 — one trivial prompt was measured at 57 events from Codex and 1,051 from Hermes, so a harness that streams token by token would otherwise fire a thousand POSTs at a board for one instruction. Every dispatch records both ends of its own transcript, so the question is answerable from the hub alone:
 
@@ -1057,10 +1287,10 @@ The same two numbers appear once per worked card in the hub log — `journalctl 
 
 **A card on the board is sitting in `input-required`:**
 
-The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in kaambaan moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
+The agent asked for permission and is waiting for a person. The question is on the card, with the options the harness offered; answering it in superpipeline moves the card back to `working` and the same run — which never let go of the card, and has been heartbeating the whole time — carries on with the answer.
 
-- **Only a human can answer it.** kaambaan refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
-- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `KAAMBAAN_BRIDGE_AGENTS` (default 30 minutes) — *not* by kaambaan's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips kaambaan's circuit breaker and parks for a human.
+- **Only a human can answer it.** superpipeline refuses an agent token on the answer route and separately refuses the asking agent's own identity, so no amount of hub configuration will make the bridge answer its own question.
+- **The wait is bounded**, by `permissionWaitMs` on the agent's entry in `SUPERPIPELINE_BRIDGE_AGENTS` (default 30 minutes) — *not* by superpipeline's 15-minute reclaim, which never fires here because the run keeps heartbeating. When it runs out the run is failed with a reason naming the wait, the card is re-queued with a failure count, and the next attempt asks again. A card that keeps going unanswered eventually trips superpipeline's circuit breaker and parks for a human.
 - **What gets asked depends on the mode.** `full-auto` never asks. `accept-edits` — the supervised setting — auto-approves file writes and asks about anything that executes. `ask` asks about every tool call, which is a great deal of asking; it is a mode for a board somebody is watching, not a default.
 - `journalctl -u agentpod-hub | grep -E 'permission request'` shows both ends: `a human answered a permission request` with the option that was chosen, and `a permission request went unanswered` with the reason.
 

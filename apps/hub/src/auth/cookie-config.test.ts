@@ -35,8 +35,8 @@ describe("sessionCookieOptions", () => {
 });
 
 describe("allowedOrigins (unified list)", () => {
-  it("includes https://app.agentpod.dev by default", () => {
-    expect(allowedOrigins).toContain("https://app.agentpod.dev");
+  it("includes https://console.agentpod.dev by default", () => {
+    expect(allowedOrigins).toContain("https://console.agentpod.dev");
   });
 
   it("includes localhost dev origins", () => {
@@ -45,8 +45,12 @@ describe("allowedOrigins (unified list)", () => {
 });
 
 describe("isAllowedOrigin (from unified list)", () => {
-  it("allows https://app.agentpod.dev", () => {
-    expect(isAllowedOrigin("https://app.agentpod.dev")).toBe(true);
+  it("allows https://console.agentpod.dev", () => {
+    expect(isAllowedOrigin("https://console.agentpod.dev")).toBe(true);
+  });
+
+  it("rejects the retired https://app.agentpod.dev", () => {
+    expect(isAllowedOrigin("https://app.agentpod.dev")).toBe(false);
   });
 
   it("rejects unknown origin", () => {

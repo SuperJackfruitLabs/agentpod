@@ -1,0 +1,46 @@
+---
+/**
+ * The AgentPod mark: three nodes dialling in to one hub.
+ *
+ * The same paths as `public/favicon.svg`, less its dark tile — a header already sits on a
+ * ground of its own, and on the light scheme a navy square would read as an app icon pasted
+ * onto the page. So the spokes and nodes take the accent and the hub takes the text colour,
+ * which keeps the hub the brightest thing in the mark on either scheme, as it is on the tile.
+ *
+ * Copies of these paths live in `apps/console/src/lib/components/brand/Mark.svelte`,
+ * `docs-site/src/assets/mark-*.svg` and `og/og.html`, and the tiled favicon is copied to
+ * `apps/console/static/` and `docs-site/public/`. Change one, change them all.
+ */
+interface Props {
+  size?: number;
+}
+const { size = 26 } = Astro.props;
+---
+
+<svg
+  class="mark"
+  width={size}
+  height={size}
+  viewBox="4 4.5 24 24"
+  aria-hidden="true"
+  focusable="false"
+>
+  <g class="spokes" stroke-width="2.6" stroke-linecap="round">
+    <path d="M16 16 L7.5 8.5" />
+    <path d="M16 16 L24.5 10" />
+    <path d="M16 16 L10.5 24.5" />
+  </g>
+  <g class="nodes">
+    <circle cx="7.5" cy="8.5" r="3.1" />
+    <circle cx="24.5" cy="10" r="3.1" />
+    <circle cx="10.5" cy="24.5" r="3.1" />
+  </g>
+  <circle cx="16" cy="16" r="5.4" fill="currentColor" />
+</svg>
+
+<style>
+  .mark { flex: none; display: block; }
+  /* A property rather than a presentation attribute: `stroke="var(...)"` is not resolved. */
+  .spokes { stroke: var(--mark-accent, currentColor); }
+  .nodes { fill: var(--mark-accent, currentColor); }
+</style>

@@ -89,6 +89,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Migrate before the suite, not inside it.
+      #
+      # Integration suites call `ensurePgMigrations()` in `beforeAll`, which is
+      # idempotent — but on a cold CI database the *first* caller runs every
+      # migration, and a `beforeAll` gets bun's default five seconds. Whichever
+      # file happened to go first then failed as an unnamed 5000ms timeout,
+      # which reads like flake and is not: three runs were lost to it on
+      # 2026-09-15, in two different suites, purely by file ordering.
+      #
+      # Running the same helper the tests use — rather than `db:migrate` —
+      # keeps one definition of "migrated", including the pgvector extension
+      # that must exist before the migrations that use it.
+      - name: Migrate the test database
+        working-directory: apps/hub
+        run: bun -e 'import("./tests/helpers/pg-migrations").then((m) => m.ensurePgMigrations())'
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
+
       - name: Run tests
         working-directory: apps/hub
         run: bun test
@@ -96,6 +115,23 @@ jobs:
           NODE_ENV: test
           # Matches the host port mapped above (service container internal 5432 →
           # host 5434) and the integration-test default DATABASE_URL fallback.
+          DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
+          API_TOKEN: test-token
+          SESSION_SECRET: test-session-secret-32-chars-long
+          ENCRYPTION_KEY: test-encryption-key-32-bytes!!!!
+
+      - name: Setup Go for managed skill integration
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: apps/node-agent/go.mod
+          cache-dependency-path: apps/node-agent/go.sum
+
+      - name: Test managed skills across hub and node
+        working-directory: apps/hub
+        timeout-minutes: 5
+        run: bun tests/integration/skills-node-e2e.ts
+        env:
+          NODE_ENV: test
           DATABASE_URL: postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod
           API_TOKEN: test-token
           SESSION_SECRET: test-session-secret-32-chars-long
@@ -121,6 +157,9 @@ jobs:
         working-directory: apps/node-agent
         run: go test ./... -race
 
+      - name: Test offline ACP discovery probe
+        run: python3 -B -m unittest discover -s apps/node-agent/internal/skills/testdata -p test_probe_codex_acp.py
+
       # Here rather than in a job of its own: it is about the node-agent's
       # runtime layout, and this job is a required check — a new job would not
       # gate. Runs as a user who can write to /, so the /workspace assertions
@@ -135,6 +174,14 @@ jobs:
       - name: Test the Modal image entrypoint wrapper
         run: sh apps/node-agent/deploy/test-modal-entrypoint.sh
 
+      # install-fleet.sh is published as a release asset and runs on a stranger's
+      # machine via `curl | sh`, `rm` included — the same reasoning as the two
+      # suites above applies twice over: it is a required check, so a job of its
+      # own would not gate, and untested shell that deletes files is exactly the
+      # kind of thing that should not ship unverified.
+      - name: Test the fleet client installer
+        run: sh apps/node-agent/scripts/install-fleet.test.sh
+
       # The Fly images bake in a RELEASED node-agent binary rather than
       # compiling one, so they carry a version pin — and a pin nobody is forced
       # to move goes stale silently (issue #290: both Fly images sat on v0.1.22
@@ -142,17 +189,26 @@ jobs:
       # station at all). These two steps are that forcing function. They live in
       # this job for the same reason as the ones above: it is a required check,
       # and a job of its own would not gate.
-      - name: Test the Fly node-agent pin check
-        run: sh fly/node-image/test-version-pin.sh
-
-      # Resolves the latest release from the GitHub API and fails when either
-      # Fly Dockerfile's ARG default is behind it. Expected to turn red on the
-      # first PR after a node-agent release: bumping both ARGs is the fix, and
-      # noticing here is the entire point.
-      - name: Check the Fly images pin the current node-agent release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: sh fly/node-image/check-version-pin.sh
+      - name: Test the release version comparator
+        run: sh fly/node-image/test-latest-release.sh
+  # The hub is deployed BY HAND (ssh + git pull + systemctl restart), so nothing
+  # here ships it. What this does is notice when the thing that is running stops
+  # serving what it should — which on 2026-09-20 took a person curling a route to
+  # discover, hours after a green deploy.
+  #
+  # Runs on main only, and never fails the build: it reports on a deployment this
+  # workflow did not perform and may legitimately be mid-restart. It is a signal,
+  # not a gate. The gate is running it yourself after deploying, per
+  # docs/DEPLOYMENT.md.
+  hub-smoke:
+    name: hub smoke (production)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: Probe the deployed hub's routes
+        run: sh deploy/smoke.sh https://hub.agentpod.dev
 
   console:
     name: console
@@ -217,3 +273,233 @@ jobs:
       - name: Run tests
         working-directory: cloudflare/worker-v2
         run: npx vitest run
+
+  # The published documentation site, to Cloudflare Pages at docs.agentpod.dev.
+  #
+  # npm and a package-lock, following the precedent the `worker` job above already
+  # sets: docs-site sits outside the pnpm workspace (apps/*, packages/*), so copying
+  # the pnpm setup the hub and console jobs use would find no lockfile.
+  #
+  # Gated on `hub`, which is where the docs-claims test lives — the check that these
+  # pages name no MCP tool, apn command or gated capability the code does not have.
+  # Publishing a page that lies is worse than not publishing it.
+  #
+  # Requires a CLOUDFLARE_API_TOKEN repo secret with Cloudflare Pages: Edit, and a
+  # Pages project named `agentpod-docs`. One-time setup is in docs-site/README.md.
+  deploy-docs:
+    needs: [hub]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-docs
+      cancel-in-progress: false
+    environment:
+      name: docs
+      url: https://docs.agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          # Astro 7 refuses to start below 22.12 ("Node.js v20.20.2 is not
+          # supported by Astro!"). The other jobs stay on 20; only this one
+          # builds the docs site. It never runs on a pull request, so a PR
+          # going green says nothing about it — that is how 20 survived here.
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs-site
+        run: npm ci
+
+      - name: Build
+        working-directory: docs-site
+        run: npm run build
+
+      # wrangler invoked directly rather than through cloudflare/wrangler-action.
+      # The action picks a package manager by looking at the REPO ROOT, finds
+      # pnpm-lock.yaml, and shells out to pnpm to install wrangler — which this job
+      # does not have, because docs-site is deliberately npm. superpipeline's identical
+      # job failed exactly this way on its first real run, with "Unable to locate
+      # executable file: pnpm", before it ever reached Cloudflare.
+      # Run from a scratch directory, NOT from docs-site and NOT from the repo root.
+      # Both were tried against the live account and both are wrong:
+      #
+      #   - in docs-site, wrangler's project detection SCAFFOLDS the project — it
+      #     added an @astrojs/cloudflare adapter and a wrangler devDependency, wrote
+      #     wrangler.jsonc, and rewrote astro.config.mjs and tsconfig.json. The Astro
+      #     build then failed on the Cloudflare vite plugin it had just installed.
+      #   - at the repo root it refuses outright: "application detection logic has
+      #     been run in the root of a workspace".
+      #
+      # From a neutral cwd with an absolute path it is clean, and leaves the checkout
+      # untouched. Verified by deploying both sites this way.
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/docs-site/dist" \
+            --project-name=agentpod-docs --branch=main
+
+  # The marketing site, apps/landing, on every pull request. It had no CI at all, so a
+  # change that broke its build was found — if at all — by whoever next deployed it by
+  # hand. It is also the gate for deploy-landing below: nothing tests the page's claims
+  # the way docs-claims tests the docs, so the most this can promise is that it builds
+  # and type-checks.
+  landing:
+    name: landing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Unlike docs-site, the landing app is inside the pnpm workspace (apps/*), so it
+      # installs from the root lockfile — filtered, since it needs none of the hub's or
+      # console's dependencies.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @agentpod/landing
+
+      - name: Type check (astro check)
+        working-directory: apps/landing
+        run: pnpm check
+
+      - name: Build
+        working-directory: apps/landing
+        run: pnpm build
+
+  # agentpod.dev, to the Cloudflare Pages project `agentpod-site`.
+  #
+  # Until this job existed the site was only ever deployed by hand, so the live page
+  # drifted behind main — it was still linking docs.kaambaan.dev days after the source
+  # stopped. Same shape as deploy-docs above, and the same CLOUDFLARE_API_TOKEN.
+  #
+  # It runs in the `docs` environment on purpose. The token is an environment secret
+  # there, not a repository one, and a job in any other environment receives an empty
+  # string — the first run of this job, in its own `landing` environment, failed on
+  # exactly that. Both jobs push to Pages on the same account, so sharing the
+  # environment exposes nothing the token did not already reach.
+  deploy-landing:
+    needs: [landing]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-landing
+      cancel-in-progress: false
+    environment:
+      name: docs
+      url: https://agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --filter @agentpod/landing
+
+      - name: Build
+        working-directory: apps/landing
+        run: pnpm build
+
+      # From a neutral cwd, for the reasons given on deploy-docs: inside the app wrangler
+      # scaffolds a Cloudflare adapter into it, and at the repo root it refuses to run.
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/apps/landing/dist" \
+            --project-name=agentpod-site --branch=main
+
+  # console.agentpod.dev, to the Cloudflare Pages project `agentpod-console`.
+  #
+  # Deployed by hand until this job existed, and it drifted the way the landing page
+  # did: on 2026-09-17 the live console was two weeks behind main, missing a sign-in
+  # fix and the rebrand. Gated on `console`, so the build that ships is one whose
+  # type check and tests passed.
+  #
+  # PUBLIC_HUB_URL is baked in at build time; without it a hosted console opens
+  # disconnected (stores/connection.svelte.ts). Same `docs` environment as the other
+  # deploy jobs, because that is where CLOUDFLARE_API_TOKEN lives — see
+  # deploy-landing.
+  deploy-console:
+    needs: [console]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-console
+      cancel-in-progress: false
+    environment:
+      name: docs
+      url: https://console.agentpod.dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: apps/console
+        env:
+          PUBLIC_HUB_URL: https://hub.agentpod.dev
+        run: pnpm build
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # Not a secret: it is in every dashboard URL. Naming the account stops wrangler
+          # looking it up through /memberships, which a Pages-scoped token may not read
+          # (code 9106). Whether that lookup happens depends on the wrangler version npx
+          # resolves — deploy-console, after a full workspace install, got 4.86.0 instead
+          # of a fresh 4.133.0 and failed on exactly this on 2026-09-17.
+          CLOUDFLARE_ACCOUNT_ID: 88acd85618f099112eadc9374996b9f7
+        run: |
+          mkdir -p "$RUNNER_TEMP/wrangler-cwd"
+          cd "$RUNNER_TEMP/wrangler-cwd"
+          npx --yes wrangler@4 pages deploy "$GITHUB_WORKSPACE/apps/console/build" \
+            --project-name=agentpod-console --branch=main \
+            --commit-hash="$GITHUB_SHA"

@@ -25,17 +25,16 @@ function formatDate(dateString: string): string {
 }
 ---
 
-<ModernLayout title="Blog — AgentPod" description="Thoughts on portable AI sandboxes, development tools, and building in public">
+<ModernLayout title="Blog — AgentPod" description="Notes on building AgentPod, and on running agents somewhere other than your laptop.">
   <Header slot="header" variant="solid" />
   
   <!-- Blog Header -->
   <section class="pt-32 pb-16 px-6">
     <div class="container-wide mx-auto">
       <div class="max-w-3xl animate-fade-in-up">
-        <p class="eyebrow mb-4">Insights & Stories</p>
         <h1 class="display-lg mb-6">Blog</h1>
         <p class="subheadline max-w-2xl">
-          Thoughts on portable AI sandboxes, development patterns, and building in public.
+          Notes on building AgentPod, and on running agents somewhere other than your laptop.
         </p>
       </div>
     </div>
@@ -53,7 +52,7 @@ function formatDate(dateString: string): string {
             <article 
               class={`card group cursor-pointer animate-fade-in-up delay-${Math.min(index + 1, 6) * 100}`}
             >
-              <a href={`/blog/${post.id}`} class="block">
+              <a href={`/blog/${post.id.replace(/\.mdx?$/, "")}`} class="block">
                 <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
                   <div class="flex items-center gap-4 text-sm text-foreground-muted">
                     <time datetime={post.data.date}>{formattedDate}</time>

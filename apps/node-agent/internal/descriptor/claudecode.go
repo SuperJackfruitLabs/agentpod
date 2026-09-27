@@ -46,6 +46,10 @@ type claudeCodeDescriptor struct {
 	isExecutable func(string) bool                     // isExecutableFile
 	nodeVersion  func(nodePath string) (string, error) // `node --version`
 	getenv       func(string) string                   // os.Getenv
+
+	// nativeSkillDiscovery starts a disposable ACP session and returns the
+	// command names it advertises. A field so a test needs no adapter.
+	nativeSkillDiscovery func(ctx context.Context, adapter, workspace, nodePath string) ([]string, error)
 }
 
 // ClaudeCodeConfig carries everything the descriptor needs. Zero values are
@@ -93,6 +97,8 @@ func NewClaudeCodeFrom(cfg ClaudeCodeConfig) Descriptor {
 		isExecutable: isExecutableFile,
 		nodeVersion:  nodeVersionOutput,
 		getenv:       os.Getenv,
+
+		nativeSkillDiscovery: claudeACPDiscoverSkills,
 	}
 }
 
@@ -130,7 +136,7 @@ func (c *claudeCodeDescriptor) Detect() ([]Station, error) {
 
 	// "acp" is advertised because *claudeCodeDescriptor implements ACPCommander
 	// (via the external claude-agent-acp adapter — see ACPCommand).
-	caps := []string{"health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
+	caps := []string{"skills.inventory", "health", "logs", "fs.read", "fs.write", "terminal", "cleanup", "acp"}
 	var stations []Station
 
 	for _, projPath := range paths {
@@ -348,7 +354,22 @@ func (c *claudeCodeDescriptor) Health(key string) (Health, error) {
 	if err != nil {
 		return Health{}, err
 	}
+	return c.healthAt(projPath), nil
+}
 
+// HealthFor implements HealthForStation: it reads the workspace off the station
+// the caller already detected instead of re-running Detect to find it again,
+// which is what turns a health sweep from O(N²) host scans into O(N).
+func (c *claudeCodeDescriptor) HealthFor(s Station) (Health, error) {
+	if s.WorkspacePath == nil || *s.WorkspacePath == "" {
+		return c.Health(s.Key)
+	}
+	return c.healthAt(*s.WorkspacePath), nil
+}
+
+// healthAt is the shared body of Health and HealthFor, keyed on a workspace
+// path the caller has already resolved.
+func (c *claudeCodeDescriptor) healthAt(projPath string) Health {
 	health := Health{}
 
 	// Disk usage from the shared async cache — never walk on the request path
@@ -369,7 +390,7 @@ func (c *claudeCodeDescriptor) Health(key string) (Health, error) {
 		health.LastActivity = &s
 	}
 
-	return health, nil
+	return health
 }
 
 // claudeProcessRunning checks for a running claude process whose working

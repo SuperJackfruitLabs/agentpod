@@ -48,6 +48,7 @@ import type { AcpEvent, DetectedStation } from "@agentpod/contract";
 // src/ imports — DB URL is already set above
 import { db, rawSql } from "../db/drizzle";
 import { acpSessions, acpEvents } from "../db/schema/acp";
+import { nodes } from "../db/schema/nodes";
 import { createTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeUnregistered } from "../../tests/helpers/wait";
@@ -77,6 +78,7 @@ import {
   clampSessionLimit,
   deriveSessionTitle,
   _setOfflineGraceMsForTest,
+  _setTurnErrorGraceMsForTest,
   _setOpenDbTimeoutMsForTest,
   _setHandshakeTimeoutMsForTest,
 } from "./acp-sessions";
@@ -560,6 +562,123 @@ test(
   },
   20_000
 );
+
+test("promptSession persists an ACP rejection before returning the session to idle", async () => {
+  const { server, fake, station } = await setupRig("acpsess-prompt-error", {
+    stationKey: "acp-prompt-error-station",
+    failPrompt: "Provider quota exhausted",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    const liveEvents: AcpEvent[] = [];
+    const unsub = subscribe(row.id, (event) => liveEvents.push(event));
+
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { message?: string }).message === "Provider quota exhausted",
+      8_000,
+    );
+    const { all } = await pollForEvent(row.id, stateWith("idle"));
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+    await pollUntil(() => liveEvents.some((event) => event.type === "error"));
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toContain("Provider quota exhausted");
+    unsub();
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("promptSession keeps the words a harness put in the error's data (Codex quota)", async () => {
+  // codex-acp rejects a quota failure with message "Internal error" and the
+  // provider's sentence in data. The room used to show "Internal error".
+  const { server, fake, station } = await setupRig("acpsess-prompt-error-data", {
+    stationKey: "acp-prompt-error-data-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    failPromptData: {
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      codexErrorInfo: "usageLimitExceeded",
+    },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+    expect(hit.payload).toMatchObject({
+      message: "You've hit your usage limit. Upgrade to Pro or try again later.",
+      kind: "quota",
+      harness: "opencode",
+      retryable: false,
+      source: "acp-rejection",
+    });
+
+    const audits = await rawSql`
+      SELECT error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.error).toContain("usage limit");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+});
+
+test("promptSession reports an adapter that completes without any visible update", async () => {
+  // No plugin reports here; the wait for one only slows the suite.
+  _setTurnErrorGraceMsForTest(50);
+  const { server, fake, station } = await setupRig("acpsess-silent-prompt", {
+    stationKey: "acp-silent-prompt-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit: error } = await pollForEvent(
+      row.id,
+      (event) =>
+        event.type === "error" &&
+        (event.payload as { message?: string }).message === "The agent completed without a reply.",
+      8_000,
+    );
+    // The idle state is written just after the error; wait for it rather than
+    // assume the snapshot that found the error already holds it.
+    const { all } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > error.seq);
+    const errorIndex = all.findIndex((event) => event.type === "error");
+    const idleIndex = all.findIndex((event, index) => index > errorIndex && stateWith("idle")(event));
+    expect(all.some((event) => event.type === "agent-update")).toBe(false);
+    expect(idleIndex).toBeGreaterThan(errorIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      kind: "unknown",
+      harness: "opencode",
+      source: "acp-stop-reason",
+    });
+
+    const audits = await rawSql`
+      SELECT result, error FROM station_audit
+      WHERE user_id = ${TEST_USER} AND verb = 'acp.prompt'
+      ORDER BY created_at DESC LIMIT 1`;
+    expect(audits[0]!.result).toBe("error");
+    expect(audits[0]!.error).toBe("The agent completed without a reply.");
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
 
 test(
   "ask mode: permission parks (status waiting), answerPermission resolves it, events persisted, agent sees selected outcome",
@@ -2044,3 +2163,582 @@ test(
   },
   30_000
 );
+
+// ─── Images from a bridged room ─────────────────────────────────────────────
+//
+// 2026-09-24: an image sent to Krishna reached it as its file name. The room
+// side now fetches the picture; these pin the session side — the picture goes
+// as an ACP image block only to an agent that said, at `initialize`, that it
+// takes one, and the transcript never holds the bytes.
+
+const IMAGE = { mimeType: "image/png", data: "iVBORw0KGgo=", name: "map.png", bytes: 8 };
+
+/** Give a rig's node the capability a real node advertises in its hello. */
+async function nodeReadsLargeFrames(nodeId: string) {
+  await db.update(nodes).set({ capabilities: ["posture", "frames.large"] }).where(eq(nodes.id, nodeId));
+}
+
+function lastPrompt(fake: { agentReceived: Array<Record<string, unknown>> }) {
+  const prompts = fake.agentReceived.filter((m) => m.method === "session/prompt");
+  return (prompts.at(-1)?.params as { prompt: Array<Record<string, unknown>> } | undefined)?.prompt;
+}
+
+test(
+  "promptSession: an agent that accepts images gets the image as a block, before the words",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-yes", {
+      stationKey: "acp-image-yes",
+      promptCapabilities: { image: true },
+    });
+    try {
+      await nodeReadsLargeFrames(station.nodeId);
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      expect(lastPrompt(fake)).toEqual([
+        { type: "image", mimeType: "image/png", data: IMAGE.data },
+        { type: "text", text: "What region is this?" },
+      ]);
+
+      // The transcript names the image; it does not keep it.
+      const { all } = await pollForEvent(row.id, (e) => e.type === "user-prompt", 8000);
+      const payload = all.find((e) => e.type === "user-prompt")!.payload as Record<string, unknown>;
+      expect(payload.images).toEqual([{ name: "map.png", mimeType: "image/png", bytes: 8 }]);
+      expect(JSON.stringify(payload)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: an agent that never said it takes images gets a note, not a block it would refuse",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-image-no", {
+      stationKey: "acp-image-no",
+    });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("What region is this?");
+      expect(prompt[0]!.text).toContain("map.png");
+      expect(prompt[0]!.text).toContain("cannot view images");
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+test(
+  "promptSession: a node that never said it reads large frames gets a note — an image would close its connection",
+  async () => {
+    // The adapter takes images; the node does not advertise "frames.large",
+    // as no node did before this fix. Sending the image anyway is what
+    // dropped ashram's whole hub connection on 2026-09-24.
+    const { server, fake, station } = await setupRig("acpsess-image-oldnode", {
+      stationKey: "acp-image-oldnode",
+      promptCapabilities: { image: true },
+    });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      await promptSession(TEST_USER, row.id, "What region is this?", [IMAGE]);
+
+      await pollUntil(() => lastPrompt(fake) !== undefined);
+      const prompt = lastPrompt(fake)!;
+      expect(prompt).toHaveLength(1);
+      expect(prompt[0]!.type).toBe("text");
+      expect(prompt[0]!.text).toContain("needs an AgentPod update");
+      expect(JSON.stringify(prompt)).not.toContain(IMAGE.data);
+
+      await pollUntil(async () => (await getSession(TEST_USER, row.id))?.status === "idle");
+      await endSession(TEST_USER, row.id, "cleanup");
+      fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
+);
+
+
+
+// ─── Turn errors a harness plugin reports (spec §2–3) ──────────────────────────
+
+/** What krishna's plugin would have sent at 2026-09-25 05:47. */
+function krishnaReport(key: { harnessSessionKey?: string; acpSessionId?: string }) {
+  return {
+    type: "turn.error",
+    report: {
+      ...key,
+      error: {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+      },
+    },
+  };
+}
+
+const errorEvents = (all: EventLike[]) => all.filter((e) => e.type === "error");
+const sawSessionKey = (e: EventLike) =>
+  e.type === "agent-update" &&
+  (e.payload as { sessionUpdate?: string }).sessionUpdate === "session_info_update";
+
+test("a plugin's report becomes a silent turn's error, arriving after the prompt resolved", async () => {
+  // OpenClaw's bridge resolves end_turn before its agent_end hook has run, so
+  // the report lands after the hub has seen the turn end with nothing.
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-late", {
+    stationKey: "acp-plugin-late-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({
+      message: "⚠️ You've reached your weekly (7-day) usage limit.",
+      kind: "quota",
+      provider: "kimi-coding",
+      model: "k2p6",
+      harness: "opencode",
+      source: "plugin",
+      retryable: false,
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report during the turn is used as soon as the turn ends, with no wait", async () => {
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-early", {
+    stationKey: "acp-plugin-early-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Are you here?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(krishnaReport({ harnessSessionKey: "agent:krishna:main" })));
+    await new Promise((r) => setTimeout(r, 150));
+    const releasedAt = Date.now();
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    expect(Date.now() - releasedAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ kind: "quota", source: "plugin" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report keyed by the hub session id matches that session (Pi's way)", async () => {
+  _setTurnErrorGraceMsForTest(3_000);
+  const { server, fake, station } = await setupRig("acpsess-plugin-acpid", {
+    stationKey: "acp-plugin-acpid-station",
+    silentPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    expect(errorEvents(all).map((e) => (e.payload as { source?: string }).source)).toEqual(["plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node cannot report into a session on another node", async () => {
+  // Anyone who can write a turn.error can put words in a room. A node speaks
+  // only for its own sessions.
+  _setTurnErrorGraceMsForTest(400);
+  const { server, fake, station } = await setupRig("acpsess-plugin-owner", {
+    stationKey: "acp-plugin-owner-station",
+    silentPrompt: true,
+  });
+  const intruderEnrol = await enrollTestNode("acpsess-plugin-intruder");
+  const intruder = await connectFakeAcpNode(server.port!, intruderEnrol.nodeId, intruderEnrol.nodeSecret, {});
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    intruder.ws.send(JSON.stringify(krishnaReport({ acpSessionId: row.id })));
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    await new Promise((r) => setTimeout(r, 200)); // a second error would land here
+    const errors = errorEvents(all);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ message: "The agent completed without a reply." });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+    intruder.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("with no report, the wait ends in the error the hub already had", async () => {
+  _setTurnErrorGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-plugin-none", {
+    stationKey: "acp-plugin-none-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 8_000);
+    expect(errorEvents(all)[0]!.payload).toMatchObject({
+      message: "The agent completed without a reply.",
+      source: "acp-stop-reason",
+    });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a node lost mid-turn records why the turn failed, before the session ends", async () => {
+  // The #565 review: "Couldn't reach the node." was only an ended-state reason,
+  // so no error event carried it and the node_offline kind was never produced.
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-midturn", {
+    stationKey: "acp-lost-midturn-station",
+    hangPrompt: true,
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(row.id, stateWith("working"));
+    fake.close();
+
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    const errorIndex = all.findIndex((e) => e.type === "error");
+    const endedIndex = all.findIndex(stateWith("ended"));
+    expect(errorIndex).toBeGreaterThan(-1);
+    expect(errorIndex).toBeLessThan(endedIndex);
+    expect(all[errorIndex]!.payload).toMatchObject({
+      message: "Couldn't reach the node.",
+      kind: "node_offline",
+      source: "session-state",
+    });
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});
+
+test("a node lost between turns is not a failed turn", async () => {
+  _setOfflineGraceMsForTest(300);
+  const { server, fake, station } = await setupRig("acpsess-lost-idle", {
+    stationKey: "acp-lost-idle-station",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    fake.close();
+    const { all } = await pollForEvent(row.id, stateWith("ended"), 8_000);
+    expect(errorEvents(all)).toHaveLength(0);
+  } finally {
+    _setOfflineGraceMsForTest(60_000);
+    server.stop(true);
+  }
+});
+
+// ─── One turn, one error (krishna, ashram, 2026-09-26 05:05) ───────────────────
+
+function report(key: string, provider: string, model: string, message: string) {
+  return {
+    type: "turn.error",
+    report: { harnessSessionKey: key, error: { message, provider, model, attempts: [{ provider, model, message }] } },
+  };
+}
+
+test("two reports during one turn become one error, led by the first, with every attempt", async () => {
+  // The plugin sent after nearly every attempt; the hub kept only the last, so
+  // the room showed opencode-go's 400 and never Kimi's used-up quota.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-merge-reports", {
+    stationKey: "acp-merge-reports-station",
+    hangPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { all } = await pollForEvent(row.id, (e) => e.type === "error", 3_000);
+    await new Promise((r) => setTimeout(r, 300));
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.payload).toMatchObject({ provider: "kimi-coding", kind: "quota" });
+    expect((errors[0]!.payload as { attempts: Array<{ provider: string }> }).attempts.map((a) => a.provider)).toEqual([
+      "kimi-coding",
+      "opencode-go",
+    ]);
+    void all;
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a second report after the turn already shows the plugin's error is not posted again", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-dup-report", {
+    stationKey: "acp-dup-report-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "opencode-go", "qwen3.7-plus", "Request is missing x-opencode-session")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(1);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the generic error still follows it: it says why", async () => {
+  _setTurnErrorGraceMsForTest(100);
+  const { server, fake, station } = await setupRig("acpsess-late-after-generic", {
+    stationKey: "acp-late-after-generic-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "All good?");
+    await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 500));
+
+    const errors = errorEvents(await eventsFor(row.id));
+    expect(errors.map((e) => (e.payload as { source: string }).source)).toEqual(["acp-stop-reason", "plugin"]);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── A fallback that answered after the plugin reported (krishna, 2026-09-26 08:09) ───
+
+test("an answer after the plugin's report means the fallback recovered: no error", async () => {
+  // Kimi failed; the OpenClaw plugin reported after its quiet window while the
+  // next model was still thinking; that model then answered. The hub put the
+  // stale report up as the turn's error, under a turn that had answered.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-recovered-after-report", {
+    stationKey: "acp-recovered-after-report-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.agentSays("Hey Rakesh. I'm here. What is it?");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the agent's last words is still the turn's error", async () => {
+  // A partial answer, then the failure: Pi's report lands at agent_settled,
+  // after pi-acp's "Retrying (attempt 1/2)…" lines. That is a failed turn.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-report-after-words", {
+    stationKey: "acp-report-after-words-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.agentSays("Retrying (attempt 1/2, waiting 1s)...");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "fakeq", "flaky", "Overloaded")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    expect(hit.payload).toMatchObject({ source: "plugin", message: "Overloaded" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── A run that ended well after its failure was reported (2026-09-26 08:56) ───
+
+function resolution(key: string, r: "answered" | "silent") {
+  return { type: "turn.error", report: { harnessSessionKey: key, resolution: r } };
+}
+
+test("a failure the plugin then says ended in deliberate silence is no error, and the turn is silent", async () => {
+  // Kimi failed and was reported; the slower fallback then answered NO_REPLY.
+  // Nothing reached the room, and the room showed Kimi's failure.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-silent", {
+    stationKey: "acp-resolved-silent-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Okay.");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    expect(hit.payload).toMatchObject({ status: "idle", silent: true });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a silence that arrives while the hub waits for a report ends the wait at once", async () => {
+  // The prompt resolved empty before the plugin's word arrived.
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-silent-during-wait", {
+    stationKey: "acp-silent-during-wait-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Nothing.");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    const sentAt = Date.now();
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    expect(Date.now() - sentAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ silent: true });
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("'answered' clears a reported failure too", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-answered", {
+    stationKey: "acp-resolved-answered-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "quota")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "answered")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});

@@ -1,120 +1,177 @@
 package terminal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
-// Manager owns the set of live PTY sessions keyed both by session ID and by
-// station key.  All public methods are safe for concurrent use.
-type Manager struct {
-	mu      sync.Mutex
-	byID    map[string]*Session
-	byKey   map[string]string // station key → session ID
-	counter int               // monotonic counter for deterministic IDs
+var ErrClosed = errors.New("terminal: manager shut down")
+
+type pendingOpen struct {
+	done    chan struct{}
+	session *Session
+	err     error
 }
 
-// NewManager allocates an empty Manager.
-func NewManager() *Manager {
+// Manager owns PTY children by session ID and station key. Workspace leases
+// include starting and closing children. All public methods are concurrent-safe.
+type Manager struct {
+	mu         sync.Mutex
+	byID       map[string]*Session
+	byKey      map[string]string
+	counter    int
+	pending    map[string]*pendingOpen
+	finishes   map[string]func()
+	closed     bool
+	children   sync.WaitGroup
+	workspaces *workspacegate.Coordinator
+	spawn      func(string, string, string, uint16, uint16) (*Session, error)
+}
+
+func NewManager() *Manager { return NewManagerWithWorkspaces(workspacegate.New()) }
+
+// NewManagerWithWorkspaces shares admission with ACP and native publication.
+func NewManagerWithWorkspaces(g *workspacegate.Coordinator) *Manager {
+	if g == nil {
+		panic("terminal: workspace coordinator required")
+	}
 	return &Manager{
-		byID:  make(map[string]*Session),
-		byKey: make(map[string]string),
+		byID: make(map[string]*Session), byKey: make(map[string]string),
+		pending: make(map[string]*pendingOpen), finishes: make(map[string]func()),
+		workspaces: g, spawn: newSession,
 	}
 }
 
-// Open returns the live session for key if one already exists (idempotent), or
-// spawns a new one.  shell defaults to "/bin/sh" when empty.  cwd sets the
-// working directory of the spawned process.
+// Open reuses the live or pending session for key, or reserves cwd before
+// spawning. The reservation lasts through child reaping. Empty shell defaults
+// to /bin/sh. Shutdown permanently closes admission and waits for starts.
 func (m *Manager) Open(key, shell, cwd string, cols, rows uint16) (*Session, error) {
 	m.mu.Lock()
-	// Fast path: session already alive for this key.
-	if id, ok := m.byKey[key]; ok {
-		if s, ok := m.byID[id]; ok {
-			m.mu.Unlock()
-			return s, nil
-		}
+	if m.closed {
+		m.mu.Unlock()
+		return nil, ErrClosed
 	}
-	// Reserve an ID atomically so concurrent opens get distinct IDs.
+	if s := m.byID[m.byKey[key]]; s != nil {
+		m.mu.Unlock()
+		return s, nil
+	}
+	if p := m.pending[key]; p != nil {
+		m.mu.Unlock()
+		<-p.done
+		return p.session, p.err
+	}
+	p := &pendingOpen{done: make(chan struct{})}
+	m.pending[key] = p
+	m.children.Add(1)
 	m.counter++
 	id := fmt.Sprintf("sess-%d", m.counter)
 	m.mu.Unlock()
-
-	// Spawn the session outside the lock (process creation may be slow).
-	s, err := newSession(id, shell, cwd, cols, rows)
+	complete := func(s *Session, err error) (*Session, error) {
+		m.mu.Lock()
+		p.session, p.err = s, err
+		delete(m.pending, key)
+		close(p.done)
+		m.mu.Unlock()
+		return s, err
+	}
+	lease, err := m.workspaces.Activity(context.Background(), cwd)
 	if err != nil {
-		return nil, err
+		m.children.Done()
+		return complete(nil, err)
 	}
-
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() { m.remove(id); lease.Release(); m.children.Done() })
+	}
 	m.mu.Lock()
-	// Double-check: another goroutine may have won the race for this key.
-	if existingID, ok := m.byKey[key]; ok {
-		if existing, ok := m.byID[existingID]; ok {
-			m.mu.Unlock()
-			// We lost the race — discard our session.
-			_ = s.Close()
-			return existing, nil
-		}
-	}
-	m.byID[id] = s
-	m.byKey[key] = id
+	m.finishes[id] = finish
+	closed := m.closed
 	m.mu.Unlock()
-	return s, nil
+	if closed {
+		finish()
+		return complete(nil, ErrClosed)
+	}
+	s, err := m.spawn(id, shell, lease.Path(), cols, rows)
+	if err != nil {
+		finish()
+		return complete(nil, err)
+	}
+	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		_ = s.Close()
+		finish()
+		return complete(nil, ErrClosed)
+	}
+	m.byID[id], m.byKey[key] = s, id
+	m.mu.Unlock()
+	go func() { <-s.done; finish() }()
+	return complete(s, nil)
 }
 
-// Get looks up a session by its ID.
 func (m *Manager) Get(id string) (*Session, bool) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.byID[id]
-	m.mu.Unlock()
 	return s, ok
 }
 
-// GetByKey looks up a session by station key.
 func (m *Manager) GetByKey(key string) (*Session, bool) {
 	m.mu.Lock()
-	id, ok := m.byKey[key]
-	if !ok {
-		m.mu.Unlock()
-		return nil, false
-	}
-	s, ok2 := m.byID[id]
-	m.mu.Unlock()
-	return s, ok2
+	defer m.mu.Unlock()
+	s, ok := m.byID[m.byKey[key]]
+	return s, ok
 }
 
-// Close removes the session from both indexes, kills the process, and waits
-// for the read loop to exit.  Returns nil if no session with that ID exists.
+func (m *Manager) remove(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.byID, id)
+	delete(m.finishes, id)
+	for key, v := range m.byKey {
+		if v == id {
+			delete(m.byKey, key)
+			break
+		}
+	}
+}
+
+// Close stops reusing the session immediately. Repeated calls wait for child
+// reaping before releasing its reservation.
 func (m *Manager) Close(id string) error {
 	m.mu.Lock()
-	s, ok := m.byID[id]
-	if !ok {
-		m.mu.Unlock()
-		return nil
-	}
-	delete(m.byID, id)
-	// Remove from the key→id reverse index.
-	for k, v := range m.byKey {
+	s, finish := m.byID[id], m.finishes[id]
+	for key, v := range m.byKey {
 		if v == id {
-			delete(m.byKey, k)
+			delete(m.byKey, key)
 			break
 		}
 	}
 	m.mu.Unlock()
-	return s.Close()
+	if s == nil {
+		return nil
+	}
+	err := s.Close()
+	finish()
+	return err
 }
 
-// Shutdown closes all live sessions.
+// Shutdown permanently closes admission and waits for pending starts, live
+// children and children already being closed. It is idempotent.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
-	sessions := make([]*Session, 0, len(m.byID))
-	for _, s := range m.byID {
-		sessions = append(sessions, s)
+	m.closed = true
+	sessions := make([]string, 0, len(m.byID))
+	for id := range m.byID {
+		sessions = append(sessions, id)
 	}
-	m.byID = make(map[string]*Session)
-	m.byKey = make(map[string]string)
 	m.mu.Unlock()
-
-	for _, s := range sessions {
-		_ = s.Close()
+	for _, id := range sessions {
+		_ = m.Close(id)
 	}
+	m.children.Wait()
 }

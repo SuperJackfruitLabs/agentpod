@@ -1,0 +1,7 @@
+.astro/
+dist/
+node_modules/
+
+# The root .gitignore has a `build/` rule for compiler output. These are docs
+# pages served at /build/*, not build artifacts; without this they vanish silently.
+!src/content/docs/build/

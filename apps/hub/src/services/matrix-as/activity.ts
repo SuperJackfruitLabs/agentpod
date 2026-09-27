@@ -8,7 +8,7 @@
  * whole life of the bridge with nothing anywhere saying so, while the console
  * rendered all of them.
  *
- * The kaambaan coalescer already keeps `unmapped()`/`losses()` and lists its
+ * The superpipeline coalescer already keeps `unmapped()`/`losses()` and lists its
  * dropped kinds explicitly "so a NEW kind shows up in `unmapped()` instead of
  * joining this set by accident" (`bridge/coalesce.ts:53-62`). This is that
  * discipline, on the path that lacked it — and it ships before anything else in

@@ -5,7 +5,7 @@
  *    statement inserting into it exists at any commit in this repository, and
  *    production holds zero rows. This is its first one, and the thing it must
  *    carry is the paired fact the CHECK enforces: `external_run_id` =
- *    kaambaan's run id, `external_source` = "kaambaan". Its own id is
+ *    superpipeline's run id, `external_source` = "superpipeline". Its own id is
  *    `attempt_<uuid>` — AgentPod is the executor, not the minter.
  *
  * 2. **The at-least-once ledger** (requirement 3). Spike RQ4: a harness finished
@@ -22,7 +22,7 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, describe, beforeAll, beforeEach, afterAll } from "bun:test";
-import { AcpRunId, KaambaanRunId } from "@agentpod/contract";
+import { AcpRunId, SuperpipelineRunId } from "@agentpod/contract";
 import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../../src/db/drizzle";
@@ -51,7 +51,7 @@ const RUN_ID_2 = "run_a1b2c3d4e5f60718";
 
 const key = (externalRunId = RUN_ID) => ({
   tenantId: BOOTSTRAP_TENANT_ID,
-  externalSource: "kaambaan",
+  externalSource: "superpipeline",
   boardId: BOARD_ID,
   externalCardId: CARD_ID,
   externalRunId,
@@ -91,7 +91,7 @@ afterAll(async () => {
 });
 
 describe("the run join — acp_runs' first writer", () => {
-  test("an attempt carries kaambaan's run id and says who minted it", async () => {
+  test("an attempt carries superpipeline's run id and says who minted it", async () => {
     await open();
     const attemptId = await startAttempt({
       ...key(),
@@ -102,19 +102,19 @@ describe("the run join — acp_runs' first writer", () => {
 
     const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
     expect(row!.externalRunId).toBe(RUN_ID);
-    expect(row!.externalSource).toBe("kaambaan");
+    expect(row!.externalSource).toBe("superpipeline");
     expect(row!.state).toBe("working");
     expect(row!.startSeq).toBe(4);
     expect(row!.endSeq).toBeNull();
     expect(row!.tenantId).toBe(BOOTSTRAP_TENANT_ID);
   });
 
-  test("the attempt's own id is AgentPod's, and kaambaan's is not restated as it", async () => {
+  test("the attempt's own id is AgentPod's, and superpipeline's is not restated as it", async () => {
     await open();
     const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 0 });
 
     expect(AcpRunId.safeParse(attemptId).success).toBe(true);
-    expect(KaambaanRunId.safeParse(attemptId).success).toBe(false);
+    expect(SuperpipelineRunId.safeParse(attemptId).success).toBe(false);
     expect(attemptId).not.toBe(RUN_ID);
   });
 
@@ -315,7 +315,7 @@ describe("migration 0039, against a table that already has rows", () => {
             (external_source, external_run_id, tenant_id, board_id, external_card_id,
              agent_key, station_id, lease_epoch, outcome, started_at, updated_at)
           VALUES
-            ('kaambaan', ${RUN_ID_2}, ${BOOTSTRAP_TENANT_ID}, ${BOARD_ID}, ${CARD_ID},
+            ('superpipeline', ${RUN_ID_2}, ${BOOTSTRAP_TENANT_ID}, ${BOARD_ID}, ${CARD_ID},
              'codex-mac', ${STATION_ID}, 1, 'reported', now(), now())
         `;
 

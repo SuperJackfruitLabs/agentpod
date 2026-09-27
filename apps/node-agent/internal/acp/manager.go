@@ -1,162 +1,194 @@
 package acp
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"sync"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
-// ErrEmptyArgv is returned by Open when argv has no command to run.
 var ErrEmptyArgv = errors.New("acp: empty argv")
+var ErrClosed = errors.New("acp: manager shut down")
 
-// Manager owns the set of live ACP sessions keyed both by session ID and by
-// the (station key, instance) pair. All public methods are safe for concurrent
-// use.
+type pendingOpen struct {
+	done    chan struct{}
+	session *Session
+	err     error
+}
+
+// Manager owns ACP children by session ID and (station key, instance). Its
+// reservations cover pending starts and closing children independently of the
+// addressable-session indexes. Public methods are safe for concurrent use.
 type Manager struct {
-	mu    sync.Mutex
-	byID  map[string]*Session
-	byKey map[string]string // instanceKey(key, instance) → session ID
+	mu         sync.Mutex
+	byID       map[string]*Session
+	byKey      map[string]string
+	pending    map[string]*pendingOpen
+	finishes   map[string]func()
+	closed     bool
+	children   sync.WaitGroup
+	workspaces *workspacegate.Coordinator
+	spawn      func(string, []string, string, []string) (*Session, error)
 }
 
-// instanceKey encodes the (station key, instance) pair as one map key. NUL
-// cannot appear in either half (station keys are "harness:id", instances are
-// hub-chosen identifiers), so the pairs can never flatten onto each other the
-// way plain concatenation would collapse ("a","bc") and ("ab","c"). An empty
-// instance is a distinct pair of its own — that is the legacy
-// one-process-per-key slot an older hub keeps re-opening.
-func instanceKey(key, instance string) string {
-	return key + "\x00" + instance
-}
+// NUL separates pairs without plain-concatenation collisions. Empty instance
+// preserves the legacy one-process-per-station slot.
+func instanceKey(key, instance string) string { return key + "\x00" + instance }
 
-// NewManager allocates an empty Manager.
-func NewManager() *Manager {
+func NewManager() *Manager { return NewManagerWithWorkspaces(workspacegate.New()) }
+
+// NewManagerWithWorkspaces shares admission with terminals and native placement.
+func NewManagerWithWorkspaces(g *workspacegate.Coordinator) *Manager {
+	if g == nil {
+		panic("acp: workspace coordinator required")
+	}
 	return &Manager{
-		byID:  make(map[string]*Session),
-		byKey: make(map[string]string),
+		byID: make(map[string]*Session), byKey: make(map[string]string),
+		pending: make(map[string]*pendingOpen), finishes: make(map[string]func()),
+		workspaces: g, spawn: newSession,
 	}
 }
 
-// newSessionID returns a fresh identifier of the form "acp_" + 8 random hex
-// characters.
 func newSessionID() string {
 	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return "acp_" + hex.EncodeToString(b[:])
 }
 
-// Open returns the live session for the (key, instance) pair if one already
-// exists (idempotent), or spawns argv[0] with argv[1:] in dir with env appended
-// to os.Environ(). stdout is streamed to subscribers in chunks; stderr is
-// discarded to a bounded ring (last 4 KiB) exposed via s.StderrTail() for exit
-// reasons.
-//
-// instance discriminates concurrent sessions on one station: each distinct
-// instance gets its own child, so two hub sessions never read each other's
-// JSON-RPC traffic. An empty instance keeps the pre-instance behaviour
-// (idempotent by station key alone), which is what an older hub sends.
+// Open reuses the live or pending (key, instance) session, or reserves the cwd
+// before spawning. Distinct instances have independent stdio. env is appended
+// to os.Environ by newSession; stdout and bounded stderr retain their framing.
+// Shutdown permanently closes admission and waits for pending spawns.
 func (m *Manager) Open(key, instance string, argv []string, dir string, env []string) (*Session, error) {
 	if len(argv) == 0 {
 		return nil, ErrEmptyArgv
 	}
 	ikey := instanceKey(key, instance)
-
 	m.mu.Lock()
-	// Fast path: session already alive for this pair.
-	if id, ok := m.byKey[ikey]; ok {
-		if s, ok := m.byID[id]; ok {
-			m.mu.Unlock()
-			return s, nil
-		}
+	if m.closed {
+		m.mu.Unlock()
+		return nil, ErrClosed
 	}
-	// Pick an ID that is not in use, retrying on (astronomically unlikely)
-	// random collision.
+	if s := m.byID[m.byKey[ikey]]; s != nil {
+		m.mu.Unlock()
+		return s, nil
+	}
+	if p := m.pending[ikey]; p != nil {
+		m.mu.Unlock()
+		<-p.done
+		return p.session, p.err
+	}
+	p := &pendingOpen{done: make(chan struct{})}
+	m.pending[ikey] = p
+	// Add under the mutex that closes admission so Shutdown cannot Wait
+	// before an admitted start becomes visible to the wait group.
+	m.children.Add(1)
+	m.mu.Unlock()
+	complete := func(s *Session, err error) (*Session, error) {
+		m.mu.Lock()
+		p.session, p.err = s, err
+		delete(m.pending, ikey)
+		close(p.done)
+		m.mu.Unlock()
+		return s, err
+	}
+	lease, err := m.workspaces.Activity(context.Background(), dir)
+	if err != nil {
+		m.children.Done()
+		return complete(nil, err)
+	}
+	m.mu.Lock()
 	id := newSessionID()
-	for {
-		if _, taken := m.byID[id]; !taken {
-			break
-		}
+	// Reserve IDs for pending starts as well as live children.
+	for m.byID[id] != nil || m.finishes[id] != nil {
 		id = newSessionID()
 	}
+	var finishOnce sync.Once
+	finish := func() {
+		finishOnce.Do(func() { m.remove(id); lease.Release(); m.children.Done() })
+	}
+	m.finishes[id] = finish
+	closed := m.closed
 	m.mu.Unlock()
-
-	// Spawn the session outside the lock (process creation may be slow).
-	s, err := newSession(id, argv, dir, env)
+	if closed {
+		finish()
+		return complete(nil, ErrClosed)
+	}
+	s, err := m.spawn(id, argv, lease.Path(), env)
 	if err != nil {
-		return nil, err
+		finish()
+		return complete(nil, err)
 	}
-
 	m.mu.Lock()
-	// Double-check: another goroutine may have won the race for this pair.
-	if existingID, ok := m.byKey[ikey]; ok {
-		if existing, ok := m.byID[existingID]; ok {
-			m.mu.Unlock()
-			// We lost the race — discard our session.
-			_ = s.Close()
-			return existing, nil
-		}
+	if m.closed {
+		m.mu.Unlock()
+		_ = s.Close()
+		finish()
+		return complete(nil, ErrClosed)
 	}
-	m.byID[id] = s
-	m.byKey[ikey] = id
+	m.byID[id], m.byKey[ikey] = s, id
 	m.mu.Unlock()
-
-	// Drop the session from the registry once the child exits so a later
-	// Open for the same pair spawns a fresh process instead of returning a
-	// dead session. Only this pair's entry goes — siblings on the same station
-	// key keep running.
-	s.OnExit(func(string) { m.remove(id) })
-	return s, nil
+	// Independent of user OnExit callbacks, which may block. done closes
+	// after the pipe readers drain and cmd.Wait reaps the child.
+	go func() { <-s.done; finish() }()
+	return complete(s, nil)
 }
 
-// Get looks up a session by its ID.
 func (m *Manager) Get(id string) (*Session, bool) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	s, ok := m.byID[id]
-	m.mu.Unlock()
 	return s, ok
 }
 
-// remove deletes id from both indexes (no-op if already gone). A session ID is
-// mapped from at most one (key, instance) pair, so the reverse scan can stop at
-// the first hit and leaves every sibling pair on the same station key intact.
 func (m *Manager) remove(id string) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	delete(m.byID, id)
-	for ikey, v := range m.byKey {
+	delete(m.finishes, id)
+	for key, v := range m.byKey {
 		if v == id {
-			delete(m.byKey, ikey)
+			delete(m.byKey, key)
+			break
+		}
+	}
+}
+
+// Close stops reusing the instance immediately but retains its reservation
+// until Close has reaped the process. Repeat callers also wait for reaping.
+func (m *Manager) Close(id string) error {
+	m.mu.Lock()
+	s, finish := m.byID[id], m.finishes[id]
+	for key, v := range m.byKey {
+		if v == id {
+			delete(m.byKey, key)
 			break
 		}
 	}
 	m.mu.Unlock()
-}
-
-// Close removes the session from both indexes and shuts down its process
-// (SIGTERM → 3s grace → SIGKILL). Returns nil if no session with that ID
-// exists.
-func (m *Manager) Close(id string) error {
-	m.mu.Lock()
-	s, ok := m.byID[id]
-	m.mu.Unlock()
-	if !ok {
+	if s == nil {
 		return nil
 	}
-	m.remove(id)
-	return s.Close()
+	err := s.Close()
+	finish()
+	return err
 }
 
-// Shutdown closes every session.
+// Shutdown is terminal and idempotent. It covers starts admitted before
+// shutdown and children another caller is already closing.
 func (m *Manager) Shutdown() {
 	m.mu.Lock()
-	sessions := make([]*Session, 0, len(m.byID))
-	for _, s := range m.byID {
-		sessions = append(sessions, s)
+	m.closed = true
+	sessions := make([]string, 0, len(m.byID))
+	for id := range m.byID {
+		sessions = append(sessions, id)
 	}
-	m.byID = make(map[string]*Session)
-	m.byKey = make(map[string]string)
 	m.mu.Unlock()
-
-	for _, s := range sessions {
-		_ = s.Close()
+	for _, id := range sessions {
+		_ = m.Close(id)
 	}
+	m.children.Wait()
 }

@@ -130,8 +130,8 @@ API_TOKEN=<run: openssl rand -hex 24>
 
 # ── Browser origins and the session cookie ────────────────────────────────────
 # REQUIRED on any domain other than agentpod.dev. The built-in origin allowlist
-# is only http://localhost:5173, https://console.agentpod.dev and
-# https://app.agentpod.dev (config.ts); ALLOWED_ORIGINS ADDS to it. Without
+# is only http://localhost:5173 and https://console.agentpod.dev (config.ts);
+# ALLOWED_ORIGINS ADDS to it. Without
 # your console's origin here, every mutating /api/* request is rejected by the
 # CSRF middleware and the terminal WebSocket fails its CSWSH check — the
 # console loads and cannot log in.
@@ -142,10 +142,6 @@ ALLOWED_ORIGINS=https://console.<your-domain>
 # wrong for a TLS deployment — and the smoke test in §9 cannot pass.
 COOKIE_DOMAIN=.<your-domain>
 COOKIE_SECURE=true
-
-# ── Feature flags ─────────────────────────────────────────────────────────────
-# Disable MetaMCP integration (not part of fleet console).
-METAMCP_ENABLED=false
 
 # ── Provisioning ──────────────────────────────────────────────────────────────
 # Enable the Docker provisioner.
@@ -228,18 +224,18 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # NODE_AGENT_FLY_OPENCODE_IMAGE=ghcr.io/<owner>/agentpod-node-opencode-fly:<release>
 # NODE_AGENT_FLY_PI_IMAGE=ghcr.io/<owner>/agentpod-node-pi-fly:<release>
 
-# ── kaambaan bridge ───────────────────────────────────────────────────────────
-# See "kaambaan bridge" below before enabling. OFF unless this is the literal
+# ── superpipeline bridge ───────────────────────────────────────────────────────────
+# See "superpipeline bridge" below before enabling. OFF unless this is the literal
 # lowercase string "true" — `1` and `TRUE` read as off.
-# ENABLE_KAAMBAAN_BRIDGE=false
-# KAAMBAAN_BASE_URL=https://kaambaan.dev
-# KAAMBAAN_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"kbn_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
+# ENABLE_SUPERPIPELINE_BRIDGE=false
+# SUPERPIPELINE_BASE_URL=https://superpipeline.dev
+# SUPERPIPELINE_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"spa_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
 
 > **Key constraints**
-> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173`, `console.agentpod.dev` and `app.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
+> - `ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, `COOKIE_SECURE`: required on any domain that is not `agentpod.dev`. The built-in origin allowlist covers only `localhost:5173` and `console.agentpod.dev`; `ALLOWED_ORIGINS` **adds** to that list rather than replacing it. Skip them and the console loads, then fails every mutating request.
 > - `BETTER_AUTH_SECRET`: ≥ 32 characters **and** at least two character classes when `NODE_ENV=production`.
 > - `ENCRYPTION_KEY`: **exactly** 32 bytes. Using `openssl rand -hex 16` produces 32 hex characters = 32 ASCII bytes.
 > - `CLOUDFLARE_SANDBOX_IMAGE`: required whenever `ENABLE_CLOUDFLARE_SANDBOXES=true`, and it must be the image the worker was deployed with (what `imageForHarness` returns for the harness you provision). The Cloudflare driver advertises a **fixed** image and refuses a spec asking for a different one — but only when it knows this value. Unset, it advertises "fixed" and provisions whatever it is handed. Boot validation now fails instead.
@@ -393,7 +389,7 @@ every dispatch is refused — which is correct, and is also an outage.
 
 | Field | Meaning |
 |---|---|
-| `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `kaambaan:<agentId>` is matched by kaambaan and **ignored** here. |
+| `mayDispatch` | Namespaced patterns. AgentPod's name a **node and a station**: `agentpod:<nodeName>/<stationKey>`. `superpipeline:<agentId>` is matched by superpipeline and **ignored** here. |
 | `mayGrantReach` | Whether this principal may **change what an agent is**. Required, and enforced — see the table below. Dispatch control alone is decorative: anyone who can grant an agent production credentials does not need permission to dispatch it. |
 
 **What `mayGrantReach` gates**, as of #345. `mayDispatch` asks whether you may
@@ -452,24 +448,24 @@ Why values are namespaced, and where that ends:
 `charter` → `decisions/2026-08-15-a-grant-names-an-agent-per-plane.md`.
 
 Enforced at `acp.createSession`, the one choke point both the console and the
-kaambaan bridge pass through — a check living only in the bridge would leave
+superpipeline bridge pass through — a check living only in the bridge would leave
 provisioning straight at this API unguarded.
 
-### kaambaan bridge
+### superpipeline bridge
 
-Off by default, and **nothing is inferred from a credential being present** — a `kbn_` token
+Off by default, and **nothing is inferred from a credential being present** — a `spa_` token
 sitting in an env file is not a decision to start claiming work on someone's board. A hub
 that has not opted in constructs nothing, opens no session and makes no request. Day-2
 operation — reading the ledger, spotting a halted loop — is
-[docs/OPERATING.md → The kaambaan bridge](./OPERATING.md#8-the-kaambaan-bridge).
+[docs/OPERATING.md → The superpipeline bridge](./OPERATING.md#8-the-superpipeline-bridge).
 
 Three variables, all required together:
 
 | Variable | Meaning |
 |---|---|
-| `ENABLE_KAAMBAAN_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
-| `KAAMBAAN_BASE_URL` | Origin of the kaambaan deployment, e.g. `https://kaambaan.dev`. Trailing slashes are stripped. |
-| `KAAMBAAN_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
+| `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
+| `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
+| `SUPERPIPELINE_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
 
 One process, many identities. Each roster entry is a separate principal with its own token,
 board and station — "the bridge's credential" is not a thing that exists:
@@ -479,7 +475,7 @@ board and station — "the bridge's credential" is not a thing that exists:
   {
     "key": "codex-mac",
     "boardId": "brd_9c1d4e5f6a7b8c9d",
-    "token": "kbn_…",
+    "token": "spa_…",
     "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
     "hubUserId": "usr-local-1",
     "mode": "full-auto",
@@ -493,42 +489,83 @@ board and station — "the bridge's credential" is not a thing that exists:
 | Field | Required | Notes |
 |---|---|---|
 | `key` | yes | Stable name. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique — a duplicate is refused at boot. |
-| `boardId` | yes | The kaambaan board to claim from. |
-| `token` | yes | This agent's own kaambaan credential, minted under "Connect an agent". Must start `kbn_`. |
+| `boardId` | yes | The superpipeline board to claim from. |
+| `token` | yes | This agent's own superpipeline credential, minted under "Connect an agent". Must start `spa_`. |
 | `stationId` | yes | The station its work runs on. |
 | `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
 | `mode` | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call, which is a great deal of asking; it suits a board somebody is watching, which is why it is not the default. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers — see `permissionWaitMs`. |
 | `permissionWaitMs` | no (default **30 minutes**) | How long a human has to answer before the run gives up. Must be a positive integer. |
-| `maxConcurrency` | no | How many of this agent's runs may be in flight. kaambaan defaults to 1. |
+| `maxConcurrency` | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
 | `profileKey` | no | Claim under a profile, when the board routes by profile. |
 
 **What `permissionWaitMs` actually buys you.** When an agent asks for permission, the run keeps
-the card and keeps heartbeating, so kaambaan's 15-minute reclaim never fires — the wait is
+the card and keeps heartbeating, so superpipeline's 15-minute reclaim never fires — the wait is
 bounded by *this setting*, not by the lease. If it expires, the run is **`fail`ed and the card is
 re-queued** with the reason and a failure count. It is not silently dropped, and it is not
 `release`d either: a session had started, so the workspace may hold partial work, and `fail` is
 the verb that records that. The next attempt asks the question again, and a card nobody ever
-answers eventually trips kaambaan's own circuit breaker and parks for a human. Nothing is ever
+answers eventually trips superpipeline's own circuit breaker and parks for a human. Nothing is ever
 approved or declined on a human's behalf when the wait runs out.
 
 Set it per agent, because attendance is a property of a deployment: a board watched during
 office hours wants minutes, and one that runs unattended overnight wants the harness released
 quickly rather than a station pinned until morning.
 
-**A roster that fails to parse refuses the boot**, naming `KAAMBAAN_BRIDGE_AGENTS`. That is
+**A roster that fails to parse refuses the boot**, naming `SUPERPIPELINE_BRIDGE_AGENTS`. That is
 deliberate: a bridge that silently claimed nothing because its roster was malformed looks
 exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
-array, a token that does not start `kbn_`, a `permissionWaitMs` of zero or less, and a
+array, a token that does not start `spa_`, a `permissionWaitMs` of zero or less, and a
 duplicate `key`.
 
 > **Quoting.** The roster is JSON on one line, which makes it the value most likely to be
 > quoted in an env file, and the value quoting most often breaks. systemd's
-> `EnvironmentFile=` strips one surrounding layer, so both `KAAMBAAN_BRIDGE_AGENTS=[{…}]`
-> and `KAAMBAAN_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
+> `EnvironmentFile=` strips one surrounding layer, so both `SUPERPIPELINE_BRIDGE_AGENTS=[{…}]`
+> and `SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
 > parses the file differently will disagree with the hub about which one works. See the
 > pre-flight notes under [Re-deploy](#re-deploy-upgrade); this variable is why they exist.
 
 ---
+
+### The OAuth client registry
+
+A plane on its own domain cannot read the hub's session cookie: it is `SameSite=Lax`, and
+`superpipeline.dev` is a different site from `agentpod.dev`. The authorization-code flow
+(`GET /api/auth/authorize` → `POST /api/auth/token/exchange`) exists so a browser can *navigate*
+to the hub — which `Lax` permits — and hand the plane's server a one-time code.
+
+| Variable | Meaning |
+|---|---|
+| `HUB_OAUTH_CLIENTS` | Who may **receive** a token. Comma-separated `client\|redirect_uri`; repeat the client key for several URIs. **Empty by default**, and a hub that has not opted in refuses every authorize. |
+
+**This is deliberately not `ALLOWED_ORIGINS`.** They answer different questions: that list says
+who may *call* the hub from a browser; this one says who may *be handed a credential for whoever
+is signed in*. Being permitted to make a request must not by itself confer the right to receive a
+token, which is why the two are separate and this one starts empty.
+
+Redirect matching is **full-string equality**. Prefix or origin matching is how an authorize
+endpoint becomes a credential-minting open redirector: `https://k.dev/hub/callback/../../evil`
+shares an origin and a prefix with the registered URI and is not it.
+
+**One exception, for native apps.** A client may register the literal `loopback` instead of a URI
+— `apn|loopback` — which permits `http://127.0.0.1:<any port>/callback` and `[::1]`, and nothing
+else. A CLI cannot pin a port, so it cannot register an exact URI. Everything about that rule is
+narrow on purpose:
+
+- **`localhost` is refused.** It is a *name*, resolved through DNS and `/etc/hosts`, so whoever
+  can answer for it receives the authorization code. Only the IP literals are accepted.
+- the path must be exactly `/callback`; no query, no fragment, no userinfo, no scheme but `http`
+- it is **opt-in per client** — superpipeline registering a machine-local port would be a compromise,
+  not a feature
+
+A malformed entry is skipped rather than thrown, so a typo cannot stop the hub booting for a
+feature it may not use — but a skipped entry is simply not in the registry, and authorize refuses
+what it cannot find. The refusal names this variable.
+
+Example, registering the web plane and the CLI:
+
+```
+HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback
+```
 
 ## 5. Hub — build + deploy
 
@@ -552,9 +589,8 @@ systemctl daemon-reload
 systemctl enable --now agentpod-hub
 ```
 
-> **The unit hardcodes `agentpod.dev`.** Three `Environment=` lines in the shipped file name
-> that domain — `COOKIE_DOMAIN=.agentpod.dev`, `ALLOWED_ORIGINS=https://app.agentpod.dev`,
-> and `PUBLIC_URL=https://hub.agentpod.dev`. On any other domain, **edit them** (or delete
+> **The unit hardcodes `agentpod.dev`.** Two `Environment=` lines in the shipped file name
+> that domain — `COOKIE_DOMAIN=.agentpod.dev` and `PUBLIC_URL=https://hub.agentpod.dev`. On any other domain, **edit them** (or delete
 > them and keep the values in `hub.env`, which the same unit loads via `EnvironmentFile=`).
 > Note `PUBLIC_URL` is read by nothing in the hub — the config field is
 > `MANAGEMENT_API_PUBLIC_URL` — so it is inert either way.
@@ -582,6 +618,25 @@ Health check:
 curl -s http://127.0.0.1:3001/health
 # {"status":"ok",...}
 ```
+
+**`/health` is not enough, and this is not a theoretical caution.** On
+2026-09-20 the hub was pulled, restarted, reported `active`, answered `/health`
+with 200 and migrated cleanly — while every `/api/auth/devices*` route returned
+404, because they had been mounted behind Better Auth's `/api/auth/*` catch-all.
+Nothing in this runbook looked at a route, so the deploy read as a success for
+as long as it took somebody to curl one by hand.
+
+Run the smoke check after every deploy:
+
+```bash
+sh /opt/agentpod/deploy/smoke.sh http://127.0.0.1:3001
+# every route answers, and refuses; non-zero exit if any is missing
+```
+
+It uses no credentials. It asks each route anonymously and requires a *refusal*
+— a 401 or 403 proves the route exists and is mounted where it can be reached,
+where a 404 proves it is not. That distinction is the whole point: a process
+that is up and a product that is served are different facts.
 
 > If you need to run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`
 
@@ -646,6 +701,10 @@ overhead depending on syscall frequency.
 
 ## 6. Console — build + deploy to Cloudflare Pages
 
+> **agentpod.dev itself deploys from CI.** The `deploy-console` job in `.github/workflows/ci.yml`
+> builds with `PUBLIC_HUB_URL=https://hub.agentpod.dev` and uploads to the `agentpod-console`
+> project on every push to `main`. The steps below are for a deployment on your own domain.
+
 Build the static SPA (build locally — the VPS does not need to run this step):
 
 ```bash
@@ -682,14 +741,6 @@ Cloudflare Pages picks this up automatically. Alternatively, enable the "SPA" se
 ## 7. nginx vhosts (hub only)
 
 The console is hosted on Cloudflare Pages and does **not** require an nginx vhost on the VPS. Only the hub vhost is wanted here.
-
-> **The repo's vhost file contains two server blocks, not one.** `deploy/nginx/hub.agentpod.dev.conf`
-> carries `hub.agentpod.dev` **and** an `app.agentpod.dev` block serving
-> `/opt/agentpod/apps/console/build` from disk — a leftover from the pre-Pages deploy.
-> Copying it as-is installs a vhost for a hostname this guide never creates. `nginx -t`
-> passes either way (a missing `root` directory is not a config error), so nothing tells you.
-> **Delete the second `server { … }` block after copying**, or serve the console from it
-> instead of Cloudflare Pages — but pick one.
 
 **7a. WebSocket upgrade map** (add once to the `http{}` context):
 
@@ -832,14 +883,14 @@ Two things about that snippet are load-bearing, and both were learned the hard w
 - **Do not pipe the file through `xargs`.** The obvious form —
   `env $(grep -v '^#' /etc/agentpod/hub.env | xargs) bun …` — was in this runbook
   until 2026-08-14 and is **wrong**: `xargs` re-tokenises and strips quotes wherever
-  they appear, so a value containing them arrives mangled. Enabling the kaambaan
-  bridge, whose roster is a JSON array, produced `KAAMBAAN_BRIDGE_AGENTS is not
+  they appear, so a value containing them arrives mangled. Enabling the superpipeline
+  bridge, whose roster is a JSON array, produced `SUPERPIPELINE_BRIDGE_AGENTS is not
   valid JSON` from a config file that was perfectly valid — a pre-flight failing on
   a fault it invented, which is worse than no pre-flight at all.
 - **Strip exactly one layer of surrounding quotes, and nothing else** — that is what
   systemd's `EnvironmentFile=` does. The replacement snippet was, briefly, *fully*
   literal, which recreated the same class of bug from the other side: an operator who
-  quoted the roster (`KAAMBAAN_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
+  quoted the roster (`SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
   `JSON.parse` and the same invented failure. Note systemd does **not** strip trailing
   comments — `KEY=value  # note` really is a value with a comment in it, on the live
   hub as well as here, which is why the `ENCRYPTION_KEY` line in §4 keeps its comment

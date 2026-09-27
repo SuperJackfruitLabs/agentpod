@@ -9,6 +9,43 @@
    All fonts loaded locally from /static/fonts/
    ============================================ */
 
+/* Archivo - Signage grotesk, the console's default */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('/fonts/archivo/archivo-800.woff2') format('woff2');
+}
+
 /* Inter - Clean, modern sans-serif */
 @font-face {
   font-family: 'Inter';
@@ -634,9 +671,14 @@
   --status-running: oklch(0.723 0.192 149.58);
   --status-degraded: oklch(0.769 0.188 70.08);
   --status-starting: oklch(0.715 0.143 215.221);
-  --status-stopped: var(--muted-foreground);
+  /* Fixed, not var(--muted-foreground): that token belongs to the active
+     colour scheme, so "stopped" was the one state a theme could still
+     recolour — under Cyberpunk it went near-black. Colour means state, and
+     that has to hold for the colourless state too. */
+  --status-stopped: oklch(0.554 0.021 264.36);
   --status-error: oklch(0.577 0.245 27.325);
   --status-sleeping: oklch(0.606 0.25 292.717);
+  --status-unknown: oklch(0.769 0.188 70.08);
 }
 
 .dark {
@@ -674,9 +716,11 @@
   --status-running: oklch(0.792 0.209 151.711);
   --status-degraded: oklch(0.828 0.189 84.429);
   --status-starting: oklch(0.789 0.154 211.53);
-  --status-stopped: var(--muted-foreground);
+  /* Fixed for the same reason as its light counterpart above. */
+  --status-stopped: oklch(0.646 0.019 264.36);
   --status-error: oklch(0.704 0.191 22.216);
   --status-sleeping: oklch(0.702 0.183 293.541);
+  --status-unknown: oklch(0.828 0.189 84.429);
 }
 
 @theme inline {
@@ -721,6 +765,7 @@
   --color-status-stopped: var(--status-stopped);
   --color-status-error: var(--status-error);
   --color-status-sleeping: var(--status-sleeping);
+  --color-status-unknown: var(--status-unknown);
 }
 
 /* ============================================

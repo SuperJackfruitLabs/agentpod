@@ -1,0 +1,24 @@
+{
+  "nodeId": "fixture-node",
+  "stationKey": "codex:fixture",
+  "harness": "codex",
+  "profile": "fixture",
+  "verification": {
+    "current": {
+      "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "archiveSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "bundleDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "path": "/fixture/workspace/.agentpod-skills/fixture/generations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "present": {
+      "value": true,
+      "observedAt": "2026-09-20T16:00:01Z",
+      "reason": "Verified managed files"
+    },
+    "loaded": {
+      "value": null,
+      "observedAt": null,
+      "reason": "No session inspection"
+    }
+  }
+}

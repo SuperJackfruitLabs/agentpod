@@ -33,6 +33,19 @@ func main() {
 		fmt.Println(helpText(version))
 		os.Exit(0)
 	}
+	// `apn node <verb>` is the explicit spelling of the machine-scoped verbs; the bare forms
+	// stay because the estate's own documents name them (`apn enroll`, `apn update`), and a
+	// runbook that stops working is worse than a CLI with two spellings. Stripping the prefix
+	// here rather than dispatching separately means the two spellings CANNOT diverge: there is
+	// one switch, and `node` is only ever a word removed before it.
+	if os.Args[1] == "node" {
+		if len(os.Args) < 3 {
+			fmt.Println(commandHelp("node"))
+			os.Exit(0)
+		}
+		os.Args = append([]string{os.Args[0]}, os.Args[2:]...)
+	}
+
 	switch os.Args[1] {
 	case "help", "-h", "--help":
 		if os.Args[1] == "help" && len(os.Args) > 2 {
@@ -86,9 +99,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-		// Preserve operator-set lifecycle commands across re-enrollment.
-		newCfg := config.Config{Hub: hub, NodeID: id, NodeSecret: sec,
-			HermesStartCmd: existing.HermesStartCmd, OpenClawStartCmd: existing.OpenClawStartCmd}
+		// Re-enrollment rotates only the machine identity. Keep every local
+		// operator setting, including the explicit native-skill activation gate.
+		newCfg := renewedConfig(existing, hub, id, sec)
 		if err := config.Save(config.DefaultPath(), newCfg); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -99,6 +112,18 @@ func main() {
 			os.Exit(0)
 		}
 		runCmd() // implemented in Task 9
+	case "native-skills":
+		os.Exit(nativeSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "hermes-skills":
+		os.Exit(hermesSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "hermes-live":
+		os.Exit(hermesLiveCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "openclaw-errors":
+		os.Exit(openclawErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "pi-errors":
+		os.Exit(piErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "plugin-management":
+		os.Exit(pluginManagementCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":
 		if maybeShowHelp(os.Stdout, "detect", os.Args[2:]) {
 			os.Exit(0)
@@ -132,10 +157,12 @@ func main() {
 		if err != nil {
 			if errors.Is(err, selfupdate.ErrRestartFailed) {
 				fmt.Fprintln(os.Stderr, "update: binary swapped but service restart failed:", err)
-				if runtime.GOOS == "darwin" {
-					fmt.Fprintf(os.Stderr, "restart it manually: launchctl kickstart -k gui/%d/dev.agentpod.node  (or re-run: apn run)\n", os.Getuid())
-				} else {
-					fmt.Fprintln(os.Stderr, "restart the service manually: systemctl restart agentpod-node")
+				// Asked rather than guessed. This branch used to print `systemctl restart` on
+				// every Linux host, which is wrong wherever the node runs as a USER unit — it
+				// sent an operator to a second dead end after the first. `service` already
+				// decides the scope in order to restart at all, so it is the one that knows.
+				if m, mErr := service.NewManagerForRestart(runtime.GOOS, nil); mErr == nil {
+					fmt.Fprintln(os.Stderr, "restart it manually:", m.RestartHint())
 				}
 				os.Exit(1)
 			}

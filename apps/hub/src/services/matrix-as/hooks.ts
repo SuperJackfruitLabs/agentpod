@@ -41,3 +41,111 @@ export function notifyStationsAdopted(stationIds: string[]): void {
     });
   });
 }
+
+/**
+ * The node has told the hub what a station's harness answers as on Matrix.
+ *
+ * The other half of the ordered identity move
+ * (`matrix-as/identity-move.ts`, design §4 step 5): convergence is the node
+ * reporting the address its occupying principal's handle implies — never what
+ * `bridge_matrix_id` holds, which for a harness station is the address it is
+ * moving OFF — and it is the ONLY thing that may trigger the one irreversible
+ * step. `station-registry` is the place that hears every
+ * `detect`, and it must go on knowing nothing about Matrix — so it announces
+ * the report and whoever cares listens, exactly as adoption does above.
+ *
+ * **Awaited, and announced BEFORE the registry writes the new value.** Both
+ * matter. The value about to be overwritten is the only record of which
+ * identity the station is moving off — nothing else in the database remembers
+ * it — so a fire-and-forget listener would race its own caller and read the
+ * new value as though it were the old one. The listener is cheap in the
+ * ordinary case (one row read, then nothing) and does real work exactly once
+ * in a station's life.
+ */
+type MatrixIdReport = (stationId: string, mxid: string) => Promise<void>;
+
+let matrixIdListener: MatrixIdReport | null = null;
+
+/** Register the one listener. Boot wiring, same as `onStationsAdopted`. */
+export function onStationMatrixIdReported(fn: MatrixIdReport | null): void {
+  matrixIdListener = fn;
+}
+
+/**
+ * Announce what a station reported, and wait for the answer.
+ *
+ * Never throws: a detect must not fail because a homeserver would not take an
+ * old identity out of a room. The station is already working under its new
+ * address by the time this runs — that is what convergence means.
+ */
+export async function stationReportedMatrixId(
+  stationId: string,
+  mxid: string | null | undefined
+): Promise<void> {
+  if (!matrixIdListener || !mxid) return;
+  try {
+    await matrixIdListener(stationId, mxid);
+  } catch (err) {
+    log.error("could not act on a station's reported Matrix identity", {
+      stationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Provisioning ONE station, on demand, and waiting for the answer.
+ *
+ * The adoption hook above is fire-and-forget because adoption has already
+ * succeeded by the time it runs and must not be undone by a homeserver.
+ * This one is awaited, because its caller — `routes/agents-admin.ts`'s
+ * assign endpoint — is the act that makes a station dispatchable, and
+ * whether the agent actually got a room is part of the answer an operator
+ * needs, not a detail to discover weeks later from a silent gate.
+ *
+ * The whole-branch review's Critical: assigning an agent wrote
+ * `stations.principal_id`, conditionally bound an EXISTING unbound room,
+ * and never provisioned. The console reaches no other provisioning trigger
+ * — `onStationsAdopted` fires before there is an occupant, and
+ * `provision.ts` returns early for a bridge-mode station with none — so a
+ * console-created agent had no room, its gates resolved to `no-room`, and
+ * `gate-sweep.ts` does not count that status. Silent, and permanent until
+ * somebody restarted the hub.
+ */
+type Provisioner = (stationId: string) => Promise<void>;
+
+let provisioner: Provisioner | null = null;
+let provisionDomain: string | null = null;
+export function stationSetupMatrixDomain(): string | null { return provisionDomain; }
+
+/** Register the one provisioner. Boot wiring, same as `onStationsAdopted`. */
+export function onProvisionStation(fn: Provisioner | null, domain?: string): void {
+  provisioner = fn;
+  provisionDomain = fn ? domain ?? null : null;
+}
+
+/**
+ * Whether a station ended up with a Matrix room, and if not, why not.
+ *
+ * `"no-bridge"` is a real answer rather than a failure: a hub with
+ * `MATRIX_AS_*` unset has no homeserver, no rooms for anything, and an
+ * assignment there is complete when the row is written. Distinguished from
+ * `"failed"` so a caller never reports a configuration choice as a fault,
+ * or a fault as a configuration choice.
+ */
+export type ProvisionOutcome =
+  | { status: "provisioned" }
+  | { status: "no-bridge" }
+  | { status: "failed"; error: string };
+
+export async function provisionStationNow(stationId: string): Promise<ProvisionOutcome> {
+  if (!provisioner) return { status: "no-bridge" };
+  try {
+    await provisioner(stationId);
+    return { status: "provisioned" };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    log.error("could not provision a Matrix room for a station", { stationId, error });
+    return { status: "failed", error };
+  }
+}

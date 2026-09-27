@@ -24,6 +24,13 @@ export const user = pgTable("user", {
   banned: boolean("banned").notNull().default(false),
   bannedReason: text("banned_reason"),
   bannedAt: timestamp("banned_at"),
+
+  // The admin plugin's own ban columns. This hub bans through its own routes
+  // and the two fields above; these exist because Better Auth 1.7 validates
+  // the Drizzle schema at startup and refuses every auth request when a
+  // column an enabled plugin writes is missing.
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires"),
   
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -49,6 +56,8 @@ export const session = pgTable(
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    // Admin plugin (impersonation). Unused here; required by 1.7's startup schema check.
+    impersonatedBy: text("impersonated_by"),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
@@ -130,4 +139,10 @@ export const jwks = pgTable("jwks", {
   privateKey: text("privateKey").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   expiresAt: timestamp("expiresAt"),
+  // The plugin wrote these on key creation in 1.6 too; Drizzle dropped them
+  // silently while the columns were missing. Rows from then stay null, which
+  // the plugin reads as keyPairConfig's alg (EdDSA) — so the published JWKS
+  // does not change for the existing key.
+  alg: text("alg"),
+  crv: text("crv"),
 });

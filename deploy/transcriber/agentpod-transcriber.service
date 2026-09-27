@@ -1,0 +1,17 @@
+[Unit]
+Description=AgentPod transcriber (voice notes to text)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agentpod-transcriber
+EnvironmentFile=/etc/agentpod-transcriber.env
+Environment=HF_HOME=/opt/agentpod-transcriber/models
+ExecStart=/opt/agentpod-transcriber/.venv/bin/uvicorn server:app --host ${TRANSCRIBER_HOST} --port ${TRANSCRIBER_PORT}
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

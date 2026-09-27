@@ -132,6 +132,23 @@ test("initConnection with url in localStorage but health fails → stays disconn
   // URL must be retained in localStorage so the connect screen can prefill it
   expect(localStorage.getItem(LS_KEY)).toBe("http://localhost:3001");
   expect(setAuthApiUrl).not.toHaveBeenCalled();
+  // ...and the hub we failed to reach must still be NAMED. The top bar's hub
+  // pill exists so a console pointed at nothing cannot look like a working
+  // one; a null apiUrl made it say "No hub", which is the same lie.
+  expect(connection.apiUrl).toBe("http://localhost:3001");
+  expect(connection.error).toBeTruthy();
+});
+
+test("initConnection when the probe throws → still names the hub it could not reach", async () => {
+  localStorage.setItem(LS_KEY, "https://hub.agentpod.dev");
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("getaddrinfo ENOTFOUND")));
+
+  await initConnection();
+
+  expect(connection.isConnected).toBe(false);
+  expect(connection.apiUrl).toBe("https://hub.agentpod.dev");
+  expect(connection.error).toContain("ENOTFOUND");
+  expect(setAuthApiUrl).not.toHaveBeenCalled();
 });
 
 test("initConnection with no url in localStorage and no PUBLIC_HUB_URL → stays disconnected, no fetch called", async () => {

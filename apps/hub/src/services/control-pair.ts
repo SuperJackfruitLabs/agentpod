@@ -26,7 +26,7 @@
  * enforcement from data makes an empty table indistinguishable from a disabled
  * control.
  *
- * The literal lowercase `"true"`, matching `ENABLE_KAAMBAAN_BRIDGE` — this
+ * The literal lowercase `"true"`, matching `ENABLE_SUPERPIPELINE_BRIDGE` — this
  * codebase already learned that a looser boolean lets `=1` pass validation and
  * start nothing.
  */
@@ -38,7 +38,7 @@ export function isControlPairEnforced(): boolean {
  * A dispatch refused by the control pair.
  *
  * A distinct type because a denial is **permanent** and every other failure at
- * that point is transient. Callers that retry — the kaambaan bridge hands a
+ * that point is transient. Callers that retry — the superpipeline bridge hands a
  * claim back and lets the board reissue it — must be able to tell the
  * difference, or a refusal becomes a hot loop: claim, refuse, release, claim
  * again, forever.
@@ -64,7 +64,7 @@ export function isControlPairDenied(e: unknown): e is ControlPairDenied {
  * An act refused by the second half of the pair.
  *
  * A separate type rather than a subclass of `ControlPairDenied`, deliberately:
- * the kaambaan bridge treats a `ControlPairDenied` as a **permanent** dispatch
+ * the superpipeline bridge treats a `ControlPairDenied` as a **permanent** dispatch
  * refusal and stops retrying that card. A refusal to *write into* an agent must
  * never be mistaken for one, or a workspace-permission problem would be
  * diagnosed — and given up on — as a dispatch grant problem.

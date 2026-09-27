@@ -167,6 +167,7 @@ func TestClaudeCodeACPCommand_ProbesWellKnownPathsInOrder(t *testing.T) {
 	want := []string{
 		filepath.Join(testStubHome, ".local", "share", "pnpm", "claude-agent-acp"),
 		filepath.Join(testStubHome, ".local", "bin", "claude-agent-acp"),
+		filepath.Join(testStubHome, ".npm-global", "bin", "claude-agent-acp"),
 		"/usr/local/bin/claude-agent-acp",
 		"/usr/bin/claude-agent-acp",
 		"/opt/homebrew/bin/claude-agent-acp",
@@ -379,6 +380,27 @@ func TestNodeVersionOutputWithin_Timeout(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("took %s: `node --version` must be bounded, it runs on the acp.open path", elapsed)
+	}
+}
+
+// A cold `node --version` that overruns its bound once is asked again rather
+// than read as "version unknown", which dropped the configured runtime from
+// PATH under load (TestBuildRegistry_ThreadsClaudeCodeACPKeys, full-suite runs).
+func TestNodeVersionOutputWithin_RetriesAColdStartOnce(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "warmed")
+	stub := filepath.Join(dir, "node")
+	// First call: mark the cache warm, then stall past the bound. Second call:
+	// answer at once. exec keeps the stalled process the one the deadline kills.
+	script := "#!/bin/sh\nif [ -e " + marker + " ]; then echo v22.14.0; exit 0; fi\n: > " + marker + "\nexec sleep 30\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// 2s, not less: macOS can take hundreds of milliseconds to run a freshly
+	// written script the first time, which is the very cold start at issue.
+	out, err := nodeVersionOutputWithin(2*time.Second, stub)
+	if err != nil || strings.TrimSpace(out) != "v22.14.0" {
+		t.Fatalf("out=%q err=%v; a timed-out first query must be retried once", out, err)
 	}
 }
 

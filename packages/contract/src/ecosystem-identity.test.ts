@@ -2,7 +2,7 @@
  * AgentPod's half of the shared ecosystem-identity fixture corpus.
  *
  * The corpus lives at `fixtures/ecosystem-identity/` — plain JSON, depending on
- * no type from any repo, so kaambaan can check in the *same files* and write the
+ * no type from any repo, so superpipeline can check in the *same files* and write the
  * equivalent test in its own runtime. See that directory's README.
  *
  * Why a fixture corpus rather than a shared package: a published package would
@@ -11,7 +11,7 @@
  * (apps/node-agent/internal/contractfix), which is the evidence the approach is
  * enough.
  *
- * The negative cases are the point. kaambaan's `mem_`/`mbr_` drift survived
+ * The negative cases are the point. superpipeline's `mem_`/`mbr_` drift survived
  * because nothing ever validated a minted id against the schema — and a corpus
  * of only-valid examples would have missed it too, because `mem_abc123` is a
  * perfectly well-formed id of an entity that does not exist.
@@ -23,11 +23,11 @@ import { join } from "node:path";
 import type { ZodType } from "zod";
 
 import {
-  KaambaanTenantId,
-  KaambaanUserId,
-  KaambaanMembershipId,
-  KaambaanAgentId,
-  KaambaanRunId,
+  SuperpipelineTenantId,
+  SuperpipelineUserId,
+  SuperpipelineMembershipId,
+  SuperpipelineAgentId,
+  SuperpipelineRunId,
   TenantId,
   NodeId,
   RuntimeId,
@@ -36,6 +36,9 @@ import {
   AcpSessionId,
   AcpRunId,
   UserId,
+  PrincipalId,
+  DeviceCredentialId,
+  OrganizationId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt } from "./card-prompt";
@@ -82,13 +85,13 @@ const grammar = readCorpus<IdGrammar>("id_grammar.json");
  * untested — which is the failure mode the corpus exists to prevent.
  */
 const VALIDATORS: Record<string, ZodType> = {
-  // kaambaan-owned. AgentPod consumes these across the seam and must be neither
+  // superpipeline-owned. AgentPod consumes these across the seam and must be neither
   // stricter nor looser than the minter's own declared contract.
-  "kaambaan.tenant": KaambaanTenantId,
-  "kaambaan.user": KaambaanUserId,
-  "kaambaan.membership": KaambaanMembershipId,
-  "kaambaan.agent": KaambaanAgentId,
-  "kaambaan.run": KaambaanRunId,
+  "superpipeline.tenant": SuperpipelineTenantId,
+  "superpipeline.user": SuperpipelineUserId,
+  "superpipeline.membership": SuperpipelineMembershipId,
+  "superpipeline.agent": SuperpipelineAgentId,
+  "superpipeline.run": SuperpipelineRunId,
 
   // AgentPod-owned. AgentPod is the only minter, so these are pinned to exactly
   // what the mint sites produce.
@@ -100,10 +103,18 @@ const VALIDATORS: Record<string, ZodType> = {
   "agentpod.acpSession": AcpSessionId,
   "agentpod.acpRun": AcpRunId,
   "agentpod.user": UserId,
+  "agentpod.principal": PrincipalId,
+  "agentpod.deviceCredential": DeviceCredentialId,
+  "agentpod.organization": OrganizationId,
 };
 
 /** Entities AgentPod deliberately has no validator for. Empty, and a decision each time. */
-const SKIPPED: readonly string[] = [];
+const SKIPPED: readonly string[] = [
+  // Owned by superpipeline and crosses a repo boundary on every projected approval,
+  // but nothing on AgentPod's side consumes a gate id today — there is no
+  // agentpod-side validator to map it to. Revisit if AgentPod ever reads one.
+  "superpipeline.gate",
+];
 
 describe("ecosystem identity corpus — coverage", () => {
   test("every corpus entity is either validated or explicitly skipped", () => {
@@ -118,7 +129,7 @@ describe("ecosystem identity corpus — coverage", () => {
 
   test("the corpus is not empty and covers both repos", () => {
     const owners = new Set(grammar.entities.map((e) => e.owner));
-    expect(owners).toEqual(new Set(["kaambaan", "agentpod"]));
+    expect(owners).toEqual(new Set(["superpipeline", "agentpod"]));
   });
 });
 
@@ -185,19 +196,19 @@ describe("ecosystem identity corpus — prefix registry", () => {
     // A NEW collision must fail here, and `knownConflicts` is now empty — so any
     // second owner appearing against any prefix fails this test outright. This
     // is the guard that catches `run_` coming back: re-pointing acp_runs.id at
-    // `run` means re-adding an agentpod claim on a prefix kaambaan already owns.
+    // `run` means re-adding an agentpod claim on a prefix superpipeline already owns.
     expect(contestedPrefixes()).toEqual(known);
   });
 
-  test("`run` is resolved: kaambaan alone claims it", () => {
+  test("`run` is resolved: superpipeline alone claims it", () => {
     // Was a knownConflict. AgentPod's acp_runs.id moved to `attempt_` — an id
-    // space kaambaan does not claim — so the prefix has exactly one owner again.
+    // space superpipeline does not claim — so the prefix has exactly one owner again.
     expect(grammar.prefixRegistry.knownConflicts.map((c) => c.prefix)).not.toContain("run");
 
     const owners = grammar.prefixRegistry.claims
       .filter((c) => c.prefix === "run")
       .map((c) => c.owner);
-    expect(owners).toEqual(["kaambaan"]);
+    expect(owners).toEqual(["superpipeline"]);
   });
 
   test("a resolved conflict is resolved in the claims, not merely declared resolved", () => {
@@ -267,7 +278,7 @@ describe("ecosystem identity corpus — run join key", () => {
   test("records how far enforcement has actually got", () => {
     // Honest bookkeeping. Both halves are now executable: the two id spaces are
     // disjoint (asserted here, in the contract, and by CHECK constraints in the
-    // database), and acp_runs finally has a writer — the kaambaan bridge, which
+    // database), and acp_runs finally has a writer — the superpipeline bridge, which
     // creates the row when it opens the session that executes a claimed card.
     // What is still absent is a READ path: the reverse index exists and no
     // query uses it. When that lands, this string changes again.
@@ -285,13 +296,13 @@ describe("ecosystem identity corpus — run join key", () => {
     expect(joinKey.cases.some((c) => !c.mustParse)).toBe(true);
   });
 
-  test("a dispatched run keeps kaambaan's id verbatim through a parse", () => {
+  test("a dispatched run keeps superpipeline's id verbatim through a parse", () => {
     // The invariant in one assertion: the board's id survives, and AgentPod's own
     // `id` is a separate local key rather than a restatement of it.
     const dispatched = joinKey.cases.find((c) => c.name === "dispatched_run")!;
     const parsed = Run.parse(dispatched.value);
     expect(parsed.externalRunId).toBe("run_e074a2160c4b4f28");
-    expect(parsed.externalSource).toBe("kaambaan");
+    expect(parsed.externalSource).toBe("superpipeline");
     expect(parsed.id).not.toBe(parsed.externalRunId);
   });
 
@@ -303,18 +314,18 @@ describe("ecosystem identity corpus — run join key", () => {
     const parsed = Run.parse(dispatched.value);
 
     expect(AcpRunId.safeParse(parsed.id).success).toBe(true);
-    expect(KaambaanRunId.safeParse(parsed.id).success).toBe(false);
+    expect(SuperpipelineRunId.safeParse(parsed.id).success).toBe(false);
 
-    expect(KaambaanRunId.safeParse(parsed.externalRunId).success).toBe(true);
+    expect(SuperpipelineRunId.safeParse(parsed.externalRunId).success).toBe(true);
     expect(AcpRunId.safeParse(parsed.externalRunId).success).toBe(false);
   });
 
-  test("kaambaan's run id in the fixture is valid by kaambaan's own grammar", () => {
-    // The cross-repo half: the value AgentPod carries must be one kaambaan would
+  test("superpipeline's run id in the fixture is valid by superpipeline's own grammar", () => {
+    // The cross-repo half: the value AgentPod carries must be one superpipeline would
     // have minted and would accept back.
     const dispatched = joinKey.cases.find((c) => c.name === "dispatched_run")!;
     const parsed = Run.parse(dispatched.value);
-    expect(KaambaanRunId.safeParse(parsed.externalRunId).success).toBe(true);
+    expect(SuperpipelineRunId.safeParse(parsed.externalRunId).success).toBe(true);
   });
 
   test("RunState matches the corpus's A2A vocabulary exactly", () => {
@@ -383,7 +394,7 @@ describe("ecosystem identity corpus — card prompt", () => {
     // either a secret or an id the harness cannot act on and could echo back
     // into a transcript the board then renders.
     for (const c of prompts.cases.filter((x) => x.rendered !== undefined)) {
-      expect(c.rendered!).not.toContain("kbn_");
+      expect(c.rendered!).not.toContain("spa_");
       expect(c.rendered!).not.toContain("attempt_");
       expect(c.rendered!).not.toContain("acps_");
       expect(c.rendered!.toLowerCase()).not.toContain("leaseepoch");

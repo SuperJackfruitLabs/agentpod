@@ -28,6 +28,18 @@ export const classicInter: FontPairing = {
   },
 };
 
+export const musterArchivo: FontPairing = {
+  id: "muster-archivo",
+  label: "Archivo · IBM Plex Mono",
+  category: "classic",
+  description: "The console's own pairing: a signage grotesk with an institutional mono.",
+  fonts: {
+    "font-body": "Archivo",
+    "font-heading": "Archivo",
+    "font-mono": "IBM Plex Mono",
+  },
+};
+
 export const classicNunito: FontPairing = {
   id: "classic-nunito",
   label: "Nunito",
@@ -230,6 +242,7 @@ export const creativeOcean: FontPairing = {
 
 export const fontPairings: FontPairing[] = [
   // Classic
+  musterArchivo,
   classicInter,
   classicNunito,
   // Modern
@@ -260,5 +273,5 @@ export function getFontPairingsByCategory(category: FontPairing["category"]): Fo
   return fontPairings.filter((fp) => fp.category === category);
 }
 
-// Default font pairing
-export const DEFAULT_FONT_PAIRING_ID = "classic-inter";
+// Default font pairing — the console's own, not a borrowed classic
+export const DEFAULT_FONT_PAIRING_ID = "muster-archivo";

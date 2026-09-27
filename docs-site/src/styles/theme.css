@@ -1,0 +1,83 @@
+/*
+ * The docs wear the product's identity.
+ *
+ * Until this file existed the docs were Starlight's stock blue on system fonts, so following
+ * "Read the docs" from agentpod.dev felt like leaving for somebody else's site. Every value
+ * below is the landing page's own token (`apps/landing/src/pages/index.astro`), expressed as
+ * the gray ramp plus accent triple that Starlight derives everything else from — so no
+ * component needs restyling.
+ *
+ * Starlight wants more gray steps than the landing page has surfaces. The ones it has (ink,
+ * raised, line, text, muted) are used exactly; the in-between steps are interpolations and
+ * are marked as such.
+ *
+ * `html:root` rather than `:root` is load-bearing: this file can be bundled ahead of
+ * Starlight's own props.css, and at equal specificity Starlight's defaults would win with a
+ * build that succeeds and a page that looks untouched. supermessage's docs met exactly that.
+ *
+ * The console is not on this palette — it has its own theme presets — so these docs match
+ * the site that links to them, not the app.
+ */
+html:root {
+  /* dark — the landing page's default */
+  --sl-color-white: #eef4fa; /* text */
+  --sl-color-gray-1: #eef4fa; /* text */
+  --sl-color-gray-2: #c0cedc; /* between text and muted */
+  --sl-color-gray-3: #93a8bf; /* muted */
+  --sl-color-gray-4: #5f768f; /* between muted and line */
+  --sl-color-gray-5: #2c4560; /* line */
+  --sl-color-gray-6: #18293c; /* raised */
+  --sl-color-black: #101c2b; /* ink */
+
+  /* Text on an accent fill is accent-low in dark, so it is the ink rather than a tint —
+     as on the landing page's primary button: 7.3:1 on cyan. Cyan link text on the ink is
+     the same 7.3:1. */
+  --sl-color-accent-low: #101c2b;
+  --sl-color-accent: #5fb3d4; /* cyan */
+  --sl-color-accent-high: #5fb3d4;
+
+  --sl-font: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ap-font-display: 'Bricolage Grotesque', 'Trebuchet MS', sans-serif;
+}
+
+html:root[data-theme='light'] {
+  --sl-color-white: #101c29; /* text */
+  --sl-color-gray-1: #243343; /* between text and muted */
+  --sl-color-gray-2: #37495c; /* between text and muted */
+  --sl-color-gray-3: #4b6076; /* muted */
+  --sl-color-gray-4: #8c9dae; /* between muted and line */
+  --sl-color-gray-5: #ccdae7; /* line */
+  --sl-color-gray-6: #eef3f8; /* raised */
+  --sl-color-gray-7: #f4f8fb; /* between raised and ink */
+  --sl-color-black: #fbfcfe; /* ink */
+
+  /* The landing page's light cyan, which is link text here: 5.7:1 on the ground. */
+  --sl-color-accent-low: #d8eaf2; /* a tint, for fills behind accent text */
+  --sl-color-accent: #1d6c8c;
+  --sl-color-accent-high: #14536b;
+}
+
+/* The display face on headings and the site title, as in the landing page's wordmark.
+   Body text stays IBM Plex Sans. */
+.site-title,
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--ap-font-display);
+  letter-spacing: -0.02em;
+}
+
+/* As on agentpod.dev: the mark carries the accent and the name is plain text. Starlight
+   colours the title with the accent by default. */
+.site-title {
+  font-weight: 800;
+  color: var(--sl-color-white);
+  gap: 0.55rem;
+}
+
+.site-title img {
+  width: 1.5em;
+  height: 1.5em;
+}

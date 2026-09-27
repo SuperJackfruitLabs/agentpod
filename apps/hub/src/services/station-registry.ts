@@ -9,7 +9,7 @@
  */
 
 import { and, eq, sql } from "drizzle-orm";
-import { notifyStationsAdopted } from "./matrix-as/hooks";
+import { notifyStationsAdopted, stationReportedMatrixId } from "./matrix-as/hooks";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
@@ -60,6 +60,22 @@ export async function adoptStations(
   // The node's purpose is a DEFAULT, not the truth — see `stations.purpose`.
   // It is applied below only to a station that has none of its own.
   const nodePurpose = nodeRow.purpose;
+
+  // ── What each of these stations answered as, before this pass ────────────
+  // Read BEFORE the upsert below overwrites `matrix_id`, and announced before
+  // it too: the old value is the only record of which identity a station is
+  // moving off (`matrix-as/identity-move.ts`), and the upsert is about to
+  // replace it. A station being adopted for the first time has no row here and
+  // nothing to move off, which is the ordinary case.
+  const known = await db
+    .select({ id: stations.id, stationKey: stations.stationKey })
+    .from(stations)
+    .where(and(eq(stations.userId, userId), eq(stations.nodeId, nodeId)));
+  const knownIdFor = new Map(known.map((r) => [r.stationKey, r.id]));
+  for (const station of toAdopt) {
+    const id = knownIdFor.get(station.key);
+    if (id) await stationReportedMatrixId(id, station.matrixId);
+  }
 
   // ── First pass: upsert all rows without parent links ─────────────────────
   for (const station of toAdopt) {
@@ -227,15 +243,24 @@ export async function refreshAdoptedCapabilities(
 
     // Only rows that already exist for this node are eligible.
     const existing = await db
-      .select({ stationKey: stations.stationKey })
+      .select({ id: stations.id, stationKey: stations.stationKey })
       .from(stations)
       .where(eq(stations.nodeId, nodeId));
-    const adopted = new Set(existing.map((row) => row.stationKey));
+    const adopted = new Map(existing.map((row) => [row.stationKey, row.id]));
     if (adopted.size === 0) return 0;
 
     let updated = 0;
     for (const s of parsed.data) {
-      if (!adopted.has(s.key)) continue; // never insert
+      const stationId = adopted.get(s.key);
+      if (!stationId) continue; // never insert
+
+      // Before the write, for the reason `adoptStations` gives above: the
+      // value this UPDATE is about to replace is the only record of the
+      // identity a station is moving off. This is the path that carries a
+      // real fleet's reports — `refreshAdoptedCapabilities` runs on every
+      // node connect, and `matrix_id` was already its column to keep current.
+      await stationReportedMatrixId(stationId, s.matrixId);
+
       await db
         .update(stations)
         .set({
