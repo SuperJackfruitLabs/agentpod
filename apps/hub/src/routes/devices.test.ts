@@ -50,7 +50,8 @@ import {
   listDeviceCredentials,
   DEVICE_CREDENTIAL_TTL_MS,
 } from "../services/device-credentials";
-import { deviceRoutes } from "./devices";
+import { createDeviceRoutes, deviceRoutes } from "./devices";
+import { config, type OAuthClient } from "../config";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const app = new Hono().route("/api/auth", deviceRoutes);
@@ -271,5 +272,84 @@ describe("the device routes are mounted where they can be reached", () => {
       mount,
       "deviceRoutes is behind authMiddleware, which accepts no dev_… credential and no hub JWT",
     ).toBeLessThan(middleware);
+  });
+});
+
+/**
+ * Renewing a device credential for a PLANE, not only for the hub.
+ *
+ * `signServiceToken` stamps `.setAudience(config.publicUrl)` — the hub's own URL — so every
+ * device exchange produced a hub-only token. superpipeline demands `aud` equal to its own
+ * `APP_URL` (`auth/hub-jwt.ts`, `planeAudience`), so `supi boards` answered 401 with a valid,
+ * fresh, correctly-located credential. The audience was the whole of it.
+ *
+ * The registry already models the answer: `OAuthClient.audiences`'s own comment names this exact
+ * case — "the `apn` CLI: `apn fleet nodes` hits the hub, `supi boards` hits superpipeline — lists
+ * every one of them". What was missing is that the device exchange never consulted a client.
+ *
+ * Note the audiences are a LIST and the token must carry all of them. One credential serves both
+ * planes; minting for one audience at a time would break `fleet nodes` to fix `supi boards`.
+ */
+const TWO_PLANE_CLIENT: OAuthClient = {
+  id: "apn",
+  redirectUris: ["http://127.0.0.1/callback"],
+  audiences: [config.publicUrl, "https://app.superpipeline.dev"],
+};
+
+function appWithRegistry(clients: readonly OAuthClient[]) {
+  return new Hono().route("/api/auth", createDeviceRoutes({ clients }));
+}
+
+async function exchangeAsClient(
+  clients: readonly OAuthClient[],
+  id: string,
+  secret: string,
+  client: string | null,
+) {
+  const path = client === null
+    ? "/api/auth/devices/token"
+    : `/api/auth/devices/token?client=${encodeURIComponent(client)}`;
+  return appWithRegistry(clients).request(path, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${id}:${secret}` },
+  });
+}
+
+describe("exchanging a device credential for a named client", () => {
+  test("carries every audience that client declares, so one credential reaches both planes", async () => {
+    const device = await mintFor();
+    const res = await exchangeAsClient([TWO_PLANE_CLIENT], device.id, device.secret, "apn");
+    expect(res.status).toBe(200);
+
+    const { token } = (await res.json()) as { token: string };
+    const claims = decodeJwt(token) as Record<string, unknown>;
+    expect(claims.aud).toEqual([config.publicUrl, "https://app.superpipeline.dev"]);
+    // Everything else about the token is unchanged — this widens where it may be spent and
+    // nothing else. `amr` in particular still says the person was not present.
+    expect(claims.amr).toEqual(["device"]);
+    expect(claims.sub).toBe(userId);
+  });
+
+  test("refuses an unknown client instead of falling back to a hub-only token", async () => {
+    // A silent fallback is the bug this whole change fixes, one layer up: the caller would get a
+    // token that verifies at the hub, looks entirely valid, and then 401s at the plane it was
+    // asked for — with nothing anywhere saying the audience was quietly narrowed.
+    const device = await mintFor();
+    const res = await exchangeAsClient([TWO_PLANE_CLIENT], device.id, device.secret, "not-a-client");
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toMatch(/client/i);
+  });
+
+  test("without a client, mints exactly what it always did", async () => {
+    // The deployed registry declares no audiences today, and every existing caller — `fleet`
+    // before this release, the agent exchange — sends no client. None of them may change.
+    const device = await mintFor();
+    const res = await exchangeAsClient([TWO_PLANE_CLIENT], device.id, device.secret, null);
+    expect(res.status).toBe(200);
+
+    const { token } = (await res.json()) as { token: string };
+    const claims = decodeJwt(token) as Record<string, unknown>;
+    expect(claims.aud).toBe(config.publicUrl);
   });
 });

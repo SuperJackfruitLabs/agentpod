@@ -64,10 +64,20 @@ export const TURN_ERROR_MESSAGE_MAX = 8_192;
  * the harness's own name for the session, which the hub has already seen in
  * that session's `session_info_update._meta.sessionKey` (OpenClaw).
  */
+/**
+ * How a run the plugin is watching ended well, sent instead of an error:
+ * `answered` — a later attempt succeeded, so any failure it reported earlier
+ * was recovered; `silent` — the run succeeded and chose to say nothing
+ * (OpenClaw's NO_REPLY), so an empty turn is not a failure.
+ */
+export const TurnResolution = z.enum(["answered", "silent"]);
+export type TurnResolution = z.infer<typeof TurnResolution>;
+
 export const TurnErrorReport = z
   .object({
     acpSessionId: z.string().min(1).optional(),
     harnessSessionKey: z.string().min(1).optional(),
+    resolution: TurnResolution.optional(),
     error: TurnError.omit({ harness: true, source: true })
       .partial({ kind: true })
       .extend({
@@ -88,7 +98,11 @@ export const TurnErrorReport = z
           )
           .max(16)
           .optional(),
-      }),
+      })
+      .optional(),
+  })
+  .refine((r) => r.error !== undefined || r.resolution !== undefined, {
+    message: "a report carries an error, or a resolution saying the run ended well",
   })
   .refine((r) => r.acpSessionId !== undefined || r.harnessSessionKey !== undefined, {
     message: "a report needs acpSessionId or harnessSessionKey to be matched to a session",

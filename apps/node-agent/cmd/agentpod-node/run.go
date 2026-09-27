@@ -6,12 +6,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
@@ -126,36 +128,39 @@ func runCmd() {
 		})
 		reg.EnablePluginManagement()
 	}
+	harnessFor := func(key string) (string, error) {
+		d, err := reg.For(key)
+		if err != nil {
+			return "", err
+		}
+		return d.Harness(), nil
+	}
+	// The capability list `detect` would report for this key. Asked of the
+	// descriptor rather than remembered, for the same reason the hub reads
+	// `matrix_id` off a detect: a station's capabilities are a fact about
+	// the host right now, and the one matrix.adopt and transcription.apply
+	// need — `lifecycle` — is withheld dynamically (descriptor/hermes.go,
+	// issue #273).
+	capabilitiesFor := gateway.CapabilityLookupFunc(func(key string) ([]string, error) {
+		d, err := reg.For(key)
+		if err != nil {
+			return nil, err
+		}
+		stations, err := d.Detect()
+		if err != nil {
+			return nil, fmt.Errorf("capability lookup: detect: %w", err)
+		}
+		for _, s := range stations {
+			if s.Key == key {
+				return s.Capabilities, nil
+			}
+		}
+		return nil, fmt.Errorf("capability lookup: no station with key %q", key)
+	})
 	h = gateway.NewMatrixAdoptHandler(h, gateway.MatrixAdoptDeps{
-		Resolver: resolver,
-		HarnessFor: func(key string) (string, error) {
-			d, err := reg.For(key)
-			if err != nil {
-				return "", err
-			}
-			return d.Harness(), nil
-		},
-		// The capability list `detect` would report for this key. Asked of the
-		// descriptor rather than remembered, for the same reason the hub reads
-		// `matrix_id` off a detect: a station's capabilities are a fact about
-		// the host right now, and the one this verb needs — `lifecycle` — is
-		// withheld dynamically (descriptor/hermes.go, issue #273).
-		CapabilitiesFor: func(key string) ([]string, error) {
-			d, err := reg.For(key)
-			if err != nil {
-				return nil, err
-			}
-			stations, err := d.Detect()
-			if err != nil {
-				return nil, fmt.Errorf("capability lookup: detect: %w", err)
-			}
-			for _, s := range stations {
-				if s.Key == key {
-					return s.Capabilities, nil
-				}
-			}
-			return nil, fmt.Errorf("capability lookup: no station with key %q", key)
-		},
+		Resolver:        resolver,
+		HarnessFor:      harnessFor,
+		CapabilitiesFor: capabilitiesFor,
 		WriterFor: gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
 			w, ok := descriptor.WriterFor(harness)
 			if !ok {
@@ -173,9 +178,32 @@ func runCmd() {
 			return descriptor.MatrixIDFromProfile(profileDir, "")
 		},
 	})
+	// transcription.apply: the hub's resolved voice-note setting, written into
+	// a harness-mode Hermes profile's own STT config. Same shape as
+	// matrix.adopt above — the key is fetched over HTTP with this node's
+	// credential, never carried in the broker frame — but a station without
+	// "lifecycle" (#273) is still written, just not restarted.
+	h = gateway.NewTranscriptionApplyHandler(h, gateway.TranscriptionApplyDeps{
+		Resolver:        resolver,
+		HarnessFor:      harnessFor,
+		CapabilitiesFor: capabilitiesFor,
+		Fetch:           gateway.NewHTTPTranscriptionFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
+		Write:           descriptor.WriteHermesTranscription,
+		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
+	})
 	h = gateway.NewChangesetHandler(h, resolver)
+	gitIdentityRoot := filepath.Dir(config.DefaultPath())
+	// git.identity.ensure: the public half of a station's push key, generated on first ask.
+	// Rooted at the config directory, NOT a workspace — see internal/gitidentity for why.
+	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
-	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
+	// A station with a provisioned git identity gets GIT_SSH_COMMAND in its harness's environment.
+	// This is what makes the key do anything: without it the key is on disk, the account is on
+	// forge, and `git push` still uses whatever ssh would have used anyway.
+	h = gateway.NewACPHandler(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
+		gitIdentityRoot,
+		descriptor.NewCapabilityHandler(reg).ACPCommand,
+	)))
 	h = gateway.NewUpdateHandler(h, version)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

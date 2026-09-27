@@ -219,3 +219,8 @@ func (m *systemdManager) Status() (Status, error) {
 
 	return st, nil
 }
+
+// RestartHint names the scope this manager actually uses, so the advice works where it is read.
+func (m *systemdManager) RestartHint() string {
+	return "systemctl " + strings.Join(append(m.baseArgs(), "restart", systemdUnitName), " ")
+}

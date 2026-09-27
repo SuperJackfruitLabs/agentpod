@@ -46,6 +46,7 @@ import type {
   AcpSessionStatus,
   TurnError,
   TurnErrorReport,
+  TurnResolution,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
@@ -229,8 +230,17 @@ interface LiveSession {
   turnErrorSource: TurnError["source"] | null;
   /** A plugin's report that arrived while the turn was still running. */
   pendingTurnError: TurnError | null;
+  /** When the latest plugin report for this turn arrived. */
+  pendingTurnErrorAt: number;
+  /** When the agent last produced something a reader sees, this turn. */
+  lastProducedAt: number;
   /** Set while a silent turn waits for a plugin's report. */
-  awaitingTurnError: ((error: TurnError) => void) | null;
+  awaitingTurnError: ((outcome: TurnError | TurnResolution) => void) | null;
+  /**
+   * A plugin said this turn's run ended well after all: a fallback answered,
+   * or the agent chose silence (OpenClaw's NO_REPLY).
+   */
+  turnResolution: TurnResolution | null;
   /** When the last turn settled, for placing a late report. */
   lastTurnSettledAt: number;
   /**
@@ -558,6 +568,7 @@ function handleSessionUpdate(live: LiveSession, params: SessionNotification): vo
     update.sessionUpdate === "tool_call_update"
   ) {
     live.turnProduced = true;
+    live.lastProducedAt = Date.now();
   }
   const meta = (params.update as { _meta?: unknown })._meta;
   if (meta && typeof meta === "object") {
@@ -822,7 +833,10 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     turnErrorRecorded: false,
     turnErrorSource: null,
     pendingTurnError: null,
+    pendingTurnErrorAt: 0,
+    lastProducedAt: 0,
     awaitingTurnError: null,
+    turnResolution: null,
     lastTurnSettledAt: 0,
     acceptsImages: false,
   };
@@ -1186,6 +1200,9 @@ export async function promptSession(
   live.turnErrorRecorded = false;
   live.turnErrorSource = null;
   live.pendingTurnError = null;
+  live.pendingTurnErrorAt = 0;
+  live.lastProducedAt = 0;
+  live.turnResolution = null;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
     !live.ended && live.turnEpoch === epoch && live.status === "working";
@@ -1212,8 +1229,20 @@ export async function promptSession(
     })
     .then(async (response) => {
       if (isCurrentTurn()) {
-        // A plugin already said why, during the turn: that is the error, even
-        // when the harness managed some words before failing.
+        // A plugin already said why, during the turn — unless the agent spoke
+        // after that report. OpenClaw's plugin reports a failed model once its
+        // attempts go quiet, and the next model in the chain can still answer
+        // (krishna, 2026-09-26 08:09: Kimi's quota, then a fallback's "Hey
+        // Rakesh"). Words after the report mean the chain recovered; a report
+        // after the last words (a partial answer, or Pi reporting at settled
+        // after "Retrying…") is the turn's error.
+        if (live.pendingTurnError && live.lastProducedAt > live.pendingTurnErrorAt) {
+          log.info("a plugin's turn error was followed by an answer; the fallback recovered", {
+            sessionId: live.id,
+            kind: live.pendingTurnError.kind,
+          });
+          live.pendingTurnError = null;
+        }
         if (live.pendingTurnError) {
           await recordError(live.pendingTurnError);
           settled();
@@ -1221,9 +1250,18 @@ export async function promptSession(
         }
         if (!live.turnProduced) {
           // Nothing came back. A harness that drops its errors over ACP may
-          // have a plugin about to say why; give it a moment.
-          const reported = await awaitTurnError(live);
+          // have a plugin about to say why; give it a moment — unless its
+          // plugin has already said the run ended well.
+          const reported = live.turnResolution ?? (await awaitTurnError(live));
           if (!isCurrentTurn()) {
+            settled();
+            return;
+          }
+          if (reported === "answered" || reported === "silent") {
+            // The agent chose to say nothing (NO_REPLY). An empty turn it
+            // chose is not a failed one: no error, and the room says done.
+            await audit.done("ok");
+            await setStatus(live, "idle", { extra: { silent: true } }).done;
             settled();
             return;
           }
@@ -1276,7 +1314,7 @@ export async function promptSession(
 }
 
 /** Wait, up to the grace window, for a plugin to report this turn's error. */
-function awaitTurnError(live: LiveSession): Promise<TurnError | null> {
+function awaitTurnError(live: LiveSession): Promise<TurnError | TurnResolution | null> {
   if (turnErrorGraceMs <= 0) return Promise.resolve(null);
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -1292,7 +1330,7 @@ function awaitTurnError(live: LiveSession): Promise<TurnError | null> {
   });
 }
 
-export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "late" | "duplicate" | "unmatched";
+export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "resolved" | "late" | "duplicate" | "unmatched";
 
 /**
  * One turn's reports, as one error. The first report leads — it is about the
@@ -1346,6 +1384,24 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
     return "unmatched";
   }
 
+  if (report.resolution) {
+    // The run this plugin reported (or is watching) ended well: whatever it
+    // said failed was recovered. A pending report goes; a waiting turn wakes.
+    live.pendingTurnError = null;
+    live.pendingTurnErrorAt = 0;
+    if (live.awaitingTurnError) {
+      live.awaitingTurnError(report.resolution);
+      return "resolved";
+    }
+    if (live.turnInFlight) {
+      live.turnResolution = report.resolution;
+      return "resolved";
+    }
+    // Too late to take back what the room was already told.
+    log.info("a turn resolution arrived after its turn ended", { nodeId, sessionId: live.id, resolution: report.resolution });
+    return "late";
+  }
+  if (!report.error) return "unmatched";
   const error = turnErrorFromPlugin(report.error, live.harness);
   if (live.awaitingTurnError) {
     live.awaitingTurnError(error);
@@ -1354,6 +1410,7 @@ export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnEr
   if (live.turnInFlight && !live.turnErrorRecorded) {
     // More than one report for a turn: merge, never replace. Replacing lost
     // Kimi's quota — the cause — behind the fallbacks' errors (2026-09-26).
+    live.pendingTurnErrorAt = Date.now();
     if (live.pendingTurnError) {
       live.pendingTurnError = mergeTurnErrors(live.pendingTurnError, error);
       return "merged";

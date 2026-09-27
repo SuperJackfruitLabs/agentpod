@@ -1,3 +1,4 @@
+import { TURN_ERROR_CONTENT_KEY, TurnErrorCard } from "@agentpod/contract";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
@@ -19,7 +20,7 @@ const ROOM = "!room:id.agentpod.dev";
 const AGENT = "@agent_box_openclaw-krishna:id.agentpod.dev";
 const SESSION = "acps_outbound_test";
 
-let sent: Array<{ userId: string; roomId: string; body: string }> = [];
+let sent: Array<{ userId: string; roomId: string; body: string; extra?: Record<string, unknown> }> = [];
 let typing: Array<{ roomId: string; on: boolean }> = [];
 let listeners: Array<(e: any) => void> = [];
 let reactions: Array<{ targetId: string; key: string }> = [];
@@ -29,8 +30,8 @@ let unsubscribed = 0;
 function deps() {
   return {
     client: {
-      sendText: async (userId: string, roomId: string, body: string) => {
-        sent.push({ userId, roomId, body });
+      sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+        sent.push({ userId, roomId, body, ...(extra ? { extra } : {}) });
         return "$evt";
       },
       sendTyping: async (_userId: string, roomId: string, on: boolean) => {
@@ -400,9 +401,67 @@ describe("live feedback, so a room is not a black box", () => {
       payload: { message: "harness exited" },
       createdAt: new Date().toISOString(),
     });
+    // Held until the turn ends: a harness may retry after an error (#583).
+    emit(state("idle"));
     await settle();
 
     expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-2", key: "❌" });
+  });
+
+  test("an error the harness recovers from is not reported: the answer after it wins", async () => {
+    // Krishna, 2026-09-26: Kimi's quota error, then the fallback's answer. The
+    // room showed the error and a ❌, then the answer underneath (#583).
+    noteTurnTrigger(SESSION, "$user-msg-recovered");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    emit({
+      sessionId: SESSION,
+      seq: 3,
+      type: "error",
+      payload: { message: "You've reached your weekly (7-day) usage limit." },
+      createdAt: new Date().toISOString(),
+    });
+    emit(chunk("Hey Rakesh. I'm here."));
+    emit(state("idle"));
+    await settle();
+
+    expect(sent.some((m) => /reported an error/.test(m.body))).toBe(false);
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-recovered", key: "✅" });
+  });
+
+  test("an error after part of an answer, with nothing after it, is still reported", async () => {
+    noteTurnTrigger(SESSION, "$user-msg-cut");
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+
+    emit(state("working"));
+    emit(chunk("Let me check"));
+    emit({
+      sessionId: SESSION,
+      seq: 4,
+      type: "error",
+      payload: { message: "harness exited" },
+      createdAt: new Date().toISOString(),
+    });
+    emit(state("idle"));
+    await settle();
+
+    expect(sent.some((m) => /reported an error: harness exited/.test(m.body))).toBe(true);
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-cut", key: "❌" });
+  });
+
+  test("an error outside a turn has no end to wait for, so it is said at once", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps());
+    emit({
+      sessionId: SESSION,
+      seq: 5,
+      type: "error",
+      payload: { message: "node went away" },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+
+    expect(sent.some((m) => /reported an error: node went away/.test(m.body))).toBe(true);
   });
 
   test("reacts to the message that started THIS turn, not the previous one", async () => {
@@ -1046,5 +1105,85 @@ describe("a turn that ends without saying anything", () => {
     expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-cut", key: "❌" });
     expect(sent).toHaveLength(1);
     expect(sent[0]!.body).toContain("Couldn't reach the node.");
+  });
+});
+
+
+describe("a failed turn a client can draw", () => {
+  const krishna = {
+    message: "You've reached your weekly (7-day) usage limit.",
+    kind: "quota",
+    harness: "openclaw",
+    provider: "kimi-coding",
+    model: "k2p6",
+    retryable: false,
+    source: "plugin",
+    providerErrorType: "permission_error",
+    attempts: [
+      { provider: "kimi-coding", model: "k2p6", kind: "quota", message: "You've reached your weekly (7-day) usage limit.", providerErrorType: "permission_error" },
+      { provider: "opencode-go", model: "hy3-preview", kind: "bad_request", message: "Request is missing x-opencode-session", httpStatus: 400 },
+    ],
+  };
+
+  test("the error notice carries the card under its key, beside the readable body", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-card");
+    emit(state("working"));
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: krishna, createdAt: new Date().toISOString() });
+    emit(state("idle"));
+    await settle();
+
+    const notice = sent.find((m) => /reported an error/.test(m.body))!;
+    expect(notice.body).toContain("weekly (7-day) usage limit");
+    const card = TurnErrorCard.parse(notice.extra?.[TURN_ERROR_CONTENT_KEY]);
+    expect(card).toMatchObject({ schema_version: 1, kind: "quota", provider: "kimi-coding", model: "k2p6", harness: "openclaw" });
+    expect(card.attempts!.map((a) => a.provider)).toEqual(["kimi-coding", "opencode-go"]);
+    // What a reader does not need stays out of the room.
+    expect(JSON.stringify(card)).not.toContain("permission_error");
+    expect(JSON.stringify(card)).not.toContain("plugin");
+  });
+
+  test("an error with only words, from before the shape existed, is sent as words alone", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-old");
+    emit(state("working"));
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: { message: "harness exited" }, createdAt: new Date().toISOString() });
+    emit(state("idle"));
+    await settle();
+    const notice = sent.find((m) => /harness exited/.test(m.body))!;
+    expect(notice.extra).toBeUndefined();
+  });
+
+  test("an oversized error is bounded, not dropped: the card still parses", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-big");
+    emit(state("working"));
+    const huge = {
+      ...krishna,
+      message: "x".repeat(20_000),
+      attempts: Array.from({ length: 40 }, () => ({ ...krishna.attempts[1], message: "y".repeat(9_000) })),
+    };
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: huge, createdAt: new Date().toISOString() });
+    emit(state("idle"));
+    await settle();
+    const notice = sent.find((m) => /reported an error/.test(m.body))!;
+    const card = TurnErrorCard.parse(notice.extra?.[TURN_ERROR_CONTENT_KEY]);
+    expect(card.attempts!.length).toBe(16);
+  });
+});
+
+describe("a turn that chose silence", () => {
+  test("is marked done, with no notice: the agent decided to say nothing", async () => {
+    // OpenClaw's NO_REPLY (krishna, 2026-09-26 08:56, to "Okay."). The hub
+    // marks such a turn's idle state `silent`; it is not a failed turn.
+    attachRoomToSession(SESSION, ROOM, AGENT, deps() as any);
+    noteTurnTrigger(SESSION, "$user-msg-okay");
+    emit(state("working"));
+    await settle();
+    emit({ ...state("idle"), payload: { status: "idle", silent: true } });
+    await settle();
+
+    expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-okay", key: "✅" });
+    expect(sent).toHaveLength(0);
   });
 });

@@ -2585,3 +2585,160 @@ test("a report after the generic error still follows it: it says why", async () 
     server.stop(true);
   }
 });
+
+// ─── A fallback that answered after the plugin reported (krishna, 2026-09-26 08:09) ───
+
+test("an answer after the plugin's report means the fallback recovered: no error", async () => {
+  // Kimi failed; the OpenClaw plugin reported after its quiet window while the
+  // next model was still thinking; that model then answered. The hub put the
+  // stale report up as the turn's error, under a turn that had answered.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-recovered-after-report", {
+    stationKey: "acp-recovered-after-report-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.agentSays("Hey Rakesh. I'm here. What is it?");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a report after the agent's last words is still the turn's error", async () => {
+  // A partial answer, then the failure: Pi's report lands at agent_settled,
+  // after pi-acp's "Retrying (attempt 1/2)…" lines. That is a failed turn.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-report-after-words", {
+    stationKey: "acp-report-after-words-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.agentSays("Retrying (attempt 1/2, waiting 1s)...");
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "fakeq", "flaky", "Overloaded")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => e.type === "error", 5_000);
+    expect(hit.payload).toMatchObject({ source: "plugin", message: "Overloaded" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+// ─── A run that ended well after its failure was reported (2026-09-26 08:56) ───
+
+function resolution(key: string, r: "answered" | "silent") {
+  return { type: "turn.error", report: { harnessSessionKey: key, resolution: r } };
+}
+
+test("a failure the plugin then says ended in deliberate silence is no error, and the turn is silent", async () => {
+  // Kimi failed and was reported; the slower fallback then answered NO_REPLY.
+  // Nothing reached the room, and the room showed Kimi's failure.
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-silent", {
+    stationKey: "acp-resolved-silent-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Okay.");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "You've reached your weekly (7-day) usage limit.")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    expect(hit.payload).toMatchObject({ status: "idle", silent: true });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("a silence that arrives while the hub waits for a report ends the wait at once", async () => {
+  // The prompt resolved empty before the plugin's word arrived.
+  _setTurnErrorGraceMsForTest(10_000);
+  const { server, fake, station } = await setupRig("acpsess-silent-during-wait", {
+    stationKey: "acp-silent-during-wait-station",
+    silentPrompt: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Nothing.");
+    await pollForEvent(row.id, sawSessionKey);
+    await new Promise((r) => setTimeout(r, 150));
+    const sentAt = Date.now();
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "silent")));
+    const { hit } = await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    expect(Date.now() - sentAt).toBeLessThan(3_000);
+    expect(hit.payload).toMatchObject({ silent: true });
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});
+
+test("'answered' clears a reported failure too", async () => {
+  _setTurnErrorGraceMsForTest(5_000);
+  const { server, fake, station } = await setupRig("acpsess-resolved-answered", {
+    stationKey: "acp-resolved-answered-station",
+    hangPrompt: true,
+    quietHang: true,
+    harnessSessionKey: "agent:krishna:main",
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "Hi");
+    await pollForEvent(row.id, sawSessionKey);
+    fake.ws.send(JSON.stringify(report("agent:krishna:main", "kimi-coding", "k2p6", "quota")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.ws.send(JSON.stringify(resolution("agent:krishna:main", "answered")));
+    await new Promise((r) => setTimeout(r, 150));
+    fake.releasePrompt("end_turn");
+    await pollForEvent(row.id, (e) => stateWith("idle")(e) && e.seq > 3, 5_000);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(errorEvents(await eventsFor(row.id))).toHaveLength(0);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    _setTurnErrorGraceMsForTest();
+    server.stop(true);
+  }
+});

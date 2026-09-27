@@ -37,7 +37,12 @@ import (
 
 // clientID is this CLI's entry in the hub's registry. A hub that has not opted in refuses every
 // authorize, which is the correct posture for a deployment that never asked for this door.
-const clientID = "apn"
+//
+// One definition, in the package that spends the credential: the sign-in below and every later
+// renewal (`fleetcred.ExchangeDevice`) must name the SAME client, because the client is what
+// decides which planes the minted token may be spent at. Two constants that happened to agree
+// would be one edit away from a renewal that silently reaches fewer planes than the sign-in.
+const clientID = fleetcred.ClientID
 
 // loginTimeout bounds the wait for a human. Generous by default, because it may include
 // signing in — and overridable, because five minutes is the wrong wait for anything scripted.

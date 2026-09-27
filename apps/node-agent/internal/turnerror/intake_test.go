@@ -45,6 +45,20 @@ func TestFrameWrapsAReportUnchanged(t *testing.T) {
 	}
 }
 
+// A plugin says a run it reported ended well after all — the fallback
+// answered, or chose silence (krishna, 2026-09-26 08:56). No error to carry.
+func TestFrameCarriesAResolutionWithoutAnError(t *testing.T) {
+	for _, r := range []string{"answered", "silent"} {
+		line := []byte(`{"harnessSessionKey":"agent:krishna:main","resolution":"` + r + `"}`)
+		if _, err := Frame(line); err != nil {
+			t.Errorf("resolution %q refused: %v", r, err)
+		}
+	}
+	if _, err := Frame([]byte(`{"harnessSessionKey":"k","resolution":"maybe"}`)); err == nil {
+		t.Error("an unknown resolution was accepted")
+	}
+}
+
 func TestFrameRefusesWhatTheHubWouldRefuse(t *testing.T) {
 	// The hub validates properly; the node refuses the obvious so a plugin
 	// hears "no" on its own socket instead of in a hub log it cannot read.

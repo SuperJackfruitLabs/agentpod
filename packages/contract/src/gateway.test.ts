@@ -73,6 +73,25 @@ describe("TurnErrorReport — what a plugin writes to its node", () => {
     expect(TurnErrorReport.safeParse({ ...r, error: { ...r.error, httpStatus: 42 } }).success).toBe(false);
   });
 
+  // krishna, 2026-09-26 08:56: Kimi failed, the plugin reported, and 3.4 s
+  // later the fallback succeeded — with NO_REPLY, OpenClaw's deliberate
+  // silence. The room showed Kimi's failure. A plugin must be able to say the
+  // run it reported ended well after all.
+  it("says a reported run recovered, with no error", () => {
+    const r = { harnessSessionKey: "agent:krishna:main", resolution: "answered" };
+    expect(TurnErrorReport.parse(r)).toEqual(r);
+  });
+
+  it("says a run ended in deliberate silence", () => {
+    const r = { harnessSessionKey: "agent:krishna:main", resolution: "silent" };
+    expect(TurnErrorReport.parse(r)).toEqual(r);
+  });
+
+  it("needs an error or a resolution, and knows only these resolutions", () => {
+    expect(TurnErrorReport.safeParse({ harnessSessionKey: "k" }).success).toBe(false);
+    expect(TurnErrorReport.safeParse({ harnessSessionKey: "k", resolution: "maybe" }).success).toBe(false);
+  });
+
   it("needs something to match a session by", () => {
     expect(TurnErrorReport.safeParse({ error: { message: "x" } }).success).toBe(false);
   });

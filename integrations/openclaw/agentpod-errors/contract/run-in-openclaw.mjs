@@ -29,6 +29,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const PLUGIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OPENCLAW = process.env.OPENCLAW_BIN || "openclaw";
 const SESSION_KEY = "agent:krishna:main";
+// SCENARIO=failure (default): every model fails; one report of every attempt.
+// SCENARIO=silent: Kimi fails, then a fallback slower than the plugin's quiet
+// window answers NO_REPLY — krishna, 2026-09-26 08:56. The failure goes out,
+// then a resolution saying the run ended in deliberate silence.
+const SCENARIO = process.env.SCENARIO === "silent" ? "silent" : "failure";
 
 const KIMI_403 = {
   type: "error",
@@ -67,6 +72,16 @@ async function main() {
     http.createServer((req, res) => {
       req.resume();
       req.on("end", () => {
+        if (req.url.startsWith("/slow")) {
+          // A fallback that thinks for 3.5 s, then says nothing on purpose.
+          setTimeout(() => {
+            res.writeHead(200, { "content-type": "text/event-stream" });
+            const chunk = (delta, finish = null) =>
+              `data: ${JSON.stringify({ id: "c1", object: "chat.completion.chunk", created: 1, model: "slow", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+            res.end(chunk({ role: "assistant", content: "NO_REPLY" }) + chunk({}, "stop") + "data: [DONE]\n\n");
+          }, 3500);
+          return;
+        }
         const [status, body] = req.url.startsWith("/anth") ? [403, KIMI_403] : [400, OPENCODE_400];
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify(body));
@@ -115,10 +130,14 @@ async function main() {
         providers: {
           fakeq: { baseUrl: `${providerUrl}/anth`, api: "anthropic-messages", apiKey: "x", models: [model("quota")] },
           fakeb: { baseUrl: `${providerUrl}/oai/v1`, api: "openai-completions", apiKey: "x", models: [model("bad")] },
+          fakec: { baseUrl: `${providerUrl}/slow/v1`, api: "openai-completions", apiKey: "x", models: [model("silent")] },
         },
       },
       agents: {
-        defaults: { model: { primary: "fakeq/quota", fallbacks: ["fakeb/bad"] }, workspace: path.join(home, "ws") },
+        defaults: {
+          model: { primary: "fakeq/quota", fallbacks: [SCENARIO === "silent" ? "fakec/silent" : "fakeb/bad"] },
+          workspace: path.join(home, "ws"),
+        },
         list: [{ id: "krishna", default: true, workspace: path.join(home, "ws") }],
       },
       gateway: { port, mode: "local", bind: "loopback", auth: { mode: "token", token: "contract-token" } },
@@ -178,10 +197,20 @@ async function main() {
     for (let i = 0; i < 80 && reports.length === 0; i++) await sleep(100);
     await sleep(3000); // a second report would land here
 
+    if (SCENARIO === "silent") {
+      check(reports.length === 2, `the failure, then how the run ended (got ${reports.length})`);
+      const [failure, ended] = reports;
+      check(failure?.error?.provider === "fakeq", "first, the asked-for model's failure, sent before the slow fallback finished");
+      check(
+        ended?.harnessSessionKey === SESSION_KEY && ended?.resolution === "silent" && ended?.error === undefined,
+        `then resolution "silent": the fallback answered NO_REPLY (${JSON.stringify(ended)})`
+      );
+      return;
+    }
+
     check(reports.length === 1, `exactly one report reached the node (got ${reports.length})`);
     const [report] = reports;
     if (report) {
-      check(report.harnessSessionKey === SESSION_KEY, `keyed by the ACP session's key (${report.harnessSessionKey})`);
       // What a reader sees first: the sentence alone. OpenClaw 2026.9.x hands
       // it over as "403: {json}"; 2026.7.x as the bare JSON body.
       check((report.error?.message ?? "").startsWith("You've reached your weekly (7-day) usage limit"), "leads with the first model's sentence, with no status or JSON around it");

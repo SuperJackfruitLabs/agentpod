@@ -92,8 +92,13 @@ jobs:
           echo "OpenClaw ${{ matrix.target }}: $v (Node $(node --version))" >> "$GITHUB_STEP_SUMMARY"
       - name: Install OpenClaw
         run: npm install -g "openclaw@${{ steps.ver.outputs.version }}"
-      - name: Run the contract
+      - name: Run the contract (every model fails)
         working-directory: ${{ env.PLUGIN_DIR }}
+        run: node contract/run-in-openclaw.mjs
+      - name: Run the contract (a slow fallback answers NO_REPLY)
+        working-directory: ${{ env.PLUGIN_DIR }}
+        env:
+          SCENARIO: silent
         run: node contract/run-in-openclaw.mjs
 
   report:

@@ -413,7 +413,7 @@ func parseEtime(s string) (int64, error) {
 // Returns running=false and a non-empty note when neither check can be performed.
 func openclawGatewayRunning() (running bool, note string) {
 	// Try systemctl --user first (Linux with user systemd units).
-	cmd := exec.Command("systemctl", "--user", "is-active", "openclaw-gateway.service")
+	cmd := userSystemctl("is-active", "openclaw-gateway.service")
 	if out, err := cmd.Output(); err == nil {
 		state := strings.TrimSpace(string(out))
 		return state == "active", ""
@@ -453,7 +453,7 @@ func openclawGatewayPID() (int, error) {
 // SIGTERM (escalating to SIGKILL after LifecycleGracePeriod).
 func (o *openclawDescriptor) Stop(key string) error {
 	// Prefer systemctl stop (no-ops gracefully if service not configured).
-	if err := exec.Command("systemctl", "--user", "stop", "openclaw-gateway.service").Run(); err == nil {
+	if err := userSystemctl("stop", "openclaw-gateway.service").Run(); err == nil {
 		return nil
 	}
 	pid, err := openclawGatewayPID()

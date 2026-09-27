@@ -148,6 +148,15 @@ var commands = []struct {
 			"nothing. disable removes both. Neither restarts the gateway; that is yours to do.",
 	},
 	{
+		name: "pi-errors", group: "Node",
+		oneline: "Install, enable or remove the agentpod-errors extension in Pi",
+		detail: "apn pi-errors <status|enable|disable> [--apply] —\n" +
+			"pi-acp drops why a turn failed; this extension reports it to this node.\n" +
+			"enable installs the copy shipped in this apn, on a Pi the CI contract tested,\n" +
+			"as ~/.pi/agent/extensions/agentpod-errors.ts. Without --apply it prints what it\n" +
+			"would do and writes nothing. Nothing needs restarting: each new Pi session loads it.",
+	},
+	{
 		name: "detect", group: "Node",
 		oneline: "Print detected harness stations as JSON",
 		detail: "apn detect — print the harness stations detected on this host as\n" +

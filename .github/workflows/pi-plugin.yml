@@ -1,0 +1,110 @@
+name: Pi extension
+
+# The agentpod-errors extension runs inside Pi and leans on its extension API:
+# message_end for every attempt, agent_settled once at the end, and pi-acp
+# passing its environment to Pi. It is proven against a real Pi driven over
+# ACP by pi-acp, as the node drives it, rather than trusted.
+#
+#   fleet   — the Pi our stations run (pi-fleet.version) with pi-acp 0.0.33.
+#   release — npm's latest Pi and pi-acp. Is the next upgrade safe?
+#
+# A nightly failure opens (or updates) an issue before any station upgrades.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/pi/**"
+      - "apps/node-agent/internal/pierrors/extension/**"
+      - ".github/workflows/pi-plugin.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "integrations/pi/**"
+      - "apps/node-agent/internal/pierrors/extension/**"
+      - ".github/workflows/pi-plugin.yml"
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: pi-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  EXT_DIR: integrations/pi/agentpod-errors
+
+jobs:
+  unit:
+    name: pi-extension unit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Run unit tests
+        working-directory: ${{ env.EXT_DIR }}
+        run: node --experimental-strip-types --test test/*.test.mjs
+
+      # apn embeds the extension it installs (apn pi-errors). It must be this
+      # exact copy, on this tested range.
+      - name: The copy apn ships is this one
+        run: |
+          shipped=apps/node-agent/internal/pierrors/extension
+          cmp "$EXT_DIR/index.ts" "$shipped/agentpod-errors.ts"
+          cmp "$EXT_DIR/pi-fleet.version" "$shipped/pi-tested.min"
+          cmp "$EXT_DIR/pi-tested.max" "$shipped/pi-tested.max"
+
+  contract:
+    name: pi-extension contract (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: fleet
+          - target: release
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Install Pi and pi-acp
+        run: |
+          case "${{ matrix.target }}" in
+            fleet)   pi="$(tr -d '[:space:]' < "$EXT_DIR/pi-fleet.version")"; acp="0.0.33" ;;
+            release) pi="$(npm view @earendil-works/pi-coding-agent version)"; acp="$(npm view pi-acp version)" ;;
+          esac
+          npm install -g "@earendil-works/pi-coding-agent@$pi" "pi-acp@$acp"
+          echo "Pi ${{ matrix.target }}: $pi, pi-acp $acp" >> "$GITHUB_STEP_SUMMARY"
+      - name: Run the contract
+        working-directory: ${{ env.EXT_DIR }}
+        run: node contract/run-in-pi.mjs
+
+  report:
+    name: pi-extension nightly report
+    needs: contract
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="agentpod-errors: Pi contract broken"
+          existing="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')"
+          body="The nightly contract run against Pi failed: $RUN_URL
+
+          If only \`release\` failed, Pi or pi-acp changed something the extension relies on. Fix it before any station upgrades. If \`fleet\` failed, stations running today are affected."
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
