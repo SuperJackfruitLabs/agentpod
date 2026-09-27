@@ -152,6 +152,12 @@ The hub must have the CLI registered — `apn|loopback` in `HUB_OAUTH_CLIENTS`, 
 [DEPLOYMENT.md](./DEPLOYMENT.md#the-oauth-client-registry). Without
 it, authorize refuses, which is the correct posture for a hub that has not opted in.
 
+Registering the CLI is enough for `fleet`, which only ever talks to the hub. It is **not**
+enough for a CLI that presents the same token to another plane: `supi` is refused by
+superpipeline unless `apn`'s entry also declares that plane's audience in its third field. A
+bare `apn|loopback` gives the hub alone, and the symptom is a 401 from the other plane while
+`fleet whoami` and `supi whoami` both look perfect — neither of them leaves the machine.
+
 ### Reading the fleet
 
 ```sh
