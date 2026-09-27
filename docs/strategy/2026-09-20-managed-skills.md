@@ -88,6 +88,35 @@ cleanup must be exposed before broad managed rollout. Package materialization
 does not register a plugin, update harness configuration or refresh a session.
 Session loading remains unknown.
 
+The console now exposes a read-only retained-state inspection for one managed
+profile. It reports the node-owned operation, generation, staging, pending-write,
+and native-placement counts without creating a namespace. It deliberately does
+not prune anything: receipts and generations remain recovery evidence until a
+separately reviewed maintenance policy can prove what is safe to remove. Broad
+rollout therefore still requires that maintenance policy and its recovery tests.
+
+The maintenance policy is now defined for implementation. A node first produces
+a bounded, read-only plan and a digest of the managed and native heads it
+observed. It refuses to plan if either namespace contains an incomplete or
+conflicting receipt, an active native journal, malformed node-owned state, or a
+changed workspace binding. A plan may include only completed records beyond a
+fixed retained history floor and generations unreferenced by both managed and
+native current/previous heads. It never includes staging, pending writes,
+conflicts, active journals, current/previous generations, or the history floor.
+Applying requires the exact reviewed digest under the installation lock and
+rechecks every head and candidate immediately before removal. A mismatch or an
+uncertain result leaves state intact and requires a new inspection. There is no
+background cleanup and no recursive caller-supplied path.
+
+The first implementation exposes that plan and its exact digest through the
+station Skills panel. Apply receives only the reviewed digest; it writes a
+node-owned maintenance journal before removal and updates that journal after
+each candidate, so an interrupted cleanup resumes the original reviewed set
+instead of creating a fresh plan. Source-level checks cover protected heads and
+the retained history floor. CI, a released node binary, and a disposable
+station recovery exercise remain required before this closes the broad-rollout
+gate.
+
 The node now implements `skills.plan`, `skills.apply`, `skills.verify`,
 `skills.rollback` and `skills.operation` under the separate `skills.manage`
 capability. Six descriptors opt into exact detected-workspace resolution. The
@@ -135,12 +164,18 @@ eligibility/loading and an exercise separately.
 
 ## Native project placement primitive
 
-The Go node now has a separate placement transaction for the grouped project
-layouts tested on Codex 0.155.0, OpenCode 1.18.15, Pi 0.84.1's directory loader and
-OpenClaw 2026.2.12. Claude's grouped layout is unsupported; Hermes has no local
-runtime evidence. The primitive publishes a complete selected generation to
-`.agents/skills/sjl-<profile>`, `.opencode/skills/sjl-<profile>`,
-`.pi/skills/sjl-<profile>` or `skills/sjl-<profile>` respectively.
+The Go node now has a separate placement transaction for project skills tested
+on Codex, OpenCode 1.18.15, Pi 0.84.1's directory loader and OpenClaw
+2026.2.12. Codex requires each `SKILL.md` directly under an immediate child of
+`.agents/skills`; its earlier grouped bundle was present but did not load as a
+plain skill. The corrected placement projects a verified skill directly to
+`.agents/skills/sjl-<profile>/SKILL.md` and records a layout marker in its
+reviewed plan. Existing grouped Codex placements can be verified and migrated
+with a new reviewed activation; an already saved old plan retains its old
+layout. OpenCode, Pi and OpenClaw continue to publish grouped generations at
+`.opencode/skills/sjl-<profile>`, `.pi/skills/sjl-<profile>` and
+`skills/sjl-<profile>` respectively. Claude's grouped layout is unsupported;
+Hermes has no local native-placement evidence.
 
 Placement has its own typed plan, head, operation receipt, journal and retained
 copies. A plan pins both managed and native heads, the workspace/repository
@@ -162,21 +197,27 @@ There is a brief absence window between renames. Recovery recognizes publication
 before head/receipt completion, preserves edits and refuses competing operations.
 Rollback and deactivation affect native placement without changing the independently
 selected managed generation. Repeated activation preserves useful rollback history.
-Receipts are historical; fresh verification rereads current bytes and keeps native
-eligibility/session loading unknown.
+Receipts are historical; fresh verification rereads current bytes. For selected
+Codex adapter/engine pairs and OpenCode 1.18.15 in a quiescent workspace, a
+fresh isolated ACP session can compare the exact command names in the verified
+placement receipt. This yields a dated loaded yes/no observation for that new
+session. Unsupported versions, busy workspaces, unmanaged layouts and probe
+failures remain unknown with a reason. It does not establish active-session
+refresh or skill behavior.
 
-This primitive is deliberately **not advertised as a remote capability** yet.
-It requires a quiescent workspace. Before broker/hub/console exposure, complete
-external/lifecycle process coverage, verify actual runtime
-version/mode and expose unsupported or externally busy cases. Advisory locks do
-not control external harnesses or editors. No busy station is restarted and no
-production workspace was changed by this work.
+The broker/hub/console expose native placement only when the node operator has
+enabled its separate local gate. Activation still requires a supported runtime
+and quiescent workspace; the workspace coordinator guards AgentPod-managed
+children, while process preflight covers selected external runtimes. Advisory
+locks do not control external editors. No busy station is restarted.
 
 Tests cover actual process exits at ten publication stages, stale managed/native
 state, changed review digests, nested-root collisions, symlinks, user edits and
 safe deactivation. The optional native probe adds 44 checks using four real
 harnesses and checked-in synthetic exporter fixtures. Pi uses its loader only;
-none establishes model behavior, ACP, session trust or deployed operation. See
+separate Codex and OpenCode ACP probes establish fresh-session discovery for
+specific versions. None establishes model behavior, active-session refresh,
+session trust or deployed operation. See
 `apps/node-agent/internal/skills/testdata/README.md` for reproduction and evidence.
 
 ### Managed session coordination
@@ -229,7 +270,22 @@ already running child left behind by a terminated node needs external-process
 inspection before recovery, as does activity managed by another node process.
 Those gaps, actual version/mode gating and operator
 visibility must be resolved before any remote activation capability is enabled.
-No wire verbs, advertised capabilities or production placements change here.
+The node now has strict `skills.native.*` request/result schemas and a separate
+handler boundary for native planning, application, operation inspection and
+verification. Mutation is off by default. An operator must set
+`nativeSkillActivation` on the node, the descriptor must supply current runtime
+readiness evidence, and the shared workspace coordinator must acquire the
+repository lease. Only those descriptors advertise `skills.native`; today that
+means Codex, and its readiness remains version- and process-specific. The Hub
+and Console retain native plans, receipts and history separately from managed
+installation, require reach permission, and never restart a station.
+
+The supported operator workflow is `apn native-skills status|enable|disable`.
+It changes only the local node gate, preserves the selection across re-enrollment,
+and requires a node-service restart before the hub can observe the capability.
+It deliberately does not activate a release, select a station, bypass readiness,
+or restart a harness. Native canary evidence remains an operational gate after
+the node release is deployed and the operator has explicitly enabled it.
 
 ## Hub, console and verification
 
@@ -290,8 +346,34 @@ A lost planning response retains its request UUID for retry. An uncertain apply
 requires node inspection before the UI offers apply again. Navigation discards late
 responses from the previous station. Conflict guidance preserves local edits;
 there is no force-overwrite button. Loading evidence remains separate from applied
-files. The UI currently selects uploaded artifacts; stable catalog/release discovery,
-native activation and rollout cohorts remain unfinished.
+files. The UI now presents native activation, rollback and removal as separate
+reviewed operations only when the node advertises `skills.native`. The Console
+and fleet CLI support artifact intake, complete catalog-record admission,
+immutable cohorts, and explicit canary planning, inspection and reviewed
+application. Catalog intake verifies archive content before pinning it. Those
+surfaces do not substitute for live canary, loading and rollback evidence.
+
+### Stable catalog intake boundary
+
+The future catalog accepts an immutable library release record, never a claim
+attached to a manually uploaded archive. Intake must require schema version one,
+one canonical artifact for each of the six harnesses, the record digest over its
+unsigned canonical JSON, and archive bytes matching every pinned SHA-256. Each
+archive must then pass the node-equivalent bundle checks and match its declared
+harness, profile and bundle digest. A duplicate record digest is idempotent;
+the same version/profile with a different digest is refused. Catalog records are
+owner/tenant scoped and retain their original release record and archive pins.
+They do not prove a harness loaded a skill or that a release is safe to deploy.
+
+A cohort is an operator-selected immutable list of station IDs plus one catalog
+record digest. Planning rechecks every station owner, tenant, harness and reach
+permission and creates reviewed per-station plans. The first station is named
+explicitly in a canary request, which records an ordinary managed operation
+bound to the cohort's release, digest and harness-specific archive. Its later
+inspection and reviewed apply repeat that binding; applying it does not advance
+another cohort member. Runtime observation and rollback remain required before
+any later cohort is chosen. Empty, offline, mixed-owner or already-unknown
+stations are visible refusals, never silently excluded.
 
 Contract fixtures round-trip through Go so nullable evidence cannot silently become
 false. Filesystem tests cover scope isolation, traversal/symlink rejection, bounds,
@@ -311,6 +393,26 @@ one actual canary per harness, rollback, then an operator-selected cohort. Test
 persistent and ephemeral Modal, Fly images and local placement separately; source
 pins do not establish deployed versions. Follow the current release runbook and
 verify the real deployment before claiming completion.
+
+### Node release evidence (2026-09-21)
+
+`v0.1.43` packages the read-only retained-state inspection from merged change
+`#499` (`3cdbeac4`). Its GitHub release workflow completed successfully and the
+published manifest contains the four `agentpod-node` binaries, four
+`agentpod-fleet` binaries, both installers, the service unit, and
+`SHA256SUMS`. Downloading those public assets and verifying the manifest passed
+for every listed asset. This establishes a reproducible node release; it does
+not establish that any station has installed the version or that retained state
+has been inspected on a live station.
+
+`v0.1.44` packages merged change `#502` (`8fbedb25`): the reviewed retained
+state cleanup flow. Its release workflow completed successfully, and all four
+node binaries, four fleet binaries, installers, service unit and checksum
+manifest were downloaded and verified against `SHA256SUMS`. The remaining
+evidence is deliberately operational: install it only on a disposable station,
+exercise preview, reviewed cleanup, an interrupted journal and recovery, then
+inspect retained state. This release evidence does not establish that a station
+has installed it or that cleanup has run safely outside fixtures.
 
 ### Runtime selection follow-up (2026-09-21)
 
@@ -337,3 +439,176 @@ qualified fixture name; installation alone remains undiscovered and sibling
 workspaces remain isolated. No model prompt or client tool is used. These are
 repeatable installed-runtime probes, not a production version gate or evidence
 of active-session refresh, production authentication or AgentPod transport.
+
+The node now reuses this same bounded probe for `skills.native.verify` on a
+managed Codex placement. The verification receipt carries the command names
+derived from its verified generation, so an unrelated skill cannot make the
+placement appear loaded. The probe is read-only. Native publication remains
+fail-closed by default until the operator enables the local node gate; live
+lifecycle, canary, loading and rollback evidence remain required before a
+cohort rollout can be claimed.
+
+### Fleet CLI release evidence (2026-09-22)
+
+`v0.1.46` packages the fleet skill-catalog and canary commands. Its published
+assets were downloaded and verified against `SHA256SUMS`. The CLI has a separate
+human operator login and never substitutes a node credential for fleet access.
+
+`v0.1.47` packages explicit cleanup of an unreferenced uploaded artifact:
+`fleet skills artifact delete --id …`. The hub remains the authority: it refuses
+an artifact that is missing or retained by an operation. Its published assets
+were also downloaded and verified against `SHA256SUMS`. Cleanup capability does
+not authorize deleting a live artifact or establish a release canary.
+
+### Managed fixture canaries (2026-09-22)
+
+The operator installed synthetic fixture archives on stopped disposable Hermes,
+Pi and Claude Code stations, reviewed rollback plans, applied rollback and
+freshly verified that each managed generation is absent. The retained operation
+IDs are Hermes `67721628ce4dd797a065840b393fa9aa` / rollback
+`f8a5d43f4a935a5c2f3495ad41a3ca4d`, Pi
+`f26ee8b32d3eb0d93ec8f444e9483cbd` / rollback
+`524fa97dd350bf3876fe21f0fa49c512`, and Claude Code
+`2be445055418452d0700ec5dd76041ef` / rollback
+`23e9e0d437ce802c4420392fb97d242c`. Each fresh verification reports
+`Files present: No` and `Loaded: Unknown`; installation and rollback do not
+establish that a harness session discovered or exercised a skill.
+
+OpenClaw has no safe disposable registered station: the ten registered agents
+are running, and other detections share core paths. OpenCode has no registered
+station; the installed 0.5.5 CLI fails with the user's normal plugin settings,
+and a disposable isolated-config launch did not register a station. Neither
+harness was changed merely to obtain a canary. The managed canary matrix remains
+incomplete, as do native publication, fresh-session loading and exercise gates.
+
+### Live Codex native-placement canary (2026-09-22)
+
+The disposable stopped Codex station `new-game` (`codex:e420535d`) completed a
+reviewed native activation of the synthetic `fixture` profile. The reviewed plan
+contained only `SKILL.md` and one fixture reference and published them at
+`/Users/rakeshgangwar/new-game/.agents/skills/sjl-fixture`. Fresh node
+verification reports **Files present: Yes** and the inventory reports a regular
+`SKILL.md` entrypoint at that workspace location. This proves reviewed native
+publication and file verification for this one Codex station.
+
+The deployed hub was advanced to merged revision `726bba5b` and health-checked
+after restart. This included the safe skill-operation diagnostic change: a node
+refusal is now retained as a bounded diagnostic rather than overwritten by a
+generic unknown outcome. The Mac node was then self-updated from `v0.1.49` to
+`v0.1.50`. The Console initially displayed a connection error because its
+request timed out before the hub's 12-second update reply; the hub subsequently
+completed the update and the node returned online at `v0.1.50`. This is a UI
+timeout/reporting issue to address separately, not an unsuccessful node update.
+
+Fresh isolated Codex loading is still **Unknown**. The live node reports:
+`ACP output closed before discovery completed`. It does not claim that the
+fixture loaded or was used. Change `#527` adds a compact adapter stderr summary
+to this failure so the next released node run can identify the actual ACP
+startup/configuration refusal without exposing an unbounded transcript. Its
+focused descriptor test passes. The next operational sequence is: merge and
+release `#527`, update the disposable Mac node, rerun only this read-only
+verification, then fix the specific adapter diagnostic if it still cannot
+discover commands.
+
+Current completion record:
+
+- Done: contracts, verified artifact handling, reviewed managed installation and
+  rollback, retained-state cleanup planning, native placement transactions,
+  Console controls, fleet CLI planning, synthetic managed canaries for Hermes,
+  Pi and Claude Code, and one live Codex native file-placement canary.
+- Proven only for the Codex native canary: reviewed file publication and fresh
+  file verification. No claim is made for session loading, use, behavior, or
+  active-session refresh.
+- Remaining before a broad release claim: resolve Codex fresh-session discovery;
+  perform an explicit Codex rollback and re-verification; create safe disposable
+  canaries for OpenCode and OpenClaw; capture per-harness native/loading and
+  rollback evidence; then choose and operate an explicit trusted-release cohort.
+
+### Addendum — Codex native rollback canary (2026-09-22)
+
+This addendum supersedes the unresolved discovery result recorded in the
+preceding section. That paragraph was written before `#528` was released as
+`v0.1.52`; it is retained as the state at its own timestamp, not as current
+evidence.
+
+`v0.1.52` resolves the isolated Codex discovery failure. On the disposable
+stopped station `new-game` (`codex:e420535d`,
+`station_7ff5dccb-8f21-4a92-8e73-6e7d665f4a8d`, node
+`node_161e685104dc488ebd11`, agent `v0.1.52`) a fresh read-only verification of
+the synthetic `fixture` profile reported **Present: Yes** and **Loaded: Yes** at
+2026-09-22T05:57:28Z, with the reason `A fresh isolated ACP session advertised
+every native skill in this placement`. The earlier failure is not reproducible
+at this revision.
+
+A reviewed native rollback was then planned and applied against that same
+station while it remained stopped:
+
+| Field | Value |
+|---|---|
+| Operation | `b57efa9fe1afbd433091b004a1e85361` |
+| Action | `rollback` (`before` generation `cfd83e8d4a08b3cd19431dbf9d0c92a4`, `after` `null`) |
+| Plan digest | `d981bb49c3795ef539b3ccb9bba4bbff0d4e01e5aeed38e877b9be8e37e05f1a` |
+| Expected installation head | `741b7c492e7c88516cc29ea5616b0d71e6bc88f0bb0482fa8c5754f200cf2dc5` |
+| Expected native head | `65d44fc4ceebae151dde1fa6e9b178774901481603c3194ec289e55d3c985d52` |
+| Layout | `codex-direct-v1` |
+| Diff | removed `SKILL.md` and one fixture reference; nothing added or changed |
+| Applied | 2026-09-22T05:58:26.747107Z, receipt phase `applied`, no error |
+
+Post-rollback verification reported **Present: No** at 2026-09-22T05:59:13Z and
+the owned files are absent from
+`/Users/rakeshgangwar/new-game/.agents/skills/sjl-fixture`. The empty
+`.agents/skills` directory remains, and no unrelated repository content changed.
+
+Node verification returns `Loaded: unknown` for an absent placement, with the
+reason `Native eligibility, project trust and session loading were not queried`.
+That is correct fail-closed behavior, but it means the node alone cannot supply
+the negative loading observation this gate requires. An independent replica of
+`codexACPDiscoverSkills` — disposable `CODEX_HOME`, unreachable local provider,
+`initialize` and `session/new` only, no prompt and no client tools — was run
+against the workspace with adapter `@agentclientprotocol/codex-acp 1.12.0`. At
+2026-09-22T06:00:23Z the fresh session advertised `imagegen`, `openai-docs`,
+`plugin-creator`, `review-agent`, `skill-creator` and `skill-installer`, and did
+**not** advertise `sjl-fixture`. A synthetic positive control in a separate
+disposable workspace advertised its `probe-control` project skill through the
+same probe, so the absence is an observed negative rather than an inert probe.
+
+This establishes, for this one Codex station and adapter version: reviewed
+native publication, fresh-session loading, reviewed rollback, file absence and
+fresh-session non-advertisement. It does not establish model use of the skill,
+active-session refresh, behavior on another node, or any other harness. The
+probe adapter version differs from the `1.1.14` recorded earlier; treat each
+observation as bound to its own stated adapter version.
+
+### Inventory deadline and the observed first-request timeout
+
+The earlier first-request inventory timeout has a structural cause rather than a
+transient one. `skills.inventory` for Codex runs the same fresh-session ACP
+discovery probe whenever the station has at least one present skill and the
+runtime reports ready. That probe is bounded at 45 seconds in
+`discoverACPSkillCommands`. The inventory route calls `broker.request` without a
+timeout override, so it uses the broker's `DEFAULT_TIMEOUT_MS` of 15 seconds.
+The skill *management* routes already override this deliberately with 30 and 70
+seconds; the inventory route was left on the default.
+
+Any probe that takes between 15 and 45 seconds therefore produces a hub
+`timeout` while the node continues working and completes normally. A subsequent
+request succeeds because the adapter is then warm. Measured steady-state cost of
+the isolated probe on this workstation is 0.42–0.77 seconds, and a full
+hub-mediated native verification round trip is 1.6–2.4 seconds, so the condition
+is confined to genuinely cold adapter starts — which is what the original
+observation followed, immediately after a node self-update. The exact cold-cache
+timing was not re-created here, so the reproduction remains unconfirmed while
+the deadline mismatch is confirmed in source.
+
+Recommended resolution, preferring the system's existing honesty contract over a
+longer wait: bound the inventory probe below the hub's deadline so the node
+always answers within the window with `Loaded: unknown` and a stated reason,
+rather than raising the inventory deadline to 45+ seconds and holding an
+operator request open that long. A timeout must continue to surface as unknown
+with a safe retry, and must never render as `Loaded: No` or as an applied-state
+claim. Console behavior for delayed success, true node loss and ambiguous
+outcomes still needs its own tests before this item is closed.
+
+All three nodes — `ashram`, `guild` and the Mac node — report `v0.1.52` with no
+update available as of 2026-09-22T05:56Z. The version drift recorded in the
+22 September completion plan no longer holds; re-observe before relying on it.

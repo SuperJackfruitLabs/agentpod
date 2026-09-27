@@ -50,6 +50,10 @@ import (
 // directory with no readable *.jsonl is SKIPPED rather than guessed at
 // (observed: `pi --mode rpc` creates the directory without writing a session).
 type piDescriptor struct {
+	// nativeSkillDiscovery starts a disposable ACP session and returns the
+	// skill commands it advertises. A field so a test needs no adapter.
+	nativeSkillDiscovery func(ctx context.Context, adapter, engine, workspace string) ([]string, error)
+
 	dataDir    string // absolute path to ~/.pi/agent
 	sessionDir string // absolute path to the sessions directory
 
@@ -123,6 +127,8 @@ func NewPi(dataDir string) Descriptor {
 		lookPath:     exec.LookPath,
 		isExecutable: isExecutableFile,
 		getenv:       os.Getenv,
+
+		nativeSkillDiscovery: piACPDiscoverSkills,
 	}
 	// userHome is "" when it can't be determined, which the binary locator
 	// reads as "skip the home-relative candidates".

@@ -8,6 +8,7 @@
   },
   "version": "v0.1.22",
   "capabilities": [
-    "posture"
+    "posture",
+    "frames.large"
   ]
 }

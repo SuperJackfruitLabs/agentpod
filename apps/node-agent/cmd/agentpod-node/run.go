@@ -3,15 +3,21 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
@@ -79,41 +85,82 @@ func runCmd() {
 	if fetch, err := gateway.NewHTTPArtifactFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret); err == nil {
 		h = gateway.NewSkillManagementHandler(h, gateway.SkillManagementDeps{
 			NodeID: cfg.NodeID, Resolve: reg.ManagedSkillWorkspace, Fetch: fetch,
+			Workspaces: workspaces,
+			// Native placement is separately opt-in. Readiness resolves the exact
+			// runtime and checks its process boundary; ApplyPlacementWhenIdle holds
+			// the repository lease for the complete filesystem transaction.
+			AuthorizeNative: func(ctx context.Context, key, _ string) error {
+				if !cfg.NativeSkillActivation {
+					return fmt.Errorf("native activation is disabled in this node's operator configuration")
+				}
+				readiness, err := reg.NativeSkillReadiness(ctx, key)
+				if err != nil {
+					return err
+				}
+				if !readiness.Ready {
+					return fmt.Errorf("%s", readiness.Reason)
+				}
+				return nil
+			},
+			VerifyNative: func(ctx context.Context, key, _ string, names []string) (skills.Observation, error) {
+				return reg.NativeSkillLoading(ctx, key, names)
+			},
+			ReportInventory: func(ctx context.Context, key, _ string) (map[string]string, error) {
+				return reg.NativeSkillInventory(ctx, key)
+			},
 		})
 		reg.EnableSkillManagement()
+		if cfg.NativeSkillActivation {
+			reg.EnableNativeSkillManagement()
+		}
 	} else {
 		fmt.Fprintln(os.Stderr, "skill management unavailable:", err)
 	}
+	// Console plugin management is its own operator opt-in (#553). The node
+	// resolves the profile and probes Hermes itself for every plan and apply.
+	if cfg.PluginManagement {
+		h = gateway.NewPluginManagementHandler(h, gateway.PluginManagementDeps{
+			NodeID: cfg.NodeID, ProfileDir: reg.PluginProfileDir,
+			Gate: func(ctx context.Context) hermeslive.Gate {
+				probe := descriptor.HermesVersion(ctx)
+				return hermeslive.CheckHermes(probe.Status, probe.Version, probe.Reason)
+			},
+		})
+		reg.EnablePluginManagement()
+	}
+	harnessFor := func(key string) (string, error) {
+		d, err := reg.For(key)
+		if err != nil {
+			return "", err
+		}
+		return d.Harness(), nil
+	}
+	// The capability list `detect` would report for this key. Asked of the
+	// descriptor rather than remembered, for the same reason the hub reads
+	// `matrix_id` off a detect: a station's capabilities are a fact about
+	// the host right now, and the one matrix.adopt and transcription.apply
+	// need — `lifecycle` — is withheld dynamically (descriptor/hermes.go,
+	// issue #273).
+	capabilitiesFor := gateway.CapabilityLookupFunc(func(key string) ([]string, error) {
+		d, err := reg.For(key)
+		if err != nil {
+			return nil, err
+		}
+		stations, err := d.Detect()
+		if err != nil {
+			return nil, fmt.Errorf("capability lookup: detect: %w", err)
+		}
+		for _, s := range stations {
+			if s.Key == key {
+				return s.Capabilities, nil
+			}
+		}
+		return nil, fmt.Errorf("capability lookup: no station with key %q", key)
+	})
 	h = gateway.NewMatrixAdoptHandler(h, gateway.MatrixAdoptDeps{
-		Resolver: resolver,
-		HarnessFor: func(key string) (string, error) {
-			d, err := reg.For(key)
-			if err != nil {
-				return "", err
-			}
-			return d.Harness(), nil
-		},
-		// The capability list `detect` would report for this key. Asked of the
-		// descriptor rather than remembered, for the same reason the hub reads
-		// `matrix_id` off a detect: a station's capabilities are a fact about
-		// the host right now, and the one this verb needs — `lifecycle` — is
-		// withheld dynamically (descriptor/hermes.go, issue #273).
-		CapabilitiesFor: func(key string) ([]string, error) {
-			d, err := reg.For(key)
-			if err != nil {
-				return nil, err
-			}
-			stations, err := d.Detect()
-			if err != nil {
-				return nil, fmt.Errorf("capability lookup: detect: %w", err)
-			}
-			for _, s := range stations {
-				if s.Key == key {
-					return s.Capabilities, nil
-				}
-			}
-			return nil, fmt.Errorf("capability lookup: no station with key %q", key)
-		},
+		Resolver:        resolver,
+		HarnessFor:      harnessFor,
+		CapabilitiesFor: capabilitiesFor,
 		WriterFor: gateway.WriterLookupFunc(func(harness string) (gateway.ProfileWriteFunc, bool) {
 			w, ok := descriptor.WriterFor(harness)
 			if !ok {
@@ -131,13 +178,62 @@ func runCmd() {
 			return descriptor.MatrixIDFromProfile(profileDir, "")
 		},
 	})
-	h = gateway.NewChangesetHandler(h, resolver)
-	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
-	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
-	h = gateway.NewUpdateHandler(h, version)
-	gateway.Run(ctx, cfg, h, version, func() []gateway.HealthReport {
-		return gatherHealthReports(reg)
+	// transcription.apply: the hub's resolved voice-note setting, written into
+	// a harness-mode Hermes profile's own STT config. Same shape as
+	// matrix.adopt above — the key is fetched over HTTP with this node's
+	// credential, never carried in the broker frame — but a station without
+	// "lifecycle" (#273) is still written, just not restarted.
+	h = gateway.NewTranscriptionApplyHandler(h, gateway.TranscriptionApplyDeps{
+		Resolver:        resolver,
+		HarnessFor:      harnessFor,
+		CapabilitiesFor: capabilitiesFor,
+		Fetch:           gateway.NewHTTPTranscriptionFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
+		Write:           descriptor.WriteHermesTranscription,
+		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
+	h = gateway.NewChangesetHandler(h, resolver)
+	gitIdentityRoot := filepath.Dir(config.DefaultPath())
+	// git.identity.ensure: the public half of a station's push key, generated on first ask.
+	// Rooted at the config directory, NOT a workspace — see internal/gitidentity for why.
+	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
+	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
+	// A station with a provisioned git identity gets GIT_SSH_COMMAND in its harness's environment.
+	// This is what makes the key do anything: without it the key is on disk, the account is on
+	// forge, and `git push` still uses whatever ssh would have used anyway.
+	h = gateway.NewACPHandler(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
+		gitIdentityRoot,
+		descriptor.NewCapabilityHandler(reg).ACPCommand,
+	)))
+	h = gateway.NewUpdateHandler(h, version)
+	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
+		return gatherHealthReports(reg)
+	}, startTurnErrorIntake(ctx))
+}
+
+// startTurnErrorIntake opens the socket harness plugins report failed turns
+// on (OpenClaw and Pi drop them over ACP). It is not essential: a node that
+// cannot open it runs as before, and does not advertise "turn.errors", so
+// nothing tells a plugin installer this node can take reports.
+func startTurnErrorIntake(ctx context.Context) gateway.Extras {
+	outbox := make(chan []byte, 64)
+	extras := gateway.Extras{Outbox: outbox}
+
+	path, err := turnerror.DefaultSocketPath()
+	if err != nil {
+		log.Printf("turn-error intake disabled: %v", err)
+		return extras
+	}
+	intake, err := turnerror.Listen(path, outbox)
+	if err != nil {
+		log.Printf("turn-error intake disabled: %v", err)
+		return extras
+	}
+	go func() {
+		intake.Serve(ctx)
+	}()
+	log.Printf("turn-error intake listening on %s", path)
+	extras.Capabilities = []string{"turn.errors"}
+	return extras
 }
 
 // gatherHealthReports enumerates all detected stations and collects a

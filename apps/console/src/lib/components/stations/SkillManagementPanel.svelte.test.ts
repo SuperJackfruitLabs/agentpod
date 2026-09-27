@@ -1,7 +1,8 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent, cleanup } from "@testing-library/svelte";
-import { SkillHubOperation } from "@agentpod/contract";
+import { SkillHubOperation, SkillInstallPlan } from "@agentpod/contract";
 import { planFixture } from "../../../../../../packages/contract/src/fixtures/skill-install";
+import { placementFixture } from "../../../../../../packages/contract/src/fixtures/skill-placement";
 import * as api from "$lib/api/skills";
 import SkillManagementPanel from "./SkillManagementPanel.svelte";
 
@@ -22,6 +23,7 @@ function operation(state = "planned") {
     stationKey: "codex:fixture",
     harness: "codex",
     profile: "fixture",
+    kind: "managed",
     action: "install",
     artifactId: artifact.id,
     state,
@@ -45,10 +47,35 @@ function operation(state = "planned") {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.spyOn(api, "listSkillArtifacts").mockResolvedValue([artifact]);
+  vi.spyOn(api, "listTrustedSkillReleases").mockResolvedValue([]);
+  vi.spyOn(api, "listSkillReleaseCohorts").mockResolvedValue([]);
   vi.spyOn(api, "listSkillOperations").mockResolvedValue([]);
 });
 afterEach(cleanup);
 const props = { stationId: "station_1", harness: "codex", canManage: true };
+
+test("explains how a Codex node operator enables native placement", async () => {
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() => expect(view.getByText("Native placement is off on this node")).toBeTruthy());
+  expect(view.getByText("apn native-skills enable")).toBeTruthy();
+});
+
+test("creates an explicit one-station cohort before planning its trusted release canary", async () => {
+  const release = { id: "22222222-2222-4222-8222-222222222222", version: "1.2.3", profile: "fixture", recordDigest: "a".repeat(64), createdAt: planFixture.createdAt };
+  const cohort = { id: "33333333-3333-4333-8333-333333333333", releaseId: release.id, recordDigest: release.recordDigest, stationIds: ["station_1"], createdAt: planFixture.createdAt };
+  vi.spyOn(api, "listTrustedSkillReleases").mockResolvedValue([release]);
+  vi.spyOn(api, "createSkillReleaseCohort").mockResolvedValue(cohort);
+  const canary = vi.spyOn(api, "planSkillReleaseCanary").mockResolvedValue({ cohortId: cohort.id, releaseId: release.id, recordDigest: release.recordDigest, stationId: "station_1", operationId: planFixture.operationId, operation: operation() });
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() => expect(view.getByRole("option", { name: /1\.2\.3/ })).toBeTruthy());
+  await fireEvent.change(view.getByLabelText("Trusted release"), { target: { value: release.id } });
+  await fireEvent.click(view.getByRole("button", { name: "Enroll this station as canary" }));
+  await waitFor(() => expect((view.getByRole("button", { name: "Review canary plan" }) as HTMLButtonElement).disabled).toBe(false));
+  expect(api.createSkillReleaseCohort).toHaveBeenCalledWith(release.id, release.recordDigest, ["station_1"]);
+  await fireEvent.click(view.getByRole("button", { name: "Review canary plan" }));
+  await waitFor(() => expect(canary).toHaveBeenCalledWith(cohort.id, release.id, release.recordDigest, "station_1", expect.any(String)));
+  expect(view.getByText("skills/fixture/SKILL.md")).toBeTruthy();
+});
 
 test("shows exact changes before applying the reviewed digest and keeps activation separate", async () => {
   vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());
@@ -81,6 +108,36 @@ test("shows exact changes before applying the reviewed digest and keeps activati
   );
   await waitFor(() => expect(view.getByText("Files applied")).toBeTruthy());
   expect(view.getByText(/Activation pending/)).toBeTruthy();
+});
+
+test("native placement has its own explicit review action and history", async () => {
+  const native = SkillHubOperation.parse({
+    id: planFixture.operationId,
+    stationId: "station_1",
+    nodeId: "fixture-node",
+    stationKey: "codex:fixture",
+    harness: "codex",
+    profile: "fixture",
+    kind: "native",
+    action: "activate",
+    artifactId: null,
+    state: "planned",
+    error: null,
+    inFlight: false,
+    createdAt: planFixture.createdAt,
+    updatedAt: planFixture.createdAt,
+    plan: placementFixture,
+    receipt: null,
+  });
+  vi.spyOn(api, "listNativeSkillOperations").mockResolvedValue([]);
+  const plan = vi.spyOn(api, "planNativeSkillPlacement").mockResolvedValue(native);
+  const view = render(SkillManagementPanel, { props: { ...props, canNative: true } });
+  await waitFor(() => expect(view.getByRole("button", { name: "Review native activation" })).toBeTruthy());
+  await fireEvent.input(view.getByLabelText("Profile"), { target: { value: "fixture" } });
+  await fireEvent.click(view.getByRole("button", { name: "Review native activation" }));
+  await waitFor(() => expect(plan).toHaveBeenCalledWith("station_1", "fixture", "activate", expect.any(String)));
+  expect(view.getByText(/Native activate/)).toBeTruthy();
+  expect(view.getByRole("heading", { name: "Native placement history" })).toBeTruthy();
 });
 
 test("uncertain application requires inspection before apply becomes available again", async () => {
@@ -198,14 +255,15 @@ test("rollback is a separate reviewed plan and file verification keeps unknown l
   const rollback = operation();
   rollback.action = "rollback";
   rollback.artifactId = null;
-  rollback.plan = {
-    ...rollback.plan!,
+  const rollbackPlan = SkillInstallPlan.parse({
+    ...planFixture,
     action: "rollback",
-    before: rollback.plan!.after,
+    before: planFixture.after,
     after: null,
     targetPath: null,
     changes: { added: [], changed: [], removed: ["skills/fixture/SKILL.md"] },
-  };
+  });
+  rollback.plan = rollbackPlan;
   const plan = vi.spyOn(api, "planSkillRollback").mockResolvedValue(rollback);
   const apply = vi
     .spyOn(api, "applySkillOperation")
@@ -213,7 +271,7 @@ test("rollback is a separate reviewed plan and file verification keeps unknown l
       ...rollback,
       state: "applied",
       receipt: {
-        plan: rollback.plan,
+        plan: rollbackPlan,
         phase: "applied",
         updatedAt: planFixture.createdAt,
         completedAt: planFixture.createdAt,
@@ -282,4 +340,107 @@ test("opening a recorded conflict shows recovery guidance without offering apply
   expect(
     view.queryByRole("button", { name: "Apply reviewed plan" }),
   ).toBeNull();
+});
+
+// An unconfirmed operation has several causes, and the hub already tells them
+// apart -- offline, disconnected, timed out, rejected -- each ending in the
+// same safe instruction. The console must carry that distinction through
+// rather than flattening every one into "Outcome unknown", because the
+// operator's next move differs: a node that is offline needs attention before
+// any retry, while a rejection names something to fix.
+//
+// The invariant underneath is the one that matters most: an unconfirmed
+// outcome must never render as an applied-state claim. Apply stays unavailable
+// until an inspection establishes what actually happened.
+function unconfirmed(reason: string) {
+  return SkillHubOperation.parse({
+    ...JSON.parse(JSON.stringify(operation())),
+    state: "unknown",
+    error: reason,
+    receipt: null,
+  });
+}
+
+test("each cause of an unconfirmed outcome keeps its own reason and offers no applied claim", async () => {
+  for (const reason of [
+    "Node is offline during apply; inspect the operation before retrying",
+    "Node disconnected during apply; inspect the operation before retrying",
+    "Node timed out during apply; inspect the operation before retrying",
+    "Node rejected apply: managed skill namespace not found. Inspect the operation before retrying",
+    "Node outcome is unknown during apply; inspect the operation before retrying",
+  ]) {
+    cleanup();
+    vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());
+    vi.spyOn(api, "applySkillOperation").mockResolvedValue(unconfirmed(reason));
+    const view = render(SkillManagementPanel, { props });
+    await waitFor(() =>
+      expect(view.getByRole("option", { name: /fixture/ })).toBeTruthy(),
+    );
+    await fireEvent.change(view.getByLabelText("Artifact"), {
+      target: { value: artifact.id },
+    });
+    await fireEvent.click(
+      view.getByRole("button", { name: "Review installation" }),
+    );
+    await waitFor(() =>
+      expect(
+        view.getByRole("button", { name: "Apply reviewed plan" }),
+      ).toBeTruthy(),
+    );
+    await fireEvent.click(
+      view.getByRole("button", { name: "Apply reviewed plan" }),
+    );
+
+    // The cause survives to the operator, verbatim.
+    await waitFor(() => expect(view.getByText(reason)).toBeTruthy());
+    // And is still labelled unconfirmed rather than finished.
+    expect(view.getByText("Outcome unknown")).toBeTruthy();
+    // Never an applied-state claim, and never a second apply without looking.
+    expect(view.queryByText("Files applied")).toBeNull();
+    expect(
+      view.queryByRole("button", { name: "Apply reviewed plan" }),
+    ).toBeNull();
+    // The safe next step is offered.
+    expect(
+      view.getByRole("button", { name: "Inspect node outcome" }),
+    ).toBeTruthy();
+  }
+});
+
+// Delayed success is a THIRD thing, distinct from both success and failure:
+// the hub still holds the operation. It must not read as applied, and it must
+// not read as failed either.
+test("an operation still in flight reads as neither applied nor failed", async () => {
+  const inFlight = SkillHubOperation.parse({
+    ...JSON.parse(JSON.stringify(operation("applying"))),
+    inFlight: true,
+    receipt: null,
+  });
+  vi.spyOn(api, "planSkillInstall").mockResolvedValue(operation());
+  vi.spyOn(api, "applySkillOperation").mockResolvedValue(inFlight);
+  const view = render(SkillManagementPanel, { props });
+  await waitFor(() =>
+    expect(view.getByRole("option", { name: /fixture/ })).toBeTruthy(),
+  );
+  await fireEvent.change(view.getByLabelText("Artifact"), {
+    target: { value: artifact.id },
+  });
+  await fireEvent.click(
+    view.getByRole("button", { name: "Review installation" }),
+  );
+  await waitFor(() =>
+    expect(
+      view.getByRole("button", { name: "Apply reviewed plan" }),
+    ).toBeTruthy(),
+  );
+  await fireEvent.click(
+    view.getByRole("button", { name: "Apply reviewed plan" }),
+  );
+  await waitFor(() =>
+    expect(view.getByRole("status").textContent).toContain(
+      "The hub is processing this operation",
+    ),
+  );
+  expect(view.queryByText("Files applied")).toBeNull();
+  expect(view.queryByText("Outcome unknown")).toBeNull();
 });

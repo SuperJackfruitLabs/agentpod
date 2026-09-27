@@ -13,8 +13,45 @@ import (
 	"time"
 )
 
-var placementRoots = map[string]string{"codex": ".agents/skills", "opencode": ".opencode/skills", "pi": ".pi/skills", "openclaw": "skills"}
+var placementRoots = map[string]string{"codex": ".agents/skills", "claude-code": ".claude/skills", "hermes": "managed-skills", "opencode": ".opencode/skills", "pi": ".pi/skills", "openclaw": "skills"}
 var placementScanRoots = []string{".agents/skills", ".claude/skills", ".opencode/skills", ".pi/skills", ".hermes/skills", "skills"}
+
+const (
+	codexDirectLayout  = "codex-direct-v1"
+	claudeDirectLayout = "claude-direct-v1"
+	hermesDirectLayout = "hermes-direct-v1"
+)
+
+// Harnesses whose native discovery reads a direct skill directory rather than
+// a grouped bundle export. Codex scans each immediate child of .agents/skills
+// for SKILL.md; Claude reads .claude/skills the same way, and its grouped
+// layout was probed and does not load. Each entry publishes one plain skill at
+// the destination root, so they share a projection.
+var directLayouts = map[string]string{"codex": codexDirectLayout, "claude-code": claudeDirectLayout, "hermes": hermesDirectLayout}
+
+// Harnesses whose station is not a source checkout. A Hermes station is a
+// profile directory and an OpenClaw station is the OpenClaw home: each is its
+// own coordination boundary rather than a project, has no .git, and one must
+// never be created inside a user's home to satisfy a binding. These bind to
+// the workspace itself.
+var nonRepositoryWorkspaces = map[string]bool{"hermes": true, "openclaw": true}
+
+// directLayout reports the layout this binding's harness requires, and whether
+// it requires one at all. A harness absent from the map keeps the grouped
+// export, whose own evidence is recorded separately.
+func (s *InstallStore) directLayout() (string, bool) {
+	layout, ok := directLayouts[s.binding.Harness]
+	return layout, ok
+}
+
+// isDirectLayout reports whether a recorded layout is the one this binding's
+// harness requires. A layout recorded for the wrong harness, or an unknown
+// one, is not accepted: a plan or head carrying it describes a placement this
+// node cannot verify.
+func (s *InstallStore) isDirectLayout(layout string) bool {
+	want, ok := s.directLayout()
+	return ok && layout == want
+}
 
 func (s *InstallStore) placementTarget() (string, error) {
 	root, ok := placementRoots[s.binding.Harness]
@@ -27,7 +64,29 @@ func (s *InstallStore) placementTarget() (string, error) {
 	}
 	return target, nil
 }
+
+// placementRepository resolves the root that identifies and coordinates a
+// placement. For a source checkout that is the enclosing Git work tree, whose
+// identity covers a replaced or renamed repository. A harness whose station is
+// not a checkout binds to the workspace itself: the identity still moves if the
+// directory is replaced, and the two modes hash under different prefixes so an
+// identity from one can never satisfy the other.
 func (s *InstallStore) placementRepository() (string, string, error) {
+	if nonRepositoryWorkspaces[s.binding.Harness] {
+		p := s.binding.WorkspacePath
+		dir, err := os.Stat(p)
+		if err != nil {
+			return "", "", err
+		}
+		if !dir.IsDir() {
+			return "", "", fmt.Errorf("%w: workspace is not a directory", ErrInstallConflict)
+		}
+		a, ok := dir.Sys().(*syscall.Stat_t)
+		if !ok {
+			return "", "", fmt.Errorf("skills: unsupported workspace identity")
+		}
+		return p, hashBytes([]byte(fmt.Sprintf("workspace:%s:%d:%d", p, a.Dev, a.Ino))), nil
+	}
 	for p := s.binding.WorkspacePath; ; p = filepath.Dir(p) {
 		marker := filepath.Join(p, ".git")
 		info, err := os.Lstat(marker)
@@ -105,7 +164,50 @@ func (s *InstallStore) placementLock(ctx context.Context) (string, string, func(
 	}
 	return repo, identity, release, nil
 }
-func (s *InstallStore) placementCollisions(ctx context.Context, repo, target string, manifests ...*BundleManifest) error {
+
+// harnessInventoryCollision compares the harness's reported names with the
+// ones this placement introduces.
+//
+// `owned` are the names this placement already publishes, which the harness
+// will of course report; re-placing what we put there is not a collision with
+// ourselves. A report that cannot be read is an ERROR rather than an empty
+// inventory: reading a failed report as "nothing is taken" would publish over
+// a name the harness holds, which is the one outcome this check exists to stop.
+// placedNames are the skill names a generation publishes, used to tell "this
+// name is already ours" from "this name belongs to something else".
+//
+// A generation whose manifest cannot be read yields no names rather than an
+// error: the caller then treats every reported name as foreign, which refuses
+// a re-placement it could have allowed. Failing closed here costs a retry;
+// failing open would publish over a neighbour.
+func (s *InstallStore) placedNames(ctx context.Context, g *Generation) map[string]bool {
+	if g == nil {
+		return nil
+	}
+	manifest, err := s.verifyGeneration(ctx, g)
+	if err != nil || manifest == nil {
+		return nil
+	}
+	owned := make(map[string]bool, len(manifest.Skills))
+	for _, skill := range manifest.Skills {
+		owned[skill.ID] = true
+	}
+	return owned
+}
+
+func harnessInventoryCollision(listed map[string]string, names, owned map[string]bool) error {
+	for name := range names {
+		if owned[name] {
+			continue
+		}
+		if _, taken := listed[name]; taken {
+			return fmt.Errorf("%w: duplicate project skill name %s", ErrInstallConflict, name)
+		}
+	}
+	return nil
+}
+
+func (s *InstallStore) placementCollisions(ctx context.Context, repo, target string, owned map[string]bool, manifests ...*BundleManifest) error {
 	names := map[string]bool{}
 	for _, m := range manifests {
 		if m != nil {
@@ -117,6 +219,18 @@ func (s *InstallStore) placementCollisions(ctx context.Context, repo, target str
 	// Removal introduces no names and must preserve unrelated user drafts.
 	if len(names) == 0 {
 		return nil
+	}
+	// A harness that can report its own inventory is asked instead of walked.
+	// A reporter that answers with no inventory and no error is saying "this
+	// harness cannot report", and the walk stays in charge.
+	if s.reportedSkills != nil {
+		listed, err := s.reportedSkills(ctx)
+		if err != nil {
+			return fmt.Errorf("skills: %s could not report which skill names exist: %w", s.binding.Harness, err)
+		}
+		if listed != nil {
+			return harnessInventoryCollision(listed, names, owned)
+		}
 	}
 	examined, bytesRead := 0, 0
 	for directory := s.binding.WorkspacePath; ; directory = filepath.Dir(directory) {
@@ -191,7 +305,17 @@ func (s *InstallStore) placementWorkspace() (*InstallStore, error) {
 	}
 	return &InstallStore{root: root, binding: s.binding}, nil
 }
-func (s *InstallStore) verifyPlaced(ctx context.Context, workspace *InstallStore, relative string, g *Generation) error {
+func (s *InstallStore) verifyPlaced(ctx context.Context, workspace *InstallStore, relative string, g *Generation, layout string) error {
+	if want, direct := s.directLayout(); direct && layout == want {
+		manifest, err := s.verifyGeneration(ctx, g)
+		if err != nil {
+			return err
+		}
+		if err := verifyDirectProjection(ctx, workspace.root, relative, s, g, manifest); err != nil {
+			return fmt.Errorf("%w: native files differ: %v", ErrInstallConflict, err)
+		}
+		return nil
+	}
 	if g == nil {
 		if _, err := workspace.root.Lstat(relative); errors.Is(err, os.ErrNotExist) {
 			return nil

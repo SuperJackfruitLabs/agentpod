@@ -7,18 +7,27 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
 )
 
 // Resolve must require the complete, currently detected station key and return
 // its workspace and harness. No caller-supplied path reaches the install store.
 type SkillManagementDeps struct {
-	NodeID  string
-	Resolve func(context.Context, string) (workspace, harness string, err error)
-	Fetch   SkillArtifactFetcher
+	NodeID          string
+	Resolve         func(context.Context, string) (workspace, harness string, err error)
+	Fetch           SkillArtifactFetcher
+	Workspaces      *workspacegate.Coordinator
+	AuthorizeNative func(context.Context, string, string) error
+	VerifyNative    func(context.Context, string, string, []string) (skills.Observation, error)
+	// ReportInventory is the harness's own account of which skill names exist,
+	// for the harnesses that can give one. Nil, or a nil result, leaves the
+	// workspace walk in charge. See InstallStore.UseHarnessInventory.
+	ReportInventory func(context.Context, string, string) (map[string]string, error)
 }
 type SkillOperationResult struct {
 	Receipt *skills.InstallReceipt `json:"receipt"`
@@ -29,6 +38,30 @@ type SkillVerifyResult struct {
 	Harness      string                     `json:"harness"`
 	Profile      string                     `json:"profile"`
 	Verification skills.InstallVerification `json:"verification"`
+}
+type SkillRetentionResult struct {
+	NodeID     string                     `json:"nodeId"`
+	StationKey string                     `json:"stationKey"`
+	Harness    string                     `json:"harness"`
+	Profile    string                     `json:"profile"`
+	Retention  skills.RetentionInspection `json:"retention"`
+}
+type SkillMaintenanceResult struct {
+	NodeID      string                 `json:"nodeId"`
+	StationKey  string                 `json:"stationKey"`
+	Harness     string                 `json:"harness"`
+	Profile     string                 `json:"profile"`
+	Maintenance skills.MaintenancePlan `json:"maintenance"`
+}
+type SkillNativeOperationResult struct {
+	Receipt *skills.PlacementReceipt `json:"receipt"`
+}
+type SkillNativeVerifyResult struct {
+	NodeID       string                       `json:"nodeId"`
+	StationKey   string                       `json:"stationKey"`
+	Harness      string                       `json:"harness"`
+	Profile      string                       `json:"profile"`
+	Verification skills.PlacementVerification `json:"verification"`
 }
 type skillManagementHandler struct {
 	inner Handler
@@ -45,7 +78,7 @@ var skillProfile = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 // also accepts case-insensitive and duplicate keys, unlike the strict contract.
 func skillManagementParams(verb string, raw json.RawMessage) (map[string]string, error) {
 	fields := map[string]bool{"key": true, "profile": true}
-	if verb != "skills.verify" {
+	if verb != "skills.verify" && verb != "skills.native.verify" && verb != "skills.retention" && verb != "skills.maintenance.plan" && verb != "skills.maintenance.apply" {
 		fields["operationId"] = true
 	}
 	if verb == "skills.plan" {
@@ -54,6 +87,15 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 	}
 	if verb == "skills.apply" {
 		fields["stationId"] = true
+		fields["expectedPlanDigest"] = true
+	}
+	if verb == "skills.maintenance.apply" {
+		fields["expectedPlanDigest"] = true
+	}
+	if verb == "skills.native.plan" {
+		fields["action"] = true
+	}
+	if verb == "skills.native.apply" {
 		fields["expectedPlanDigest"] = true
 	}
 	invalid := fmt.Errorf("skills: invalid management params")
@@ -101,12 +143,15 @@ func skillManagementParams(verb string, raw json.RawMessage) (map[string]string,
 			return nil, invalid
 		}
 	}
+	if fields["action"] && params["action"] != "activate" && params["action"] != "deactivate" && params["action"] != "rollback" {
+		return nil, invalid
+	}
 	return params, nil
 }
 
 func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw json.RawMessage, emit func(int, string, bool, string) error) (any, bool, error) {
 	switch verb {
-	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify":
+	case "skills.plan", "skills.rollback", "skills.apply", "skills.operation", "skills.verify", "skills.retention", "skills.maintenance.plan", "skills.maintenance.apply", "skills.native.plan", "skills.native.apply", "skills.native.operation", "skills.native.verify":
 	default:
 		return h.inner.Handle(ctx, verb, raw, emit)
 	}
@@ -114,8 +159,11 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	if err != nil {
 		return nil, false, err
 	}
-	if h.deps.NodeID == "" || h.deps.Resolve == nil || h.deps.Fetch == nil {
+	if h.deps.NodeID == "" || h.deps.Resolve == nil {
 		return nil, false, fmt.Errorf("skills: management unavailable")
+	}
+	if (verb == "skills.plan" || verb == "skills.apply") && h.deps.Fetch == nil {
+		return nil, false, fmt.Errorf("skills: artifact transport unavailable")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
@@ -125,6 +173,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		return nil, false, err
 	}
 	binding := skills.InstallBinding{NodeID: h.deps.NodeID, StationKey: params["key"], Harness: harness, Profile: params["profile"], WorkspacePath: workspace}
+	nativeMutation := verb == "skills.native.plan" || verb == "skills.native.apply"
+	if nativeMutation && (h.deps.Workspaces == nil || h.deps.AuthorizeNative == nil) {
+		return nil, false, fmt.Errorf("skills: native activation unavailable")
+	}
+	if nativeMutation {
+		if err := h.deps.AuthorizeNative(ctx, params["key"], harness); err != nil {
+			return nil, false, fmt.Errorf("skills: native activation refused: %w", err)
+		}
+	}
 	var store *skills.InstallStore
 	var archive []byte
 	if verb == "skills.plan" {
@@ -145,6 +202,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	} else {
 		store, err = skills.OpenExistingInstallStore(binding)
 	}
+	// A harness that can report its own inventory decides name collisions,
+	// in place of walking the workspace. Only a harness with a reporter is
+	// wired; everything else keeps the walk.
+	if store != nil && h.deps.ReportInventory != nil {
+		key, harness := params["key"], harness
+		store.UseHarnessInventory(func(ctx context.Context) (map[string]string, error) {
+			return h.deps.ReportInventory(ctx, key, harness)
+		})
+	}
 	if errors.Is(err, skills.ErrInstallStoreNotFound) {
 		if verb == "skills.operation" {
 			return SkillOperationResult{}, false, nil
@@ -156,6 +222,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 				Present: skills.Observation{Value: &present, ObservedAt: &now, Reason: "No managed namespace exists for this profile"},
 				Loaded:  skills.Observation{Reason: "No harness registration or session inspection was performed"},
 			}}, false, nil
+		}
+		if verb == "skills.retention" {
+			return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: skills.RetentionInspection{NamespaceExists: false, OperationLimit: 256, ObservedAt: time.Now().UTC().Format(time.RFC3339Nano), Limitation: "No managed namespace exists for this profile; no state was created while inspecting"}}, false, nil
+		}
+		if verb == "skills.maintenance.plan" {
+			return nil, false, fmt.Errorf("skills: no managed namespace exists for maintenance")
+		}
+		if verb == "skills.maintenance.apply" {
+			return nil, false, fmt.Errorf("skills: no managed namespace exists for maintenance")
 		}
 	}
 	if err != nil {
@@ -181,6 +256,15 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 	case "skills.verify":
 		verification, err := store.Verify(ctx)
 		return SkillVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
+	case "skills.retention":
+		retention, err := store.Retention(ctx)
+		return SkillRetentionResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Retention: retention}, false, err
+	case "skills.maintenance.plan":
+		plan, err := store.PlanMaintenance(ctx)
+		return SkillMaintenanceResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Maintenance: plan}, false, err
+	case "skills.maintenance.apply":
+		plan, err := store.ApplyMaintenance(ctx, params["expectedPlanDigest"])
+		return SkillMaintenanceResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Maintenance: plan}, false, err
 	case "skills.apply":
 		receipt, err := store.Operation(ctx, params["operationId"])
 		if err != nil {
@@ -199,8 +283,83 @@ func (h *skillManagementHandler) Handle(ctx context.Context, verb string, raw js
 		}
 		applied, err := store.ApplyReviewed(ctx, params["operationId"], params["expectedPlanDigest"], reader)
 		return applied, false, err
+	case "skills.native.plan":
+		plan, err := store.PlanPlacement(ctx, params["operationId"], params["action"])
+		return plan, false, err
+	case "skills.native.operation":
+		receipt, err := store.PlacementOperation(ctx, params["operationId"])
+		if errors.Is(err, os.ErrNotExist) {
+			return SkillNativeOperationResult{}, false, nil
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		return SkillNativeOperationResult{Receipt: &receipt}, false, nil
+	case "skills.native.apply":
+		receipt, err := store.ApplyPlacementWhenIdle(ctx, params["operationId"], params["expectedPlanDigest"], h.deps.Workspaces)
+		return receipt, false, err
+	case "skills.native.verify":
+		verification, err := store.VerifyPlacement(ctx)
+		if err == nil && h.deps.VerifyNative != nil {
+			verification.Loaded = h.nativeLoading(ctx, store, params["key"], harness, verification)
+		}
+		return SkillNativeVerifyResult{NodeID: binding.NodeID, StationKey: binding.StationKey, Harness: harness, Profile: binding.Profile, Verification: verification}, false, err
 	}
 	return nil, false, fmt.Errorf("skills: unknown management verb")
+}
+
+// nativeLoading keeps the three loading outcomes distinct and never collapses
+// them. A probe that ran and answered yields the provider's true or false; a
+// probe that could not run, failed or timed out yields an observation with no
+// value whose reason names the condition. Nothing here can turn a failure into
+// a negative: only h.deps.VerifyNative ever sets a value.
+//
+// A present placement checks that its own discovery names are advertised. An
+// absent placement runs the same read-only fresh-session probe over the names
+// of the last verified generation, because file absence alone is not loading
+// evidence — without it a removal can only report "loaded: unknown", which is
+// what forced an external probe by hand on a real station.
+func (h *skillManagementHandler) nativeLoading(ctx context.Context, store *skills.InstallStore, key, harness string, verification skills.PlacementVerification) skills.Observation {
+	if verification.Present.Value == nil {
+		return verification.Loaded
+	}
+	names, absent := verification.DiscoveryNames, !*verification.Present.Value
+	if !absent {
+		if len(names) == 0 {
+			// A present placement whose advertised names are not established;
+			// VerifyPlacement's own reason already describes that state.
+			return verification.Loaded
+		}
+	} else {
+		determined, indeterminate, err := store.AbsentPlacementNames(ctx)
+		if err != nil {
+			return skills.Observation{Reason: "Native session loading was not queried: " + boundedNativeVerificationReason(err.Error())}
+		}
+		if len(determined) == 0 {
+			if indeterminate == "" {
+				indeterminate = "Native session loading was not queried: the native skill names to check could not be determined"
+			}
+			return skills.Observation{Reason: indeterminate}
+		}
+		names = determined
+	}
+	loaded, err := h.deps.VerifyNative(ctx, key, harness, names)
+	if err != nil {
+		return skills.Observation{Reason: "Native loading verification failed: " + boundedNativeVerificationReason(err.Error())}
+	}
+	if absent && loaded.Value != nil {
+		// Say where the checked names came from: a verdict about an absent
+		// placement is only as good as its record of what used to be there.
+		loaded.Reason = boundedNativeVerificationReason(loaded.Reason + "; the native placement is absent and these names come from the last verified generation")
+	}
+	return loaded
+}
+
+func boundedNativeVerificationReason(reason string) string {
+	if len(reason) > 512 {
+		return reason[:512]
+	}
+	return reason
 }
 
 func (h *skillManagementHandler) HandleFrame(frameType, id string, raw json.RawMessage) error {

@@ -42,6 +42,13 @@ func (s *InstallStore) placementContent(ctx context.Context, g *Generation, m *B
 		switch {
 		case name == "plugin.json" && (s.binding.Harness == "codex" || s.binding.Harness == "openclaw"):
 			allowed["$schema"] = true
+		// Claude exports carry a plugin manifest because that is how the
+		// bundle is built. It is validated here and never published: the
+		// direct projection copies only the skill directory, so nothing
+		// under .claude-plugin reaches the discovery root. No key beyond the
+		// descriptive set is allowed, so a manifest declaring hooks, MCP
+		// servers, commands or agents is refused rather than quietly placed.
+		case name == ".claude-plugin/plugin.json" && s.binding.Harness == "claude-code":
 		case name == ".codex-plugin/plugin.json" && s.binding.Harness == "codex":
 			allowed["skills"] = true
 			allowed["interface"] = true

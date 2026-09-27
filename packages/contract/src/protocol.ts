@@ -3,7 +3,10 @@ import { Station, StationHealth, FsEntry } from "./station";
 import { ChangesetStatus, ChangesetDiff, ChangesetDiffSide } from "./changeset";
 import { PostureReport } from "./posture";
 import { SkillInventory, SkillInventoryParams } from "./skills";
-import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult } from "./skill-install";
+import { SkillPlanParams, SkillApplyParams, SkillOperationParams, SkillVerifyParams, SkillRetentionParams, SkillInstallPlan, SkillInstallReceipt, SkillOperationResult, SkillVerifyResult, SkillRetentionResult, SkillMaintenanceResult, SkillMaintenanceApplyParams } from "./skill-install";
+import { SkillNativePlanParams, SkillNativeApplyParams, SkillNativeOperationParams, SkillNativeVerifyParams, SkillNativeOperationResult, SkillNativeVerifyResult } from "./skill-native";
+import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
+import { PluginPlanParams, PluginApplyParams, PluginInspectParams, PluginOperationPlan, PluginOperationReceipt, PluginOperationResult } from "./plugin-operation";
 
 export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
@@ -32,6 +35,16 @@ export const VERB_PARAMS = {
   "skills.apply": SkillApplyParams,
   "skills.operation": SkillOperationParams,
   "skills.verify": SkillVerifyParams,
+  "skills.retention": SkillRetentionParams,
+  "skills.maintenance.plan": SkillRetentionParams,
+  "skills.maintenance.apply": SkillMaintenanceApplyParams,
+  "skills.native.plan": SkillNativePlanParams,
+  "skills.native.apply": SkillNativeApplyParams,
+  "skills.native.operation": SkillNativeOperationParams,
+  "skills.native.verify": SkillNativeVerifyParams,
+  "plugins.plan": PluginPlanParams,
+  "plugins.apply": PluginApplyParams,
+  "plugins.operation": PluginInspectParams,
   "skills.inventory": SkillInventoryParams,
   "detect": z.object({}),
   "health": z.object({ key: z.string() }),
@@ -66,6 +79,24 @@ export const VERB_PARAMS = {
   }),
   // Node-level: no station key. One scan describes one machine.
   "posture.scan": z.object({}),
+  /**
+   * The public half of the SSH key a station pushes to forge with, generated on the node on first
+   * ask. Provisioning is explicit — the hub asks for the stations an operator chose, never for
+   * every station — so there is no "ensure all".
+   *
+   * BOTH names of the station, for the same reason `matrix.adopt` carries both and neither can
+   * stand in for the other: `stationId` is the hub's, stable across a rename, and is what
+   * revocation is keyed by; `stationKey` is the only name the node knows, and the node records it
+   * beside the key so the harness spawn path can find which key belongs to the station it is
+   * starting. Both are non-secret, which keeps this on the broker's rule that no credential ever
+   * rides in a frame — and here the SECRET NEVER MOVES AT ALL: the private half is generated on the
+   * node and stays there, and the hub registers only what comes back.
+   */
+  "git.identity.ensure": z.object({ stationId: z.string(), stationKey: z.string() }),
+  // Withdrawal. By id alone: a rename must not be able to miss the key it meant to delete. The
+  // forge side is the hub's own to revoke; this only deletes the node's copy, so that a station
+  // reassigned to another agent cannot be handed the previous occupant's key.
+  "git.identity.remove": z.object({ stationId: z.string() }),
   // key is the station key (e.g. "hermes:writer-quill") — what the node
   // uses to resolve the profile directory. stationId is the station's
   // database id — what the hub's redemption endpoint
@@ -74,6 +105,13 @@ export const VERB_PARAMS = {
   // sending both keeps this on the broker's own constraint that a
   // credential never rides along here.
   "matrix.adopt": z.object({ key: z.string(), stationId: z.string() }),
+  // Push a station's resolved voice-note transcription setting into its
+  // harness profile. Same shape and the same rule as matrix.adopt: the node
+  // needs the key (profile dir), the hub's config endpoint
+  // (POST /api/nodes/:nodeId/stations/:stationId/transcription) needs the
+  // database id, and the STT API key is fetched over that endpoint with the
+  // node's own credential — it never rides in a broker frame.
+  "transcription.apply": z.object({ key: z.string(), stationId: z.string() }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -85,6 +123,16 @@ export const VERB_RESULTS = {
   "skills.apply": SkillInstallReceipt,
   "skills.operation": SkillOperationResult,
   "skills.verify": SkillVerifyResult,
+  "skills.retention": SkillRetentionResult,
+  "skills.maintenance.plan": SkillMaintenanceResult,
+  "skills.maintenance.apply": SkillMaintenanceResult,
+  "skills.native.plan": SkillPlacementPlan,
+  "skills.native.apply": SkillPlacementReceipt,
+  "skills.native.operation": SkillNativeOperationResult,
+  "skills.native.verify": SkillNativeVerifyResult,
+  "plugins.plan": PluginOperationPlan,
+  "plugins.apply": PluginOperationReceipt,
+  "plugins.operation": PluginOperationResult,
   "skills.inventory": SkillInventory,
   "detect": z.array(Station),
   "health": StationHealth,
@@ -109,6 +157,15 @@ export const VERB_RESULTS = {
   "changeset.status": ChangesetStatus,
   "changeset.diff": ChangesetDiff,
   "posture.scan": PostureReport,
+  /**
+   * `publicKey` is an OpenSSH public key line. `created` distinguishes a freshly minted pair from
+   * one that already existed, which is what makes a repeated provision safe to run.
+   *
+   * There is deliberately no path and no private key here. The hub has no use for either, and a
+   * key path in a hub log is a map to the one file on that node worth stealing.
+   */
+  "git.identity.ensure": z.object({ publicKey: z.string(), created: z.boolean() }),
+  "git.identity.remove": z.object({ removed: z.boolean() }),
   /**
    * `matrixId` is what closes the move.
    *
@@ -136,5 +193,18 @@ export const VERB_RESULTS = {
   "matrix.adopt": z.object({
     accepted: z.boolean(),
     matrixId: z.string().nullable().optional(),
+  }),
+  /**
+   * What the node wrote into the harness profile, and whether the harness was
+   * restarted to pick it up. `restarted: false` with `applied: true` is a
+   * station without the `lifecycle` capability (a Hermes profile sharing the
+   * root gateway, issue #273): the config is written, and takes effect when
+   * that gateway next restarts. No url or key comes back.
+   */
+  "transcription.apply": z.object({
+    applied: z.boolean(),
+    mode: z.enum(["on", "off"]),
+    model: z.string().nullable(),
+    restarted: z.boolean(),
   }),
 } as const;

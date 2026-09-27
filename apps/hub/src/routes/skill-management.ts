@@ -1,3 +1,4 @@
+import { nodeRefusal } from "../services/skill-operation-diagnostics";
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -8,6 +9,16 @@ import {
   SkillApplyRequest,
   SkillVerifyParams,
   SkillVerifyResult,
+  SkillRetentionResult,
+  SkillMaintenanceResult,
+  SkillMaintenanceApplyParams,
+  SkillNativePlanRequest,
+  SkillNativeVerifyResult,
+  PluginPlanRequest,
+  TrustedSkillReleaseImportRequest,
+  SkillReleaseCanaryPlanRequest,
+  SkillReleaseCanaryOperationRequest,
+  SkillReleaseCanaryApplyRequest,
 } from "@agentpod/contract";
 import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
@@ -28,13 +39,22 @@ import {
   type SkillOwner,
 } from "../services/skill-artifacts";
 import {
+  importTrustedSkillRelease,
+  listTrustedSkillReleases,
+} from "../services/trusted-skill-catalog";
+import { createSkillReleaseCohort, listSkillReleaseCohorts } from "../services/skill-release-cohorts";
+import { createSkillReleaseCanaryOperation, getSkillReleaseCanaryOperation } from "../services/skill-release-canary";
+import { SkillReleaseCohortCreateRequest } from "@agentpod/contract";
+import {
   createSkillOperation,
   getSkillOperation,
   executeSkillOperation,
   listSkillOperations,
   operationResult,
+  MANAGED_PLUGIN,
 } from "../services/skill-operations";
 import * as broker from "../services/broker";
+import { canaryOperationIdentity } from "./canary-operation";
 
 function owner(c: Context): SkillOwner {
   const user = c.get("user") as AuthUser | undefined;
@@ -42,22 +62,27 @@ function owner(c: Context): SkillOwner {
     throw new SkillRequestError(401, "Unauthorized");
   return { userId: user.id, tenantId: user.tenantId };
 }
-async function stationContext(c: Context, mutate = false) {
+
+async function stationContext(c: Context, mutate = false, capability = "skills.manage") {
   const caller = owner(c),
     station = await getStation(caller.userId, c.req.param("id")!);
   if (!station || station.tenantId !== caller.tenantId)
     throw new SkillRequestError(404, "Station not found");
-  if (!gateCapability(station, "skills.manage"))
+  if (!gateCapability(station, capability))
     throw new SkillRequestError(
       403,
-      "Station does not advertise skill management",
+      capability === "skills.native"
+        ? "Station does not advertise native skill activation"
+        : capability === "plugins.manage"
+          ? "Station does not advertise plugin management"
+          : "Station does not advertise skill management",
     );
   if (mutate) {
     const refusal = await refuseWithoutReach(
       c,
       caller.userId,
       station,
-      "skills.manage",
+      capability as "skills.manage" | "skills.native" | "plugins.manage",
     );
     if (refusal) return { refusal } as const;
   }
@@ -65,6 +90,22 @@ async function stationContext(c: Context, mutate = false) {
 }
 
 /** Bounded streaming reads also protect chunked uploads without Content-Length. */
+
+/**
+ * A node refusal the operator can act on, rather than a blanket bad gateway.
+ *
+ * `nodeRefusal` separates a conflict the node NAMED (409, carrying the reason)
+ * from a transport failure where it never answered (502, the generic text
+ * passed in here).
+ */
+function skillNodeRefusal(nodeError: string | undefined, unavailable: string) {
+  const outcome = nodeRefusal(nodeError);
+  return new SkillRequestError(
+    outcome.status,
+    outcome.status === 409 ? outcome.message : unavailable,
+  );
+}
+
 export async function readSkillBody(
   request: Request,
   maxBytes: number,
@@ -139,9 +180,57 @@ export function createSkillManagementRoutes(
   return routesBase()
     .use("/skills/*", authenticateSkillRequest)
     .use("/stations/:id/skills/*", authenticateSkillRequest)
+    .use("/stations/:id/plugins/*", authenticateSkillRequest)
     .get("/skills/artifacts", async (c) =>
       c.json(await listSkillArtifacts(owner(c))),
     )
+    .get("/skills/catalog/releases", async (c) =>
+      c.json(await listTrustedSkillReleases(owner(c))),
+    )
+    .post("/skills/catalog/releases", async (c) => {
+      const request = await body(c, TrustedSkillReleaseImportRequest);
+      return c.json(
+        await importTrustedSkillRelease(owner(c), request.record, request.artifacts),
+        201,
+      );
+    })
+    .get("/skills/catalog/cohorts", async (c) => c.json(await listSkillReleaseCohorts(owner(c))))
+    .post("/skills/catalog/cohorts", async (c) =>
+      c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest)), 201),
+    )
+    .post("/skills/catalog/cohorts/:cohortId/canary/plan", async (c) => {
+      const caller = owner(c);
+      const binding = await createSkillReleaseCanaryOperation(
+        caller,
+        c.req.param("cohortId"),
+        await body(c, SkillReleaseCanaryPlanRequest),
+      );
+      const station = await getStation(caller.userId, binding.stationId);
+      if (!station || station.tenantId !== caller.tenantId)
+        throw new SkillRequestError(409, "Canary station is no longer available to this owner");
+      const result = await executeSkillOperation(caller, station, binding.operationId, "plan", undefined, timeoutMs);
+      return c.json({ ...binding, operation: result }, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/skills/catalog/cohorts/:cohortId/canary/operations/inspect", async (c) => {
+      const caller = owner(c);
+      const { station, operation } = await getSkillReleaseCanaryOperation(caller, c.req.param("cohortId"), await body(c, SkillReleaseCanaryOperationRequest));
+      const result = await executeSkillOperation(caller, station, operation.id, "inspect", undefined, timeoutMs);
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/skills/catalog/cohorts/:cohortId/canary/operations/apply", async (c) => {
+      const caller = owner(c);
+      const request = await body(c, SkillReleaseCanaryApplyRequest);
+      const { station, operation } = await getSkillReleaseCanaryOperation(
+        caller,
+        c.req.param("cohortId"),
+        canaryOperationIdentity(request),
+      );
+      if (!station.capabilities?.includes("skills.manage"))
+        throw new SkillRequestError(409, "Canary station does not advertise skill management");
+      await requireGrantReach(caller.userId, station, "skills.manage", "mutate");
+      const result = await executeSkillOperation(caller, station, operation.id, "apply", request.planDigest, timeoutMs);
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
     .post("/skills/artifacts", async (c) => {
       const query = new URL(c.req.url).searchParams;
       if ([...query.keys()].some((key) => query.getAll(key).length !== 1))
@@ -204,7 +293,7 @@ export function createSkillManagementRoutes(
         operation = await createSkillOperation(
           ctx.caller,
           ctx.station,
-          request,
+        request,
         );
       const result = await executeSkillOperation(
         ctx.caller,
@@ -218,6 +307,66 @@ export function createSkillManagementRoutes(
         result,
         result.inFlight || result.state === "unknown" ? 202 : 200,
       );
+    })
+    .post("/stations/:id/skills/native/plan", async (c) => {
+      const ctx = await stationContext(c, true, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillNativePlanRequest);
+      const operation = await createSkillOperation(ctx.caller, ctx.station, request);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, operation.id, "plan", undefined, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .get("/stations/:id/skills/native/operations", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(await listSkillOperations(ctx.caller, ctx.station, "native"));
+    })
+    .get("/stations/:id/skills/native/operations/:operationId", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(operationResult(await getSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "native")));
+    })
+    .post("/stations/:id/skills/native/operations/:operationId/inspect", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      await body(c, z.object({}).strict());
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "inspect", undefined, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    // Plugin management (#553): the node plans enabling or disabling the one
+    // plugin its apn embeds; the Console reviews and applies by digest. Reads
+    // need only the capability; planning and applying need reach.
+    .post("/stations/:id/plugins/plan", async (c) => {
+      const ctx = await stationContext(c, true, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, PluginPlanRequest);
+      const operation = await createSkillOperation(ctx.caller, ctx.station, { ...request, plugin: MANAGED_PLUGIN });
+      const result = await executeSkillOperation(ctx.caller, ctx.station, operation.id, "plan", undefined, timeoutMs, "plugin");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .get("/stations/:id/plugins/operations", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(await listSkillOperations(ctx.caller, ctx.station, "plugin"));
+    })
+    .get("/stations/:id/plugins/operations/:operationId", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      return c.json(operationResult(await getSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "plugin")));
+    })
+    .post("/stations/:id/plugins/operations/:operationId/inspect", async (c) => {
+      const ctx = await stationContext(c, false, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      await body(c, z.object({}).strict());
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "inspect", undefined, timeoutMs, "plugin");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
+    .post("/stations/:id/plugins/operations/:operationId/apply", async (c) => {
+      const ctx = await stationContext(c, true, "plugins.manage");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillApplyRequest);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "apply", request.planDigest, timeoutMs, "plugin");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
     .get("/stations/:id/skills/operations", async (c) => {
       const ctx = await stationContext(c);
@@ -271,6 +420,13 @@ export function createSkillManagementRoutes(
         result.inFlight || result.state === "unknown" ? 202 : 200,
       );
     })
+    .post("/stations/:id/skills/native/operations/:operationId/apply", async (c) => {
+      const ctx = await stationContext(c, true, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillApplyRequest);
+      const result = await executeSkillOperation(ctx.caller, ctx.station, c.req.param("operationId"), "apply", request.planDigest, timeoutMs, "native");
+      return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
+    })
     .post("/stations/:id/skills/verify", async (c) => {
       const ctx = await stationContext(c);
       if ("refusal" in ctx) return ctx.refusal;
@@ -294,6 +450,69 @@ export function createSkillManagementRoutes(
           502,
           "Node verification is unavailable or invalid",
         );
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/retention", async (c) => {
+      const ctx = await stationContext(c);
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillVerifyParams.omit({ key: true }));
+      const response = await broker.request(
+        ctx.station.nodeId,
+        "skills.retention",
+        { key: ctx.station.stationKey, profile: request.profile },
+        { timeoutMs },
+      );
+      const parsed = SkillRetentionResult.safeParse(response.data);
+      if (
+        !response.ok ||
+        !parsed.success ||
+        parsed.data.nodeId !== ctx.station.nodeId ||
+        parsed.data.stationKey !== ctx.station.stationKey ||
+        parsed.data.harness !== ctx.station.harness ||
+        parsed.data.profile !== request.profile
+      )
+        throw skillNodeRefusal(response.error, "Node retention inspection is unavailable or invalid");
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/maintenance/plan", async (c) => {
+      const ctx = await stationContext(c);
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillVerifyParams.omit({ key: true }));
+      const response = await broker.request(
+        ctx.station.nodeId,
+        "skills.maintenance.plan",
+        { key: ctx.station.stationKey, profile: request.profile },
+        { timeoutMs },
+      );
+      const parsed = SkillMaintenanceResult.safeParse(response.data);
+      if (
+        !response.ok ||
+        !parsed.success ||
+        parsed.data.nodeId !== ctx.station.nodeId ||
+        parsed.data.stationKey !== ctx.station.stationKey ||
+        parsed.data.harness !== ctx.station.harness ||
+        parsed.data.profile !== request.profile
+      ) throw skillNodeRefusal(response.error, "Node maintenance preview is unavailable or invalid");
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/maintenance/apply", async (c) => {
+      const ctx = await stationContext(c, true);
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillMaintenanceApplyParams.omit({ key: true }));
+      const response = await broker.request(ctx.station.nodeId, "skills.maintenance.apply", { key: ctx.station.stationKey, profile: request.profile, expectedPlanDigest: request.expectedPlanDigest }, { timeoutMs });
+      const parsed = SkillMaintenanceResult.safeParse(response.data);
+      if (!response.ok || !parsed.success || parsed.data.nodeId !== ctx.station.nodeId || parsed.data.stationKey !== ctx.station.stationKey || parsed.data.harness !== ctx.station.harness || parsed.data.profile !== request.profile)
+        throw skillNodeRefusal(response.error, "Node maintenance apply is unavailable or invalid");
+      return c.json(parsed.data);
+    })
+    .post("/stations/:id/skills/native/verify", async (c) => {
+      const ctx = await stationContext(c, false, "skills.native");
+      if ("refusal" in ctx) return ctx.refusal;
+      const request = await body(c, SkillVerifyParams.omit({ key: true }));
+      const response = await broker.request(ctx.station.nodeId, "skills.native.verify", { key: ctx.station.stationKey, profile: request.profile }, { timeoutMs });
+      const parsed = SkillNativeVerifyResult.safeParse(response.data);
+      if (!response.ok || !parsed.success || parsed.data.nodeId !== ctx.station.nodeId || parsed.data.stationKey !== ctx.station.stationKey || parsed.data.harness !== ctx.station.harness || parsed.data.profile !== request.profile)
+        throw new SkillRequestError(502, "Node native verification is unavailable or invalid");
       return c.json(parsed.data);
     });
 }

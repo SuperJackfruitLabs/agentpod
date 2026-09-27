@@ -38,3 +38,11 @@ func decideEnroll(cfg config.Config, haveConfig bool, hub string, force bool,
 	}
 	return decisionEnroll, "stored credential rejected by hub"
 }
+
+// renewedConfig rotates only the enrollment identity. Runtime paths and
+// operator-selected gates belong to the node, not to an enrollment token.
+func renewedConfig(existing config.Config, hub, nodeID, nodeSecret string) config.Config {
+	updated := existing
+	updated.Hub, updated.NodeID, updated.NodeSecret = hub, nodeID, nodeSecret
+	return updated
+}

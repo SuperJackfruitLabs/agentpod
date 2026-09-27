@@ -35,6 +35,21 @@ import {
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
 import { parseGateDecision } from "./gates";
+import { imageNote, imageSource, isRefusal, loadImage, type PromptImage } from "./attachments";
+import {
+  audioSource,
+  isVoiceRefusal,
+  loadVoice,
+  transcriptContent,
+  MAX_VOICE_SECONDS,
+  transcriptNotice,
+  voiceNote,
+  voicePrompt,
+  type Transcriber,
+  type VoiceResult,
+} from "./voice";
+import { RoomQueue, type DispatchOutcome, type FreeOutcome, type QueuedPrompt } from "./room-queue";
+import { SESSION_BUSY_MESSAGE } from "../acp-sessions";
 
 const log = createLogger("matrix-inbound");
 
@@ -72,14 +87,57 @@ export interface InboundDeps {
   };
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+    /**
+     * Fetch media as `userId`. Optional so a relay-only deployment, and the
+     * tests that predate images, still type-check; without it an image
+     * reaches the agent as a note saying it could not be fetched.
+     */
+    downloadMedia?(userId: string, mxc: string): Promise<Uint8Array | null>;
+    /**
+     * Send any room event as `userId`. Used for the bridge's own words — a
+     * refusal, a failure — sent as `m.notice`, so a client can show them as
+     * the room talking rather than the agent. Optional: without it they fall
+     * back to `sendText`.
+     */
+    sendCustomEvent?(
+      userId: string,
+      roomId: string,
+      eventType: string,
+      content: Record<string, unknown>
+    ): Promise<string | null>;
   };
+  /**
+   * Speech to text for voice notes, asked per voice note for the room's
+   * station — the console's station and hub settings, then TRANSCRIBE_* env
+   * (`services/transcription-settings.ts`). Null: none for that station.
+   */
+  transcriberFor?(stationId: string): Promise<{ transcriber: Transcriber; maxSeconds: number } | null>;
+  /**
+   * One transcriber for every station, at the default length limit. Used when
+   * `transcriberFor` is absent — the tests that predate per-station settings.
+   * Without either, a voice note reaches the agent as a note that it could
+   * not be heard — see `voice.ts`.
+   */
+  transcriber?: Transcriber | null;
   acp: {
     createSession(input: {
       stationId: string;
       userId: string;
       mode: string;
     }): Promise<{ id: string }>;
-    promptSession(userId: string, sessionId: string, text: string): Promise<void>;
+    promptSession(
+      userId: string,
+      sessionId: string,
+      text: string,
+      images?: PromptImage[]
+    ): Promise<void>;
+    /**
+     * Whether the session is mid-turn, and when it will not be. Optional so
+     * the tests that predate the queue still type-check; without them a busy
+     * session's refusal is reported rather than queued.
+     */
+    isBusy?(sessionId: string): boolean;
+    whenIdle?(sessionId: string): Promise<FreeOutcome>;
     /**
      * Answer a permission request the agent is parked on. Optional so a
      * deployment (or a test) that only relays messages still type-checks.
@@ -215,6 +273,28 @@ function remember(event: InboundEvent): void {
 }
 
 /**
+ * The transcription service for a station's voice note, and its length limit.
+ * A lookup that fails is a voice note that cannot be heard — reported like
+ * any other reason — never a message that is lost.
+ */
+async function voiceServiceFor(
+  deps: InboundDeps,
+  stationId: string
+): Promise<{ transcriber: Transcriber | null; maxSeconds: number } | { reason: string }> {
+  if (!deps.transcriberFor) return { transcriber: deps.transcriber ?? null, maxSeconds: MAX_VOICE_SECONDS };
+  try {
+    const found = await deps.transcriberFor(stationId);
+    return found ?? { transcriber: null, maxSeconds: MAX_VOICE_SECONDS };
+  } catch (err) {
+    log.error("could not read a station's transcription settings", {
+      stationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { reason: "its transcription settings could not be read" };
+  }
+}
+
+/**
  * Try the waiting messages again, now that more keys are in hand.
  *
  * Called after each transaction's crypto half, which is the only moment new
@@ -273,10 +353,26 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     return;
   }
 
-  const text = typeof event.content?.body === "string" ? event.content.body : "";
+  // An image's `body` is its file name, not something the sender said — the
+  // bridge used to send that name as the whole message, and the agent could
+  // only guess at a picture it never received (2026-09-24). Its words are the
+  // caption, if there is one; the picture itself is fetched below, once the
+  // room and the agent speaking in it are known.
+  const image = imageSource(event.content);
+  // A voice note's `body` is its file name too; its words are transcribed
+  // below, the same way the picture is fetched.
+  const audio = image ? null : audioSource(event.content);
+  const text = image
+    ? image.caption
+    : audio
+      ? audio.caption
+      : typeof event.content?.body === "string"
+        ? event.content.body
+        : "";
   // Whitespace is not a prompt. Sending one would start a turn with nothing in
-  // it and cost an agent a round trip to say so.
-  if (text.trim() === "") return;
+  // it and cost an agent a round trip to say so. A bare image or voice note is
+  // not nothing.
+  if (text.trim() === "" && !image && !audio) return;
 
   const room = await roomContext(event.room_id);
   // A room we do not own is not ours to answer in — anyone can invite the bot
@@ -302,7 +398,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   }
 
   const agentUser = bridgeUserId(handle, deps.domain);
-  const say = (body: string) => deps.client.sendText(agentUser, room.roomId, body);
+  const say = (body: string) => notice(deps, agentUser, room.roomId, body);
 
   // ── Who is this? ──────────────────────────────────────────────────────────
   const identity = await resolveMatrixId(event.sender);
@@ -396,6 +492,127 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   }
 
   // ── Say it to the agent ───────────────────────────────────────────────────
+  //
+  // The picture, fetched as the agent — a member of the room, so allowed to
+  // read what was posted in it — and decrypted when the room is encrypted.
+  // One that cannot be had still reaches the agent, as a note saying why,
+  // rather than as a file name it would try to interpret.
+  let prompt = text;
+  const images: PromptImage[] = [];
+  if (image) {
+    const download = deps.client.downloadMedia;
+    const loaded = download
+      ? await loadImage(image, (mxc) => download(agentUser, mxc))
+      : { reason: "this hub cannot fetch images" };
+    if (isRefusal(loaded)) {
+      log.warn("an image for an agent could not be passed on", {
+        room: room.roomId,
+        reason: loaded.reason,
+      });
+      prompt = [text, imageNote(image.name, loaded.reason)].filter((p) => p.trim() !== "").join("\n");
+    } else {
+      images.push(loaded);
+    }
+  }
+
+  // The voice note, heard: fetched as the agent, decrypted, transcribed. The
+  // transcript goes into the room as a reply to the note — so whoever sent it
+  // sees what the agent heard — and to the agent as the message. One that
+  // cannot be heard reaches the agent as a note saying why, and the room is
+  // told the same.
+  if (audio) {
+    const download = deps.client.downloadMedia;
+    const service = download ? await voiceServiceFor(deps, room.stationId) : null;
+    const heard: VoiceResult = !download || !service
+      ? { reason: "this hub cannot fetch audio" }
+      : "reason" in service
+        ? service
+        : await loadVoice(audio, (mxc) => download(agentUser, mxc), service.transcriber, service.maxSeconds);
+    if (isVoiceRefusal(heard)) {
+      log.warn("a voice note for an agent could not be transcribed", {
+        room: room.roomId,
+        reason: heard.reason,
+      });
+      await say(`I could not transcribe this voice note: ${heard.reason}.`);
+      prompt = [text, voiceNote(audio.name, heard.reason)].filter((p) => p.trim() !== "").join("\n");
+    } else {
+      log.info("transcribed a voice note for an agent", {
+        room: room.roomId,
+        seconds: heard.seconds,
+        language: heard.transcript.language,
+      });
+      await notice(
+        deps,
+        agentUser,
+        room.roomId,
+        transcriptNotice(heard.transcript),
+        event.event_id,
+        transcriptContent(heard.transcript, heard.seconds)
+      );
+      prompt = voicePrompt(heard.transcript, heard.seconds, text);
+    }
+  }
+
+  const turn: QueuedPrompt = event.event_id
+    ? { text: prompt, images, eventId: event.event_id }
+    : { text: prompt, images };
+  // Mid-turn is not a refusal. The message waits and goes with the next turn
+  // — see `RoomQueue`. Only a hub that cannot tell when a turn ends refuses.
+  if ((await dispatchTurn(room, agentUser, turn, deps)) === "busy") {
+    if (deps.acp.whenIdle) {
+      queueFor(deps).enqueue(room.roomId, turn);
+    } else {
+      await say(`I could not reach this agent: ${SESSION_BUSY_MESSAGE}`);
+    }
+  }
+}
+
+type RoomRow = NonNullable<Awaited<ReturnType<typeof roomContext>>>;
+
+/**
+ * The bridge's own words — a refusal, a failure, a dropped queue — as an
+ * `m.notice`. Sent as the agent, because only the agent is in the room, but
+ * marked as a notice so a client can show it as the room speaking: posted as
+ * ordinary text, "Session is busy" read as the agent turning the person away.
+ */
+function notice(
+  deps: InboundDeps,
+  agentUser: string,
+  roomId: string,
+  body: string,
+  replyTo?: string,
+  extra?: Record<string, unknown>
+) {
+  if (deps.client.sendCustomEvent) {
+    return deps.client.sendCustomEvent(agentUser, roomId, "m.room.message", {
+      // Extra keys beside the body, never over it: `msgtype` and `body` below
+      // are what every client falls back to.
+      ...(extra ?? {}),
+      msgtype: "m.notice",
+      body,
+      // A reply, when it is about one message — a voice note's transcript —
+      // so a client shows it under that message.
+      ...(replyTo ? { "m.relates_to": { "m.in_reply_to": { event_id: replyTo } } } : {}),
+    });
+  }
+  return deps.client.sendText(agentUser, roomId, body);
+}
+
+/**
+ * Hand one turn to the room's agent: find or open the session, attach the
+ * room to it, mark the message, prompt.
+ *
+ * "busy" when the session is mid-turn — checked BEFORE the trigger is noted,
+ * because noting it would move the running turn's ✅ onto a message that has
+ * not been answered. Any other failure is reported to the room and counts as
+ * handled.
+ */
+async function dispatchTurn(
+  room: RoomRow,
+  agentUser: string,
+  turn: QueuedPrompt,
+  deps: InboundDeps
+): Promise<DispatchOutcome> {
   try {
     // A session the hub has already ended is not a session. Boot reconciliation
     // ends every live one with "hub restarted", so without this check a room
@@ -403,6 +620,8 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     // first restart — with "Session not found or not active" as the only clue.
     const sessionUsable = room.sessionId !== null && room.sessionStatus !== null && room.sessionStatus !== "ended";
     let sessionId = sessionUsable ? room.sessionId : null;
+
+    if (sessionId && deps.acp.isBusy?.(sessionId)) return "busy";
 
     if (!sessionId) {
       // One session per room, not per message: a conversation is a
@@ -415,9 +634,10 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
       // hub had already received, resolved and authorised the message.
       //
       // Authorisation still belongs to the principal: the control-pair check
-      // above is what decides whether this sender may dispatch this agent, and
-      // it must stay that way — a grant can cover a station its holder does not
-      // own. What this line settles is only which user the station is read as.
+      // in `handleRoomMessage` is what decides whether this sender may dispatch
+      // this agent, and it must stay that way — a grant can cover a station its
+      // holder does not own. What this line settles is only which user the
+      // station is read as.
       //
       // The cost, recorded rather than hidden: `acp_sessions.user_id` now names
       // the owner, so a transcript no longer says WHICH principal asked. That
@@ -437,7 +657,7 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     // Before prompting, so the first words of the answer are not produced into
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
-    if (event.event_id) deps.noteTrigger?.(sessionId, event.event_id);
+    if (turn.eventId) deps.noteTrigger?.(sessionId, turn.eventId);
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
@@ -447,14 +667,58 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     // "Session not found or not active." The same defect as the station
     // lookup, one call later; it survived the first fix because only the
     // createSession site was corrected.
-    await deps.acp.promptSession(room.stationUserId, sessionId, text);
+    await deps.acp.promptSession(room.stationUserId, sessionId, turn.text, turn.images);
+    return "sent";
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    // Lost the race between the check above and the prompt: another message
+    // started a turn in between. Waiting is still the answer.
+    if (reason === SESSION_BUSY_MESSAGE) return "busy";
     log.error("matrix message could not reach the station", {
       room: room.roomId,
       stationKey: room.stationKey,
       error: reason,
     });
-    await say(`I could not reach this agent: ${reason}`);
+    await notice(deps, agentUser, room.roomId, `I could not reach this agent: ${reason}`);
+    return "sent";
   }
+}
+
+/** One queue per set of deps — one in production, one per test. */
+const queues = new WeakMap<InboundDeps, RoomQueue>();
+
+function queueFor(deps: InboundDeps): RoomQueue {
+  let queue = queues.get(deps);
+  if (queue) return queue;
+  queue = new RoomQueue({
+    async waitUntilFree(roomId) {
+      const room = await roomContext(roomId);
+      const usable = room?.sessionId && room.sessionStatus && room.sessionStatus !== "ended";
+      if (!room || !usable || !deps.acp.whenIdle) return "ended";
+      return deps.acp.whenIdle(room.sessionId!);
+    },
+    async dispatch(roomId, prompt) {
+      // Re-read: the session may have ended, or been replaced, while waiting.
+      const room = await roomContext(roomId);
+      const handle = room?.principalId ? await principalHandle(room.principalId) : null;
+      if (!room || !handle) return "sent";
+      return dispatchTurn(room, bridgeUserId(handle, deps.domain), prompt, deps);
+    },
+    async giveUp(roomId, dropped) {
+      const room = await roomContext(roomId);
+      const handle = room?.principalId ? await principalHandle(room.principalId) : null;
+      if (!room || !handle) return;
+      log.warn("gave up on messages queued behind a turn that never ended", { room: roomId, dropped });
+      await notice(
+        deps,
+        bridgeUserId(handle, deps.domain),
+        roomId,
+        dropped === 1
+          ? "One message was not passed on: the agent's previous turn never finished."
+          : `${dropped} messages were not passed on: the agent's previous turn never finished.`
+      );
+    },
+  });
+  queues.set(deps, queue);
+  return queue;
 }

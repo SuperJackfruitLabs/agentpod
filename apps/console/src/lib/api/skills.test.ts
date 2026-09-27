@@ -11,6 +11,7 @@ const operation = {
   stationKey: "codex:fixture",
   harness: "codex",
   profile: "fixture",
+  kind: "managed",
   action: "install",
   artifactId: "11111111-1111-4111-8111-111111111111",
   state: "planned",
@@ -77,6 +78,27 @@ test("refuses a verification for another profile", async () => {
     skills.verifySkillFiles("station_1", "fixture"),
   ).rejects.toThrow();
 });
+test("preserves native discovery names when verifying a native placement", async () => {
+  const http = vi.spyOn(client, "http").mockResolvedValue({
+    nodeId: "fixture-node",
+    stationKey: "codex:fixture",
+    harness: "codex",
+    profile: "fixture",
+    verification: {
+      current: planFixture.after,
+      path: "/workspace/.agents/skills/sjl-fixture",
+      discoveryNames: ["sjl-fixture:sjl-fixture"],
+      present: { value: true, reason: "Verified native placement", observedAt: planFixture.createdAt },
+      loaded: { value: true, reason: "Fresh isolated session advertised the skill", observedAt: planFixture.createdAt },
+    },
+  });
+  const result = await skills.verifyNativeSkillPlacement("station_1", "fixture");
+  expect(result.verification.discoveryNames).toEqual(["sjl-fixture:sjl-fixture"]);
+  expect(http).toHaveBeenCalledWith(
+    "/api/stations/station_1/skills/native/verify",
+    expect.objectContaining({ method: "POST" }),
+  );
+});
 test("rejects oversized artifacts before sending bytes", async () => {
   const http = vi.spyOn(client, "http");
   await expect(
@@ -87,4 +109,10 @@ test("rejects oversized artifacts before sending bytes", async () => {
     ),
   ).rejects.toThrow(/32 MiB/);
   expect(http).not.toHaveBeenCalled();
+});
+test("records only the exact release record and its harness pins", async () => {
+  const http = vi.spyOn(client, "http").mockResolvedValue({ id: "22222222-2222-4222-8222-222222222222", version: "1.2.3", profile: "fixture", recordDigest: "a".repeat(64), createdAt: planFixture.createdAt });
+  const record = { schema_version: 1, version: "1.2.3", profile: "fixture", visibility: "private", artifacts: ["codex", "claude-code", "opencode", "pi", "hermes", "openclaw"].map(harness => ({ harness, bundle_digest: "b".repeat(64), archive_sha256: "c".repeat(64), path: `archives/${harness}/sjl-fixture.tar.gz` })), digest: "d".repeat(64) } as never;
+  await skills.importTrustedSkillRelease(record, [{ harness: "codex", artifactId: "11111111-1111-4111-8111-111111111111" }] as never);
+  expect(http).toHaveBeenCalledWith("/api/skills/catalog/releases", expect.objectContaining({ method: "POST", body: JSON.stringify({ record, artifacts: [{ harness: "codex", artifactId: "11111111-1111-4111-8111-111111111111" }] }) }));
 });

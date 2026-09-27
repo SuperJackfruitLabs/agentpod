@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "operationId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "action": "disable",
+  "binding": {
+    "nodeId": "node_fixture",
+    "stationKey": "hermes:fixture",
+    "harness": "hermes",
+    "plugin": "agentpod-live"
+  },
+  "version": "0.3.0",
+  "gate": null,
+  "files": null,
+  "filesDigest": "",
+  "fileAction": null,
+  "fileNames": [],
+  "config": null,
+  "noOp": false,
+  "notes": [],
+  "refusal": "hermes-live: apn has no record of installing agentpod-live in this profile",
+  "restartRequired": false,
+  "createdAt": "2026-09-25T10:00:00Z",
+  "planDigest": "3333333333333333333333333333333333333333333333333333333333333333"
+}

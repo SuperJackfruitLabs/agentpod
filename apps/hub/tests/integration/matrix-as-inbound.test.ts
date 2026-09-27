@@ -402,6 +402,170 @@ describe("an inbound room message", () => {
   });
 });
 
+let transcriptKeys: unknown[] = [];
+
+describe("a voice note", () => {
+  function voice(sender: string, extra: Record<string, unknown> = {}) {
+    return {
+      type: "m.room.message",
+      sender,
+      room_id: ROOM,
+      event_id: "$voice1",
+      content: {
+        msgtype: "m.audio",
+        body: "Voice message.m4a",
+        url: "mxc://id.agentpod.dev/voice1",
+        info: { mimetype: "audio/mp4", duration: 42_000 },
+        ...extra,
+      },
+    };
+  }
+
+  /** `deps()` with media, notices and a transcriber that hears `heard`. */
+  function voiceDeps(heard: string | Error) {
+    const base = deps();
+    const notices: Array<{ body: string; replyTo: string | null }> = [];
+    transcriptKeys = [];
+    return {
+      notices,
+      deps: {
+        ...base,
+        client: {
+          ...base.client,
+          downloadMedia: async () => new Uint8Array([1, 2, 3]),
+          sendCustomEvent: async (_u: string, _r: string, _t: string, content: Record<string, unknown>) => {
+            const rel = content["m.relates_to"] as { "m.in_reply_to"?: { event_id?: string } } | undefined;
+            notices.push({ body: String(content.body), replyTo: rel?.["m.in_reply_to"]?.event_id ?? null });
+            if (content["dev.agentpod.voice_transcript"]) transcriptKeys.push(content["dev.agentpod.voice_transcript"]);
+            return "$notice";
+          },
+        },
+        transcriber: {
+          transcribe: async () => {
+            if (heard instanceof Error) throw heard;
+            return { text: heard, language: "en" };
+          },
+        },
+      },
+    };
+  }
+
+  test("is transcribed: the agent gets the words, and the room gets the transcript under the note", async () => {
+    // The 2026-09-24 report: a voice note reached Krishna as its file name.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notices } = voiceDeps("send the report by Friday");
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toBe("[Voice note, 0:42, transcribed] send the report by Friday");
+    expect(prompts[0]!.text).not.toContain("Voice message.m4a");
+    expect(notices).toEqual([{ body: "Transcript: send the report by Friday", replyTo: "$voice1" }]);
+    expect(transcriptKeys).toEqual([{ schema_version: 1, text: "send the report by Friday", language: "en", seconds: 42 }]);
+  });
+
+  test("one that cannot be transcribed still reaches the agent, with the reason, and the room is told", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d, notices } = voiceDeps(new Error("the transcription service answered 503"));
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(prompts[0]!.text).toBe(
+      "[The user sent a voice note, Voice message.m4a, but the transcription service answered 503.]"
+    );
+    expect(notices[0]!.body).toBe("I could not transcribe this voice note: the transcription service answered 503.");
+  });
+
+  test("over five minutes is not transcribed", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never heard");
+
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 301_000 } }), d);
+
+    expect(prompts[0]!.text).toContain("it is longer than 5 minutes");
+    expect(prompts[0]!.text).not.toContain("never heard");
+  });
+
+  test("the service is looked up per voice note, for the room's station, with that station's limit", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+    const askedFor: string[] = [];
+    const heardBy: string[] = [];
+    const withLookup = {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async (stationId: string) => {
+        askedFor.push(stationId);
+        return {
+          transcriber: {
+            transcribe: async () => {
+              heardBy.push(stationId);
+              return { text: "from the station's own service", language: "en" };
+            },
+          },
+          maxSeconds: 30,
+        };
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), withLookup);
+    // 42 s is over this station's 30 s limit: named, not heard.
+    expect(askedFor).toEqual([STATION]);
+    expect(heardBy).toEqual([]);
+    expect(prompts[0]!.text).toContain("it is longer than 30 seconds");
+
+    prompts.length = 0;
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 20_000 } }), withLookup);
+    expect(heardBy).toEqual([STATION]);
+    expect(prompts[0]!.text).toBe("[Voice note, 0:20, transcribed] from the station's own service");
+  });
+
+  test("a station whose lookup answers none is told the hub has no service", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), { ...d, transcriber: undefined, transcriberFor: async () => null });
+
+    expect(prompts[0]!.text).toBe(
+      "[The user sent a voice note, Voice message.m4a, but this hub has no transcription service set up.]"
+    );
+  });
+
+  test("a lookup that throws is a voice note that cannot be heard, not a lost message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("never used");
+
+    await handleRoomMessage(voice(OWNER_MXID), {
+      ...d,
+      transcriber: undefined,
+      transcriberFor: async () => {
+        throw new Error("database unavailable");
+      },
+    });
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]!.text).toContain("but its transcription settings could not be read");
+  });
+
+  test("a sender who may not dispatch the agent gets no transcription either", async () => {
+    // Transcribing is work done as the agent; it follows the same grant.
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [OTHER_AGENT], mayGrantReach: false });
+    let transcribed = false;
+    const { deps: d } = voiceDeps("x");
+    d.transcriber = {
+      transcribe: async () => {
+        transcribed = true;
+        return { text: "x", language: "en" };
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), d);
+
+    expect(transcribed).toBe(false);
+    expect(prompts).toHaveLength(0);
+  });
+});
+
 describe("answering a permission request from the room", () => {
   const OPTIONS = [
     { optionId: "allow_once", name: "Allow once" },

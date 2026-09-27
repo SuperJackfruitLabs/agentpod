@@ -11,6 +11,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  existsSync,
+  writeFileSync,
   rmSync,
   realpathSync,
 } from "node:fs";
@@ -31,7 +33,7 @@ import {
   createSkillManagementRoutes,
   skillArtifactDownloadRoutes,
 } from "../../src/routes/skill-management";
-import { SkillHubOperation, SkillVerifyResult } from "@agentpod/contract";
+import { SkillHubOperation, SkillVerifyResult, type PluginOperationPlan } from "@agentpod/contract";
 
 const database = new URL(process.env.DATABASE_URL ?? "http://missing");
 assert(
@@ -42,9 +44,14 @@ assert(
 );
 const temporary = mkdtempSync(join(tmpdir(), "sjl-skills-hub-e2e-")),
   workspacePath = join(temporary, "workspace"),
+  profilePath = join(temporary, "hermes-profile"),
   binary = join(temporary, "node-fixture");
 mkdirSync(workspacePath);
+mkdirSync(profilePath);
+const hermesConfig = "model: fixture\nplatforms:\n  - matrix\n";
+writeFileSync(join(profilePath, "config.yaml"), hermesConfig);
 const workspace = realpathSync(workspacePath);
+const profile = realpathSync(profilePath);
 const nodeDirectory = resolve(import.meta.dir, "../../../node-agent");
 const build = Bun.spawn(
   ["go", "test", "-c", "-o", binary, "./internal/gateway"],
@@ -130,6 +137,7 @@ try {
       SJL_SKILL_FIXTURE_SECRET: enrolled.nodeSecret,
       SJL_SKILL_FIXTURE_HUB: origin,
       SJL_SKILL_FIXTURE_WORKSPACE: workspace,
+      SJL_SKILL_FIXTURE_PROFILE: profile,
     },
   });
   child = nodeProcess;
@@ -261,11 +269,77 @@ try {
     readFileSync(installed).length > 0,
     "Rollback must retain the previous generation",
   );
+
+  // Plugin management: the same hub machinery, a Hermes station, and the real
+  // Go installer writing a fixture profile.
+  const hermesPrincipal = await createPrincipal({
+    kind: "agent",
+    handle: `plugin-agent-${crypto.randomUUID()}`,
+  });
+  principalIds.push(hermesPrincipal);
+  const [hermes] = await db
+    .insert(stations)
+    .values({
+      id: `station_${crypto.randomUUID()}`,
+      tenantId: BOOTSTRAP_TENANT_ID,
+      userId,
+      principalId: hermesPrincipal,
+      nodeId,
+      harness: "hermes",
+      stationKey: "hermes:fixture",
+      kind: "leaf",
+      displayName: "Synthetic plugin integration",
+      workspacePath: profile,
+      capabilities: ["plugins.manage"],
+    })
+    .returning();
+  const plugins = `/api/stations/${hermes!.id}/plugins`;
+  const pluginDenied = await fetch(origin + plugins + "/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ requestId: crypto.randomUUID(), action: "enable" }),
+  });
+  assert.equal(pluginDenied.status, 403, "Plugin changes require the station grant");
+  await pluginDenied.arrayBuffer();
+  await setGrant(humanPrincipal, {
+    mayDispatch: [agentPrincipal, hermesPrincipal],
+    mayGrantReach: true,
+  });
+  const pluginDirectory = join(profile, "plugins", "agentpod-live");
+  const enable = SkillHubOperation.parse(
+    await request(plugins + "/plan", { requestId: crypto.randomUUID(), action: "enable" }),
+  );
+  assert.equal(enable.state, "planned", enable.error ?? "");
+  assert(!existsSync(pluginDirectory), "Planning must not write the plugin");
+  const enablePlan = enable.plan as PluginOperationPlan;
+  assert.equal(enablePlan.fileAction, "add");
+  assert(enablePlan.config!.diff.includes("- agentpod-live"));
+  const enabled = SkillHubOperation.parse(
+    await request(`${plugins}/operations/${enable.id}/apply`, { planDigest: enablePlan.planDigest }),
+  );
+  assert.equal(enabled.state, "applied", enabled.error ?? "");
+  assert(existsSync(join(pluginDirectory, "plugin.yaml")));
+  assert(readFileSync(join(profile, "config.yaml"), "utf8").includes("- agentpod-live"));
+  const disable = SkillHubOperation.parse(
+    await request(plugins + "/plan", { requestId: crypto.randomUUID(), action: "disable" }),
+  );
+  const disabled = SkillHubOperation.parse(
+    await request(`${plugins}/operations/${disable.id}/apply`, { planDigest: disable.plan!.planDigest }),
+  );
+  assert.equal(disabled.state, "applied", disabled.error ?? "");
+  assert(!existsSync(pluginDirectory));
+  assert.equal(readFileSync(join(profile, "config.yaml"), "utf8"), hermesConfig);
+  const refused = SkillHubOperation.parse(
+    await request(plugins + "/plan", { requestId: crypto.randomUUID(), action: "disable" }),
+  );
+  assert.equal(refused.state, "conflict");
+  assert.match(refused.error ?? "", /no record of installing/);
+
   nodeProcess.stdin.end();
   assert.equal(await nodeProcess.exited, 0, await stderr);
   await output;
   console.log(
-    "PASS: real hub/Go scoped authorization, plan, authenticated download, reviewed apply, disk verification, replay and rollback; native loading remains unknown.",
+    "PASS: real hub/Go scoped authorization, plan, authenticated download, reviewed apply, disk verification, replay and rollback; plugin enable, disable and refusal; native loading remains unknown.",
   );
 } finally {
   if (nodeId) {

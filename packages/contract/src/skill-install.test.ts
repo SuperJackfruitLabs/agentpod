@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { SkillInstallPlan, SkillInstallReceipt } from "./skill-install";
+import { SkillInstallPlan, SkillInstallReceipt, SkillRetentionResult, SkillMaintenanceResult } from "./skill-install";
 
 import { planFixture } from "./fixtures/skill-install";
 import { VERB_PARAMS, VERB_RESULTS } from "./protocol";
@@ -18,6 +18,7 @@ test("skill management requests accept identifiers and reviewed digests, never c
   expect(VERB_PARAMS["skills.operation"].parse(base)).toEqual(base);
   expect(VERB_PARAMS["skills.verify"].safeParse(base).success).toBe(false);
   expect(Capability.parse("skills.manage")).toBe("skills.manage");
+  expect(Capability.parse("skills.native")).toBe("skills.native");
 });
 
 test("skill status distinguishes unknown operation and absent managed files from harness activation", () => {
@@ -26,6 +27,22 @@ test("skill status distinguishes unknown operation and absent managed files from
   const status = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",verification:{current:null,path:null,present:{...observation,value:false,observedAt:"2026-09-20T16:00:01Z"},loaded:observation}};
   expect(VERB_RESULTS["skills.verify"].parse(status).verification.loaded.value).toBeNull();
   expect(VERB_RESULTS["skills.verify"].safeParse({...status,verification:{...status.verification,path:"/tmp/claimed"}}).success).toBe(false);
+});
+
+test("retention inspection is read-only accounting, including an absent namespace", () => {
+  const retention = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",retention:{namespaceExists:false,operations:0,operationLimit:256,generations:0,staging:0,pending:0,nativeOperations:0,nativeStaging:0,nativeBackups:0,observedAt:"2026-09-21T15:00:00Z",limitation:"No managed namespace exists; no state was created"}};
+  expect(VERB_PARAMS["skills.retention"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
+  expect(SkillRetentionResult.parse(retention).retention.namespaceExists).toBe(false);
+  expect(SkillRetentionResult.safeParse({...retention,retention:{...retention.retention,operationLimit:255}}).success).toBe(false);
+});
+
+test("maintenance preview is a bounded read-only plan", () => {
+  const result = {nodeId:"fixture-node",stationKey:"codex:fixture",harness:"codex",profile:"fixture",maintenance:{preview:{generations:["a".repeat(32)],operations:[],nativeOperations:[],nativeBackups:[]},planDigest:"b".repeat(64),observedAt:"2026-09-21T15:00:00Z",limitation:"Read-only preview"}};
+  expect(VERB_PARAMS["skills.maintenance.plan"].parse({key:"codex:fixture",profile:"fixture"})).toEqual({key:"codex:fixture",profile:"fixture"});
+  expect(VERB_PARAMS["skills.maintenance.plan"].safeParse({key:"codex:fixture",profile:"fixture",operationId:"a".repeat(32)}).success).toBe(false);
+  expect(SkillMaintenanceResult.parse(result).maintenance.preview.generations).toHaveLength(1);
+  expect(VERB_PARAMS["skills.maintenance.apply"].safeParse({key:"codex:fixture",profile:"fixture",expectedPlanDigest:"a".repeat(64)}).success).toBe(true);
+  expect(VERB_PARAMS["skills.maintenance.apply"].safeParse({key:"codex:fixture",profile:"fixture",expectedPlanDigest:"a".repeat(64),generations:["b".repeat(32)]}).success).toBe(false);
 });
 
 test("durable plans bind identity and a prior head, with activation pending", () => {

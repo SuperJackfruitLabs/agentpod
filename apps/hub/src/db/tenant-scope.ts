@@ -50,13 +50,21 @@ import {
 import { principalIdentities } from "./schema/identities";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
+import { stationGitIdentities } from "./schema/git-identities";
 import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
-import { skillArtifacts, skillOperations } from "./schema/skills";
+import { stationTranscription } from "./schema/transcription";
+import {
+  skillArtifacts,
+  skillOperations,
+  trustedSkillReleaseArtifacts,
+  trustedSkillReleases,
+  skillReleaseCohorts,
+} from "./schema/skills";
 import { tenants } from "./schema/tenants";
 import { organizations, principals } from "./schema/organization";
 
@@ -113,7 +121,11 @@ export const TENANT_SCOPED_TABLES = {
   stations,
   skillArtifacts,
   skillOperations,
+  trustedSkillReleases,
+  trustedSkillReleaseArtifacts,
+  skillReleaseCohorts,
   stationSetups,
+  stationTranscription,
   stationAudit,
   acpSessions,
   acpEvents,
@@ -127,6 +139,7 @@ export const TENANT_SCOPED_TABLES = {
   matrixMissionMembers,
   matrixSpaces,
   matrixCredentialAuthorizations,
+  stationGitIdentities,
 } as const satisfies Record<string, TenantScopedTable>;
 
 /**

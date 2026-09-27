@@ -221,3 +221,9 @@ func parsePID(printOutput string) (int, bool) {
 	}
 	return pid, true
 }
+
+// RestartHint mirrors what launchd actually needs: the gui domain carries the uid, and a hint
+// without it is not a command anyone can run.
+func (m *launchdManager) RestartHint() string {
+	return fmt.Sprintf("launchctl kickstart -k gui/%d/%s  (or re-run: apn run)", m.uid, launchdLabel)
+}

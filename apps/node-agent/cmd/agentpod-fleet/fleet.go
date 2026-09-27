@@ -56,12 +56,18 @@ func fleetCmd(args []string) {
 		fleetGet("/api/nodes", args[1:])
 	case "agents":
 		fleetGet("/api/fleet/agents", args[1:])
+	case "stations":
+		fleetStations(args[1:])
 	case "stats":
 		fleetGet("/api/fleet/stats", args[1:])
 	case "activity":
 		fleetGet("/api/activity", args[1:])
+	case "skills":
+		fleetSkills(args[1:])
 	case "devices":
 		fleetDevices(args[1:])
+	case "update":
+		fleetUpdate(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown fleet command: %q\n\n%s\n", args[0], helpText(version))
 		os.Exit(2)

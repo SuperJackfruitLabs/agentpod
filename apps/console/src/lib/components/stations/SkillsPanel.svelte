@@ -109,11 +109,13 @@
       {/if}
       {#each report.plugins as plugin (plugin.id)}
         <div class="rounded-md border p-3 text-sm">
-          <p class="font-medium">{plugin.name}</p>
-          <p class="break-all text-muted-foreground">{plugin.path} · {plugin.scope}</p>
+          <p class="font-medium">{plugin.name}{plugin.source.revision ? ` ${plugin.source.revision}` : ""}</p>
+          <p class="break-all text-muted-foreground">{plugin.path} · {plugin.scope}{plugin.source.locator ? ` · ${plugin.source.locator}` : ""}</p>
           <p>Components: {plugin.components.join(", ") || "Not reported"}</p>
           <p>Activation: {value(plugin.activation)} — {plugin.activation.reason}</p>
-          {#each states as state}<p>{labels[state]}: {value(plugin.evidence[state])}</p>{/each}
+          {#each states as state}
+            <p>{labels[state]}: {value(plugin.evidence[state])}<span class="text-muted-foreground"> — {plugin.evidence[state].reason}{plugin.evidence[state].observedAt ? ` (${plugin.evidence[state].observedAt})` : ""}</span></p>
+          {/each}
         </div>
       {/each}
     </section>

@@ -26,6 +26,7 @@
   import CleanupPanel from "$lib/components/stations/CleanupPanel.svelte";
   import SkillsPanel from "$lib/components/stations/SkillsPanel.svelte";
   import SkillManagementPanel from "$lib/components/stations/SkillManagementPanel.svelte";
+  import PluginManagementPanel from "$lib/components/stations/PluginManagementPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -164,7 +165,9 @@
 
   const hasSkillInventory = $derived(station?.capabilities?.includes("skills.inventory") ?? false);
   const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
-  const hasSkills = $derived(hasSkillInventory || hasSkillManagement);
+  const hasNativeSkillManagement = $derived(station?.capabilities?.includes("skills.native") ?? false);
+  const hasPluginManagement = $derived(station?.capabilities?.includes("plugins.manage") ?? false);
+  const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
 
   const hasChangeset = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
@@ -664,7 +667,8 @@
     {@render mountedPanel("skills", skillsContent)}
     {#snippet skillsContent()}
       {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
-      {#if hasSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={mayGrantReach} />{/if}
+      {#if hasSkillManagement || hasNativeSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={hasSkillManagement && mayGrantReach} canNative={hasNativeSkillManagement && mayGrantReach} />{/if}
+      {#if hasPluginManagement}<PluginManagementPanel {stationId} canManage={mayGrantReach} onRestart={canLifecycle ? () => askFor("restart") : undefined} />{/if}
     {/snippet}
   {/if}
 

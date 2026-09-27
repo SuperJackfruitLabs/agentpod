@@ -20,6 +20,7 @@
     "archiveSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     "bundleDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
   },
+  "nativeLayout": "codex-direct-v1",
   "targetPath": "/fixture/workspace/.agents/skills/sjl-fixture",
   "changes": {
     "added": [
@@ -29,7 +30,7 @@
     "changed": []
   },
   "discoveryNames": [
-    "sjl-fixture:sjl-fixture"
+    "sjl-fixture"
   ],
   "activation": "quiescent-project; loading-unverified",
   "createdAt": "2026-09-20T16:00:00Z",

@@ -34,6 +34,28 @@ type InstallStore struct {
 	directory     string
 	workspaceInfo fs.FileInfo
 	afterWrite    func(string) error // test-only process-interruption boundary
+
+	// reportedSkills is the harness's own account of which skill names exist,
+	// when the harness can give one. See UseHarnessInventory.
+	reportedSkills func(context.Context) (map[string]string, error)
+}
+
+// UseHarnessInventory makes the harness itself the authority on which skill
+// names are already taken, in place of walking the workspace.
+//
+// The walk cannot answer for every harness. An OpenClaw home idiomatically
+// holds SYMLINKED skills -- clawhub links `~/.openclaw/skills/<name>` at
+// `~/.agents/skills/<name>` -- and the scan refuses a symlink as an ambiguous
+// entry rather than following it out of the root, which is right but blocked
+// every placement on a real home. Nor can the walk reach the link's target: an
+// OpenClaw station is its own repository boundary, so the scan never climbs to
+// the directory the link points into.
+//
+// Asking the harness resolves the name exactly, against what it actually sees,
+// with no traversal at all. It is the same distinction this package already
+// draws for loading: some harnesses report, others are asked to open a session.
+func (s *InstallStore) UseHarnessInventory(report func(context.Context) (map[string]string, error)) {
+	s.reportedSkills = report
 }
 
 func OpenInstallStore(binding InstallBinding) (*InstallStore, error) {

@@ -557,3 +557,66 @@ func TestInstallRetainsCapacityForRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRetentionInspectionReportsOnlyNodeOwnedState(t *testing.T) {
+	store, _ := testInstallStore(t)
+	inspection, err := store.Retention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inspection.NamespaceExists || inspection.OperationLimit != 256 || inspection.Operations != 0 || inspection.Generations != 0 || inspection.Staging != 0 || inspection.Pending != 0 {
+		t.Fatalf("unexpected initial retention inspection: %+v", inspection)
+	}
+	id := strings.Repeat("a", 32)
+	planFixtureInstall(t, store, id)
+	inspection, err = store.Retention(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Operations != 1 || inspection.Generations != 0 || inspection.Limitation == "" {
+		t.Fatalf("unexpected planned retention inspection: %+v", inspection)
+	}
+}
+
+func TestMaintenancePreviewKeepsHeadsAndHistoryFloor(t *testing.T) {
+	store, _ := testInstallStore(t)
+	ctx := context.Background()
+	for i := 0; i < RetentionFloor+2; i++ {
+		id := fmt.Sprintf("%032x", i+1)
+		planFixtureInstall(t, store, id)
+		applyFixtureInstall(t, store, id)
+	}
+	preview, err := store.MaintenancePreview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Operations) != 2 || len(preview.Generations) != RetentionFloor || len(preview.NativeOperations) != 0 || len(preview.NativeBackups) != 0 {
+		t.Fatalf("unexpected conservative maintenance candidates: %+v", preview)
+	}
+	for _, id := range preview.Generations {
+		if id == fmt.Sprintf("%032x", RetentionFloor+1) || id == fmt.Sprintf("%032x", RetentionFloor+2) {
+			t.Fatalf("current or rollback generation proposed: %s", id)
+		}
+	}
+	plan, err := store.PlanMaintenance(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.ApplyMaintenance(ctx, plan.PlanDigest); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := store.Retention(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained.Operations != RetentionFloor || retained.Generations != 2 {
+		t.Fatalf("maintenance removed protected history: %+v", retained)
+	}
+	// An incomplete receipt is recovery evidence and blocks every candidate.
+	if _, err := store.PlanRollback(ctx, strings.Repeat("f", 32)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.MaintenancePreview(ctx); err == nil {
+		t.Fatal("maintenance preview accepted incomplete operation")
+	}
+}

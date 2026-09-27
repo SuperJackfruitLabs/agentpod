@@ -146,9 +146,26 @@ func runWithOpts(ctx context.Context, cfg config.Config, h Handler, opts runOpti
 // gatherHealth is called on each health tick to collect per-station snapshots;
 // if nil no health frames are pushed (old-node compat / tests that don't care).
 func Run(ctx context.Context, cfg config.Config, h Handler, version string, gatherHealth func() []HealthReport) error {
+	return RunWith(ctx, cfg, h, version, gatherHealth, Extras{})
+}
+
+// Extras are what a node offers beyond answering the hub.
+type Extras struct {
+	// Outbox carries frames the node sends unprompted — a harness plugin's
+	// turn.error. It outlives connections: a frame queued while the node is
+	// between connections goes out on the next one.
+	Outbox <-chan []byte
+	// Capabilities are advertised in hello beside NodeCapabilities, for what
+	// only exists when something started — the turn-error intake is only a
+	// capability if its socket opened.
+	Capabilities []string
+}
+
+// RunWith is Run with Extras.
+func RunWith(ctx context.Context, cfg config.Config, h Handler, version string, gatherHealth func() []HealthReport, extras Extras) error {
 	return runWithOpts(ctx, cfg, h, runOptions{
 		dialFn: func(ctx context.Context, cfg config.Config, h Handler, onConnected func()) error {
-			return connectOnce(ctx, cfg, h, onConnected, version, gatherHealth)
+			return connectOnce(ctx, cfg, h, onConnected, version, gatherHealth, extras)
 		},
 		sleepFn:  defaultSleep,
 		jitterFn: defaultJitter,
@@ -181,7 +198,7 @@ type HelloMsg struct {
 // from parent, cancelled on return. It MUST stay that way: started on parent
 // directly, the health ticker's only exit was node shutdown, so each reconnect
 // left another one sweeping stations against a dead socket forever.
-func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnected func(), version string, gatherHealth func() []HealthReport) error {
+func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnected func(), version string, gatherHealth func() []HealthReport, extras Extras) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
@@ -192,12 +209,19 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		return err
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
+	// The library's default is 32 KiB, and a frame over it closes the whole
+	// connection. Every frame used to be small; then an image sent to an agent
+	// arrived as one ~2.7 MB ACP prompt, the read loop failed with "message
+	// too big: read limited at 32769 bytes", and the node dropped every
+	// station's connection mid-turn (ashram, 2026-09-24). The same generous
+	// finite cap the ACP proxy has used all along.
+	c.SetReadLimit(gatewayReadLimitBytes)
 
 	hello, _ := json.Marshal(HelloMsg{
 		Type:         "hello",
 		HostInfo:     host.Info(),
 		Version:      version,
-		Capabilities: NodeCapabilities,
+		Capabilities: append(append([]string{}, NodeCapabilities...), extras.Capabilities...),
 	})
 	if err := c.Write(ctx, websocket.MessageText, hello); err != nil {
 		return err
@@ -250,6 +274,28 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		}()
 	}
 
+	// Outbox drain. A frame taken off the outbox and then lost to a write on a
+	// dying socket is gone — reports are best-effort by design, and the
+	// alternative (putting it back) could reorder it behind newer ones.
+	if extras.Outbox != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case frame := <-extras.Outbox:
+					writeMu.Lock()
+					werr := c.Write(ctx, websocket.MessageText, frame)
+					writeMu.Unlock()
+					if werr != nil {
+						log.Printf("gateway: an outbox frame was lost with the connection: %v", werr)
+						return
+					}
+				}
+			}
+		}()
+	}
+
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -270,3 +316,10 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 		}
 	}
 }
+
+// gatewayReadLimitBytes caps one inbound hub frame. Large enough for an ACP
+// prompt carrying an image (the hub caps images at 5 MB before base64), and
+// finite so a broken hub cannot exhaust a node's memory. Advertised to the hub
+// as the "frames.large" node capability.
+const gatewayReadLimitBytes = 32 << 20 // 32 MiB
+

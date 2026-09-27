@@ -11,6 +11,7 @@ type PlacementPlan struct {
 	ExpectedHead             string         `json:"expectedHead"`
 	Before                   *Generation    `json:"before"`
 	After                    *Generation    `json:"after"`
+	NativeLayout             string         `json:"nativeLayout,omitempty"`
 	TargetPath               string         `json:"targetPath"`
 	Changes                  InstallChanges `json:"changes"`
 	DiscoveryNames           []string       `json:"discoveryNames"`
@@ -26,10 +27,11 @@ type PlacementReceipt struct {
 	Error       *string       `json:"error"`
 }
 type PlacementVerification struct {
-	Current *Generation `json:"current"`
-	Path    string      `json:"path"`
-	Present Observation `json:"present"`
-	Loaded  Observation `json:"loaded"`
+	Current        *Generation `json:"current"`
+	Path           string      `json:"path"`
+	DiscoveryNames []string    `json:"discoveryNames"`
+	Present        Observation `json:"present"`
+	Loaded         Observation `json:"loaded"`
 }
 
 const placementActivation = "quiescent-project; loading-unverified"

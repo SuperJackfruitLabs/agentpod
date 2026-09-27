@@ -16,9 +16,12 @@ Usage: fleet <verb> [flags]
   fleet devices revoke <id>  revoke one
   fleet nodes                the fleet's nodes
   fleet agents               the agents you may dispatch
+  fleet stations …           detect, adopt and unadopt stations on a node
   fleet stats                fleet totals
   fleet activity             recent fleet activity
+  fleet skills …             manage skill artifacts, releases and canaries
 
+  fleet update [--check]     replace this binary with the newest release
   fleet version              print version and platform
   fleet help                 this text
 

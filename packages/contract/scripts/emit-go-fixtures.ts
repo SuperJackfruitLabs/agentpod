@@ -18,12 +18,14 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
+import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, TurnErrorMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
 
 import { planFixture } from "../src/fixtures/skill-install";
 import { placementFixture } from "../src/fixtures/skill-placement";
 import { SkillPlacementPlan, SkillPlacementReceipt } from "../src/skill-placement";
 import { inventoryWireFixture } from "../src/fixtures/skill-inventory";
+import { pluginPlanFixture, pluginRefusalFixture } from "../src/fixtures/plugin-operation";
+import { PluginOperationPlan, PluginOperationResult } from "../src/plugin-operation";
 
 const OUT_DIR = join(import.meta.dir, "../../../apps/node-agent/internal/contractfix/testdata");
 
@@ -33,6 +35,9 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["skill_install_plan", SkillInstallPlan, planFixture],
   ["skill_placement_plan", SkillPlacementPlan, placementFixture],
   ["skill_placement_receipt", SkillPlacementReceipt, {plan:placementFixture,phase:"applied",updatedAt:"2026-09-20T16:00:01Z",completedAt:"2026-09-20T16:00:01Z",error:null}],
+  ["plugin_operation_plan", PluginOperationPlan, pluginPlanFixture],
+  ["plugin_operation_refusal", PluginOperationPlan, pluginRefusalFixture],
+  ["plugin_operation_result", PluginOperationResult, {receipt:{plan:pluginPlanFixture,phase:"applied",updatedAt:"2026-09-25T10:00:01Z",completedAt:"2026-09-25T10:00:01Z",error:null}}],
   ["skill_verify", SkillVerifyResult, {
     nodeId: planFixture.binding.nodeId, stationKey: planFixture.binding.stationKey,
     harness: planFixture.binding.harness, profile: planFixture.binding.profile,
@@ -50,7 +55,7 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
     type: "hello",
     hostInfo: { hostname: "fleet-box-1", os: "linux", arch: "arm64", cpuCount: 8 },
     version: "v0.1.22",
-    capabilities: ["posture"],
+    capabilities: ["posture", "frames.large"],
   }],
 
   ["heartbeat", HeartbeatMsg, { type: "heartbeat", ts: 1786445000000 }],
@@ -66,6 +71,21 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["station_health_nulls", StationHealthReport, {
     key: "hermes:idle", ok: false, running: false,
     pid: null, cpuPct: null, memBytes: null, uptimeSec: null,
+  }],
+
+  // The node wraps a plugin's line in this envelope without reading it, so the
+  // Go test pins the envelope and that the report travels byte-for-byte.
+  ["turn_error_frame", TurnErrorMsg, {
+    type: "turn.error",
+    report: {
+      harnessSessionKey: "agent:krishna:main",
+      error: {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+      },
+    },
   }],
 
   ["health_frame", HealthReportMsg, {

@@ -89,7 +89,11 @@ export interface MatrixClient {
       isDirect?: boolean;
     }
   ): Promise<string | null>;
-  sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  /**
+   * `extra` adds namespaced keys to the message content (a client-drawable
+   * card beside the readable body). It can never replace `msgtype` or `body`.
+   */
+  sendText(userId: string, roomId: string, body: string, extra?: Record<string, unknown>): Promise<string | null>;
   /**
    * Send a message-like event of any type into a room.
    *
@@ -236,6 +240,14 @@ export interface MatrixClient {
   getAvatar(userId: string): Promise<string | null>;
   /** Upload an image and return its mxc:// URL. */
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
+  /**
+   * Download media as `userId`, or null when the homeserver will not give it.
+   *
+   * For an image sent to an agent: the agent is a member of the room and so
+   * may read what was posted in it. The bytes are ciphertext for an encrypted
+   * room — `attachments.decryptAttachment` makes them an image.
+   */
+  downloadMedia(userId: string, mxc: string): Promise<Uint8Array | null>;
 }
 
 /**
@@ -388,18 +400,29 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       });
       assertOkOrAlready(`register ${localpart}`, res);
 
-      // Set the display name EVERY time, not only on creation. The user is
+      // Check the display name EVERY time, not only on creation. The user is
       // created exactly once and provisioning runs forever, so a name set only
       // at creation means a renamed station keeps introducing itself by its old
       // name — and the display name is what carries the readability a derived
       // mxid does not have.
+      //
+      // But only WRITE it when it differs. Each PUT makes the homeserver post a
+      // new m.room.member event into every room the agent is in, identical name
+      // or not, and provisioning runs on every node reconnect: that was the
+      // stream of "updated their membership" lines in agent rooms.
       //
       // The register reply has no `user_id` when the user already existed, so
       // the mxid is composed rather than read back.
       const userId =
         String(res.body.user_id ?? "") ||
         (deps.domain ? `@${localpart}:${deps.domain}` : "");
-      if (userId) await this.setDisplayName(userId, displayName);
+      if (!userId) return;
+      const current = await call(
+        `/_matrix/client/v3/profile/${encodeURIComponent(userId)}/displayname`,
+        { method: "GET", userId }
+      );
+      if (current.status === 200 && current.body.displayname === displayName) return;
+      await this.setDisplayName(userId, displayName);
     },
 
     async registerWithCredentials(localpart) {
@@ -564,13 +587,13 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       return String(retry.body.room_id ?? "") || null;
     },
 
-    async sendText(userId, roomId, body) {
+    async sendText(userId, roomId, body, extra) {
       // A fresh transaction id per send: the homeserver deduplicates on it, so
       // reusing one would silently drop a genuinely new message.
       const txn = `apb-${crypto.randomUUID()}`;
       const res = await call(
         `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${txn}`,
-        { method: "PUT", userId, body: { msgtype: "m.text", body } }
+        { method: "PUT", userId, body: { ...(extra ?? {}), msgtype: "m.text", body } }
       );
       assertOkOrAlready("send", res);
       return String(res.body.event_id ?? "") || null;
@@ -706,6 +729,26 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       if (!res.ok) return null;
       const body = (await res.json()) as { content_uri?: string };
       return body.content_uri ?? null;
+    },
+
+    async downloadMedia(userId, mxc) {
+      const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(mxc);
+      if (!parsed) return null;
+      const path = `${encodeURIComponent(parsed[1]!)}/${encodeURIComponent(parsed[2]!)}`;
+      // Authenticated media (Matrix 1.11) first: current homeservers serve new
+      // uploads only there. The unauthenticated path is the fallback for one
+      // that predates it.
+      for (const base of ["/_matrix/client/v1/media/download/", "/_matrix/media/v3/download/"]) {
+        const res = await doFetch(asUser(`${base}${path}`, userId), {
+          method: "GET",
+          headers: { Authorization: `Bearer ${deps.asToken}` },
+        });
+        if (res.ok) return new Uint8Array(await res.arrayBuffer());
+        // Only "this endpoint is not here" earns the second try. A 403 or a
+        // missing file is the same answer on both paths.
+        if (res.status !== 404 && res.status !== 400) return null;
+      }
+      return null;
     },
 
     async getAvatar(userId) {

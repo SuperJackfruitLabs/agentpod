@@ -17,6 +17,7 @@ import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
 import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
+import { adminTranscriptionRoutes } from "./transcription-settings";
 
 // Models
 import {
@@ -325,6 +326,13 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
 // =============================================================================
 // Settings Routes
 // =============================================================================
+
+/**
+ * /admin/settings/transcription — the hub's default speech-to-text service
+ * for voice notes (GET, PUT, POST /test). Inside this router so it sits
+ * behind the same admin guard; see `routes/transcription-settings.ts`.
+ */
+adminRouter.route("/settings/transcription", adminTranscriptionRoutes());
 
 /**
  * GET /admin/settings

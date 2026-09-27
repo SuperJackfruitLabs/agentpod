@@ -74,6 +74,7 @@ func TestResolveOpenClawBinary_ProbesWellKnownPathsInOrder(t *testing.T) {
 	want := []string{
 		filepath.Join(home, ".local", "share", "pnpm", "openclaw"),
 		filepath.Join(home, ".local", "bin", "openclaw"),
+		filepath.Join(home, ".npm-global", "bin", "openclaw"),
 		"/usr/local/bin/openclaw",
 		"/usr/bin/openclaw",
 		"/opt/homebrew/bin/openclaw",

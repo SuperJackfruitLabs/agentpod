@@ -21,6 +21,7 @@ import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
+import { transcriberFor } from "../transcription-settings";
 import {
   handleGateDecision,
   projectionForGate,
@@ -32,7 +33,7 @@ import { resolveMatrixId } from "../matrix-identity";
 import { principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
-  answerPermission } from "../acp-sessions";
+  answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
 import { bridgeModeOnly } from "./bridge-agents";
 import { createAgentCrypto, feedAgents, type AgentCrypto } from "./crypto";
@@ -157,6 +158,8 @@ export interface MatrixBridge {
    * never calls it, and the route checks for exactly that.
    */
   onCryptoTransaction: ((tx: Parameters<typeof feedAgents>[1]) => Promise<void>) | null;
+  /** Release native crypto machines before Bun tears down napi during shutdown. */
+  close(): Promise<void>;
 }
 
 /**
@@ -325,6 +328,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       : undefined,
     gates,
     client: speakingClient,
+    // Voice notes to text, looked up per voice note for the room's station:
+    // its own setting, then the hub's (both in the console), then the
+    // TRANSCRIBE_* env. None, and a voice note is named to the agent.
+    transcriberFor: (stationId: string) => transcriberFor(stationId),
     acp: {
       createSession: async (input: { stationId: string; userId: string; mode: string }) => {
         const session = await createSession({
@@ -336,6 +343,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       },
       promptSession,
       answerPermission,
+      // The room queue's two questions: is a turn running, and when is it
+      // over. Without them a mid-turn message is refused, not held.
+      isBusy: sessionIsBusy,
+      whenIdle: (sessionId: string) => whenIdle(sessionId),
     },
     // The joint between inbound and outbound. Without it a session is created,
     // prompted, and answers into a stream nobody is listening to — which is
@@ -377,6 +388,10 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           await retryPendingDecrypts(inboundDeps);
         }
       : null,
+
+    async close() {
+      await crypto?.close();
+    },
 
     async provision(stationId: string) {
       await provisionStation(stationId, provisionDeps);

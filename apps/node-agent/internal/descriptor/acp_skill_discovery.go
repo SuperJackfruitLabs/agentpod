@@ -1,0 +1,244 @@
+package descriptor
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+const acpDiscoveryMaxFrame = 1 << 20
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.b.String()
+}
+
+// discoverACPSkillCommands starts a resolved ACP adapter, sends only
+// initialize and session/new, then returns the slash-command names that the
+// new session advertises. It never creates a prompt or supplies client tools.
+// Callers establish each harness's version, authentication, and environment
+// evidence before selecting this probe.
+// acpDiscoveryBeforeFirstWrite runs just before discovery sends initialize. A
+// no-op in production; a test uses it to let the adapter exit first, which is
+// otherwise a race the test cannot win on purpose.
+var acpDiscoveryBeforeFirstWrite = func() {}
+
+func discoverACPSkillCommands(ctx context.Context, argv []string, workspace string, env []string, normalize func(string) (string, bool)) ([]string, error) {
+	if len(argv) == 0 || argv[0] == "" || !filepath.IsAbs(argv[0]) || !filepath.IsAbs(workspace) {
+		return nil, fmt.Errorf("invalid ACP discovery scope")
+	}
+	if normalize == nil {
+		return nil, fmt.Errorf("ACP discovery needs a command-name mapping")
+	}
+	if _, err := os.Stat(workspace); err != nil {
+		return nil, fmt.Errorf("workspace unavailable: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Dir = workspace
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// Stderr is copied here, not by exec. exec's own copy finishes only at
+	// Wait, which runs after this function returns, so an error built when
+	// stdout closed could read the buffer before the adapter's explanation had
+	// arrived. stderrDone closes when the adapter's stderr reaches EOF.
+	var stderr synchronizedBuffer
+	errOut, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		in.Close()
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		in.Close()
+		return nil, err
+	}
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&stderr, errOut)
+		close(stderrDone)
+	}()
+	defer func() {
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		finished := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(finished) }()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			<-finished
+		}
+		_ = in.Close()
+	}()
+
+	type event struct {
+		ID     any    `json:"id"`
+		Method string `json:"method"`
+		Params struct {
+			Update struct {
+				SessionUpdate     string `json:"sessionUpdate"`
+				AvailableCommands []struct {
+					Name string `json:"name"`
+				} `json:"availableCommands"`
+			} `json:"update"`
+		} `json:"params"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	events := make(chan event, 32)
+	readErr := make(chan error, 1)
+	go func() {
+		defer close(events)
+		s := bufio.NewScanner(out)
+		s.Buffer(make([]byte, 4096), acpDiscoveryMaxFrame+1)
+		for s.Scan() {
+			if len(s.Bytes()) > acpDiscoveryMaxFrame {
+				readErr <- fmt.Errorf("ACP frame exceeds discovery limit")
+				return
+			}
+			var e event
+			if err := json.Unmarshal(s.Bytes(), &e); err != nil {
+				readErr <- fmt.Errorf("ACP returned invalid JSON")
+				return
+			}
+			select {
+			case events <- e:
+			case <-ctx.Done():
+				return
+			}
+		}
+		if err := s.Err(); err != nil {
+			readErr <- err
+			return
+		}
+		readErr <- io.EOF
+	}()
+	stderrSummary := func() string {
+		// Adapters occasionally describe a startup/configuration refusal only on
+		// stderr. Keep that evidence compact and one-line before it reaches the
+		// hub's separately bounded, path-scrubbing diagnostic boundary.
+		message := strings.Join(strings.Fields(stderr.String()), " ")
+		if len(message) > 400 {
+			message = message[:400] + "…"
+		}
+		return message
+	}
+	// earlyClose reports an adapter that went away before discovery finished,
+	// whichever side noticed first: stdout reaching EOF, or a write into a
+	// stdin nobody reads any more. Either way the adapter's own reason is on
+	// stderr, possibly still in flight, so wait for it -- bounded, because a
+	// child that inherited stderr can hold it open after the adapter exits.
+	earlyClose := func(cause error) error {
+		select {
+		case <-stderrDone:
+		case <-time.After(2 * time.Second):
+		case <-ctx.Done():
+		}
+		if summary := stderrSummary(); summary != "" {
+			return fmt.Errorf("ACP output closed before discovery completed: %s", summary)
+		}
+		if cause != nil {
+			return fmt.Errorf("ACP output closed before discovery completed: %w", cause)
+		}
+		return fmt.Errorf("ACP output closed before discovery completed")
+	}
+	write := func(id int, method string, params any) error {
+		frame, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+		if err != nil {
+			return err
+		}
+		_, err = in.Write(append(frame, '\n'))
+		return err
+	}
+	acpDiscoveryBeforeFirstWrite()
+	if err := write(1, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{}, "clientInfo": map[string]string{"name": "agentpod-native-skill-verifier", "version": "1"}}); err != nil {
+		return nil, earlyClose(err)
+	}
+	responses := map[float64]bool{}
+	sessionRequested := false
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("ACP discovery deadline exceeded: %w", ctx.Err())
+		case err, ok := <-readErr:
+			// The scanner can observe EOF before the buffered events channel is
+			// drained. Keep consuming those already-read frames; a command update
+			// in that buffer is still valid discovery evidence. A non-EOF reader
+			// error remains terminal because its stream may be incomplete.
+			if !ok || err == io.EOF {
+				readErr = nil
+				continue
+			}
+			return nil, fmt.Errorf("ACP output closed before discovery completed: %w", err)
+		case e, ok := <-events:
+			if !ok {
+				return nil, earlyClose(nil)
+			}
+			if e.Method != "" && e.ID != nil {
+				return nil, fmt.Errorf("ACP requested an unsupported client action")
+			}
+			if e.ID != nil {
+				id, ok := e.ID.(float64)
+				if !ok || (id != 1 && id != 2) || len(e.Error) != 0 || len(e.Result) == 0 {
+					return nil, fmt.Errorf("ACP discovery request failed")
+				}
+				responses[id] = true
+				// ACP initialization is a handshake.  Some adapters begin their
+				// session setup as soon as they answer it and can close their
+				// transport when session/new arrives before that response.  Keep
+				// the probe protocol-correct and send the dependent request only
+				// after initialization is acknowledged.
+				if id == 1 && !sessionRequested {
+					if err := write(2, "session/new", map[string]any{"cwd": workspace, "mcpServers": []any{}}); err != nil {
+						return nil, earlyClose(err)
+					}
+					sessionRequested = true
+				}
+			}
+			if e.Params.Update.SessionUpdate == "available_commands_update" {
+				if !responses[1] || !responses[2] {
+					return nil, fmt.Errorf("ACP announced commands before initialization completed")
+				}
+				names := make([]string, 0, len(e.Params.Update.AvailableCommands))
+				for _, command := range e.Params.Update.AvailableCommands {
+					if name, ok := normalize(command.Name); ok {
+						names = append(names, name)
+					}
+				}
+				sort.Strings(names)
+				return names, nil
+			}
+		}
+	}
+}

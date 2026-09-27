@@ -25,6 +25,23 @@ func TestPostureHandlerPassesOtherVerbsThrough(t *testing.T) {
 	}
 }
 
+func TestPostureHandlerPreservesTerminalFrames(t *testing.T) {
+	inner := &frameRecorder{}
+	h := NewPostureHandler(inner, func() int { return 0 })
+
+	fh, ok := h.(FrameHandler)
+	if !ok {
+		t.Fatal("postureHandler must implement FrameHandler so it cannot drop terminal input")
+	}
+	raw := json.RawMessage(`{"type":"input","id":"attach-1","data":"aGk="}`)
+	if err := fh.HandleFrame("input", "attach-1", raw); err != nil {
+		t.Fatalf("HandleFrame: %v", err)
+	}
+	if inner.gotType != "input" || inner.gotID != "attach-1" {
+		t.Fatalf("inner frame = %q:%q, want input:attach-1", inner.gotType, inner.gotID)
+	}
+}
+
 func TestPostureScanReturnsAGradedReport(t *testing.T) {
 	h := NewPostureHandler(posturePassthrough(), func() int { return 7 })
 	got, streamed, err := h.Handle(t.Context(), "posture.scan", json.RawMessage(`{}`), nil)
