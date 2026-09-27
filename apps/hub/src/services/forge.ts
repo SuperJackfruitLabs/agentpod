@@ -208,3 +208,63 @@ export async function revokeAgentToken(
   }
   log.info("forge token revoked", { username, name: tokenName });
 }
+
+export interface RegisteredKey {
+  /** forge's numeric key id — the handle revocation needs. */
+  id: number;
+  title: string;
+}
+
+/**
+ * Register a public key on an agent's account.
+ *
+ * The private half is generated on the node and never leaves it, which is why nothing here takes
+ * or returns a secret. forge's own push mirror works the same way: it generated its keypair and
+ * handed us only the public half.
+ *
+ * `read_only: false` — the key is for pushing. A read-only key would clone and then fail at the
+ * push, which is the least useful place to discover a permission.
+ */
+export async function addAgentKey(
+  cfg: ForgeConfig,
+  username: string,
+  title: string,
+  publicKey: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<RegisteredKey> {
+  const res = await call(cfg, "POST", `/admin/users/${encodeURIComponent(username)}/keys`, fetchImpl, {
+    title,
+    key: publicKey.trim(),
+    read_only: false,
+  });
+  if (res.status !== 201 && res.status !== 200) {
+    refuse(`registering a key for ${username}`, res.status);
+  }
+  const body = res.body as { id?: unknown; title?: unknown };
+  if (typeof body?.id !== "number") {
+    // Without the id there is no way to revoke this key later, and forge does not let us search
+    // for it by content. Failing here beats registering a key nobody can withdraw.
+    throw new Error(`forge: the key registered for ${username} came back without an id.`);
+  }
+  log.info("forge key registered", { username, title, keyId: body.id });
+  return { id: body.id, title: typeof body.title === "string" ? body.title : title };
+}
+
+/** Withdraw one key by the id `addAgentKey` returned. 404 is success: the end state is asked for. */
+export async function deleteAgentKey(
+  cfg: ForgeConfig,
+  username: string,
+  keyId: number,
+  fetchImpl: FetchLike = fetch,
+): Promise<void> {
+  const res = await call(
+    cfg,
+    "DELETE",
+    `/admin/users/${encodeURIComponent(username)}/keys/${keyId}`,
+    fetchImpl,
+  );
+  if (res.status !== 204 && res.status !== 200 && res.status !== 404) {
+    refuse(`deleting key ${keyId} for ${username}`, res.status);
+  }
+  log.info("forge key deleted", { username, keyId });
+}

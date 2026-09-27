@@ -67,6 +67,21 @@ export const config = {
     token: getEnv('API_TOKEN', 'dev-token-change-in-production'),
   },
 
+  /**
+   * forge, for provisioning an agent's git identity.
+   *
+   * Unset means the feature is off and `POST …/git-identity` answers 503 — a deployment that
+   * never asked for this grows no new door. The admin token can create any account and register
+   * any key, so it lives in `hub.env` beside the other root-equivalent values and never in this
+   * file.
+   *
+   * `charter → decisions/2026-09-27-which-side-is-primary-is-a-repositorys-property.md`.
+   */
+  forge: {
+    url: getEnv('FORGE_URL', ''),
+    adminToken: getEnv('FORGE_ADMIN_TOKEN', ''),
+  },
+
   // Encryption for provider credentials
   encryption: {
     // 32-byte (256-bit) key for AES-256-GCM
