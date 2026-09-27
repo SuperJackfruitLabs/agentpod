@@ -115,7 +115,15 @@ func (r *acpTestRig) readFrame() map[string]any {
 // contains want, or the deadline passes.
 func (r *acpTestRig) awaitStreamContaining(want string) bool {
 	r.t.Helper()
-	deadline := time.Now().Add(acpTestBarrier)
+	return r.awaitStreamContainingWithin(want, acpTestBarrier)
+}
+
+// awaitStreamContainingWithin is awaitStreamContaining with a caller-chosen window, for a test
+// that retries the thing producing the output instead of waiting longer for output that may
+// already have been dropped.
+func (r *acpTestRig) awaitStreamContainingWithin(want string, window time.Duration) bool {
+	r.t.Helper()
+	deadline := time.Now().Add(window)
 	for time.Now().Before(deadline) {
 		select {
 		case data := <-r.frames:
@@ -524,8 +532,17 @@ func TestACPOpenGivesTheAdapterItsHubSession(t *testing.T) {
 	mgr := acp.NewManager()
 	t.Cleanup(mgr.Shutdown)
 	dir := t.TempDir()
+	// Answers on demand rather than announcing at startup.
+	//
+	// `acp.Session` fans a chunk out only to the subscribers present when it is READ — there is no
+	// replay buffer — and `acp.attach` subscribes after `acp.open` has already spawned this. So a
+	// command that echoed once at startup was asserting on a chunk that quite possibly never had a
+	// listener, and no amount of waiting can recover a dropped one. That is why raising the barrier
+	// from 5s to 30s in #593 did not fix this test: it was never slow, it was losing the line, and
+	// it went on failing at exactly the new barrier.
 	cmd := func(key string) ([]string, string, []string, error) {
-		return []string{"/bin/sh", "-c", `echo "hub-session=[$AGENTPOD_ACP_SESSION]"; cat`}, dir, nil, nil
+		return []string{"/bin/sh", "-c",
+			`while read _; do echo "hub-session=[$AGENTPOD_ACP_SESSION]"; done`}, dir, nil, nil
 	}
 	h := NewACPHandler(failInner(t), mgr, cmd)
 	rig := newACPTestRig(t, h)
@@ -538,7 +555,17 @@ func TestACPOpenGivesTheAdapterItsHubSession(t *testing.T) {
 		t.Fatalf("acp.open failed: %v", msg)
 	}
 	rig.writeHub(fmt.Sprintf(`{"type":"req","id":"attach-1","verb":"acp.attach","params":{"sessionId":"%s"}}`, sessionID))
-	if !rig.awaitStreamContaining("hub-session=[acps_0f3c]") {
-		t.Fatal("the adapter did not see AGENTPOD_ACP_SESSION set to the hub session")
+
+	// Ask repeatedly rather than sleeping for the subscribe. The attach subscribes on its own
+	// goroutine, so an early poke can still be answered into the void; the next one is heard, and
+	// the loop turns a race that had to be won once into one that only has to be won eventually.
+	poke := base64.StdEncoding.EncodeToString([]byte("\n"))
+	deadline := time.Now().Add(acpTestBarrier)
+	for time.Now().Before(deadline) {
+		rig.writeHub(fmt.Sprintf(`{"type":"input","id":"%s","data":"%s"}`, sessionID, poke))
+		if rig.awaitStreamContainingWithin("hub-session=[acps_0f3c]", 250*time.Millisecond) {
+			return
+		}
 	}
+	t.Fatal("the adapter did not see AGENTPOD_ACP_SESSION set to the hub session")
 }
