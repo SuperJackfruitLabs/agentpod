@@ -32,6 +32,14 @@ type Manager interface {
 	Stop() error      // stop + disable (sticky)
 	Restart() error
 	Status() (Status, error)
+	// RestartHint is the command an operator should run when an automatic restart failed.
+	//
+	// It belongs here because the scope belongs here: this package already probes
+	// `systemctl --user is-active` to decide HOW to restart, and a caller printing its own
+	// advice has to repeat that decision and can get it wrong. `apn update` did — it told an
+	// operator to run `systemctl restart` on a host whose node is a user unit, sending them to
+	// a second dead end after the first.
+	RestartHint() string
 }
 
 // NewManager picks the platform implementation. darwin: launchd per-user
