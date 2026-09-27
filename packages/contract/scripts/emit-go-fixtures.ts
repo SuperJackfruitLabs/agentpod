@@ -18,7 +18,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
-import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
+import { HostInfo, HelloMsg, HeartbeatMsg, StationHealthReport, HealthReportMsg, TurnErrorMsg, ChangesetStatus, SkillInventory, SkillInstallPlan, SkillInstallReceipt, SkillVerifyResult, SkillOperationResult } from "../src/index";
 
 import { planFixture } from "../src/fixtures/skill-install";
 import { placementFixture } from "../src/fixtures/skill-placement";
@@ -71,6 +71,21 @@ const FIXTURES: Array<[string, z.ZodTypeAny, unknown]> = [
   ["station_health_nulls", StationHealthReport, {
     key: "hermes:idle", ok: false, running: false,
     pid: null, cpuPct: null, memBytes: null, uptimeSec: null,
+  }],
+
+  // The node wraps a plugin's line in this envelope without reading it, so the
+  // Go test pins the envelope and that the report travels byte-for-byte.
+  ["turn_error_frame", TurnErrorMsg, {
+    type: "turn.error",
+    report: {
+      harnessSessionKey: "agent:krishna:main",
+      error: {
+        message: "⚠️ You've reached your weekly (7-day) usage limit.",
+        kind: "quota",
+        provider: "kimi-coding",
+        model: "k2p6",
+      },
+    },
   }],
 
   ["health_frame", HealthReportMsg, {

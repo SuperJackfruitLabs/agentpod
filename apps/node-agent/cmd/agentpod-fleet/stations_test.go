@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -95,5 +96,73 @@ func TestStationsRefusesIncompleteArguments(t *testing.T) {
 		if strings.TrimSpace(out) == "" {
 			t.Fatalf("%v failed silently", args)
 		}
+	}
+}
+
+// Push access is granted per station through the hub's own route, so an operator never has to
+// reach for curl and never has to hold the forge admin token to do it.
+func TestStationsPushAccessVerbsReachTheGitIdentityRoute(t *testing.T) {
+	bin := build(t)
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		method string
+	}{
+		{"show", []string{"stations", "git-identity", "--station", "station_fixture"}, http.MethodGet},
+		{"grant", []string{"stations", "grant-push", "--station", "station_fixture"}, http.MethodPost},
+		{"revoke", []string{"stations", "revoke-push", "--station", "station_fixture"}, http.MethodDelete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath, gotBody string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.Path
+				b, _ := io.ReadAll(r.Body)
+				gotBody = string(b)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{
+				"AGENTPOD_HUB=" + srv.URL,
+				"AGENTPOD_TOKEN=" + jwtish("prn_operator", "human"),
+			}, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit %d: %s", code, out)
+			}
+			if gotMethod != tc.method {
+				t.Errorf("method = %s, want %s", gotMethod, tc.method)
+			}
+			if gotPath != "/api/stations/station_fixture/git-identity" {
+				t.Errorf("path = %s, want /api/stations/station_fixture/git-identity", gotPath)
+			}
+			// Nothing is sent: an operator who could name the account could aim a key at another
+			// agent, and the key itself is the node's to generate.
+			if strings.Contains(gotBody, "username") || strings.Contains(gotBody, "publicKey") {
+				t.Errorf("body carried something the caller should not supply: %s", gotBody)
+			}
+		})
+	}
+}
+
+// A verb that silently acted on nothing would be worse than one that refuses.
+func TestStationsPushAccessVerbsRequireAStation(t *testing.T) {
+	bin := build(t)
+	for _, verb := range []string{"git-identity", "grant-push", "revoke-push"} {
+		t.Run(verb, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("%s with no --station reached the hub: %s %s", verb, r.Method, r.URL.Path)
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{
+				"AGENTPOD_HUB=" + srv.URL,
+				"AGENTPOD_TOKEN=" + jwtish("prn_operator", "human"),
+			}, "stations", verb)
+			if code == 0 {
+				t.Fatalf("exit 0 with no --station: %s", out)
+			}
+			if !strings.Contains(out, "--station") {
+				t.Errorf("the refusal does not say what is missing: %s", out)
+			}
+		})
 	}
 }

@@ -148,6 +148,7 @@ func TestCodexACPCommand_ProbesWellKnownPathsInOrder(t *testing.T) {
 	want := []string{
 		filepath.Join(testStubHome, ".local", "share", "pnpm", "codex-acp"),
 		filepath.Join(testStubHome, ".local", "bin", "codex-acp"),
+		filepath.Join(testStubHome, ".npm-global", "bin", "codex-acp"),
 		"/usr/local/bin/codex-acp",
 		"/usr/bin/codex-acp",
 		"/opt/homebrew/bin/codex-acp",

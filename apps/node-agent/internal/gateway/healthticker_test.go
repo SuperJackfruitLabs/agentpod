@@ -69,7 +69,7 @@ func TestHealthTickerStopsWhenConnectionEnds(t *testing.T) {
 	// Drive the same sequence runWithOpts does: connect, get dropped, repeat.
 	const reconnects = 5
 	for i := 0; i < reconnects; i++ {
-		_ = connectOnce(ctx, cfg, stubHandler, func() {}, "dev", gather)
+		_ = connectOnce(ctx, cfg, stubHandler, func() {}, "dev", gather, Extras{})
 	}
 
 	if calls.Load() == 0 {
@@ -112,7 +112,7 @@ func TestReadLoopDeathEndsConnection(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		_ = connectOnce(ctx, cfg, stubHandler, func() {}, "dev", nil)
+		_ = connectOnce(ctx, cfg, stubHandler, func() {}, "dev", nil, Extras{})
 		close(done)
 	}()
 

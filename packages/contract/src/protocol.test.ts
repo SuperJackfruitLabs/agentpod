@@ -83,3 +83,78 @@ it("matrix.adopt's result strips unknown fields — the credential does not come
     VERB_RESULTS["matrix.adopt"].parse({ accepted: true, matrixId: "@a:h", accessToken: "syt_x" })
   ).toEqual({ accepted: true, matrixId: "@a:h" });
 });
+it("transcription.apply carries a station key AND its database id — the node needs the key, the hub's config endpoint needs the id", () => {
+  expect(
+    VERB_PARAMS["transcription.apply"].parse({ key: "hermes:analyst-echo", stationId: "station_abc123" })
+  ).toEqual({ key: "hermes:analyst-echo", stationId: "station_abc123" });
+});
+it("transcription.apply strips unknown fields — an API key cannot ride along on this channel", () => {
+  expect(
+    VERB_PARAMS["transcription.apply"].parse({
+      key: "k",
+      stationId: "s",
+      apiKey: "sk-secret",
+      url: "http://stt.internal:8840",
+    })
+  ).toEqual({ key: "k", stationId: "s" });
+});
+it("transcription.apply's result says what the profile now holds and whether the harness restarted", () => {
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "on", model: "large-v3-turbo", restarted: true })
+  ).toEqual({ applied: true, mode: "on", model: "large-v3-turbo", restarted: true });
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "off", model: null, restarted: false })
+  ).toEqual({ applied: true, mode: "off", model: null, restarted: false });
+  expect(() =>
+    VERB_RESULTS["transcription.apply"].parse({ applied: true, mode: "maybe", model: null, restarted: false })
+  ).toThrow();
+});
+it("transcription.apply's result strips unknown fields — neither the key nor the url comes back", () => {
+  expect(
+    VERB_RESULTS["transcription.apply"].parse({
+      applied: true,
+      mode: "on",
+      model: "m",
+      restarted: true,
+      apiKey: "sk-secret",
+      url: "http://stt.internal:8840/v1",
+    })
+  ).toEqual({ applied: true, mode: "on", model: "m", restarted: true });
+});
+
+describe("git identity verbs", () => {
+  // The rule these verbs exist to keep: nothing secret crosses the broker. The private half of the
+  // key is generated on the node and never leaves it, so neither schema has anywhere to put one.
+  it("neither the params nor the result has a field a secret could ride in", () => {
+    for (const verb of ["git.identity.ensure", "git.identity.remove"] as const) {
+      const params = Object.keys(VERB_PARAMS[verb].shape);
+      const result = Object.keys(VERB_RESULTS[verb].shape);
+      for (const field of [...params, ...result]) {
+        expect(field).not.toMatch(/token|secret|private|password|keyPath/i);
+      }
+    }
+  });
+
+  it("ensure carries BOTH names of the station, because neither side knows the other's", () => {
+    // stationId alone cannot be looked up by the node's spawn path; stationKey alone cannot survive
+    // a rename. Dropping either one breaks a push with nothing to explain it.
+    expect(VERB_PARAMS["git.identity.ensure"].safeParse({ stationId: "stn_a" }).success).toBe(false);
+    expect(VERB_PARAMS["git.identity.ensure"].safeParse({ stationKey: "hermes:a" }).success).toBe(false);
+    expect(
+      VERB_PARAMS["git.identity.ensure"].safeParse({ stationId: "stn_a", stationKey: "hermes:a" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("remove is keyed by id alone, so a rename cannot make it miss", () => {
+    expect(VERB_PARAMS["git.identity.remove"].safeParse({ stationId: "stn_a" }).success).toBe(true);
+  });
+
+  it("the result reports whether a key was minted, which is what makes a re-provision safe", () => {
+    expect(
+      VERB_RESULTS["git.identity.ensure"].safeParse({ publicKey: "ssh-ed25519 AAAA", created: true })
+        .success,
+    ).toBe(true);
+    expect(VERB_RESULTS["git.identity.ensure"].safeParse({ publicKey: "ssh-ed25519 AAAA" }).success).toBe(false);
+  });
+});

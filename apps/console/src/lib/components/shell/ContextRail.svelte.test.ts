@@ -21,6 +21,14 @@ import ContextRail from "./ContextRail.svelte";
 
 afterEach(cleanup);
 
+// The rail's Voice notes section reads the station's setting on mount. No
+// test here but the one that injects it cares, and none should reach a hub.
+vi.mock("$lib/api/transcription", () => ({
+  getStationTranscription: vi.fn(() => new Promise(() => {})),
+  saveStationTranscription: vi.fn(),
+  applyStationTranscription: vi.fn(),
+}));
+
 function station(over: Partial<StationRow> = {}): StationRow {
   return {
     id: "station_1",
@@ -246,4 +254,29 @@ test("a harness station that has not reported yet is not called a bridge station
   });
 
   expect(getByTestId("rail-credential-mode").textContent).toContain("Held by the agent itself");
+});
+
+// ─── voice notes ────────────────────────────────────────────────────────────
+
+test("the rail carries the station's voice-note setting, and a harness station's apply control", async () => {
+  vi.spyOn(api, "stationMoveState").mockResolvedValue({ status: "unknown" });
+  const loadTranscription = vi.fn(async () => ({
+    mode: "inherit" as const,
+    hasApiKey: false,
+    effective: { enabled: true, url: "https://api.openai.com", model: "whisper-1", maxSeconds: 300, source: "hub" as const },
+  }));
+
+  const { findByTestId, getByTestId, getByRole } = render(ContextRail, {
+    props: {
+      station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }),
+      node,
+      loadTranscription,
+    },
+  });
+
+  expect(getByTestId("rail-voice-notes")).toBeTruthy();
+  expect((await findByTestId("voice-effective")).textContent).toContain("OpenAI");
+  expect(loadTranscription).toHaveBeenCalledWith("station_1");
+  expect(getByTestId("voice-harness-note")).toBeTruthy();
+  expect(getByRole("button", { name: "Apply to harness" })).toBeTruthy();
 });

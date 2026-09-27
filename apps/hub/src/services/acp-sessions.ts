@@ -44,6 +44,9 @@ import type {
   AcpSessionMode,
   AcpSessionRow,
   AcpSessionStatus,
+  TurnError,
+  TurnErrorReport,
+  TurnResolution,
 } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
@@ -61,6 +64,7 @@ import { openAcpWire, type AcpWire } from "./acp-transport";
 import * as broker from "./broker";
 import { nodes } from "../db/schema/nodes";
 import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
+import { turnErrorForSilentTurn, turnErrorFromPlugin, turnErrorFromReason, turnErrorFromRejection } from "./turn-error";
 
 const log = createLogger("acp-sessions");
 
@@ -72,6 +76,23 @@ let offlineGraceMs = 60_000;
 export function _setOfflineGraceMsForTest(ms: number): void {
   offlineGraceMs = ms;
 }
+
+// How long a turn that ended with nothing waits for a harness plugin to say
+// why. OpenClaw's bridge resolves `end_turn` before the plugin's report
+// arrives: the plugin waits 2.5 s of quiet after the last model attempt (see
+// integrations/openclaw/agentpod-errors), and real attempts land ~1 s apart.
+const TURN_ERROR_GRACE_DEFAULT_MS = 5_000;
+let turnErrorGraceMs = TURN_ERROR_GRACE_DEFAULT_MS;
+
+/** Test hook: change the wait. Pass nothing to restore the default. */
+export function _setTurnErrorGraceMsForTest(ms = TURN_ERROR_GRACE_DEFAULT_MS): void {
+  turnErrorGraceMs = ms;
+}
+
+// A report for a turn that has already been given its error is still posted,
+// as a follow-up, if it comes within this long. Later than that it cannot be
+// told apart from a report about some other turn.
+const LATE_TURN_ERROR_MS = 60_000;
 
 // Deadline for each ACP handshake request (initialize, session/new). An agent
 // process that spawns but never speaks ACP (interactive-prompt/TTY wedge —
@@ -162,6 +183,8 @@ interface LiveSession {
   userId: string;
   nodeId: string;
   stationKey: string;
+  /** Which harness answers, so an error can say whose failure it was. */
+  harness: string;
   mode: AcpSessionMode;
   status: AcpSessionStatus;
   /** Last assigned event seq (assigned synchronously; writes are chained). */
@@ -193,6 +216,33 @@ interface LiveSession {
    */
   instanceEchoed: boolean | null;
   graceTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * The harness's own name for this session, from `_meta.sessionKey` on its
+   * session updates (OpenClaw: "agent:krishna:main"). How a plugin's report,
+   * which knows only that name, finds this session.
+   */
+  harnessSessionKey: string | null;
+  /** A prompt has been sent and has not yet settled. */
+  turnInFlight: boolean;
+  /** This turn already has its error event; a second would say it twice. */
+  turnErrorRecorded: boolean;
+  /** Where the last turn's recorded error came from, to tell a follow-up from a repeat. */
+  turnErrorSource: TurnError["source"] | null;
+  /** A plugin's report that arrived while the turn was still running. */
+  pendingTurnError: TurnError | null;
+  /** When the latest plugin report for this turn arrived. */
+  pendingTurnErrorAt: number;
+  /** When the agent last produced something a reader sees, this turn. */
+  lastProducedAt: number;
+  /** Set while a silent turn waits for a plugin's report. */
+  awaitingTurnError: ((outcome: TurnError | TurnResolution) => void) | null;
+  /**
+   * A plugin said this turn's run ended well after all: a fallback answered,
+   * or the agent chose silence (OpenClaw's NO_REPLY).
+   */
+  turnResolution: TurnResolution | null;
+  /** When the last turn settled, for placing a late report. */
+  lastTurnSettledAt: number;
   /**
    * Whether the agent said, at `initialize`, that it accepts image blocks
    * (`agentCapabilities.promptCapabilities.image`). False until it says so:
@@ -431,6 +481,15 @@ async function finalizeEnd(live: LiveSession, reason: string): Promise<void> {
     clearTimeout(live.graceTimer);
     live.graceTimer = null;
   }
+  // A session ending under a running turn is why that turn failed: the node
+  // went away, or the harness exited. Recorded before the ended state, so
+  // every reader meets the reason before the end.
+  if (live.turnInFlight && !live.turnErrorRecorded) {
+    const error = live.pendingTurnError ?? turnErrorFromReason(reason, live.harness, "session-state");
+    live.turnErrorRecorded = true;
+    live.turnErrorSource = error.source;
+    persistEvent(live, "error", error);
+  }
   const hadParked = live.pending.size > 0;
   rejectPendingPermissions(live);
   if (hadParked) {
@@ -509,6 +568,12 @@ function handleSessionUpdate(live: LiveSession, params: SessionNotification): vo
     update.sessionUpdate === "tool_call_update"
   ) {
     live.turnProduced = true;
+    live.lastProducedAt = Date.now();
+  }
+  const meta = (params.update as { _meta?: unknown })._meta;
+  if (meta && typeof meta === "object") {
+    const key = (meta as { sessionKey?: unknown }).sessionKey;
+    if (typeof key === "string" && key !== "") live.harnessSessionKey = key;
   }
   // Every SDK sessionUpdate notification → agent-update with the raw update.
   persistEvent(live, "agent-update", params.update);
@@ -719,7 +784,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
   if (!connectionManager.isOnline(station.nodeId)) {
     throw new Error("Node is offline.");
   }
-  const { nodeId, stationKey, workspacePath } = station;
+  const { nodeId, stationKey, workspacePath, harness } = station;
 
   // ── Compatibility layer 1 (pre-open) ───────────────────────────────────────
   // A concurrent session is only safe when the node keys its agent processes on
@@ -747,6 +812,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     userId,
     nodeId,
     stationKey,
+    harness,
     mode,
     status: "starting",
     seq: 0,
@@ -762,6 +828,16 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     nodeSessionId: null,
     instanceEchoed: null,
     graceTimer: null,
+    harnessSessionKey: null,
+    turnInFlight: false,
+    turnErrorRecorded: false,
+    turnErrorSource: null,
+    pendingTurnError: null,
+    pendingTurnErrorAt: 0,
+    lastProducedAt: 0,
+    awaitingTurnError: null,
+    turnResolution: null,
+    lastTurnSettledAt: 0,
     acceptsImages: false,
   };
   // Register before any await so siblings (and the layers above) can see this
@@ -868,7 +944,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     return toContract(rows[0]!);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    persistEvent(live, "error", { message: reason });
+    persistEvent(live, "error", turnErrorFromRejection(err, live.harness));
     await finalizeEnd(live, reason);
     throw err;
   }
@@ -1093,9 +1169,11 @@ export async function promptSession(
       params: images.length === 0 ? { chars: text.length } : { chars: text.length, images: images.length },
     });
   } catch (err) {
-    persistEvent(live, "error", {
-      message: "Couldn't record the audit entry — prompt aborted.",
-    });
+    persistEvent(
+      live,
+      "error",
+      turnErrorFromReason("Couldn't record the audit entry — prompt aborted.", live.harness, "hub")
+    );
     await setStatus(live, "idle").done;
     throw err;
   }
@@ -1118,9 +1196,29 @@ export async function promptSession(
   // status (a late response from a cancelled turn must not reset a new one).
   live.turnEpoch += 1;
   live.turnProduced = false;
+  live.turnInFlight = true;
+  live.turnErrorRecorded = false;
+  live.turnErrorSource = null;
+  live.pendingTurnError = null;
+  live.pendingTurnErrorAt = 0;
+  live.lastProducedAt = 0;
+  live.turnResolution = null;
   const epoch = live.turnEpoch;
   const isCurrentTurn = () =>
     !live.ended && live.turnEpoch === epoch && live.status === "working";
+  const settled = () => {
+    if (live.turnEpoch !== epoch) return;
+    live.turnInFlight = false;
+    live.lastTurnSettledAt = Date.now();
+  };
+  const recordError = async (error: TurnError) => {
+    live.turnErrorRecorded = true;
+    live.turnErrorSource = error.source;
+    await audit.done("error", error.message).catch(() => {});
+    const { done: errorWritten } = persistEvent(live, "error", error);
+    const { done: idleWritten } = setStatus(live, "idle");
+    await Promise.all([errorWritten, idleWritten]);
+  };
 
   // The turn runs in the background; its completion restores idle. Callers
   // observe progress via subscribe()/acp_events, not this promise.
@@ -1129,14 +1227,52 @@ export async function promptSession(
       sessionId: live.acpSessionId,
       prompt: promptBlocks(text, images, imageRefusal),
     })
-    .then(async () => {
+    .then(async (response) => {
       if (isCurrentTurn()) {
+        // A plugin already said why, during the turn — unless the agent spoke
+        // after that report. OpenClaw's plugin reports a failed model once its
+        // attempts go quiet, and the next model in the chain can still answer
+        // (krishna, 2026-09-26 08:09: Kimi's quota, then a fallback's "Hey
+        // Rakesh"). Words after the report mean the chain recovered; a report
+        // after the last words (a partial answer, or Pi reporting at settled
+        // after "Retrying…") is the turn's error.
+        if (live.pendingTurnError && live.lastProducedAt > live.pendingTurnErrorAt) {
+          log.info("a plugin's turn error was followed by an answer; the fallback recovered", {
+            sessionId: live.id,
+            kind: live.pendingTurnError.kind,
+          });
+          live.pendingTurnError = null;
+        }
+        if (live.pendingTurnError) {
+          await recordError(live.pendingTurnError);
+          settled();
+          return;
+        }
         if (!live.turnProduced) {
-          const message = "The agent completed without a reply.";
-          await audit.done("error", message).catch(() => {});
-          const { done: errorWritten } = persistEvent(live, "error", { message });
-          const { done: idleWritten } = setStatus(live, "idle");
-          await Promise.all([errorWritten, idleWritten]);
+          // Nothing came back. A harness that drops its errors over ACP may
+          // have a plugin about to say why; give it a moment — unless its
+          // plugin has already said the run ended well.
+          const reported = live.turnResolution ?? (await awaitTurnError(live));
+          if (!isCurrentTurn()) {
+            settled();
+            return;
+          }
+          if (reported === "answered" || reported === "silent") {
+            // The agent chose to say nothing (NO_REPLY). An empty turn it
+            // chose is not a failed one: no error, and the room says done.
+            await audit.done("ok");
+            await setStatus(live, "idle", { extra: { silent: true } }).done;
+            settled();
+            return;
+          }
+          await recordError(
+            reported ??
+              turnErrorForSilentTurn(
+                live.harness,
+                (response as { stopReason?: unknown } | undefined)?.stopReason
+              )
+          );
+          settled();
           return;
         }
         await audit.done("ok");
@@ -1144,22 +1280,161 @@ export async function promptSession(
       } else {
         await audit.done("ok");
       }
+      settled();
     })
     .catch(async (err) => {
-      const message = err instanceof Error ? err.message : String(err);
+      // The harness's words, with what it put in `data` — Codex's quota
+      // sentence is only there — classified into one shape for every reader.
+      const error = turnErrorFromRejection(err, live.harness);
       await audit
-        .done("error", message)
+        .done("error", error.message)
         .catch(() => {});
       // Wire-level failures transition the session via handleWireClosed; only
       // recover to idle when this turn is still the live one. A normal ACP
       // request rejection is different: persist it in the transcript so every
       // client sees the provider or adapter error instead of an idle empty turn.
       if (isCurrentTurn()) {
-        const { done: errorWritten } = persistEvent(live, "error", { message });
+        // A plugin's report knows the provider and the fallback chain; the
+        // rejection, when both exist, is the less specific of the two.
+        const recorded = live.pendingTurnError ?? error;
+        live.turnErrorRecorded = true;
+        live.turnErrorSource = recorded.source;
+        const { done: errorWritten } = persistEvent(live, "error", recorded);
         const { done: idleWritten } = setStatus(live, "idle");
         await Promise.all([errorWritten, idleWritten]);
+        settled();
+        return;
       }
+      // A node that dropped rejects its prompt at once, while the session
+      // waits at `waiting` for it to come back. That turn is not over — it is
+      // lost, and finalizeEnd records why if the node never returns.
+      if (!live.ended && live.turnEpoch === epoch && live.status === "waiting") return;
+      settled();
     });
+}
+
+/** Wait, up to the grace window, for a plugin to report this turn's error. */
+function awaitTurnError(live: LiveSession): Promise<TurnError | TurnResolution | null> {
+  if (turnErrorGraceMs <= 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      live.awaitingTurnError = null;
+      resolve(null);
+    }, turnErrorGraceMs);
+    timer.unref?.();
+    live.awaitingTurnError = (error) => {
+      clearTimeout(timer);
+      live.awaitingTurnError = null;
+      resolve(error);
+    };
+  });
+}
+
+export type TurnErrorReportOutcome = "awaited" | "pending" | "merged" | "resolved" | "late" | "duplicate" | "unmatched";
+
+/**
+ * One turn's reports, as one error. The first report leads — it is about the
+ * model the agent was asked to use, and the rest are its fallbacks failing in
+ * turn — and every attempt is kept, in order.
+ */
+function mergeTurnErrors(first: TurnError, next: TurnError): TurnError {
+  const attemptsOf = (e: TurnError) =>
+    e.attempts ?? [
+      {
+        provider: e.provider ?? "unknown",
+        model: e.model ?? "unknown",
+        kind: e.kind,
+        message: e.message,
+        ...(e.providerErrorType ? { providerErrorType: e.providerErrorType } : {}),
+      },
+    ];
+  return { ...first, attempts: [...attemptsOf(first), ...attemptsOf(next)] };
+}
+
+/**
+ * A harness plugin's report of a failed turn, forwarded by the node it runs on.
+ *
+ * Only that node's sessions are candidates: anyone who can send a turn.error
+ * can put words in a room, and a node speaks only for what it runs.
+ */
+export function reportTurnError(nodeId: string, report: TurnErrorReport): TurnErrorReportOutcome {
+  const candidates = [...liveById.values()].filter(
+    (live) =>
+      !live.ended &&
+      live.nodeId === nodeId &&
+      (report.acpSessionId !== undefined
+        ? live.id === report.acpSessionId
+        : live.harnessSessionKey === report.harnessSessionKey)
+  );
+  // One harness session can be open from two places (a room and the console);
+  // the report is about the one that is failing now.
+  const live =
+    candidates.find((c) => c.awaitingTurnError) ??
+    candidates.find((c) => c.turnInFlight) ??
+    candidates.sort((a, b) => b.lastTurnSettledAt - a.lastTurnSettledAt)[0];
+
+  if (!live) {
+    // Info, not warn: a plugin sees every channel its harness serves, and a
+    // failed turn in a Telegram chat has no hub session to belong to.
+    log.info("a turn error was reported for no live session on its node", {
+      nodeId,
+      acpSessionId: report.acpSessionId,
+      harnessSessionKey: report.harnessSessionKey,
+    });
+    return "unmatched";
+  }
+
+  if (report.resolution) {
+    // The run this plugin reported (or is watching) ended well: whatever it
+    // said failed was recovered. A pending report goes; a waiting turn wakes.
+    live.pendingTurnError = null;
+    live.pendingTurnErrorAt = 0;
+    if (live.awaitingTurnError) {
+      live.awaitingTurnError(report.resolution);
+      return "resolved";
+    }
+    if (live.turnInFlight) {
+      live.turnResolution = report.resolution;
+      return "resolved";
+    }
+    // Too late to take back what the room was already told.
+    log.info("a turn resolution arrived after its turn ended", { nodeId, sessionId: live.id, resolution: report.resolution });
+    return "late";
+  }
+  if (!report.error) return "unmatched";
+  const error = turnErrorFromPlugin(report.error, live.harness);
+  if (live.awaitingTurnError) {
+    live.awaitingTurnError(error);
+    return "awaited";
+  }
+  if (live.turnInFlight && !live.turnErrorRecorded) {
+    // More than one report for a turn: merge, never replace. Replacing lost
+    // Kimi's quota — the cause — behind the fallbacks' errors (2026-09-26).
+    live.pendingTurnErrorAt = Date.now();
+    if (live.pendingTurnError) {
+      live.pendingTurnError = mergeTurnErrors(live.pendingTurnError, error);
+      return "merged";
+    }
+    live.pendingTurnError = error;
+    return "pending";
+  }
+  if (live.turnErrorSource === "plugin") {
+    // The room already shows a plugin's account of this turn. Another would be
+    // the same news twice, which is exactly what krishna's room showed.
+    return "duplicate";
+  }
+  if (Date.now() - live.lastTurnSettledAt < LATE_TURN_ERROR_MS) {
+    // The turn already has its error ("completed without a reply"). This one
+    // says why, so it follows rather than being lost.
+    live.turnErrorSource = error.source;
+    persistEvent(live, "error", error);
+    return "late";
+  }
+  log.warn("a turn error was reported too long after its turn to place", {
+    nodeId,
+    sessionId: live.id,
+  });
+  return "unmatched";
 }
 
 export async function cancelTurn(

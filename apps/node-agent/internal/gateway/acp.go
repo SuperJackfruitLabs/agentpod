@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 )
 
 // ACPCommandFunc resolves the ACP spawn command for a station key: argv is the
@@ -140,6 +142,12 @@ func (h *acpHandler) handleOpen(params json.RawMessage) (any, bool, error) {
 	argv, dir, env, err := h.cmdFn(p.Key)
 	if err != nil {
 		return nil, false, fmt.Errorf("acp.open: %w", err)
+	}
+	// The hub session this process serves, for a harness plugin to name when
+	// it reports a failed turn (internal/turnerror; Pi's agentpod-errors
+	// extension). The adapter passes its environment to the harness it spawns.
+	if p.Instance != "" && !strings.ContainsRune(p.Instance, 0) {
+		env = append(env, turnerror.SessionEnv+"="+p.Instance)
 	}
 
 	sess, err := h.mgr.Open(p.Key, p.Instance, argv, dir, env)

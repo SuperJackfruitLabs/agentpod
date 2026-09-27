@@ -2,6 +2,7 @@ import { z } from "zod";
 import { HostInfo } from "./node";
 import { RequestMsg, ResponseMsg, StreamMsg, CancelMsg, InputMsg, ResizeMsg } from "./protocol";
 import { NodeCapabilityList } from "./posture";
+import { TurnError, TurnErrorKind } from "./acp-session";
 
 export const HelloMsg = z.object({
   type: z.literal("hello"),
@@ -44,7 +45,75 @@ export const HealthReportMsg = z.object({
 });
 export type HealthReportMsg = z.infer<typeof HealthReportMsg>;
 
-export const GatewayClientMessage = z.discriminatedUnion("type", [HelloMsg, HeartbeatMsg, ResponseMsg, StreamMsg, HealthReportMsg]);
+// ─── Turn error frame (node-agent → hub, when a plugin reports one) ──────────
+
+/** A plugin's words are a sentence or two, not a log. */
+export const TURN_ERROR_MESSAGE_MAX = 8_192;
+
+/**
+ * What a harness plugin writes to its node's intake socket when a turn fails
+ * and the harness itself will not say so over ACP (OpenClaw, Pi).
+ *
+ * The plugin reports what it saw. It does not name the harness or the source:
+ * the hub knows which station the matched session belongs to, and a report
+ * that could claim to be another harness's would be one more thing to trust.
+ * `kind` is optional — the hub classifies the message when it is absent.
+ *
+ * Matched to a live session by one of two keys: `acpSessionId`, the hub
+ * session a node-spawned harness was told about (Pi), or `harnessSessionKey`,
+ * the harness's own name for the session, which the hub has already seen in
+ * that session's `session_info_update._meta.sessionKey` (OpenClaw).
+ */
+/**
+ * How a run the plugin is watching ended well, sent instead of an error:
+ * `answered` — a later attempt succeeded, so any failure it reported earlier
+ * was recovered; `silent` — the run succeeded and chose to say nothing
+ * (OpenClaw's NO_REPLY), so an empty turn is not a failure.
+ */
+export const TurnResolution = z.enum(["answered", "silent"]);
+export type TurnResolution = z.infer<typeof TurnResolution>;
+
+export const TurnErrorReport = z
+  .object({
+    acpSessionId: z.string().min(1).optional(),
+    harnessSessionKey: z.string().min(1).optional(),
+    resolution: TurnResolution.optional(),
+    error: TurnError.omit({ harness: true, source: true })
+      .partial({ kind: true })
+      .extend({
+        message: z.string().min(1).max(TURN_ERROR_MESSAGE_MAX),
+        // Each model the harness tried. A plugin reports the words; the hub
+        // classifies an attempt that arrives without a kind, as it does the
+        // report itself.
+        attempts: z
+          .array(
+            z.object({
+              provider: z.string(),
+              model: z.string(),
+              kind: TurnErrorKind.optional(),
+              message: z.string().max(TURN_ERROR_MESSAGE_MAX),
+              providerErrorType: z.string().max(200).optional(),
+              httpStatus: z.number().int().min(100).max(599).optional(),
+            })
+          )
+          .max(16)
+          .optional(),
+      })
+      .optional(),
+  })
+  .refine((r) => r.error !== undefined || r.resolution !== undefined, {
+    message: "a report carries an error, or a resolution saying the run ended well",
+  })
+  .refine((r) => r.acpSessionId !== undefined || r.harnessSessionKey !== undefined, {
+    message: "a report needs acpSessionId or harnessSessionKey to be matched to a session",
+  });
+export type TurnErrorReport = z.infer<typeof TurnErrorReport>;
+
+/** The node forwards a report unchanged, wrapped in this envelope. */
+export const TurnErrorMsg = z.object({ type: z.literal("turn.error"), report: TurnErrorReport });
+export type TurnErrorMsg = z.infer<typeof TurnErrorMsg>;
+
+export const GatewayClientMessage = z.discriminatedUnion("type", [HelloMsg, HeartbeatMsg, ResponseMsg, StreamMsg, HealthReportMsg, TurnErrorMsg]);
 export type GatewayClientMessage = z.infer<typeof GatewayClientMessage>;
 // Hub → node messages: ack/req/cancel (control) + input/resize (terminal interactivity)
 export const GatewayServerMessage = z.discriminatedUnion("type", [AckMsg, RequestMsg, CancelMsg, InputMsg, ResizeMsg]);

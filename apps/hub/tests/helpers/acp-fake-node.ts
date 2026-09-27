@@ -58,12 +58,26 @@ export interface FakeAcpNodeOpts {
   permission?: FakePermissionConfig | null;
   /** Hold the prompt turn open until session/cancel arrives (or releasePrompt). */
   hangPrompt?: boolean;
+  /**
+   * With hangPrompt: open the turn without the opening "Working on it" chunk,
+   * so a test decides when (and whether) the agent says anything.
+   */
+  quietHang?: boolean;
   /** Ignore session/cancel: a hanging prompt stays open until releasePrompt(). */
   ignoreCancel?: boolean;
   /** Reject session/prompt without emitting an agent update (provider failure). */
   failPrompt?: string;
+  /** With failPrompt: the JSON-RPC error's code and data, as a real adapter sends them. */
+  failPromptCode?: number;
+  failPromptData?: unknown;
   /** Complete session/prompt without emitting an update (adapter false success). */
   silentPrompt?: boolean;
+  /**
+   * Open each turn with a session_info_update carrying this as
+   * `_meta.sessionKey`, as OpenClaw does ("agent:krishna:main"). It is how the
+   * hub learns the harness's own name for a session.
+   */
+  harnessSessionKey?: string;
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
@@ -123,6 +137,8 @@ export interface FakeAcpNode {
   processFor(instance: string): FakeAgentProcess | undefined;
   /** Complete the OLDEST still-hanging prompt turn with the given stopReason. */
   releasePrompt(stopReason?: string): void;
+  /** The oldest hanging turn's agent says `text` (an agent_message_chunk). */
+  agentSays(text: string): void;
   close(): void;
 }
 
@@ -251,13 +267,31 @@ export async function connectFakeAcpNode(
     msg: { id: string | number; params: { sessionId: string } }
   ) => {
     proc.pendingPrompts.push(msg.id);
+    if (opts.harnessSessionKey) {
+      sendAgent(proc, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: proc.agentSessionId,
+          update: {
+            sessionUpdate: "session_info_update",
+            title: "Are you here?",
+            _meta: { kind: "direct", sessionKey: opts.harnessSessionKey },
+          },
+        },
+      });
+    }
     if (opts.failPrompt) {
       const id = proc.pendingPrompts.shift();
       if (id !== undefined) {
         sendAgent(proc, {
           jsonrpc: "2.0",
           id,
-          error: { code: -32000, message: opts.failPrompt },
+          error: {
+            code: opts.failPromptCode ?? -32000,
+            message: opts.failPrompt,
+            ...(opts.failPromptData === undefined ? {} : { data: opts.failPromptData }),
+          },
         });
       }
       return;
@@ -266,6 +300,7 @@ export async function connectFakeAcpNode(
       respondOldest(proc, { stopReason: "end_turn" });
       return;
     }
+    if (opts.hangPrompt && opts.quietHang) return;
     sendAgent(proc, {
       jsonrpc: "2.0",
       method: "session/update",
@@ -548,6 +583,18 @@ export async function connectFakeAcpNode(
     releasePrompt: (stopReason = "end_turn") => {
       const proc = processes.find((p) => p.pendingPrompts.length > 0);
       if (proc) respondOldest(proc, { stopReason });
+    },
+    agentSays: (text: string) => {
+      const proc = processes.find((p) => p.pendingPrompts.length > 0);
+      if (!proc) return;
+      sendAgent(proc, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: proc.agentSessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        },
+      });
     },
     close: () => ws.close(),
   };

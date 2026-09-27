@@ -245,3 +245,31 @@ func TestForgetDeviceIsIdempotent(t *testing.T) {
 		t.Fatalf("want ErrNoDevice after Forget, got %v", err)
 	}
 }
+
+// A renewal must ask for the same planes the original sign-in reached.
+//
+// The exchange used to send no client, and the hub's device endpoint defaults to minting for the
+// hub alone. So `fleet login` produced a token good for hub AND superpipeline, and then the first
+// silent renewal five minutes later quietly narrowed it to hub-only. `supi boards` answered 401
+// with a credential that was valid, fresh and correctly located — the audience was the whole of
+// it, and nothing in the flow said so.
+//
+// `ClientID` is the same registry entry `fleet login` authorizes as. One definition: a renewal
+// that named a different client than the sign-in would be a subtler version of this same bug.
+func TestExchangeNamesTheClientSoARenewalKeepsEveryPlane(t *testing.T) {
+	withConfigDir(t)
+	var clientSeen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		clientSeen = r.URL.Query().Get("client")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"token":"fresh-token"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := ExchangeDevice(srv.URL, Device{ID: "dev_abc", Secret: "sec", Hub: srv.URL}); err != nil {
+		t.Fatalf("ExchangeDevice: %v", err)
+	}
+	if clientSeen != ClientID {
+		t.Fatalf("sent client=%q, want %q", clientSeen, ClientID)
+	}
+}

@@ -22,6 +22,7 @@ import { autoAdoptProvisionedHarness } from "../services/runtime-autoadopt";
 import { completeRuntimeStartForNode } from "../services/runtimes";
 import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/station-registry";
 import { recordHealth, clearNode } from "../services/health-cache";
+import { reportTurnError } from "../services/acp-sessions";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
 export const gatewayRoutes = new Hono().get(
@@ -181,6 +182,9 @@ export const gatewayRoutes = new Hono().get(
           connectionManager.send(authed, { type: "ack", ts: Date.now() });
         } else if (parsed.data.type === "health") {
           recordHealth(authed, parsed.data.stations);
+        } else if (parsed.data.type === "turn.error") {
+          // A harness plugin's report of a failed turn, via its node.
+          reportTurnError(authed, parsed.data.report);
         } else if (
           parsed.data.type === "res" ||
           parsed.data.type === "stream"

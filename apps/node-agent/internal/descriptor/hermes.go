@@ -330,7 +330,7 @@ func hermesUnitName(key string) string {
 // `systemctl --user cat <unit>` exits 0 iff the unit file can be read, and
 // non-zero when absent or when systemctl/the user session is unavailable.
 func hermesUnitKnown(unit string) bool {
-	return exec.Command("systemctl", "--user", "cat", unit).Run() == nil
+	return userSystemctl("cat", unit).Run() == nil
 }
 
 // hermesPattern returns the pgrep -f (ERE) pattern for a Hermes station key.
@@ -393,7 +393,7 @@ func hermesProcessRunning(key string) (bool, error) {
 func (h *hermesDescriptor) Stop(key string) error {
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
-		return exec.Command("systemctl", "--user", "stop", unit).Run()
+		return userSystemctl("stop", unit).Run()
 	}
 	// Fallback: locate the process via pgrep and send SIGTERM/SIGKILL.
 	pid, err := hermesPID(key)
@@ -426,7 +426,7 @@ func (h *hermesDescriptor) Start(key string) error {
 	}
 	unit := hermesUnitName(key)
 	if hermesUnitKnown(unit) {
-		return exec.Command("systemctl", "--user", "start", unit).Run()
+		return userSystemctl("start", unit).Run()
 	}
 	// An operator-configured start command takes precedence over the native
 	// fallback (it can encode a site-specific launcher).

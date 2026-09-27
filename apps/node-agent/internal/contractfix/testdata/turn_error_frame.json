@@ -1,0 +1,12 @@
+{
+  "type": "turn.error",
+  "report": {
+    "harnessSessionKey": "agent:krishna:main",
+    "error": {
+      "message": "⚠️ You've reached your weekly (7-day) usage limit.",
+      "kind": "quota",
+      "provider": "kimi-coding",
+      "model": "k2p6"
+    }
+  }
+}

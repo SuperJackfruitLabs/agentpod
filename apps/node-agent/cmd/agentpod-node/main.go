@@ -118,6 +118,10 @@ func main() {
 		os.Exit(hermesSkillsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "hermes-live":
 		os.Exit(hermesLiveCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "openclaw-errors":
+		os.Exit(openclawErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
+	case "pi-errors":
+		os.Exit(piErrorsCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "plugin-management":
 		os.Exit(pluginManagementCmd(os.Args[2:], os.Stdout, os.Stderr))
 	case "detect":
@@ -153,10 +157,12 @@ func main() {
 		if err != nil {
 			if errors.Is(err, selfupdate.ErrRestartFailed) {
 				fmt.Fprintln(os.Stderr, "update: binary swapped but service restart failed:", err)
-				if runtime.GOOS == "darwin" {
-					fmt.Fprintf(os.Stderr, "restart it manually: launchctl kickstart -k gui/%d/dev.agentpod.node  (or re-run: apn run)\n", os.Getuid())
-				} else {
-					fmt.Fprintln(os.Stderr, "restart the service manually: systemctl restart agentpod-node")
+				// Asked rather than guessed. This branch used to print `systemctl restart` on
+				// every Linux host, which is wrong wherever the node runs as a USER unit — it
+				// sent an operator to a second dead end after the first. `service` already
+				// decides the scope in order to restart at all, so it is the one that knows.
+				if m, mErr := service.NewManagerForRestart(runtime.GOOS, nil); mErr == nil {
+					fmt.Fprintln(os.Stderr, "restart it manually:", m.RestartHint())
 				}
 				os.Exit(1)
 			}

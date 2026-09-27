@@ -243,3 +243,86 @@ func TestHelloAdvertisesLargeFrames(t *testing.T) {
 	}
 }
 
+// hubCollecting starts a fake hub and returns a channel of every frame whose
+// "type" is typ.
+func hubCollecting(t *testing.T, typ string) (url string, frames chan map[string]any) {
+	t.Helper()
+	frames = make(chan map[string]any, 20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer c.Close(websocket.StatusNormalClosure, "")
+		for {
+			_, data, err := c.Read(context.Background())
+			if err != nil {
+				return
+			}
+			var frame map[string]any
+			if json.Unmarshal(data, &frame) == nil && frame["type"] == typ {
+				frames <- frame
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, frames
+}
+
+// A plugin's report can arrive while the node is between connections. It
+// waits in the outbox and goes out once the node is connected again.
+func TestOutboxFramesReachTheHub(t *testing.T) {
+	url, frames := hubCollecting(t, "turn.error")
+	outbox := make(chan []byte, 4)
+	outbox <- []byte(`{"type":"turn.error","report":{"harnessSessionKey":"k","error":{"message":"queued before connect"}}}`)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := config.Config{Hub: url, NodeID: "node_1", NodeSecret: "s"}
+	go RunWith(ctx, cfg, stubHandler, "dev", nil, Extras{Outbox: outbox})
+
+	select {
+	case f := <-frames:
+		report, _ := f["report"].(map[string]any)
+		errObj, _ := report["error"].(map[string]any)
+		if errObj["message"] != "queued before connect" {
+			t.Fatalf("frame = %v", f)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued frame never reached the hub")
+	}
+
+	outbox <- []byte(`{"type":"turn.error","report":{"harnessSessionKey":"k","error":{"message":"while connected"}}}`)
+	select {
+	case <-frames:
+	case <-time.After(2 * time.Second):
+		t.Fatal("frame queued while connected never reached the hub")
+	}
+}
+
+func TestExtraCapabilitiesAreAdvertisedInHello(t *testing.T) {
+	url, hellos := hubCollecting(t, "hello")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfg := config.Config{Hub: url, NodeID: "node_1", NodeSecret: "s"}
+	go RunWith(ctx, cfg, stubHandler, "dev", nil, Extras{Capabilities: []string{"turn.errors"}})
+
+	select {
+	case h := <-hellos:
+		caps, _ := h["capabilities"].([]any)
+		found := false
+		for _, c := range caps {
+			if c == "turn.errors" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("hello capabilities = %v, want turn.errors among them", caps)
+		}
+		if len(caps) != len(NodeCapabilities)+1 {
+			t.Fatalf("hello capabilities = %v, want the base set plus one", caps)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no hello")
+	}
+}
