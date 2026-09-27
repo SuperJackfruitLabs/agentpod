@@ -121,3 +121,40 @@ it("transcription.apply's result strips unknown fields — neither the key nor t
     })
   ).toEqual({ applied: true, mode: "on", model: "m", restarted: true });
 });
+
+describe("git identity verbs", () => {
+  // The rule these verbs exist to keep: nothing secret crosses the broker. The private half of the
+  // key is generated on the node and never leaves it, so neither schema has anywhere to put one.
+  it("neither the params nor the result has a field a secret could ride in", () => {
+    for (const verb of ["git.identity.ensure", "git.identity.remove"] as const) {
+      const params = Object.keys(VERB_PARAMS[verb].shape);
+      const result = Object.keys(VERB_RESULTS[verb].shape);
+      for (const field of [...params, ...result]) {
+        expect(field).not.toMatch(/token|secret|private|password|keyPath/i);
+      }
+    }
+  });
+
+  it("ensure carries BOTH names of the station, because neither side knows the other's", () => {
+    // stationId alone cannot be looked up by the node's spawn path; stationKey alone cannot survive
+    // a rename. Dropping either one breaks a push with nothing to explain it.
+    expect(VERB_PARAMS["git.identity.ensure"].safeParse({ stationId: "stn_a" }).success).toBe(false);
+    expect(VERB_PARAMS["git.identity.ensure"].safeParse({ stationKey: "hermes:a" }).success).toBe(false);
+    expect(
+      VERB_PARAMS["git.identity.ensure"].safeParse({ stationId: "stn_a", stationKey: "hermes:a" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("remove is keyed by id alone, so a rename cannot make it miss", () => {
+    expect(VERB_PARAMS["git.identity.remove"].safeParse({ stationId: "stn_a" }).success).toBe(true);
+  });
+
+  it("the result reports whether a key was minted, which is what makes a re-provision safe", () => {
+    expect(
+      VERB_RESULTS["git.identity.ensure"].safeParse({ publicKey: "ssh-ed25519 AAAA", created: true })
+        .success,
+    ).toBe(true);
+    expect(VERB_RESULTS["git.identity.ensure"].safeParse({ publicKey: "ssh-ed25519 AAAA" }).success).toBe(false);
+  });
+});

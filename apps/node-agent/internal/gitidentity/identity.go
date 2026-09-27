@@ -43,6 +43,20 @@ func KeyPath(root, stationID string) string {
 	return filepath.Join(Dir(root), stationID)
 }
 
+// stationFile records which station KEY a key belongs to, beside the key itself.
+//
+// The two sides of this feature name a station differently and neither can adopt the other's
+// name. The hub decides and revokes by station **id**, which is stable across a rename — so that
+// is what the key file is called. But the node only ever learns a station's **key** (`harness:name`
+// from its own detect), and the spawn path has nothing else to look one up by. Hence this: one
+// line of text per key, written when the hub provisions and read when a harness starts.
+//
+// A sidecar rather than an index file because there is nothing to keep in sync. An index can
+// disagree with the directory it describes; a file that sits next to the key it names cannot.
+func stationFile(root, stationID string) string {
+	return KeyPath(root, stationID) + ".station"
+}
+
 // SSHCommand is the GIT_SSH_COMMAND that uses one station's key and nothing else.
 //
 // `IdentitiesOnly=yes` is not decoration. Without it ssh offers every identity it can find —
@@ -63,12 +77,17 @@ func SSHCommand(keyPath string) string {
 // Idempotent on purpose: regenerating would silently orphan the key already registered on forge,
 // which the hub could then never match to this station again — it would keep working until
 // somebody revoked a key that was no longer the one in use.
-func EnsureKey(root, stationID string) (publicKey string, keyPath string, created bool, err error) {
+func EnsureKey(root, stationID, stationKey string) (publicKey string, keyPath string, created bool, err error) {
 	keyPath = KeyPath(root, stationID)
 	pubPath := keyPath + ".pub"
 
 	if data, statErr := os.ReadFile(pubPath); statErr == nil {
 		if _, keyErr := os.Stat(keyPath); keyErr == nil {
+			// Rewritten, not skipped: a station that was renamed keeps its key and its id, and the
+			// sidecar is the only thing that has gone stale.
+			if err := writeStationFile(root, stationID, stationKey); err != nil {
+				return "", "", false, err
+			}
 			return strings.TrimSpace(string(data)), keyPath, false, nil
 		}
 		// A public key with no private key is not a usable identity. Removing both and starting
@@ -103,6 +122,10 @@ func EnsureKey(root, stationID string) (publicKey string, keyPath string, create
 		return "", "", false, fmt.Errorf("gitidentity: secure key: %w", err)
 	}
 
+	if err := writeStationFile(root, stationID, stationKey); err != nil {
+		return "", "", false, err
+	}
+
 	data, err := os.ReadFile(pubPath)
 	if err != nil {
 		return "", "", false, fmt.Errorf("gitidentity: read public key: %w", err)
@@ -110,10 +133,46 @@ func EnsureKey(root, stationID string) (publicKey string, keyPath string, create
 	return strings.TrimSpace(string(data)), keyPath, true, nil
 }
 
+func writeStationFile(root, stationID, stationKey string) error {
+	if err := os.WriteFile(stationFile(root, stationID), []byte(stationKey), 0o600); err != nil {
+		return fmt.Errorf("gitidentity: record station key: %w", err)
+	}
+	return nil
+}
+
+// KeyPathForStationKey finds the key belonging to a station, given the only name the node knows it
+// by. Absent is the ordinary case — most stations are never given a git identity.
+func KeyPathForStationKey(root, stationKey string) (string, bool) {
+	if stationKey == "" {
+		return "", false
+	}
+	entries, err := os.ReadDir(Dir(root))
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".station") {
+			continue
+		}
+		data, readErr := os.ReadFile(filepath.Join(Dir(root), e.Name()))
+		if readErr != nil || strings.TrimSpace(string(data)) != stationKey {
+			continue
+		}
+		keyPath := filepath.Join(Dir(root), strings.TrimSuffix(e.Name(), ".station"))
+		if _, statErr := os.Stat(keyPath); statErr != nil {
+			// A sidecar whose key is gone. Reporting it would hand out a GIT_SSH_COMMAND naming a
+			// file that does not exist, which fails every push with an ssh error naming nothing.
+			continue
+		}
+		return keyPath, true
+	}
+	return "", false
+}
+
 // Remove deletes a station's key from this node. The forge side is the hub's to withdraw.
 func Remove(root, stationID string) error {
 	keyPath := KeyPath(root, stationID)
-	for _, p := range []string{keyPath, keyPath + ".pub"} {
+	for _, p := range []string{keyPath, keyPath + ".pub", stationFile(root, stationID)} {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("gitidentity: remove %s: %w", p, err)
 		}
