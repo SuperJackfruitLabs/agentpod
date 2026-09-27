@@ -46,6 +46,7 @@ import { stationRoutes } from './routes/stations.ts';
 import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
+import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
@@ -237,6 +238,13 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  // A node registering the key one of its stations pushes with. The sibling above's refusals,
+  // carrying no secret in either direction: the node keeps the private half.
+  .route('/api', createStationGitIdentityRoutes({
+    forge: config.forge.url && config.forge.adminToken
+      ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
+      : null,
+  }))
   /**
    * POST /api/nodes/:nodeId/stations/:stationId/transcription — a node
    * reading its station's voice-note setting (API key included) for
