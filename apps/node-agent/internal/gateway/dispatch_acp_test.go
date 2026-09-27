@@ -66,12 +66,26 @@ func newACPTestRig(t *testing.T, h Handler) *acpTestRig {
 	var hubConn *websocket.Conn
 	select {
 	case hubConn = <-hubConnCh:
-	case <-time.After(2 * time.Second):
+	case <-time.After(acpTestBarrier):
 		t.Fatal("hub connection timeout")
 	}
 
 	return &acpTestRig{t: t, frames: frames, hub: hubConn}
 }
+
+// acpTestBarrier is how long a rig helper waits before calling the node broken.
+//
+// These bound a FAILURE. They do not assert a speed, and treating them as though they do is how
+// this package reported `TestACPOpenGivesTheAdapterItsHubSession` as failing on a pull request
+// that touched no Go at all — the same test passing locally every time it was run. The job that
+// runs this package also runs `internal/skills`, which alone takes about twenty-four seconds, so a
+// loaded runner can exceed a small deadline while everything works exactly as intended.
+//
+// Generous on purpose, and `CLAUDE.md`'s "never sleep for a barrier" is the same lesson from the
+// other direction: the cost of a long deadline is paid only when something is genuinely broken,
+// and the cost of a short one is paid at random, on unrelated work, by whoever is least equipped
+// to recognise it as noise.
+const acpTestBarrier = 30 * time.Second
 
 // writeHub sends a raw JSON string to the node.
 func (r *acpTestRig) writeHub(msg string) {
@@ -81,7 +95,7 @@ func (r *acpTestRig) writeHub(msg string) {
 	}
 }
 
-// readFrame waits for the next frame from the node with a 3-second timeout.
+// readFrame waits for the next frame from the node, bounded by acpTestBarrier.
 func (r *acpTestRig) readFrame() map[string]any {
 	r.t.Helper()
 	select {
@@ -91,7 +105,7 @@ func (r *acpTestRig) readFrame() map[string]any {
 			r.t.Fatalf("bad JSON frame: %v – raw: %s", err, data)
 		}
 		return m
-	case <-time.After(3 * time.Second):
+	case <-time.After(acpTestBarrier):
 		r.t.Fatal("timeout waiting for frame from node")
 		return nil
 	}
@@ -101,7 +115,7 @@ func (r *acpTestRig) readFrame() map[string]any {
 // contains want, or the deadline passes.
 func (r *acpTestRig) awaitStreamContaining(want string) bool {
 	r.t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(acpTestBarrier)
 	for time.Now().Before(deadline) {
 		select {
 		case data := <-r.frames:
