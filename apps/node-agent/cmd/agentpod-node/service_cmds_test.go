@@ -25,11 +25,12 @@ type fakeManager struct {
 	installCalled, uninstallCalled, startCalled, stopCalled, restartCalled bool
 }
 
-func (f *fakeManager) Install() error   { f.installCalled = true; return f.installErr }
-func (f *fakeManager) Uninstall() error { f.uninstallCalled = true; return f.uninstallErr }
-func (f *fakeManager) Start() error     { f.startCalled = true; return f.startErr }
-func (f *fakeManager) Stop() error      { f.stopCalled = true; return f.stopErr }
-func (f *fakeManager) Restart() error   { f.restartCalled = true; return f.restartErr }
+func (f *fakeManager) Install() error      { f.installCalled = true; return f.installErr }
+func (f *fakeManager) Uninstall() error    { f.uninstallCalled = true; return f.uninstallErr }
+func (f *fakeManager) Start() error        { f.startCalled = true; return f.startErr }
+func (f *fakeManager) Stop() error         { f.stopCalled = true; return f.stopErr }
+func (f *fakeManager) Restart() error      { f.restartCalled = true; return f.restartErr }
+func (f *fakeManager) RestartHint() string { return "fake restart hint" }
 func (f *fakeManager) Status() (service.Status, error) {
 	return f.status, f.statusErr
 }
