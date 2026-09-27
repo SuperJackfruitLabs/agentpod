@@ -46,6 +46,7 @@ import { stationRoutes } from './routes/stations.ts';
 import { stationTokenRoutes } from './routes/station-token.ts';
 // A node redeeming a human's authorization for a station's Matrix credential
 import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-credential.ts';
+import { stationGitCredentialRoutes } from './routes/station-git-credential.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
@@ -237,6 +238,9 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
+  // A node redeeming one of its stations' git credentials — the sibling above's shape, minus its
+  // single-use rule, because a git credential helper runs on every fetch and push.
+  .route('/api', stationGitCredentialRoutes)
   /**
    * POST /api/nodes/:nodeId/stations/:stationId/transcription — a node
    * reading its station's voice-note setting (API key included) for
