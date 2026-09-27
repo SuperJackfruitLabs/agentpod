@@ -238,13 +238,6 @@ const app = new Hono()
    * unit test that does not need to boot this whole file to run.
    */
   .route('/api', stationMatrixCredentialRoutesFor(matrixBridge))
-  // A node registering the key one of its stations pushes with. The sibling above's refusals,
-  // carrying no secret in either direction: the node keeps the private half.
-  .route('/api', createStationGitIdentityRoutes({
-    forge: config.forge.url && config.forge.adminToken
-      ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
-      : null,
-  }))
   /**
    * POST /api/nodes/:nodeId/stations/:stationId/transcription — a node
    * reading its station's voice-note setting (API key included) for
@@ -316,6 +309,18 @@ const app = new Hono()
   .route('/api', stationSkillsRoutes)
   .route('/api', createSkillManagementRoutes())
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
+  /**
+   * Giving one station a forge push key, and taking it away.
+   *
+   * BELOW `authMiddleware`, unlike most forge-adjacent wiring: this is an operator acting on a
+   * station they own, so it wants the same `getStation` ownership check every other station route
+   * uses. The predecessor in #594 was a node calling in with its own credential and sat above.
+   */
+  .route('/api', createStationGitIdentityRoutes({
+    forge: config.forge.url && config.forge.adminToken
+      ? { baseUrl: config.forge.url.replace(/\/+$/, ''), adminToken: config.forge.adminToken }
+      : null,
+  }))
   .route('/api', nodePostureRoutes)                        // POST /api/nodes/:id/posture/scan
   .route('/public', runtimeCallbackRoutes)                 // POST /public/runtimes/:id/state
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws

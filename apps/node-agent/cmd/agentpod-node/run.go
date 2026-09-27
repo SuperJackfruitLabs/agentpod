@@ -6,12 +6,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
@@ -190,8 +192,18 @@ func runCmd() {
 		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
 	h = gateway.NewChangesetHandler(h, resolver)
+	gitIdentityRoot := filepath.Dir(config.DefaultPath())
+	// git.identity.ensure: the public half of a station's push key, generated on first ask.
+	// Rooted at the config directory, NOT a workspace — see internal/gitidentity for why.
+	h = gateway.NewGitIdentityHandler(h, gitIdentityRoot)
 	h = gateway.NewPostureHandler(h, func() int { return len(reg.DetectAll()) })
-	h = gateway.NewACPHandler(h, acpMgr, descriptor.NewCapabilityHandler(reg).ACPCommand)
+	// A station with a provisioned git identity gets GIT_SSH_COMMAND in its harness's environment.
+	// This is what makes the key do anything: without it the key is on disk, the account is on
+	// forge, and `git push` still uses whatever ssh would have used anyway.
+	h = gateway.NewACPHandler(h, acpMgr, gateway.ACPCommandFunc(gitidentity.WithSSHCommand(
+		gitIdentityRoot,
+		descriptor.NewCapabilityHandler(reg).ACPCommand,
+	)))
 	h = gateway.NewUpdateHandler(h, version)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)

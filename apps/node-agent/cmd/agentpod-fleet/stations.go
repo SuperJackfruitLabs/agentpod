@@ -22,8 +22,17 @@ func fleetStations(args []string) {
   fleet stations adopt --node NODE_ID --key KEY [--key KEY …]
   fleet stations unadopt --station STATION_ID
 
+  fleet stations git-identity --station STATION_ID   what it can push to forge as
+  fleet stations grant-push   --station STATION_ID   give it a forge push key
+  fleet stations revoke-push  --station STATION_ID   take that key away
+
 A detected station is not an agent until it is adopted. Adopting re-detects on
-the node first, so a key that has gone away is not adopted from a stale list.`)
+the node first, so a key that has gone away is not adopted from a stale list.
+
+Push access is granted per station and never by adopting one: most stations
+never touch git, and a forge key for every station is an account nobody uses
+and a key nobody revokes. The keypair is generated ON THE NODE and the private
+half never leaves it — grant-push asks for the public half and registers that.`)
 		return
 	}
 	fs := flag.NewFlagSet("fleet stations", flag.ExitOnError)
@@ -57,8 +66,27 @@ the node first, so a key that has gone away is not adopted from a stale list.`)
 			os.Exit(2)
 		}
 		fleetSkillJSON(http.MethodDelete, "/api/stations/"+url.PathEscape(*station), nil)
+	case "git-identity":
+		requireStation(*station, "git-identity")
+		fleetGet("/api/stations/"+url.PathEscape(*station)+"/git-identity", nil)
+	case "grant-push":
+		requireStation(*station, "grant-push")
+		// No body: the account is derived from the station's occupying agent and the key is the
+		// node's to generate. There is nothing for an operator to supply, and nothing they could
+		// supply without being able to aim a key at somebody else's agent.
+		fleetSkillJSON(http.MethodPost, "/api/stations/"+url.PathEscape(*station)+"/git-identity", nil)
+	case "revoke-push":
+		requireStation(*station, "revoke-push")
+		fleetSkillJSON(http.MethodDelete, "/api/stations/"+url.PathEscape(*station)+"/git-identity", nil)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown stations command: %q\n", args[0])
+		os.Exit(2)
+	}
+}
+
+func requireStation(station, verb string) {
+	if station == "" {
+		fmt.Fprintf(os.Stderr, "%s requires --station STATION_ID (see `fleet stations list`)\n", verb)
 		os.Exit(2)
 	}
 }

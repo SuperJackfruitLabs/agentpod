@@ -17,7 +17,7 @@ func TestEnsureKeyCreatesAnEd25519KeypairOutsideTheWorkspace(t *testing.T) {
 	root := t.TempDir()
 	workspace := t.TempDir()
 
-	pub, keyPath, created, err := EnsureKey(root, "station_abc")
+	pub, keyPath, created, err := EnsureKey(root, "station_abc", "hermes:test")
 	if err != nil {
 		t.Fatalf("EnsureKey: %v", err)
 	}
@@ -54,11 +54,11 @@ func TestEnsureKeyCreatesAnEd25519KeypairOutsideTheWorkspace(t *testing.T) {
 func TestEnsureKeyIsIdempotent(t *testing.T) {
 	root := t.TempDir()
 
-	first, path1, created1, err := EnsureKey(root, "station_abc")
+	first, path1, created1, err := EnsureKey(root, "station_abc", "hermes:test")
 	if err != nil {
 		t.Fatalf("first EnsureKey: %v", err)
 	}
-	second, path2, created2, err := EnsureKey(root, "station_abc")
+	second, path2, created2, err := EnsureKey(root, "station_abc", "hermes:test")
 	if err != nil {
 		t.Fatalf("second EnsureKey: %v", err)
 	}
@@ -75,11 +75,11 @@ func TestEnsureKeyIsIdempotent(t *testing.T) {
 
 func TestEachStationGetsItsOwnKey(t *testing.T) {
 	root := t.TempDir()
-	a, _, _, err := EnsureKey(root, "station_a")
+	a, _, _, err := EnsureKey(root, "station_a", "hermes:a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, _, _, err := EnsureKey(root, "station_b")
+	b, _, _, err := EnsureKey(root, "station_b", "hermes:b")
 	if err != nil {
 		t.Fatal(err)
 	}

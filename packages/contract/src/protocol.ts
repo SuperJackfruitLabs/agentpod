@@ -79,6 +79,24 @@ export const VERB_PARAMS = {
   }),
   // Node-level: no station key. One scan describes one machine.
   "posture.scan": z.object({}),
+  /**
+   * The public half of the SSH key a station pushes to forge with, generated on the node on first
+   * ask. Provisioning is explicit — the hub asks for the stations an operator chose, never for
+   * every station — so there is no "ensure all".
+   *
+   * BOTH names of the station, for the same reason `matrix.adopt` carries both and neither can
+   * stand in for the other: `stationId` is the hub's, stable across a rename, and is what
+   * revocation is keyed by; `stationKey` is the only name the node knows, and the node records it
+   * beside the key so the harness spawn path can find which key belongs to the station it is
+   * starting. Both are non-secret, which keeps this on the broker's rule that no credential ever
+   * rides in a frame — and here the SECRET NEVER MOVES AT ALL: the private half is generated on the
+   * node and stays there, and the hub registers only what comes back.
+   */
+  "git.identity.ensure": z.object({ stationId: z.string(), stationKey: z.string() }),
+  // Withdrawal. By id alone: a rename must not be able to miss the key it meant to delete. The
+  // forge side is the hub's own to revoke; this only deletes the node's copy, so that a station
+  // reassigned to another agent cannot be handed the previous occupant's key.
+  "git.identity.remove": z.object({ stationId: z.string() }),
   // key is the station key (e.g. "hermes:writer-quill") — what the node
   // uses to resolve the profile directory. stationId is the station's
   // database id — what the hub's redemption endpoint
@@ -139,6 +157,15 @@ export const VERB_RESULTS = {
   "changeset.status": ChangesetStatus,
   "changeset.diff": ChangesetDiff,
   "posture.scan": PostureReport,
+  /**
+   * `publicKey` is an OpenSSH public key line. `created` distinguishes a freshly minted pair from
+   * one that already existed, which is what makes a repeated provision safe to run.
+   *
+   * There is deliberately no path and no private key here. The hub has no use for either, and a
+   * key path in a hub log is a map to the one file on that node worth stealing.
+   */
+  "git.identity.ensure": z.object({ publicKey: z.string(), created: z.boolean() }),
+  "git.identity.remove": z.object({ removed: z.boolean() }),
   /**
    * `matrixId` is what closes the move.
    *
