@@ -53,7 +53,7 @@ func fleetCmd(args []string) {
 	case "logout":
 		fleetLogout()
 	case "nodes":
-		fleetGet("/api/nodes", args[1:])
+		fleetNodes(args[1:])
 	case "agents":
 		fleetGet("/api/fleet/agents", args[1:])
 	case "stations":

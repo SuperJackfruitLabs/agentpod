@@ -347,6 +347,13 @@ func fleetSkillRequest(method, path string, body io.Reader, contentType string) 
 	fmt.Println(string(fleetSkillRequestBytes(method, path, body, contentType)))
 }
 func fleetSkillRequestBytes(method, path string, body io.Reader, contentType string) []byte {
+	return fleetRequestBytes(method, path, body, contentType, 75*time.Second)
+}
+
+// fleetRequestBytes sends one authenticated request and returns the body,
+// exiting on any refusal. timeout is the caller's: most verbs are one round
+// trip, a rollout is one per node.
+func fleetRequestBytes(method, path string, body io.Reader, contentType string, timeout time.Duration) []byte {
 	c := requireCredential()
 	req, err := http.NewRequest(method, hubBase()+path, body)
 	if err != nil {
@@ -357,7 +364,7 @@ func fleetSkillRequestBytes(method, path string, body io.Reader, contentType str
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	res, err := (&http.Client{Timeout: 75 * time.Second}).Do(req)
+	res, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not reach %s: %v\n", hubBase(), err)
 		os.Exit(1)
