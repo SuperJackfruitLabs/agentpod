@@ -166,7 +166,9 @@ function decide(gateId: string, referenced: string) {
         },
         ROOM,
         {
-          principalForMatrixId: async () => "principal_1",
+          // A human: a gate is a person's answer, and the kind is now part of the
+          // contract so a caller cannot resolve one without it (agentpod#608).
+          principalForMatrixId: async () => ({ id: "principal_1", kind: "human" as const }),
           projectionFor: projectionForGate,
           resolveGate: async (i) => {
             resolved.push(i);
