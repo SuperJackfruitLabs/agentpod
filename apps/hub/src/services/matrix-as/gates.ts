@@ -516,6 +516,8 @@ export async function projectGate(
 export type DecisionRefusal =
   | "not-a-decision"
   | "unlinked-sender"
+  /** A linked principal that is not a person — an agent or a service. */
+  | "not-human"
   | "unknown-gate"
   | "reference-mismatch"
   | "bad-option";
@@ -574,7 +576,22 @@ export interface GateDecisionDeps {
    * `principal_identities` — the record of sameness minted by an explicit link,
    * never inferred from a localpart or a matching email.
    */
-  principalForMatrixId(mxid: string): Promise<string | null>;
+  /**
+   * The principal a Matrix id belongs to **and what kind of thing it is**, or null
+   * when nobody has linked it.
+   *
+   * `principal_identities` — the record of sameness minted by an explicit link,
+   * never inferred from a localpart or a matching email.
+   *
+   * The kind is returned rather than looked up separately so a caller cannot
+   * resolve a gate without having been handed the answer to "is this a person?".
+   * Agents are linked here too (`prn_… | matrix | @agent_guild_hermes-cleaner-cody`),
+   * and superpipeline refuses an agent resolving its OWN gate while having no reason
+   * to refuse a different one (agentpod#608).
+   */
+  principalForMatrixId(
+    mxid: string,
+  ): Promise<{ id: string; kind: "human" | "agent" | "service" } | null>;
   /** The recorded projection for a gate, or null if this hub never posted it. */
   projectionFor(gateId: string): Promise<{
     tenantId: string;
@@ -633,8 +650,8 @@ export async function handleGateDecision(
     return { status: "refused", reason: "reference-mismatch" };
   }
 
-  const principalId = await deps.principalForMatrixId(event.sender);
-  if (!principalId) {
+  const principal = await deps.principalForMatrixId(event.sender);
+  if (!principal) {
     // An unlinked Matrix user in a room is a case this must handle explicitly
     // (charter decisions/2026-08-13-ecosystem-identity.md, Decision 2). It is
     // not an error — someone may simply be in the room — so it is logged and
@@ -643,13 +660,43 @@ export async function handleGateDecision(
     return { status: "refused", reason: "unlinked-sender" };
   }
 
+  /**
+   * A gate is a human's answer, and until now nothing said so.
+   *
+   * The check above asks whether the sender is linked, not whether they are a
+   * person. Agents are linked. superpipeline enforces separation of duties —
+   * `decidedBy !== producedBy` — so it refuses an agent resolving its own gate and
+   * has no reason to refuse a different one. An agent emitting a decision event in
+   * a room this hub can read would therefore approve another agent's gate: a human
+   * approval gate satisfied by a machine, which is the one property a gate exists
+   * to have.
+   *
+   * Dormant only because the hub cannot decrypt in harness-mode rooms, so no
+   * decision of any kind is processed there. The board room that makes a human's
+   * answer readable makes an agent's readable too, which is why this lands with it
+   * rather than after it (charter →
+   * `decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`).
+   *
+   * Warned rather than dropped quietly: an agent trying to answer a gate is worth
+   * somebody seeing.
+   */
+  if (principal.kind !== "human") {
+    log.warn("a non-human principal tried to answer a gate", {
+      sender: event.sender,
+      principalId: principal.id,
+      kind: principal.kind,
+      gateId: parsed.gateId,
+    });
+    return { status: "refused", reason: "not-human" };
+  }
+
   const result = await deps.resolveGate({
     tenantId: projection.tenantId,
     boardId: projection.boardId,
     gateId: parsed.gateId,
     decision: parsed.optionId,
     comment: parsed.comment,
-    principalId,
+    principalId: principal.id,
   });
 
   if (result.ok) return { status: "resolved" };

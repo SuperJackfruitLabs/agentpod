@@ -30,7 +30,7 @@ import {
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
-import { principalForUser } from "../principals";
+import { principalById, principalForUser } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
@@ -330,7 +330,11 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             // safe to have at all — see `mintPrincipalAssertion`.
             principalForMatrixId: async (mxid: string) => {
               const identity = await resolveMatrixId(mxid);
-              return identity?.kind === "principal" ? identity.principalId : null;
+              if (identity?.kind !== "principal") return null;
+              // The KIND of principal, not just its id: a gate is a human's answer,
+              // and an agent is linked here exactly as a person is (agentpod#608).
+              const principal = await principalById(identity.principalId);
+              return principal ? { id: principal.id, kind: principal.kind } : null;
             },
             projectionFor: projectionForGate,
             resolveGate: (input) =>

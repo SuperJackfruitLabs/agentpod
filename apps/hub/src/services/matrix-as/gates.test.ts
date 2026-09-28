@@ -170,7 +170,10 @@ function decisionDeps(over: Partial<GateDecisionDeps> = {}) {
   const resolved: unknown[] = [];
   const replies: string[] = [];
   const deps: GateDecisionDeps = {
-    principalForMatrixId: async () => "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+    principalForMatrixId: async () => ({
+      id: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+      kind: "human" as const,
+    }),
     projectionFor: async () => ({
       tenantId: "fleet_1", boardId: "brd_7c1f", eventId: GATE_EVENT_ID,
     }),
@@ -381,5 +384,71 @@ describe("resolving at the board", () => {
       baseUrl: "https://k.dev", mint: async () => { mints++; return "t"; }, fetch: f,
     });
     expect(mints).toBe(1);
+  });
+});
+
+/**
+ * agentpod#608: a gate is a human's answer, and nothing said so.
+ *
+ * The sender check asked whether a Matrix id is LINKED, not whether it belongs to a
+ * person — and agents are linked exactly as people are. superpipeline enforces
+ * separation of duties (`decidedBy !== producedBy`), so it refuses an agent
+ * resolving its own gate and has no reason to refuse a different one. An agent
+ * emitting a decision in a room the hub can read would approve another agent's
+ * gate.
+ *
+ * Dormant only because the hub cannot decrypt in harness-mode rooms. The board room
+ * that makes a human's answer readable makes an agent's readable too, so this lands
+ * with it.
+ */
+describe("who may answer a gate", () => {
+  const decision = {
+    sender: "@agent_cleaner-cody:id.agentpod.dev",
+    content: {
+      suite_event_type: GATE_DECISION_SUITE_TYPE,
+      gate_id: "gate_7c1f",
+      option_id: "approve",
+      "m.relates_to": { rel_type: "m.reference", event_id: GATE_EVENT_ID },
+    },
+  };
+
+  test("an agent is refused, and the gate is not resolved", async () => {
+    const { deps, resolved } = decisionDeps({
+      principalForMatrixId: async () => ({ id: "prn_cody", kind: "agent" as const }),
+    });
+    const out = await handleGateDecision(decision, "!room:id.agentpod.dev", deps);
+    expect(out).toEqual({ status: "refused", reason: "not-human" });
+    // The point of the test: superpipeline is never asked. Its own guard would have
+    // accepted this, because a different agent is not the producer.
+    expect(resolved).toHaveLength(0);
+  });
+
+  test("a service principal is refused too", async () => {
+    const { deps, resolved } = decisionDeps({
+      principalForMatrixId: async () => ({ id: "prn_svc", kind: "service" as const }),
+    });
+    const out = await handleGateDecision(decision, "!room:id.agentpod.dev", deps);
+    expect(out).toEqual({ status: "refused", reason: "not-human" });
+    expect(resolved).toHaveLength(0);
+  });
+
+  test("a human is resolved, as themselves", async () => {
+    const { deps, resolved } = decisionDeps();
+    const out = await handleGateDecision(decision, "!room:id.agentpod.dev", deps);
+    expect(out).toEqual({ status: "resolved" });
+    expect(resolved).toHaveLength(1);
+    // Resolved AS the answering principal, never as this service — the point
+    // charter 2026-08-14 rests on.
+    expect((resolved[0] as { principalId: string }).principalId).toBe(
+      "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+    );
+  });
+
+  test("an unlinked sender is still refused separately from a non-human one", async () => {
+    // Different reasons because they are different situations: somebody in the room
+    // who never linked an account, versus a machine trying to approve work.
+    const { deps } = decisionDeps({ principalForMatrixId: async () => null });
+    const out = await handleGateDecision(decision, "!room:id.agentpod.dev", deps);
+    expect(out).toEqual({ status: "refused", reason: "unlinked-sender" });
   });
 });
