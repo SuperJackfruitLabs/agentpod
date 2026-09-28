@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentCrypto, feedAgents, type CryptoRequest } from "./crypto";
+import { createAgentCrypto, feedAgents, type CryptoRequest, type ShareReport } from "./crypto";
 
 /**
  * The crypto state machine, driven the way the bridge drives it.
@@ -20,6 +20,7 @@ import { createAgentCrypto, feedAgents, type CryptoRequest } from "./crypto";
 const DOMAIN = "id.agentpod.dev";
 const ALICE = `@agent_alice:${DOMAIN}`;
 const BOB = `@agent_bob:${DOMAIN}`;
+const ROOM = "!room:id.agentpod.dev";
 
 /**
  * The device the agent speaks through, created on the homeserver via MSC4190.
@@ -260,5 +261,67 @@ describe("narrowing a transaction to the agents in it", () => {
       isOurs,
     );
     expect(fed[0]?.fallback).toEqual(["signed_curve25519"]);
+  });
+});
+
+/**
+ * agentpod#604: the send path reported success for messages nobody could read.
+ *
+ * These pin the numbers that separate the indistinguishable causes. They do not
+ * assert that sharing WORKS — the fixture answers `keys/query` for users with no
+ * devices, so there is legitimately nothing to share with — they assert that what
+ * happened is reported, which is the thing production could not tell anyone.
+ */
+describe("what an encrypted send did about keys", () => {
+  test("reports the recipients, whether a session was claimed, and how many keys went out", async () => {
+    const { seen, send } = recorder();
+    const reports: ShareReport[] = [];
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send,
+      deviceIdFor,
+      uploadSigningKeys,
+      onShare: (r) => reports.push(r),
+    });
+
+    await crypto.encrypt(ALICE, ROOM, [ALICE, BOB], "m.room.message", { body: "hello" });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.roomId).toBe(ROOM);
+    // Both recipients are counted, sender included: a count of 1 is the shape of a
+    // message only its author can read.
+    expect(reports[0]!.recipients).toBe(2);
+    expect(typeof reports[0]!.claimedSessions).toBe("boolean");
+    expect(reports[0]!.shares).toBeGreaterThanOrEqual(0);
+    expect(seen.length).toBeGreaterThan(0);
+  });
+
+  test("a room holding only the sender reports one recipient", async () => {
+    const reports: ShareReport[] = [];
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send: recorder().send,
+      deviceIdFor,
+      uploadSigningKeys,
+      onShare: (r) => reports.push(r),
+    });
+
+    await crypto.encrypt(ALICE, ROOM, [ALICE], "m.room.message", { body: "alone" });
+
+    expect(reports[0]!.recipients).toBe(1);
+  });
+
+  test("the hook is optional — nothing depends on it to encrypt", async () => {
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send: recorder().send,
+      deviceIdFor,
+      uploadSigningKeys,
+    });
+    const envelope = await crypto.encrypt(ALICE, ROOM, [ALICE, BOB], "m.room.message", { body: "x" });
+    expect(envelope).toHaveProperty("ciphertext");
   });
 });

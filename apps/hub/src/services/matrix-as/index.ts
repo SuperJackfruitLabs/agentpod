@@ -254,6 +254,29 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           send: createCryptoTransport(wire),
           deviceIdFor,
           uploadSigningKeys: createSigningKeyUploader(wire),
+          /**
+           * Say what each encrypted send did about keys.
+           *
+           * A send to a single recipient is a message only its author can read, and a
+           * send that shared no keys into a room that has never had them is the state
+           * agentpod#604 could not distinguish from a healthy one. Both are warned;
+           * the ordinary case is debug, so a working fleet stays quiet.
+           */
+          onShare: (r) => {
+            const ctx = {
+              roomId: r.roomId,
+              recipients: r.recipients,
+              claimedSessions: r.claimedSessions,
+              shares: r.shares,
+            };
+            if (r.recipients <= 1) {
+              log.warn("encrypted to a single recipient — nobody else can read this", ctx);
+            } else if (r.shares === 0) {
+              log.debug("no room keys shared; recipients are believed to hold them already", ctx);
+            } else {
+              log.debug("room keys shared", ctx);
+            }
+          },
         });
       })()
     : null;
