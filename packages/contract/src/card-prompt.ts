@@ -30,7 +30,7 @@ import { AcpRunId } from "./ids";
  * a card differently fails its own test suite rather than in an agent's
  * behaviour.
  */
-export const CARD_PROMPT_VERSION = "card-prompt/1";
+export const CARD_PROMPT_VERSION = "card-prompt/2";
 
 /** A card reference as an agent may read it (superpipeline `ReferenceView`, narrowed). */
 export const CardPromptReference = z.object({
@@ -70,7 +70,25 @@ const CardPrompt_ = z.object({
   }),
 
   /** null when the board's stage list no longer contains the card's stage. */
-  stage: z.object({ key: z.string().min(1), name: z.string().min(1) }).nullable().default(null),
+  stage: z
+    .object({
+      key: z.string().min(1),
+      name: z.string().min(1),
+      /**
+       * The stage's standing rule for every card that reaches it — superpipeline's
+       * `StageDef.instructions`, rendered as its own section.
+       *
+       * It is the stage's, not the card's, and that distinction is the whole point. The
+       * Press board's `publish` stage had no way to say "push to the primary remote", so
+       * the instruction lived in whoever wrote the card — and on 2026-09-28 the card that
+       * did not say it got a post committed to a station and a board reporting `published`
+       * with nothing published. A rule that must be re-typed per card is a rule that is
+       * eventually not typed.
+       */
+      instructions: z.string().min(1).optional(),
+    })
+    .nullable()
+    .default(null),
 
   /** The previous stage's handoff, verbatim. `feedback` is lifted out on render. */
   handoff: z.unknown().optional(),
@@ -151,6 +169,13 @@ export function renderCardPrompt(prompt: CardPrompt): string {
 
   if (prompt.card.spec !== undefined && prompt.card.spec !== null) {
     blocks.push(`## Task\n\n${renderValue(prompt.card.spec)}`);
+  }
+
+  // Above the handoff and the references, because it governs how the work is done rather
+  // than what was done before it — and below the Task, because a stage rule that outranked
+  // the card would read as the card being optional.
+  if (prompt.stage?.instructions?.trim()) {
+    blocks.push(`## How this stage is done\n\n${prompt.stage.instructions.trim()}`);
   }
 
   // A `request_changes` gate decision merges `{feedback}` into the handoff the

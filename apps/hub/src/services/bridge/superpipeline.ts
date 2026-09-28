@@ -99,11 +99,26 @@ export interface ClaimedCard {
   attemptCount?: number;
 }
 
+/**
+ * A stage as the board reports it on a claim or a run context.
+ *
+ * `instructions` is the stage's standing rule for every card that reaches it
+ * (superpipeline `StageDef.instructions`). It is typed here rather than left to
+ * survive the `as RunContext` cast on its own: it reached the prompt for a while
+ * only because nothing along the path parsed, and a field that works by accident
+ * is one refactor away from silently not working.
+ */
+export interface RunStage {
+  key: string;
+  name: string;
+  instructions?: string;
+}
+
 export interface ClaimedWork {
   runId: string;
   leaseEpoch: number;
   card: ClaimedCard;
-  stage: { key: string; name: string } | null;
+  stage: RunStage | null;
   handoff: unknown;
 }
 
@@ -157,7 +172,7 @@ export interface RunContext {
     endedAt: string | null;
   };
   card: ClaimedCard;
-  stage: { key: string; name: string } | null;
+  stage: RunStage | null;
   handoff: unknown;
   references: RunReference[];
   /** Every question this run asked, oldest first. Absent on older deployments. */
@@ -287,7 +302,7 @@ export class SuperpipelineClient {
       runId?: string;
       leaseEpoch?: number;
       card?: ClaimedCard;
-      stage?: { key: string; name: string };
+      stage?: RunStage;
       handoff?: unknown;
     };
 
