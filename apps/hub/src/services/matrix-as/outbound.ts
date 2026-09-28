@@ -11,7 +11,7 @@
  * needs to see: the answer, a permission question, and an error.
  */
 
-import { TURN_ERROR_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
+import { PERMISSION_REQUEST_CONTENT_KEY, TURN_ERROR_CONTENT_KEY, type AcpEvent } from "@agentpod/contract";
 import { turnErrorCard } from "../turn-error";
 import { subscribe as subscribeToSession } from "../acp-sessions";
 import {
@@ -38,6 +38,8 @@ import {
   type PermissionOption,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
+import { noteHubEvent } from "../push/hub-events";
+import { legacyRequestEvents } from "./legacy-events";
 
 const log = createLogger("matrix-outbound");
 
@@ -324,9 +326,10 @@ export function attachRoomToSession(
     inTurn: false,
   };
 
-  const say = async (body: string, extra?: Record<string, unknown>) => {
+  /** Sends into the room. Returns the event id, or null when it did not land. */
+  const say = async (body: string, extra?: Record<string, unknown>): Promise<string | null> => {
     try {
-      await deps.client.sendText(agentUser, roomId, body, extra);
+      return await deps.client.sendText(agentUser, roomId, body, extra);
     } catch (err) {
       // A homeserver hiccup must not silently detach the room: the next turn
       // should still arrive. Losing one message loudly beats losing the
@@ -336,6 +339,7 @@ export function attachRoomToSession(
         roomId,
         error: err instanceof Error ? err.message : String(err),
       });
+      return null;
     }
   };
 
@@ -756,21 +760,32 @@ export function attachRoomToSession(
             });
           }
 
-          await say(permissionPrompt(request.title, request.options));
-
-          // Beside the prose, never instead of it. The prose is what keeps
-          // Element and reply-by-number working; this only lets a client that
-          // understands it render buttons. Both answers come back as an
-          // ordinary message through the same matcher, so nothing downstream
-          // has to know which one a reader used.
+          // One event for one question. The structured request rides INSIDE
+          // the prose message, under `dev.agentpod.permission`, the way the
+          // turn error card rides on its notice — so the one push this message
+          // raises is a push the phone can classify, in an encrypted room or
+          // not. The prose is what keeps Element and reply-by-number working;
+          // the key only lets a client that understands it render buttons.
+          // Every answer comes back as an ordinary message through the same
+          // matcher, keyed on the pending request above rather than on any
+          // event id, so nothing downstream has to know which one a reader used.
           const structured = permissionRequestContent(
             sessionId,
             event.seq,
             request.title,
             request.options
           );
-          if (structured && deps.client.sendCustomEvent) {
-            await deps.client
+          const proseId = await say(
+            permissionPrompt(request.title, request.options),
+            structured ? { [PERMISSION_REQUEST_CONTENT_KEY]: structured } : undefined
+          );
+          noteHubEvent(proseId, "permission");
+
+          // …and, while clients in the field still read only it, the same
+          // payload again as its own event. Gated on the legacy flag
+          // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on).
+          if (structured && deps.client.sendCustomEvent && legacyRequestEvents()) {
+            const legacyId = await deps.client
               .sendCustomEvent(agentUser, roomId, PERMISSION_REQUEST_TYPE, structured)
               .catch((err) => {
                 log.error("could not send a structured permission request", {
@@ -778,7 +793,11 @@ export function attachRoomToSession(
                   roomId,
                   error: err instanceof Error ? err.message : String(err),
                 });
+                return null;
               });
+            // The prose already pushed; this one must not buzz a second time.
+            // Only when the prose landed — otherwise this is the question.
+            if (proseId) noteHubEvent(legacyId, "companion");
           }
           return;
         }

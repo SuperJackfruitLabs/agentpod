@@ -18,6 +18,12 @@
  * The prose goes first. If only one of the two lands, the room should be left
  * with a readable question and no buttons rather than buttons and no context.
  *
+ * **Since 2026-09-28 the prose carries the gate too**, under
+ * `dev.superpipeline.gate` (`GATE_REQUEST_CONTENT_KEY`), so one question is
+ * one event and one push. The custom event is now the legacy half, sent only
+ * while `AGENTPOD_LEGACY_PERMISSION_EVENTS` is on; a decision may reference
+ * either.
+ *
  * ## Why a gate can be delivered more than once, and must post once
  *
  * superpipeline's push is at-least-once within an attempt cap, its alarm re-picks
@@ -34,6 +40,9 @@ import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
 import { nodes } from "../../db/schema/nodes";
 import { stations } from "../../db/schema/stations";
 import { createLogger } from "../../utils/logger";
+import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contract";
+import { noteHubEvent } from "../push/hub-events";
+import { legacyRequestEvents } from "./legacy-events";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
@@ -111,7 +120,13 @@ export interface GateProjectionDeps {
     eventType: string,
     content: Record<string, unknown>
   ): Promise<string | null>;
-  sendText(userId: string, roomId: string, body: string): Promise<string | null>;
+  /** `extra` carries the embedded gate (`dev.superpipeline.gate`) beside the body. */
+  sendText(
+    userId: string,
+    roomId: string,
+    body: string,
+    extra?: Record<string, unknown>
+  ): Promise<string | null>;
   /** The homeserver's domain, for building the station's mxid. */
   domain: string;
   /** Where a card's deep link points. */
@@ -329,6 +344,16 @@ export function gateEventContent(
 }
 
 /**
+ * The gate as it rides inside the prose message, under
+ * `GATE_REQUEST_CONTENT_KEY`: the custom event's content without its `body`,
+ * which the carrying message already has.
+ */
+export function gateRequestCard(d: GatePendingDelivery, deepLink?: string): GateRequestCard {
+  const { body: _body, ...card } = gateEventContent(d, deepLink);
+  return card as GateRequestCard;
+}
+
+/**
  * Give back a claim this delivery took and could not use.
  *
  * Without it the row sits at `pending:<gateId>` forever and `gate-sweep.ts`
@@ -466,16 +491,33 @@ export async function projectGate(
   // would quietly retire push's own retry, leaving the sweep as the only path
   // — and the sweep counts this now (`gate-sweep.ts`), so a throw can no
   // longer be missing from the tally either.
+  //
+  // The gate rides INSIDE the prose (`dev.superpipeline.gate`) so the one
+  // question is one event and one push — a push the phone can classify even in
+  // an unencrypted room, where the custom type matches no push rule. The
+  // custom event still follows while clients in the field read only it
+  // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on); with it off, the prose is
+  // the event a decision references.
   let eventId: string | null;
+  let proseEventId: string | null;
   try {
-    await deps.sendText(stationUser, found.roomId, gateProseBody(d, deepLink));
+    proseEventId = await deps.sendText(stationUser, found.roomId, gateProseBody(d, deepLink), {
+      [GATE_REQUEST_CONTENT_KEY]: gateRequestCard(d, deepLink),
+    });
+    noteHubEvent(proseEventId, "gate");
 
-    eventId = await deps.sendCustomEvent(
-      stationUser,
-      found.roomId,
-      GATE_EVENT_TYPE,
-      gateEventContent(d, deepLink)
-    );
+    if (legacyRequestEvents()) {
+      eventId = await deps.sendCustomEvent(
+        stationUser,
+        found.roomId,
+        GATE_EVENT_TYPE,
+        gateEventContent(d, deepLink)
+      );
+      // The prose already pushed; the companion must not buzz a second time.
+      if (proseEventId) noteHubEvent(eventId, "companion");
+    } else {
+      eventId = proseEventId;
+    }
   } catch (err) {
     await releaseClaim(d.gateId);
     log.warn("gate could not be posted into its room; claim released so a later pass retries", {
@@ -502,7 +544,7 @@ export async function projectGate(
 
   await db
     .update(matrixGateEvents)
-    .set({ eventId })
+    .set({ eventId, proseEventId })
     .where(eq(matrixGateEvents.gateId, d.gateId));
 
   return { status: "sent", eventId, roomId: found.roomId };
@@ -597,6 +639,8 @@ export interface GateDecisionDeps {
     tenantId: string;
     boardId: string;
     eventId: string;
+    /** The prose message carrying the gate, when it was recorded. */
+    proseEventId?: string | null;
   } | null>;
   /**
    * Resolve the gate at superpipeline **as `principalId`**, never as this service.
@@ -642,7 +686,15 @@ export async function handleGateDecision(
   // Trusting the reference alone would mean resolving whatever gate an
   // untrusted sender pointed at; trusting `gate_id` alone would let a sender
   // name a gate they never saw.
-  if (parsed.referencedEventId !== projection.eventId) {
+  //
+  // Either of the gate's two events may be the one referenced: a client that
+  // draws the legacy custom event answers that, one that draws the key inside
+  // the prose answers the prose. Both were posted by this hub for this gate.
+  const referenced = parsed.referencedEventId;
+  const matches =
+    referenced !== null &&
+    (referenced === projection.eventId || (!!projection.proseEventId && referenced === projection.proseEventId));
+  if (!matches) {
     log.warn("decision's reference and gate disagree", {
       gateId: parsed.gateId,
       referenced: parsed.referencedEventId,
@@ -812,12 +864,14 @@ export async function projectionForGate(gateId: string): Promise<{
   tenantId: string;
   boardId: string;
   eventId: string;
+  proseEventId: string | null;
 } | null> {
   const [row] = await db
     .select({
       tenantId: matrixGateEvents.tenantId,
       boardId: matrixGateEvents.boardId,
       eventId: matrixGateEvents.eventId,
+      proseEventId: matrixGateEvents.proseEventId,
     })
     .from(matrixGateEvents)
     .where(eq(matrixGateEvents.gateId, gateId))

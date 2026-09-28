@@ -2,7 +2,15 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentCrypto, feedAgents, noOlmRecipients, type CryptoRequest, type ShareReport } from "./crypto";
+import {
+  createAgentCrypto,
+  createStaleRetryLimiter,
+  feedAgents,
+  noOlmRecipients,
+  STALE_RETRY_COOLDOWN_MS,
+  type CryptoRequest,
+  type ShareReport,
+} from "./crypto";
 
 /**
  * The crypto state machine, driven the way the bridge drives it.
@@ -448,5 +456,70 @@ describe("a device-list change for somebody outside our namespace", () => {
     );
 
     expect(fed).toEqual([]);
+  });
+});
+
+/**
+ * agentpod#604 follow-up: the heal assumed `m.no_olm` was transient.
+ *
+ * For a device that rotated its keys it is. For one whose olm account is broken it is
+ * not — the device in #604 answered `m.no_olm` before the re-query and after it. Without
+ * a limiter that device taxes EVERY message to its owner with an extra keys/query, a
+ * one-time-key claim and a second shareRoomKey. A single gate delivery was observed
+ * paying it twice.
+ */
+describe("healing a device that will never heal", () => {
+  const ROOM_B = "!other:id.agentpod.dev";
+
+  test("the first failure is worth a retry", () => {
+    const limiter = createStaleRetryLimiter(1000, () => 0);
+    expect(limiter.take(ROOM, [ALICE])).toEqual([ALICE]);
+  });
+
+  test("the next message does not pay for it again", () => {
+    let clock = 0;
+    const limiter = createStaleRetryLimiter(1000, () => clock);
+    limiter.take(ROOM, [ALICE]);
+    clock = 999;
+    expect(limiter.take(ROOM, [ALICE])).toEqual([]);
+  });
+
+  test("after the cooldown it is worth trying once more", () => {
+    // Short enough that a device its owner has fixed starts working on the next gate
+    // rather than the next restart.
+    let clock = 0;
+    const limiter = createStaleRetryLimiter(1000, () => clock);
+    limiter.take(ROOM, [ALICE]);
+    clock = 1000;
+    expect(limiter.take(ROOM, [ALICE])).toEqual([ALICE]);
+  });
+
+  test("a quiet room is not silenced by a busy one", () => {
+    // A device can be reachable in one room and not another, so the cooldown is per room.
+    const limiter = createStaleRetryLimiter(1000, () => 0);
+    expect(limiter.take(ROOM, [ALICE])).toEqual([ALICE]);
+    expect(limiter.take(ROOM_B, [ALICE])).toEqual([ALICE]);
+  });
+
+  test("one user's cooldown does not cover another's", () => {
+    const limiter = createStaleRetryLimiter(1000, () => 0);
+    limiter.take(ROOM, [ALICE]);
+    expect(limiter.take(ROOM, [BOB])).toEqual([BOB]);
+  });
+
+  test("a heal that worked is forgotten, so a later failure is treated as new", () => {
+    let clock = 0;
+    const limiter = createStaleRetryLimiter(1000, () => clock);
+    limiter.take(ROOM, [ALICE]);
+    limiter.clear(ROOM, [ALICE]);
+    clock = 1;
+    expect(limiter.take(ROOM, [ALICE])).toEqual([ALICE]);
+  });
+
+  test("the shipped cooldown is minutes, not hours", () => {
+    // Long enough that a dead device costs a round trip an hour rather than one per
+    // message; short enough that a fixed one is not left waiting.
+    expect(STALE_RETRY_COOLDOWN_MS).toBeGreaterThanOrEqual(60_000);
+    expect(STALE_RETRY_COOLDOWN_MS).toBeLessThanOrEqual(30 * 60_000);
   });
 });

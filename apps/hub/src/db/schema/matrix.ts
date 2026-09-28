@@ -252,8 +252,19 @@ export const matrixGateEvents = pgTable(
     boardId: text("board_id").notNull(),
     cardId: text("card_id").notNull(),
     roomId: text("room_id").notNull(),
-    /** The event the gate was posted as — what a decision references. */
+    /**
+     * The event a decision references. While `AGENTPOD_LEGACY_PERMISSION_EVENTS`
+     * is on this is the legacy `dev.superpipeline.gate.v1` custom event; with it
+     * off, the gate is one prose message and this is that message.
+     */
     eventId: text("event_id").notNull(),
+    /**
+     * The prose `m.room.message` that carries the gate under
+     * `dev.superpipeline.gate` — also accepted as a decision's reference, so a
+     * client that draws the gate from the prose can answer it while the legacy
+     * event still exists. Null for gates posted before the key existed.
+     */
+    proseEventId: text("prose_event_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [

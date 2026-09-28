@@ -1153,6 +1153,80 @@ SQLite database, its signing key and the appservice registration are preserved i
 `~/agentpod-backups/` off it. To read that history, run a throwaway Synapse
 against a *copy* — never against the original.
 
+### 7i. Push notifications: the hub is the push gateway
+
+supermessage on iOS registers an HTTP pusher with tuwunel (`format:
+event_id_only`, `data.url` = `https://hub.agentpod.dev/_matrix/push/v1/notify`),
+and tuwunel calls the hub for every event that should reach a phone. The hub
+turns each call into one APNs push per device. There is no Sygnal (operator
+decision, 2026-09-28).
+
+**Configure** — in `/etc/agentpod/hub.env`, then `systemctl restart agentpod-hub`:
+
+```bash
+APNS_KEY_PATH=/etc/agentpod/apns/AuthKey_8R6R2N4MM8.p8   # 0600 root; read once at boot
+APNS_KEY_ID=8R6R2N4MM8
+APNS_TEAM_ID=N2QQPW2BRJ
+APNS_TOPIC=dev.supermessage.ios
+PUSH_APP_IDS=dev.supermessage.ios:production,dev.supermessage.ios.dev:sandbox
+```
+
+All five or none. With none set the route answers **404**; with some set, or a
+key file the hub cannot read, the boot log says `push gateway is misconfigured`
+/ `cannot read its APNs key` and the route stays 404. The hub still boots:
+pushes are not worth taking the control plane down for. A working gateway logs
+`push gateway on` with its topic and app ids.
+
+**What a push carries** — `{"aps":{"alert":{"title":"supermessage","body":"New
+message"},"mutable-content":1,"sound":"default","badge":<unread>,"thread-id":<room>},
+"room_id","event_id","unread_count"}`. Never message content, and never anything
+a `full`-format pusher would add: the app's Notification Service Extension
+fetches and decrypts the event itself. `apns-collapse-id` is the event id, the
+same id the app's local notifier uses, so the two dedupe. Priority 10, or 5 when
+tuwunel says `prio: low`; expiry 24 h.
+
+When the event is one the hub itself posted as a **permission request** or a
+**superpipeline gate**, `aps` also carries `"category":"PERMISSION"` / `"GATE"`
+and `"interruption-level":"time-sensitive"`. The hub remembers those ids in
+memory for six hours, so a push that loses the race with the send, or arrives
+after a restart, just goes out untagged.
+
+**The one-question-one-push rule.** A permission request or a gate is ONE prose
+`m.room.message` carrying the structured request under
+`dev.agentpod.permission` / `dev.superpipeline.gate`
+(`packages/contract/src/matrix-events.ts`). While
+`AGENTPOD_LEGACY_PERMISSION_EVENTS` is on — the default — the old separate
+custom events (`dev.agentpod.permission.v1`, `dev.superpipeline.gate.v1`) are
+still sent beside it for the supermessage builds already in the field. In an
+encrypted room those would push too, so the gateway drops the push for a legacy
+event whose prose landed. Turn the flag off (`AGENTPOD_LEGACY_PERMISSION_EVENTS=false`)
+once every client reads the embedded key. Answers work either way: a permission
+answer is matched against the request the hub holds for the room, and a gate
+decision may reference either the prose or the legacy event.
+
+**Defences** — the Push Gateway API has no authentication, so the route has
+its own: a 64 KiB body cap (413), a strict schema (400), an allowlist of app ids
+(`PUSH_APP_IDS`; any other app id is dropped and logged, not rejected), and 60
+pushes a minute per pushkey (over that, dropped). Logs name a pushkey by its
+first eight characters only, and never print the JWT.
+
+**`rejected`** — the hub answers `{"rejected":[…]}` with the pushkeys APNs says
+are dead (410, or 400 `BadDeviceToken` / `DeviceTokenNotForTopic` /
+`Unregistered`) and any pushkey that is not a hex device token. tuwunel deletes
+those pushers; the app registers again on its next launch. A 5xx, a 429 or a
+timeout is retried twice (5 s per attempt) and then dropped without rejecting.
+
+**Checking it** from the host:
+
+```bash
+curl -s -X POST http://127.0.0.1:3001/_matrix/push/v1/notify \
+  -H 'content-type: application/json' \
+  -d '{"notification":{"event_id":"$test","room_id":"!r:id.agentpod.dev","counts":{"unread":1},
+       "devices":[{"app_id":"dev.supermessage.ios.dev","pushkey":"<a sandbox token>"}]}}'
+# {"rejected":[]} and a buzz on the debug build — or 404 if unconfigured.
+journalctl -u agentpod-hub -n 50 --no-pager | grep push-gateway
+```
+
 ---
 
 ## 8. The superpipeline bridge

@@ -202,3 +202,84 @@ export const VoiceTranscript = z.object({
   seconds: z.number().int().nonnegative().max(3600).optional(),
 });
 export type VoiceTranscript = z.infer<typeof VoiceTranscript>;
+
+// ─── Requests that ride on the prose message ─────────────────────────────────
+//
+// A permission request and a superpipeline gate were each sent as TWO events: a
+// prose `m.room.message` and, beside it, a custom event type a client could
+// draw buttons from. That pair costs a phone two pushes for one question in an
+// encrypted room — and in an unencrypted room the custom type matches no push
+// rule at all, so the one event that says "this is a question" is the one a
+// push never carries.
+//
+// So the structured request now rides INSIDE the prose message too, under one
+// namespaced key — the way `TURN_ERROR_CONTENT_KEY` rides on the error notice.
+// One request, one event, one push, and a Notification Service Extension that
+// decrypts it can tell a question from a chat line without a second fetch.
+//
+// The separate custom event is still sent while `AGENTPOD_LEGACY_PERMISSION_EVENTS`
+// is on (the default): clients in the field read it. Both carry the SAME
+// payload, so a client may read either; once every client reads the key, the
+// flag goes off and the custom event stops.
+//
+// Versioning is `schema_version` inside the payload, bumped for additive
+// changes only. A breaking change mints a new key (`…permission.v2`-style)
+// rather than reusing this one.
+
+/**
+ * The permission request, embedded in the prose message under this key.
+ *
+ * The payload is exactly {@link PermissionRequestEvent} — the body of the
+ * legacy `dev.agentpod.permission.v1` event — so a client parses both with one
+ * schema. Answering is unchanged: an ordinary room message carrying an
+ * option's `name` (or its number), matched against the request the hub is
+ * holding for that room. Neither which event a client read nor any event id
+ * takes part in matching an answer.
+ */
+export const PERMISSION_REQUEST_CONTENT_KEY = "dev.agentpod.permission";
+
+/** One option of a superpipeline gate. `id` is superpipeline's `GateDecision`. */
+export const GateRequestOption = z.object({
+  id: z.enum(["approve", "request_changes", "reject"]),
+  label: z.string(),
+});
+export type GateRequestOption = z.infer<typeof GateRequestOption>;
+
+/**
+ * A superpipeline approval gate, embedded in the prose message under this key.
+ *
+ * The body of the legacy `dev.superpipeline.gate.v1` event minus its `body`,
+ * which the carrying message already has. Pinned field-for-field by
+ * `fixtures/ecosystem-identity/matrix_gate_events.json`.
+ *
+ * `schema_version` is a floor, not a literal: the fixture requires a renderer
+ * to tolerate a higher minor version by ignoring what it does not know.
+ *
+ * **Answering references the message that carries this key** — an
+ * `m.room.message` with `suite_event_type: "dev.superpipeline.gate.decision.v1"`
+ * and `m.relates_to: {rel_type: "m.reference", event_id: <this message's id>}`.
+ * The hub accepts a reference to either the carrying message or the legacy
+ * custom event while both exist, so a client may answer whichever it drew.
+ */
+export const GATE_REQUEST_CONTENT_KEY = "dev.superpipeline.gate";
+
+export const GateRequestCard = z.object({
+  schema_version: z.number().int().min(1),
+  board_id: z.string(),
+  card_id: z.string(),
+  gate_id: z.string().min(1),
+  stage_key: z.string(),
+  return_stage_key: z.string(),
+  card_title: z.string(),
+  produced_by: z.string(),
+  prompt: z.string(),
+  handoff_summary: z.string().optional(),
+  // Unique by id: resolution is by id, so two `approve` entries are ambiguous.
+  options: z
+    .array(GateRequestOption)
+    .min(1)
+    .max(3)
+    .refine((opts) => new Set(opts.map((o) => o.id)).size === opts.length, "duplicate option ids"),
+  deep_link: z.string().optional(),
+});
+export type GateRequestCard = z.infer<typeof GateRequestCard>;
