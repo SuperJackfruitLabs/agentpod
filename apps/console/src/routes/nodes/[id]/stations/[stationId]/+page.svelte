@@ -167,6 +167,12 @@
   const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
   const hasNativeSkillManagement = $derived(station?.capabilities?.includes("skills.native") ?? false);
   const hasPluginManagement = $derived(station?.capabilities?.includes("plugins.manage") ?? false);
+  // A Matrix identity the hub can put a face on: the appservice's own user for
+  // a bridge-mode agent, or a harness login the node can use (`matrix.avatar`).
+  const canSetAvatar = $derived(
+    station?.matrixIdentityMode === "bridge" ||
+      (station?.capabilities?.includes("matrix.avatar") ?? false)
+  );
   const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
 
   const hasChangeset = $derived(
@@ -649,6 +655,7 @@
         bind:this={fileBrowser}
         {stationId}
         {canWrite}
+        {canSetAvatar}
         onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
       />
     </div>

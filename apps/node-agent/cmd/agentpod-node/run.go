@@ -191,6 +191,25 @@ func runCmd() {
 		Write:           descriptor.WriteHermesTranscription,
 		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
+	// matrix.avatar.set: a workspace image as a harness-mode station's Matrix
+	// avatar, uploaded with the profile's own login — the hub's appservice
+	// cannot act for that identity, and the token never leaves this node.
+	h = gateway.NewMatrixAvatarHandler(h, gateway.MatrixAvatarDeps{
+		HarnessFor: harnessFor,
+		Resolver:   resolver,
+		ReadFile: func(key, path string, maxBytes int64) ([]byte, bool, error) {
+			d, err := reg.For(key)
+			if err != nil {
+				return nil, false, err
+			}
+			content, _, truncated, err := d.ReadFile(key, path, maxBytes)
+			return content, truncated, err
+		},
+		Login: func(profileDir string) (gateway.MatrixLogin, error) {
+			c, err := descriptor.MatrixCredentialsFromEnv(profileDir)
+			return gateway.MatrixLogin(c), err
+		},
+	})
 	h = gateway.NewChangesetHandler(h, resolver)
 	gitIdentityRoot := filepath.Dir(config.DefaultPath())
 	// git.identity.ensure: the public half of a station's push key, generated on first ask.

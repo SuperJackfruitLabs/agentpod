@@ -122,6 +122,22 @@ it("transcription.apply's result strips unknown fields — neither the key nor t
   ).toEqual({ applied: true, mode: "on", model: "m", restarted: true });
 });
 
+it("matrix.avatar.set names a station and a workspace image — nothing else rides along", () => {
+  expect(
+    VERB_PARAMS["matrix.avatar.set"].parse({ key: "hermes:coder-kai", path: "pfp.png", accessToken: "syt_x" })
+  ).toEqual({ key: "hermes:coder-kai", path: "pfp.png" });
+});
+it("matrix.avatar.set's result is the identity and the uploaded image, never the credential", () => {
+  expect(
+    VERB_RESULTS["matrix.avatar.set"].parse({
+      matrixId: "@agent_coder-kai:id.agentpod.dev",
+      mxc: "mxc://id.agentpod.dev/abc",
+      accessToken: "syt_x",
+    })
+  ).toEqual({ matrixId: "@agent_coder-kai:id.agentpod.dev", mxc: "mxc://id.agentpod.dev/abc" });
+  expect(() => VERB_RESULTS["matrix.avatar.set"].parse({ matrixId: "@a:h", mxc: "https://x" })).toThrow();
+});
+
 describe("git identity verbs", () => {
   // The rule these verbs exist to keep: nothing secret crosses the broker. The private half of the
   // key is generated on the node and never leaves it, so neither schema has anywhere to put one.

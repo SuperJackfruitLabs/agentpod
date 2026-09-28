@@ -77,7 +77,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			DisplayName:   h.rootDisplayName(),
 			ParentKey:     nil,
 			WorkspacePath: &homeCopy,
-			Capabilities:  AppendChangesetCap(caps, &homeCopy),
+			Capabilities:  withMatrixAvatarCap(AppendChangesetCap(caps, &homeCopy), rootMxid),
 			MatrixId:      rootMxid,
 		},
 	}
@@ -118,7 +118,7 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 			DisplayName:   name,
 			ParentKey:     &parentKey,
 			WorkspacePath: &wsCopy,
-			Capabilities:  AppendChangesetCap(profileCaps, &wsCopy),
+			Capabilities:  withMatrixAvatarCap(AppendChangesetCap(profileCaps, &wsCopy), mxid),
 			MatrixId:      mxid,
 		})
 	}
@@ -182,6 +182,16 @@ func (h *hermesDescriptor) matrixIDOf(dir string) *string {
 // read behaves exactly as it did before this rule existed.
 func sameMatrixIdentity(a, b *string) bool {
 	return a != nil && b != nil && *a == *b
+}
+
+// withMatrixAvatarCap adds "matrix.avatar" for a station that holds its own
+// Matrix identity: matrix.avatar.set can then set its profile picture with the
+// login in its .env. No identity, no capability — there is nobody to dress.
+func withMatrixAvatarCap(caps []string, mxid *string) []string {
+	if mxid == nil {
+		return caps
+	}
+	return append(append([]string(nil), caps...), "matrix.avatar")
 }
 
 // withoutCap returns a copy of caps with name removed.

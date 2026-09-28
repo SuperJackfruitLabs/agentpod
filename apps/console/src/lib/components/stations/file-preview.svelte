@@ -3,18 +3,20 @@
   import { MonacoEditor } from "$lib/components/ui/monaco-editor";
   import { MarkdownViewer } from "$lib/components/ui/markdown";
   import FileIcon from "$lib/components/file-icon.svelte";
-  import { BINARY_EXTS, extOf } from "$lib/utils/file-ext";
+  import { BINARY_EXTS, IMAGE_EXTS, extOf } from "$lib/utils/file-ext";
   import { relativeTime } from "$lib/utils/relative-time";
 
   interface Props {
     entry: FsEntry;
     content: string | null;
+    /** An object URL for an image file, once its bytes have arrived. */
+    imageUrl?: string | null;
     truncated: boolean;
     loading: boolean;
     error: string | null;
   }
 
-  let { entry, content, truncated, loading, error }: Props = $props();
+  let { entry, content, imageUrl = null, truncated, loading, error }: Props = $props();
 
   const MARKDOWN_EXTS = new Set(["md", "mdx", "markdown"]);
   // A literal NUL byte is the simplest cross-platform signal that a file
@@ -23,7 +25,8 @@
   const NUL_BYTE = String.fromCharCode(0);
 
   const ext = $derived(extOf(entry.name));
-  const isBinary = $derived(BINARY_EXTS.has(ext));
+  const isImage = $derived(IMAGE_EXTS.has(ext));
+  const isBinary = $derived(BINARY_EXTS.has(ext) && !isImage);
   const isMarkdown = $derived(MARKDOWN_EXTS.has(ext));
   const looksBinary = $derived(content !== null && content.includes(NUL_BYTE));
 
@@ -55,7 +58,17 @@
   {/if}
 
   <div class="flex-1 overflow-hidden">
-    {#if isBinary}
+    {#if isImage}
+      {#if loading}
+        <p class="p-3 text-sm text-muted-foreground">Loading image…</p>
+      {:else if error}
+        <p class="p-3 text-sm text-destructive">{error}</p>
+      {:else if imageUrl}
+        <div class="flex h-full items-center justify-center overflow-auto bg-muted/20 p-4">
+          <img src={imageUrl} alt={entry.name} class="max-h-full max-w-full rounded object-contain shadow-sm" />
+        </div>
+      {/if}
+    {:else if isBinary}
       <div class="flex h-full items-center justify-center p-6">
         <div class="flex max-w-sm flex-col items-center gap-2 rounded-lg border border-dashed border-border p-8 text-center">
           <FileIcon filename={entry.name} size="lg" />
@@ -112,7 +125,11 @@
     {/if}
   </div>
 
-  {#if content !== null && !isBinary}
+  {#if isImage && imageUrl}
+    <div class="shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
+      {ext} image · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
+    </div>
+  {:else if content !== null && !isBinary}
     <div class="shrink-0 border-t border-border/60 px-3 py-1 font-mono text-xs text-muted-foreground">
       {isMarkdown ? "Markdown" : ext || "plain text"} · {formatBytes(entry.size)} · modified {relativeTime(entry.modified)}
     </div>

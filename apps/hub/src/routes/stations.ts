@@ -22,12 +22,16 @@ import { nodes } from "../db/schema/nodes";
 import * as broker from "../services/broker";
 import { connectionManager } from "../services/connection-manager";
 import { VERB_RESULTS } from "@agentpod/contract";
+import { sniffImage } from "../utils/sniff-image";
 import {
   adoptStations,
   listAdopted,
   unadopt,
   getStation,
 } from "../services/station-registry";
+
+/** The most a console file read may ask for: an image preview, not a download. */
+const FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -225,11 +229,20 @@ export const stationRoutes = new Hono()
    */
   .get(
     "/stations/:stationId/file",
-    zValidator("query", z.object({ path: z.string().min(1) })),
+    zValidator(
+      "query",
+      z.object({
+        path: z.string().min(1),
+        // Omitted keeps the node's 1 MiB default. The console asks for more
+        // to preview an image; the ceiling keeps one read's base64 frame
+        // well under the broker's websocket limit.
+        maxBytes: z.coerce.number().int().positive().max(FILE_READ_MAX_BYTES).optional(),
+      })
+    ),
     async (c) => {
       const userId = c.get("user").id;
       const stationId = c.req.param("stationId");
-      const { path } = c.req.valid("query");
+      const { path, maxBytes } = c.req.valid("query");
 
       const station = await getStation(userId, stationId);
       if (!station) {
@@ -239,6 +252,7 @@ export const stationRoutes = new Hono()
       const result = await broker.request(station.nodeId, "fs.read", {
         key: station.stationKey,
         path,
+        ...(maxBytes ? { maxBytes } : {}),
       });
       if (!result.ok) {
         return c.json({ error: result.error ?? "fs.read failed" }, 502);
@@ -255,7 +269,9 @@ export const stationRoutes = new Hono()
         const bytes = Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0));
         return new Response(bytes, {
           headers: {
-            "Content-Type": "application/octet-stream",
+            // An image says what it is so the console can show it; anything
+            // else stays opaque.
+            "Content-Type": sniffImage(bytes) ?? "application/octet-stream",
             "X-Truncated": String(truncated),
           },
         });

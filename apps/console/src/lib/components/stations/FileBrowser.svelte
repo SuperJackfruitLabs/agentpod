@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { readFile } from "$lib/api/client";
+  import { readFile, readImage, setMatrixAvatar } from "$lib/api/client";
+  import { toast } from "svelte-sonner";
   import type { FsEntry } from "@agentpod/contract";
-  import { X, RefreshCw, ChevronLeft } from "@lucide/svelte";
+  import { X, RefreshCw, ChevronLeft, UserRound } from "@lucide/svelte";
   import { Button } from "$lib/components/ui/button";
   import { ResizablePaneGroup, ResizablePane, ResizableHandle } from "$lib/components/ui/resizable";
   import * as Breadcrumb from "$lib/components/ui/breadcrumb";
@@ -10,7 +11,7 @@
   import FileTree from "./file-tree.svelte";
   import FilePreview from "./file-preview.svelte";
   import FileQuickOpen from "./file-quick-open.svelte";
-  import { BINARY_EXTS, extOf } from "$lib/utils/file-ext";
+  import { BINARY_EXTS, IMAGE_EXTS, extOf } from "$lib/utils/file-ext";
 
   interface Props {
     stationId: string;
@@ -22,9 +23,15 @@
      * Only invoked when canWrite is true.
      */
     onOpenConfigEditor?: (path: string) => void;
+    /**
+     * Offer "Set as profile picture" on images: the station has a Matrix
+     * identity the hub can dress — a bridge-mode agent, or a harness that
+     * advertises `matrix.avatar`.
+     */
+    canSetAvatar?: boolean;
   }
 
-  let { stationId, canWrite = false, onOpenConfigEditor }: Props = $props();
+  let { stationId, canWrite = false, onOpenConfigEditor, canSetAvatar = false }: Props = $props();
 
   // ── Tree ↔ preview bridge state ──────────────────────────────────────────────
   /** Every FsEntry the tree (or quick-open) has discovered, keyed by path —
@@ -68,6 +75,9 @@
   });
   let activePath = $state<string | null>(null);
   let contentCache = $state<Map<string, { content: string; truncated: boolean }>>(new Map());
+  /** Object URLs for previewed images, revoked when their tab closes. */
+  let imageCache = $state<Map<string, { url: string; truncated: boolean }>>(new Map());
+  let settingAvatar = $state(false);
   let isLoadingFile = $state(false);
   let fileError = $state<string | null>(null);
 
@@ -88,6 +98,7 @@
     );
   });
   const activeContentEntry = $derived(activePath ? (contentCache.get(activePath) ?? null) : null);
+  const activeImage = $derived(activePath ? (imageCache.get(activePath) ?? null) : null);
 
   type BreadcrumbSegment = { name: string; path: string; isDir: boolean };
   const breadcrumbSegments = $derived.by((): BreadcrumbSegment[] => {
@@ -133,6 +144,12 @@
       next.delete(oldPath);
       contentCache = next;
     }
+    if (imageCache.has(oldPath)) {
+      const next = new Map(imageCache);
+      next.set(newPath, next.get(oldPath)!);
+      next.delete(oldPath);
+      imageCache = next;
+    }
     if (entryIndex.has(oldPath)) {
       const next = new Map(entryIndex);
       const val = next.get(oldPath)!;
@@ -151,9 +168,42 @@
     return BINARY_EXTS.has(extOf(path));
   }
 
+  function isImagePath(path: string): boolean {
+    return IMAGE_EXTS.has(extOf(path));
+  }
+
+  function dropImage(path: string) {
+    const img = imageCache.get(path);
+    if (!img) return;
+    URL.revokeObjectURL(img.url);
+    const next = new Map(imageCache);
+    next.delete(path);
+    imageCache = next;
+  }
+
+  $effect(() => () => {
+    for (const img of imageCache.values()) URL.revokeObjectURL(img.url);
+  });
+
+  async function setAsAvatar() {
+    if (!activePath || settingAvatar) return;
+    const path = activePath;
+    settingAvatar = true;
+    try {
+      const { matrixId } = await setMatrixAvatar(stationId, path);
+      toast.success("Profile picture set", { description: `${matrixId} now wears ${path}.` });
+    } catch (err) {
+      toast.error("Couldn’t set the profile picture", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      settingAvatar = false;
+    }
+  }
+
   /** Open (or activate) a file as a tab. Cached content is reused — a
-   *  network fetch only happens the first time a path is opened. Binary
-   *  files are never fetched (the hub has no binary endpoint). */
+   *  network fetch only happens the first time a path is opened. Images are
+   *  fetched as bytes for preview; other binary files are never fetched. */
   async function openFile(entry: FsEntry) {
     const path = entry.path;
     const nextIndex = new Map(entryIndex);
@@ -168,6 +218,22 @@
     // On a phone the preview replaces the tree, so opening a file has to
     // navigate to it — otherwise the tap appears to do nothing.
     mobilePane = "file";
+
+    if (isImagePath(path)) {
+      if (imageCache.has(path)) return;
+      isLoadingFile = true;
+      try {
+        const { blob, truncated } = await readImage(stationId, path);
+        const next = new Map(imageCache);
+        next.set(path, { url: URL.createObjectURL(blob), truncated });
+        imageCache = next;
+      } catch (err) {
+        fileError = err instanceof Error ? err.message : "Couldn’t read this image.";
+      } finally {
+        isLoadingFile = false;
+      }
+      return;
+    }
 
     if (isBinaryPath(path) || contentCache.has(path)) return;
 
@@ -194,6 +260,7 @@
     const next = new Map(contentCache);
     next.delete(activePath);
     contentCache = next;
+    dropImage(activePath);
     if (entry) await openFile(entry);
   }
 
@@ -218,6 +285,7 @@
     const idx = openFiles.findIndex((f) => f.path === path);
     if (idx === -1) return;
     openFiles = openFiles.filter((f) => f.path !== path);
+    dropImage(path);
     if (activePath === path) {
       activePath = openFiles.length === 0 ? null : openFiles[Math.min(idx, openFiles.length - 1)].path;
     }
@@ -315,6 +383,18 @@
               <Button variant="ghost" size="icon-sm" title="Refresh" aria-label="Refresh file" onclick={refreshActiveFile}>
                 <RefreshCw class="h-3.5 w-3.5" />
               </Button>
+              {#if canSetAvatar && activeImage && !activeImage.truncated}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 gap-1.5 px-2 text-xs font-sans"
+                  disabled={settingAvatar}
+                  onclick={setAsAvatar}
+                >
+                  <UserRound class="h-3.5 w-3.5" />
+                  {settingAvatar ? "Setting…" : "Set as profile picture"}
+                </Button>
+              {/if}
               {#if canWrite && activeContentEntry !== null && onOpenConfigEditor}
                 <Button
                   variant="outline"
@@ -333,7 +413,8 @@
           <FilePreview
             entry={activeEntry}
             content={activeContentEntry?.content ?? null}
-            truncated={activeContentEntry?.truncated ?? false}
+            imageUrl={activeImage?.url ?? null}
+            truncated={activeContentEntry?.truncated ?? activeImage?.truncated ?? false}
             loading={isLoadingFile}
             error={fileError}
           />

@@ -333,6 +333,46 @@ export async function readFile(
   };
 }
 
+/** The hub's ceiling on one file read — enough for an agent's ~2 MB pfp.png. */
+export const IMAGE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Read an image for preview, as a Blob. A plain `readFile` decodes the body as
+ * text, which mangles binary, and stops at the node's 1 MiB default.
+ */
+export async function readImage(
+  stationId: string,
+  path: string
+): Promise<{ blob: Blob; truncated: boolean }> {
+  const requestLine = `GET /api/stations/${stationId}/file`;
+  let res: Response;
+  try {
+    res = await fetch(
+      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}&maxBytes=${IMAGE_PREVIEW_MAX_BYTES}`,
+      { credentials: "include" }
+    );
+  } catch (err) {
+    throw networkError(requestLine, err);
+  }
+  if (!res.ok) throw await apiError(res, requestLine);
+  return {
+    blob: await res.blob(),
+    truncated: res.headers.get("X-Truncated") === "true",
+  };
+}
+
+/**
+ * Make a workspace image the station's Matrix profile picture. The hub routes
+ * it: a harness-mode agent's node uploads it with the agent's own login, a
+ * bridge-mode agent's appservice identity is set by the hub.
+ */
+export const setMatrixAvatar = (stationId: string, path: string) =>
+  http<{ matrixId: string; mxc: string }>(`/api/stations/${encodeURIComponent(stationId)}/matrix-avatar`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+
 export const logsUrl = (stationId: string) =>
   `${hubUrl()}/api/stations/${stationId}/logs`;
 
