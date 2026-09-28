@@ -268,8 +268,14 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
               recipients: r.recipients,
               claimedSessions: r.claimedSessions,
               shares: r.shares,
+              staleIdentities: r.staleIdentities,
             };
-            if (r.recipients <= 1) {
+            // A stale identity that had to be re-queried is worth a line even when the
+            // retry worked: it is the fingerprint of agentpod#604, and seeing it stop
+            // is how we know the propagation fix took.
+            if (r.staleIdentities.length > 0) {
+              log.warn("re-queried a stale device identity before sharing room keys", ctx);
+            } else if (r.recipients <= 1) {
               log.warn("encrypted to a single recipient — nobody else can read this", ctx);
             } else if (r.shares === 0) {
               log.debug("no room keys shared; recipients are believed to hold them already", ctx);
