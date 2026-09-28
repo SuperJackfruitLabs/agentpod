@@ -335,6 +335,28 @@ describe("a card worked start to finish", () => {
     expect(prompt).not.toContain(TOKEN);
   });
 
+  test("a stage's standing instructions reach the harness", async () => {
+    // The stage's rule, not the card's task. The Press board's `publish` stage had no
+    // way to state one, so "push to the primary remote" lived in whoever wrote the card
+    // — and the card that did not say it left a post committed to a station while the
+    // board reported it published. This is the seam that carries the rule now: the
+    // contract keeps the field, and the renderer gives it a section of its own.
+    const instructions = "Push to the repository's PRIMARY remote, never to GitHub directly.";
+    const board = fakeBoard((path) => {
+      if (path.endsWith(`/runs/${RUN_ID}`)) {
+        return { status: 200, body: { ...contextBody, stage: { ...contextBody.stage, instructions } } };
+      }
+      return happyBoard(path);
+    });
+    const acp = fakeAcp(() => [chunk("Pushed."), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    const prompt = acp.state.prompts[0]!;
+    expect(prompt).toContain("## How this stage is done");
+    expect(prompt).toContain(instructions);
+  });
+
   test("the run join is written, and the board is told once", async () => {
     const board = fakeBoard(happyBoard);
     const acp = fakeAcp(() => [chunk("Reindexed 412 documents."), idle()]);
