@@ -282,21 +282,103 @@ test("FileBrowser: renders markdown files with a Rendered/Source toggle", async 
   });
 });
 
+const mockArchive: FsEntry = {
+  name: "bundle.zip",
+  path: "bundle.zip",
+  type: "file",
+  size: 2048,
+  modified: "2026-06-27T08:00:00Z",
+};
+
 test("FileBrowser: shows a metadata card instead of fetching binary files", async () => {
-  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockArchive]);
   const readFileSpy = vi.spyOn(api, "readFile");
+  const readImageSpy = vi.spyOn(api, "readImage");
 
   const { getByText } = render(FileBrowser, { props: { stationId: "station_1" } });
 
-  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
-  fireEvent.click(getByText("logo.png"));
+  await waitFor(() => expect(getByText("bundle.zip")).toBeTruthy());
+  fireEvent.click(getByText("bundle.zip"));
 
   await waitFor(() => {
     expect(getByText(/can’t preview this file type/i)).toBeTruthy();
   });
   expect(readFileSpy).not.toHaveBeenCalled();
+  expect(readImageSpy).not.toHaveBeenCalled();
   // 2048 bytes → "2.0 KB" via the metadata card's size formatting.
   expect(getByText(/2\.0 KB/)).toBeTruthy();
+});
+
+// ─── Images: preview, and "Set as profile picture" ──────────────────────────
+
+function stubObjectUrls() {
+  // jsdom has no object URLs.
+  const create = vi.fn(() => "blob:preview-1");
+  const revoke = vi.fn();
+  Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
+  return { create, revoke };
+}
+
+test("FileBrowser: previews an image instead of calling it unpreviewable", async () => {
+  stubObjectUrls();
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  const readImage = vi.spyOn(api, "readImage").mockResolvedValue({ blob: new Blob(["x"]), truncated: false });
+  const readFileSpy = vi.spyOn(api, "readFile");
+
+  const { getByText, getByAltText, queryByText } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
+  fireEvent.click(getByText("logo.png"));
+
+  await waitFor(() => expect((getByAltText("logo.png") as HTMLImageElement).src).toBe("blob:preview-1"));
+  expect(readImage).toHaveBeenCalledWith("station_1", "logo.png");
+  expect(readFileSpy).not.toHaveBeenCalled();
+  expect(queryByText(/can’t preview this file type/i)).toBeNull();
+});
+
+test("FileBrowser: an image on a station with a Matrix identity can become its profile picture", async () => {
+  stubObjectUrls();
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  vi.spyOn(api, "readImage").mockResolvedValue({ blob: new Blob(["x"]), truncated: false });
+  const setAvatar = vi
+    .spyOn(api, "setMatrixAvatar")
+    .mockResolvedValue({ matrixId: "@agent_coder-kai:id.agentpod.dev", mxc: "mxc://h/abc" });
+
+  const { getByText, findByRole } = render(FileBrowser, {
+    props: { stationId: "station_1", canSetAvatar: true },
+  });
+  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
+  fireEvent.click(getByText("logo.png"));
+
+  fireEvent.click(await findByRole("button", { name: /set as profile picture/i }));
+  await waitFor(() => expect(setAvatar).toHaveBeenCalledWith("station_1", "logo.png"));
+});
+
+test("FileBrowser: no profile-picture action without a Matrix identity to set it on", async () => {
+  stubObjectUrls();
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  vi.spyOn(api, "readImage").mockResolvedValue({ blob: new Blob(["x"]), truncated: false });
+
+  const { getByText, getByAltText, queryByRole } = render(FileBrowser, { props: { stationId: "station_1" } });
+  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
+  fireEvent.click(getByText("logo.png"));
+
+  await waitFor(() => expect(getByAltText("logo.png")).toBeTruthy());
+  expect(queryByRole("button", { name: /set as profile picture/i })).toBeNull();
+});
+
+test("FileBrowser: a truncated image is not offered as a profile picture", async () => {
+  stubObjectUrls();
+  vi.spyOn(api, "listFiles").mockResolvedValue([mockLogo]);
+  vi.spyOn(api, "readImage").mockResolvedValue({ blob: new Blob(["x"]), truncated: true });
+
+  const { getByText, getByAltText, queryByRole } = render(FileBrowser, {
+    props: { stationId: "station_1", canSetAvatar: true },
+  });
+  await waitFor(() => expect(getByText("logo.png")).toBeTruthy());
+  fireEvent.click(getByText("logo.png"));
+
+  await waitFor(() => expect(getByAltText("logo.png")).toBeTruthy());
+  expect(queryByRole("button", { name: /set as profile picture/i })).toBeNull();
 });
 
 // ─── Cache invalidation (ConfigEditor save → FileBrowser refetch) ───────────

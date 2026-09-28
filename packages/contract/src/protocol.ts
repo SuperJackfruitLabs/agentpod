@@ -112,6 +112,11 @@ export const VERB_PARAMS = {
   // database id, and the STT API key is fetched over that endpoint with the
   // node's own credential — it never rides in a broker frame.
   "transcription.apply": z.object({ key: z.string(), stationId: z.string() }),
+  // Make a workspace image a harness-mode station's Matrix avatar. The node
+  // uploads it with the harness's own access token, which it reads from the
+  // profile and never sends: the hub's appservice cannot act for an identity
+  // outside its namespace, and nobody but the node needs that token.
+  "matrix.avatar.set": z.object({ key: z.string(), path: z.string().min(1) }),
 } as const;
 
 // VERB_RESULTS describes what the NODE returns on each verb.
@@ -206,5 +211,10 @@ export const VERB_RESULTS = {
     mode: z.enum(["on", "off"]),
     model: z.string().nullable(),
     restarted: z.boolean(),
+  }),
+  /** Who now wears the image, and where the homeserver keeps it. */
+  "matrix.avatar.set": z.object({
+    matrixId: z.string(),
+    mxc: z.string().startsWith("mxc://"),
   }),
 } as const;

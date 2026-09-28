@@ -124,6 +124,8 @@ describe("the capability classification", () => {
     // Operating an agent is not widening it, and dispatch already guards acp.
     expect(isReachBearing("lifecycle")).toBe(false);
     expect(isReachBearing("acp")).toBe(false);
+    // Dressing an agent is not widening it.
+    expect(isReachBearing("matrix.avatar")).toBe(false);
   });
 });
 

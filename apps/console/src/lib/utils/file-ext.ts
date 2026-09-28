@@ -16,3 +16,9 @@ export function extOf(path: string): string {
   const idx = path.lastIndexOf(".");
   return idx === -1 || idx === path.length - 1 ? "" : path.slice(idx + 1).toLowerCase();
 }
+
+/**
+ * Image types the browser can show from a Blob and a homeserver takes as an
+ * avatar. SVG is left out: no Matrix client renders one as a face.
+ */
+export const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
