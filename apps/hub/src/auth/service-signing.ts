@@ -205,6 +205,19 @@ export async function signServiceToken(input: SignServiceTokenInput): Promise<st
 
 export interface AssertionInput {
   /**
+   * Where this assertion may be spent.
+   *
+   * Omitted, `signServiceToken` falls back to the hub's own URL — which is the
+   * issuer, and "an audience that equals the issuer is not an audience check; it is
+   * the issuer check, written twice." A plane that verifies `aud` against its own
+   * origin then refuses the token.
+   *
+   * That is not hypothetical: a gate answered from chat resolved all the way to
+   * superpipeline and came back `HTTP_401`, because the assertion naming the human
+   * named nowhere it could be used (agentpod#604's last mile).
+   */
+  audiences?: string[];
+  /**
    * The principal being asserted.
    *
    * **Must** have come from `principal_identities` — a record of sameness minted
@@ -231,6 +244,7 @@ export async function mintPrincipalAssertion(input: AssertionInput): Promise<str
     payload,
     subject: input.principalId,
     ttl: ASSERTION_TTL,
+    ...(input.audiences && input.audiences.length > 0 ? { audiences: input.audiences } : {}),
     extraClaims: { act: { sub: input.actor ?? BRIDGE_ACTOR } },
   });
 }

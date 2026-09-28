@@ -38,7 +38,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM principals WHERE handle = 'assertion-target'`;
+    await rawSql`DELETE FROM principals WHERE handle IN ('assertion-target', 'aud-target', 'aud-target-2', 'aud-target-3')`;
   } catch {
     // cleanup only
   }
@@ -93,5 +93,48 @@ describe("mintPrincipalAssertion", () => {
     const ttlSeconds = (claims.exp as number) - (claims.iat as number);
     expect(ttlSeconds).toBeGreaterThan(100);
     expect(ttlSeconds).toBeLessThanOrEqual(120);
+  });
+});
+
+/**
+ * agentpod#604's last mile: a human's approval travelled from their phone, through
+ * the board room, past the human-only check, and came back `HTTP_401`.
+ *
+ * `signServiceToken` falls back to the hub's own URL when no audience is given —
+ * and that URL is the issuer. As this file's own comment puts it, "an audience that
+ * equals the issuer is not an audience check; it is the issuer check, written
+ * twice." A plane verifying `aud` against its own origin refuses such a token.
+ */
+describe("an assertion for another plane", () => {
+  test("names that plane, so the plane verifying aud accepts it", async () => {
+    const principalId = await createPrincipal({ kind: "human", handle: "aud-target" });
+    const token = await mintPrincipalAssertion({
+      principalId,
+      audiences: ["https://app.superpipeline.dev"],
+    });
+    const claims = decodeJwt(token);
+    expect(claims.aud).toEqual(["https://app.superpipeline.dev"]);
+    // Still issued by the hub — the audience says where it may be spent, not who
+    // signed it.
+    expect(claims.iss).not.toEqual(claims.aud);
+  });
+
+  test("with no audience it stays hub-only, which is the safe default", async () => {
+    const principalId = await createPrincipal({ kind: "human", handle: "aud-target-2" });
+    const token = await mintPrincipalAssertion({ principalId });
+    const claims = decodeJwt(token);
+    expect(typeof claims.aud).toBe("string");
+    expect(claims.aud).toBe(claims.iss);
+  });
+
+  test("the subject is still the principal, never the bridge", async () => {
+    // The whole decision of 2026-08-14 rests here: a bridge substituting its own
+    // identity would void superpipeline's separation-of-duties check.
+    const principalId = await createPrincipal({ kind: "human", handle: "aud-target-3" });
+    const token = await mintPrincipalAssertion({
+      principalId,
+      audiences: ["https://app.superpipeline.dev"],
+    });
+    expect(decodeJwt(token).sub).toBe(principalId);
   });
 });
