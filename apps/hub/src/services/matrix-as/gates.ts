@@ -54,6 +54,23 @@ export const GATE_EVENT_TYPE = "dev.superpipeline.gate.v1";
 export const GATE_DECISION_SUITE_TYPE = "dev.superpipeline.gate.decision.v1";
 
 /**
+ * What the board did with an answer, said back in the room.
+ *
+ * On a successful resolve this service used to say nothing at all, while saying
+ * something on a DUPLICATE tap ("That was already decided"). So a room heard about
+ * a redundant answer and never about an accepted one, and a person scrolling back
+ * could not tell a resolved gate from a live one (agentpod#614).
+ *
+ * **Not the same fact as the decision event the reader's client already sent.** That
+ * one says a person tapped and it was delivered. This says superpipeline accepted
+ * it. They came apart in production on 2026-09-28: decision events landed in the
+ * room for hours while every resolve was refused `HTTP_401`, so a client rendering
+ * "answered" from the decision alone would have told the reader their approval had
+ * worked when nothing had happened.
+ */
+export const GATE_OUTCOME_TYPE = "dev.superpipeline.gate.outcome.v1";
+
+/**
  * The only option ids superpipeline resolves against — its `GateDecision`.
  *
  * Mirrored here rather than imported because the two products share no runtime.
@@ -645,6 +662,18 @@ export interface GateDecisionDeps {
   }): Promise<{ ok: true } | { ok: false; code: string }>;
   /** Say something back in the room. Used when a gate was already resolved. */
   reply(roomId: string, body: string): Promise<unknown>;
+  /**
+   * Post the structured half of a receipt beside its prose.
+   *
+   * Two events rather than one, the same convention the gate itself uses and for
+   * the same reason: a stock Matrix client renders an unknown *event type* as
+   * nothing at all, so prose is what a reader outside supermessage is left with.
+   */
+  sendOutcome?(roomId: string, content: Record<string, unknown>): Promise<unknown>;
+  /** How to name the person who answered, for the receipt. Their handle, not an mxid. */
+  displayNameFor?(principalId: string): Promise<string | null>;
+  /** Remember that a receipt was posted, so a repeated decision cannot post a second. */
+  markOutcomePosted?(gateId: string): Promise<boolean>;
 }
 
 /**
@@ -737,7 +766,10 @@ export async function handleGateDecision(
     principalId: principal.id,
   });
 
-  if (result.ok) return { status: "resolved" };
+  if (result.ok) {
+    await postOutcomeReceipt(roomId, parsed, principal.id, projection, deps);
+    return { status: "resolved" };
+  }
 
   if (result.code === "GATE_NOT_PENDING") {
     // Answered on the board, or a double tap on a slow connection. Not
@@ -925,3 +957,57 @@ export async function roomAgentUser(roomId: string, domain: string): Promise<str
     domain
   );
 }
+
+/**
+ * Say in the room that the board accepted an answer.
+ *
+ * Best-effort on purpose. The gate IS resolved by the time this runs — superpipeline
+ * has it — so a receipt that cannot be posted must not turn a successful approval
+ * into a failure the caller reports. What it costs is a room that reads as though
+ * nothing happened, which is the defect this fixes, not one it can re-create.
+ *
+ * Posted once. `markOutcomePosted` claims the gate before sending, so a decision
+ * delivered twice — a double tap, a re-sent transaction — leaves one receipt rather
+ * than two contradictory-looking ones.
+ */
+async function postOutcomeReceipt(
+  roomId: string,
+  parsed: ParsedGateDecision,
+  principalId: string,
+  projection: { boardId: string; eventId: string; proseEventId?: string | null },
+  deps: GateDecisionDeps,
+): Promise<void> {
+  try {
+    if (deps.markOutcomePosted && !(await deps.markOutcomePosted(parsed.gateId))) return;
+
+    const who = (await deps.displayNameFor?.(principalId)) ?? null;
+    const verb = OUTCOME_VERBS[parsed.optionId] ?? parsed.optionId;
+    const body = who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`;
+
+    await deps.reply(roomId, body);
+
+    // The gate's own event is what a card is drawn from, so the receipt points at it
+    // rather than at the prose: a client that finds this knows which card to close.
+    await deps.sendOutcome?.(roomId, {
+      suite_event_type: GATE_OUTCOME_TYPE,
+      gate_id: parsed.gateId,
+      board_id: projection.boardId,
+      decision: parsed.optionId,
+      decided_by: who,
+      "m.relates_to": { rel_type: "m.reference", event_id: projection.eventId },
+    });
+  } catch (err) {
+    log.warn("gate resolved but its receipt could not be posted", {
+      gateId: parsed.gateId,
+      roomId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** How each decision reads in a sentence. Falls back to the option id. */
+const OUTCOME_VERBS: Record<string, string> = {
+  approve: "Approved",
+  reject: "Rejected",
+  request_changes: "Changes requested",
+};

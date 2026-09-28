@@ -251,6 +251,14 @@ export const matrixGateEvents = pgTable(
     /** superpipeline's board, needed to address the resolution endpoint. */
     boardId: text("board_id").notNull(),
     cardId: text("card_id").notNull(),
+    /**
+     * When this hub said in the room that the board accepted an answer.
+     *
+     * The claim that stops a second receipt: a decision delivered twice — a double
+     * tap, a re-sent appservice transaction — must leave one line in the room, not
+     * two that read as though the gate were answered twice (agentpod#614).
+     */
+    outcomePostedAt: timestamp("outcome_posted_at"),
     roomId: text("room_id").notNull(),
     /**
      * The event a decision references. While `AGENTPOD_LEGACY_PERMISSION_EVENTS`
