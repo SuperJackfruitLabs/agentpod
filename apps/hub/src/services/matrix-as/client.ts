@@ -124,6 +124,16 @@ export interface MatrixClient {
   setDisplayName(userId: string, displayName: string): Promise<void>;
   invite(asUserId: string, roomId: string, invitee: string): Promise<void>;
   /**
+   * Turn on encryption for a room this appservice owns.
+   *
+   * Matrix has no un-encrypt, so this is a one-way door and idempotent by nature —
+   * setting it twice is the same state. Returns whether the room is encrypted
+   * afterwards rather than throwing, because a caller deciding whether to record a
+   * room wants an answer, not an exception (`board-room.ts` refuses to record a
+   * room it could not encrypt).
+   */
+  enableRoomEncryption(asUserId: string, roomId: string): Promise<boolean>;
+  /**
    * Join a room as a virtual user.
    *
    * **An invite is still required for an invite-only room.** This used to say
@@ -610,6 +620,26 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       );
       assertOkOrAlready("sendCustomEvent", res);
       return String(res.body.event_id ?? "") || null;
+    },
+
+    async enableRoomEncryption(asUserId, roomId) {
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.encryption/`,
+        {
+          method: "PUT",
+          userId: asUserId,
+          body: { algorithm: "m.megolm.v1.aes-sha2" },
+        },
+      );
+      const ok = res.status >= 200 && res.status < 300;
+      if (!ok) {
+        log.warn("could not enable room encryption", {
+          roomId,
+          asUserId,
+          status: res.status,
+        });
+      }
+      return ok;
     },
 
     async sendToDevice(userId, targetUserId, eventType, content) {

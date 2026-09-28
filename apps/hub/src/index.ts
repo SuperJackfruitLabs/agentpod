@@ -19,6 +19,7 @@ import { servicePublicJwks } from './auth/service-signing.ts';
 // GET /api/auth/authorize — the cross-domain handoff's front door (see below)
 import { authorizeRoutes } from './routes/auth-authorize.ts';
 import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
+import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
@@ -374,6 +375,36 @@ if (matrixBridge) {
       eventType: string,
       content: Record<string, unknown>,
     ) => matrixBridge.client.sendCustomEvent(userId, roomId, eventType, content),
+    /**
+     * The board's room, made on first use.
+     *
+     * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
+     * A gate used to go to the station's room, which this hub encrypts for but must
+     * never decrypt for — so it could be delivered and never answered.
+     */
+    boardRoom: (boardId: string, tenantId: string) =>
+      ensureBoardRoom(boardId, tenantId, {
+        domain: matrixBridge.config.domain,
+        ensureUser: (localpart, displayName) =>
+          matrixBridge.client.ensureUser(localpart, displayName),
+        ensureRoom: (alias, opts) => matrixBridge.client.ensureRoom(alias, opts),
+        invite: (asUserId, roomId, invitee) =>
+          matrixBridge.client.invite(asUserId, roomId, invitee),
+        enableEncryption: (asUserId: string, roomId: string) =>
+          matrixBridge.client.enableRoomEncryption(asUserId, roomId),
+        /**
+         * The humans who may answer this board's gates.
+         *
+         * A list from the first day though it holds one today. superpipeline owns
+         * board membership, but its `/v1/members` route resolves a user SESSION —
+         * the same restriction that stops the hub minting agent tokens — so the hub
+         * cannot ask it with the credentials it holds. Until superpipeline exposes
+         * membership to a service credential, this is the one human the bridge
+         * roster already names, resolved through `principal_identities` to the
+         * Matrix id they actually read on.
+         */
+        humansFor: async () => matrixIdsForBoardHumans(boardId),
+      }),
   };
 
   // POST /public/bridge/superpipeline/push — a board telling us a gate is open.

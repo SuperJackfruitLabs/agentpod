@@ -13,7 +13,7 @@
  * outright, so it can both encrypt for and decrypt for it. That is the whole
  * requirement, and it is what selects every choice below.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
@@ -183,4 +183,64 @@ export async function boardRoomFor(roomId: string) {
     .from(matrixBoardRooms)
     .where(eq(matrixBoardRooms.roomId, roomId));
   return row ?? null;
+}
+
+/**
+ * The Matrix ids of the humans who may answer a board's gates.
+ *
+ * **One entry today, and a list by construction.** superpipeline owns board
+ * membership and is the eventual source of truth, but its `/v1/members` route
+ * resolves a user SESSION — the same restriction that stops the hub minting agent
+ * tokens — so the hub cannot ask it with the credentials it holds. Until
+ * superpipeline exposes membership to a service credential, the bridge roster is
+ * the only place that names a board's human at all.
+ *
+ * Resolved the long way round on purpose: roster `hubUserId` → principal →
+ * `principal_identities`. A Matrix id is never guessed from a localpart or a
+ * matching email (charter `2026-08-13-ecosystem-identity` Decision 2), so a board
+ * whose human has never linked an account yields nobody rather than somebody wrong.
+ */
+export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]> {
+  const { isBridgeEnabled, loadBridgeConfig } = await import("../bridge/config");
+  if (!isBridgeEnabled()) return [];
+
+  // Null when the bridge is off or its config will not load — which is the same
+  // answer as "no humans named", not an error worth failing a room over.
+  const config = loadBridgeConfig();
+  if (!config) return [];
+
+  let hubUserIds: string[];
+  try {
+    hubUserIds = [
+      ...new Set(
+        config
+          .agents.filter((a) => a.boardId === boardId)
+          .map((a) => a.hubUserId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+  } catch {
+    // A roster that will not parse is an operator's problem and is reported where
+    // it is loaded; a board room should still be made, just with nobody invited yet.
+    return [];
+  }
+
+  const { principalForUser } = await import("../principals");
+  const { principalIdentities } = await import("../../db/schema/identities");
+  const mxids: string[] = [];
+  for (const userId of hubUserIds) {
+    const principal = await principalForUser(userId);
+    if (!principal) continue;
+    const [identity] = await db
+      .select({ externalId: principalIdentities.externalId })
+      .from(principalIdentities)
+      .where(
+        and(
+          eq(principalIdentities.principalId, principal.id),
+          eq(principalIdentities.system, "matrix"),
+        ),
+      );
+    if (identity?.externalId) mxids.push(identity.externalId);
+  }
+  return mxids;
 }

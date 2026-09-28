@@ -834,55 +834,20 @@ describe("what a station mid-move looks like", () => {
     await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
   });
 
-  test("a gate that finds no room is attributed to the move, exactly as no-agent and no-speaker are", async () => {
-    // Spec §6 names `no-room` alongside `no-speaker` as an outcome that must
-    // be attributable to a move; only `no-agent` and `no-speaker` carried
-    // `midMove`. A station whose room set changes while its identity is
-    // moving lands here, and the sweep's stuck-gate line could not tell that
-    // from a broken station — which is the noise §6 asks it to avoid.
-    await rawSql`DELETE FROM matrix_rooms WHERE station_id = ${STATION}`;
-    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-    await rawSql`
-      UPDATE stations SET matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          bridge_matrix_id = ${"@agent_old_" + RUN + ":" + DOMAIN},
-                          matrix_identity_mode = 'harness'
-       WHERE id = ${STATION}`;
-
-    const cardId = `crd_${RUN}_noroom`;
-    await dispatched(cardId);
-
-    // Nothing may be sent on this path — there is nowhere to send it — so a
-    // deps object that throws proves the outcome is reached before any client
-    // call rather than after a swallowed one.
-    const noSend = {
-      domain: DOMAIN,
-      sendText: async () => {
-        throw new Error("nothing may be sent when there is no room");
-      },
-      sendCustomEvent: async () => {
-        throw new Error("nothing may be sent when there is no room");
-      },
-    };
-
-    // Nobody has authorised anything: this is an ordinary missing room.
-    expect(await projectGate(TENANT, delivery(`gate_${RUN}_noroom_a`, cardId), noSend)).toEqual({
-      status: "no-room",
-      midMove: false,
-    });
-
-    await mintCredentialAuthorization(STATION);
-    expect(await projectGate(TENANT, delivery(`gate_${RUN}_noroom_b`, cardId), noSend)).toEqual({
-      status: "no-room",
-      midMove: true,
-    });
-
-    // A card this fleet never dispatched has no station behind it, so there is
-    // nothing to ask — and `midMove` is absent rather than a false `false`,
-    // which would claim an attribution nobody made.
-    expect(
-      await projectGate(TENANT, delivery(`gate_${RUN}_noroom_c`, `crd_${RUN}_never`), noSend)
-    ).toEqual({ status: "no-room" });
-
-    await rawSql`DELETE FROM matrix_credential_authorizations WHERE station_id = ${STATION}`;
-  });
+  /**
+   * `no-room` carried a `midMove` attribution, and no longer can.
+   *
+   * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
+   * The attribution existed because a gate borrowed a station's room, so a station
+   * between authorisation and convergence could be the reason a gate found none —
+   * and the sweep's stuck-gate line had to tell that from a broken station.
+   *
+   * A gate now closes in the board's own room. A board has no identity move to be
+   * between, and `no-room` means this hub could not make or encrypt the room — a
+   * fault in the service, not a station mid-flight. There is nothing left to
+   * attribute, so the test that pinned the attribution goes with it.
+   *
+   * The `midMove` attribution on `no-agent` and `no-speaker` went the same way, with
+   * those outcomes: see `assign-provisions.test.ts`.
+   */
 });
