@@ -203,10 +203,13 @@ export const PERMISSION_REQUEST_TYPE = "dev.agentpod.permission.v1";
  * The wire body for a permission request, or `null` when there is nothing a
  * client could render.
  *
- * Sent **beside** the prose message, never instead of it. The prose is what
- * keeps Element and reply-by-number working, and the answer to either arrives
- * as an ordinary room message through the same matcher — which is why
- * structured approvals need no new send path on either side.
+ * Carried **inside** the prose message under `PERMISSION_REQUEST_CONTENT_KEY`
+ * (`dev.agentpod.permission`), and — while `AGENTPOD_LEGACY_PERMISSION_EVENTS`
+ * is on — sent again beside it as `dev.agentpod.permission.v1`. Never instead
+ * of the prose: the prose is what keeps Element and reply-by-number working,
+ * and the answer to any of them arrives as an ordinary room message through the
+ * same matcher — which is why structured approvals need no new send path on
+ * either side.
  *
  * Capped at four options because supermessage's `DECISION_MAX_OPTIONS` renders
  * four and silently drops the rest; enforcing it here means the hub never sends

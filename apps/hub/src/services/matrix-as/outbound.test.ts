@@ -1,4 +1,11 @@
-import { TURN_ERROR_CONTENT_KEY, TurnErrorCard } from "@agentpod/contract";
+import {
+  PERMISSION_REQUEST_CONTENT_KEY,
+  PermissionRequestEvent,
+  TURN_ERROR_CONTENT_KEY,
+  TurnErrorCard,
+} from "@agentpod/contract";
+import { _resetHubEventsForTest, hubEventKind } from "../push/hub-events";
+import { matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
@@ -918,6 +925,79 @@ describe("a permission request a client can render", () => {
       { option_id: "allow", name: "Allow" },
       { option_id: "reject", name: "Reject" },
     ]);
+  });
+
+  test("the structured request rides inside the prose, under dev.agentpod.permission", async () => {
+    // One question, one event, one push: the key is what lets a phone's
+    // extension classify the push, in an encrypted room or not.
+    const { deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(permission(7));
+    await settle();
+
+    expect(sent).toHaveLength(1);
+    const embedded = PermissionRequestEvent.parse(sent[0]!.extra?.[PERMISSION_REQUEST_CONTENT_KEY]);
+    expect(embedded).toEqual({
+      schema_version: 1,
+      session_id: SESSION,
+      request_seq: 7,
+      title: "write /etc/hosts",
+      options: [
+        { option_id: "allow", name: "Allow" },
+        { option_id: "reject", name: "Reject" },
+      ],
+    });
+  });
+
+  test("the legacy event carries the same payload, and its push is marked as a companion", async () => {
+    _resetHubEventsForTest();
+    const { custom, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(permission(7));
+    await settle();
+
+    expect(custom[0]!.content).toEqual(sent[0]!.extra?.[PERMISSION_REQUEST_CONTENT_KEY]);
+    // `$evt` is the prose (the recording sendText's id), `$custom-1` the legacy event.
+    expect(hubEventKind("$evt")).toBe("permission");
+    expect(hubEventKind("$custom-1")).toBe("companion");
+  });
+
+  test("with the legacy flag off, only the prose is sent — and the answer still matches", async () => {
+    const before = process.env.AGENTPOD_LEGACY_PERMISSION_EVENTS;
+    process.env.AGENTPOD_LEGACY_PERMISSION_EVENTS = "false";
+    try {
+      const { custom, deps: d } = recordingDeps();
+      attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+      emit(permission(7));
+      await settle();
+
+      expect(custom).toHaveLength(0);
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.extra?.[PERMISSION_REQUEST_CONTENT_KEY]).toBeDefined();
+      // Answering is keyed on the request the hub holds for the room, not on
+      // an event id — so dropping the legacy event cannot strand an answer.
+      const pending = pendingPermissionFor(ROOM)!;
+      expect(pending.requestSeq).toBe(7);
+      expect(matchPermissionAnswer("2", pending.options)).toBe("reject");
+    } finally {
+      if (before === undefined) delete process.env.AGENTPOD_LEGACY_PERMISSION_EVENTS;
+      else process.env.AGENTPOD_LEGACY_PERMISSION_EVENTS = before;
+    }
+  });
+
+  test("a prose send that failed leaves the legacy event pushable", async () => {
+    _resetHubEventsForTest();
+    const { deps: d } = recordingDeps();
+    const failing = { ...d, client: { ...d.client, sendText: async () => { throw new Error("homeserver down"); } } };
+    attachRoomToSession(SESSION, ROOM, AGENT, failing as any);
+
+    emit(permission(7));
+    await settle();
+
+    expect(hubEventKind("$custom-1")).toBeUndefined();
   });
 
   test("a deployment without sendCustomEvent still asks in words", async () => {
