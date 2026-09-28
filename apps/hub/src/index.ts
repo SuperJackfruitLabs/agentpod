@@ -83,6 +83,8 @@ import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hook
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
 import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
+import { createMatrixPushRoutes } from './routes/matrix-push.ts';
+import { createPushGatewayFromEnv } from './services/push/index.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
 import { createMissionRoutes } from './routes/missions.ts';
@@ -326,6 +328,14 @@ const app = new Hono()
   .route('/api', stationAcpRoutes)                         // POST/GET /api/stations/:id/acp/sessions, WS /api/acp/sessions/:sessionId/ws
   .route('/api', acpProxyRouter);                          // WS /api/acp/proxy — Doors: an editor's stdio, piped by `apn acp`
 
+// ── The Matrix push gateway ──────────────────────────────────────────────────
+//
+// POST /_matrix/push/v1/notify — the homeserver asking for a phone to buzz.
+// Unauthenticated by the Push Gateway spec, so it lives outside /api/* (no
+// session, no CSRF) and defends itself: see `routes/matrix-push.ts`. Mounted
+// always; answers 404 until the APNS_* / PUSH_APP_IDS variables are set.
+app.route('/_matrix/push/v1', createMatrixPushRoutes(createPushGatewayFromEnv()));
+
 // ── The Matrix Application Service ───────────────────────────────────────────
 //
 // Mounted OUTSIDE /api/* because the caller is a homeserver holding a shared
@@ -355,8 +365,9 @@ if (matrixBridge) {
   const gateProjection = {
     domain: matrixBridge.config.domain,
     boardBaseUrl: process.env.SUPERPIPELINE_BOARD_URL,
-    sendText: (userId: string, roomId: string, body: string) =>
-      matrixBridge.client.sendText(userId, roomId, body),
+    // `extra` is the gate itself, embedded in the prose (`dev.superpipeline.gate`).
+    sendText: (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) =>
+      matrixBridge.client.sendText(userId, roomId, body, extra),
     sendCustomEvent: (
       userId: string,
       roomId: string,
