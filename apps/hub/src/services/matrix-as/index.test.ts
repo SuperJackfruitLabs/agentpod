@@ -51,6 +51,18 @@ describe("the bridge switch", () => {
     expect(createMatrixBridge(matrixBridgeConfig({ ...base, MATRIX_HS_TOKEN: "" }))).toBeNull();
   });
 
+  test("speaks through a client that tells the push gateway which sends are quiet", async () => {
+    const { _resetHubEventsForTest, quietSendsInFlight } = await import("../push/hub-events");
+    _resetHubEventsForTest();
+    const bridge = createMatrixBridge(matrixBridgeConfig(base));
+    const room = "!wiring:id.agentpod.dev";
+    // Announced before the network is touched; the send itself fails here, no homeserver.
+    const sent = bridge!.client.sendReaction("@agent_a:id.agentpod.dev", room, "$t", "👀").catch(() => null);
+    expect(quietSendsInFlight(room)).toBe(1);
+    await sent;
+    expect(quietSendsInFlight(room)).toBe(0);
+  });
+
   test("builds when it has everything", () => {
     const bridge = createMatrixBridge(matrixBridgeConfig(base));
     expect(bridge).not.toBeNull();

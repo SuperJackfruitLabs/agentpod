@@ -19,6 +19,7 @@ import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
+import { withQuietNotes } from "./push-quiet";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
 import { transcriberFor } from "../transcription-settings";
@@ -301,13 +302,20 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
    * keep calling `sendText` — the difference is decided by the room, not by
    * the caller, which is the only arrangement where a new send site cannot
    * accidentally ship plaintext into an encrypted room.
+   *
+   * `withQuietNotes` is outermost: it has to see a turn record as
+   * `dev.agentpod.turn.v1`, before encryption turns it into
+   * `m.room.encrypted`, to tell the push gateway that event must not reach a
+   * phone (`push-quiet.ts`).
    */
-  const speakingClient = crypto
-    ? withEncryption(client, crypto, {
-        homeserverUrl: cfg.homeserverUrl,
-        asToken: cfg.asToken,
-      })
-    : client;
+  const speakingClient = withQuietNotes(
+    crypto
+      ? withEncryption(client, crypto, {
+          homeserverUrl: cfg.homeserverUrl,
+          asToken: cfg.asToken,
+        })
+      : client
+  );
 
 
   /**

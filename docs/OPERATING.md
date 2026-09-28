@@ -1204,6 +1204,25 @@ once every client reads the embedded key. Answers work either way: a permission
 answer is matched against the request the hub holds for the room, and a gate
 decision may reference either the prose or the legacy event.
 
+**What never pushes.** The hub's own reactions on a message (👀 working, ✅
+done, ❌ failed) and a turn's activity record (`dev.agentpod.turn.v1`, which is
+`m.room.encrypted` in an encrypted room and so matches `.m.rule.encrypted`) are
+noted as *quiet* by the client every agent speaks through
+(`services/matrix-as/push-quiet.ts`); the gateway answers their pushes as
+delivered and sends nothing to Apple. Without that the app's extension blanks
+them, and iOS — without Apple's filtering entitlement — shows the empty push.
+tuwunel can push before the hub's send has returned the event id (about a third
+of turn records, measured), so a quiet send is announced for its room before it
+is made, and a push for an unknown event in a room with one in flight waits for
+it — at most 500 ms (`QUIET_WAIT_MS`). A room with nothing in flight waits for
+nothing. A counts-only notice (tuwunel's badge refresh, no `event_id`) is also
+answered and dropped. `LOG_LEVEL=debug` logs each `push decision` with its
+`timing`: `known-before`, `known-after-wait` or `unknown`, and `waitedMs`.
+
+Events a **harness-mode** agent posts itself (its own reactions and edits —
+Hermes does both) never pass through the hub, so the gateway cannot tell them
+apart; those need the app-side fix or the entitlement.
+
 **Defences** — the Push Gateway API has no authentication, so the route has
 its own: a 64 KiB body cap (413), a strict schema (400), an allowlist of app ids
 (`PUSH_APP_IDS`; any other app id is dropped and logged, not rejected), and 60
