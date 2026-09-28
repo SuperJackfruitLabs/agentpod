@@ -15,6 +15,7 @@ Usage: fleet <verb> [flags]
   fleet devices [--json]     machines that may act as you
   fleet devices revoke <id>  revoke one
   fleet nodes                the fleet's nodes
+  fleet nodes update         roll the newest release to every node (or --node NAME)
   fleet agents               the agents you may dispatch
   fleet stations …           detect, adopt and unadopt stations on a node
   fleet stats                fleet totals
