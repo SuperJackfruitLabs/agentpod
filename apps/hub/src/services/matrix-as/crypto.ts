@@ -292,6 +292,47 @@ import { createLogger } from '../../utils/logger';
 
 const log = createLogger('matrix-as:crypto');
 
+/**
+ * Every `OlmMachine` this process has opened and not yet closed.
+ *
+ * An open machine at exit aborts the process (issue #457). Bun runs napi's env
+ * cleanup hooks as it exits, napi-rs drops its Tokio runtime in one of them,
+ * and a machine torn down after that reaches for the runtime
+ * (`tokio_runtime.rs:114`: `Option::unwrap()` on `None`) — SIGABRT, exit 134,
+ * whatever the process was doing. The hub's shutdown handler closes machines
+ * first, but that is one exit path of many: bun test's own exit is another,
+ * and it turned green CI runs red.
+ *
+ * So the machines are closed on the way out whoever is exiting. An `exit`
+ * listener runs before the cleanup hooks, including after `process.exit()`,
+ * and `close()` is synchronous, which is all an `exit` listener may do.
+ */
+const openMachines = new Set<OlmMachine>();
+let closesOnExit = false;
+
+function trackOpen(machine: OlmMachine): void {
+  openMachines.add(machine);
+  if (closesOnExit) return;
+  closesOnExit = true;
+  process.on('exit', closeOpenMachines);
+}
+
+function closeMachine(machine: OlmMachine): void {
+  // Forgotten first, so a close that throws is never retried at exit.
+  openMachines.delete(machine);
+  machine.close();
+}
+
+function closeOpenMachines(): void {
+  for (const machine of [...openMachines]) {
+    try {
+      closeMachine(machine);
+    } catch {
+      // Nothing to report to at exit, and one bad machine must not keep the
+      // rest open.
+    }
+  }
+}
 
 export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   const machines = new Map<string, Promise<OlmMachine>>();
@@ -326,6 +367,9 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         new DeviceId(deviceId),
         dir,
       );
+      // Tracked before anything else can throw: a machine that failed to
+      // publish is still open.
+      trackOpen(machine);
       await publishIdentity(userId, machine);
       return machine;
     })();
@@ -628,7 +672,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       await Promise.all(
         open.map(async (pending) => {
           try {
-            (await pending).close();
+            closeMachine(await pending);
           } catch (err) {
             log.warn('closing an agent crypto machine failed', {
               reason: err instanceof Error ? err.message : String(err),
