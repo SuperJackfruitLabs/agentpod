@@ -113,6 +113,19 @@ export function isGatePending(v: unknown): v is GatePendingDelivery {
 }
 
 export interface GateProjectionDeps {
+  /**
+   * The board's room, made if it is not there yet.
+   *
+   * Injected rather than imported so a projection can be tested without a
+   * homeserver, and so the room's lifecycle stays in `board-room.ts` where its
+   * ordering rules live (encrypt before recording; never record one that could not
+   * be encrypted).
+   */
+  boardRoom(
+    boardId: string,
+    tenantId: string,
+  ): Promise<{ roomId: string; speakerMxid: string } | null>;
+
   /** Sends as a station's own virtual user. Returns the event id, or null. */
   sendCustomEvent(
     userId: string,
@@ -378,21 +391,33 @@ export async function projectGate(
   d: GatePendingDelivery,
   deps: GateProjectionDeps
 ): Promise<ProjectionOutcome> {
-  const found = await roomForCard(tenantId, d.boardId, d.cardId);
+  /**
+   * The board's room, not the station's.
+   *
+   * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
+   * A station room belongs to a harness-mode agent that owns its own keys: this hub
+   * encrypts there (which `bridge-agents.ts` says it must never do) and correctly
+   * refuses to decrypt there, so a gate could be delivered and never answered. On
+   * 2026-09-28 an operator approved from their phone and the decision was discarded
+   * unread.
+   *
+   * A board room is spoken by an identity whose keys the hub holds outright, which
+   * is the only arrangement where both halves work. It also removes three failure
+   * modes that existed only because a gate borrowed a station: an unoccupied
+   * station, a station answering as an mxid nothing registered, and a station
+   * mid-identity-move. A board is always there.
+   */
+  const found = await deps.boardRoom(d.boardId, tenantId);
   if (!found) {
-    // Attributed to a move where there IS a station to attribute it to. A card
-    // this fleet never dispatched has none, and `midMove` stays absent rather
-    // than becoming a false `false`. The extra lookup is on the failure path
-    // only — `roomForCard` already answered for the ordinary one.
-    const stationId = await dispatchedStationId(tenantId, d.boardId, d.cardId);
-    const midMove = stationId ? await moveInProgress(stationId, deps.domain) : undefined;
-    log.info("gate has no room to appear in", {
+    // No `midMove` here any more, and nothing to attribute it to. A board room
+    // failing to exist is the hub being unable to make or encrypt one — a fault in
+    // this service, not a station between authorisation and convergence.
+    log.warn("gate has no board room to appear in", {
       gateId: d.gateId,
       cardId: d.cardId,
-      stationId,
-      midMove,
+      boardId: d.boardId,
     });
-    return midMove === undefined ? { status: "no-room" } : { status: "no-room", midMove };
+    return { status: "no-room" };
   }
 
   // Claim the gate before sending. See this function's doc comment.
@@ -415,56 +440,16 @@ export async function projectGate(
     return { status: "already" };
   }
 
-  // The station's own virtual user, built the one way this codebase builds
-  // them: from its occupying agent's handle, never from `(nodeName,
-  // stationKey)`. Registering or sending as anything else lands outside the
-  // exclusive `@agent_.*` namespace, where the appservice may not act — a 403
-  // that arrives later and elsewhere. See `names.ts`.
-  const handle = found.principalId ? await principalHandle(found.principalId) : null;
-  if (!handle) {
-    // The claim must go, or a gate for a station that later gains an
-    // occupying agent could never be re-attempted — the sweep would see the
-    // claimed row and conclude it had already been handled.
-    await releaseClaim(d.gateId);
-    const midMove = await moveInProgress(found.stationId, deps.domain);
-    log.warn("gate's station has no occupying agent; claim released", {
-      gateId: d.gateId,
-      stationKey: found.stationKey,
-      midMove,
-    });
-    return { status: "no-agent", midMove };
-  }
+  /**
+   * The board speaks, not the agent.
+   *
+   * `gates.ts` already said the truth of it — superpipeline owns the gate and this
+   * only renders it — and attributing it to the agent was the fiction that broke
+   * it. The speaker comes from the room's own record rather than being rebuilt, so
+   * a room made by one identity is never spoken into by another.
+   */
+  const stationUser = found.speakerMxid;
 
-  // …and WHICH virtual user is `names.ts`'s `stationSpeaker`, not
-  // `bridgeUserId` applied unconditionally, which is what this line was.
-  // A harness-mode station's room was created by the account the harness
-  // holds (`stations.matrix_id`), and `provision.ts` deliberately never
-  // calls `ensureUser` for such a station — so `@agent_<handle>` there is an
-  // mxid nothing registered, in a room it never joined. The homeserver
-  // refuses, and the gate is lost with its claim already taken. Speaking as
-  // the identity that actually owns the room is the only send that can land.
-  const stationUser = stationSpeaker(
-    { identityMode: found.identityMode, harnessMxid: found.harnessMxid, handle },
-    deps.domain
-  );
-  if (!stationUser) {
-    // Harness mode with no reported mxid: there is a room and an occupant,
-    // and still nobody this hub may speak as. Released for the same reason
-    // as above — the node agent reports `matrix_id`, so this can become
-    // sendable later without anything else changing.
-    await releaseClaim(d.gateId);
-    // Attributed to the move when there is one (§6): a station between
-    // authorisation and convergence is waiting, not broken, and a sweep that
-    // reports the two as the same thing is how a move gets mistaken for the
-    // outage it exists to avoid.
-    const midMove = await moveInProgress(found.stationId, deps.domain);
-    log.warn("gate's station answers for itself but has reported no Matrix identity; claim released", {
-      gateId: d.gateId,
-      stationKey: found.stationKey,
-      midMove,
-    });
-    return { status: "no-speaker", midMove };
-  }
   const deepLink = boardLink(deps.boardBaseUrl, d.boardId, d.cardId);
 
   // Prose first, deliberately: if only one lands, leave the room with a
@@ -533,13 +518,14 @@ export async function projectGate(
     // The claim has to go, or this gate can never be projected again — the
     // sweep would see a row and conclude it had been handled.
     await db.delete(matrixGateEvents).where(eq(matrixGateEvents.gateId, d.gateId));
-    const midMove = await moveInProgress(found.stationId, deps.domain);
+    // No `midMove`: a board room has no identity move to be between. The send was
+    // refused and the claim is given back so the sweep re-offers it.
     log.warn("gate event was not accepted; claim released", {
       gateId: d.gateId,
-      stationId: found.stationId,
-      midMove,
+      boardId: d.boardId,
+      roomId: found.roomId,
     });
-    return { status: "no-room", midMove };
+    return { status: "no-room" };
   }
 
   await db

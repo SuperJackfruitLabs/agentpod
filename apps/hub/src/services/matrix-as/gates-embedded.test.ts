@@ -133,6 +133,7 @@ function recordingDeps() {
     customs,
     deps: {
       domain: "id.agentpod.dev",
+        boardRoom: async () => ({ roomId: "!board:id.agentpod.dev", speakerMxid: "@agent_superpipeline:id.agentpod.dev" }),
       sendText: async (_u: string, _r: string, body: string, extra?: Record<string, unknown>) => {
         const id = `$prose-${crypto.randomUUID()}`;
         texts.push({ body, extra, id });

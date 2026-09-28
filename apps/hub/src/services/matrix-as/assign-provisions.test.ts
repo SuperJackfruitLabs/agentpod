@@ -160,6 +160,13 @@ function gateDeps() {
     sent,
     deps: {
       domain: DOMAIN,
+      // A gate closes in the BOARD's room now (charter 2026-09-28). These tests
+      // are about which station an assignment provisions, which no longer decides
+      // where a gate lands.
+      boardRoom: async () => ({
+        roomId: "!board:id.agentpod.dev",
+        speakerMxid: `@agent_superpipeline:${DOMAIN}`,
+      }),
       sendText: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
         return `$prose-${crypto.randomUUID()}`;

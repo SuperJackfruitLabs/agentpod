@@ -198,6 +198,16 @@ function fakeDeps() {
     sent,
     deps: {
       domain: "id.agentpod.dev",
+      /**
+       * A gate now closes in the BOARD's room, not the station's — charter
+       * 2026-09-28. These tests still exercise reassignment, which decides which
+       * station a card belongs to; the room a gate lands in no longer follows from
+       * that, so it is a constant here.
+       */
+      boardRoom: async () => ({
+        roomId: "!board:id.agentpod.dev",
+        speakerMxid: "@agent_superpipeline:id.agentpod.dev",
+      }),
       sendText: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
         // `matrix_gate_events.event_id` is globally unique, and this file

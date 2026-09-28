@@ -26,6 +26,7 @@ import { resolveMatrixId } from "../matrix-identity";
 import { getGrant, grantAllowsPrincipal } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
+import { boardRoomFor } from "./board-room";
 import { principalHandle } from "../principals";
 import {
   clearPendingPermission,
@@ -206,6 +207,29 @@ async function asPlaintext(
 ): Promise<InboundEvent | null> {
   if (event.type !== "m.room.encrypted") return event;
   if (!deps.decrypt || !event.room_id) return null;
+
+  /**
+   * A board room first, because it is the one the hub can always read.
+   *
+   * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
+   * A board room is spoken by an identity whose keys this hub owns outright — that
+   * is the entire reason it exists — so it is decryptable by construction and needs
+   * none of the station reasoning below. It has no station at all, so the station
+   * lookup would answer null and a gate decision would be dropped unread, which is
+   * exactly what happened on 2026-09-28.
+   */
+  const board = await boardRoomFor(event.room_id);
+  if (board) {
+    const plainBoard = await deps.decrypt(event.room_id, board.speakerMxid, event);
+    if (!plainBoard) {
+      if (!retrying) remember(event);
+      return null;
+    }
+    // Same shape as the station path below, and for the same reason: the envelope
+    // is kept because a megolm plaintext need not carry `room_id` or `sender`, and
+    // everything downstream reads them.
+    return { ...event, ...plainBoard } as InboundEvent;
+  }
 
   const room = await roomContext(event.room_id);
   if (!room) return null;
