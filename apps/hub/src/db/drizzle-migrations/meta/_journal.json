@@ -540,6 +540,13 @@
       "when": 1790515949022,
       "tag": "0076_station_git_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1790583720160,
+      "tag": "0077_gate_prose_event",
+      "breakpoints": true
     }
   ]
 }

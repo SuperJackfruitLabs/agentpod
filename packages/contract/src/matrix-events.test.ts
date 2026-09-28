@@ -243,3 +243,41 @@ describe("VoiceTranscript — a voice note's words, drawable under the note", ()
     expect(() => VoiceTranscript.parse({ schema_version: 1, text: "hi", seconds: -1 })).toThrow();
   });
 });
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  GATE_REQUEST_CONTENT_KEY,
+  GateRequestCard,
+  PERMISSION_REQUEST_CONTENT_KEY,
+} from "./matrix-events";
+
+describe("requests embedded in the prose message", () => {
+  it("the keys are namespaced and fixed — supermessage reads them by name", () => {
+    expect(PERMISSION_REQUEST_CONTENT_KEY).toBe("dev.agentpod.permission");
+    expect(GATE_REQUEST_CONTENT_KEY).toBe("dev.superpipeline.gate");
+  });
+
+  const corpus = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../fixtures/ecosystem-identity/matrix_gate_events.json"), "utf8")
+  ) as { events: Array<{ suiteEventType: string; accept: Array<{ content: Record<string, unknown> }>; reject: Array<{ why: string; content: Record<string, unknown> }> }> };
+  const gate = corpus.events.find((e) => e.suiteEventType === "dev.superpipeline.gate.v1")!;
+
+  it("every gate the shared corpus accepts parses as an embedded card, minus its body", () => {
+    for (const { content } of gate.accept) {
+      const { body: _body, ...card } = content;
+      expect(GateRequestCard.safeParse(card).success).toBe(true);
+    }
+  });
+
+  it("refuses the corpus's gates that could not be answered", () => {
+    const unanswerable = gate.reject.filter((r) =>
+      /outside GateDecision|empty options|duplicate option ids|handoff_summary that is not a string/.test(r.why)
+    );
+    expect(unanswerable.length).toBe(4);
+    for (const { content } of unanswerable) {
+      const { body: _body, ...card } = content;
+      expect(GateRequestCard.safeParse(card).success).toBe(false);
+    }
+  });
+});
