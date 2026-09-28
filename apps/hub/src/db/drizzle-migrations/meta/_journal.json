@@ -547,6 +547,13 @@
       "when": 1790583720160,
       "tag": "0077_gate_prose_event",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1790583721160,
+      "tag": "0078_matrix_board_rooms",
+      "breakpoints": true
     }
   ]
 }

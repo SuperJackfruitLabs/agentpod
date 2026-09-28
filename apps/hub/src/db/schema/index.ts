@@ -69,3 +69,4 @@ export * from "./transcription";
 // Which key a station pushes with (forge today, per
 // charter → decisions/2026-09-27-which-side-is-primary-is-a-repositorys-property.md).
 export * from "./git-identities";
+export * from "./board-rooms";
