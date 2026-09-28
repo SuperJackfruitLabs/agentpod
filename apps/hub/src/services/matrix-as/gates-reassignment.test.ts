@@ -43,6 +43,7 @@ import { createPrincipal } from "../principals";
 import { adminMiddleware } from "../../auth/admin-middleware";
 import { agentsAdminRouter } from "../../routes/agents-admin";
 import { projectGate, roomAgentUser } from "./gates";
+import { roomForStation } from "./station-room";
 import { bridgeUserId, bridgeAlias } from "./names";
 import { provisionStation } from "./provision";
 import type { GatePendingDelivery } from "./gates";
@@ -198,6 +199,16 @@ function fakeDeps() {
     sent,
     deps: {
       domain: "id.agentpod.dev",
+      /**
+       * A gate now closes in the BOARD's room, not the station's — charter
+       * 2026-09-28. These tests still exercise reassignment, which decides which
+       * station a card belongs to; the room a gate lands in no longer follows from
+       * that, so it is a constant here.
+       */
+      boardRoom: async () => ({
+        roomId: "!board:id.agentpod.dev",
+        speakerMxid: "@agent_superpipeline:id.agentpod.dev",
+      }),
       sendText: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
         // `matrix_gate_events.event_id` is globally unique, and this file
@@ -226,29 +237,29 @@ describe("reassignment: the room follows the agent, not the station", () => {
     await unassign(stationAId);
     await assign(stationBId, principalId);
 
-    // New work dispatched to the agent's new station.
-    const cardId = `crd_${RUN}_1`;
-    await db.insert(bridgeDispatches).values({
-      externalSource: "superpipeline",
-      externalRunId: `run_${RUN}_1`,
-      tenantId: BOOTSTRAP_TENANT_ID,
-      boardId: `brd_${RUN}`,
-      externalCardId: cardId,
-      agentKey: "test",
-      stationId: stationBId,
-      leaseEpoch: 1,
-      outcome: "produced",
-      startedAt: new Date(),
-      updatedAt: new Date(),
-    });
+    /**
+     * The agent at its new station still answers in its ORIGINAL room.
+     *
+     * This used to be probed by projecting a gate and reading which room it landed
+     * in. A gate now closes in the BOARD's room (charter 2026-09-28), so it says
+     * nothing about where an agent's own conversation lives — the probe moved, the
+     * invariant did not. `roomForStation` asks it directly: which room does this
+     * station's occupant have?
+     */
+    const atB = await roomForStation(stationBId);
+    expect(atB.principalId).toBe(principalId);
+    expect(
+      atB.room?.roomId,
+      "the agent kept its first room rather than inheriting station B's"
+    ).toBe(`!room-a-${RUN}:id.agentpod.dev`);
 
-    const { deps, sent } = fakeDeps();
-    const outcome = await projectGate(BOOTSTRAP_TENANT_ID, delivery(`gate_${RUN}_1`, cardId), deps);
-
-    expect(outcome.status).toBe("sent");
-    // Same room id as before reassignment — not station B's own room.
-    expect((outcome as { roomId: string }).roomId).toBe(`!room-a-${RUN}:id.agentpod.dev`);
-    expect(sent.every((s) => s.roomId === `!room-a-${RUN}:id.agentpod.dev`)).toBe(true);
+    // And the binding itself is unchanged, which is what "keeps its id and its
+    // history" means: the same row, not a new room that merely looks like it.
+    const roomAfter = (await roomRow(`!room-a-${RUN}:id.agentpod.dev`))!;
+    expect(roomAfter.principalId).toBe(roomBefore.principalId);
+    expect(roomAfter.stationId, "still station A's row — the room did not move").toBe(
+      roomBefore.stationId,
+    );
   });
 
   test("station_id is not dropped — the sweep deployed on infra joins on it", async () => {
@@ -452,19 +463,27 @@ describe("occupancy is exclusive — a principal runs in one station at a time",
       updatedAt: new Date(),
     });
 
-    const { deps, sent } = fakeDeps();
-    const outcome = await projectGate(BOOTSTRAP_TENANT_ID, delivery(`gate_${RUN}_q`, cardId), deps);
+    /**
+     * X's occupant is Q, and Q answers in Q's OWN room — never the one P left behind.
+     *
+     * The probe used to be a gate: project one for a card dispatched to X and read
+     * which room and which speaker it used. A gate now closes in the BOARD's room
+     * (charter 2026-09-28), so it can no longer distinguish P's room from Q's. The
+     * exclusivity being tested is unchanged; what proves it is `roomForStation` and
+     * `roomAgentUser`, which answer "whose room is this station's" and "who speaks
+     * in that room" directly.
+     */
+    const atX = await roomForStation(stationXId);
+    expect(atX.principalId, "X is occupied by Q now, not P").toBe(qId);
+    expect(atX.room?.roomId, "Q's own room — never roomX1, which is P's").toBe(roomX2);
+    expect(atX.room?.roomId).not.toBe(roomX1);
 
-    expect(outcome.status).toBe("sent");
-    // Q's OWN room — never roomX1, which is P's.
-    expect((outcome as { roomId: string }).roomId).toBe(roomX2);
-    expect((outcome as { roomId: string }).roomId).not.toBe(roomX1);
-    expect(sent.every((s) => s.roomId === roomX2)).toBe(true);
-    // Posted as Q — never as P.
+    // Answered as Q — never as P. The room's OWN binding decides this, which is why
+    // P's old room still answers as P below.
     const qHandleMxid = bridgeUserId(`${HANDLE_PREFIX}-q`, "id.agentpod.dev");
     const pHandleMxid = bridgeUserId(`${HANDLE_PREFIX}-p`, "id.agentpod.dev");
-    expect(sent.every((s) => s.userId === qHandleMxid)).toBe(true);
-    expect(sent.some((s) => s.userId === pHandleMxid)).toBe(false);
+    expect(await roomAgentUser(roomX2, "id.agentpod.dev")).toBe(qHandleMxid);
+    expect(await roomAgentUser(roomX2, "id.agentpod.dev")).not.toBe(pHandleMxid);
 
     // `station_id` is still populated on both rooms at X — the brief's
     // explicit negative, since the deployed sweep joins on it.

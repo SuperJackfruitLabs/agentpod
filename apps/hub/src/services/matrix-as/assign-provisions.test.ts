@@ -160,6 +160,13 @@ function gateDeps() {
     sent,
     deps: {
       domain: DOMAIN,
+      // A gate closes in the BOARD's room now (charter 2026-09-28). These tests
+      // are about which station an assignment provisions, which no longer decides
+      // where a gate lands.
+      boardRoom: async () => ({
+        roomId: "!board:id.agentpod.dev",
+        speakerMxid: `@agent_superpipeline:${DOMAIN}`,
+      }),
       sendText: async (userId: string, roomId: string) => {
         sent.push({ userId, roomId });
         return `$prose-${crypto.randomUUID()}`;
@@ -272,18 +279,20 @@ describe("assigning an agent provisions its station", () => {
       "the response says plainly whether the agent got a room"
     ).toEqual({ status: "provisioned" });
 
-    // THE GATE, asserted first and deliberately: it is the end of the chain
-    // the slice exists to make work, and it is the assertion that fails when
-    // assignment stops provisioning. Everything after it is corroboration.
-    const cardId = `crd_${RUN}_exit`;
-    await dispatched(stationId, cardId);
-    const { deps, sent } = gateDeps();
-    const outcome = await projectGate(BOOTSTRAP_TENANT_ID, delivery(`gate_${RUN}_exit`, cardId), deps);
-
+    // THE ROOM, asserted first and deliberately: it is the end of the chain the
+    // slice exists to make work, and the assertion that fails when assignment
+    // stops provisioning. Everything after it is corroboration.
+    //
+    // This used to probe with a gate, because a gate landing proved a room existed.
+    // A gate now closes in the BOARD's room (charter 2026-09-28), so it no longer
+    // says anything about whether assignment provisioned this station — the probe
+    // moved, not the invariant.
+    const provisioned = await roomForStation(stationId);
     expect(
-      outcome.status,
-      "the gate is sent — 'no-room' here is the Critical, and gate-sweep does not count it"
-    ).toBe("sent");
+      provisioned.room,
+      "assignment provisioned the station's room — null here is the Critical"
+    ).not.toBeNull();
+    expect(provisioned.principalId).toBe(principalId);
 
     // The room it landed in was really created by the fake homeserver during
     // the assign call, rather than found lying around, and belongs to THIS
@@ -304,9 +313,9 @@ describe("assigning an agent provisions its station", () => {
       stationId
     );
 
-    expect((outcome as { roomId: string }).roomId).toBe(occupancy.room!.roomId);
-    expect(sent.every((s) => s.roomId === occupancy.room!.roomId)).toBe(true);
-    expect(sent.every((s) => s.userId === bridgeUserId(HANDLE, DOMAIN))).toBe(true);
+    // The room the agent got is the one assignment made, and it is the same one
+    // the earlier probe saw — not a second room found lying around.
+    expect(occupancy.room!.roomId).toBe(provisioned.room!.roomId);
   });
 
   test("a homeserver that refuses leaves the assignment standing, and says so rather than reporting success", async () => {
@@ -359,90 +368,21 @@ describe("assigning an agent provisions its station", () => {
   });
 });
 
-describe("a harness-mode station is spoken for as the account it actually owns", () => {
-  test("its gate is sent as the harness's own mxid, never as an @agent_ the bridge never registered", async () => {
-    const hs = fakeHomeserver();
-    onProvisionStation((id) => provisionStation(id, hs.deps));
 
-    // A station that answers for itself: the node agent reports the mxid it
-    // holds, and `station-registry` records it.
-    const harnessMxid = `@molt-${RUN}:${DOMAIN}`;
-    const stationId = await adopt(`opencode:${RUN}-harness`, { matrixId: harnessMxid });
-    await db
-      .update(stations)
-      .set({ matrixIdentityMode: "harness" })
-      .where(eq(stations.id, stationId));
-
-    const principalId = await createAgent(`${HANDLE}-harness`);
-    const assigned = await assign(stationId, principalId);
-    expect(assigned.status).toBe(200);
-    expect(assigned.body.room).toEqual({ status: "provisioned" });
-
-    // `provision.ts` creates the room AS the harness account and never
-    // registers a bridge user for it — that is the mode's whole point.
-    expect(hs.ensuredRooms).toHaveLength(1);
-    expect(hs.ensuredRooms[0]!.creator).toBe(harnessMxid);
-    expect(hs.ensuredUsers, "no bridge identity is minted over an account somebody else holds").toEqual(
-      []
-    );
-
-    const room = (await roomForStation(stationId)).room!;
-    const cardId = `crd_${RUN}_harness`;
-    await dispatched(stationId, cardId);
-    const { deps, sent } = gateDeps();
-    const outcome = await projectGate(
-      BOOTSTRAP_TENANT_ID,
-      delivery(`gate_${RUN}_harness`, cardId),
-      deps
-    );
-
-    expect(outcome.status).toBe("sent");
-    expect(sent.length).toBeGreaterThan(0);
-    expect(
-      sent.every((s) => s.userId === harnessMxid),
-      "sent as the account that created the room and is joined to it"
-    ).toBe(true);
-    expect(
-      sent.some((s) => s.userId === bridgeUserId(`${HANDLE}-harness`, DOMAIN)),
-      "never as the @agent_ nothing registered — the homeserver would refuse it"
-    ).toBe(false);
-    expect(room.roomId).toBe((outcome as { roomId: string }).roomId);
-  });
-
-  test("a harness-mode station that has reported no mxid gets its claim back rather than an undeliverable send", async () => {
-    onProvisionStation(null);
-    const stationId = await adopt(`opencode:${RUN}-mute`);
-    await db
-      .update(stations)
-      .set({ matrixIdentityMode: "harness" })
-      .where(eq(stations.id, stationId));
-
-    // A room from before the station flipped modes, bound to its occupant —
-    // the only way to reach "there is a room and an occupant, and still
-    // nobody to speak as".
-    const principalId = await createAgent(`${HANDLE}-mute`);
-    await assign(stationId, principalId);
-    await db.insert(matrixRooms).values({
-      roomId: `!mute-${RUN}:${DOMAIN}`,
-      tenantId: BOOTSTRAP_TENANT_ID,
-      stationId,
-      alias: `#mute-${RUN}:${DOMAIN}`,
-      principalId,
-    });
-
-    const cardId = `crd_${RUN}_mute`;
-    await dispatched(stationId, cardId);
-    const { deps, sent } = gateDeps();
-    const gateId = `gate_${RUN}_mute`;
-    const outcome = await projectGate(BOOTSTRAP_TENANT_ID, delivery(gateId, cardId), deps);
-
-    expect(outcome.status).toBe("no-speaker");
-    expect(sent, "nothing was posted as an identity that could not deliver it").toEqual([]);
-    const claims =
-      await rawSql`SELECT gate_id FROM matrix_gate_events WHERE gate_id = ${gateId}`;
-    expect(
-      claims.length,
-      "the claim is released, so the sweep can retry once the harness reports its mxid"
-    ).toBe(0);
-  });
-});
+/**
+ * The harness-mode speaker block lived here, and is gone by decision.
+ *
+ * `charter → decisions/2026-09-28-a-gate-belongs-to-its-board-not-to-an-agents-room.md`.
+ * Its two tests pinned `stationSpeaker` and the `no-speaker` outcome: which mxid a
+ * gate was sent as when the station answered for itself, and that a station with no
+ * reported mxid got its claim back rather than an undeliverable send.
+ *
+ * A gate is no longer sent as a station at all. It closes in the board's own room,
+ * spoken by an identity whose keys the hub owns — which is what makes an answer
+ * readable, and which removes the states those tests described. Keeping them
+ * passing would have meant keeping the code that could deliver a gate nobody could
+ * answer.
+ *
+ * `stationSpeaker` itself is untouched and still used where a station really does
+ * speak (`outbound.ts`); it simply no longer decides where a gate lands.
+ */
