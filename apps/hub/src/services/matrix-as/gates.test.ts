@@ -138,6 +138,7 @@ describe("the prose a stock client sees", () => {
 
 import {
   GATE_DECISION_SUITE_TYPE,
+  GATE_OUTCOME_TYPE,
   handleGateDecision,
   parseGateDecision,
   type GateDecisionDeps,
@@ -450,5 +451,104 @@ describe("who may answer a gate", () => {
     const { deps } = decisionDeps({ principalForMatrixId: async () => null });
     const out = await handleGateDecision(decision, "!room:id.agentpod.dev", deps);
     expect(out).toEqual({ status: "refused", reason: "unlinked-sender" });
+  });
+});
+
+/**
+ * agentpod#614: a gate that was answered still read as pending when its card was
+ * redrawn, because nothing in the room said the board had accepted it.
+ *
+ * This service spoke on a DUPLICATE tap ("That was already decided") and said
+ * nothing at all on a successful one — so the room heard about a redundant answer
+ * and never about an accepted one.
+ */
+describe("saying in the room that the board accepted an answer", () => {
+  function receiptDeps(over: Partial<GateDecisionDeps> = {}) {
+    const replies: string[] = [];
+    const outcomes: Record<string, unknown>[] = [];
+    const base = decisionDeps().deps;
+    const deps: GateDecisionDeps = {
+      ...base,
+      reply: async (_r, b) => {
+        replies.push(b);
+        return null;
+      },
+      sendOutcome: async (_r, content) => {
+        outcomes.push(content);
+        return null;
+      },
+      displayNameFor: async () => "rakesh",
+      markOutcomePosted: async () => true,
+      ...over,
+    };
+    return { deps, replies, outcomes };
+  }
+
+  const decision = {
+    sender: "@rakesh:id.agentpod.dev",
+    content: {
+      suite_event_type: GATE_DECISION_SUITE_TYPE,
+      gate_id: "gate_4e8b",
+      option_id: "approve",
+      "m.relates_to": { rel_type: "m.reference", event_id: GATE_EVENT_ID },
+    },
+  };
+
+  test("a resolved gate leaves a readable line and a structured receipt", async () => {
+    const { deps, replies, outcomes } = receiptDeps();
+    const out = await handleGateDecision(decision, "!room", deps);
+
+    expect(out).toEqual({ status: "resolved" });
+    // Prose, because a stock client renders an unknown event TYPE as nothing at all.
+    expect(replies[0]).toContain("Approved");
+    expect(replies[0]).toContain("rakesh");
+    // …and the marker beside it, pointing at the gate's own event so a client knows
+    // which card to close.
+    expect(outcomes[0]).toMatchObject({
+      suite_event_type: GATE_OUTCOME_TYPE,
+      gate_id: "gate_4e8b",
+      decision: "approve",
+      decided_by: "rakesh",
+      "m.relates_to": { rel_type: "m.reference", event_id: GATE_EVENT_ID },
+    });
+  });
+
+  test("it names WHO answered, which in a shared room is a different fact from 'answered'", async () => {
+    const { deps, replies } = receiptDeps({ displayNameFor: async () => "someone-else" });
+    await handleGateDecision(decision, "!room", deps);
+    expect(replies[0]).toContain("someone-else");
+  });
+
+  test("a second delivery of the same decision leaves one receipt, not two", async () => {
+    // A double tap or a re-sent transaction must not read as though the gate were
+    // answered twice.
+    let claims = 0;
+    const { deps, replies } = receiptDeps({
+      markOutcomePosted: async () => ++claims === 1,
+    });
+    await handleGateDecision(decision, "!room", deps);
+    await handleGateDecision(decision, "!room", deps);
+    expect(replies).toHaveLength(1);
+  });
+
+  test("a receipt that cannot be posted does not unresolve the gate", async () => {
+    // superpipeline already has the answer by this point. Reporting failure here
+    // would tell the reader their approval did not land when it did.
+    const { deps } = receiptDeps({
+      reply: async () => {
+        throw new Error("homeserver said no");
+      },
+    });
+    expect(await handleGateDecision(decision, "!room", deps)).toEqual({ status: "resolved" });
+  });
+
+  test("a rejection reads as a rejection", async () => {
+    const { deps, replies } = receiptDeps();
+    await handleGateDecision(
+      { ...decision, content: { ...decision.content, option_id: "reject" } },
+      "!room",
+      deps,
+    );
+    expect(replies[0]).toContain("Rejected");
   });
 });

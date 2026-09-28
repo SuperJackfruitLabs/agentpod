@@ -12,10 +12,10 @@
  * nothing.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
-import { matrixRooms } from "../../db/schema/matrix";
+import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
 import { principalIdentities } from "../../db/schema/identities";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
@@ -27,10 +27,12 @@ import {
   projectionForGate,
   resolveGateAtSuperpipeline,
   roomAgentUser,
+  GATE_OUTCOME_TYPE,
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
-import { principalById, principalForUser } from "../principals";
+import { boardRoomFor } from "./board-room";
+import { principalById, principalForUser, principalHandle } from "../principals";
 import { attachRoomToSession, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
@@ -308,6 +310,19 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     : client;
 
 
+  /**
+   * Who this hub may speak as in a room.
+   *
+   * A board room first: it is spoken by an identity the hub owns outright and has no
+   * station, so `roomAgentUser` answers null for it. Everything that talks back into
+   * a room — a receipt, "that was already decided" — went through that lookup, so in
+   * a board room it said nothing at all.
+   */
+  const roomSpeakerFor = async (roomId: string, domain: string): Promise<string | null> => {
+    const board = await boardRoomFor(roomId);
+    return board?.speakerMxid ?? (await roomAgentUser(roomId, domain));
+  };
+
   const provisionDeps = { domain: cfg.domain, client, readWorkspaceFile };
 
   /**
@@ -352,9 +367,37 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
                 mint: (principalId) =>
                   mintPrincipalAssertion({ principalId, audiences: [superpipelineBaseUrl] }),
               }),
+            /**
+             * The structured half of a receipt, spoken by whoever owns the room —
+             * the board's speaker in a board room, the agent in a station room.
+             */
+            sendOutcome: async (roomId: string, content: Record<string, unknown>) => {
+              const speaker = await roomSpeakerFor(roomId, cfg.domain);
+              return speaker
+                ? speakingClient.sendCustomEvent(speaker, roomId, GATE_OUTCOME_TYPE, content)
+                : null;
+            },
+            displayNameFor: (principalId: string) => principalHandle(principalId),
+            /**
+             * Claim the receipt before it is posted. `where outcome_posted_at is null`
+             * makes the claim the write, so two decisions racing leave one line.
+             */
+            markOutcomePosted: async (gateId: string) => {
+              const claimed = await db
+                .update(matrixGateEvents)
+                .set({ outcomePostedAt: new Date() })
+                .where(
+                  and(
+                    eq(matrixGateEvents.gateId, gateId),
+                    isNull(matrixGateEvents.outcomePostedAt),
+                  ),
+                )
+                .returning({ gateId: matrixGateEvents.gateId });
+              return claimed.length > 0;
+            },
             reply: async (roomId: string, body: string) => {
-              const room = await roomAgentUser(roomId, cfg.domain);
-              return room ? speakingClient.sendText(room, roomId, body) : null;
+              const speaker = await roomSpeakerFor(roomId, cfg.domain);
+              return speaker ? speakingClient.sendText(speaker, roomId, body) : null;
             },
           }),
       }
