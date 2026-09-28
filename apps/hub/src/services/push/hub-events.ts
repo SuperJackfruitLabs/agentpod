@@ -22,9 +22,22 @@
  * Best effort, and says so: the homeserver may fan the push out before the
  * send's response reaches this process, in which case that one push goes
  * untagged (or, for a companion, is sent). Nothing breaks either way.
+ *
+ * `quiet` is an event the hub posts that must never reach a phone as a push:
+ * its own reactions (👀/✅/❌) and a turn's activity record
+ * (`dev.agentpod.turn.v1`). The app's extension decrypts those and blanks
+ * them, but without Apple's filtering entitlement iOS still shows the empty
+ * push — so the gateway must not send one. Noted by `matrix-as/push-quiet.ts`,
+ * which wraps the client every agent speaks through.
+ *
+ * For `quiet` the race above is not left to chance. A quiet send is announced
+ * per room BEFORE it is made (`beginQuietSend`), and a push for an unknown
+ * event in a room with a quiet send in flight waits — bounded — for that send
+ * to return its id (`quietSendsSettled`). A room with nothing in flight waits
+ * for nothing, so an ordinary message is never held.
  */
 
-export type HubEventKind = "permission" | "gate" | "companion";
+export type HubEventKind = "permission" | "gate" | "companion" | "quiet";
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ENTRIES = 5_000;
@@ -54,8 +67,73 @@ export function hubEventKind(eventId: string | undefined, now = Date.now()): Hub
   return entry.kind;
 }
 
+// ─── Quiet sends in flight ───────────────────────────────────────────────────
+
+/** roomId → how many quiet sends into it have started and not yet returned. */
+const inFlight = new Map<string, number>();
+/** roomId → callbacks to run whenever a quiet send into it returns. */
+const listeners = new Map<string, Set<() => void>>();
+
+/**
+ * Announce a quiet send into `roomId` before making it. Returns the call that
+ * ends it — run it once the send has returned AND its id has been noted, or
+ * has failed. Calling it more than once is harmless.
+ */
+export function beginQuietSend(roomId: string): () => void {
+  inFlight.set(roomId, (inFlight.get(roomId) ?? 0) + 1);
+  let ended = false;
+  return () => {
+    if (ended) return;
+    ended = true;
+    const left = (inFlight.get(roomId) ?? 1) - 1;
+    if (left > 0) inFlight.set(roomId, left);
+    else inFlight.delete(roomId);
+    for (const wake of [...(listeners.get(roomId) ?? [])]) wake();
+  };
+}
+
+export function quietSendsInFlight(roomId: string | undefined): number {
+  return roomId ? (inFlight.get(roomId) ?? 0) : 0;
+}
+
+/**
+ * Wait until `eventId` is known, or no quiet send into `roomId` is in flight,
+ * or `timeoutMs` passes — whichever is first. Resolves at once when the room
+ * has nothing in flight.
+ */
+export function quietSendsSettled(
+  roomId: string | undefined,
+  eventId: string | undefined,
+  timeoutMs: number
+): Promise<void> {
+  if (!roomId || quietSendsInFlight(roomId) === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let set = listeners.get(roomId);
+    if (!set) listeners.set(roomId, (set = new Set()));
+    const done = () => {
+      clearTimeout(timer);
+      const s = listeners.get(roomId);
+      s?.delete(check);
+      if (s && s.size === 0) listeners.delete(roomId);
+      resolve();
+    };
+    const check = () => {
+      if (hubEventKind(eventId) !== undefined || quietSendsInFlight(roomId) === 0) done();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    set.add(check);
+  });
+}
+
 export function _resetHubEventsForTest(): void {
   kinds.clear();
+  inFlight.clear();
+  listeners.clear();
+}
+
+/** How many pushes are waiting on `roomId` — a barrier for tests, never a sleep. */
+export function _quietWaitersForTest(roomId: string): number {
+  return listeners.get(roomId)?.size ?? 0;
 }
 
 export function _hubEventCountForTest(): number {

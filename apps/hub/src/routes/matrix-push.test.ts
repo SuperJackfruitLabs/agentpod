@@ -15,8 +15,19 @@ import { ApnsPushPayload } from "@agentpod/contract";
 import { createMatrixPushRoutes, NOTIFY_BODY_MAX } from "./matrix-push";
 import type { ApnsOutcome, ApnsSendInput } from "../services/push/apns";
 import { parseAppIds, pushConfigFromEnv } from "../services/push/config";
-import { createPushGateway, createPushkeyLimiter, pushkeyPrefix } from "../services/push/gateway";
-import { _resetHubEventsForTest, noteHubEvent } from "../services/push/hub-events";
+import {
+  createPushGateway,
+  createPushkeyLimiter,
+  pushkeyPrefix,
+  QUIET_WAIT_MS,
+  type PushDecision,
+} from "../services/push/gateway";
+import {
+  _quietWaitersForTest,
+  _resetHubEventsForTest,
+  beginQuietSend,
+  noteHubEvent,
+} from "../services/push/hub-events";
 
 const PROD = "a".repeat(64);
 const SANDBOX = "b".repeat(64);
@@ -24,9 +35,10 @@ const EVENT = "$Eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const ROOM = "!room:id.agentpod.dev";
 
 let sends: ApnsSendInput[] = [];
+let decisions: PushDecision[] = [];
 let answer: (i: ApnsSendInput) => ApnsOutcome = () => ({ status: "sent" });
 
-function app(opts: { configured?: boolean; limit?: number } = {}) {
+function app(opts: { configured?: boolean; limit?: number; quietWaitMs?: number } = {}) {
   const gateway =
     opts.configured === false
       ? null
@@ -43,6 +55,8 @@ function app(opts: { configured?: boolean; limit?: number } = {}) {
           ]),
           limiter: createPushkeyLimiter(opts.limit ?? 60, 60_000),
           now: () => 1_790_000_000_000,
+          quietWaitMs: opts.quietWaitMs,
+          onDecision: (d) => decisions.push(d),
         });
   return new Hono().route("/_matrix/push/v1", createMatrixPushRoutes(gateway));
 }
@@ -60,6 +74,12 @@ function notification(over: Record<string, unknown> = {}) {
   };
 }
 
+/** Until the push is parked waiting on ROOM — a barrier, not a sleep. */
+async function untilWaiting() {
+  for (let i = 0; i < 2_000 && _quietWaitersForTest(ROOM) === 0; i++) await Bun.sleep(1);
+  expect(_quietWaitersForTest(ROOM)).toBe(1);
+}
+
 async function post(a: Hono, body: unknown) {
   return a.request("/_matrix/push/v1/notify", {
     method: "POST",
@@ -70,6 +90,7 @@ async function post(a: Hono, body: unknown) {
 
 beforeEach(() => {
   sends = [];
+  decisions = [];
   answer = () => ({ status: "sent" });
   _resetHubEventsForTest();
 });
@@ -246,6 +267,84 @@ describe("the hub's own questions", () => {
   test("the legacy event beside a question does not buzz a second time", async () => {
     noteHubEvent(EVENT, "companion");
     expect(await (await post(app(), notification())).json()).toEqual({ rejected: [] });
+    expect(sends).toHaveLength(0);
+  });
+});
+
+describe("the hub's quiet events — its reactions and turn records", () => {
+  test("never reach Apple, and the device is answered as delivered", async () => {
+    noteHubEvent(EVENT, "quiet");
+    const res = await post(
+      app(),
+      notification({
+        devices: [
+          { app_id: "dev.supermessage.ios", pushkey: PROD },
+          { app_id: "dev.supermessage.ios.dev", pushkey: SANDBOX },
+        ],
+      })
+    );
+    // Not rejected: that would make the homeserver delete the pusher.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ rejected: [] });
+    expect(sends).toHaveLength(0);
+    expect(decisions).toEqual([{ eventId: EVENT, kind: "quiet", timing: "known-before", waitedMs: 0 }]);
+  });
+
+  test("a push that beats the send's response waits for its id, then is dropped", async () => {
+    // The homeserver pushes before the hub's PUT has returned the event id.
+    const end = beginQuietSend(ROOM);
+    const pushed = post(app(), notification());
+    await untilWaiting();
+    noteHubEvent(EVENT, "quiet");
+    end();
+    expect(await (await pushed).json()).toEqual({ rejected: [] });
+    expect(sends).toHaveLength(0);
+    expect(decisions[0]!.timing).toBe("known-after-wait");
+    expect(decisions[0]!.kind).toBe("quiet");
+  });
+
+  test("a message beside a quiet send in its room goes out once that send returns", async () => {
+    const end = beginQuietSend(ROOM);
+    const pushed = post(app(), notification());
+    await untilWaiting();
+    noteHubEvent("$the-reaction", "quiet");
+    end();
+    await pushed;
+    expect(sends).toHaveLength(1);
+    expect(decisions[0]!.timing).toBe("unknown");
+    expect(decisions[0]!.waitedMs).toBeLessThan(QUIET_WAIT_MS);
+  });
+
+  test("a message is held no longer than the wait, even if a quiet send never returns", async () => {
+    beginQuietSend(ROOM); // hangs
+    const t = performance.now();
+    await post(app({ quietWaitMs: 80 }), notification());
+    const took = performance.now() - t;
+    expect(sends).toHaveLength(1);
+    expect(took).toBeGreaterThanOrEqual(75);
+    expect(took).toBeLessThan(1_000);
+    expect(decisions[0]!.timing).toBe("unknown");
+  });
+
+  test("a message in a room with nothing in flight is not held at all", async () => {
+    beginQuietSend("!another-room:id.agentpod.dev"); // hangs, elsewhere
+    const t = performance.now();
+    await post(app({ quietWaitMs: 5_000 }), notification());
+    expect(performance.now() - t).toBeLessThan(1_000);
+    expect(sends).toHaveLength(1);
+    expect(decisions[0]).toEqual({ eventId: EVENT, kind: undefined, timing: "unknown", waitedMs: 0 });
+  });
+
+  test("the wait is bounded by default", () => {
+    expect(QUIET_WAIT_MS).toBeGreaterThan(0);
+    expect(QUIET_WAIT_MS).toBeLessThanOrEqual(800);
+  });
+});
+
+describe("a counts-only notice", () => {
+  test("is not a push — tuwunel's badge refresh names no event", async () => {
+    const res = await post(app(), notification({ event_id: undefined, room_id: undefined }));
+    expect(await res.json()).toEqual({ rejected: [] });
     expect(sends).toHaveLength(0);
   });
 });

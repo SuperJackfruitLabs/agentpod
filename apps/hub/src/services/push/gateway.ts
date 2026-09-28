@@ -21,7 +21,7 @@ import {
 import { createLogger } from "../../utils/logger";
 import type { ApnsClient } from "./apns";
 import type { ApnsEnvironment } from "./config";
-import { hubEventKind } from "./hub-events";
+import { hubEventKind, quietSendsInFlight, quietSendsSettled, type HubEventKind } from "./hub-events";
 
 const log = createLogger("push-gateway");
 
@@ -77,7 +77,10 @@ export function pushkeyPrefix(pushkey: string): string {
 
 /** What the hub knows an event to be, as a push category. */
 export function categoryFor(eventId: string | undefined): PushCategory | undefined {
-  const kind = hubEventKind(eventId);
+  return categoryOf(hubEventKind(eventId));
+}
+
+function categoryOf(kind: HubEventKind | undefined): PushCategory | undefined {
   if (kind === "permission") return "PERMISSION";
   if (kind === "gate") return "GATE";
   return undefined;
@@ -141,11 +144,53 @@ export const APNS_EXPIRATION_S = 24 * 60 * 60;
 /** `apns-collapse-id` is at most 64 bytes; a longer event id is sent without one. */
 const COLLAPSE_ID_MAX = 64;
 
+/**
+ * The longest a push waits for a quiet send in its room to return its event id.
+ *
+ * Only a push whose event id is unknown AND whose room has a quiet send in
+ * flight waits at all; everything else is decided at once. So this bounds the
+ * delay an ordinary message can pick up by landing beside a hub reaction, and
+ * it is what stands between a reaction and an empty buzz when the homeserver
+ * pushes before the send's response arrives.
+ *
+ * Measured against tuwunel 1.9.3 (2026-09-28, 50 turns, pusher over HTTP to a
+ * gateway on the same machine): 16 of 50 turn records were pushed BEFORE the
+ * send's response reached the hub — without a wait each would have buzzed —
+ * and every one of them became known within 1 ms of waiting. In production
+ * the hub reaches tuwunel on 127.0.0.1 while the push comes back through
+ * nginx and TLS, which only favours the send. 500 ms is two orders of
+ * magnitude of headroom for a hub whose event loop is busy, and still short
+ * enough that an ordinary message held beside a hung quiet send is late by
+ * half a second at worst.
+ */
+export const QUIET_WAIT_MS = 500;
+
+/**
+ * How a push's event came to be known, for the debug log that measures the
+ * race between a hub send's response and the homeserver's push:
+ * - `known-before`: the id was noted before the push arrived;
+ * - `known-after-wait`: a quiet send was in flight and its id arrived in time;
+ * - `unknown`: never noted — an ordinary message (sent after `waitedMs`, 0
+ *   unless a quiet send was in flight in its room).
+ */
+export type PushDecisionTiming = "known-before" | "known-after-wait" | "unknown";
+
 export interface PushGatewayDeps {
   apns: ApnsClient;
   appIds: ReadonlyMap<string, ApnsEnvironment>;
   limiter?: ReturnType<typeof createPushkeyLimiter>;
   now?: () => number;
+  /** Overrides `QUIET_WAIT_MS`. */
+  quietWaitMs?: number;
+  /** Told every decision, as the debug log is. For tests and measurement. */
+  onDecision?: (d: PushDecision) => void;
+}
+
+export interface PushDecision {
+  eventId: string;
+  kind: HubEventKind | undefined;
+  timing: PushDecisionTiming;
+  waitedMs: number;
 }
 
 export type PushGateway = ReturnType<typeof createPushGateway>;
@@ -153,17 +198,50 @@ export type PushGateway = ReturnType<typeof createPushGateway>;
 export function createPushGateway(deps: PushGatewayDeps) {
   const limiter = deps.limiter ?? createPushkeyLimiter(60, 60_000);
   const now = deps.now ?? Date.now;
+  const quietWaitMs = deps.quietWaitMs ?? QUIET_WAIT_MS;
+
+  /** What the hub knows the event to be — waiting, bounded, if it may be about to. */
+  async function classify(n: Notification): Promise<Omit<PushDecision, "eventId">> {
+    const known = hubEventKind(n.event_id);
+    if (known) return { kind: known, timing: "known-before", waitedMs: 0 };
+    if (quietSendsInFlight(n.room_id) === 0) return { kind: undefined, timing: "unknown", waitedMs: 0 };
+    const started = Date.now();
+    await quietSendsSettled(n.room_id, n.event_id, quietWaitMs);
+    const waitedMs = Date.now() - started;
+    const kind = hubEventKind(n.event_id);
+    return { kind, timing: kind ? "known-after-wait" : "unknown", waitedMs };
+  }
 
   /** Push one notification to each of its devices. Returns the rejected pushkeys. */
   async function notify(n: Notification): Promise<{ rejected: string[] }> {
-    // The legacy custom event beside a question's prose: the prose already
-    // pushed, and one question should buzz once.
-    if (hubEventKind(n.event_id) === "companion") {
-      log.debug("push for a legacy companion event dropped", { eventId: n.event_id });
+    // A counts-only notice — tuwunel's badge refresh after a read, with no
+    // event at all. There is nothing for the extension to fetch, and an alert
+    // for it is a buzz about nothing.
+    if (!n.event_id) {
+      log.debug("push without an event (a counts-only badge refresh) dropped", { roomId: n.room_id });
       return { rejected: [] };
     }
 
-    const category = categoryFor(n.event_id);
+    const { kind, timing, waitedMs } = await classify(n);
+    log.debug("push decision", { eventId: n.event_id, roomId: n.room_id, kind: kind ?? "message", timing, waitedMs });
+    deps.onDecision?.({ eventId: n.event_id, kind, timing, waitedMs });
+
+    // Answered as delivered, never rejected: a rejection would make the
+    // homeserver delete the device's pusher.
+    //
+    // The legacy custom event beside a question's prose: the prose already
+    // pushed, and one question should buzz once.
+    if (kind === "companion") {
+      log.debug("push for a legacy companion event dropped", { eventId: n.event_id });
+      return { rejected: [] };
+    }
+    // The hub's own reaction or turn record: nothing a person should be told.
+    if (kind === "quiet") {
+      log.debug("push for a quiet hub event dropped", { eventId: n.event_id });
+      return { rejected: [] };
+    }
+
+    const category = categoryOf(kind);
     const payload = buildApnsPayload(n, category);
     const collapseId =
       n.event_id && Buffer.byteLength(n.event_id) <= COLLAPSE_ID_MAX ? n.event_id : undefined;
