@@ -45,6 +45,17 @@ export function boardSpeakerMxid(domain: string): string {
 
 export interface BoardRoomDeps {
   domain: string;
+  /**
+   * What to call this board's room.
+   *
+   * Every room was named "superpipeline", so a second board produced a second room
+   * with the same name and nothing to tell them apart — the speaker is the same
+   * identity in all of them, so the name is the only thing that distinguishes one.
+   *
+   * The board's own name when it can be read, and the board id when it cannot. Never
+   * a constant: a room a person cannot identify is worse than an ugly one.
+   */
+  nameFor(boardId: string): Promise<string>;
   /** Create the speaker if it does not exist yet, and name it. */
   ensureUser(localpart: string, displayName: string): Promise<unknown>;
   /** Create or find the room, returning its id. */
@@ -114,7 +125,7 @@ export async function ensureBoardRoom(
   const humans = await deps.humansFor(boardId);
   const roomId = await deps.ensureRoom(alias, {
     creator: speaker,
-    name: "superpipeline",
+    name: await deps.nameFor(boardId),
     topic: `Approvals for board ${boardId}. Answer here and the board hears it.`,
     // The first invitee rides on creation; the rest follow. `is_direct` and the
     // room's People filing depend on the invite being part of the create.
@@ -243,4 +254,34 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
     if (identity?.externalId) mxids.push(identity.externalId);
   }
   return mxids;
+}
+
+/**
+ * A board's own name, or its id.
+ *
+ * Read from superpipeline with the token the bridge already holds for that board —
+ * the same credential it claims cards with, so this needs no new grant. A board the
+ * hub cannot read is named by its id rather than by a constant: every board room is
+ * spoken by the same identity, so the name is the only thing that tells two apart,
+ * and "superpipeline" on both is indistinguishable.
+ */
+export async function boardNameFor(boardId: string): Promise<string> {
+  try {
+    const { isBridgeEnabled, loadBridgeConfig } = await import("../bridge/config");
+    if (!isBridgeEnabled()) return boardId;
+    const config = loadBridgeConfig();
+    const agent = config?.agents.find((a) => a.boardId === boardId);
+    if (!agent?.token || !config?.baseUrl) return boardId;
+
+    const res = await fetch(`${config.baseUrl.replace(/\/+$/, "")}/v1/boards/${encodeURIComponent(boardId)}`, {
+      headers: { Authorization: `Bearer ${agent.token}` },
+    });
+    if (!res.ok) return boardId;
+    const body = (await res.json()) as { name?: unknown };
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    return name || boardId;
+  } catch {
+    // Naming a room must never be the reason a gate has nowhere to go.
+    return boardId;
+  }
 }

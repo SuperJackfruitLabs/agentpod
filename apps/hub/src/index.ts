@@ -19,7 +19,7 @@ import { servicePublicJwks } from './auth/service-signing.ts';
 // GET /api/auth/authorize — the cross-domain handoff's front door (see below)
 import { authorizeRoutes } from './routes/auth-authorize.ts';
 import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
-import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
+import { boardNameFor, ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
@@ -403,6 +403,7 @@ if (matrixBridge) {
          * roster already names, resolved through `principal_identities` to the
          * Matrix id they actually read on.
          */
+        nameFor: (id: string) => boardNameFor(id),
         humansFor: async () => matrixIdsForBoardHumans(boardId),
       }),
   };

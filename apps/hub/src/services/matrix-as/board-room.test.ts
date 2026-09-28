@@ -34,9 +34,10 @@ function rig(over: Partial<BoardRoomDeps> = {}) {
   const invited: string[] = [];
   const deps: BoardRoomDeps = {
     domain: DOMAIN,
+    nameFor: async (id) => `Board ${id}`,
     ensureUser: async (lp) => void calls.push(`ensureUser:${lp}`),
-    ensureRoom: async (alias) => {
-      calls.push(`ensureRoom:${alias}`);
+    ensureRoom: async (alias, opts) => {
+      calls.push(`ensureRoom:${alias}:${opts.name}`);
       return `!room-${alias}:${DOMAIN}`;
     },
     invite: async (_as, _room, who) => {
@@ -144,6 +145,30 @@ describe("a board's room", () => {
 
     expect(room).not.toBeNull();
     expect(invitedLocal).toContain(good);
+  });
+
+  test("each board's room is named for its board, never all the same", async () => {
+    // Every room was called "superpipeline", so a second board produced a second
+    // room with the same name and nothing to tell them apart — the speaker is the
+    // same identity in all of them.
+    const one = `brd_test_${RUN}_n1`;
+    const two = `brd_test_${RUN}_n2`;
+    const a = rig({ nameFor: async () => "Press" });
+    const b = rig({ nameFor: async () => "Delivery" });
+
+    await ensureBoardRoom(one, BOOTSTRAP_TENANT_ID, a.deps);
+    await ensureBoardRoom(two, BOOTSTRAP_TENANT_ID, b.deps);
+
+    expect(a.calls.some((c) => c.endsWith(":Press"))).toBe(true);
+    expect(b.calls.some((c) => c.endsWith(":Delivery"))).toBe(true);
+  });
+
+  test("a board whose name cannot be read is named by its id, not by a constant", async () => {
+    // A room a person cannot identify is worse than an ugly one.
+    const boardId = `brd_test_${RUN}_n3`;
+    const { deps, calls } = rig({ nameFor: async (id) => id });
+    await ensureBoardRoom(boardId, BOOTSTRAP_TENANT_ID, deps);
+    expect(calls.some((c) => c.endsWith(`:${boardId}`))).toBe(true);
   });
 
   test("the alias is safe for a board id with awkward characters", async () => {
