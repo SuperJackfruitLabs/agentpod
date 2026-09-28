@@ -148,6 +148,59 @@ export function noOlmRecipients(requests: Array<{ eventType?: string; body?: str
   return [...users];
 }
 
+/**
+ * How long a user is left alone after a failed heal, per room.
+ *
+ * Ten minutes is short enough that a device fixed by its owner starts working
+ * again on the next gate rather than the next restart, and long enough that a
+ * device which will NEVER work costs one extra round trip an hour instead of one
+ * per message.
+ */
+export const STALE_RETRY_COOLDOWN_MS = 10 * 60_000;
+
+/**
+ * Which users are worth re-querying right now.
+ *
+ * The heal in `encrypt` assumed `m.no_olm` was transient: throw the cached identity
+ * away, ask again, and the next share succeeds. That holds for a device that rotated
+ * its keys. It does NOT hold for a device whose olm account is simply broken — the
+ * one in agentpod#604 answered `m.no_olm` before the re-query and after it, and would
+ * have done so forever.
+ *
+ * Without a limiter that device taxes every single message to its owner with an extra
+ * keys/query, a one-time-key claim and a second `shareRoomKey`. A gate delivery was
+ * observed paying it twice, once per event.
+ *
+ * So a failed heal buys quiet for a while. Keyed by room as well as user because a
+ * device can be reachable in one room and not another, and because a busy room must
+ * not silence a quiet one.
+ */
+export function createStaleRetryLimiter(
+  cooldownMs: number = STALE_RETRY_COOLDOWN_MS,
+  now: () => number = Date.now,
+) {
+  const lastTried = new Map<string, number>();
+  return {
+    /** The subset of `users` not tried too recently; marks those it returns. */
+    take(roomId: string, users: string[]): string[] {
+      const at = now();
+      const worth: string[] = [];
+      for (const user of users) {
+        const key = `${roomId}\u0000${user}`;
+        const previous = lastTried.get(key);
+        if (previous !== undefined && at - previous < cooldownMs) continue;
+        lastTried.set(key, at);
+        worth.push(user);
+      }
+      return worth;
+    },
+    /** A heal that worked: forget it, so a future failure is treated as new. */
+    clear(roomId: string, users: string[]): void {
+      for (const user of users) lastTried.delete(`${roomId}\u0000${user}`);
+    },
+  };
+}
+
 export interface AgentCryptoDeps {
   /** Where each agent's crypto store lives. One directory per user. */
   storeDir: string;
@@ -242,6 +295,9 @@ const log = createLogger('matrix-as:crypto');
 
 export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   const machines = new Map<string, Promise<OlmMachine>>();
+  // Shared across agents: a device that cannot session is broken for everyone, and
+  // one machine paying the round trip is enough to learn that for a while.
+  const staleRetries = createStaleRetryLimiter();
 
   /**
    * One machine per agent, built once.
@@ -459,14 +515,18 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       const stale = noOlmRecipients(
         shares as unknown as Array<{ eventType?: string; body?: string }>,
       );
-      if (stale.length > 0) {
+      // A device that answers `m.no_olm` after a fresh identity is not stale, it is
+      // broken — and it will answer the same way on every message. Retrying each time
+      // taxes every send to its owner forever, so a failed heal buys quiet.
+      const worthRetrying = staleRetries.take(roomId, stale);
+      if (worthRetrying.length > 0) {
         log.warn("a device refused an olm session; re-querying its identity and retrying", {
           roomId,
-          users: stale,
+          users: worthRetrying,
         });
         await machine.receiveSyncChanges(
           JSON.stringify([]),
-          new DeviceLists(stale.map((u) => new UserId(u)), []),
+          new DeviceLists(worthRetrying.map((u) => new UserId(u)), []),
           {},
           [],
         );
@@ -478,6 +538,16 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
           await machine.markRequestAsSent(req.id, req.type, response);
         }
         shares = await machine.shareRoomKey(room, recipients, new EncryptionSettings());
+
+        // Whoever stopped refusing is forgotten, so a later failure is treated as new
+        // rather than sitting out a cooldown it did not earn.
+        const stillRefusing = new Set(
+          noOlmRecipients(shares as unknown as Array<{ eventType?: string; body?: string }>),
+        );
+        staleRetries.clear(
+          roomId,
+          worthRetrying.filter((u) => !stillRefusing.has(u)),
+        );
       }
 
       for (const share of shares) {
