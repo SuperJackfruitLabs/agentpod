@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAgentCrypto, feedAgents, type CryptoRequest, type ShareReport } from "./crypto";
+import { createAgentCrypto, feedAgents, noOlmRecipients, type CryptoRequest, type ShareReport } from "./crypto";
 
 /**
  * The crypto state machine, driven the way the bridge drives it.
@@ -185,6 +185,9 @@ describe("narrowing a transaction to the agents in it", () => {
         encrypt: async () => ({}),
         decrypt: async () => null,
         trackUsers: async () => {},
+        // No machine is loaded in these, so a device-list change wakes nobody extra
+        // and each case still asserts exactly the narrowing it was written for.
+        loadedAgents: () => [],
         close: () => {},
       },
     };
@@ -233,6 +236,9 @@ describe("narrowing a transaction to the agents in it", () => {
     expect(fed.map((f) => f.userId)).toEqual([ALICE]);
   });
 
+  // Still true of the HUMAN: no machine is ever created for one. A device-list change
+  // does now reach agents whose machine is already loaded — see the separate case for
+  // that — and this fixture loads none, so the narrowing is unchanged here.
   test("users outside our namespace are not fed", async () => {
     const { fed, crypto } = spy();
     await feedAgents(
@@ -323,5 +329,124 @@ describe("what an encrypted send did about keys", () => {
     });
     const envelope = await crypto.encrypt(ALICE, ROOM, [ALICE, BOB], "m.room.message", { body: "x" });
     expect(envelope).toHaveProperty("ciphertext");
+  });
+});
+
+/**
+ * agentpod#604: a device that rotated its keys kept a stale identity here forever,
+ * so every room key shared to it came back withheld and the send still succeeded.
+ * Measured on live guild: 19 of 20 devices received the key; the operator's own
+ * phone was refused `m.no_olm` and could not read a single approval gate.
+ */
+describe("a device that refused an olm session", () => {
+  const withheld = (messages: Record<string, Record<string, { code?: string }>>) => ({
+    eventType: "m.room_key.withheld",
+    body: JSON.stringify({ messages }),
+  });
+
+  test("is found by the user it belongs to", () => {
+    const users = noOlmRecipients([
+      { eventType: "m.room.encrypted", body: JSON.stringify({ messages: { [BOB]: { OK: {} } } }) },
+      withheld({ [ALICE]: { "0zGB6UZiSe": { code: "m.no_olm" } } }),
+    ]);
+    expect(users).toEqual([ALICE]);
+  });
+
+  test("a withheld for any OTHER reason is left alone", () => {
+    // `m.unverified` and `m.blacklisted` are decisions, not staleness. Re-querying a
+    // device list would not change them, and retrying would be noise on every send.
+    const users = noOlmRecipients([
+      withheld({ [ALICE]: { D1: { code: "m.unverified" } } }),
+      withheld({ [BOB]: { D2: { code: "m.blacklisted" } } }),
+    ]);
+    expect(users).toEqual([]);
+  });
+
+  test("one user is named once however many of their devices refused", () => {
+    const users = noOlmRecipients([
+      withheld({ [ALICE]: { D1: { code: "m.no_olm" }, D2: { code: "m.no_olm" } } }),
+    ]);
+    expect(users).toEqual([ALICE]);
+  });
+
+  test("a body that cannot be parsed does not take the message down", () => {
+    // These come from a Rust binding. A share we cannot read must cost us the retry,
+    // never the send.
+    expect(noOlmRecipients([{ eventType: "m.room_key.withheld", body: "not json" }])).toEqual([]);
+    expect(noOlmRecipients([{ eventType: "m.room_key.withheld" }])).toEqual([]);
+    expect(noOlmRecipients([{}])).toEqual([]);
+  });
+
+  test("an ordinary share reports nobody stale", async () => {
+    const reports: ShareReport[] = [];
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send: recorder().send,
+      deviceIdFor,
+      uploadSigningKeys,
+      onShare: (r) => reports.push(r),
+    });
+    await crypto.encrypt(ALICE, ROOM, [ALICE, BOB], "m.room.message", { body: "hello" });
+    expect(reports[0]!.staleIdentities).toEqual([]);
+  });
+});
+
+/**
+ * The cause beneath that symptom: a transaction naming only a human was dropped,
+ * because the loop that feeds machines was gated on an agent being present.
+ */
+describe("a device-list change for somebody outside our namespace", () => {
+  test("reaches the machines that hold a cache of them", async () => {
+    const { send } = recorder();
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send,
+      deviceIdFor,
+      uploadSigningKeys,
+    });
+    // A machine only exists once the agent has done something.
+    await crypto.trackUsers(ALICE, [ALICE]);
+    expect(crypto.loadedAgents()).toContain(ALICE);
+
+    const fed: string[] = [];
+    const spy = { ...crypto, receive: async (userId: string) => void fed.push(userId) } as typeof crypto;
+
+    await feedAgents(
+      spy,
+      {
+        toDevice: [],
+        // The shape that produced the bug: a human, named alone.
+        deviceLists: { changed: ["@rakesh:" + DOMAIN], left: [] },
+        otkCounts: {},
+        unusedFallbackKeys: {},
+      },
+      (u) => u.startsWith("@agent_"),
+    );
+
+    expect(fed).toContain(ALICE);
+  });
+
+  test("a transaction with no device-list change wakes nobody", async () => {
+    const crypto = createAgentCrypto({
+      storeDir: await storeDir(),
+      domain: DOMAIN,
+      send: recorder().send,
+      deviceIdFor,
+      uploadSigningKeys,
+    });
+    await crypto.trackUsers(ALICE, [ALICE]);
+
+    const fed: string[] = [];
+    const spy = { ...crypto, receive: async (userId: string) => void fed.push(userId) } as typeof crypto;
+
+    await feedAgents(
+      spy,
+      { toDevice: [], deviceLists: { changed: [], left: [] }, otkCounts: {}, unusedFallbackKeys: {} },
+      (u) => u.startsWith("@agent_"),
+    );
+
+    expect(fed).toEqual([]);
   });
 });

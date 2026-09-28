@@ -105,6 +105,47 @@ export interface ShareReport {
   claimedSessions: boolean;
   /** How many to-device room-key messages `shareRoomKey` produced. */
   shares: number;
+  /**
+   * Users whose devices refused a session, after which their device list was
+   * re-queried and the share retried. Empty on a healthy send.
+   */
+  staleIdentities: string[];
+}
+
+/**
+ * The users whose devices refused an olm session on this share.
+ *
+ * `shareRoomKey` reports a device it could not reach by emitting an
+ * `m.room_key.withheld` to-device message with `code: "m.no_olm"` beside the real
+ * room keys. It is not an error and nothing throws: nineteen devices get the key,
+ * one does not, and the send returns an event id either way (agentpod#604).
+ *
+ * `m.no_olm` means a one-time key could not be turned into a session. When the
+ * homeserver does hand one over — measured, every time — the remaining explanation
+ * is that the key verifies against a device identity cached before that device
+ * rotated. So the useful response is to distrust our copy of that user's devices,
+ * which is what the caller does with this list.
+ *
+ * Parsed defensively: these bodies come from a Rust binding, and a share that
+ * cannot be understood must not take the message down with it.
+ */
+export function noOlmRecipients(requests: Array<{ eventType?: string; body?: string }>): string[] {
+  const users = new Set<string>();
+  for (const request of requests) {
+    if (!String(request.eventType ?? "").includes("withheld")) continue;
+    let parsed: { messages?: Record<string, Record<string, { code?: string } | null>> };
+    try {
+      parsed = JSON.parse(request.body ?? "{}") as typeof parsed;
+    } catch {
+      continue;
+    }
+    for (const [userId, devices] of Object.entries(parsed.messages ?? {})) {
+      for (const content of Object.values(devices ?? {})) {
+        if (content?.code === "m.no_olm") users.add(userId);
+      }
+    }
+  }
+  return [...users];
 }
 
 export interface AgentCryptoDeps {
@@ -177,6 +218,13 @@ export interface AgentCrypto {
   ): Promise<Record<string, unknown> | null>;
   /** Tell the machine which users share a room, so it can target keys. */
   trackUsers(userId: string, members: string[]): Promise<void>;
+  /**
+   * Agents whose machine is loaded right now.
+   *
+   * Only these hold a device cache that a change could invalidate, so only these
+   * need feeding when somebody outside our namespace rotates a device.
+   */
+  loadedAgents(): string[];
   /**
    * Close every machine. Awaited, because a machine left to the garbage
    * collector is dropped during process teardown and panics there.
@@ -341,6 +389,10 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       await flush(userId, machine);
     },
 
+    loadedAgents() {
+      return [...machines.keys()];
+    },
+
     async trackUsers(userId, members) {
       const machine = await machineFor(userId);
       await machine.updateTrackedUsers(members.map((m) => new UserId(m)));
@@ -382,7 +434,52 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       // 3. Share the megolm session itself, device by device. The SDK returns
       //    nothing here when every recipient already has it, so this is not a
       //    cost paid per message.
-      const shares = await machine.shareRoomKey(room, recipients, new EncryptionSettings());
+      let shares = await machine.shareRoomKey(room, recipients, new EncryptionSettings());
+
+      /**
+       * A device that refused a session gets one more chance, with our copy of its
+       * identity thrown away first.
+       *
+       * This is the whole of agentpod#604. A device-list change for a user outside
+       * this appservice's namespace was dropped, so a device that rotated its keys
+       * kept a stale identity here forever. Every one-time key it offered then failed
+       * to verify, every share was withheld `m.no_olm`, and the send still succeeded —
+       * so the operator's own phone could not read a single approval gate while the
+       * other nineteen devices could.
+       *
+       * `receiveSyncChanges` with the user in `changed` is what marks them dirty;
+       * `flush` runs the keys/query that replaces the identity. Then the share is
+       * retried once. Once, not in a loop: if a fresh identity still cannot make a
+       * session, the fault is not staleness and repeating would only slow the send.
+       *
+       * This recovers a device that went stale BEFORE the propagation fix below —
+       * the change that would have invalidated it has long since passed, and nothing
+       * else will ever come to correct it.
+       */
+      const stale = noOlmRecipients(
+        shares as unknown as Array<{ eventType?: string; body?: string }>,
+      );
+      if (stale.length > 0) {
+        log.warn("a device refused an olm session; re-querying its identity and retrying", {
+          roomId,
+          users: stale,
+        });
+        await machine.receiveSyncChanges(
+          JSON.stringify([]),
+          new DeviceLists(stale.map((u) => new UserId(u)), []),
+          {},
+          [],
+        );
+        await flush(userId, machine);
+        const missingAgain = await machine.getMissingSessions(recipients);
+        if (missingAgain) {
+          const req = missingAgain as unknown as { id: string; type: RequestType; body: string };
+          const response = await deps.send(userId, { id: req.id, type: req.type, body: req.body });
+          await machine.markRequestAsSent(req.id, req.type, response);
+        }
+        shares = await machine.shareRoomKey(room, recipients, new EncryptionSettings());
+      }
+
       for (const share of shares) {
         const req = share as unknown as {
           id: string;
@@ -407,6 +504,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         recipients: recipients.length,
         claimedSessions,
         shares: shares.length,
+        staleIdentities: stale,
       });
 
       const encrypted = await machine.encryptRoomEvent(
@@ -509,6 +607,25 @@ export async function feedAgents(
   for (const user of Object.keys(tx.otkCounts)) if (isOurs(user)) agents.add(user);
   for (const user of Object.keys(tx.unusedFallbackKeys)) if (isOurs(user)) agents.add(user);
   for (const user of tx.deviceLists.changed) if (isOurs(user)) agents.add(user);
+
+  /**
+   * A device-list change for somebody who is NOT ours still has to reach our machines.
+   *
+   * The namespace filter is right for `otkCounts` and `unusedFallbackKeys` — one cannot
+   * own another user's key counts. It was wrong as a gate on the loop below: a
+   * transaction reporting only `changed: ["@a-human"]` produced an empty set, the loop
+   * never ran, and the change was discarded. A human device that rotated its keys then
+   * kept a stale identity in every agent's store forever, and every room key shared to
+   * it was withheld `m.no_olm` (agentpod#604).
+   *
+   * `receive()` is already handed the FULL `tx.deviceLists`, so the only thing missing
+   * was somebody to hand it to. Every machine already loaded is fed — they are the ones
+   * holding a cache that can go stale. A machine not yet loaded is not woken for this:
+   * loading one costs an appservice login per agent, and a device it never had cached
+   * cannot be stale. One that IS stale heals on its next send, through the retry in
+   * `encrypt`.
+   */
+  if (tx.deviceLists.changed.length > 0) for (const user of crypto.loadedAgents()) agents.add(user);
 
   for (const userId of agents) {
     // Flattened per device, then merged: MSC3202 reports counts per device,
