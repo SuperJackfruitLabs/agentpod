@@ -78,14 +78,47 @@ export function withEncryption(
     return false;
   }
 
+  /**
+   * Everyone joined, or a throw.
+   *
+   * This returned `[]` on any non-OK response, and `[]` is not "nobody is here" — it is
+   * "share the megolm key with nobody", after which the message still encrypts, still
+   * sends, and still returns an event id. Every approval gate the hub projected was
+   * unreadable on the operator's phone and nothing anywhere said so (agentpod#604).
+   *
+   * So it throws, and the throw is load-bearing rather than tidier: `gates.ts` gives a
+   * gate's claim back when a send throws, so the sweep re-offers it. A gate that could
+   * not be encrypted to anyone is now retried instead of lost.
+   */
   async function membersOf(roomId: string, asUserId: string): Promise<string[]> {
     const res = await get(
       `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/joined_members`,
       asUserId,
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      log.warn("cannot read a room's members; refusing to encrypt to nobody", {
+        roomId,
+        asUserId,
+        status: res.status,
+        detail: detail.slice(0, 200),
+      });
+      throw new Error(
+        `members of ${roomId} unreadable (${res.status}); refusing to encrypt to nobody`,
+      );
+    }
     const body = (await res.json()) as { joined?: Record<string, unknown> };
-    return Object.keys(body.joined ?? {});
+    const members = Object.keys(body.joined ?? {});
+    if (members.length === 0) {
+      log.warn("a room reports no joined members; refusing to encrypt to nobody", { roomId, asUserId });
+      throw new Error(`members of ${roomId} came back empty; refusing to encrypt to nobody`);
+    }
+    // Not an error — an agent may legitimately be alone in its room — but it is the shape
+    // of a message nobody can read, so it does not pass unremarked.
+    if (members.length === 1 && members[0] === asUserId) {
+      log.warn("encrypting to a room that holds only the sender", { roomId, asUserId });
+    }
+    return members;
   }
 
   /**

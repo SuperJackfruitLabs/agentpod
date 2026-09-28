@@ -85,6 +85,28 @@ export interface CryptoTransaction {
   unusedFallbackKeys?: string[];
 }
 
+/**
+ * What one encrypted send actually did about keys.
+ *
+ * Reported rather than logged inline so it can be asserted in a test — and
+ * because the numbers are the whole diagnosis. agentpod#604: every gate the hub
+ * encrypted was unreadable, and the send path reported nothing but success. The
+ * three counts below separate the causes that look identical from outside:
+ *
+ *   recipients 1        — nobody but the sender was ever going to read it
+ *   shares 0, new room  — the machine believes recipients already hold the key
+ *   shares > 0          — keys went out; look at the transport or the reader
+ */
+export interface ShareReport {
+  roomId: string;
+  /** Everyone the megolm key was meant for, the sender included. */
+  recipients: number;
+  /** Whether a one-time key had to be claimed to open an olm session. */
+  claimedSessions: boolean;
+  /** How many to-device room-key messages `shareRoomKey` produced. */
+  shares: number;
+}
+
 export interface AgentCryptoDeps {
   /** Where each agent's crypto store lives. One directory per user. */
   storeDir: string;
@@ -101,6 +123,13 @@ export interface AgentCryptoDeps {
    * broke every credential mint and rotation with it (#435).
    */
   deviceIdFor: (userId: string) => Promise<string>;
+  /**
+   * Called once per encrypted send with what the key exchange did.
+   *
+   * Optional because nothing depends on it for correctness; supplied in
+   * production so an operator can see why a room cannot read what it was sent.
+   */
+  onShare?: (report: ShareReport) => void;
   /** This homeserver's name, e.g. `id.agentpod.dev`. */
   domain: string;
   /**
@@ -343,6 +372,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       // 2. Have an olm session with each of them, claiming a one-time key
       //    where there is none. Olm is what carries the megolm key in step 3.
       const missing = await machine.getMissingSessions(recipients);
+      const claimedSessions = Boolean(missing);
       if (missing) {
         const req = missing as unknown as { id: string; type: RequestType; body: string };
         const response = await deps.send(userId, { id: req.id, type: req.type, body: req.body });
@@ -371,6 +401,13 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         });
         await machine.markRequestAsSent(req.id, 3 as unknown as RequestType, response);
       }
+
+      deps.onShare?.({
+        roomId,
+        recipients: recipients.length,
+        claimedSessions,
+        shares: shares.length,
+      });
 
       const encrypted = await machine.encryptRoomEvent(
         room,
