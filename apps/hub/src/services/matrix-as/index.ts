@@ -340,7 +340,17 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
             resolveGate: (input) =>
               resolveGateAtSuperpipeline(input, {
                 baseUrl: superpipelineBaseUrl,
-                mint: (principalId) => mintPrincipalAssertion({ principalId }),
+                /**
+                 * Named for the plane that will verify it.
+                 *
+                 * superpipeline checks `aud` against its own origin, and an
+                 * assertion with no audience carries the hub's URL — the issuer,
+                 * which is not an audience check at all. A human's approval
+                 * travelled the whole way and came back `HTTP_401` for exactly
+                 * this.
+                 */
+                mint: (principalId) =>
+                  mintPrincipalAssertion({ principalId, audiences: [superpipelineBaseUrl] }),
               }),
             reply: async (roomId: string, body: string) => {
               const room = await roomAgentUser(roomId, cfg.domain);
