@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 /**
  * A process must be able to exit with an agent crypto machine still open
@@ -12,24 +12,42 @@ import { join } from "node:path";
  * failure is in how that process dies, which no in-process assertion can see.
  */
 
-const FIXTURE = join(import.meta.dir, "testdata", "exit-with-open-machine.ts");
+const HUB = join(import.meta.dir, "..", "..", "..");
+const SCRIPT = join(import.meta.dir, "testdata", "exit-with-open-machine.ts");
+const TEST_FILE = join(import.meta.dir, "testdata", "open-machine.bun-test-fixture.ts");
 
-async function runFixture(mode: "natural" | "exit") {
-  const proc = Bun.spawn([process.execPath, FIXTURE, mode], { stdout: "pipe", stderr: "pipe" });
-  const [exitCode, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  return { exitCode, stderr };
+async function run(argv: string[]) {
+  // From the hub's root, so its bunfig.toml — and the preload in it — applies
+  // exactly as it does to the hub's own `bun test`.
+  const proc = Bun.spawn([process.execPath, ...argv], { cwd: HUB, stdout: "pipe", stderr: "pipe" });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { exitCode, output: stdout + stderr };
 }
 
 describe("exiting with an open crypto machine", () => {
   test("when the event loop drains", async () => {
-    const { exitCode, stderr } = await runFixture("natural");
-    expect(stderr).not.toContain("panicked");
+    const { exitCode, output } = await run([SCRIPT, "natural"]);
+    expect(output).not.toContain("panicked");
     expect(exitCode).toBe(0);
   }, 30_000);
 
   test("when the process calls process.exit", async () => {
-    const { exitCode, stderr } = await runFixture("exit");
-    expect(stderr).not.toContain("panicked");
+    const { exitCode, output } = await run([SCRIPT, "exit"]);
+    expect(output).not.toContain("panicked");
+    expect(exitCode).toBe(0);
+  }, 30_000);
+
+  // The path that actually failed CI. bun test runs no `exit` listeners, so
+  // only the preload's global afterAll stands between an unclosed machine and
+  // SIGABRT here.
+  test("when bun test exits", async () => {
+    const { exitCode, output } = await run(["test", `./${relative(HUB, TEST_FILE)}`]);
+    expect(output).toContain("1 pass");
+    expect(output).not.toContain("panicked");
     expect(exitCode).toBe(0);
   }, 30_000);
 });
