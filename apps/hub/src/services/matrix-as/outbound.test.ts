@@ -4,7 +4,7 @@ import {
   TURN_ERROR_CONTENT_KEY,
   TurnErrorCard,
 } from "@agentpod/contract";
-import { _resetHubEventsForTest, hubEventKind } from "../push/hub-events";
+import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
 import { matchPermissionAnswer, pendingPermissionFor } from "./permissions";
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
@@ -862,6 +862,41 @@ describe("the durable record of a turn", () => {
     await settle();
 
     expect(custom).toHaveLength(1);
+  });
+
+  test("notes the answer as the turn's outcome, with its counts, for the push gateway", async () => {
+    _resetHubEventsForTest();
+    const { said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "completed" }));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c2", title: "Run tests", status: "failed" }, 3));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c3", title: "Fix", status: "completed" }, 4));
+    emit(chunk("Two of three."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(said).toHaveLength(1);
+    expect(hubEventKind("$msg-1")).toBe("answer");
+    expect(hubEventTurn("$msg-1")).toEqual({ total: 3, failed: 1 });
+    // Announced while in flight, so a push that beats the send waits for it —
+    // and nothing is left in flight afterwards.
+    expect(quietSendsInFlight(ROOM)).toBe(0);
+  });
+
+  test("an answer to a turn with no tools is not noted — there is no outcome to carry", async () => {
+    _resetHubEventsForTest();
+    const { said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(chunk("Just talking."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(said).toHaveLength(1);
+    expect(hubEventKind("$msg-1")).toBeUndefined();
   });
 
   test("a deployment without sendCustomEvent still says the answer", async () => {

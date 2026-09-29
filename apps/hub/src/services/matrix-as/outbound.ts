@@ -38,7 +38,7 @@ import {
   type PermissionOption,
 } from "./permissions";
 import { createLogger } from "../../utils/logger";
-import { noteHubEvent } from "../push/hub-events";
+import { beginQuietSend, noteAnswerEvent, noteHubEvent, type TurnCounts } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
 
 const log = createLogger("matrix-outbound");
@@ -374,9 +374,21 @@ export function attachRoomToSession(
     const tools = state.tools;
     state.tools = new Map();
     state.toolSeq = 0;
-    if (tools.size > 0) await recordTurn(tools);
+    const counts = tools.size > 0 ? await recordTurn(tools) : null;
     if (text.trim() === "") return;
-    await say(text);
+    if (!counts) {
+      await say(text);
+      return;
+    }
+    // The answer that ends a turn with a record carries the turn's counts on
+    // its push (spec A5). Announced before it is sent, like a quiet send, so a
+    // push that beats the send's response waits for them — see `hub-events.ts`.
+    const end = beginQuietSend(roomId);
+    try {
+      noteAnswerEvent(await say(text), counts);
+    } finally {
+      end();
+    }
   };
 
   /**
@@ -426,10 +438,12 @@ export function attachRoomToSession(
    * these things, then said this. Best-effort like every other outbound call
    * here — a card that fails to send must not cost the answer behind it.
    */
-  const recordTurn = async (tools: Map<string, ToolRecord>) => {
+  const recordTurn = async (tools: Map<string, ToolRecord>): Promise<TurnCounts> => {
+    const content = turnActivityContent(sessionId, tools);
+    const counts = { total: content.counts.total, failed: content.counts.failed };
     const send = deps.client.sendCustomEvent;
-    if (!send) return;
-    await send(agentUser, roomId, TURN_ACTIVITY_TYPE, turnActivityContent(sessionId, tools)).catch(
+    if (!send) return counts;
+    await send(agentUser, roomId, TURN_ACTIVITY_TYPE, content).catch(
       (err) => {
         log.error("could not record a turn's activity in its room", {
           sessionId,
@@ -438,6 +452,7 @@ export function attachRoomToSession(
         });
       }
     );
+    return counts;
   };
 
   /**

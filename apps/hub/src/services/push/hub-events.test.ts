@@ -8,6 +8,8 @@ import {
   _resetHubEventsForTest,
   beginQuietSend,
   hubEventKind,
+  hubEventTurn,
+  noteAnswerEvent,
   noteHubEvent,
   quietSendsInFlight,
   quietSendsSettled,
@@ -78,5 +80,24 @@ describe("quiet sends in flight", () => {
     const took = performance.now() - t;
     expect(took).toBeGreaterThanOrEqual(55);
     expect(took).toBeLessThan(1_000);
+  });
+});
+
+describe("an answer and the turn it ended", () => {
+  test("is remembered as an answer, with the turn's counts and nothing else", () => {
+    noteAnswerEvent("$a", { total: 7, failed: 1 });
+    expect(hubEventKind("$a")).toBe("answer");
+    expect(hubEventTurn("$a")).toEqual({ total: 7, failed: 1 });
+    expect(hubEventTurn("$other")).toBeUndefined();
+  });
+
+  test("a kind noted without counts has none", () => {
+    noteHubEvent("$q", "quiet");
+    expect(hubEventTurn("$q")).toBeUndefined();
+  });
+
+  test("forgets the counts with the kind", () => {
+    noteAnswerEvent("$a", { total: 1, failed: 0 }, 0);
+    expect(hubEventTurn("$a", 6 * 60 * 60 * 1000)).toBeUndefined();
   });
 });
