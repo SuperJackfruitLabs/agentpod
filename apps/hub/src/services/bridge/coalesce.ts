@@ -88,6 +88,13 @@ export class ActivityCoalescer {
   private buffer: { kind: ChunkKind; text: string } | null = null;
   /** The tool call whose update is still being collapsed, if any. */
   private pendingTool: { id: string; activity: BoardActivity } | null = null;
+  /**
+   * What each tool call in this turn was called, so its update can borrow the name.
+   *
+   * Cleared at the end of the turn with everything else: a turn has a bounded number of tool
+   * calls, and a map that outlived one would grow for as long as the bridge runs.
+   */
+  private readonly toolTitles = new Map<string, string>();
 
   private peak: ContextPeak | null = null;
   private warned = false;
@@ -181,6 +188,7 @@ export class ActivityCoalescer {
       out.push(this.pendingTool.activity);
       this.pendingTool = null;
     }
+    this.toolTitles.clear();
     return out;
   }
 
@@ -200,21 +208,49 @@ export class ActivityCoalescer {
     }
 
     switch (kind) {
-      case "tool_call":
-        return this.durable({
-          type: "action",
-          action: String(p.title ?? p.kind ?? "tool"),
-          parameter: p.rawInput ?? p.locations,
-        });
+      case "tool_call": {
+        const id = String(p.toolCallId ?? "");
+        const action = String(p.title ?? p.kind ?? "tool");
+        // Remembered so this call's own update can be named after the CALL. Hermes sends the
+        // update without a `title`, and falling back to `kind` is what turned the completion of
+        // `search_files: <query>` into a row reading `search`.
+        if (id) this.toolTitles.set(id, action);
+        return this.durable({ type: "action", action, parameter: p.rawInput ?? p.locations });
+      }
 
       case "tool_call_update": {
         // Tool updates stream too. Consecutive updates for one call collapse to
         // its last state, which is the only one a board can act on.
         const id = String(p.toolCallId ?? "");
+        const output = p.rawOutput ?? p.content;
+        const status = p.status === undefined || p.status === null ? null : String(p.status);
+
+        /**
+         * An update that carries no output and reports nothing wrong is not news.
+         *
+         * The call is already on the board with its arguments; this only says the thing the
+         * reader was just told about has finished. Measured on one `brief` run: 14 of 44
+         * activities were these, sitting directly beneath the call they belonged to —
+         *
+         *     ACTION search_files: HEARTBEAT_TIMEOUT_MS|CIRCUIT_BREAKER_LIMIT|STALE_LEASE
+         *     ACTION search                                            ← nothing in it
+         *
+         * — so a third of what a person read was restatement. Reported rather than silently
+         * discarded, because "we dropped a third of the stream" is exactly the sort of decision
+         * that should be visible in `unmapped()`.
+         *
+         * A FAILURE is news with or without output, so only the uneventful states are dropped.
+         */
+        const uneventful = status === null || status === "completed" || status === "pending" || status === "in_progress";
+        if (output === undefined && uneventful) {
+          this.lossKinds.add("tool_call_update → dropped (no output, nothing wrong)");
+          return [];
+        }
+
         const activity: BoardActivity = {
           type: "action",
-          action: String(p.title ?? p.kind ?? "tool"),
-          result: p.rawOutput ?? p.status ?? p.content,
+          action: String(p.title ?? this.toolTitles.get(id) ?? p.kind ?? "tool"),
+          result: output ?? status,
         };
         if (this.pendingTool && this.pendingTool.id === id) {
           this.pendingTool.activity = activity;

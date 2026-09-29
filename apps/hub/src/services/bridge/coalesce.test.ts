@@ -275,3 +275,82 @@ describe("ActivityCoalescer — projection", () => {
     expect(c.losses().join(" ")).toContain("agent_thought_chunk");
   });
 });
+
+describe("a tool call's completion is not a second activity", () => {
+  /**
+   * Live evidence, from a `brief` run on the Press board: 44 activities, of which 14 were bare —
+   * six `search`, three `execute`, two `read`. Each sat directly beneath the call it belonged to,
+   * which already carried the useful part:
+   *
+   *   ACTION search_files: HEARTBEAT_TIMEOUT_MS|CIRCUIT_BREAKER_LIMIT|STALE_LEASE
+   *   ACTION search                                              ← this one, saying nothing
+   *
+   * Hermes omits `title` on the update, so the projection fell back to `kind`, and sent
+   * `result: "completed"` because there was no `rawOutput` either. A third of what a person read
+   * was a restatement that something they had just been told about had finished.
+   */
+  const call = (id: string, title: string) =>
+    ev("agent-update", { sessionUpdate: "tool_call", toolCallId: id, title, kind: "search", rawInput: { pattern: "x" } });
+
+  const update = (id: string, over: Record<string, unknown> = {}) =>
+    ev("agent-update", { sessionUpdate: "tool_call_update", toolCallId: id, kind: "search", ...over });
+
+  test("drops an update that only says the call finished", () => {
+    const c = new ActivityCoalescer();
+    const out = [...c.push(call("t1", "search_files: needle")), ...c.push(update("t1", { status: "completed" })), ...c.flush()];
+
+    expect(out).toHaveLength(1);
+    expect(out[0]!.action).toBe("search_files: needle");
+    // The call's own arguments are what a reader wanted, and they survive.
+    expect(out[0]!.parameter).toEqual({ pattern: "x" });
+  });
+
+  test("records the drop, so a silent projection is not a quiet one", () => {
+    const c = new ActivityCoalescer();
+    c.push(call("t1", "search_files: needle"));
+    c.push(update("t1", { status: "completed" }));
+    expect(c.losses().some((k) => /tool_call_update/.test(k))).toBe(true);
+  });
+
+  test("keeps an update that carries real output", () => {
+    const c = new ActivityCoalescer();
+    const out = [...c.push(call("t1", "read_file: README.md")), ...c.push(update("t1", { status: "completed", rawOutput: "# Title" })), ...c.flush()];
+
+    expect(out).toHaveLength(2);
+    expect(out[1]!.result).toBe("# Title");
+  });
+
+  test("keeps a failure even with no output — a call that broke is news", () => {
+    const c = new ActivityCoalescer();
+    const out = [...c.push(call("t1", "terminal: pnpm test")), ...c.push(update("t1", { status: "failed" })), ...c.flush()];
+
+    expect(out).toHaveLength(2);
+    expect(out[1]!.result).toBe("failed");
+  });
+
+  test("names a kept update after its call, since the harness does not title it", () => {
+    // `title` is absent on the update; falling back to `kind` is what produced a bare `search`.
+    const c = new ActivityCoalescer();
+    const out = [...c.push(call("t1", "terminal: pnpm test")), ...c.push(update("t1", { status: "failed" })), ...c.flush()];
+    expect(out[1]!.action).toBe("terminal: pnpm test");
+  });
+
+  test("an in-progress tick with nothing in it is dropped too", () => {
+    const c = new ActivityCoalescer();
+    const out = [
+      ...c.push(call("t1", "search_files: needle")),
+      ...c.push(update("t1", { status: "in_progress" })),
+      ...c.push(update("t1", { status: "completed" })),
+      ...c.flush(),
+    ];
+    expect(out).toHaveLength(1);
+  });
+
+  test("an update for a call this turn never saw is still kept", () => {
+    // It is the only record of that call, so dropping it would lose the event entirely.
+    const c = new ActivityCoalescer();
+    const out = [...c.push(update("orphan", { status: "failed" })), ...c.flush()];
+    expect(out).toHaveLength(1);
+    expect(out[0]!.action).toBe("search");
+  });
+});
