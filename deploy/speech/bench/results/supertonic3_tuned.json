@@ -1,0 +1,33 @@
+{
+ "model": "supertonic3",
+ "threads": 4,
+ "sr": 44100,
+ "meta": {
+  "voice": "F1",
+  "steps": 8
+ },
+ "load_s": 0.68,
+ "short": {
+  "audio_s": 3.62,
+  "synth_s": 0.82,
+  "rtf": 4.44
+ },
+ "para": {
+  "audio_s": 29.49,
+  "synth_s": 5.33,
+  "rtf": 5.53
+ },
+ "tricky": {
+  "audio_s": 13.65,
+  "synth_s": 2.47,
+  "rtf": 5.53
+ },
+ "first_audio_mode": "sentence by sentence",
+ "stream_para": {
+  "first_audio_s": 0.85,
+  "total_s": 6.34,
+  "audio_s": 30.51,
+  "rtf": 4.81
+ },
+ "peak_rss_mb": 637
+}

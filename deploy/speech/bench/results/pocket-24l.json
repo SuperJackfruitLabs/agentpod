@@ -1,0 +1,34 @@
+{
+ "model": "pocket-24l",
+ "threads": 12,
+ "sr": 24000,
+ "meta": {
+  "voice": "alba",
+  "language": "english_2026-09_24l",
+  "torch_threads": 12
+ },
+ "load_s": 17.53,
+ "short": {
+  "audio_s": 3.36,
+  "synth_s": 3.84,
+  "rtf": 0.87
+ },
+ "para": {
+  "audio_s": 28.32,
+  "synth_s": 31.69,
+  "rtf": 0.89
+ },
+ "tricky": {
+  "audio_s": 10.32,
+  "synth_s": 11.65,
+  "rtf": 0.89
+ },
+ "first_audio_mode": "native stream",
+ "stream_para": {
+  "first_audio_s": 0.32,
+  "total_s": 30.68,
+  "audio_s": 27.44,
+  "rtf": 0.89
+ },
+ "peak_rss_mb": 2960
+}

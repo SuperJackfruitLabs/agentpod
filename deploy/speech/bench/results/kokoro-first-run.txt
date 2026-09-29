@@ -1,0 +1,23 @@
+# foundry, 2026-09-29. Console output of kokoro/bench.py and kokoro/bench2.py,
+# copied from the benchmark session (they print, they do not write files).
+# kokoro-onnx 0.6.1, onnxruntime 1.30.0, default session (all 12 threads).
+
+$ bench.py kokoro-v1.0.int8.onnx kokoro-v1.0.onnx
+== int8: load 0.5s
+  en_short  audio   2.9s  synth  4.43s  x 0.7 realtime
+  en_para   audio  25.2s  synth 32.53s  x 0.8 realtime
+  hi_short  audio   2.8s  synth  4.55s  x 0.6 realtime
+  hi_para   audio  15.4s  synth 20.41s  x 0.8 realtime
+  peak RSS 1144 MB
+== fp32: load 0.8s
+  en_short  audio   2.9s  synth  1.09s  x 2.7 realtime
+  en_para   audio  25.4s  synth  8.67s  x 2.9 realtime
+  hi_short  audio   2.9s  synth  1.12s  x 2.6 realtime
+  hi_para   audio  15.2s  synth  5.24s  x 2.9 realtime
+  peak RSS 1453 MB
+
+$ bench2.py idle; (5-minute transcription in the background); bench2.py "during STT"
+[idle] sentence by sentence: first audio after 0.78s, whole 25.6s of audio in 6.26s (x4.1)
+[during STT] sentence by sentence: first audio after 1.30s, whole 25.6s of audio in 10.16s (x2.5)
+[stt] http 200, 5-min transcription took 87.1s while TTS ran
+[stt] http 200, 5-min transcription alone took 82.5s

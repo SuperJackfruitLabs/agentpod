@@ -1,0 +1,16 @@
+[Unit]
+Description=AgentPod speech (agents' spoken replies)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/agentpod-speech
+EnvironmentFile=/etc/agentpod-speech.env
+ExecStart=/opt/agentpod-speech/.venv/bin/uvicorn server:create_app --factory --host ${SPEECH_HOST} --port ${SPEECH_PORT}
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

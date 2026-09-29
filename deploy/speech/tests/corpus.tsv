@@ -1,0 +1,73 @@
+# Agent replies and exactly what should be spoken for them.
+# One row per line: the reply as the agent wrote it, a tab, the spoken text.
+# "\n" is a newline in either column; in the spoken text it is a paragraph
+# break, where the service pauses longer. Comment lines start with # and have
+# no tab.
+#
+# A reply that is read out wrong in real use becomes a row here, with the
+# spoken text it should have had, before the fix.
+Done! The migration finished at 3:45 p.m. and the row counts match.	Done! The migration finished at three forty five PM and the row counts match.
+**Deployed.** The hub is on v0.1.76 and all 14 stations reconnected.	Deployed. The hub is on version zero point one point seven six and all fourteen stations reconnected.
+I've merged PR #618. CI took 12 minutes, about 2x slower than usual.	I've merged PR number six hundred and eighteen. CI took twelve minutes, about two times slower than usual.
+## Summary\nThe export job still writes to the old bucket.\n## Next steps\n1. Flip the export.\n2. Watch it for a day.\n3. Schedule the failover drill for Friday.	Summary.\nThe export job still writes to the old bucket.\nNext steps.\nFlip the export.\nWatch it for a day.\nSchedule the failover drill for Friday.
+Here's the fix:\n```ts\nexport function add(a: number, b: number) {\n  return a + b;\n}\n```\nRun `pnpm test` to check it.	Here's the fix:\nI've included a code snippet in the message.\nRun pnpm test to check it.
+The error is in `apps/hub/src/services/matrix-as/voice.ts`, line 142.	The error is in voice dot ts, line one hundred and forty two.
+See https://github.com/SuperJackfruitLabs/agentpod/pull/629 for the details.	See a link to github dot com for the details.
+I read [the Kokoro voice list](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md) — af_heart is graded A.	I read the Kokoro voice list — af heart is graded A.
+Two options:\n- **Kokoro**: 3.9x realtime, 1.45 GB of RAM\n- **Supertonic**: 5.5x realtime, 0.64 GB	Two options:\nKokoro: three point nine times realtime, one point four five gigabytes of RAM.\nSupertonic: five point five times realtime, zero point six four gigabytes.
+| Model | RTF | Memory |\n|---|---|---|\n| Kokoro | 3.9 | 1.45 GB |\n| MOSS | 1.8 | 4.6 GB |	Model, RTF, Memory.\nKokoro, three point nine, one point four five gigabytes.\nMOSS, one point eight, four point six gigabytes.
+> The deploy failed with HTTP 502.\n\nI restarted nginx and it's back up. 🎉	The deploy failed with HTTP five hundred and two.\nI restarted nginx and it's back up.
+The disk on foundry is 91% full (377 GB free of 436 GB).	The disk on foundry is ninety one percent full, three hundred and seventy seven gigabytes free of four hundred and thirty six gigabytes.
+Your meeting is on 30/09/2026 at 10:30 a.m. with Dr. Rao.	Your meeting is on the thirtieth of september twenty twenty six at ten thirty AM with doctor Rao.
+The invoice total is $12,480.50, i.e. roughly $1,040 a month.	The invoice total is twelve thousand four hundred and eighty dollars and fifty cents, that is roughly one thousand and forty dollars a month.
+Tests: 1,284 passed, 3 failed, 12 skipped.	Tests: one thousand two hundred and eighty four passed, three failed, twelve skipped.
+The config lives in ~/.hermes/profiles/analyst-echo/config.yaml.	The config lives in config dot yaml.
+It's fixed!!! The bug was an off-by-one in the loop 😅	It's fixed! The bug was an off-by-one in the loop.
+Use `git rebase -i` sparingly, e.g. only on your own branch.	Use git rebase -i sparingly, for example only on your own branch.
+The queue holds up to 8 requests; a 9th gets a 503 with Retry-After.	The queue holds up to eight requests; a ninth gets a five hundred and three with Retry-After.
+Latency dropped from 1.3 s to 0.8 s — a 38% improvement.	Latency dropped from one point three seconds to zero point eight seconds — a thirty eight percent improvement.
+The API accepts JSON, XML, etc. and returns UTF-8.	The API accepts JSON, XML, et cetera and returns UTF-eight.
+Kokoro vs. Supertonic: Kokoro wins on quality, Supertonic on speed.	Kokoro versus Supertonic: Kokoro wins on quality, Supertonic on speed.
+Set `SPEECH_PORT` to 8841 in /etc/agentpod-speech.env.	Set SPEECH PORT to eight thousand eight hundred and forty one in agentpod-speech dot env.
+I found 3 issues:\n* the token is logged\n* the timeout is too short\n* the preview cache never expires	I found three issues:\nthe token is logged.\nthe timeout is too short.\nthe preview cache never expires.
+The build finished in 4m 32s.	The build finished in four minutes thirty two seconds.
+Temperature today is 31°C, humidity 70%.	Temperature today is thirty one degrees Celsius, humidity seventy percent.
+- [x] tests pass\n- [ ] docs updated\n- [ ] deployed to production	tests pass.\ndocs updated.\ndeployed to production.
+Call `create_app()` with `engine=FakeEngine()` in tests.	Call create app with some code in tests.
+I've pushed 3 commits to `feat/speech-service` (a1b2c3d).	I've pushed three commits to feat slash speech service.
+The file is 2.5 MB; the limit is 25 MB.	The file is two point five megabytes; the limit is twenty five megabytes.
+Sprint 42 ends on Friday, 2 October.	Sprint forty two ends on Friday, the second of october.
+It costs approx. $0.02 per 1,000 characters.	It costs approximately two cents per one thousand characters.
+Rate limit: 60 requests/minute.	Rate limit: sixty requests per minute.
+Do you want me to proceed? Yes/no is fine.	Do you want me to proceed? Yes/no is fine.
+**Note:** this changes the public API, so it needs a major version bump.	Note: this changes the public API, so it needs a major version bump.
+The server returned `{"error": "unauthorized"}` with status 401.	The server returned some code with status four hundred and one.
+Revenue grew 12.5% QoQ to $3.2M in Q3 2026.	Revenue grew twelve point five percent QoQ to three point two million dollars in Q three twenty twenty six.
+Step 1 → build, step 2 → test, step 3 → ship.	Step one to build, step two to test, step three to ship.
+The ETA is ~20 minutes (maybe 30 if CI is slow).	The ETA is about twenty minutes, maybe thirty if CI is slow.
+Voice notes up to 5 minutes (300 s) are transcribed.	Voice notes up to five minutes, three hundred seconds, are transcribed.
+Check <https://docs.agentpod.dev/operating> for the runbook.	Check a link to docs dot agentpod dot dev for the runbook.
+It was the 3rd time this week, on 2026-09-28 at 23:15 UTC.	It was the third time this week, on the twenty eighth of september twenty twenty six at twenty three fifteen UTC.
+We support Python 3.12 and Node 20.	We support Python three point one two and Node twenty.
+The file README.md mentions Node.js 22 and Bun 1.4.2.	The file README dot md mentions Node dot js twenty two and Bun one point four point two.
+I'd say ~50/50 whether it lands today.	I'd say about fifty fifty whether it lands today.
+Priorities, in order:\n1) security fix\n2) the flaky test\n3) the docs	Priorities, in order:\nsecurity fix.\nthe flaky test.\nthe docs.
+---\nThat's all for today. Talk tomorrow! 👋	That's all for today. Talk tomorrow!
+The station `hermes:analyst-echo` is online again.	The station hermes:analyst-echo is online again.
+The PR is +250/-80 lines across 7 files.	The PR is plus two hundred and fifty, minus eighty lines across seven files.
+Headcount is 1.2k; we hired 30 people in the 1990s-style job fair.	Headcount is one point two thousand; we hired thirty people in the nineteen nineties-style job fair.
+Merge conflicts in `package.json` and `pnpm-lock.yaml` — I resolved both.	Merge conflicts in package dot json and pnpm-lock dot yaml — I resolved both.
+Ports 8840-8849 are free on the Tailscale IP 100.78.52.87.	Ports eight thousand eight hundred and forty to eight thousand eight hundred and forty nine are free on the Tailscale IP one zero zero dot seven eight dot five two dot eight seven.
+Memory usage went from 1.4 GB → 1.45 GB, i.e. +3.6%.	Memory usage went from one point four gigabytes to one point four five gigabytes, that is plus three point six percent.
+The meeting moved from Mon. to Wed. at 9am.	The meeting moved from Monday to Wednesday at nine AM.
+A 10-minute timeout and 3 retries (each <5 s) should be enough.	A ten-minute timeout and three retries, each under five seconds, should be enough.
+What do you think?? Should I go ahead, or wait for Mr. Singh???	What do you think? Should I go ahead, or wait for Mister Singh?
+Error: `ECONNREFUSED 127.0.0.1:5434` — is Postgres running?	Error: some code — is Postgres running?
+The cost is £5.50 per user per month, or €60 a year.	The cost is five pounds and fifty pence per user per month, or sixty euros a year.
+Thanks! I'll get on it.	Thanks! I'll get on it.
+Okay — pausing the deploy until 14:00.	Okay — pausing the deploy until fourteen o'clock.
+Here's what I changed in `server.py`:\n\n```python\nprint(1)\n```\n\nand in `speech_text.py`:\n\n```python\nprint(2)\n```	Here's what I changed in server dot py:\nI've included a code snippet in the message.\nand in speech text dot py:\nI've included a code snippet in the message.
+### Status\n\n**Build:** ✅ green\n**Deploy:** ⏳ waiting on approval\n\nI'll ping you when it's live.	Status.\nBuild: green.\nDeploy: waiting on approval.\nI'll ping you when it's live.
+Both hosts are fine: infra at 4% CPU, foundry at 12%. The transcriber's p95 is 13.2 s.	Both hosts are fine: infra at four percent CPU, foundry at twelve percent. The transcriber's p ninety five is thirteen point two seconds.
+The 2 failing tests are in `apps/console/src/lib/voice.test.ts` — see the [CI run](https://github.com/SuperJackfruitLabs/agentpod/actions/runs/123) for logs.	The two failing tests are in voice dot test dot ts — see the CI run for logs.
+I booked the room for 2:30 p.m. tomorrow (Oct. 1) — about 45 min.	I booked the room for two thirty PM tomorrow, the first of october — about forty five minutes.

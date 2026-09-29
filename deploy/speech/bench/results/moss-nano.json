@@ -1,0 +1,33 @@
+{
+ "model": "moss-nano",
+ "threads": 12,
+ "sr": 48000,
+ "meta": {
+  "voice": "Ava",
+  "backend": "official ONNX CPU runtime"
+ },
+ "load_s": 3.87,
+ "short": {
+  "audio_s": 3.36,
+  "synth_s": 5.24,
+  "rtf": 0.64
+ },
+ "para": {
+  "audio_s": 31.28,
+  "synth_s": 48.0,
+  "rtf": 0.65
+ },
+ "tricky": {
+  "audio_s": 15.2,
+  "synth_s": 24.03,
+  "rtf": 0.63
+ },
+ "first_audio_mode": "native stream",
+ "stream_para": {
+  "first_audio_s": 0.46,
+  "total_s": 65.57,
+  "audio_s": 29.2,
+  "rtf": 0.45
+ },
+ "peak_rss_mb": 5230
+}

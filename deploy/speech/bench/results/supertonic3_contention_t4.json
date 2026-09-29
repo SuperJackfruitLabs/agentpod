@@ -1,0 +1,114 @@
+{
+ "model": "supertonic3",
+ "threads": 4,
+ "sr": 44100,
+ "meta": {
+  "voice": "F1",
+  "steps": 8
+ },
+ "load_s": 0.68,
+ "contention": {
+  "idle_para_synth_s": 5.32,
+  "loaded_para_synth_s_mean": 8.15,
+  "runs": [
+   {
+    "synth_s": 8.56,
+    "audio_s": 29.49,
+    "rtf": 3.45,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.12,
+    "audio_s": 29.49,
+    "rtf": 3.63,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.84,
+    "audio_s": 29.49,
+    "rtf": 3.76,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.23,
+    "audio_s": 29.49,
+    "rtf": 3.58,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.38,
+    "audio_s": 29.49,
+    "rtf": 3.99,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.18,
+    "audio_s": 29.49,
+    "rtf": 3.61,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.96,
+    "audio_s": 29.49,
+    "rtf": 3.71,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.14,
+    "audio_s": 29.49,
+    "rtf": 3.62,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.85,
+    "audio_s": 29.49,
+    "rtf": 3.76,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.9,
+    "audio_s": 29.49,
+    "rtf": 3.73,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.52,
+    "audio_s": 29.49,
+    "rtf": 3.46,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.73,
+    "audio_s": 29.49,
+    "rtf": 3.38,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.05,
+    "audio_s": 29.49,
+    "rtf": 3.66,
+    "overlapped": true
+   },
+   {
+    "synth_s": 8.87,
+    "audio_s": 29.49,
+    "rtf": 3.32,
+    "overlapped": true
+   },
+   {
+    "synth_s": 7.92,
+    "audio_s": 29.49,
+    "rtf": 3.72,
+    "overlapped": true
+   },
+   {
+    "synth_s": 6.03,
+    "audio_s": 29.49,
+    "rtf": 4.89,
+    "overlapped": false
+   }
+  ],
+  "stt_http": "200",
+  "stt_seconds": 127.239349
+ }
+}

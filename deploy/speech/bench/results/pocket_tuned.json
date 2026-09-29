@@ -1,0 +1,34 @@
+{
+ "model": "pocket",
+ "threads": 1,
+ "sr": 24000,
+ "meta": {
+  "voice": "alba",
+  "language": "english",
+  "torch_threads": 1
+ },
+ "load_s": 0.66,
+ "short": {
+  "audio_s": 2.88,
+  "synth_s": 1.0,
+  "rtf": 2.89
+ },
+ "para": {
+  "audio_s": 24.8,
+  "synth_s": 8.16,
+  "rtf": 3.04
+ },
+ "tricky": {
+  "audio_s": 11.76,
+  "synth_s": 3.93,
+  "rtf": 2.99
+ },
+ "first_audio_mode": "native stream",
+ "stream_para": {
+  "first_audio_s": 0.14,
+  "total_s": 8.06,
+  "audio_s": 24.4,
+  "rtf": 3.03
+ },
+ "peak_rss_mb": 1019
+}

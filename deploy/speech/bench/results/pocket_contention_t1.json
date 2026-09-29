@@ -1,0 +1,85 @@
+{
+ "model": "pocket",
+ "threads": 1,
+ "sr": 24000,
+ "meta": {
+  "voice": "alba",
+  "language": "english",
+  "torch_threads": 1
+ },
+ "load_s": 0.66,
+ "contention": {
+  "idle_para_synth_s": 8.58,
+  "loaded_para_synth_s_mean": 11.53,
+  "runs": [
+   {
+    "synth_s": 11.83,
+    "audio_s": 25.84,
+    "rtf": 2.18,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.26,
+    "audio_s": 24.88,
+    "rtf": 2.21,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.37,
+    "audio_s": 23.6,
+    "rtf": 2.08,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.69,
+    "audio_s": 24.8,
+    "rtf": 2.12,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.4,
+    "audio_s": 25.28,
+    "rtf": 2.22,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.56,
+    "audio_s": 25.28,
+    "rtf": 2.19,
+    "overlapped": true
+   },
+   {
+    "synth_s": 10.96,
+    "audio_s": 24.56,
+    "rtf": 2.24,
+    "overlapped": true
+   },
+   {
+    "synth_s": 12.96,
+    "audio_s": 25.44,
+    "rtf": 1.96,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.11,
+    "audio_s": 25.04,
+    "rtf": 2.25,
+    "overlapped": true
+   },
+   {
+    "synth_s": 11.13,
+    "audio_s": 24.96,
+    "rtf": 2.24,
+    "overlapped": true
+   },
+   {
+    "synth_s": 10.81,
+    "audio_s": 24.96,
+    "rtf": 2.31,
+    "overlapped": false
+   }
+  ],
+  "stt_http": "200",
+  "stt_seconds": 125.458655
+ }
+}

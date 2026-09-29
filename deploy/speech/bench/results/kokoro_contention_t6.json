@@ -1,0 +1,102 @@
+{
+ "model": "kokoro",
+ "threads": 6,
+ "sr": 24000,
+ "meta": {
+  "voice": "af_heart",
+  "variant": "kokoro-onnx fp32"
+ },
+ "load_s": 0.79,
+ "contention": {
+  "idle_para_synth_s": 6.43,
+  "loaded_para_synth_s_mean": 9.59,
+  "runs": [
+   {
+    "synth_s": 9.74,
+    "audio_s": 25.39,
+    "rtf": 2.61,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.45,
+    "audio_s": 25.39,
+    "rtf": 2.69,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.42,
+    "audio_s": 25.39,
+    "rtf": 2.69,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.44,
+    "audio_s": 25.39,
+    "rtf": 2.69,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.52,
+    "audio_s": 25.39,
+    "rtf": 2.67,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.56,
+    "audio_s": 25.39,
+    "rtf": 2.65,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.56,
+    "audio_s": 25.39,
+    "rtf": 2.66,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.54,
+    "audio_s": 25.39,
+    "rtf": 2.66,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.53,
+    "audio_s": 25.39,
+    "rtf": 2.66,
+    "overlapped": true
+   },
+   {
+    "synth_s": 10.13,
+    "audio_s": 25.39,
+    "rtf": 2.51,
+    "overlapped": true
+   },
+   {
+    "synth_s": 10.02,
+    "audio_s": 25.39,
+    "rtf": 2.53,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.32,
+    "audio_s": 25.39,
+    "rtf": 2.72,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.48,
+    "audio_s": 25.39,
+    "rtf": 2.68,
+    "overlapped": true
+   },
+   {
+    "synth_s": 9.27,
+    "audio_s": 25.39,
+    "rtf": 2.74,
+    "overlapped": false
+   }
+  ],
+  "stt_http": "200",
+  "stt_seconds": 135.528434
+ }
+}

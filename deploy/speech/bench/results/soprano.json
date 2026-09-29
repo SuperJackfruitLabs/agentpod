@@ -1,0 +1,33 @@
+{
+ "model": "soprano",
+ "threads": 12,
+ "sr": 32000,
+ "meta": {
+  "voice": "built-in (single voice)",
+  "repo": "ekwek/Soprano-1.1-80M"
+ },
+ "load_s": 4.26,
+ "short": {
+  "audio_s": 2.69,
+  "synth_s": 1.56,
+  "rtf": 1.72
+ },
+ "para": {
+  "audio_s": 23.23,
+  "synth_s": 5.39,
+  "rtf": 4.31
+ },
+ "tricky": {
+  "audio_s": 13.7,
+  "synth_s": 2.77,
+  "rtf": 4.95
+ },
+ "first_audio_mode": "native stream",
+ "stream_para": {
+  "first_audio_s": 0.24,
+  "total_s": 19.6,
+  "audio_s": 23.04,
+  "rtf": 1.18
+ },
+ "peak_rss_mb": 976
+}

@@ -1,0 +1,57 @@
+name: Speech service
+
+# deploy/speech runs on foundry, deployed by hand, so nothing here ships it.
+# What this proves on every change to it: the normaliser still reads the
+# corpus of agent replies the way it did, and the HTTP service (with Kokoro
+# faked) still answers as documented. The model itself is not downloaded;
+# the one test that loads it is marked slow and runs on foundry.
+#
+# Not a required check: it only runs when deploy/speech changes, and a
+# required check that did not run would block every other PR.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/speech/**"
+      - ".github/workflows/speech.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "deploy/speech/**"
+      - ".github/workflows/speech.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: speech-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: speech
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # foundry runs Python 3.12, and WeTextProcessing's pynini ships wheels
+      # for Linux x86-64 only, which is why this is not run on a Mac.
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            deploy/speech/requirements.txt
+            deploy/speech/tests/requirements.txt
+
+      - name: Install
+        working-directory: deploy/speech
+        run: pip install -r tests/requirements.txt
+
+      - name: Test (normaliser and API; the real-model test is deselected)
+        working-directory: deploy/speech
+        run: python -m pytest -v

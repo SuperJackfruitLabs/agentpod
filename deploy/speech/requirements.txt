@@ -1,0 +1,7 @@
+kokoro-onnx==0.6.1
+onnxruntime==1.30.0
+numpy==2.5.3
+soundfile==0.14.0
+WeTextProcessing==1.2.0
+fastapi==0.118.0
+uvicorn==0.37.0

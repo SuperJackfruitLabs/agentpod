@@ -1,0 +1,16 @@
+# foundry, 2026-09-26, large-v3-turbo. Console output of bench_plain12.py,
+# bench_batched.py (threads, batch) and bench_cpp.py (12 threads), copied from
+# the benchmark session; these scripts printed JSON that was not saved to files.
+# Times are seconds of wall clock per clip.
+
+plain 12t: hi 13.1 s  long5 216.0 s
+batched t=6 b=8: hi 13.4s en 12.1s long5 84.3s
+batched t=12 b=8: hi 13.5s en 12.7s long5 82.9s
+batched t=12 b=16: hi 13.6s en 12.7s long5 81.4s
+
+whisper.cpp 12t load 0.3
+  hi.wav        24.8s | कल सुबह 10 बजे तीम की बैठक है। कृटिया अपनी रिपोर्ट समय पर भेज दीजिये और नई योजना के बारे म
+  hinglish.wav  24.8s | मीटिंग के बाद प्लीज मज फाइनल रिपोर्ट बेज दीना और क्लाइन्ट को भी एच आउपडेट कार दीना की डेदल
+  th.wav        24.4s | การประชุมพรุ่มนี้เริ่มบ่าย 3 โมง กรุณาเตรียมเอกสารให้พรอม
+  en.wav        24.2s | The quarterly review is moved to Thursday afternoon. Please send your updated numbers by W
+  long5.wav     262.7s | Item 1. The quarterly review is moved to Thursday afternoon. Please send your updated numb
