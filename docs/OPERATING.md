@@ -1289,6 +1289,34 @@ The agent stops claiming and only a hub restart resumes it — there is no route
 reports this, so `grep 'halting: a run belonged to another agent'` in the hub log is the only
 signal. A lost lease (409 `STALE_LEASE`) is *not* a halt; it is ordinary and the loop claims again.
 
+### When the agent reports for itself
+
+Give a roster entry an `mcpToken` and its harness gets superpipeline's own MCP tools inside the
+session — it can add a reference, block on a question, or complete the card itself. Configure it
+and check it is working by looking for the status:
+
+```bash
+journalctl -u agentpod-hub | grep 'the agent reported for itself'
+```
+
+What happens: the credential rides ACP's `session/new`, per session. Nothing is written to the
+station's disk, nothing is persisted, and neither the session row nor the transcript in the
+console contains it — so there is nothing to rotate on the station and nothing to clean up when
+a session ends. Hermes does not *declare* `mcpCapabilities` at `initialize` and registers the
+servers anyway, so AgentPod sends them unconditionally; a harness that ignores the field simply
+has no board tools and the bridge remains its only voice.
+
+The bridge still sends its own `complete` afterwards, and when the agent got there first
+superpipeline answers `409 STALE_LEASE` — the same code as a lease reclaimed out from under us.
+So the bridge re-reads the run: ended with `completed`, `submitted` or `blocked` is the agent
+having reported (dispatch status `self-reported`, ledger `reported`); `reclaimed` or `released`
+is still a lost lease, and so is a run that cannot be re-read at all. That fallback is also the
+safety net for a registration that silently failed: the card still finishes.
+
+Mint the token **run-only**, from superpipeline's Workspace → Agents tab. See
+[DEPLOYMENT.md → superpipeline bridge](./DEPLOYMENT.md#superpipeline-bridge) for why it must not
+be the roster `token`.
+
 ### Reading `bridge_dispatches`
 
 There is no API for the ledger — Postgres is the read path. One row per claimed run, keyed

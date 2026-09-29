@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/card-prompt",
-  "contract": "card-prompt/2",
+  "contract": "card-prompt/3",
   "version": 1,
   "authoredAt": "2026-08-14",
   "invariant": "A card handed to a harness becomes exactly one prompt, assembled from the card, the previous stage's handoff and the card's references — deterministically, from a versioned shape, so the two planes can disagree in a test rather than in an agent's behaviour.",
@@ -23,8 +23,8 @@
     "A string `spec` or `handoff` is rendered verbatim (trimmed); anything else is pretty-printed JSON in a fenced block. A harness must never be shown `[object Object]`.",
     "`feedback` on a handoff is lifted out and rendered above the rest of the handoff, because it is a human telling the agent what to change and is the reason the card came back.",
     "The provenance line always states the attempt number. Attempt 2 of a card is not the same instruction as attempt 1, and a harness that cannot tell them apart cannot behave differently on a retry.",
-    "The prompt never contains a credential, a lease epoch or an AgentPod id: it crosses into a harness process, and the harness has no use for any of them.",
-    "A stage's `instructions` render as their own section, because they are the stage's standing rule rather than this card's task: the same text governs every card that reaches the stage and every agent that can claim it. Folded into the Task it would read as one card's whim."
+    "A stage's `instructions` render as their own section, because they are the stage's standing rule rather than this card's task: the same text governs every card that reaches the stage and every agent that can claim it. Folded into the Task it would read as one card's whim.",
+    "The closing section depends on whether the prompt carries a `run`. Without one it says the bridge reports for the agent and the agent must not call the board — how every board worked before agents held a credential. With one it names the MCP verbs, gives the board and run ids, and points at `superpipeline_get_run` for the lease epoch, which must never be rendered into a prompt."
   ],
   "cases": [
     {
@@ -32,7 +32,7 @@
       "mustParse": true,
       "why": "Every input present. This is the shape a second-stage card has: a spec from the human, a handoff from the stage before it, and references the first agent attached.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -68,7 +68,7 @@
       "mustParse": true,
       "why": "The minimum a board can hand over: a title and nothing else. Every optional section must vanish rather than render empty, or the harness is told there was no spec, no handoff and no references when it was only told a title.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -92,7 +92,7 @@
       "mustParse": true,
       "why": "THE CASE THAT EARNS THE CONTRACT. A `request_changes` gate decision merges `{feedback}` into the handoff the agent itself produced and re-queues the card. Rendered as an undifferentiated JSON blob, a reviewer's instruction sits below the agent's own summary of what it already did — so the most important sentence on the card is the least prominent. It is lifted out.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_a1b2c3d4e5f60718",
@@ -121,7 +121,7 @@
       "mustParse": true,
       "why": "`spec` is `JsonValue` on superpipeline's side, so it is routinely an object, and a reference's `title` is nullable. Both are the paths where a naive renderer prints `[object Object]` or the word `null` into a harness's instruction.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -160,7 +160,7 @@
       "mustParse": true,
       "why": "superpipeline returns `stage: null` when the board's stage list no longer contains the card's stage (board-do.ts:157). The prompt must still render — a board edited mid-run must not strand a harness.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -181,7 +181,7 @@
       "mustParse": true,
       "why": "A stage may carry a standing rule for every card that reaches it; it renders as its own section.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_6a899b0f0d054046",
         "externalRunId": "run_5b3c1d9e7f204a11",
@@ -201,6 +201,34 @@
         }
       },
       "rendered": "# The CLI that could not update itself\n\nsuperpipeline board brd_6a899b0f0d054046 · card crd_9f8e7d6c5b4a3918 · stage Publish (publish) · attempt 1.\n\n## Task\n\nWrite up why agentpod-fleet sat eleven releases behind while agentpod-node self-updated.\n\n## How this stage is done\n\nPublish by pushing to the repository's PRIMARY remote, never to GitHub directly.\nA human approved this card at the gate before this one, so no pull request is needed.\nReport the commit sha and the live URL in your handoff.\n\n## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card."
+    },
+    {
+      "name": "agent_may_report_for_itself",
+      "mustParse": true,
+      "why": "A prompt carrying a run tells the agent to report its own outcome, and names the run — not the lease epoch, which the agent fetches itself.",
+      "value": {
+        "version": "card-prompt/3",
+        "source": "superpipeline",
+        "boardId": "brd_6a899b0f0d054046",
+        "externalRunId": "run_5b3c1d9e7f204a11",
+        "card": {
+          "id": "crd_9f8e7d6c5b4a3918",
+          "title": "Publish the post",
+          "spec": "Push it and report the URL."
+        },
+        "stage": {
+          "key": "publish",
+          "name": "Publish"
+        },
+        "run": {
+          "id": "run_5b3c1d9e7f204a11"
+        },
+        "references": [],
+        "attempt": {
+          "number": 1
+        }
+      },
+      "rendered": "# Publish the post\n\nsuperpipeline board brd_6a899b0f0d054046 · card crd_9f8e7d6c5b4a3918 · stage Publish (publish) · attempt 1.\n\n## Task\n\nPush it and report the URL.\n\n## Completing this card\n\nReport the outcome to the board yourself, over the `superpipeline` MCP server:\n\n- finished it — `superpipeline_complete` with a handoff saying what you produced\n- could not finish it — `superpipeline_block` with the reason. **Say this rather than\n  finishing your turn quietly:** a turn that simply ends is recorded as success.\n- produced something worth linking — `superpipeline_add_reference`\n\nYour board is `brd_6a899b0f0d054046` and your run is `run_5b3c1d9e7f204a11`. Call\n`superpipeline_get_run` first: every verb above needs the lease epoch it returns.\n\nDo not ask for another card; your credential cannot claim one."
     },
     {
       "name": "unversioned",
@@ -226,7 +254,7 @@
       "mustParse": false,
       "why": "A hub must refuse a version it cannot render rather than render it as though it were v1. Accepting an unknown version is how a section silently goes missing on one side of the seam.",
       "value": {
-        "version": "card-prompt/3",
+        "version": "card-prompt/4",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -246,7 +274,7 @@
       "mustParse": false,
       "why": "The title is the one field always rendered and is the harness's whole instruction when there is no spec. An empty one produces a prompt that asks for nothing and gets a confident answer anyway.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -266,7 +294,7 @@
       "mustParse": false,
       "why": "superpipeline's `attemptCount` increments on claim, so the agent working a card is always on attempt 1 or later (spike finding RQ4). A zero means the count was read from the wrong field, and 'attempt 0' invites a harness to treat a retry as a first run.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
@@ -286,7 +314,7 @@
       "mustParse": false,
       "why": "The same rule `Run.externalRunId` carries, applied where the id enters rather than where it is stored. An `attempt_…` here means AgentPod's own key was passed off as the board's work run, and the prompt would be built for a run no board has.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "source": "superpipeline",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
@@ -306,7 +334,7 @@
       "mustParse": false,
       "why": "Mirrors the `externalRunId`/`externalSource` pairing on acp_runs: a prompt built from work whose orchestrator is unnamed cannot be traced back to the board that asked for it, and `externalSource` is deliberately open so the id's shape cannot supply the answer.",
       "value": {
-        "version": "card-prompt/2",
+        "version": "card-prompt/3",
         "boardId": "brd_9c1d4e5f6a7b8c9d",
         "externalRunId": "run_e074a2160c4b4f28",
         "card": {

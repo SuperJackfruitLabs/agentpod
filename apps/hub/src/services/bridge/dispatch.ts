@@ -65,7 +65,7 @@
  *    never reclaimed. See `askTheHuman`.
  */
 
-import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpSessionMode } from "@agentpod/contract";
+import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import { isControlPairDenied } from "../control-pair";
@@ -131,6 +131,12 @@ export interface DispatchDeps {
   permissionWaitMs?: number;
   /** How often the run is re-read while a question is outstanding. */
   permissionPollMs?: number;
+  /**
+   * superpipeline's MCP endpoint, for the agent's own board tools. Together with
+   * the agent's `mcpToken` it is what makes a harness able to report for
+   * itself; either one missing means it cannot, and is told nothing about it.
+   */
+  mcpUrl?: string;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -145,6 +151,13 @@ export type DispatchStatus =
   | "replayed"
   /** Worked and reported. */
   | "reported"
+  /**
+   * Worked, and the AGENT told the board — the bridge's own report arrived
+   * second and was refused. Its own status rather than a flavour of `reported`,
+   * because the two differ in who authored the card's outcome, and that is the
+   * fact an operator reading the ledger is trying to establish.
+   */
+  | "self-reported"
   /** Worked; the board could not be told. Recoverable — the output is recorded. */
   | "unreported"
   /** The lease lapsed mid-run. The harness was stopped. */
@@ -318,7 +331,12 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     text = renderCardPrompt(await assemblePrompt(deps, work));
 
     // ─── the session ────────────────────────────────────────────────────────
-    session = await acp.createSession({ stationId: agent.stationId, userId: agent.hubUserId, mode: agent.mode });
+    session = await acp.createSession({
+      stationId: agent.stationId,
+      userId: agent.hubUserId,
+      mode: agent.mode,
+      ...(boardTools(deps) ? { mcpServers: boardTools(deps)! } : {}),
+    });
   } catch (err) {
     return await handBack(deps, key, work, err);
   }
@@ -630,6 +648,19 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     try {
       await client.complete(work, handoff);
     } catch (err) {
+      if (isLeaseSuperseded(err)) {
+        const authored = await endedByTheAgent(deps, work);
+        if (authored) {
+          const reason = `the agent ended its own run: ${authored}`;
+          log("the agent reported for itself; the bridge's report was redundant", {
+            run: work.runId,
+            card: key.externalCardId,
+            outcome: authored,
+          });
+          await afterTheBoardWasTold(deps, "the agent had already reported", () => markReported(key));
+          return { status: "self-reported", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
+        }
+      }
       if (isLeaseSuperseded(err) || isForeignRun(err)) {
         return await abort(deps, key, work, attemptId, err);
       }
@@ -893,6 +924,46 @@ async function failStarted(
 }
 
 /**
+ * Outcomes an agent can write to its own run. Everything else on `runs.outcome`
+ * — `released`, `reclaimed` — is the board taking the card BACK, which is the
+ * opposite fact and must not be read as a report.
+ */
+const AGENT_AUTHORED_OUTCOMES = new Set(["completed", "submitted", "blocked"]);
+
+/**
+ * Did the agent end this run itself?
+ *
+ * An agentpod-driven agent now carries a run-scoped superpipeline token and calls
+ * `superpipeline_complete` (or `_block`) through MCP. When it does, the run is
+ * already `ended` by the time the bridge sends its own `complete`, and the board
+ * answers the same 409 `STALE_LEASE` it sends for a lease reclaimed out from
+ * under us. One code, two opposite facts: the card finished by the agent we
+ * dispatched, or the card taken away from it.
+ *
+ * The run row is what tells them apart, so it is re-read. `GET /runs/:runId`
+ * needs no lease — that is exactly why it can still be read here — but it does
+ * check ownership, so a foreign run answers 403 rather than lying.
+ *
+ * **A read that fails means no.** Returning "the agent reported" on the strength
+ * of a read that never happened would mark the ledger `reported` for work
+ * nothing vouched for; the superseded-lease path costs a re-queue and vouches
+ * for nothing it did not see.
+ */
+async function endedByTheAgent(deps: DispatchDeps, work: ClaimedWork): Promise<string | null> {
+  try {
+    const { run } = await deps.client.context(work.runId);
+    if (!run || run.status !== "ended") return null;
+    return run.outcome && AGENT_AUTHORED_OUTCOMES.has(run.outcome) ? run.outcome : null;
+  } catch (err) {
+    (deps.log ?? (() => {}))("the run could not be re-read after a stale lease", {
+      run: work.runId,
+      error: String(err),
+    });
+    return null;
+  }
+}
+
+/**
  * Stop, without touching the run again.
  *
  * Deliberately no `fail` and no `release`: both would 409 on a superseded lease
@@ -963,5 +1034,36 @@ async function assemblePrompt(deps: DispatchDeps, work: ClaimedWork): Promise<Ca
     // attemptCount increments on CLAIM, so the agent working a card is always
     // on attempt 1 or later (RQ4).
     attempt: { number: ctx.card.attemptCount ?? work.card.attemptCount ?? 1 },
+    // Told which run it holds ONLY when it has the tools to address it. A
+    // prompt naming verbs the harness cannot call is an instruction to fail.
+    run: boardTools(deps) ? { id: work.runId } : null,
   });
 }
+
+/**
+ * The board's own MCP server, as this agent's session should receive it — or
+ * null when this agent has no run-scoped credential and therefore no tools.
+ *
+ * Built per dispatch and never stored. The `Bearer` is the agent's `mcpToken`,
+ * which can drive a run and cannot claim one; the roster token, which can, is
+ * the hub's alone and does not leave this process.
+ */
+function boardTools(deps: DispatchDeps): AcpMcpServer[] | null {
+  const token = deps.agent.mcpToken;
+  if (!token || !deps.mcpUrl) return null;
+  return [
+    {
+      type: "http",
+      name: SUPERPIPELINE_MCP_NAME,
+      url: deps.mcpUrl,
+      headers: [{ name: "Authorization", value: `Bearer ${token}` }],
+    },
+  ];
+}
+
+/**
+ * What the harness will call its board tools: `superpipeline_complete`,
+ * `superpipeline_get_run`. The card prompt names them in prose, so renaming
+ * this renames them there too — and the prompt would then be wrong.
+ */
+const SUPERPIPELINE_MCP_NAME = "superpipeline";

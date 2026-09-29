@@ -2742,3 +2742,71 @@ test("'answered' clears a reported failure too", async () => {
     server.stop(true);
   }
 });
+
+// ─── MCP servers on the session ─────────────────────────────────────────────
+//
+// ACP's `session/new` carries them, and hermes registers what it is given per
+// session — so a board credential reaches the harness for exactly the run it
+// was minted for, and nothing is written to the station's disk.
+
+function sessionNewParams(fake: { agentReceived: Array<Record<string, unknown>> }) {
+  const news = fake.agentReceived.filter((m) => m.method === "session/new");
+  return news.at(-1)?.params as { cwd?: string; mcpServers?: unknown } | undefined;
+}
+
+test(
+  "createSession: the MCP servers it is given reach the harness at session/new",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-mcp", { stationKey: "acp-mcp" });
+    try {
+      const row = await createSession({
+        stationId: station.id,
+        userId: TEST_USER,
+        mode: "full-auto",
+        mcpServers: [
+          {
+            type: "http",
+            name: "superpipeline",
+            url: "https://board.test/mcp",
+            headers: [{ name: "Authorization", value: "Bearer spa_run_scoped" }],
+          },
+        ],
+      });
+
+      expect(sessionNewParams(fake)?.mcpServers).toEqual([
+        {
+          type: "http",
+          name: "superpipeline",
+          url: "https://board.test/mcp",
+          headers: [{ name: "Authorization", value: "Bearer spa_run_scoped" }],
+        },
+      ]);
+
+      // The credential is not in the session row, and never in the transcript:
+      // the console reads both.
+      expect(JSON.stringify(row)).not.toContain("spa_run_scoped");
+      const evts = await eventsFor(row.id);
+      expect(JSON.stringify(evts)).not.toContain("spa_run_scoped");
+
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "createSession: a session given none still sends the empty list ACP requires",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-mcp-none", { stationKey: "acp-mcp-none" });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      expect(sessionNewParams(fake)?.mcpServers).toEqual([]);
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);

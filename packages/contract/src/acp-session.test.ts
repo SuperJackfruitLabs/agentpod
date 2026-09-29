@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   AcpSessionMode,
+  AcpMcpServer,
   AcpSessionStatus,
   AcpSessionRow,
   AcpEventType,
@@ -149,4 +150,19 @@ describe("TurnError — one error shape, whichever harness failed", () => {
   it("refuses a kind it does not know rather than guessing one", () => {
     expect(TurnError.safeParse({ ...openclawQuota, kind: "cosmic_rays" }).success).toBe(false);
   });
+});
+
+it("AcpMcpServer is HTTP only, and a stdio entry is refused", () => {
+  const ok = AcpMcpServer.parse({
+    type: "http",
+    name: "superpipeline",
+    url: "https://app.superpipeline.dev/mcp",
+    headers: [{ name: "Authorization", value: "Bearer spa_token" }],
+  });
+  expect(ok.headers[0]!.name).toBe("Authorization");
+  // Headers are optional: a public MCP server needs none.
+  expect(AcpMcpServer.parse({ type: "http", name: "docs", url: "https://x.test/mcp" }).headers).toEqual([]);
+  // stdio would be a second way to run code on the station; the board cannot vouch for one.
+  expect(() => AcpMcpServer.parse({ type: "stdio", name: "local", command: "/bin/sh" })).toThrow();
+  expect(() => AcpMcpServer.parse({ type: "http", name: "superpipeline", url: "not-a-url" })).toThrow();
 });

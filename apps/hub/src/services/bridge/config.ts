@@ -93,6 +93,24 @@ export const BridgeAgentConfig = z.object({
   maxConcurrency: z.number().int().positive().optional(),
   /** superpipeline profile to claim under, when the board routes by profile. */
   profileKey: z.string().optional(),
+  /**
+   * A second superpipeline credential, handed to the HARNESS so it can report on
+   * its own card over MCP. Absent means the harness gets no board tools and the
+   * bridge remains the only voice — which is what every agent had until now.
+   *
+   * **Not `token`, and never `token`.** The roster credential can claim, and an
+   * agent holding it could take a second card while still working the first —
+   * the objection AgentPod's own prompt contract raised against giving a
+   * harness board access at all. superpipeline answers it by scoping a token to
+   * `run` (superpipeline#109), so the credential that reaches the station can
+   * finish the card it holds and cannot ask for another. Two fields, because
+   * that difference is the whole safety argument and one field could not carry
+   * it.
+   *
+   * Minting is a human act on superpipeline — an agent cannot mint for itself,
+   * by design — so this is configured, not derived.
+   */
+  mcpToken: z.string().startsWith("spa_", 'a superpipeline agent token starts with "spa_"').optional(),
 });
 export type BridgeAgentConfig = z.infer<typeof BridgeAgentConfig>;
 
@@ -129,7 +147,7 @@ export function loadBridgeConfig(): BridgeConfig | null {
     parsed = JSON.parse(raw || "[]");
   } catch {
     throw new Error(
-      `SUPERPIPELINE_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?}`,
+      `SUPERPIPELINE_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?, mcpToken?}`,
     );
   }
 

@@ -30,7 +30,7 @@ import { AcpRunId } from "./ids";
  * a card differently fails its own test suite rather than in an agent's
  * behaviour.
  */
-export const CARD_PROMPT_VERSION = "card-prompt/2";
+export const CARD_PROMPT_VERSION = "card-prompt/3";
 
 /** A card reference as an agent may read it (superpipeline `ReferenceView`, narrowed). */
 export const CardPromptReference = z.object({
@@ -86,6 +86,29 @@ const CardPrompt_ = z.object({
        * eventually not typed.
        */
       instructions: z.string().min(1).optional(),
+    })
+    .nullable()
+    .default(null),
+
+  /**
+   * The run this prompt is for, when the agent can address the board itself.
+   *
+   * The ID ONLY. superpipeline's run verbs are also fenced on a `leaseEpoch`, and the first
+   * version of this carried one — which `ecosystem-identity`'s own rule refused:
+   *
+   *     no rendered prompt leaks a credential, a lease epoch or an AgentPod id
+   *
+   * That rule predates agents having a credential and is still right: a prompt crosses into a
+   * harness process and can be echoed back into a transcript the board renders. So the agent is
+   * told which run it holds and asks superpipeline for the epoch itself
+   * (`superpipeline_get_run`, superpipeline#109).
+   *
+   * Absent means the bridge reports on the agent's behalf, which is how every board worked before
+   * this existed.
+   */
+  run: z
+    .object({
+      id: z.string().min(1),
     })
     .nullable()
     .default(null),
@@ -198,12 +221,43 @@ export function renderCardPrompt(prompt: CardPrompt): string {
     blocks.push(`## References\n\n${prompt.references.map(referenceLine).join("\n")}`);
   }
 
-  // The bridge owns reporting. A harness that tries to drive the board itself
-  // has no credential for it, and one that asks for more work would keep a
-  // lease open past the card it was claimed for.
-  blocks.push(
-    "## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card.",
-  );
+  /**
+   * Who reports, and what the agent may say.
+   *
+   * This used to be one fixed paragraph: *your progress is reported to the board for you — do not
+   * call the board*. Its reason was recorded beside it and half of it stopped being true. "A
+   * harness that tries to drive the board itself has no credential for it" is answered by giving
+   * it one; "one that asks for more work would keep a lease open past the card it was claimed
+   * for" is answered by scoping that credential to `run`, so it cannot ask.
+   *
+   * The half that was never about credentials is the half that mattered most: an agent that
+   * decided to refuse had no way to SAY so. It ended its turn normally, the bridge called
+   * `complete`, and the board recorded a refusal as a success — twice, on the card that prompted
+   * all of this. The rule telling it to block was unobeyable.
+   */
+  if (prompt.run) {
+    blocks.push(
+      [
+        "## Completing this card",
+        "",
+        "Report the outcome to the board yourself, over the `superpipeline` MCP server:",
+        "",
+        `- finished it — \`superpipeline_complete\` with a handoff saying what you produced`,
+        `- could not finish it — \`superpipeline_block\` with the reason. **Say this rather than`,
+        `  finishing your turn quietly:** a turn that simply ends is recorded as success.`,
+        `- produced something worth linking — \`superpipeline_add_reference\``,
+        "",
+        `Your board is \`${prompt.boardId}\` and your run is \`${prompt.run.id}\`. Call`,
+        "`superpipeline_get_run` first: every verb above needs the lease epoch it returns.",
+        "",
+        "Do not ask for another card; your credential cannot claim one.",
+      ].join("\n"),
+    );
+  } else {
+    blocks.push(
+      "## Completing this card\n\nDo the work in this workspace, then stop. Your progress is reported to the board for you — do not call the board, and do not ask for the next card.",
+    );
+  }
 
   return blocks.join("\n\n");
 }

@@ -186,6 +186,15 @@ export async function startSuperpipelineBridge(
   const acp = deps.acp ?? hubAcpPort;
   const log = deps.log ?? ((m: string, meta?: Record<string, unknown>) => console.log(`[bridge] ${m}`, meta ?? ""));
 
+  /**
+   * superpipeline serves MCP at one origin-level path, not per board — the board
+   * is the agent's, carried by its credential (`apps/api/src/index.ts`,
+   * `path === '/mcp'`). Derived from the configured base URL rather than
+   * configured separately: two settings that must agree are one setting an
+   * operator can get wrong.
+   */
+  const mcpUrl = new URL("/mcp", config.baseUrl).toString();
+
   const loops: LoopHandle[] = [];
   for (const agent of config.agents) {
     const tenantId = await resolveTenantForUser(agent.hubUserId);
@@ -198,7 +207,7 @@ export async function startSuperpipelineBridge(
 
     loops.push(
       startAgentLoop({
-        run: () => runOnce({ client, acp, agent, tenantId, source: config.source, log }),
+        run: () => runOnce({ client, acp, agent, tenantId, source: config.source, log, mcpUrl }),
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),
       }),
     );
