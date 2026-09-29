@@ -193,6 +193,12 @@ describe("what a report becomes — the bridge's own fleet events", () => {
     ]);
   });
 
+  test("writing is the bridge's words-streaming event: the card's Writing phase, and nothing of the answer", async () => {
+    const r = relay();
+    await r.handle(NODE, report({ type: "writing" }));
+    expect(noted.map((n) => n.event)).toEqual([{ type: "spoke", roomId: ROOM, mxid: AGENT, name: "Echo", at: T0 }]);
+  });
+
   test("an approval is the room's permission decision, answered in the room (no inline buttons)", async () => {
     const r = relay();
     await r.handle(NODE, report({ type: "decision-asked", eventId: "$prompt", question: "Run rm -rf build?" }));

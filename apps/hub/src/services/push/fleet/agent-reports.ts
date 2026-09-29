@@ -187,6 +187,10 @@ export function createAgentReportRelay(deps: AgentReportDeps) {
       case "step":
         note({ type: "step", roomId, mxid, name, title: event.title, completed: event.completed, total: event.total, at: t });
         break;
+      case "writing":
+        // The answer began streaming: the bridge's "spoke", the card's Writing phase.
+        note({ type: "spoke", roomId, mxid, name, at: t });
+        break;
       case "turn-finished":
         note({
           type: "turn-finished",
