@@ -435,3 +435,127 @@ describe("starting the sweeper", () => {
     expect(passes).toBeGreaterThan(0);
   });
 });
+
+describe("settling a gate decided somewhere the room never heard about", () => {
+  /**
+   * A gate resolved in superpipeline's web UI leaves a live-looking card in Matrix forever.
+   *
+   * The receipt that settles a room card is posted by `handleGateDecision`, which runs only when a
+   * decision arrives AS A MATRIX EVENT — from supermessage. A decision made on the board is
+   * resolved by superpipeline directly; the hub never sees it, `markOutcomePosted` never fires,
+   * and the card goes on offering Approve, Request changes and Reject for a decision already made.
+   *
+   * Observed live: `gate_ff389c32e0fc4ce6` approved on the web at 12:20, still live in the room
+   * twenty-five minutes later beside the NEXT gate for the same card — two near-identical cards,
+   * one of them a ghost, distinguishable only by a stage key in small grey text.
+   *
+   * The sweep already asks each board which gates are still pending. A gate this hub posted, whose
+   * outcome it has not posted, and which the board no longer calls pending, was decided elsewhere.
+   * That is the whole rule.
+   */
+  /** The full shape, because `isGatePending` filters anything else out of the pending set. */
+  const pending = (gateId: string, cardId = "card_1") =>
+    ({
+      event: "gate.pending",
+      boardId: "brd_one",
+      gateId,
+      cardId,
+      stageKey: "angle",
+      returnStageKey: "brief",
+      cardTitle: "T",
+      producedBy: "agt_x",
+      options: [{ id: "approve", label: "Approve" }],
+      ts: "2026-09-29T00:00:00.000Z",
+    }) as never;
+
+  function rig(over: Partial<Parameters<typeof sweepGates>[0]> = {}) {
+    const settled: Array<{ gateId: string; decision: string }> = [];
+    const deps = {
+      boards: async () => ["brd_one"],
+      tenantIdFor: async () => "fleet_a",
+      pendingGates: async () => [] as never[],
+      project: async () => ({ status: "already" }) as never,
+      // what this branch adds
+      postedGatesAwaitingOutcome: async () => [] as Array<{ gateId: string; cardId: string }>,
+      decisionFor: async () => null as null | { decision: string; decidedBy: string | null },
+      settleOutcome: async (gateId: string, decision: string) => {
+        settled.push({ gateId, decision });
+        return true;
+      },
+      ...over,
+    };
+    return { deps: deps as Parameters<typeof sweepGates>[0], settled };
+  }
+
+  test("posts the outcome for a gate the board no longer calls pending", async () => {
+    const r = rig({
+      pendingGates: async () => [pending("gate_live")] as never,
+      postedGatesAwaitingOutcome: async () => [
+        { gateId: "gate_live", cardId: "card_1" },
+        { gateId: "gate_decided_on_the_web", cardId: "card_1" },
+      ],
+      decisionFor: async () => ({ decision: "approve", decidedBy: "usr_1" }),
+    });
+
+    const out = await sweepGates(r.deps);
+
+    expect(r.settled).toEqual([{ gateId: "gate_decided_on_the_web", decision: "approve" }]);
+    expect(out.settled).toBe(1);
+  });
+
+  test("leaves a gate that is still pending alone", async () => {
+    const r = rig({
+      pendingGates: async () => [pending("gate_live")] as never,
+      postedGatesAwaitingOutcome: async () => [{ gateId: "gate_live", cardId: "card_1" }],
+      decisionFor: async () => ({ decision: "approve", decidedBy: "usr_1" }),
+    });
+
+    await sweepGates(r.deps);
+    expect(r.settled).toEqual([]);
+  });
+
+  test("does not settle a gate whose decision cannot be read — absence is not a decision", async () => {
+    // A board that answered `pendingGates` but cannot say what the decision was leaves the card
+    // alone. Posting "resolved" without knowing the outcome would be inventing one.
+    const r = rig({
+      postedGatesAwaitingOutcome: async () => [{ gateId: "gate_gone", cardId: "card_1" }],
+      decisionFor: async () => null,
+    });
+
+    await sweepGates(r.deps);
+    expect(r.settled).toEqual([]);
+  });
+
+  test("a board that could not be asked settles nothing on it", async () => {
+    // `pendingGates` threw, so "not in the pending set" means "we do not know", not "decided".
+    const r = rig({
+      pendingGates: async () => { throw new Error("unreachable"); },
+      postedGatesAwaitingOutcome: async () => [{ gateId: "gate_x", cardId: "card_1" }],
+      decisionFor: async () => ({ decision: "reject", decidedBy: "usr_1" }),
+    });
+
+    const out = await sweepGates(r.deps);
+    expect(r.settled).toEqual([]);
+    expect(out.failedBoards).toEqual(["brd_one"]);
+  });
+
+  test("one that fails to settle does not stop the next", async () => {
+    const seen: string[] = [];
+    const r = rig({
+      postedGatesAwaitingOutcome: async () => [
+        { gateId: "gate_a", cardId: "card_1" },
+        { gateId: "gate_b", cardId: "card_1" },
+      ],
+      decisionFor: async () => ({ decision: "approve", decidedBy: "usr_1" }),
+      settleOutcome: async (gateId: string) => {
+        seen.push(gateId);
+        if (gateId === "gate_a") throw new Error("matrix refused");
+        return true;
+      },
+    });
+
+    const out = await sweepGates(r.deps);
+    expect(seen).toEqual(["gate_a", "gate_b"]);
+    expect(out.settled).toBe(1);
+  });
+});

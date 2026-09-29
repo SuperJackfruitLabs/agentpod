@@ -435,6 +435,15 @@ if (matrixBridge) {
   startGateSweeper({
     tenantIdFor: tenantForBoard,
     project: (tenantId, delivery) => projectGate(tenantId, delivery, gateProjection),
+    /**
+     * …and the floor beneath THAT: a gate decided anywhere but supermessage.
+     *
+     * `handleGateDecision` posts the receipt when a decision arrives as a Matrix event. A decision
+     * made in superpipeline's web UI is resolved there directly, so nothing here learns of it and
+     * the room card offers Approve and Reject for a decision already made, with no expiry. The
+     * sweep already asks each board what is still pending; this settles what is not.
+     */
+    settleOutcome: (gateId, decision, decidedBy) => matrixBridge.settleGate(gateId, decision, decidedBy),
   });
 
   app.route(

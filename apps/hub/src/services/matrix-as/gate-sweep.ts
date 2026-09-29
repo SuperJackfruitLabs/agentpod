@@ -61,6 +61,22 @@ export interface GateSweepDeps {
   pendingGates(boardId: string): Promise<GatePendingDelivery[]>;
   /** Post the gate, exactly once. Idempotent on `gate_id`. */
   project(tenantId: string, d: GatePendingDelivery): Promise<ProjectionOutcome>;
+
+  /**
+   * Gates this hub has put in a room and has NOT yet posted an outcome for.
+   *
+   * The other half of the sweep, and the half that was missing. A gate decided in superpipeline's
+   * web UI never reaches `handleGateDecision` — that runs only on a Matrix event, which is to say
+   * only on a decision made from supermessage — so nothing marks the receipt posted and the room
+   * card goes on offering Approve and Reject for a decision already made, with no expiry.
+   *
+   * Optional so a caller that only wants the projection half keeps working.
+   */
+  postedGatesAwaitingOutcome?(boardId: string): Promise<Array<{ gateId: string; cardId: string }>>;
+  /** How a gate was decided, or null when that cannot be read. `GET …/gates/:gateId`. */
+  decisionFor?(boardId: string, gateId: string): Promise<{ decision: string; decidedBy: string | null } | null>;
+  /** Post the outcome receipt and claim it, so two sweeps leave one line. */
+  settleOutcome?(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
 }
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
@@ -117,12 +133,21 @@ export interface GateSweepResult {
   /** Boards that could not be asked. Named, because an empty sweep and an
    *  unreachable board look identical from the outside. */
   failedBoards: string[];
+  /**
+   * Room cards settled this pass — gates decided somewhere this hub never heard about.
+   *
+   * Counted separately from `projected` because they are opposite acts: one puts a question in a
+   * room, the other takes a decided one out of contention. A sweep that reported them together
+   * could not answer "is anything still being decided behind my back".
+   */
+  settled: number;
 }
 
 /** One sweep pass. Deps are injected so this runs with no network and no db. */
 export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> {
   let checked = 0;
   let projected = 0;
+  let settled = 0;
   const byStatus: Record<GateSweepStatus, number> = {
     sent: 0,
     already: 0,
@@ -207,6 +232,41 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
         });
       }
     }
+
+    /**
+     * The other direction: a gate this hub posted that the board no longer calls pending.
+     *
+     * Deliberately inside the loop and AFTER the `continue` above, so a board that could not be
+     * asked settles nothing on it. "Not in the pending set" means "decided" only when we actually
+     * have the pending set; when the read failed it means "we do not know", and acting on that
+     * would take a live question out of a room because the network was down for five minutes.
+     */
+    const stillPending = new Set(gates.filter(isGatePending).map((g) => g.gateId));
+    for (const posted of (await deps.postedGatesAwaitingOutcome?.(boardId)) ?? []) {
+      if (stillPending.has(posted.gateId)) continue;
+      try {
+        const decided = await deps.decisionFor?.(boardId, posted.gateId);
+        // Absence is not a decision. A board that cannot say WHAT was decided leaves the card
+        // alone: posting "resolved" without the outcome would be inventing one, and a room that
+        // says a gate was decided but not how is worse than one that still asks.
+        if (!decided) continue;
+        if (await deps.settleOutcome?.(posted.gateId, decided.decision, decided.decidedBy)) {
+          settled++;
+          log.info("settled a room card for a gate decided elsewhere", {
+            gateId: posted.gateId,
+            boardId,
+            decision: decided.decision,
+          });
+        }
+      } catch (err) {
+        // One card that will not settle must not strand the rest; the next pass tries again,
+        // because `outcome_posted_at` is still null.
+        log.warn("could not settle a room card", {
+          gateId: posted.gateId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   const stuck = STUCK.reduce((n, status) => n + byStatus[status], 0);
@@ -216,7 +276,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
     log.warn("pending gates the sweep could not deliver", { stuck, ...byStatus });
   }
 
-  return { checked, projected, byStatus, failedBoards };
+  return { checked, projected, byStatus, failedBoards, settled };
 }
 
 /**
@@ -235,7 +295,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
  */
 export function bridgeGateSweepDeps(
   config: BridgeConfig,
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome">,
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = defaultRoster,
 ): GateSweepDeps {
@@ -269,6 +329,34 @@ export function bridgeGateSweepDeps(
         fetch: fetchImpl,
       }).pendingGates();
     },
+
+    /**
+     * Gates this hub put in a room and never posted an outcome for.
+     *
+     * The table is the record of what we projected; `outcome_posted_at IS NULL` is the record of
+     * what we have not settled. Neither is knowable from superpipeline, which is why this half of
+     * the sweep reads locally and the other half reads the board.
+     */
+    postedGatesAwaitingOutcome: async (boardId) => {
+      const { db } = await import("../../db/drizzle");
+      const { matrixGateEvents } = await import("../../db/schema/matrix");
+      const { and, eq, isNull } = await import("drizzle-orm");
+      const rows = await db
+        .select({ gateId: matrixGateEvents.gateId, cardId: matrixGateEvents.cardId })
+        .from(matrixGateEvents)
+        .where(and(eq(matrixGateEvents.boardId, boardId), isNull(matrixGateEvents.outcomePostedAt)));
+      return rows;
+    },
+
+    decisionFor: async (boardId, gateId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      if (!token) return null;
+      const g = await new SuperpipelineClient({ baseUrl: config.baseUrl, boardId, token, fetch: fetchImpl }).gate(gateId);
+      // Only a RESOLVED gate settles a card. A gate that is somehow neither pending nor resolved
+      // is a shape this hub does not model, and guessing at it would put a wrong word in a room.
+      if (!g || g.status !== "resolved" || !g.decision) return null;
+      return { decision: g.decision, decidedBy: g.decidedBy };
+    },
   };
 }
 
@@ -299,7 +387,7 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  * belongs to something the operator actually turned on.
  */
 export function startGateSweeper(
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome">,
   opts: {
     config?: BridgeConfig | null;
     intervalMs?: number;
