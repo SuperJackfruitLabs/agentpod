@@ -1060,8 +1060,9 @@ after its text. The speech service is anything with OpenAI's
   plaintext bridge (no crypto store) sends `url`, as it sends everything in
   the clear.
 - **Harness-mode stations** (Hermes, OpenClaw with their own Matrix client)
-  speak for themselves: the hub never speaks for them. Their voice is stored
-  and editable now; pushing it to the harness is a later stage.
+  speak for themselves: the hub never speaks for them. A Hermes station's
+  voice is pushed into its profile with **Apply to harness** — see *Voice
+  replies from a harness-mode station* below.
 - **Fallback**: none. A Cloudflare Workers AI (Aura) fallback for when
   foundry is down is not implemented — the hub has no Workers AI credentials
   (its `CLOUDFLARE_*` settings are for Sandboxes). TODO once it does.
@@ -1098,6 +1099,70 @@ contains `transcription.apply`; an older node answers the verb as unknown and
 the console shows that error — roll the node first (`apn update`, or
 **Update** in the console). Changing the hub default later does not re-push:
 apply again on each harness station.
+
+**Voice replies from a harness-mode station.** A harness-mode Hermes station
+posts its own replies, so it speaks them with Hermes's own text-to-speech; the
+hub's setting reaches it the same way the transcription setting does. The
+station page's **Voice replies** section has **Apply to harness** (save
+first): the hub sends `speech.apply` (station key and id only) to the node,
+the node fetches `{url, apiKey, voice, speakMode}` from
+`POST /api/nodes/:nodeId/stations/:stationId/speech` with its node credential
+(same 401/403 rules as the transcription endpoint; the key is never logged),
+writes the profile and restarts the station's own unit through `lifecycle`
+(#589 — never a second gateway). What it writes:
+
+- `config.yaml`: `tts.provider: openai` and, under `tts.openai`, `base_url:
+  <url>/v1`, `model: kokoro` (the service ignores the model), `voice: <voice>`
+  (an id, a blend like `af_heart:60+af_bella:40`, or an OpenAI alias — the
+  service resolves it) and `api_key: ${AGENTPOD_TTS_API_KEY}`. Hermes expands
+  `${VAR}` from the profile's own `.env`, so the key never lands in
+  `config.yaml`. Every other key under `tts` is left alone — the operator's
+  `providers.cloudflare-aura` command provider above all — and the node
+  refuses the write if anything else in the file would change.
+- `.env`: `AGENTPOD_TTS_API_KEY=<key>` (0600, every other line untouched). Not
+  `VOICE_TOOLS_OPENAI_KEY`: Hermes's OpenAI STT reads that one too, and
+  `transcription.apply` puts the transcription service's key there.
+- `voice.auto_tts` for the speak mode: `always` → `true`, `off` → `false`,
+  `voice_in` → left as it is (see below).
+
+What Hermes then does (read from the installed Hermes on guild, 2026-09-30):
+with `voice.auto_tts: true` it speaks every reply — a reply to a voice note
+through the Matrix adapter's auto-TTS, a reply to text through the gateway's
+voice reply — synthesised as `.ogg`, i.e. `response_format: opus`, which the
+speech service answers with Ogg/Opus. The Matrix adapter posts it as `m.audio`
+with `org.matrix.msc3245.voice` and `org.matrix.msc1767.audio {duration,
+waveform}` (computed by Hermes itself), before the text. It carries no
+`dev.agentpod.voice_reply` — that key is the hub's. With `voice.auto_tts: false`
+it speaks only when the agent calls its `text_to_speech` tool, or in a room
+where someone sent `/voice on` (voice notes answered with voice) or `/voice tts`
+(every reply).
+
+The console's result line says both: **Applied — restarted** (or **restart the
+gateway**, for a #273 profile without `lifecycle`) and what the agent will now
+do on its own. **Known gaps**:
+
+- **`voice_in` has no Hermes profile setting.** Hermes's "answer a voice note
+  with a voice note" exists only per room (`/voice on`, stored in the gateway's
+  voice-mode file, keyed by room); `voice.auto_tts: true` speaks every reply.
+  So `voice_in` sets the provider and voice and leaves `voice.auto_tts` as it
+  was (off unless someone turned it on) — the agent answers in voice where a
+  room has sent `/voice on`, and the console says so.
+- **The longest reply spoken** (`maxChars`) is not pushed: Hermes has no cut —
+  it splits a long reply into several clips (its `openai` cap is 4096
+  characters, the speech service's own limit).
+- **Fallback**: Hermes has no TTS fallback-provider list, so a harness station
+  whose speech service is down sends no voice note (the text still arrives).
+  The `cloudflare-aura` provider stays defined; `tts.provider:
+  cloudflare-aura` in the profile switches back by hand.
+- **Off** (no speech service for the station) sets `voice.auto_tts: false` and
+  leaves `tts` and `.env` as they were, so the agent's own `text_to_speech` tool
+  still reaches the last applied service. Only Hermes is supported: a
+  harness-mode OpenClaw station is refused (400, *not supported yet*); OpenClaw
+  stations are normally bridge-mode, where the hub speaks for them.
+- Needs a node-agent release containing `speech.apply` (nodes that know only
+  `transcription.apply` keep working for that verb; this one answers 502 with
+  "update its node"). Changing the hub default later does not re-push: apply
+  again on each harness station.
 
 **Who may talk to an agent** is the control pair, unchanged. A refusal arrives
 **in the room**, saying which of the three things happened: the hub does not
