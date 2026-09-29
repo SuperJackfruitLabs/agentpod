@@ -3,6 +3,7 @@ import { HostInfo } from "./node";
 import { RequestMsg, ResponseMsg, StreamMsg, CancelMsg, InputMsg, ResizeMsg } from "./protocol";
 import { NodeCapabilityList } from "./posture";
 import { TurnError, TurnErrorKind } from "./acp-session";
+import { FleetReportMsg } from "./fleet-report";
 
 export const HelloMsg = z.object({
   type: z.literal("hello"),
@@ -113,7 +114,7 @@ export type TurnErrorReport = z.infer<typeof TurnErrorReport>;
 export const TurnErrorMsg = z.object({ type: z.literal("turn.error"), report: TurnErrorReport });
 export type TurnErrorMsg = z.infer<typeof TurnErrorMsg>;
 
-export const GatewayClientMessage = z.discriminatedUnion("type", [HelloMsg, HeartbeatMsg, ResponseMsg, StreamMsg, HealthReportMsg, TurnErrorMsg]);
+export const GatewayClientMessage = z.discriminatedUnion("type", [HelloMsg, HeartbeatMsg, ResponseMsg, StreamMsg, HealthReportMsg, TurnErrorMsg, FleetReportMsg]);
 export type GatewayClientMessage = z.infer<typeof GatewayClientMessage>;
 // Hub → node messages: ack/req/cancel (control) + input/resize (terminal interactivity)
 export const GatewayServerMessage = z.discriminatedUnion("type", [AckMsg, RequestMsg, CancelMsg, InputMsg, ResizeMsg]);
