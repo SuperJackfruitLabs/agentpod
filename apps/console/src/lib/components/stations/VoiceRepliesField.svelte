@@ -8,8 +8,11 @@
    * set here. The speech service itself is inherited; a station may turn it
    * off or name its own under "Speech service".
    *
-   * A harness-mode agent is its own Matrix client and will speak for itself;
-   * the voice is saved now and applied to its harness in a later update.
+   * A harness-mode agent is its own Matrix client and speaks for itself, so
+   * the saved voice reaches it only when its node writes it into the harness
+   * profile — "Apply to harness" (`speech.apply`), which says whether the
+   * harness was restarted and what it will now do on its own (Hermes has no
+   * profile setting for "only when spoken to"; docs/OPERATING.md §7d).
    */
   import { onMount } from "svelte";
   import { toast } from "svelte-sonner";
@@ -21,11 +24,13 @@
   import { providerName, urlProblem } from "$lib/components/transcription/transcription";
   import { describeSpeechSource, SPEAK_MODE_LABELS, voiceLabel, voiceProblem } from "$lib/components/speech/speech";
   import {
+    applyStationSpeech,
     getStationSpeech,
     listVoices,
     saveStationSpeech,
     type ApiKeyWrite,
     type SpeakMode,
+    type SpeechApplyResult,
     type StationSpeech,
     type StationSpeechInput,
     type StationSpeechMode,
@@ -39,6 +44,7 @@
     load = getStationSpeech,
     save = saveStationSpeech,
     loadVoices = listVoices,
+    apply = applyStationSpeech,
     preview,
     play,
   }: {
@@ -47,6 +53,7 @@
     load?: (stationId: string) => Promise<StationSpeech>;
     save?: (stationId: string, input: StationSpeechInput) => Promise<StationSpeech>;
     loadVoices?: () => Promise<VoiceList>;
+    apply?: (stationId: string) => Promise<SpeechApplyResult>;
     preview?: (voiceId: string) => Promise<Blob>;
     play?: (audio: Blob) => unknown;
   } = $props();
@@ -62,6 +69,37 @@
   let url = $state("");
   let apiKey = $state<ApiKeyWrite>(undefined);
   let saving = $state(false);
+
+  let applying = $state(false);
+  let applied = $state<SpeechApplyResult | null>(null);
+  let applyError = $state<string | null>(null);
+
+  async function onApply() {
+    if (applying) return;
+    applying = true;
+    applied = null;
+    applyError = null;
+    try {
+      applied = await apply(stationId);
+    } catch (e) {
+      applyError = e instanceof Error ? e.message : "Couldn’t apply the voice to the harness.";
+    } finally {
+      applying = false;
+    }
+  }
+
+  /** What the harness will now do, in words — which is not always what was asked. */
+  function appliedBehaviour(r: SpeechApplyResult): string {
+    if (r.mode === "off") return "No speech service for this station, so the agent no longer speaks on its own.";
+    if (r.autoSpeak) return "It now speaks every reply aloud.";
+    if (r.speakMode === "voice_in") {
+      return (
+        "Hermes has no setting for “only when spoken to”, so it will not speak on its own: send /voice on " +
+        "in a room to have it answer voice notes with voice there."
+      );
+    }
+    return "It speaks only when it chooses to (its text-to-speech tool).";
+  }
 
   let voices = $state<VoiceInfo[] | null>(null);
   let voicesError = $state<string | null>(null);
@@ -215,10 +253,29 @@
     </Button>
 
     {#if harnessMode}
-      <p class="border-t border-border pt-3 text-xs text-muted-foreground" data-testid="voice-replies-harness-note">
-        This agent runs its own Matrix client and will speak for itself. Its voice is saved here and
-        applied to its harness in a later update.
-      </p>
+      <div class="space-y-2 border-t border-border pt-3">
+        <p class="text-xs text-muted-foreground" data-testid="voice-replies-harness-note">
+          This agent runs its own Matrix client and speaks for itself. Save, then apply to write its voice
+          into its harness profile.
+        </p>
+        <Button
+          size="sm"
+          variant="outline"
+          onclick={() => void onApply()}
+          disabled={applying || saving || changed}
+          title={changed ? "Save your changes first" : undefined}
+        >
+          {applying ? "Applying…" : "Apply to harness"}
+        </Button>
+        {#if applyError}
+          <p class="text-xs text-destructive" role="alert">{applyError}</p>
+        {:else if applied}
+          <p class="text-xs text-muted-foreground" data-testid="voice-replies-apply-result" aria-live="polite">
+            {applied.restarted ? "Applied — restarted." : "Applied — restart the gateway to pick it up."}
+            {appliedBehaviour(applied)}
+          </p>
+        {/if}
+      </div>
     {/if}
   {/if}
 </div>

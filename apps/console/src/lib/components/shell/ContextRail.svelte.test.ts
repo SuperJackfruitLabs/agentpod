@@ -33,6 +33,7 @@ vi.mock("$lib/api/transcription", () => ({
 vi.mock("$lib/api/speech", () => ({
   getStationSpeech: vi.fn(() => new Promise(() => {})),
   saveStationSpeech: vi.fn(),
+  applyStationSpeech: vi.fn(),
   listVoices: vi.fn(() => new Promise(() => {})),
   fetchVoicePreview: vi.fn(),
 }));
@@ -291,7 +292,7 @@ test("the rail carries the station's voice-note setting, and a harness station's
 
 // ─── voice replies ──────────────────────────────────────────────────────────
 
-test("the rail carries the station's voice replies, with the harness note for a harness station", async () => {
+test("the rail carries the station's voice replies, with the harness note and apply control for a harness station", async () => {
   vi.spyOn(api, "stationMoveState").mockResolvedValue({ status: "unknown" });
   const loadSpeech = vi.fn(async () => ({
     mode: "inherit" as const,
@@ -324,4 +325,8 @@ test("the rail carries the station's voice replies, with the harness note for a 
   expect((await findByTestId("voice-replies-effective")).textContent).toContain("bf_emma");
   expect(loadSpeech).toHaveBeenCalledWith("station_1");
   expect(getByTestId("voice-replies-harness-note")).toBeTruthy();
+  const applyButtons = [...getByTestId("rail-voice-replies").querySelectorAll("button")].filter(
+    (b) => b.textContent?.trim() === "Apply to harness"
+  );
+  expect(applyButtons).toHaveLength(1);
 });
