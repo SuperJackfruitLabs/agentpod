@@ -26,7 +26,7 @@ import {
   type LiveActivityPushPayload,
 } from "@agentpod/contract";
 
-import { bound, type FleetChange } from "./state";
+import { ACTIVE_WITHIN_MS, bound, type FleetChange } from "./state";
 
 /** At most one routine update per reader in this window (spec A2). */
 export const COALESCE_MS = 3_000;
@@ -250,9 +250,15 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
  */
 export function planForNewUpdateToken(plan: ReaderPlan, i: PlanInput): PlanResult {
   if (plan.phase === "dismissed") return { plan, push: null, wakeAt: i.expiryAt };
-  if (!i.active) return end({ ...plan, phase: "live" }, i, "new-token");
-  const sent = sendUpdate(plan, i, "new-token", 5, false);
-  return sent;
+  if (!i.active) {
+    // The card this hub started, for a fleet that went quiet before its token came.
+    if (plan.phase === "starting") return end({ ...plan, phase: "live" }, i, "new-token");
+    // A card this hub knows nothing of — the app relaunched with one up, most
+    // likely across a hub restart that emptied this state. Treated as restored:
+    // updated if work arrives, ended if none does within the active window.
+    return { plan: { ...plan, phase: "live", dueAt: null }, push: null, wakeAt: i.now + ACTIVE_WITHIN_MS + 1 };
+  }
+  return sendUpdate(plan, i, "new-token", 5, false);
 }
 
 /** The app deleted its last update token: its activity ended on the phone. */

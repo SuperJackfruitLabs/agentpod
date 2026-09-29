@@ -129,6 +129,15 @@ describe("the late update token", () => {
     expect(r.plan.phase).toBe("idle");
   });
 
+  test("a card the hub knows nothing of, on a quiet fleet, is adopted and given the active window", () => {
+    const r = planForNewUpdateToken(initialPlan(), input({ active: false, tokens: upd, change: "none" }));
+    expect(r.push).toBeNull();
+    expect(r.plan.phase).toBe("live");
+    expect(r.wakeAt).toBe(T0 + 15 * 60_000 + 1);
+    // …and ended at that wake if still quiet.
+    expect(planPush(r.plan, input({ now: r.wakeAt!, active: false, tokens: upd })).push!.payload.aps.event).toBe("end");
+  });
+
   test("a second device's token while live is brought up to date too", () => {
     const r = planForNewUpdateToken(live(), input({ tokens: upd, change: "none" }));
     expect(r.push!.target).toBe("new-token");
