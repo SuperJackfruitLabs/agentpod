@@ -237,17 +237,30 @@ export function bridgeGateSweepDeps(
   config: BridgeConfig,
   rest: Pick<GateSweepDeps, "tenantIdFor" | "project">,
   fetchImpl: Fetcher = fetchAdapter,
+  roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = defaultRoster,
 ): GateSweepDeps {
-  const tokenForBoard = new Map<string, string>();
-  for (const agent of config.agents) {
-    if (!tokenForBoard.has(agent.boardId)) tokenForBoard.set(agent.boardId, agent.token);
-  }
+  /**
+   * Which credential to ask each board with, read PER SWEEP rather than once at start.
+   *
+   * It used to be built once from the environment roster, which was the only roster there was.
+   * Now the roster is a table an operator edits from the console, so a board added at noon would
+   * have gone unswept until the next hub restart, and a rotated token would have gone on being
+   * refused with a 401 that arrives as "this board could not be reached". Five minutes apart, one
+   * small query, and the sweep is always asking with what the bridge is actually claiming with.
+   */
+  const tokensForBoards = async () => {
+    const map = new Map<string, string>();
+    for (const agent of await (roster ?? defaultRoster)()) {
+      if (!map.has(agent.boardId)) map.set(agent.boardId, agent.token);
+    }
+    return map;
+  };
 
   return {
     ...rest,
-    boards: async () => [...tokenForBoard.keys()],
+    boards: async () => [...(await tokensForBoards()).keys()],
     pendingGates: async (boardId) => {
-      const token = tokenForBoard.get(boardId);
+      const token = (await tokensForBoards()).get(boardId);
       if (!token) return [];
       return new SuperpipelineClient({
         baseUrl: config.baseUrl,
@@ -257,6 +270,13 @@ export function bridgeGateSweepDeps(
       }).pendingGates();
     },
   };
+}
+
+/** The rostered agents, decrypted. Separated so a test can supply its own without a database. */
+async function defaultRoster(): Promise<Array<{ boardId: string; token: string }>> {
+  const { readBridgeRoster } = await import("../bridge/roster");
+  const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
+  return readBridgeRoster(BOOTSTRAP_TENANT_ID);
 }
 
 /**
@@ -280,22 +300,26 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  */
 export function startGateSweeper(
   rest: Pick<GateSweepDeps, "tenantIdFor" | "project">,
-  opts: { config?: BridgeConfig | null; intervalMs?: number } = {},
+  opts: {
+    config?: BridgeConfig | null;
+    intervalMs?: number;
+    /** Test seam: the rostered agents, in place of the table. */
+    roster?: () => Promise<Array<{ boardId: string; token: string }>>;
+  } = {},
 ): (() => void) | null {
   const config =
     opts.config !== undefined ? opts.config : isBridgeEnabled() ? loadBridgeConfig() : null;
   if (!config) return null;
 
-  const deps = bridgeGateSweepDeps(config, rest);
+  const deps = bridgeGateSweepDeps(config, rest, fetchAdapter, opts.roster);
   const timer = setInterval(() => {
     void sweepGates(deps).catch((err) =>
       log.error("gate sweep failed", { error: err instanceof Error ? err.message : String(err) }),
     );
   }, opts.intervalMs ?? GATE_SWEEP_INTERVAL_MS);
 
-  log.info("gate sweep started", {
-    boards: new Set(config.agents.map((a) => a.boardId)).size,
-    intervalMs: opts.intervalMs ?? GATE_SWEEP_INTERVAL_MS,
-  });
+  // No board count: the roster is read per sweep now, so there is no number to report here that
+  // would still be true five minutes later.
+  log.info("gate sweep started", { intervalMs: opts.intervalMs ?? GATE_SWEEP_INTERVAL_MS });
   return () => clearInterval(timer);
 }

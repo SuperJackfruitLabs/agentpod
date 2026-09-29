@@ -14,7 +14,10 @@
 
 import { resolveTenantForUser } from "../../auth/tenant";
 import * as acpSessions from "../acp-sessions";
-import { isBridgeEnabled, loadBridgeConfig, type BridgeAgentConfig } from "./config";
+import { BRIDGE_SOURCE, isBridgeEnabled, type BridgeAgentConfig } from "./config";
+import { reconcileRoster, type LoopRegistry, type ReconcileState } from "./reconcile";
+import { readBridgeRoster, type BridgeAgentSecrets } from "./roster";
+import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
 
@@ -102,8 +105,8 @@ export function startAgentLoop(opts: AgentLoopOptions): LoopHandle {
             status: err.status,
             path: err.path,
             hint:
-              "the token no longer resolves to an agent on that board — re-mint it, or remove " +
-              "this agent from SUPERPIPELINE_BRIDGE_AGENTS",
+              "the token no longer resolves to an agent on that board — re-mint it in superpipeline and " +
+              "update this agent under Bridge in the console, or disable it there",
           });
           // Deliberately NOT reported through `onFault`, which takes a DispatchResult: this
           // is not a dispatch outcome, and inventing a status member for it from a catch
@@ -166,58 +169,136 @@ const hubAcpPort: AcpPort = {
 };
 
 export interface BridgeHandle {
-  agents: string[];
+  /** The keys currently running. Changes as the roster does. */
+  readonly agents: string[];
   stop(): Promise<void>;
 }
 
+/** How often the roster is re-read. A console edit takes effect within one of these. */
+const RECONCILE_MS = 10_000;
+
 /**
- * Start a loop per configured agent, or return null when the bridge is off.
+ * Supervise a loop per rostered agent, or return null when the bridge is off.
  *
- * Called from `src/index.ts` after the sweeper, mirroring
- * `registerEnabledProvisioners()`: a subsystem that is off is not constructed.
+ * Called from `src/index.ts` after the sweeper, mirroring `registerEnabledProvisioners()`: a
+ * subsystem that is off is not constructed.
+ *
+ * **This used to read an environment variable once and be done.** The roster is a table now
+ * (`services/bridge/roster.ts`), so this became a supervisor: it ticks, diffs, and starts or stops
+ * loops to match. An agent added in the console starts claiming within `RECONCILE_MS` with no
+ * restart, which is the whole reason the roster moved.
  */
 export async function startSuperpipelineBridge(
-  deps: { acp?: AcpPort; log?: (m: string, meta?: Record<string, unknown>) => void } = {},
+  deps: {
+    acp?: AcpPort;
+    log?: (m: string, meta?: Record<string, unknown>) => void;
+    /** Test seam: the roster to reconcile against, in place of the table. */
+    roster?: () => Promise<BridgeAgentSecrets[]>;
+    reconcileMs?: number;
+  } = {},
 ): Promise<BridgeHandle | null> {
   if (!isBridgeEnabled()) return null;
-  const config = loadBridgeConfig();
-  if (!config) return null;
+
+  const baseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim().replace(/\/+$/, "");
+  if (!baseUrl) return null;
 
   const acp = deps.acp ?? hubAcpPort;
   const log = deps.log ?? ((m: string, meta?: Record<string, unknown>) => console.log(`[bridge] ${m}`, meta ?? ""));
-
   /**
-   * superpipeline serves MCP at one origin-level path, not per board — the board
-   * is the agent's, carried by its credential (`apps/api/src/index.ts`,
-   * `path === '/mcp'`). Derived from the configured base URL rather than
-   * configured separately: two settings that must agree are one setting an
-   * operator can get wrong.
+   * superpipeline serves MCP at one origin-level path, not per board — the board is the agent's,
+   * carried by its credential (`apps/api/src/index.ts`, `path === '/mcp'`). Derived from the
+   * configured base URL rather than configured separately: two settings that must agree are one
+   * setting an operator can get wrong.
    */
-  const mcpUrl = new URL("/mcp", config.baseUrl).toString();
+  const mcpUrl = new URL("/mcp", baseUrl).toString();
 
-  const loops: LoopHandle[] = [];
-  for (const agent of config.agents) {
-    const tenantId = await resolveTenantForUser(agent.hubUserId);
-    const client = new SuperpipelineClient({
-      baseUrl: config.baseUrl,
-      boardId: agent.boardId,
-      token: agent.token,
-      fetch: fetchAdapter,
-    });
+  const live = new Map<string, { handle: LoopHandle; revision: string }>();
+  const state: ReconcileState = {};
 
-    loops.push(
-      startAgentLoop({
-        run: () => runOnce({ client, acp, agent, tenantId, source: config.source, log, mcpUrl }),
+  const registry: LoopRegistry = {
+    running: () => new Map([...live].map(([k, v]) => [k, v.revision])),
+    start(agent) {
+      const config: BridgeAgentConfig = {
+        key: agent.key,
+        boardId: agent.boardId,
+        token: agent.token,
+        stationId: agent.stationId,
+        hubUserId: agent.hubUserId,
+        mode: agent.mode,
+        ...(agent.permissionWaitMs !== null ? { permissionWaitMs: agent.permissionWaitMs } : {}),
+        ...(agent.maxConcurrency !== null ? { maxConcurrency: agent.maxConcurrency } : {}),
+        ...(agent.profileKey !== null ? { profileKey: agent.profileKey } : {}),
+        ...(agent.mcpToken !== null ? { mcpToken: agent.mcpToken } : {}),
+      };
+      const client = new SuperpipelineClient({
+        baseUrl,
+        boardId: agent.boardId,
+        token: agent.token,
+        fetch: fetchAdapter,
+      });
+      const handle = startAgentLoop({
+        run: async () =>
+          runOnce({
+            client,
+            acp,
+            agent: config,
+            // Read per cycle rather than captured at start: a station that moves tenant would
+            // otherwise keep writing ledger rows under the old one.
+            tenantId: await resolveTenantForUser(agent.hubUserId),
+            source: BRIDGE_SOURCE,
+            log,
+            mcpUrl,
+          }),
         log: (m, meta) => log(m, { agent: agent.key, ...meta }),
-      }),
-    );
-    log("claiming", describe(agent, config.baseUrl));
-  }
+      });
+      live.set(agent.key, { handle, revision: agent.revision });
+      log("claiming", describe(config, baseUrl));
+    },
+    async stop(key) {
+      const entry = live.get(key);
+      if (!entry) return;
+      // Drain, not abandon: `stop()` waits for the in-flight card. See `LoopRegistry.stop`.
+      log("no longer rostered; finishing the current card and stopping", { agent: key });
+      await entry.handle.stop();
+      live.delete(key);
+    },
+  };
+
+  const readRoster =
+    deps.roster ??
+    (() =>
+      readBridgeRoster(BOOTSTRAP_TENANT_ID, (key, error) =>
+        log("an agent's credential could not be read; it is not being claimed with", { agent: key, error }),
+      ));
+
+  const tick = async () => {
+    try {
+      await reconcileRoster(registry, await readRoster(), {
+        state,
+        onEmpty: () =>
+          log(
+            "enabled, but no agents are rostered — nothing will be claimed. Add one under " +
+              "Bridge in the console.",
+          ),
+        onError: (key, error) => log("an agent could not be started", { agent: key, error }),
+      });
+    } catch (err) {
+      // A database blip must not kill the supervisor: the next tick tries again.
+      log("the roster could not be read", { error: String(err) });
+    }
+  };
+
+  await tick();
+  const timer = setInterval(() => void tick(), deps.reconcileMs ?? RECONCILE_MS);
 
   return {
-    agents: config.agents.map((a) => a.key),
+    get agents() {
+      return [...live.keys()];
+    },
     async stop() {
-      await Promise.all(loops.map((l) => l.stop()));
+      clearInterval(timer);
+      await Promise.all([...live.values()].map((l) => l.handle.stop()));
+      live.clear();
     },
   };
 }

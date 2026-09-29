@@ -431,15 +431,20 @@ export function collectConfigErrors(
   // The superpipeline bridge, scoped by its flag for the same reason every rule
   // above is: a hub that never claims board work must not be stopped from
   // booting by a bridge variable, and unset must stay indistinguishable from
-  // off. When it IS on, a roster that fails to parse would otherwise produce a
-  // hub that claims nothing and looks exactly like a quiet board — so the
-  // loader's own error is surfaced here, at boot, naming the variable.
+  // off.
+  //
+  // This used to also parse the ROSTER, because "a hub that claims nothing
+  // because its roster failed to parse looks exactly like a quiet board". The
+  // roster is a table now, and `validateConfig()` runs before `initDatabase()`
+  // — so that check moved to the first reconcile tick, which can read it. What
+  // is still checkable here is what is still in the environment: where
+  // superpipeline is, and the key every rostered credential is encrypted with.
   if (cfg.bridge.enabled) {
     try {
       loadBridgeConfig();
     } catch (err) {
       errors.push({
-        field: "SUPERPIPELINE_BRIDGE_AGENTS",
+        field: "SUPERPIPELINE_BASE_URL",
         message: err instanceof Error ? err.message : String(err),
       });
     }

@@ -27,10 +27,12 @@
  */
 
 import { sql } from "drizzle-orm";
-import { pgTable, text, integer, timestamp, jsonb, primaryKey, index, check } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, timestamp, jsonb, primaryKey, index, check, boolean, foreignKey } from "drizzle-orm/pg-core";
 
 import { acpRuns } from "./acp";
 import { tenants } from "./tenants";
+import { stations } from "./stations";
+import { user } from "./auth";
 
 /**
  * What the bridge knows about a dispatched run, in the order it learns it.
@@ -132,3 +134,74 @@ export const bridgeDispatches = pgTable(
     ),
   ],
 );
+
+/**
+ * The bridge's roster: which agent identities claim from which board, onto which station.
+ *
+ * **Why this is not an env var any more.** It was `SUPERPIPELINE_BRIDGE_AGENTS`, a JSON array in
+ * `hub.env`, which meant every roster change — adding an agent, rotating a token, moving a station
+ * — needed root on the hub host and a restart, while every comparable thing in AgentPod (station
+ * adoption, git identities, Matrix credentials, plugin operations) is a tenant-scoped row a human
+ * creates in the console. It also had no `tenant_id`, so `tenantScope()` discipline stopped at the
+ * bridge, and nothing checked a `stationId` against a station that exists: a stale one surfaced
+ * only at claim time, as "station not ready", which is what an offline node looks like too.
+ *
+ * **`hubUserId` is gone, not moved.** `getStation(userId, stationId)` filters on
+ * `stations.userId`, so a roster entry naming any other user failed every ACP call as "Station not
+ * found". The field could only ever hold one correct value; it is read from the station now.
+ *
+ * Design: `docs/superpowers/specs/2026-09-29-bridge-roster-in-the-database-design.md`.
+ */
+export const bridgeAgents = pgTable(
+  "bridge_agents",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** Stable name. Lands in `bridge_dispatches.agent_key` and every log line. */
+    key: text("key").notNull(),
+    /** superpipeline's own `brd_…`. Not a foreign key: the board is theirs, not ours. */
+    boardId: text("board_id").notNull(),
+    /** The station its work runs on — and, through it, the user its sessions belong to. */
+    stationId: text("station_id").notNull(),
+    mode: text("mode").notNull().default("full-auto"),
+    /** Null means the 30-minute default in `services/bridge/config.ts`. */
+    permissionWaitMs: integer("permission_wait_ms"),
+    maxConcurrency: integer("max_concurrency"),
+    profileKey: text("profile_key"),
+    /**
+     * This agent's superpipeline credential, AES-256-GCM (`utils/encryption.ts`). Never returned
+     * to a client — the read surface answers `hasToken`, not the token.
+     */
+    tokenEncrypted: text("token_encrypted").notNull(),
+    /**
+     * The second, `run`-scoped credential the HARNESS spends over MCP, so a dispatched agent can
+     * complete or block its own card. Deliberately not `token`: that one can claim, and an agent
+     * holding it could take a second card while still working the first.
+     */
+    mcpTokenEncrypted: text("mcp_token_encrypted"),
+    /** Stop an agent without destroying the row, and the credential a human pasted into it. */
+    enabled: boolean("enabled").notNull().default(true),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    /** The reconciler restarts a loop when this moves, which is how an edit takes effect. */
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.key] }),
+    foreignKey({
+      columns: [t.stationId, t.tenantId],
+      foreignColumns: [stations.id, stations.tenantId],
+      name: "bridge_agents_station_tenant_fk",
+    }).onDelete("restrict"),
+    index("bridge_agents_station_idx").on(t.stationId),
+    index("bridge_agents_board_idx").on(t.boardId),
+    check("bridge_agents_mode_check", sql`${t.mode} IN ('ask', 'accept-edits', 'full-auto')`),
+    check("bridge_agents_wait_check", sql`${t.permissionWaitMs} IS NULL OR ${t.permissionWaitMs} > 0`),
+    check("bridge_agents_concurrency_check", sql`${t.maxConcurrency} IS NULL OR ${t.maxConcurrency} > 0`),
+    check("bridge_agents_board_grammar_check", sql`${t.boardId} ~ '^brd_[0-9a-f]{16}$'`),
+  ],
+);
+
+export type BridgeAgentRow = typeof bridgeAgents.$inferSelect;
+export type InsertBridgeAgent = typeof bridgeAgents.$inferInsert;

@@ -322,13 +322,19 @@ describe("what the sweep reads, and as whom", () => {
   const config = {
     baseUrl: "https://board.test",
     source: "superpipeline",
-    agents: [
-      { key: "forge", boardId: "brd_one", token: `spa_${"a".repeat(48)}`, stationId: "stn_1", hubUserId: "usr_1" },
-      { key: "quill", boardId: "brd_two", token: `spa_${"b".repeat(48)}`, stationId: "stn_2", hubUserId: "usr_1" },
-      // Two agents on one board is ordinary: an agent is not a board.
-      { key: "scout", boardId: "brd_one", token: `spa_${"c".repeat(48)}`, stationId: "stn_3", hubUserId: "usr_1" },
-    ],
   } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
+
+  /**
+   * The roster, as the sweep reads it now: from `bridge_agents`, per sweep, rather than from a
+   * config object built once at start. Two agents on one board is ordinary — an agent is not a
+   * board — and the first listed for a board is the credential used.
+   */
+  const ROSTER = [
+    { boardId: "brd_one", token: `spa_${"a".repeat(48)}` },
+    { boardId: "brd_two", token: `spa_${"b".repeat(48)}` },
+    { boardId: "brd_one", token: `spa_${"c".repeat(48)}` },
+  ];
+  const roster = async () => ROSTER;
 
   function recordingFetch() {
     const sent: Array<{ url: string; token: string }> = [];
@@ -340,7 +346,12 @@ describe("what the sweep reads, and as whom", () => {
   }
 
   test("asks each board once, however many agents work it", async () => {
-    const deps = bridgeGateSweepDeps(config, { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) });
+    const deps = bridgeGateSweepDeps(
+      config,
+      { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
+      recordingFetch().fetchImpl,
+      roster,
+    );
 
     // Two agents claim on brd_one. Sweeping it twice would ask the same
     // question twice and log every recovered gate twice with it.
@@ -356,13 +367,30 @@ describe("what the sweep reads, and as whom", () => {
       config,
       { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
       fetchImpl,
+      roster,
     );
 
     await deps.pendingGates("brd_two");
 
     expect(sent).toHaveLength(1);
     expect(sent[0]!.url).toBe("https://board.test/v1/boards/brd_two/gates/pending");
-    expect(sent[0]!.token).toBe(`Bearer ${config.agents[1]!.token}`);
+    expect(sent[0]!.token).toBe(`Bearer ${ROSTER[1]!.token}`);
+  });
+
+  test("a board added to the roster is swept without a restart", async () => {
+    // The reason the roster is read per sweep rather than once: it is a table an operator edits
+    // from the console now, and a board added at noon used to go unswept until the next reboot.
+    let live = [{ boardId: "brd_one", token: `spa_${"a".repeat(48)}` }];
+    const deps = bridgeGateSweepDeps(
+      config,
+      { tenantIdFor: async () => "flt_a", project: async () => ({ status: "already" }) },
+      recordingFetch().fetchImpl,
+      async () => live,
+    );
+
+    expect(await deps.boards()).toEqual(["brd_one"]);
+    live = [...live, { boardId: "brd_three", token: `spa_${"d".repeat(48)}` }];
+    expect(await deps.boards()).toEqual(["brd_one", "brd_three"]);
   });
 });
 
@@ -370,7 +398,6 @@ describe("starting the sweeper", () => {
   const config = {
     baseUrl: "https://board.test",
     source: "superpipeline",
-    agents: [{ key: "forge", boardId: "brd_one", token: `spa_${"a".repeat(48)}`, stationId: "s", hubUserId: "u" }],
   } as unknown as Parameters<typeof bridgeGateSweepDeps>[0];
 
   test("does not start on a hub that works no board", async () => {
@@ -398,7 +425,7 @@ describe("starting the sweeper", () => {
         },
         project: async () => ({ status: "already" }),
       },
-      { config, intervalMs: 5 },
+      { config, intervalMs: 5, roster: async () => [{ boardId: "brd_one", token: `spa_${"a".repeat(48)}` }] },
     );
 
     expect(stop).not.toBeNull();

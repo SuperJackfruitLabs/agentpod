@@ -117,7 +117,6 @@ export type BridgeAgentConfig = z.infer<typeof BridgeAgentConfig>;
 export interface BridgeConfig {
   baseUrl: string;
   source: string;
-  agents: BridgeAgentConfig[];
 }
 
 export function isBridgeEnabled(): boolean {
@@ -125,11 +124,18 @@ export function isBridgeEnabled(): boolean {
 }
 
 /**
- * The roster, or null when the bridge is off.
+ * Where the bridge claims from, or null when it is off.
  *
- * Throws when it is on and misconfigured. That is deliberate and matches
- * `validateConfig`: a bridge that silently claimed nothing because its roster
- * failed to parse would look exactly like a quiet board.
+ * **The roster is not here any more.** It was `SUPERPIPELINE_BRIDGE_AGENTS`, a JSON array of agent
+ * identities and their credentials in `hub.env`, and it is now a table —
+ * `services/bridge/roster.ts`, read per reconcile tick. What remains in the environment is the
+ * two facts that really are deployment configuration: whether the bridge runs at all, and which
+ * superpipeline it talks to.
+ *
+ * What is lost with it is the boot-time refusal: "a bridge that silently claimed nothing because
+ * its roster failed to parse would look exactly like a quiet board" cannot be checked here, since
+ * `validateConfig()` runs before `initDatabase()`. It is checked at the first reconcile instead,
+ * where the table can actually be read.
  */
 export function loadBridgeConfig(): BridgeConfig | null {
   if (!isBridgeEnabled()) return null;
@@ -141,30 +147,20 @@ export function loadBridgeConfig(): BridgeConfig | null {
     );
   }
 
-  const raw = (process.env.SUPERPIPELINE_BRIDGE_AGENTS ?? "").trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw || "[]");
-  } catch {
+  // Every token in `bridge_agents` is encrypted with it, so without it the roster reads as a list
+  // of agents none of which can be run — an outage with no obvious cause. Checked here because it
+  // IS an environment fact, and so is still reachable at boot.
+  //
+  // Read from `process.env` rather than through `config.encryption.key`, for the same reason the
+  // base URL above is: `config` snapshots at module load AND falls back to a dev key when the
+  // variable is unset, so asking it would answer "configured" for a hub that is about to encrypt
+  // every credential with a value published in this repository.
+  const encryptionKey = (process.env.ENCRYPTION_KEY ?? "").trim();
+  if (encryptionKey.length < 32) {
     throw new Error(
-      `SUPERPIPELINE_BRIDGE_AGENTS is not valid JSON — expected an array of {key, boardId, token, stationId, hubUserId, mode?, permissionWaitMs?, maxConcurrency?, profileKey?, mcpToken?}`,
+      `ENCRYPTION_KEY (at least 32 characters) is required when ${BRIDGE_ENV_FLAG}=true — every rostered agent's superpipeline credential is encrypted with it, and an unset one silently falls back to the development key`,
     );
   }
 
-  const agents = z.array(BridgeAgentConfig).parse(parsed);
-  if (agents.length === 0) {
-    throw new Error(
-      `SUPERPIPELINE_BRIDGE_AGENTS must list at least one agent when ${BRIDGE_ENV_FLAG}=true — an enabled bridge with no identities claims nothing and looks like an idle board`,
-    );
-  }
-
-  const seen = new Set<string>();
-  for (const a of agents) {
-    // `key` is written to bridge_dispatches.agent_key and appears in every log
-    // line. Two identities under one name make attribution unanswerable.
-    if (seen.has(a.key)) throw new Error(`SUPERPIPELINE_BRIDGE_AGENTS: duplicate agent key "${a.key}"`);
-    seen.add(a.key);
-  }
-
-  return { baseUrl: baseUrl.replace(/\/+$/, ""), source: BRIDGE_SOURCE, agents };
+  return { baseUrl: baseUrl.replace(/\/+$/, ""), source: BRIDGE_SOURCE };
 }
