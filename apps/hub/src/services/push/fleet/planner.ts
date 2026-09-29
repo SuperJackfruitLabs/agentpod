@@ -64,8 +64,6 @@ export interface PlanInput {
   active: boolean;
   /** What the event that prompted this did; `none` for a timer or a token. */
   change: FleetChange;
-  /** A decision arrived with this change — the one update that alerts. */
-  newDecision: boolean;
   endedOnFinish: boolean;
   /** The fleet's own next change (`nextExpiry`), or null. */
   expiryAt: number | null;
@@ -131,14 +129,19 @@ function startPayload(readerId: string, c: FleetContentState, ts: number): LiveA
   };
 }
 
-function updatePayload(c: FleetContentState, ts: number, alert: boolean): LiveActivityPushPayload {
+/**
+ * An update never alerts — operator decision 2026-09-29: a decision arriving
+ * is buzzed by its ordinary message notification, and the card only changes
+ * (at priority 10, so promptly). Only a push-to-start carries an alert, which
+ * APNs requires.
+ */
+function updatePayload(c: FleetContentState, ts: number): LiveActivityPushPayload {
   return {
     aps: {
       timestamp: ts,
       event: "update",
       "content-state": c,
       "stale-date": ts + STALE_AFTER_S,
-      ...(alert && c.decision ? { alert: { title: c.decision.agent, body: c.decision.question } } : {}),
     },
   };
 }
@@ -189,11 +192,11 @@ function end(plan: ReaderPlan, i: PlanInput, target: PushTarget): PlanResult {
   };
 }
 
-function sendUpdate(plan: ReaderPlan, i: PlanInput, target: PushTarget, priority: 5 | 10, alert: boolean): PlanResult {
+function sendUpdate(plan: ReaderPlan, i: PlanInput, target: PushTarget, priority: 5 | 10): PlanResult {
   const ts = nextTimestamp(plan, i.now);
   return {
     plan: { ...plan, phase: "live", lastSentAt: i.now, lastSent: i.content, lastTimestamp: ts, dueAt: null },
-    push: { target, priority, payload: fitPayload(updatePayload(i.content, ts, alert)) },
+    push: { target, priority, payload: fitPayload(updatePayload(i.content, ts)) },
     wakeAt: i.expiryAt,
   };
 }
@@ -213,7 +216,7 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
     case "starting": {
       if (i.tokens.update) {
         // An activity is up — after a restart, or the start's token arrived.
-        return sendUpdate(plan, i, "update-tokens", i.change === "important" ? 10 : 5, false);
+        return sendUpdate(plan, i, "update-tokens", i.change === "important" ? 10 : 5);
       }
       if (plan.phase === "starting" || !i.tokens.start) {
         return { plan, push: null, wakeAt: i.expiryAt };
@@ -234,10 +237,10 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
       if (sameCard(plan.lastSent, i.content)) {
         return { plan: { ...plan, dueAt: null }, push: null, wakeAt: i.expiryAt };
       }
-      if (i.change === "important") return sendUpdate(plan, i, "update-tokens", 10, i.newDecision);
-      if (i.change === "flush") return sendUpdate(plan, i, "update-tokens", 5, false);
+      if (i.change === "important") return sendUpdate(plan, i, "update-tokens", 10);
+      if (i.change === "flush") return sendUpdate(plan, i, "update-tokens", 5);
       const openAt = plan.lastSentAt === null ? i.now : plan.lastSentAt + COALESCE_MS;
-      if (i.now >= openAt) return sendUpdate(plan, i, "update-tokens", 5, false);
+      if (i.now >= openAt) return sendUpdate(plan, i, "update-tokens", 5);
       return { plan: { ...plan, dueAt: openAt }, push: null, wakeAt: earliest(openAt, i.expiryAt) };
     }
   }
@@ -258,7 +261,7 @@ export function planForNewUpdateToken(plan: ReaderPlan, i: PlanInput): PlanResul
     // updated if work arrives, ended if none does within the active window.
     return { plan: { ...plan, phase: "live", dueAt: null }, push: null, wakeAt: i.now + ACTIVE_WITHIN_MS + 1 };
   }
-  return sendUpdate(plan, i, "new-token", 5, false);
+  return sendUpdate(plan, i, "new-token", 5);
 }
 
 /** The app deleted its last update token: its activity ended on the phone. */

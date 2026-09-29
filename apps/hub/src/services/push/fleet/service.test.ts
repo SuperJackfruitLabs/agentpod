@@ -181,7 +181,8 @@ describe("coalescing, through real timers", () => {
     await fleet.settled();
     expect(sends).toHaveLength(3);
     expect(sends[2]!.priority).toBe(10);
-    expect(lastAps().alert).toEqual({ title: "Lyra", body: "Push to main?" });
+    expect(lastAps().alert).toBeUndefined();
+    expect(lastAps()["content-state"].decision.question).toBe("Push to main?");
 
     fleet.clearDecision(`perm:${ROOM}`);
     await fleet.settled();

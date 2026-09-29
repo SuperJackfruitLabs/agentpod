@@ -46,7 +46,6 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
     content: { ...content("Reading"), updatedAt: Math.floor(now / 1000) },
     active: true,
     change: "routine",
-    newDecision: false,
     endedOnFinish: false,
     expiryAt: null,
     tokens: { start: true, update: false },
@@ -189,15 +188,17 @@ describe("coalescing", () => {
     expect(b.push!.payload.aps.timestamp).toBeGreaterThan(a.push!.payload.aps.timestamp);
   });
 
-  test("an update alerts only for a decision arriving, and says what it asks", () => {
+  test("an update never alerts — a decision arriving changes the card at priority 10; its message notification does the buzzing", () => {
     const decided = content("Waiting for you", {
       decision: { roomId: "!a:hs", eventId: "$e", agent: "Lyra", kind: "permission", question: "Delete the branch?", options: [] },
       needsYou: 1,
     });
     const quiet = planPush(live(), input({ tokens: upd, change: "important" }));
     expect(quiet.push!.payload.aps.alert).toBeUndefined();
-    const loud = planPush(quiet.plan, input({ now: T0 + 100, tokens: upd, content: decided, change: "important", newDecision: true }));
-    expect(loud.push!.payload.aps.alert).toEqual({ title: "Lyra", body: "Delete the branch?" });
+    const loud = planPush(quiet.plan, input({ now: T0 + 100, tokens: upd, content: decided, change: "important" }));
+    expect(loud.push!.priority).toBe(10);
+    expect(loud.push!.payload.aps.alert).toBeUndefined();
+    expect(loud.push!.payload.aps["content-state"].decision!.question).toBe("Delete the branch?");
     expect(loud.push!.payload.aps["stale-date"]).toBe(loud.push!.payload.aps.timestamp + STALE_AFTER_S);
   });
 

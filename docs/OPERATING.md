@@ -1255,8 +1255,9 @@ and is on exactly when the gateway is.
   approve/reject — never "always").
 - **When it pushes** — `start` (push-to-start) only when the reader has no
   update token; routine changes at most once per 3 s at priority 5; a decision
-  arriving or a turn finishing at once at priority 10 (a decision arriving also
-  alerts); a decision clearing at once at priority 5; `end` once every agent has
+  arriving or a turn finishing at once at priority 10 (a decision arriving never
+  alerts through the card — its ordinary message notification buzzes; only a
+  push-to-start carries an alert, as APNs requires); a decision clearing at once at priority 5; `end` once every agent has
   been quiet 15 minutes with nothing pending, dismissed two minutes later after
   a finished turn, at once otherwise. Updates carry a 15-minute `stale-date`.
 - **Restarts** — fleet state is in memory. After a restart, a reader with an

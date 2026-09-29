@@ -105,14 +105,13 @@ export function createFleetService(deps: FleetServiceDeps) {
     return run;
   }
 
-  function inputFor(id: string, r: Reader, t: number, change: FleetChange, newDecision: boolean, list: LiveActivityToken[]): PlanInput {
+  function inputFor(id: string, r: Reader, t: number, change: FleetChange, list: LiveActivityToken[]): PlanInput {
     return {
       readerId: id,
       now: t,
       content: contentState(r.fleet, t),
       active: isFleetActive(r.fleet, t),
       change,
-      newDecision,
       endedOnFinish: endedOnFinish(r.fleet),
       expiryAt: nextExpiry(r.fleet, t),
       tokens: { start: list.some((k) => k.kind === "start"), update: list.some((k) => k.kind === "update") },
@@ -151,7 +150,7 @@ export function createFleetService(deps: FleetServiceDeps) {
     if (wakeAt === null) return;
     r.cancelWake = setTimer(() => {
       r.cancelWake = null;
-      void enqueue(id, (rr) => replan(id, rr, "none", false));
+      void enqueue(id, (rr) => replan(id, rr, "none"));
     }, Math.max(0, wakeAt - t));
   }
 
@@ -161,10 +160,10 @@ export function createFleetService(deps: FleetServiceDeps) {
     }
   }
 
-  async function replan(id: string, r: Reader, change: FleetChange, newDecision: boolean): Promise<void> {
+  async function replan(id: string, r: Reader, change: FleetChange): Promise<void> {
     const t = now();
     const list = await deps.tokens.list(id);
-    const result = planPush(r.plan, inputFor(id, r, t, change, newDecision, list));
+    const result = planPush(r.plan, inputFor(id, r, t, change, list));
     r.plan = result.plan;
     if (result.push) {
       const kind: LiveActivityTokenKind = result.push.target === "start-tokens" ? "start" : "update";
@@ -183,7 +182,7 @@ export function createFleetService(deps: FleetServiceDeps) {
         const { state, change } = applyFleetEvent(r.fleet, event);
         r.fleet = state;
         if (change === "none") return;
-        await replan(readerId, r, change, event.type === "decision-asked");
+        await replan(readerId, r, change);
       });
     },
 
@@ -215,12 +214,12 @@ export function createFleetService(deps: FleetServiceDeps) {
       return enqueue(t.userId, async (r) => {
         await deps.tokens.upsert(t);
         if (t.kind === "start") {
-          await replan(t.userId, r, "none", false);
+          await replan(t.userId, r, "none");
           return;
         }
         const at = now();
         const list = await deps.tokens.list(t.userId);
-        const result = planForNewUpdateToken(r.plan, inputFor(t.userId, r, at, "none", false, list));
+        const result = planForNewUpdateToken(r.plan, inputFor(t.userId, r, at, "none", list));
         r.plan = result.plan;
         const target = list.find((k) => k.kind === "update" && k.token === t.token.toLowerCase());
         if (result.push && target) await push(t.userId, result.push, [target], at);
