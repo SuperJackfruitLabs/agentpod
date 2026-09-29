@@ -36,35 +36,43 @@ type TranscriptionFetcher func(ctx context.Context, stationId string) (Transcrip
 // NewHTTPCredentialFetcher uses for matrix.adopt. The key travels over this
 // authenticated HTTP call, never in a broker frame.
 func NewHTTPTranscriptionFetcher(hub, nodeID, nodeSecret string) TranscriptionFetcher {
-	base := strings.TrimSuffix(hub, "/")
 	return func(ctx context.Context, stationId string) (TranscriptionConfig, error) {
-		u := base + "/api/nodes/" + url.PathEscape(nodeID) + "/stations/" + url.PathEscape(stationId) + "/transcription"
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
-		if err != nil {
-			return TranscriptionConfig{}, fmt.Errorf("transcription.apply: building request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+nodeID+":"+nodeSecret)
-
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return TranscriptionConfig{}, fmt.Errorf("transcription.apply: could not reach the hub: %w", err)
-		}
-		defer res.Body.Close()
-
-		if res.StatusCode != http.StatusOK {
-			// Drain and discard: the body is never read into an error.
-			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4<<10))
-			return TranscriptionConfig{}, fmt.Errorf("transcription.apply: hub refused the request (status %d)", res.StatusCode)
-		}
-
 		var cfg TranscriptionConfig
-		if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&cfg); err != nil {
-			// Not wrapped: a decoder error can quote the body it choked on,
-			// and this body carries the key.
-			return TranscriptionConfig{}, errors.New("transcription.apply: the hub's response did not decode")
-		}
-		return cfg, nil
+		err := postNodeStationRead(ctx, hub, nodeID, nodeSecret, stationId, "transcription", "transcription.apply", &cfg)
+		return cfg, err
 	}
+}
+
+// postNodeStationRead POSTs to the hub's node-facing
+// /api/nodes/:nodeId/stations/:stationId/<what> with this node's own
+// credential and decodes the answer into out. verb prefixes every error.
+//
+// The answer carries a key, so no error ever quotes the body: a refusal is
+// drained and reported by status only, and a decode error is not wrapped (a
+// decoder error can quote the bytes it choked on).
+func postNodeStationRead(ctx context.Context, hub, nodeID, nodeSecret, stationId, what, verb string, out any) error {
+	u := strings.TrimSuffix(hub, "/") + "/api/nodes/" + url.PathEscape(nodeID) +
+		"/stations/" + url.PathEscape(stationId) + "/" + what
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, nil)
+	if err != nil {
+		return fmt.Errorf("%s: building request: %w", verb, err)
+	}
+	req.Header.Set("Authorization", "Bearer "+nodeID+":"+nodeSecret)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s: could not reach the hub: %w", verb, err)
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 4<<10))
+		return fmt.Errorf("%s: hub refused the request (status %d)", verb, res.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(out); err != nil {
+		return errors.New(verb + ": the hub's response did not decode")
+	}
+	return nil
 }
 
 // TranscriptionWriteFunc writes cfg into the harness profile at profileDir.

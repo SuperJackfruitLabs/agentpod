@@ -17,6 +17,7 @@ func TestProductionHandlerChainPreservesTerminalFrames(t *testing.T) {
 	h = NewSkillManagementHandler(h, SkillManagementDeps{})
 	h = NewMatrixAdoptHandler(h, MatrixAdoptDeps{})
 	h = NewTranscriptionApplyHandler(h, TranscriptionApplyDeps{})
+	h = NewSpeechApplyHandler(h, SpeechApplyDeps{})
 	h = NewChangesetHandler(h, WorkspaceFunc(func(string) (string, error) {
 		t.Fatal("workspace lookup must not run for a terminal frame")
 		return "", nil
