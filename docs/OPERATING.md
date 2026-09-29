@@ -1181,7 +1181,17 @@ pushes are not worth taking the control plane down for. A working gateway logs
 message"},"mutable-content":1,"sound":"default","badge":<unread>,"thread-id":<room>},
 "room_id","event_id","unread_count"}`. Never message content, and never anything
 a `full`-format pusher would add: the app's Notification Service Extension
-fetches and decrypts the event itself. `apns-collapse-id` is the event id, the
+fetches and decrypts the event itself. The one addition: the push for an agent's answer
+that ended a turn with tools also carries `"turn":{"total":7,"failed":1}` —
+counts only — which the app's widget recap reads ("Finished · 7 steps",
+"Failed at step 4 of 7"). The answer's send is announced like a quiet send, so
+a push that beats its response waits (≤ 500 ms) for the counts.
+
+**The exception: the fleet Live Activity sends text to Apple.** By operator
+decision (2026-09-29) the Lock Screen fleet card is pushed by the hub, and its
+pushes carry **agent names, the current step's title, and a pending decision's
+question and option labels in plaintext** — readable by Apple in transit. The
+message push above still carries ids only; nothing else widened. `apns-collapse-id` is the event id, the
 same id the app's local notifier uses, so the two dedupe. Priority 10, or 5 when
 tuwunel says `prio: low`; expiry 24 h.
 
@@ -1222,6 +1232,40 @@ answered and dropped. `LOG_LEVEL=debug` logs each `push decision` with its
 Events a **harness-mode** agent posts itself (its own reactions and edits —
 Hermes does both) never pass through the hub, so the gateway cannot tell them
 apart; those need the app-side fix or the entitlement.
+
+**The fleet Live Activity** (supermessage spec
+`docs/superpowers/specs/2026-09-29-fleet-live-activity-and-recap-widgets-design.md`,
+Part A). No new variables: it uses the APNS_* above, with
+`apns-push-type: liveactivity` on the topic `<APNS_TOPIC>.push-type.liveactivity`,
+and is on exactly when the gateway is.
+
+- **Tokens** — the app registers them at
+  `POST /_supermessage/v1/live-activity/tokens`
+  (`{kind: "start"|"update", token, environment, device_id, activity_id?}`) and
+  removes them with `DELETE` on the same path. Auth is the user's Matrix access
+  token, checked against tuwunel's `whoami` at `MATRIX_HOMESERVER_URL` (a success
+  is cached 60 s); the owner is whoever whoami names. 401 for a token tuwunel
+  refuses, 502 when tuwunel cannot be reached, **503 when the gateway is off**.
+  Stored in `live_activity_tokens` (migration 0081, applied on boot). A token
+  APNs refuses is deleted; an update token is deleted once its activity is ended.
+- **What it shows** — per reader (the station owner, as for the live stream):
+  each agent that is working, waiting on a decision, or did something in the
+  last 15 minutes (at most 3 rows, the rest counted), and the oldest pending
+  permission or gate with up to two inline options (allow-once/reject,
+  approve/reject — never "always").
+- **When it pushes** — `start` (push-to-start) only when the reader has no
+  update token; routine changes at most once per 3 s at priority 5; a decision
+  arriving or a turn finishing at once at priority 10 (a decision arriving never
+  alerts through the card — its ordinary message notification buzzes; only a
+  push-to-start carries an alert, as APNs requires); a decision clearing at once at priority 5; `end` once every agent has
+  been quiet 15 minutes with nothing pending, dismissed two minutes later after
+  a finished turn, at once otherwise. Updates carry a 15-minute `stale-date`.
+- **Restarts** — fleet state is in memory. After a restart, a reader with an
+  update token on file keeps their card; it is updated when work arrives and
+  ended if none does within 15 minutes. Pending permissions are lost with the
+  process as before; pending gates come back with the next gate sweep (≤ 5 min).
+- `LOG_LEVEL=info` logs each token registered/removed (`live-activity-tokens`)
+  and each refused or failed Live Activity push (`fleet-live`).
 
 **Defences** — the Push Gateway API has no authentication, so the route has
 its own: a 64 KiB body cap (413), a strict schema (400), an allowlist of app ids

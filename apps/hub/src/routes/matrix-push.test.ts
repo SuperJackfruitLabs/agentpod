@@ -26,6 +26,7 @@ import {
   _quietWaitersForTest,
   _resetHubEventsForTest,
   beginQuietSend,
+  noteAnswerEvent,
   noteHubEvent,
 } from "../services/push/hub-events";
 
@@ -268,6 +269,41 @@ describe("the hub's own questions", () => {
     noteHubEvent(EVENT, "companion");
     expect(await (await post(app(), notification())).json()).toEqual({ rejected: [] });
     expect(sends).toHaveLength(0);
+  });
+});
+
+describe("a turn's outcome on the push for its answer", () => {
+  test("the answer's push carries the turn's counts, and still no content", async () => {
+    noteAnswerEvent(EVENT, { total: 7, failed: 1 });
+    await post(app(), notification());
+    expect(sends).toHaveLength(1);
+    const p = sends[0]!.payload as Record<string, unknown> & { aps: Record<string, unknown> };
+    expect(p.turn).toEqual({ total: 7, failed: 1 });
+    // An answer is an ordinary message otherwise: no category, the fixed alert.
+    expect(p.aps.category).toBeUndefined();
+    expect(p.aps.alert).toEqual({ title: "supermessage", body: "New message" });
+    expect(ApnsPushPayload.safeParse(p).success).toBe(true);
+    expect(decisions[0]!.kind).toBe("answer");
+  });
+
+  test("any other push carries no turn", async () => {
+    noteAnswerEvent("$another-answer", { total: 3, failed: 0 });
+    await post(app(), notification());
+    expect((sends[0]!.payload as Record<string, unknown>).turn).toBeUndefined();
+  });
+
+  test("an answer pushed before its send returned waits for its id, like a quiet event", async () => {
+    // The answer is announced as in flight by `outbound.ts`, so the push that
+    // beats the send's response still learns the turn it ended.
+    const end = beginQuietSend(ROOM);
+    const pushed = post(app(), notification());
+    await untilWaiting();
+    noteAnswerEvent(EVENT, { total: 2, failed: 0 });
+    end();
+    await pushed;
+    expect(sends).toHaveLength(1);
+    expect((sends[0]!.payload as Record<string, unknown>).turn).toEqual({ total: 2, failed: 0 });
+    expect(decisions[0]!.timing).toBe("known-after-wait");
   });
 });
 

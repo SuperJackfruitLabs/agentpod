@@ -161,6 +161,12 @@ export interface GateProjectionDeps {
   domain: string;
   /** Where a card's deep link points. */
   boardBaseUrl?: string;
+  /**
+   * Told once the gate is in its room — the fleet Live Activity shows it as
+   * a pending decision (`fleet-gates.ts`). Best-effort: a failure here is
+   * logged and costs the Lock Screen card, never the gate.
+   */
+  onPosted?(d: GatePendingDelivery, posted: { roomId: string; eventId: string; proseEventId: string | null }): Promise<void>;
 }
 
 export type ProjectionOutcome =
@@ -550,6 +556,13 @@ export async function projectGate(
     .set({ eventId, proseEventId })
     .where(eq(matrixGateEvents.gateId, d.gateId));
 
+  await deps.onPosted?.(d, { roomId: found.roomId, eventId, proseEventId }).catch((err) =>
+    log.warn("gate posted but not shown on the fleet card", {
+      gateId: d.gateId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
+
   return { status: "sent", eventId, roomId: found.roomId };
 }
 
@@ -881,6 +894,7 @@ export async function resolveGateAtSuperpipeline(
 export async function projectionForGate(gateId: string): Promise<{
   tenantId: string;
   boardId: string;
+  roomId: string;
   eventId: string;
   proseEventId: string | null;
 } | null> {
@@ -888,6 +902,7 @@ export async function projectionForGate(gateId: string): Promise<{
     .select({
       tenantId: matrixGateEvents.tenantId,
       boardId: matrixGateEvents.boardId,
+      roomId: matrixGateEvents.roomId,
       eventId: matrixGateEvents.eventId,
       proseEventId: matrixGateEvents.proseEventId,
     })

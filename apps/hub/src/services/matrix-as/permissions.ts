@@ -20,6 +20,8 @@
  * and *Allow always* is exactly the ambiguity that would cause it.
  */
 
+import { clearFleetDecision, permissionDecisionKey } from "../push/fleet/sink";
+
 export interface PermissionOption {
   optionId: string;
   name: string;
@@ -44,7 +46,9 @@ export function pendingPermissionFor(roomId: string): PendingPermission | undefi
 }
 
 export function clearPendingPermission(roomId: string): void {
-  pending.delete(roomId);
+  // The fleet Live Activity shows the pending question on the Lock Screen; it
+  // goes the moment the question stops standing, however it was settled.
+  if (pending.delete(roomId)) clearFleetDecision(permissionDecisionKey(roomId));
 }
 
 /** Leak detection, mirroring `_attachedCountForTest` in `outbound.ts`. */

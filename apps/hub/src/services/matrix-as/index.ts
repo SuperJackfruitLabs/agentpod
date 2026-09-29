@@ -23,8 +23,10 @@ import { withQuietNotes } from "./push-quiet";
 import { provisionStation, provisionAll, provisionStationForAlias } from "./provision";
 import { handleRoomMessage, retryPendingDecrypts } from "./inbound";
 import { transcriberFor } from "../transcription-settings";
+import { clearFleetDecision, gateDecisionKey } from "../push/fleet/sink";
 import {
   handleGateDecision,
+  parseGateDecision,
   projectionForGate,
   resolveGateAtSuperpipeline,
   roomAgentUser,
@@ -117,6 +119,20 @@ async function readerForRoom(roomId: string): Promise<string | null> {
       )
     );
   return identity?.externalId ?? null;
+}
+
+/**
+ * The agent's name on the fleet Live Activity: its station's display name, as
+ * the console shows it. Null for a room with no station, and the caller falls
+ * back to the agent's localpart.
+ */
+async function agentNameForRoom(roomId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ displayName: stations.displayName })
+    .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .where(eq(matrixRooms.roomId, roomId));
+  return row?.displayName ?? null;
 }
 
 export function matrixBridgeConfig(env = process.env): MatrixBridgeConfig {
@@ -353,11 +369,11 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
   const superpipelineBaseUrl = (process.env.SUPERPIPELINE_BASE_URL ?? "").trim();
   const gates = superpipelineBaseUrl
     ? {
-        handle: (
+        handle: async (
           event: { sender: string; content: Record<string, unknown> },
           roomId: string
-        ) =>
-          handleGateDecision(event, roomId, {
+        ) => {
+          const result = await handleGateDecision(event, roomId, {
             // The subject comes from here and from nowhere else. This is the
             // control that makes minting an assertion for another principal
             // safe to have at all — see `mintPrincipalAssertion`.
@@ -417,7 +433,15 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
               const speaker = await roomSpeakerFor(roomId, cfg.domain);
               return speaker ? speakingClient.sendText(speaker, roomId, body) : null;
             },
-          }),
+          });
+          // Answered: off the fleet Live Activity at once. A gate answered on the
+          // board instead leaves with the next sweep (`fleet-gates.ts`).
+          if (result.status === "resolved") {
+            const gateId = parseGateDecision(event.content)?.gateId;
+            if (gateId) clearFleetDecision(gateDecisionKey(gateId));
+          }
+          return result;
+        },
       }
     : undefined;
 
@@ -463,6 +487,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         // encrypted and the agent's reply in plaintext, in the same room.
         client: speakingClient,
         readerFor: readerForRoom,
+        nameFor: agentNameForRoom,
       }),
     noteTrigger: noteTurnTrigger,
   };

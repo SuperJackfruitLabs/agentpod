@@ -4,9 +4,10 @@ import {
   TURN_ERROR_CONTENT_KEY,
   TurnErrorCard,
 } from "@agentpod/contract";
-import { _resetHubEventsForTest, hubEventKind } from "../push/hub-events";
-import { matchPermissionAnswer, pendingPermissionFor } from "./permissions";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { _resetHubEventsForTest, hubEventKind, hubEventTurn, quietSendsInFlight } from "../push/hub-events";
+import { clearPendingPermission, matchPermissionAnswer, pendingPermissionFor } from "./permissions";
+import { setFleetSink } from "../push/fleet/sink";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   attachRoomToSession,
   detachRoom,
@@ -864,6 +865,41 @@ describe("the durable record of a turn", () => {
     expect(custom).toHaveLength(1);
   });
 
+  test("notes the answer as the turn's outcome, with its counts, for the push gateway", async () => {
+    _resetHubEventsForTest();
+    const { said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "completed" }));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c2", title: "Run tests", status: "failed" }, 3));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c3", title: "Fix", status: "completed" }, 4));
+    emit(chunk("Two of three."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(said).toHaveLength(1);
+    expect(hubEventKind("$msg-1")).toBe("answer");
+    expect(hubEventTurn("$msg-1")).toEqual({ total: 3, failed: 1 });
+    // Announced while in flight, so a push that beats the send waits for it —
+    // and nothing is left in flight afterwards.
+    expect(quietSendsInFlight(ROOM)).toBe(0);
+  });
+
+  test("an answer to a turn with no tools is not noted — there is no outcome to carry", async () => {
+    _resetHubEventsForTest();
+    const { said, deps: d } = recordingDeps();
+    attachRoomToSession(SESSION, ROOM, AGENT, d as any);
+
+    emit(chunk("Just talking."));
+    await settle();
+    emit(state("idle"));
+    await settle();
+
+    expect(said).toHaveLength(1);
+    expect(hubEventKind("$msg-1")).toBeUndefined();
+  });
+
   test("a deployment without sendCustomEvent still says the answer", async () => {
     // The property that makes this safe to roll out: the card is additive, and
     // its absence changes nothing else.
@@ -1265,5 +1301,172 @@ describe("a turn that chose silence", () => {
 
     expect(reactions.at(-1)).toEqual({ targetId: "$user-msg-okay", key: "✅" });
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("the fleet Live Activity", () => {
+  type Noted = { reader: string; event: any };
+  let noted: Noted[] = [];
+  let cleared: string[] = [];
+  let nameLookups = 0;
+
+  const sink = {
+    note: (reader: string, event: any) => noted.push({ reader, event }),
+    clearDecision: (key: string) => cleared.push(key),
+    reconcileGates: () => {},
+    knowsDecision: () => false,
+  };
+
+  function fleetDeps(over: Record<string, unknown> = {}) {
+    const base = deps();
+    return {
+      ...base,
+      client: {
+        ...base.client,
+        sendCustomEvent: async () => "$turn-record",
+      },
+      readerFor: async () => "@owner:id.agentpod.dev",
+      nameFor: async () => {
+        nameLookups++;
+        return "Krishna";
+      },
+      ...over,
+    } as any;
+  }
+
+  const tool = (payload: Record<string, unknown>, seq = 2) => ({
+    sessionId: SESSION,
+    seq,
+    type: "agent-update",
+    payload,
+    createdAt: new Date().toISOString(),
+  });
+
+  beforeEach(() => {
+    noted = [];
+    cleared = [];
+    nameLookups = 0;
+    setFleetSink(sink);
+  });
+  afterEach(() => setFleetSink(null));
+
+  test("a turn is reported as it runs: started, each step with its counts, finished with the record's counts", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("working", 1));
+    await settle();
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "in_progress" }));
+    emit(tool({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" }, 3));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c2", title: "Run tests", status: "failed" }, 4));
+    emit(chunk("One failed.", 5));
+    await settle();
+    emit(state("idle", 6));
+    await settle();
+
+    const types = noted.map((n) => n.event.type);
+    expect(noted.every((n) => n.reader === "@owner:id.agentpod.dev")).toBe(true);
+    expect(noted.every((n) => n.event.roomId === ROOM && n.event.name === "Krishna")).toBe(true);
+    expect(types[0]).toBe("turn-started");
+    expect(noted.filter((n) => n.event.type === "step").map((n) => [n.event.title, n.event.completed, n.event.total])).toEqual([
+      ["Read a", 0, 1],
+      ["Read a", 1, 1],
+      ["Run tests", 2, 2],
+    ]);
+    expect(types).toContain("spoke");
+    expect(noted.at(-1)!.event).toMatchObject({ type: "turn-finished", total: 2, failed: 1, failedAt: 2, errored: false });
+    // Looked up once for the room, not once per event.
+    expect(nameLookups).toBe(1);
+  });
+
+  test("a turn that errored with nothing after it finishes as failed", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("working", 1));
+    await settle();
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: { message: "quota" }, createdAt: new Date().toISOString() });
+    await settle();
+    emit(state("idle", 3));
+    await settle();
+    expect(noted.at(-1)!.event).toMatchObject({ type: "turn-finished", total: 0, failed: 0, errored: true });
+  });
+
+  test("an idle with no turn behind it (a session ending between turns) finishes nothing", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("ended", 1));
+    await settle();
+    expect(noted.map((n) => n.event.type)).not.toContain("turn-finished");
+  });
+
+  test("a permission request becomes the fleet's decision, with its inline options; the turn moving on clears it", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("working", 1));
+    await settle();
+    emit({
+      sessionId: SESSION,
+      seq: 5,
+      type: "permission-request",
+      payload: {
+        toolCall: { title: "git push origin main" },
+        options: [
+          { optionId: "allow_once", name: "Allow once" },
+          { optionId: "allow_always", name: "Allow always" },
+          { optionId: "reject_once", name: "Reject" },
+        ],
+      },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+    const asked = noted.find((n) => n.event.type === "decision-asked")!.event.decision;
+    expect(asked).toMatchObject({
+      key: `perm:${ROOM}`,
+      roomId: ROOM,
+      eventId: "$evt",
+      agent: "Krishna",
+      kind: "permission",
+      question: "git push origin main",
+      options: [
+        { id: "Allow once", label: "Allow once", declines: false },
+        { id: "Reject", label: "Reject", declines: true },
+      ],
+    });
+
+    emit(state("working", 6));
+    await settle();
+    emit(state("idle", 7));
+    await settle();
+    expect(cleared).toContain(`perm:${ROOM}`);
+  });
+
+  test("a question answered before its send returned is not shown as pending", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const d = fleetDeps();
+    d.client.sendText = async () => {
+      await gate;
+      return "$late";
+    };
+    attachRoomToSession(SESSION, ROOM, AGENT, d);
+    emit({
+      sessionId: SESSION,
+      seq: 5,
+      type: "permission-request",
+      payload: { toolCall: { title: "x" }, options: [{ optionId: "a", name: "Allow once" }] },
+      createdAt: new Date().toISOString(),
+    });
+    await settle();
+    clearPendingPermission(ROOM); // answered in the console meanwhile
+    release();
+    await settle();
+    expect(noted.map((n) => n.event.type)).not.toContain("decision-asked");
+  });
+
+  test("with no sink installed (no push gateway), nothing is looked up", async () => {
+    setFleetSink(null);
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("working", 1));
+    emit(chunk("hi"));
+    await settle();
+    emit(state("idle", 2));
+    await settle();
+    expect(nameLookups).toBe(0);
+    expect(noted).toEqual([]);
   });
 });

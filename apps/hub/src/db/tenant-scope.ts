@@ -49,6 +49,7 @@ import {
   matrixSpaces,
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
+import { liveActivityTokens } from "./schema/live-activity";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { stationGitIdentities } from "./schema/git-identities";
@@ -255,6 +256,17 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "tenants their rooms do. Scoping this would mean asking which tenant a retry belongs to " +
       "before reading what is in it, which is backwards, and would let one tenant's replay " +
       "re-deliver another's.",
+  },
+
+  live_activity_tokens: {
+    table: liveActivityTokens,
+    reason:
+      "A PERSON's phone, keyed by the Matrix id the homeserver vouched for — exempt for the reason " +
+      "`principal_identities` is: a person is not inside a fleet, they reach one. The card these " +
+      "tokens receive is built per reader from the rooms that reader owns (`readerForRoom`), so " +
+      "which fleet's work reaches the phone is decided where the content is built, not here. " +
+      "Nothing lists these rows over an API: the only routes write and delete the caller's own, " +
+      "by the user id whoami returned.",
   },
 
   service_signing_keys: {

@@ -31,3 +31,12 @@ describe("ApnsPushPayload — everything a push may carry, and nothing else", ()
     expect(PushCategory.options).toEqual(["PERMISSION", "GATE"]);
   });
 });
+
+describe("ApnsPushPayload — a turn's outcome on the answer push", () => {
+  it("carries counts, and only counts", () => {
+    const withTurn = { ...plain, turn: { total: 7, failed: 1 } };
+    expect(ApnsPushPayload.parse(withTurn)).toEqual(withTurn);
+    expect(ApnsPushPayload.safeParse({ ...plain, turn: { total: 7, failed: 1, step: "Running the tests" } }).success).toBe(false);
+    expect(ApnsPushPayload.safeParse({ ...plain, turn: { total: -1, failed: 0 } }).success).toBe(false);
+  });
+});

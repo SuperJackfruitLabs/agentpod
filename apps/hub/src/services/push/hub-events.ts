@@ -37,18 +37,42 @@
  * for nothing, so an ordinary message is never held.
  */
 
-export type HubEventKind = "permission" | "gate" | "companion" | "quiet";
+export type HubEventKind = "permission" | "gate" | "companion" | "quiet" | "answer";
+
+/**
+ * A finished turn's outcome, as counts. Noted on the `answer` that ended the
+ * turn so the gateway can put it on that push (spec A5) — counts only, never
+ * a tool's title or anything it said.
+ */
+export interface TurnCounts {
+  total: number;
+  failed: number;
+}
 
 const TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_ENTRIES = 5_000;
 
-const kinds = new Map<string, { kind: HubEventKind; until: number }>();
+const kinds = new Map<string, { kind: HubEventKind; until: number; turn?: TurnCounts }>();
 
 export function noteHubEvent(eventId: string | null | undefined, kind: HubEventKind, now = Date.now()): void {
+  note(eventId, kind, undefined, now);
+}
+
+/**
+ * `answer` is the agent's reply that ended a turn which ran tools. It still
+ * pushes as an ordinary message; the gateway adds `turn` to it. Announced
+ * in flight by `outbound.ts` like a quiet send, so a push that beats the
+ * send's response waits for the counts rather than going without them.
+ */
+export function noteAnswerEvent(eventId: string | null | undefined, turn: TurnCounts, now = Date.now()): void {
+  note(eventId, "answer", { total: turn.total, failed: turn.failed }, now);
+}
+
+function note(eventId: string | null | undefined, kind: HubEventKind, turn: TurnCounts | undefined, now: number): void {
   if (!eventId) return;
   // Re-inserted so Map order stays oldest-first for eviction.
   kinds.delete(eventId);
-  kinds.set(eventId, { kind, until: now + TTL_MS });
+  kinds.set(eventId, { kind, until: now + TTL_MS, ...(turn ? { turn } : {}) });
   while (kinds.size > MAX_ENTRIES) {
     const oldest = kinds.keys().next().value;
     if (oldest === undefined) break;
@@ -65,6 +89,12 @@ export function hubEventKind(eventId: string | undefined, now = Date.now()): Hub
     return undefined;
   }
   return entry.kind;
+}
+
+/** The counts noted with an `answer`, or undefined for anything else. */
+export function hubEventTurn(eventId: string | undefined, now = Date.now()): TurnCounts | undefined {
+  if (!eventId || hubEventKind(eventId, now) === undefined) return undefined;
+  return kinds.get(eventId)?.turn;
 }
 
 // ─── Quiet sends in flight ───────────────────────────────────────────────────

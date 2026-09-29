@@ -70,3 +70,7 @@ export * from "./transcription";
 // charter → decisions/2026-09-27-which-side-is-primary-is-a-repositorys-property.md).
 export * from "./git-identities";
 export * from "./board-rooms";
+
+// Where the fleet Live Activity is pushed: a device's push-to-start token and
+// each running activity's update token (supermessage spec 2026-09-29, A1).
+export * from "./live-activity";

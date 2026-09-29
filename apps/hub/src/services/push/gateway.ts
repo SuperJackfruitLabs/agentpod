@@ -4,8 +4,16 @@
  * Operator decision 2026-09-28: the gateway lives in the hub rather than in
  * Sygnal. The pusher supermessage registers is `format: "event_id_only"`, so
  * what arrives is an event id, a room id and an unread count — and that, plus
- * a category when the hub itself asked the question, is all that leaves. The
- * app's Notification Service Extension fetches and decrypts the event.
+ * a category when the hub itself asked the question, and a finished turn's
+ * tool counts on the answer that ended it, is all that leaves. The app's
+ * Notification Service Extension fetches and decrypts the event.
+ *
+ * **Not the whole of what the hub sends Apple any more.** The fleet Live
+ * Activity (`fleet/`, operator decision 2026-09-29) pushes agent names, step
+ * titles and decision questions and options in PLAINTEXT, over its own
+ * `liveactivity` push type. That is a deliberate trade the operator accepted
+ * for a Lock Screen that stays live with the app closed; it does not loosen
+ * this file. A message push still carries ids only.
  *
  * Spec: https://spec.matrix.org/latest/push-gateway-api/
  */
@@ -21,7 +29,14 @@ import {
 import { createLogger } from "../../utils/logger";
 import type { ApnsClient } from "./apns";
 import type { ApnsEnvironment } from "./config";
-import { hubEventKind, quietSendsInFlight, quietSendsSettled, type HubEventKind } from "./hub-events";
+import {
+  hubEventKind,
+  hubEventTurn,
+  quietSendsInFlight,
+  quietSendsSettled,
+  type HubEventKind,
+  type TurnCounts,
+} from "./hub-events";
 
 const log = createLogger("push-gateway");
 
@@ -87,11 +102,16 @@ function categoryOf(kind: HubEventKind | undefined): PushCategory | undefined {
 }
 
 /**
- * The APNs body for one notification. Built ONLY from ids, a count and a
- * category — no field of `notification` that could carry what was said is
- * read here, and the contract's strict schema is the check that it stays so.
+ * The APNs body for one notification. Built ONLY from ids, a count, a
+ * category and — for an answer that ended a turn — the turn's tool counts; no
+ * field of `notification` that could carry what was said is read here, and
+ * the contract's strict schema is the check that it stays so.
  */
-export function buildApnsPayload(n: Notification, category: PushCategory | undefined): ApnsPushPayload {
+export function buildApnsPayload(
+  n: Notification,
+  category: PushCategory | undefined,
+  turn?: TurnCounts
+): ApnsPushPayload {
   const unread = n.counts?.unread;
   const payload: ApnsPushPayload = {
     aps: {
@@ -105,6 +125,7 @@ export function buildApnsPayload(n: Notification, category: PushCategory | undef
     ...(n.room_id ? { room_id: n.room_id } : {}),
     ...(n.event_id ? { event_id: n.event_id } : {}),
     ...(unread !== undefined ? { unread_count: unread } : {}),
+    ...(turn ? { turn: { total: turn.total, failed: turn.failed } } : {}),
   };
   // Throws on anything the contract does not list — a payload that fails here
   // is a bug in this function, and it must not reach Apple.
@@ -242,7 +263,8 @@ export function createPushGateway(deps: PushGatewayDeps) {
     }
 
     const category = categoryOf(kind);
-    const payload = buildApnsPayload(n, category);
+    const turn = kind === "answer" ? hubEventTurn(n.event_id) : undefined;
+    const payload = buildApnsPayload(n, category, turn);
     const collapseId =
       n.event_id && Buffer.byteLength(n.event_id) <= COLLAPSE_ID_MAX ? n.event_id : undefined;
     const expiration = Math.floor(now() / 1000) + APNS_EXPIRATION_S;

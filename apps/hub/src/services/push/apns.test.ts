@@ -178,3 +178,24 @@ describe("retries", () => {
     expect(calls).toHaveLength(2);
   });
 });
+
+describe("push types", () => {
+  test("a Live Activity push says so, on the app's .push-type.liveactivity topic", async () => {
+    const { calls, transport } = scripted([ok(), ok()]);
+    const { apns } = client(transport);
+    await apns.send({ ...input, collapseId: undefined, pushType: "liveactivity" });
+    await apns.send({ ...input, pushType: "alert" });
+
+    expect(calls[0]!.headers["apns-push-type"]).toBe("liveactivity");
+    expect(calls[0]!.headers["apns-topic"]).toBe("dev.supermessage.ios.push-type.liveactivity");
+    expect(calls[1]!.headers["apns-push-type"]).toBe("alert");
+    expect(calls[1]!.headers["apns-topic"]).toBe("dev.supermessage.ios");
+  });
+
+  test("an alert is the default, as it always was", async () => {
+    const { calls, transport } = scripted([ok()]);
+    await client(transport).apns.send(input);
+    expect(calls[0]!.headers["apns-push-type"]).toBe("alert");
+    expect(calls[0]!.headers["apns-topic"]).toBe("dev.supermessage.ios");
+  });
+});

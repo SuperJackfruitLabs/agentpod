@@ -1,0 +1,19 @@
+{
+  "agents": [
+    {"roomId": "!ray:hs", "name": "Research Ray", "state": "needs_you", "step": "Waiting for you", "since": 1790670000},
+    {"roomId": "!lyra:hs", "name": "Artistic Lyra", "state": "working", "step": "Running the tests", "completed": 3, "total": 7, "since": 1790669880},
+    {"roomId": "!quill:hs", "name": "Writer Quill", "state": "failed", "step": "Failed at step 4 of 7", "completed": 4, "total": 7, "since": 1790669500}
+  ],
+  "more": 1,
+  "decision": {
+    "roomId": "!ray:hs", "eventId": "$perm1", "agent": "Research Ray", "kind": "permission",
+    "question": "Run git push origin main?",
+    "options": [
+      {"id": "Allow once", "label": "Allow once", "declines": false},
+      {"id": "Reject", "label": "Reject", "declines": true}
+    ]
+  },
+  "needsYou": 1,
+  "working": 1,
+  "updatedAt": 1790670123
+}

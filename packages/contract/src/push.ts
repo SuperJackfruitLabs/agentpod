@@ -11,6 +11,10 @@ import { z } from "zod";
 // This schema is `.strict()` all the way down on purpose: it is the list of
 // everything a push may carry, and a field that is not on it is a field that
 // must not reach Apple. Message content has no place here.
+//
+// The fleet Live Activity (`fleet-live.ts`) is the deliberate exception, and
+// a separate schema: by operator decision (2026-09-29) its pushes carry agent
+// names, step titles and decision questions in plaintext. Nothing here does.
 
 /**
  * What a push is about, when the hub itself posted the event: a permission
@@ -42,6 +46,15 @@ export const ApnsPushPayload = z
     room_id: z.string().optional(),
     event_id: z.string().optional(),
     unread_count: z.number().int().nonnegative().optional(),
+    /**
+     * A finished turn's outcome, on the push for the answer that ended it —
+     * counts only, never what a tool was or what it did. The app's widget
+     * recap reads it to say "Finished · 7 steps" or "Failed at step 4 of 7".
+     */
+    turn: z
+      .object({ total: z.number().int().nonnegative(), failed: z.number().int().nonnegative() })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ApnsPushPayload = z.infer<typeof ApnsPushPayload>;

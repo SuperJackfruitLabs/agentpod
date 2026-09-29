@@ -178,8 +178,21 @@ export type ApnsOutcome =
   | { status: "rejected"; reason: string }
   | { status: "failed"; reason: string };
 
+/**
+ * What kind of push this is. `alert` is every message push; `liveactivity` is
+ * the fleet Live Activity (`fleet/`), which Apple routes by its own topic —
+ * the app's bundle id with `.push-type.liveactivity` appended.
+ */
+export type ApnsPushType = "alert" | "liveactivity";
+
+export function topicFor(bundleTopic: string, pushType: ApnsPushType): string {
+  return pushType === "liveactivity" ? `${bundleTopic}.push-type.liveactivity` : bundleTopic;
+}
+
 export interface ApnsSendInput {
   environment: ApnsEnvironment;
+  /** `alert` when absent. */
+  pushType?: ApnsPushType;
   deviceToken: string;
   priority: 5 | 10;
   collapseId?: string;
@@ -221,12 +234,13 @@ export function createApnsClient(opts: ApnsClientOptions) {
     const body = JSON.stringify(input.payload);
     let lastReason = "";
     let refreshedToken = false;
+    const pushType = input.pushType ?? "alert";
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const headers: Record<string, string> = {
         authorization: `bearer ${opts.tokens.token()}`,
-        "apns-topic": opts.topic,
-        "apns-push-type": "alert",
+        "apns-topic": topicFor(opts.topic, pushType),
+        "apns-push-type": pushType,
         "apns-priority": String(input.priority),
         "apns-expiration": String(input.expiration),
         "content-type": "application/json",
