@@ -31,6 +31,8 @@
   import PurposeField from "$lib/components/purpose/PurposeField.svelte";
   import VoiceNotesField from "$lib/components/stations/VoiceNotesField.svelte";
   import type { StationTranscription } from "$lib/api/transcription";
+  import VoiceRepliesField from "$lib/components/stations/VoiceRepliesField.svelte";
+  import type { StationSpeech, VoiceList } from "$lib/api/speech";
 
   interface Props {
     station: StationRow | null;
@@ -46,6 +48,9 @@
     listPrincipals?: typeof defaultListPrincipals;
     /** Injected by tests. Defaults to the hub's station transcription endpoint. */
     loadTranscription?: (stationId: string) => Promise<StationTranscription>;
+    /** Injected by tests. Default to the hub's station speech and voices endpoints. */
+    loadSpeech?: (stationId: string) => Promise<StationSpeech>;
+    loadVoices?: () => Promise<VoiceList>;
   }
 
   let {
@@ -58,6 +63,8 @@
     listGrants = defaultListGrants,
     listPrincipals = defaultListPrincipals,
     loadTranscription,
+    loadSpeech,
+    loadVoices,
   }: Props = $props();
 
   const admin = $derived(isAdmin ?? auth.user?.role === "admin");
@@ -273,6 +280,21 @@
           stationId={station.id}
           harnessMode={station.matrixIdentityMode === "harness"}
           load={loadTranscription}
+        />
+      {/key}
+    </section>
+
+    <!-- ── Voice replies ────────────────────────────────────────────────── -->
+    <section class="border-t border-border pt-4" data-testid="rail-voice-replies">
+      <h2 class="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+        Voice replies
+      </h2>
+      {#key station.id}
+        <VoiceRepliesField
+          stationId={station.id}
+          harnessMode={station.matrixIdentityMode === "harness"}
+          load={loadSpeech}
+          {loadVoices}
         />
       {/key}
     </section>

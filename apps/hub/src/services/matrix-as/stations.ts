@@ -16,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
+import { matrixRooms } from "../../db/schema/matrix";
 import { localpartFor, bridgeUserId, bridgeLocalpart } from "./names";
 import { principalHandle } from "../principals";
 
@@ -116,6 +117,23 @@ export async function stationForAgentUserId(
     if (handle && bridgeUserId(handle, domain) === mxid) return s;
   }
   return null;
+}
+
+/**
+ * The station a bridged room belongs to, and how that station speaks in
+ * Matrix (`bridge` — the hub posts for it — or `harness`). What the voice
+ * replier asks before speaking: a harness-mode agent speaks for itself.
+ */
+export async function stationForRoom(
+  roomId: string
+): Promise<{ stationId: string; identityMode: string } | null> {
+  const [row] = await db
+    .select({ stationId: stations.id, identityMode: stations.matrixIdentityMode })
+    .from(matrixRooms)
+    .innerJoin(stations, eq(stations.id, matrixRooms.stationId))
+    .where(eq(matrixRooms.roomId, roomId))
+    .limit(1);
+  return row ?? null;
 }
 
 /**

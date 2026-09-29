@@ -1470,3 +1470,137 @@ describe("the fleet Live Activity", () => {
     expect(noted).toEqual([]);
   });
 });
+
+describe("a turn's end hands its text to the voice replier", () => {
+  let spoken: Array<Record<string, unknown>> = [];
+  /** How many text messages were in the room when each speak was asked. */
+  let sentAtSpeak: number[] = [];
+
+  function speakingDeps(speak?: (turn: any) => Promise<unknown>) {
+    let n = 0;
+    const base = deps();
+    return {
+      ...base,
+      client: {
+        ...base.client,
+        sendText: async (userId: string, roomId: string, body: string, extra?: Record<string, unknown>) => {
+          sent.push({ userId, roomId, body, ...(extra ? { extra } : {}) });
+          n += 1;
+          return `$text${n}`;
+        },
+      },
+      speak:
+        speak ??
+        (async (turn: any) => {
+          sentAtSpeak.push(sent.length);
+          spoken.push(turn);
+        }),
+    };
+  }
+
+  beforeEach(() => {
+    spoken = [];
+    sentAtSpeak = [];
+  });
+
+  test("a turn a voice note started: the posted text, its event, and voiceTriggered", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$user-voice", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("The build "));
+    emit(chunk("is green."));
+    emit(state("idle", 2));
+    await settle();
+    expect(spoken).toEqual([
+      {
+        roomId: ROOM,
+        agentUser: AGENT,
+        sessionId: SESSION,
+        text: "The build is green.",
+        textEventId: "$text1",
+        voiceTriggered: true,
+      },
+    ]);
+    // The text was in the room before speech was asked for.
+    expect(sentAtSpeak).toEqual([1]);
+  });
+
+  test("a typed message: voiceTriggered is false, and a voice turn does not leak into the next", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$v", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("one"));
+    emit(state("idle", 2));
+    await settle();
+    noteTurnTrigger(SESSION, "$typed");
+    emit(state("working", 3));
+    emit(chunk("two"));
+    emit(state("idle", 4));
+    await settle();
+    expect(spoken.map((t) => t.voiceTriggered)).toEqual([true, false]);
+  });
+
+  test("a turn flushed in parts (a permission pause) is spoken whole, after its last text", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$v", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("Before the question."));
+    emit(state("waiting", 2));
+    await settle();
+    emit(state("working", 3));
+    emit(chunk("After the answer."));
+    emit(state("idle", 4));
+    await settle();
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toMatchObject({
+      text: "Before the question.\n\nAfter the answer.",
+      textEventId: "$text2",
+      voiceTriggered: true,
+    });
+  });
+
+  test("an error turn is not spoken", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$v", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("Partial answer"));
+    emit({ sessionId: SESSION, seq: 2, type: "error", payload: { message: "quota" }, createdAt: new Date().toISOString() });
+    emit(state("idle", 3));
+    await settle();
+    expect(sent.at(-1)!.body).toMatch(/quota/);
+    expect(spoken).toEqual([]);
+  });
+
+  test("an empty turn is not spoken", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$v", { voice: true });
+    emit(state("working", 1));
+    emit(state("idle", 2));
+    await settle();
+    expect(spoken).toEqual([]);
+  });
+
+  test("once per turn, and a failing replier costs the room nothing", async () => {
+    let calls = 0;
+    attachRoomToSession(
+      SESSION,
+      ROOM,
+      AGENT,
+      speakingDeps(async () => {
+        calls += 1;
+        throw new Error("speech down");
+      })
+    );
+    noteTurnTrigger(SESSION, "$v", { voice: true });
+    emit(state("working", 1));
+    emit(chunk("Answer."));
+    emit(state("idle", 2));
+    await settle();
+    emit(state("working", 3));
+    emit(chunk("Next."));
+    emit(state("idle", 4));
+    await settle();
+    expect(calls).toBe(2);
+    expect(sent.map((m) => m.body)).toEqual(["Answer.", "Next."]);
+  });
+});

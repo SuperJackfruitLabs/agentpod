@@ -15,7 +15,7 @@
 
   interface Props {
     /** The section this page is. */
-    active: "users" | "grants" | "bridge" | "transcription";
+    active: "users" | "grants" | "bridge" | "transcription" | "speech";
   }
 
   let { active }: Props = $props();
@@ -25,6 +25,7 @@
     { id: "grants", label: "Grants", href: "/admin/grants" },
     { id: "bridge", label: "Bridge", href: "/admin/bridge" },
     { id: "transcription", label: "Transcription", href: "/admin/transcription" },
+    { id: "speech", label: "Speech", href: "/admin/speech" },
   ] as const;
 </script>
 

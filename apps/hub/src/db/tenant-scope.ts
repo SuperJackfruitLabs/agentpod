@@ -60,6 +60,7 @@ import { deviceCredentials } from "./schema/devices";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
 import { stationTranscription } from "./schema/transcription";
+import { stationSpeech } from "./schema/speech";
 import {
   skillArtifacts,
   skillOperations,
@@ -128,6 +129,7 @@ export const TENANT_SCOPED_TABLES = {
   skillReleaseCohorts,
   stationSetups,
   stationTranscription,
+  stationSpeech,
   stationAudit,
   acpSessions,
   acpEvents,

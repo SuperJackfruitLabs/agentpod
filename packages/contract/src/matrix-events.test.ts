@@ -244,6 +244,35 @@ describe("VoiceTranscript — a voice note's words, drawable under the note", ()
   });
 });
 
+import { VOICE_REPLY_CONTENT_KEY, VoiceReply } from "./matrix-events";
+
+describe("VoiceReply — an agent's reply, spoken, on its voice message", () => {
+  const reply = { schema_version: 1, text_event_id: "$text:id.agentpod.dev", voice: "af_heart", seconds: 12 };
+
+  it("rides under one namespaced, versioned key", () => {
+    expect(VOICE_REPLY_CONTENT_KEY).toBe("dev.agentpod.voice_reply");
+    expect(VoiceReply.parse(reply)).toEqual(reply);
+  });
+
+  it("seconds is optional; a blend is a voice", () => {
+    const blend = { schema_version: 1, text_event_id: "$t", voice: "af_heart:60+af_bella:40" };
+    expect(VoiceReply.parse(blend)).toEqual(blend);
+  });
+
+  it("strips what it does not know", () => {
+    expect(VoiceReply.parse({ ...reply, text: "the words" })).toEqual(reply);
+  });
+
+  it("an unknown version, a missing text event or an unbounded field is refused", () => {
+    expect(() => VoiceReply.parse({ ...reply, schema_version: 2 })).toThrow();
+    expect(() => VoiceReply.parse({ schema_version: 1, voice: "af_heart" })).toThrow();
+    expect(() => VoiceReply.parse({ ...reply, voice: "x".repeat(65) })).toThrow();
+    expect(() => VoiceReply.parse({ ...reply, seconds: 3601 })).toThrow();
+    expect(() => VoiceReply.parse({ ...reply, seconds: 1.5 })).toThrow();
+    expect(() => VoiceReply.parse({ ...reply, seconds: -1 })).toThrow();
+  });
+});
+
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {

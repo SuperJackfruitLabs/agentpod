@@ -127,9 +127,10 @@ export async function enableSignup(updatedBy: string): Promise<void> {
 /**
  * Settings that are not dumped by `getAllSettings`: they carry a secret (an
  * encrypted API key), and have their own write-only endpoints instead.
- * `transcription` — see `services/transcription-settings.ts`.
+ * `transcription` — see `services/transcription-settings.ts`; `speech` — see
+ * `services/speech-settings.ts`.
  */
-export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set(["transcription"]);
+export const PRIVATE_SETTING_KEYS: ReadonlySet<string> = new Set(["transcription", "speech"]);
 
 /**
  * Get all settings

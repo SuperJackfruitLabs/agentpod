@@ -163,7 +163,7 @@ export interface InboundDeps {
    * Which message started the turn about to run, so the agent can mark it —
    * 👀 while working, ✅ when done. Absent for a turn nobody asked for.
    */
-  noteTrigger?(sessionId: string, eventId: string): void;
+  noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean }): void;
 }
 
 /** The room, its station, and the node name that station's identity is built from. */
@@ -577,9 +577,14 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
     }
   }
 
-  const turn: QueuedPrompt = event.event_id
-    ? { text: prompt, images, eventId: event.event_id }
-    : { text: prompt, images };
+  // A voice note — heard or not — marks the turn as spoken to, which is what
+  // a station set to answer voice with voice (`voice_in`) speaks.
+  const turn: QueuedPrompt = {
+    text: prompt,
+    images,
+    ...(event.event_id ? { eventId: event.event_id } : {}),
+    ...(audio ? { voice: true } : {}),
+  };
   // Mid-turn is not a refusal. The message waits and goes with the next turn
   // — see `RoomQueue`. Only a hub that cannot tell when a turn ends refuses.
   if ((await dispatchTurn(room, agentUser, turn, deps)) === "busy") {
@@ -681,7 +686,7 @@ async function dispatchTurn(
     // Before prompting, so the first words of the answer are not produced into
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
-    if (turn.eventId) deps.noteTrigger?.(sessionId, turn.eventId);
+    if (turn.eventId) deps.noteTrigger?.(sessionId, turn.eventId, { voice: turn.voice === true });
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
