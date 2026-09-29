@@ -19,6 +19,7 @@ import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
 import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
 import { adminTranscriptionRoutes } from "./transcription-settings";
+import { adminSpeechRoutes } from "./speech-settings";
 
 // Models
 import {
@@ -339,6 +340,13 @@ adminRouter.get("/audit-log", zValidator("query", auditLogSchema), async (c) => 
  * behind the same admin guard; see `routes/transcription-settings.ts`.
  */
 adminRouter.route("/settings/transcription", adminTranscriptionRoutes());
+
+/**
+ * /admin/settings/speech — the hub's default text-to-speech service for
+ * agents' spoken replies (GET, PUT, POST /test). Same guard; see
+ * `routes/speech-settings.ts`.
+ */
+adminRouter.route("/settings/speech", adminSpeechRoutes());
 
 /**
  * GET /admin/settings

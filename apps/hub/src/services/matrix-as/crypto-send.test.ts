@@ -166,3 +166,12 @@ describe("a room whose members cannot be read", () => {
     expect(members[0]).toEqual([AGENT]);
   });
 });
+
+describe("isRoomEncrypted — what a media sender asks before choosing `file` over `url`", () => {
+  test("answers from the room's encryption state", async () => {
+    const { sender } = rig();
+    expect(await sender.isRoomEncrypted!(AGENT, ROOM)).toBe(true);
+    encryptedRoom = false;
+    expect(await sender.isRoomEncrypted!(AGENT, "!other:id.agentpod.dev")).toBe(false);
+  });
+});

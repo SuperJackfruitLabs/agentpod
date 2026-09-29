@@ -251,6 +251,18 @@ export interface MatrixClient {
   /** Upload an image and return its mxc:// URL. */
   uploadImage(userId: string, bytes: Uint8Array, contentType: string): Promise<string | null>;
   /**
+   * Upload any media as `userId` and return its mxc:// URL, or null when the
+   * homeserver refuses. For an encrypted room, the bytes are the ciphertext
+   * (`attachments.encryptAttachment`) and the type `application/octet-stream`.
+   */
+  uploadMedia(userId: string, bytes: Uint8Array, contentType: string, filename?: string): Promise<string | null>;
+  /**
+   * Whether the room is encrypted. Only the encrypting client
+   * (`crypto-send.ts`) answers; a plaintext bridge leaves it out, and sends
+   * everything in the clear, media included.
+   */
+  isRoomEncrypted?(userId: string, roomId: string): Promise<boolean>;
+  /**
    * Download media as `userId`, or null when the homeserver will not give it.
    *
    * For an image sent to an agent: the agent is a member of the room and so
@@ -377,6 +389,28 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
    * A 404 is the one non-200 that IS an answer: the homeserver knows nothing
    * of this user, so it is in no rooms, so it is not in this one.
    */
+  async function uploadMedia(
+    userId: string,
+    bytes: Uint8Array,
+    contentType: string,
+    filename?: string
+  ): Promise<string | null> {
+    // Media upload is not JSON, so it bypasses `call`.
+    const url =
+      `${deps.homeserverUrl}/_matrix/media/v3/upload?user_id=${encodeURIComponent(userId)}` +
+      (filename ? `&filename=${encodeURIComponent(filename)}` : "");
+    const res = await doFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": contentType, Authorization: `Bearer ${deps.asToken}` },
+      // Cast through unknown: this is the one call that sends bytes rather
+      // than JSON, and the DOM's BodyInit is not in this project's lib set.
+      body: bytes as unknown as never,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { content_uri?: string };
+    return body.content_uri ?? null;
+  }
+
   async function isJoined(userId: string, roomId: string): Promise<boolean> {
     const res = await call("/_matrix/client/v3/joined_rooms", { method: "GET", userId });
     if (res.status === 404) return false;
@@ -747,19 +781,10 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
     },
 
     async uploadImage(userId, bytes, contentType) {
-      // Media upload is not JSON, so it bypasses `call`.
-      const url = `${deps.homeserverUrl}/_matrix/media/v3/upload?user_id=${encodeURIComponent(userId)}`;
-      const res = await doFetch(url, {
-        method: "POST",
-        headers: { "Content-Type": contentType, Authorization: `Bearer ${deps.asToken}` },
-        // Cast through unknown: this is the one call that sends bytes rather
-        // than JSON, and the DOM's BodyInit is not in this project's lib set.
-        body: bytes as unknown as never,
-      });
-      if (!res.ok) return null;
-      const body = (await res.json()) as { content_uri?: string };
-      return body.content_uri ?? null;
+      return uploadMedia(userId, bytes, contentType);
     },
+
+    uploadMedia,
 
     async downloadMedia(userId, mxc) {
       const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(mxc);

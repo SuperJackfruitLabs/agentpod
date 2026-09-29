@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MAX_IMAGE_BYTES,
   decryptAttachment,
+  encryptAttachment,
   imageNote,
   imageSource,
   isRefusal,
@@ -190,5 +191,56 @@ describe("promptBlocks", () => {
     expect(promptBlocks("What is this?", [image], "this agent cannot view images")).toEqual([
       { type: "text", text: `What is this?\n${imageNote("map.png", "this agent cannot view images")}` },
     ]);
+  });
+});
+
+describe("encryptAttachment — the other half, for what an agent sends", () => {
+  test("round-trips through decryptAttachment", async () => {
+    const plain = crypto.getRandomValues(new Uint8Array(4096));
+    const { ciphertext, file } = await encryptAttachment(plain);
+    expect(ciphertext).not.toEqual(plain);
+    expect(ciphertext.length).toBe(plain.length);
+    const back = await decryptAttachment(ciphertext, { ...file, url: "mxc://x/y" });
+    expect(back).toEqual(plain);
+  });
+
+  test("round-trips through a client's own decryption (the test's reference implementation)", async () => {
+    const plain = crypto.getRandomValues(new Uint8Array(100));
+    const { ciphertext, file } = await encryptAttachment(plain);
+    const key = await crypto.subtle.importKey("jwk", file.key as any, { name: "AES-CTR" }, false, ["decrypt"]);
+    const iv = Buffer.from(file.iv, "base64");
+    const back = new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CTR", counter: iv, length: 64 }, key, ciphertext));
+    expect(back).toEqual(plain);
+  });
+
+  test("has the spec's shape: v2, A256CTR JWK, a 64-bit-counter IV, unpadded base64", async () => {
+    const { file } = await encryptAttachment(new Uint8Array([1, 2, 3]));
+    expect(file.v).toBe("v2");
+    expect(file.key).toEqual({
+      kty: "oct",
+      alg: "A256CTR",
+      ext: true,
+      key_ops: ["encrypt", "decrypt"],
+      k: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/),
+    });
+    // 16 bytes, the low 8 (the counter) zero, so a long file never wraps it.
+    const iv = Buffer.from(file.iv, "base64");
+    expect(iv.length).toBe(16);
+    expect([...iv.subarray(8)]).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
+    expect(file.iv).not.toContain("=");
+    expect(file.hashes.sha256).toMatch(/^[A-Za-z0-9+/]{43}$/);
+  });
+
+  test("a fresh key and IV every time", async () => {
+    const a = await encryptAttachment(new Uint8Array([1]));
+    const b = await encryptAttachment(new Uint8Array([1]));
+    expect(a.file.key.k).not.toBe(b.file.key.k);
+    expect(a.file.iv).not.toBe(b.file.iv);
+  });
+
+  test("a tampered ciphertext is refused by the integrity check", async () => {
+    const { ciphertext, file } = await encryptAttachment(new Uint8Array([1, 2, 3, 4]));
+    ciphertext[0]! ^= 0xff;
+    await expect(decryptAttachment(ciphertext, { ...file, url: "mxc://x/y" })).rejects.toThrow(/integrity/);
   });
 });

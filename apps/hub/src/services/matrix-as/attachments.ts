@@ -138,6 +138,43 @@ export async function decryptAttachment(
   return new Uint8Array(plain);
 }
 
+/** An `EncryptedFile` before its ciphertext has an mxc:// to live at. */
+export type EncryptedFileInfo = Omit<EncryptedFile, "url" | "key"> & {
+  key: { kty: "oct"; alg: "A256CTR"; ext: true; key_ops: ["encrypt", "decrypt"]; k: string };
+  v: "v2";
+};
+
+/**
+ * Encrypt an attachment an agent sends into an encrypted room — the other
+ * half of `decryptAttachment`, per the same section of the spec: a fresh
+ * AES-256-CTR key, a 16-byte IV whose low 64 bits (the counter) start at
+ * zero, the key as a JWK, and the SHA-256 of the *ciphertext*, all unpadded
+ * base64 (the key base64url, as JWK requires). Upload the ciphertext, then
+ * send `file: {url, ...info}` in place of `url`.
+ */
+export async function encryptAttachment(
+  plain: Uint8Array
+): Promise<{ ciphertext: Uint8Array; file: EncryptedFileInfo }> {
+  const key = await crypto.subtle.generateKey({ name: "AES-CTR", length: 256 }, true, ["encrypt", "decrypt"]);
+  const jwk = await crypto.subtle.exportKey("jwk", key);
+  const iv = new Uint8Array(16);
+  // The high 8 bytes random, the counter zero.
+  iv.set(crypto.getRandomValues(new Uint8Array(8)), 0);
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-CTR", counter: iv, length: 64 }, key, plain)
+  );
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", ciphertext));
+  return {
+    ciphertext,
+    file: {
+      v: "v2",
+      key: { kty: "oct", alg: "A256CTR", ext: true, key_ops: ["encrypt", "decrypt"], k: jwk.k! },
+      iv: unpaddedBase64(iv),
+      hashes: { sha256: unpaddedBase64(digest) },
+    },
+  };
+}
+
 /** Why an image could not be passed on, in words an agent can relay. */
 export type ImageRefusal = { reason: string };
 

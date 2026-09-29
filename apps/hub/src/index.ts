@@ -53,6 +53,7 @@ import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 import { stationTranscriptionRoutes } from './routes/transcription-settings.ts';
+import { speechVoicesRoutes, stationSpeechRoutes } from './routes/speech-settings.ts';
 // A workspace image as a station's Matrix avatar (matrix.avatar.set, or the appservice)
 import { stationAvatarRoutes, avatarBridgeFrom } from './routes/station-avatar.ts';
 // Station terminal WebSocket bridge (fleet console ↔ node PTY)
@@ -304,6 +305,8 @@ const app = new Hono()
   .route('/api', stationRoutes)                            // GET/POST/DELETE /api/nodes/:id/... and /api/stations/:id
   .route('/api', purposeRoutes)                            // PUT /api/stations/:id/purpose, /api/nodes/:id/purpose
   .route('/api', stationTranscriptionRoutes())             // GET/PUT /api/stations/:id/transcription
+  .route('/api', stationSpeechRoutes())                    // GET/PUT /api/stations/:id/speech
+  .route('/api', speechVoicesRoutes())                     // GET /api/speech/voices, /api/speech/voices/:id/preview
   .route('/api', stationAvatarRoutes({                     // POST /api/stations/:id/matrix-avatar
     bridge: matrixBridge ? avatarBridgeFrom(matrixBridge) : undefined,
   }))

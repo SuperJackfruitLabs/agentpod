@@ -51,6 +51,16 @@ describe("mergeQueued", () => {
       ]).text
     ).toBe("One more thing\n\nand make it short");
   });
+
+  test("a voice note among them makes the merged turn a voice turn", () => {
+    expect(
+      mergeQueued([
+        { text: "[Voice note] hi", images: [], eventId: "$v", voice: true },
+        { text: "and this", images: [], eventId: "$t" },
+      ])
+    ).toEqual({ text: "[Voice note] hi\n\nand this", images: [], eventId: "$t", voice: true });
+    expect(mergeQueued([{ text: "typed", images: [], eventId: "$t" }]).voice).toBeUndefined();
+  });
 });
 
 describe("RoomQueue", () => {
