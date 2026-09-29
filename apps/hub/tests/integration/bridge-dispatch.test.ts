@@ -506,6 +506,60 @@ describe("the agent ended its own run — MCP reached the board before the bridg
     expect(result.reason).toContain("blocked");
   });
 
+  test("the 409 that actually arrives first is the ACTIVITY post, not the complete", async () => {
+    /**
+     * The live run that found this. The agent calls `superpipeline_complete` through MCP, the
+     * harness then emits its closing message, the bridge posts that as an activity — and THAT is
+     * the call that gets the 409, several seconds before the bridge would have sent its own
+     * `complete`. The first version of this feature checked only at the `complete` call site, so
+     * a card the agent had finished perfectly was recorded `abandoned`, "the lease was
+     * superseded", with the reference the agent had added sitting on it.
+     */
+    let ended = false;
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`))
+        return ended
+          ? { status: 200, body: { ...contextBody, run: { ...contextBody.run, status: "ended", outcome: "completed" } } }
+          : { status: 200, body: contextBody };
+      if (path.endsWith("/activities")) {
+        // The agent completed mid-turn; every board call after this point is on an ended run.
+        ended = true;
+        return { status: 409, body: boardError("STALE_LEASE") };
+      }
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => [chunk("Done — I called superpipeline_complete."), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("self-reported");
+    expect(await dispatchOutcome(key())).toMatchObject({ outcome: "reported" });
+  });
+
+  test("the session is ended for the right reason — the agent finished, it did not lose the card", async () => {
+    let ended = false;
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`))
+        return ended
+          ? { status: 200, body: { ...contextBody, run: { ...contextBody.run, status: "ended", outcome: "blocked" } } }
+          : { status: 200, body: contextBody };
+      if (path.endsWith("/activities")) {
+        ended = true;
+        return { status: 409, body: boardError("STALE_LEASE") };
+      }
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => [chunk("I blocked it myself."), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.ended).toHaveLength(1);
+    expect(acp.state.ended[0]!.toLowerCase()).not.toContain("superseded");
+    expect(acp.state.ended[0]!.toLowerCase()).toContain("blocked");
+  });
+
   test("a reclaimed run is still a lost lease — an outcome we did not author proves nothing", async () => {
     const board = fakeBoard(endedBoard("reclaimed"));
     const acp = fakeAcp(() => [chunk("working"), idle()]);

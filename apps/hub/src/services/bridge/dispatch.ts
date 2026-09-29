@@ -648,19 +648,8 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     try {
       await client.complete(work, handoff);
     } catch (err) {
-      if (isLeaseSuperseded(err)) {
-        const authored = await endedByTheAgent(deps, work);
-        if (authored) {
-          const reason = `the agent ended its own run: ${authored}`;
-          log("the agent reported for itself; the bridge's report was redundant", {
-            run: work.runId,
-            card: key.externalCardId,
-            outcome: authored,
-          });
-          await afterTheBoardWasTold(deps, "the agent had already reported", () => markReported(key));
-          return { status: "self-reported", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason };
-        }
-      }
+      // A stale lease here may mean the agent completed the run itself a moment ago; `abort`
+      // is where that is decided, for every path that reaches it.
       if (isLeaseSuperseded(err) || isForeignRun(err)) {
         return await abort(deps, key, work, attemptId, err);
       }
@@ -978,6 +967,7 @@ async function abort(
   cause: unknown,
   sessionId?: string,
 ): Promise<DispatchResult> {
+  const log = deps.log ?? (() => {});
   const foreign = cause === "foreign-run" || isForeignRun(cause);
   const stale = cause === "lease-superseded" || isLeaseSuperseded(cause);
 
@@ -985,6 +975,40 @@ async function abort(
     // Some other refusal on the replay path. Leave the ledger alone so the
     // output stays replayable.
     return { status: "failed", externalRunId: work.runId, reason: String(cause) };
+  }
+
+  /**
+   * Before calling a lost lease a lost lease: did the agent end this run itself?
+   *
+   * **The check lives here rather than at the `complete` call site, and a live run is why.** An
+   * agent that reports through MCP completes the run mid-turn; the harness then says one more
+   * thing, the bridge posts that as an activity, and THAT is the call that gets the 409 —
+   * seconds before the bridge would have sent its own `complete`. Checking only where the
+   * bridge reports meant the first real self-report was recorded `abandoned`, "the lease was
+   * superseded", on a card the agent had finished correctly and left a reference on.
+   *
+   * `abort` is the single funnel every stale-lease path reaches — the activity chain, the turn
+   * end, `failStarted`, the report itself — so one check here covers all of them.
+   *
+   * Never for a foreign run: that is another agent's outcome, and reading it as our own report
+   * is exactly the confusion `denyForeignRun` exists to prevent.
+   */
+  if (stale && !foreign) {
+    const authored = await endedByTheAgent(deps, work);
+    if (authored) {
+      const said = `the agent ended its own run: ${authored}`;
+      log("the agent reported for itself; the bridge's report was redundant", {
+        run: work.runId,
+        card: key.externalCardId,
+        outcome: authored,
+      });
+      if (sessionId) {
+        await deps.acp.endSession(deps.agent.hubUserId, sessionId, `The card was ${authored} by the agent.`).catch(() => {});
+      }
+      if (attemptId) await endAttempt(attemptId, "completed", null);
+      await afterTheBoardWasTold(deps, "the agent had already reported", () => markReported(key));
+      return { status: "self-reported", externalRunId: work.runId, attemptId: attemptId ?? undefined, reason: said };
+    }
   }
 
   const reason = foreign
