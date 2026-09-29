@@ -56,11 +56,18 @@ curl -s -H "Authorization: Bearer $SPEECH_TOKEN" -H 'Content-Type: application/j
 | `voice` | A voice id, an OpenAI voice name, or a blend; default `af_heart` |
 | `response_format` | `opus` (default: Ogg/Opus, what a Matrix voice note is), `mp3`, `wav`, `flac`, or `pcm` (raw signed 16-bit little-endian, 24 kHz mono). All are encoded by libsndfile inside the `soundfile` wheel; no ffmpeg. `aac` is not offered |
 | `speed` | 0.5 to 2.0, default 1.0 (Kokoro's range; 400 outside it) |
+| `waveform` | `true` adds **`X-Audio-Waveform`** to the answer (below). Default `false`; the header `X-Want-Waveform: 1` asks the same |
 | `model` | Ignored. There is one model, and OpenAI clients send `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts`; refusing those would break them for nothing |
 
 The answer is the audio, with its `Content-Type` (`audio/ogg`, `audio/mpeg`,
 `audio/wav`, `audio/flac`, `audio/pcm`) and **`X-Audio-Duration-Ms`**, which a
-Matrix voice note needs in its `info.duration`. Errors are
+Matrix voice note needs in its `info.duration`. Asked for, **`X-Audio-Waveform`**
+is 60 comma-separated loudness values, 0 to 1024 (RMS of 60 equal slices of the
+audio, loudest slice = 1024, computed from the PCM before encoding): the
+`waveform` of MSC3246 (`org.matrix.msc1767.audio`), which Element and
+Supermessage draw as the voice note's bars. The hub asks for it because it
+cannot decode Opus cheaply; a client that does not ask gets exactly what it
+got before. Errors are
 `{"detail": "..."}`: 400 for a bad request (not FastAPI's 422, to match
 OpenAI), 401, 413, 503 with `Retry-After` when the queue is full, 504 past
 the deadline.
