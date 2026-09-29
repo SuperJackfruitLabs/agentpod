@@ -203,6 +203,8 @@ describe("/api/stations/:id/speech", () => {
       mode: "inherit",
       hasApiKey: false,
       assignedVoice: assignedVoiceFor("st_1"),
+      inheritedVoice: assignedVoiceFor("st_1"),
+      inheritedVoiceSource: "assigned",
       effective: {
         enabled: true,
         url: "http://env:8841",

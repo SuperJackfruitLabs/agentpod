@@ -191,8 +191,11 @@ export interface StationSpeechView {
   speakMode?: SpeakMode;
   url?: string;
   hasApiKey: boolean;
-  /** The voice this station gets when nobody chooses one. */
+  /** The voice this station gets from its id when nobody chooses one. */
   assignedVoice: string;
+  /** What it speaks in with no voice of its own: the hub default voice, else the assigned one. */
+  inheritedVoice: string;
+  inheritedVoiceSource: "hub" | "assigned";
   effective: EffectiveSpeech;
 }
 
@@ -310,6 +313,7 @@ export function createSpeechSettings(deps: {
     service: (SpeechEndpoint & { source: SpeechSource }) | null;
     voice: string;
     voiceSource: VoiceSource;
+    inherited: { voice: string; voiceSource: "hub" | "assigned" };
     speakMode: SpeakMode;
     maxChars: number;
   }> {
@@ -320,14 +324,16 @@ export function createSpeechSettings(deps: {
     } else if (station?.mode !== "off" && hub.enabled) {
       service = { url: hub.url, apiKey: hub.apiKey, source: hub.source === "env" ? "env" : "hub" };
     }
+    const inherited: { voice: string; voiceSource: "hub" | "assigned" } = hub.defaultVoice
+      ? { voice: hub.defaultVoice, voiceSource: "hub" }
+      : { voice: assignedVoiceFor(stationId), voiceSource: "assigned" };
     const voice: { voice: string; voiceSource: VoiceSource } = station?.voice
       ? { voice: station.voice, voiceSource: "station" }
-      : hub.defaultVoice
-        ? { voice: hub.defaultVoice, voiceSource: "hub" }
-        : { voice: assignedVoiceFor(stationId), voiceSource: "assigned" };
+      : inherited;
     return {
       service,
       ...voice,
+      inherited,
       speakMode: station?.speakMode ?? hub.mode,
       maxChars: hub.maxChars,
     };
@@ -397,6 +403,8 @@ export function createSpeechSettings(deps: {
       mode: station?.mode ?? "inherit",
       hasApiKey: !!station?.apiKeyEncrypted,
       assignedVoice: assignedVoiceFor(stationId),
+      inheritedVoice: e.inherited.voice,
+      inheritedVoiceSource: e.inherited.voiceSource,
       effective: {
         enabled: e.service !== null,
         url: e.service?.url ?? null,

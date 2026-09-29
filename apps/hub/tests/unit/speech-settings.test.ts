@@ -180,6 +180,12 @@ describe("resolveFor — the service", () => {
     expect((await settings.resolveFor("st_2"))?.voice).toBe("af_bella");
     await settings.putStation("st_2", { mode: "inherit", voice: "af_nova" });
     expect((await settings.resolveFor("st_2"))?.voice).toBe("af_nova");
+    // The view still says what "no voice" would fall back to.
+    expect(await settings.getStationView("st_2")).toMatchObject({
+      voice: "af_nova",
+      inheritedVoice: "af_bella",
+      inheritedVoiceSource: "hub",
+    });
     await settings.putHub({ ...hubOn, defaultVoice: "" });
     expect((await settings.resolveFor("st_3"))?.voice).toBe(assignedVoiceFor("st_3"));
   });
