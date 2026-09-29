@@ -166,7 +166,7 @@ export interface TranscriptionApplyTarget {
   matrixIdentityMode: string;
 }
 
-type BrokerRequest = (
+export type BrokerRequest = (
   nodeId: string,
   verb: string,
   params: unknown,
@@ -191,7 +191,7 @@ export interface StationTranscriptionDeps {
   brokerRequest?: BrokerRequest;
 }
 
-async function applyTargetInDb(userId: string, stationId: string): Promise<TranscriptionApplyTarget | null> {
+export async function applyTargetInDb(userId: string, stationId: string): Promise<TranscriptionApplyTarget | null> {
   const [row] = await db
     .select({
       id: stations.id,

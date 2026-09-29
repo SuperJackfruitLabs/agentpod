@@ -7,6 +7,8 @@
  *                                                comes back for the console to play
  *   GET  /api/stations/:stationId/speech         a station's voice / speak mode /
  *   PUT  /api/stations/:stationId/speech         service override (owner)
+ *   POST /api/stations/:stationId/speech/apply   push it into a harness-mode
+ *                                                Hermes profile (owner)
  *   GET  /api/speech/voices                      the service's voices (any signed-in user)
  *   GET  /api/speech/voices/:id/preview          one voice's sample, Ogg/Opus
  *
@@ -34,6 +36,13 @@ import {
   type SpeechSettings,
 } from "../services/speech-settings";
 import { fetchPreview, fetchVoices, testSpeech } from "../services/speech-client";
+import { VERB_RESULTS } from "@agentpod/contract";
+import * as broker from "../services/broker";
+import {
+  applyTargetInDb,
+  type BrokerRequest,
+  type TranscriptionApplyTarget,
+} from "./transcription-settings";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("speech-settings-routes");
@@ -173,7 +182,24 @@ export function adminSpeechRoutes(deps: AdminSpeechDeps = {}) {
 export interface StationSpeechDeps {
   settings?: SpeechSettings;
   ownsStation?: (userId: string, stationId: string) => Promise<boolean>;
+  /** The station, if the caller owns it. Defaults to the stations table. */
+  applyTarget?: (userId: string, stationId: string) => Promise<TranscriptionApplyTarget | null>;
+  /** Injected by tests; defaults to the broker. */
+  brokerRequest?: BrokerRequest;
 }
+
+/** A node gets this long to fetch, write and restart — transcription.apply's budget. */
+export const SPEECH_APPLY_TIMEOUT_MS = 120_000;
+
+/**
+ * Harnesses whose node-agent can write a speech setting — the hub's copy of
+ * `speechHarnesses` in the node-agent's speechapply.go. OpenClaw is not here:
+ * its stations are bridge-mode, where the hub speaks for them.
+ */
+const HARNESSES_WITH_TTS_WRITER: ReadonlySet<string> = new Set(["hermes"]);
+
+/** How a node that predates `speech.apply` answers it (descriptor/handler.go). */
+const UNKNOWN_VERB = /unknown verb "speech\.apply"/;
 
 async function ownsStationInDb(userId: string, stationId: string): Promise<boolean> {
   const [row] = await db
@@ -187,6 +213,8 @@ async function ownsStationInDb(userId: string, stationId: string): Promise<boole
 export function stationSpeechRoutes(deps: StationSpeechDeps = {}) {
   const settings = deps.settings ?? speechSettings;
   const ownsStation = deps.ownsStation ?? ownsStationInDb;
+  const applyTarget = deps.applyTarget ?? applyTargetInDb;
+  const request: BrokerRequest = deps.brokerRequest ?? broker.request;
 
   return new Hono()
     .get("/stations/:stationId/speech", async (c) => {
@@ -210,6 +238,87 @@ export function stationSpeechRoutes(deps: StationSpeechDeps = {}) {
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : "invalid speech setting" }, 400);
       }
+    })
+    /**
+     * A harness-mode station is its own Matrix client and speaks for itself,
+     * so the saved voice and speak mode reach it only when its node writes
+     * them into the harness profile. This asks the node to (`speech.apply`).
+     * The frame carries the station key and id only; the node fetches the
+     * setting, key included, from its own authenticated endpoint
+     * (routes/station-speech-node.ts).
+     */
+    .post("/stations/:stationId/speech/apply", async (c) => {
+      const userId = c.get("user").id;
+      const stationId = c.req.param("stationId");
+      const station = await applyTarget(userId, stationId);
+      if (!station) return c.json({ error: "Not Found" }, 404);
+
+      if (station.matrixIdentityMode !== "harness") {
+        return c.json(
+          {
+            error:
+              "This station is bridge-mode: the hub speaks its replies, so the saved voice " +
+              "already applies. Only a harness-mode station needs it pushed.",
+          },
+          400
+        );
+      }
+      if (!HARNESSES_WITH_TTS_WRITER.has(station.harness)) {
+        return c.json(
+          {
+            error:
+              `Pushing voice replies to a harness-mode ${station.harness} station is not supported ` +
+              "yet; only Hermes stations can take it. Its voice is saved and applies if it " +
+              "moves to bridge mode.",
+          },
+          400
+        );
+      }
+
+      const result = await request(
+        station.nodeId,
+        "speech.apply",
+        { key: station.stationKey, stationId: station.id },
+        { timeoutMs: SPEECH_APPLY_TIMEOUT_MS }
+      );
+      if (!result.ok) {
+        log.warn("a node could not apply a station's speech setting", {
+          stationId: station.id,
+          nodeId: station.nodeId,
+          error: result.error,
+        });
+        if (result.error && UNKNOWN_VERB.test(result.error)) {
+          return c.json(
+            {
+              error:
+                "This station's node-agent predates voice replies for harness stations. Update " +
+                "its node from the console (or run `apn update` on the host) and apply again.",
+            },
+            502
+          );
+        }
+        return c.json({ error: result.error ?? "the node could not apply the setting" }, 502);
+      }
+      const parsed = VERB_RESULTS["speech.apply"].safeParse(result.data);
+      if (!parsed.success) {
+        return c.json(
+          {
+            error:
+              "The node answered in a shape this hub does not understand — its node-agent may " +
+              "predate speech.apply.",
+          },
+          502
+        );
+      }
+      log.info("applied a station's speech setting to its harness", {
+        stationId: station.id,
+        nodeId: station.nodeId,
+        mode: parsed.data.mode,
+        speakMode: parsed.data.speakMode,
+        autoSpeak: parsed.data.autoSpeak,
+        restarted: parsed.data.restarted,
+      });
+      return c.json(parsed.data);
     });
 }
 

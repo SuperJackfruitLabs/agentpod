@@ -236,3 +236,44 @@ describe("the voices proxy behind the hub's real auth", () => {
     expect(asked).toBe(0);
   });
 });
+
+describe("POST /api/stations/:id/speech/apply over the stations table", () => {
+  const sent: Array<{ nodeId: string; verb: string; params: unknown }> = [];
+  const APPLIED = { applied: true, mode: "on", voice: "af_heart", speakMode: "voice_in", autoSpeak: false, restarted: true };
+
+  function applyApp(userId: string) {
+    return new Hono().use("*", as(userId)).route(
+      "/api",
+      stationSpeechRoutes({
+        settings,
+        brokerRequest: async (nodeId, verb, params) => {
+          sent.push({ nodeId, verb, params });
+          return { ok: true, data: APPLIED };
+        },
+      })
+    );
+  }
+
+  beforeEach(() => {
+    sent.length = 0;
+  });
+
+  test("a harness-mode Hermes station's owner sends speech.apply to its node", async () => {
+    const res = await applyApp(OWNER).request(`/api/stations/${HARNESS_STATION}/speech/apply`, { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(APPLIED);
+    expect(sent).toEqual([{ nodeId: NODE, verb: "speech.apply", params: { key: "hermes:h", stationId: HARNESS_STATION } }]);
+  });
+
+  test("another user's station is a 404 and nothing is sent", async () => {
+    const res = await applyApp(OTHER).request(`/api/stations/${HARNESS_STATION}/speech/apply`, { method: "POST" });
+    expect(res.status).toBe(404);
+    expect(sent).toHaveLength(0);
+  });
+
+  test("a bridge-mode station is a 400 and nothing is sent", async () => {
+    const res = await applyApp(OWNER).request(`/api/stations/${STATION}/speech/apply`, { method: "POST" });
+    expect(res.status).toBe(400);
+    expect(sent).toHaveLength(0);
+  });
+});

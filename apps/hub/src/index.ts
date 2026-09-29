@@ -51,6 +51,8 @@ import { stationMatrixCredentialRoutesFor } from './routes/station-matrix-creden
 import { createStationGitIdentityRoutes } from './routes/station-git-identity.ts';
 // A node reading its station's voice-note setting (transcription.apply)
 import { createNodeTranscriptionRoutes } from './routes/station-transcription-node.ts';
+// ... and its spoken-reply setting (speech.apply)
+import { createNodeSpeechRoutes } from './routes/station-speech-node.ts';
 import { purposeRoutes } from './routes/purpose.ts';
 import { stationTranscriptionRoutes } from './routes/transcription-settings.ts';
 import { speechVoicesRoutes, stationSpeechRoutes } from './routes/speech-settings.ts';
@@ -255,6 +257,11 @@ const app = new Hono()
    * setting exists with or without a Matrix bridge.
    */
   .route('/api', createNodeTranscriptionRoutes())
+  /**
+   * POST /api/nodes/:nodeId/stations/:stationId/speech — the same, for the
+   * spoken-reply setting `speech.apply` writes into a harness profile.
+   */
+  .route('/api', createNodeSpeechRoutes())
   /**
    * GET /api/fleet/dispatchable — the agents the holder of a hub-issued token
    * may dispatch, for superpipeline's agent picker

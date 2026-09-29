@@ -3,7 +3,8 @@
  *
  * For bridge-mode stations — the hub posts their messages (Claude Code,
  * Codex, opencode, Pi, any ACP-bridged agent). A harness-mode agent is its own
- * Matrix client and speaks for itself (stage 3), so the hub never does.
+ * Matrix client and speaks for itself (its profile is written by `speech.apply`,
+ * routes/station-speech-node.ts), so the hub never does.
  *
  * When a turn ends with text in the room (`outbound.ts` calls `speakTurn`,
  * without awaiting it), and the station's speak mode says so:
