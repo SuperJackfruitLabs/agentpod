@@ -343,6 +343,27 @@ export class SuperpipelineClient {
    * same shape and opposite meanings, and reporting the second as the first is
    * how a floor beneath push becomes a floor that was never there.
    */
+  /**
+   * One gate, including how it was decided — `GET …/gates/:gateId` (superpipeline#116).
+   *
+   * `pendingGates` answers only what is still waiting, which is exactly not the question the
+   * sweep has: a gate that vanished from that list was decided, and the room card it left behind
+   * has to say WHICH way. Null on any refusal, because "we could not read it" and "it was
+   * approved" must never collapse into one answer.
+   */
+  async gate(gateId: string): Promise<{ status: string; decision: string | null; decidedBy: string | null } | null> {
+    try {
+      const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/${encodeURIComponent(gateId)}`)) as {
+        gate?: { status?: string; decision?: string | null; decidedBy?: string | null };
+      };
+      const g = res.gate;
+      if (!g || typeof g.status !== "string") return null;
+      return { status: g.status, decision: g.decision ?? null, decidedBy: g.decidedBy ?? null };
+    } catch {
+      return null;
+    }
+  }
+
   async pendingGates(): Promise<GatePendingDelivery[]> {
     const res = (await this.send("GET", `/v1/boards/${this.boardId}/gates/pending`)) as {
       gates?: GatePendingDelivery[];

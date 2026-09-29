@@ -977,10 +977,39 @@ async function postOutcomeReceipt(
   projection: { boardId: string; eventId: string; proseEventId?: string | null },
   deps: GateDecisionDeps,
 ): Promise<void> {
+  await settleGateOutcome(
+    { gateId: parsed.gateId, decision: parsed.optionId, decidedBy: principalId },
+    roomId,
+    projection,
+    deps,
+  );
+}
+
+/**
+ * Post the receipt that takes a decided gate out of contention, and claim it.
+ *
+ * Shared by the two ways a gate stops being pending. One is a decision arriving as a Matrix event
+ * — supermessage — which is what this was written for. The other is a decision made anywhere
+ * else: superpipeline's own web UI resolves the gate directly, this hub never hears, and the room
+ * card goes on offering Approve and Reject **forever**. Observed live on 2026-09-29: a gate
+ * approved on the web at 12:20 still showing live buttons twenty-five minutes later, beside the
+ * next gate for the same card.
+ *
+ * `markOutcomePosted` claims before sending, so the Matrix path and the sweep racing on the same
+ * gate leave one receipt rather than two.
+ */
+export async function settleGateOutcome(
+  decided: { gateId: string; decision: string; decidedBy: string | null },
+  roomId: string,
+  projection: { boardId: string; eventId: string; proseEventId?: string | null },
+  deps: Pick<GateDecisionDeps, "markOutcomePosted" | "displayNameFor" | "reply" | "sendOutcome">,
+): Promise<void> {
+  const parsed = { gateId: decided.gateId, optionId: decided.decision } as ParsedGateDecision;
+  const principalId = decided.decidedBy;
   try {
     if (deps.markOutcomePosted && !(await deps.markOutcomePosted(parsed.gateId))) return;
 
-    const who = (await deps.displayNameFor?.(principalId)) ?? null;
+    const who = principalId ? ((await deps.displayNameFor?.(principalId)) ?? null) : null;
     const verb = OUTCOME_VERBS[parsed.optionId] ?? parsed.optionId;
     const body = who ? `${verb} by ${who} — the board has it.` : `${verb} — the board has it.`;
 

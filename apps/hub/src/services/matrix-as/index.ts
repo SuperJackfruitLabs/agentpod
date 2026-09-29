@@ -29,6 +29,7 @@ import {
   resolveGateAtSuperpipeline,
   roomAgentUser,
   GATE_OUTCOME_TYPE,
+  settleGateOutcome,
 } from "./gates";
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
@@ -155,6 +156,15 @@ export interface MatrixBridge {
   onEvent(event: { type: string; sender: string; room_id?: string; content?: Record<string, unknown> }): Promise<void>;
   /** Create the room behind an alias the homeserver asked about. */
   onProvisionAlias(alias: string): Promise<void>;
+  /**
+   * Take a decided gate out of contention in the room this hub put it in.
+   *
+   * The Matrix path posts this receipt itself when a decision arrives as an event. This is for
+   * every other way a gate stops being pending — chiefly superpipeline's own web UI, which
+   * resolves the gate there and tells this hub nothing, leaving a room card offering Approve and
+   * Reject for a decision already made. `services/matrix-as/gate-sweep.ts` is the caller.
+   */
+  settleGate(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
   /**
    * Feed the encryption side-channels of one transaction to the agents it
    * concerns. Null when no crypto store is configured — a plaintext bridge
@@ -461,6 +471,43 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     client: speakingClient,
     config: cfg,
     provisionDeps,
+
+    settleGate: async (gateId, decision, decidedBy) => {
+      const [row] = await db
+        .select()
+        .from(matrixGateEvents)
+        .where(eq(matrixGateEvents.gateId, gateId))
+        .limit(1);
+      // A gate this hub never posted has no room card to settle, which is not a failure: the
+      // sweep asks about every gate the board decided, including ones from before this bridge.
+      if (!row) return false;
+
+      await settleGateOutcome(
+        { gateId, decision, decidedBy },
+        row.roomId,
+        { boardId: row.boardId, eventId: row.eventId, proseEventId: row.proseEventId },
+        {
+          markOutcomePosted: async (id) => {
+            const claimed = await db
+              .update(matrixGateEvents)
+              .set({ outcomePostedAt: new Date() })
+              .where(and(eq(matrixGateEvents.gateId, id), isNull(matrixGateEvents.outcomePostedAt)))
+              .returning({ gateId: matrixGateEvents.gateId });
+            return claimed.length > 0;
+          },
+          displayNameFor: (principalId) => principalHandle(principalId),
+          reply: async (roomId, body) => {
+            const speaker = await roomSpeakerFor(roomId, cfg.domain);
+            if (speaker) await speakingClient.sendText(speaker, roomId, body);
+          },
+          sendOutcome: async (roomId, content) => {
+            const speaker = await roomSpeakerFor(roomId, cfg.domain);
+            return speaker ? speakingClient.sendCustomEvent(speaker, roomId, GATE_OUTCOME_TYPE, content) : null;
+          },
+        },
+      );
+      return true;
+    },
 
     onCryptoTransaction: crypto
       ? async (tx) => {
