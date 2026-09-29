@@ -18,7 +18,8 @@ import { createSuperpipelinePushRoutes } from './routes/superpipeline-push.ts';
 import { servicePublicJwks } from './auth/service-signing.ts';
 // GET /api/auth/authorize — the cross-domain handoff's front door (see below)
 import { authorizeRoutes } from './routes/auth-authorize.ts';
-import { projectGate, tenantForBoard } from './services/matrix-as/gates.ts';
+import { projectGate, projectionForGate, tenantForBoard } from './services/matrix-as/gates.ts';
+import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
 import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
 import { createLogger } from './utils/logger.ts';
@@ -81,13 +82,15 @@ import { startSuperpipelineBridge } from './services/bridge/loop.ts';
 import { createGracefulShutdown } from './services/shutdown.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
-import { createMatrixBridge, startMatrixBridge } from './services/matrix-as/index.ts';
+import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
 import { onStationsAdopted, onProvisionStation } from './services/matrix-as/hooks.ts';
 import { preJoinNewIdentity, moveState, wireConvergenceListener } from './services/matrix-as/identity-move.ts';
 import { signalNodeToAdopt } from './services/matrix-as/adopt-signal.ts';
 import { createMatrixAsRoutes } from './routes/matrix-as.ts';
 import { createMatrixPushRoutes } from './routes/matrix-push.ts';
-import { createPushGatewayFromEnv } from './services/push/index.ts';
+import { createPushServicesFromEnv } from './services/push/index.ts';
+import { setFleetSink } from './services/push/fleet/sink.ts';
+import { createLiveActivityRoutes, createWhoami } from './routes/live-activity.ts';
 import { createStationMatrixRoutes } from './routes/station-matrix.ts';
 import { createStationSayRoutes } from './routes/station-say.ts';
 import { createMissionRoutes } from './routes/missions.ts';
@@ -340,7 +343,34 @@ const app = new Hono()
 // Unauthenticated by the Push Gateway spec, so it lives outside /api/* (no
 // session, no CSRF) and defends itself: see `routes/matrix-push.ts`. Mounted
 // always; answers 404 until the APNS_* / PUSH_APP_IDS variables are set.
-app.route('/_matrix/push/v1', createMatrixPushRoutes(createPushGatewayFromEnv()));
+const pushServices = createPushServicesFromEnv();
+app.route('/_matrix/push/v1', createMatrixPushRoutes(pushServices.gateway));
+
+// ── The fleet Live Activity ──────────────────────────────────────────────────
+//
+// POST/DELETE /_supermessage/v1/live-activity/tokens — the app registering the
+// APNs tokens its Lock Screen fleet card is pushed to (supermessage spec
+// 2026-09-29, Part A). Same origin as the push gateway; authenticated by the
+// user's Matrix access token against the homeserver's whoami. Answers 503
+// while the push gateway is off, and then nothing else changes: no sink is
+// installed, so the Matrix path does no fleet lookups at all.
+//
+// These pushes carry agent names, step titles and decision questions to Apple
+// in PLAINTEXT — an operator decision (2026-09-29), and the one exception to
+// the gateway's ids-only rule. See `services/push/fleet/service.ts`.
+if (pushServices.fleet) {
+  setFleetSink(pushServices.fleet);
+  void pushServices.fleet.restore().catch((err) =>
+    console.error('fleet live activity: could not restore readers', err instanceof Error ? err.message : err),
+  );
+}
+app.route(
+  '/_supermessage/v1/live-activity',
+  createLiveActivityRoutes({
+    fleet: pushServices.fleet,
+    whoami: createWhoami({ homeserverUrl: matrixBridgeConfig().homeserverUrl }),
+  }),
+);
 
 // ── The Matrix Application Service ───────────────────────────────────────────
 //
@@ -410,6 +440,9 @@ if (matrixBridge) {
          */
         humansFor: async () => matrixIdsForBoardHumans(boardId),
       }),
+    /** A posted gate is a pending decision on each of the board's humans' fleet card. */
+    onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
+      noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
   };
 
   // POST /public/bridge/superpipeline/push — a board telling us a gate is open.
@@ -444,6 +477,10 @@ if (matrixBridge) {
      * sweep already asks each board what is still pending; this settles what is not.
      */
     settleOutcome: (gateId, decision, decidedBy) => matrixBridge.settleGate(gateId, decision, decidedBy),
+    // What each board still waits on: the fleet card drops gates answered on the
+    // board, and shows again the ones a restart forgot.
+    onBoardPending: (boardId, gates) =>
+      reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
   });
 
   app.route(
