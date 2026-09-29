@@ -112,6 +112,8 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
   const subs = new Set<(e: AcpEvent) => void>();
   const state = {
     created: 0,
+    /** What each `createSession` was given, so a test can read the MCP entry. */
+    createdWith: [] as Array<Parameters<AcpPort["createSession"]>[0]>,
     readyChecks: 0,
     prompts: [] as string[],
     ended: [] as string[],
@@ -123,9 +125,10 @@ function fakeAcp(script: () => AcpEvent[], opts: FakeAcpOpts = {}) {
       state.readyChecks++;
       return opts.ready ?? { ready: true };
     },
-    async createSession() {
+    async createSession(input) {
       if (opts.failCreate) throw new Error(opts.failCreate);
       state.created++;
+      state.createdWith.push(input);
       return { id: SESSION_ID };
     },
     async promptSession(_u, _s, text) {
@@ -453,6 +456,137 @@ describe("409 STALE_LEASE — the lease is gone, so the harness must stop", () =
     // The card is someone else's now: replaying our half-done handoff onto it
     // would report work this bridge cannot vouch for.
     expect((await dispatchOutcome(key()))!.reason!.toLowerCase()).toContain("lease");
+  });
+});
+
+describe("the agent ended its own run — MCP reached the board before the bridge did", () => {
+  /**
+   * An agentpod-driven agent now carries a run-scoped superpipeline token and calls
+   * `superpipeline_complete` itself. When it does, the run is already `ended` by
+   * the time the bridge sends its own `complete`, and the board answers the same
+   * 409 STALE_LEASE it sends for a lease that was reclaimed out from under us.
+   *
+   * The two are opposites: one is the card finished by the agent we dispatched,
+   * the other is the card taken away from it. The code alone cannot tell them
+   * apart, so the run is re-read — and the run row says which happened.
+   */
+  const endedBoard = (outcome: string): Handler => {
+    let completed = false;
+    return (path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`))
+        return completed
+          ? { status: 200, body: { ...contextBody, run: { ...contextBody.run, status: "ended", outcome } } }
+          : { status: 200, body: contextBody };
+      if (path.endsWith("/complete")) {
+        completed = true;
+        return { status: 409, body: boardError("STALE_LEASE") };
+      }
+      return { status: 200, body: { ok: true } };
+    };
+  };
+
+  test("a run the agent completed for itself is reported, not abandoned", async () => {
+    const board = fakeBoard(endedBoard("completed"));
+    const acp = fakeAcp(() => [chunk("Reindexed 412 documents."), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("self-reported");
+    expect(await dispatchOutcome(key())).toMatchObject({ outcome: "reported" });
+  });
+
+  test("blocking itself counts too — the agent reported, it just did not finish", async () => {
+    const board = fakeBoard(endedBoard("blocked"));
+    const acp = fakeAcp(() => [chunk("I cannot reach the repository."), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("self-reported");
+    expect(result.reason).toContain("blocked");
+  });
+
+  test("a reclaimed run is still a lost lease — an outcome we did not author proves nothing", async () => {
+    const board = fakeBoard(endedBoard("reclaimed"));
+    const acp = fakeAcp(() => [chunk("working"), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("lease-superseded");
+    expect(await dispatchOutcome(key())).toMatchObject({ outcome: "abandoned" });
+  });
+
+  test("when the run cannot be re-read, the lease is treated as lost", async () => {
+    // The safe direction: claiming the agent finished on the strength of a read
+    // that never happened would report work nothing vouched for.
+    let completed = false;
+    const board = fakeBoard((path) => {
+      if (path.endsWith("/claims")) return { status: 200, body: claimBody };
+      if (path.endsWith(`/runs/${RUN_ID}`))
+        return completed ? { status: 502, body: "gateway" } : { status: 200, body: contextBody };
+      if (path.endsWith("/complete")) {
+        completed = true;
+        return { status: 409, body: boardError("STALE_LEASE") };
+      }
+      return { status: 200, body: { ok: true } };
+    });
+    const acp = fakeAcp(() => [chunk("working"), idle()]);
+
+    const result = await runOnce(deps(board.client, acp.port));
+
+    expect(result.status).toBe("lease-superseded");
+  });
+});
+
+describe("an agent that can address the board itself", () => {
+  /**
+   * The run-scoped credential (superpipeline#109) reaches the harness on
+   * `session/new` and nowhere else. It is NOT the roster token: that one can
+   * claim, and an agent holding it could take a second card while still
+   * working the first — which is the objection the run scope answers.
+   */
+  const MCP_TOKEN = `spa_${"f0e1d2c3".repeat(6)}`;
+  const withMcp = { ...agent, mcpToken: MCP_TOKEN };
+
+  test("the session carries the superpipeline MCP server, with the RUN-scoped token", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+
+    expect(acp.state.createdWith[0]!.mcpServers).toEqual([
+      {
+        type: "http",
+        name: "superpipeline",
+        url: "https://board.test/mcp",
+        headers: [{ name: "Authorization", value: `Bearer ${MCP_TOKEN}` }],
+      },
+    ]);
+    // The claim credential never leaves the hub.
+    expect(JSON.stringify(acp.state.createdWith)).not.toContain(TOKEN);
+  });
+
+  test("the prompt names the run, so the agent can ask for its own lease epoch", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port, undefined, { agent: withMcp, mcpUrl: "https://board.test/mcp" }));
+
+    expect(acp.state.prompts[0]).toContain(RUN_ID);
+    expect(acp.state.prompts[0]).toContain("superpipeline_get_run");
+    // The epoch is a fence, and a prompt is not where a fence belongs.
+    expect(acp.state.prompts[0]).not.toContain("leaseEpoch");
+  });
+
+  test("an agent with no token is told none of it — the tools would not be there", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+
+    await runOnce(deps(board.client, acp.port));
+
+    expect(acp.state.createdWith[0]!.mcpServers).toBeUndefined();
+    expect(acp.state.prompts[0]).not.toContain("superpipeline_get_run");
+    expect(acp.state.prompts[0]).not.toContain(RUN_ID);
   });
 });
 

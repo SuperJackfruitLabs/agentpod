@@ -32,6 +32,7 @@ import {
   client,
   ndJsonStream,
   PROTOCOL_VERSION,
+  type McpServer,
   type ClientConnection,
   type ClientContext,
   type RequestPermissionRequest,
@@ -173,6 +174,27 @@ export interface CreateSessionInput {
   stationId: string;
   userId: string;
   mode: AcpSessionMode;
+  /**
+   * MCP servers to hand the harness when the session opens.
+   *
+   * Per session, not per station: the superpipeline entry carries a run-scoped
+   * board credential, and a credential that outlives the run it was minted for
+   * is a credential the next session on that machine can spend. Nothing here
+   * is persisted — the row and the transcript the console reads never see it.
+   *
+   * Hermes does not DECLARE `mcpCapabilities` at `initialize`, and registers
+   * `session/new`'s servers anyway (`acp_adapter/server.py` `new_session` →
+   * `_register_session_mcp_servers`). So this is sent unconditionally rather
+   * than gated on the declaration: gating on it would leave the one harness
+   * the board actually dispatches to without its tools. An adapter that
+   * ignores the field ignores it, and the bridge's own report still lands.
+   *
+   * Typed as the SDK's own `McpServer` because this is the SDK boundary — the
+   * value goes to `session/new` unaltered. The contract's `AcpMcpServer`, which
+   * is what callers build, is assignable to it and is the narrower of the two:
+   * HTTP only.
+   */
+  mcpServers?: McpServer[];
 }
 
 interface LiveSession {
@@ -921,7 +943,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
         // The SDK requires an absolute cwd; the station workspace is the
         // natural one, "/" the fallback for workspace-less stations.
         cwd: workspacePath ?? "/",
-        mcpServers: [],
+        mcpServers: input.mcpServers ?? [],
       }),
       handshakeTimeoutMs,
       HANDSHAKE_TIMEOUT_MESSAGE

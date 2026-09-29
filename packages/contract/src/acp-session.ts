@@ -8,6 +8,33 @@ export type AcpSessionMode = z.infer<typeof AcpSessionMode>;
 export const AcpSessionStatus = z.enum(["starting", "idle", "working", "waiting", "ended"]);
 export type AcpSessionStatus = z.infer<typeof AcpSessionStatus>;
 
+/**
+ * An MCP server handed to the harness when its session opens.
+ *
+ * ACP's `session/new` carries `mcpServers`, and this is that entry, HTTP only:
+ * the alternative — an MCP config file written onto the station — would leave a
+ * credential on disk, outliving the session it was minted for, for every future
+ * session on that machine to reach.
+ *
+ * **The headers are a credential.** Nothing in AgentPod logs, persists or
+ * echoes an entry: it is built at dispatch, handed to `session/new`, and
+ * forgotten. It is deliberately NOT part of `AcpSessionRow`, which is what the
+ * console reads.
+ *
+ * `type` is ACP's own discriminator and the only value AgentPod sends is
+ * `http`. The stdio form exists in ACP and is not offered here, because a
+ * station-local command is a second way to run code on the station and the
+ * board cannot vouch for one.
+ */
+export const AcpMcpServer = z.object({
+  type: z.literal("http"),
+  /** The harness names its tools after this: `superpipeline` → `superpipeline_complete`. */
+  name: z.string().min(1),
+  url: z.string().url(),
+  headers: z.array(z.object({ name: z.string().min(1), value: z.string() })).default([]),
+});
+export type AcpMcpServer = z.infer<typeof AcpMcpServer>;
+
 export const AcpSessionRow = z.object({
   id: z.string(), stationId: z.string(), userId: z.string(),
   mode: AcpSessionMode, status: AcpSessionStatus,

@@ -481,7 +481,8 @@ board and station — "the bridge's credential" is not a thing that exists:
     "mode": "full-auto",
     "permissionWaitMs": 1800000,
     "maxConcurrency": 1,
-    "profileKey": "reviewer"
+    "profileKey": "reviewer",
+    "mcpToken": "spa_…"
   }
 ]
 ```
@@ -497,6 +498,33 @@ board and station — "the bridge's credential" is not a thing that exists:
 | `permissionWaitMs` | no (default **30 minutes**) | How long a human has to answer before the run gives up. Must be a positive integer. |
 | `maxConcurrency` | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
 | `profileKey` | no | Claim under a profile, when the board routes by profile. |
+| `mcpToken` | no | A **second** superpipeline credential, handed to the harness so it can report on its own card. See below. Omit it and the harness gets no board tools, which is how every agent worked before this existed. |
+
+**What `mcpToken` is for, and why it is not `token`.**
+
+With it, the agent gets superpipeline's own MCP tools inside its session — it can add a reference,
+block on a question, or complete the card itself, instead of the bridge summarising what it
+said. The card prompt then names the run and tells it to call `superpipeline_get_run` first for
+the lease epoch. Without it the prompt says none of that, because a prompt naming verbs the
+harness cannot call is an instruction to fail.
+
+Mint it **run-scoped**: the roster `token` can *claim*, and an agent holding that could take a
+second card while still working the first. A `run`-scoped token can finish the card it holds and
+cannot ask for another. On superpipeline, minting is a human act — an agent cannot mint for
+itself — so mint it from superpipeline's **Workspace → Agents** tab with **Issue a run-only
+token** (the plaintext is shown once, as on create). `supi` cannot: minting is deliberately
+closed to hub-issued credentials, so the CLI's token is refused there.
+
+The credential reaches the harness on ACP's `session/new`, per session, and nowhere else: no MCP
+config file is written to the station, nothing is persisted, and neither the session row nor the
+transcript the console reads contains it. The MCP endpoint is derived from `SUPERPIPELINE_BASE_URL`
+(`/mcp`), so there is no second URL to keep in agreement.
+
+The bridge still sends its own `complete` afterwards. When the agent got there first, superpipeline
+answers `409 STALE_LEASE` — the same code it sends for a lease reclaimed out from under us — so
+the bridge re-reads the run and reports `self-reported` when the run ended with an outcome the
+agent itself could author (`completed`, `submitted`, `blocked`). A run that was `reclaimed` or
+`released` is still a lost lease.
 
 **What `permissionWaitMs` actually buys you.** When an agent asks for permission, the run keeps
 the card and keeps heartbeating, so superpipeline's 15-minute reclaim never fires — the wait is
