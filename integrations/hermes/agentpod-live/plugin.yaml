@@ -1,6 +1,6 @@
 name: agentpod-live
-version: "0.1.1"
-description: "Streams a Matrix turn to the reader's devices as AgentPod live events (answer, reasoning, tool calls), the same events the hub sends for bridge-mode stations."
+version: "0.2.0"
+description: "Streams a Matrix turn to the reader's devices as AgentPod live events (answer, reasoning, tool calls), the same events the hub sends for bridge-mode stations, and reports the turn to the hub's fleet Live Activity through the node."
 author: AgentPod
 # The oldest Hermes the CI contract runs against (hermes-fleet.ref). Hermes
 # refuses to load the plugin below it. The newest tested version is in
@@ -16,3 +16,5 @@ provides_hooks:
   - on_stream_delta
   - pre_tool_call
   - post_tool_call
+  - pre_approval_request
+  - post_approval_response
