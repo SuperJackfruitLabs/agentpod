@@ -1,0 +1,4 @@
+[test]
+# Closes Matrix crypto machines a test left open before bun test exits, or the
+# run aborts in napi-rs after every test has passed (issue #457).
+preload = ["./tests/preload.ts"]

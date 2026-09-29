@@ -289,9 +289,11 @@ import { EncryptionSettings, RoomId } from '@matrix-org/matrix-sdk-crypto-nodejs
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger } from '../../utils/logger';
+// Every machine is recorded so that it is closed on the way out, however the
+// process exits (issue #457).
+import { trackOpenMachine, closeTrackedMachine } from './open-machines';
 
 const log = createLogger('matrix-as:crypto');
-
 
 export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
   const machines = new Map<string, Promise<OlmMachine>>();
@@ -326,6 +328,9 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
         new DeviceId(deviceId),
         dir,
       );
+      // Tracked before anything else can throw: a machine that failed to
+      // publish is still open.
+      trackOpenMachine(machine);
       await publishIdentity(userId, machine);
       return machine;
     })();
@@ -628,7 +633,7 @@ export function createAgentCrypto(deps: AgentCryptoDeps): AgentCrypto {
       await Promise.all(
         open.map(async (pending) => {
           try {
-            (await pending).close();
+            closeTrackedMachine(await pending);
           } catch (err) {
             log.warn('closing an agent crypto machine failed', {
               reason: err instanceof Error ? err.message : String(err),
