@@ -4,7 +4,7 @@ import { clearAuthSession } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
 
 /** Resolves the hub base URL at call time so it reflects the runtime connection. */
-function hubUrl(): string {
+export function hubUrl(): string {
   const stored =
     typeof window !== "undefined" ? window.localStorage.getItem("agentpod.apiUrl") : null;
   return stored ?? import.meta.env.PUBLIC_HUB_URL ?? "http://localhost:3001";
