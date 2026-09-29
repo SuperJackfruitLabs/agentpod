@@ -64,6 +64,11 @@ export const stations = pgTable("stations", {
 }, (t) => [
   uniqueIndex("stations_node_id_station_key_idx").on(t.nodeId, t.stationKey),
   uniqueIndex("stations_skill_owner_idx").on(t.id, t.tenantId, t.userId),
+  // Referencable by a composite FK, exactly as `nodes_id_tenant_idx` is by this
+  // table's own `(node_id, tenant_id)` key below. `bridge_agents` uses it so a
+  // roster entry in one tenant pointing at a station in another is
+  // unrepresentable rather than merely unwritten.
+  uniqueIndex("stations_id_tenant_idx").on(t.id, t.tenantId),
   // Partial: many stations share `principal_id IS NULL` (unoccupied is the
   // default state), and only a non-null occupant needs to be unique.
   uniqueIndex("stations_principal_id_idx").on(t.principalId).where(sql`${t.principalId} IS NOT NULL`),

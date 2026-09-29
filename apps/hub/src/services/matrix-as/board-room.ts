@@ -201,27 +201,22 @@ export async function boardRoomFor(roomId: string) {
  * whose human has never linked an account yields nobody rather than somebody wrong.
  */
 export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]> {
-  const { isBridgeEnabled, loadBridgeConfig } = await import("../bridge/config");
+  const { isBridgeEnabled } = await import("../bridge/config");
   if (!isBridgeEnabled()) return [];
-
-  // Null when the bridge is off or its config will not load — which is the same
-  // answer as "no humans named", not an error worth failing a room over.
-  const config = loadBridgeConfig();
-  if (!config) return [];
 
   let hubUserIds: string[];
   try {
-    hubUserIds = [
-      ...new Set(
-        config
-          .agents.filter((a) => a.boardId === boardId)
-          .map((a) => a.hubUserId)
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ];
+    // Read from `bridge_agents` rather than a parsed environment variable, and — the part that
+    // matters here — the user comes off the STATION. The roster used to carry its own `hubUserId`,
+    // which could disagree with the station it named; this cannot, because there is only one of
+    // them now. See `services/bridge/roster.ts`.
+    const { listBridgeAgents } = await import("../bridge/roster");
+    const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
+    const roster = await listBridgeAgents(BOOTSTRAP_TENANT_ID);
+    hubUserIds = [...new Set(roster.filter((a) => a.boardId === boardId).map((a) => a.hubUserId))];
   } catch {
-    // A roster that will not parse is an operator's problem and is reported where
-    // it is loaded; a board room should still be made, just with nobody invited yet.
+    // A roster that cannot be read is an operator's problem and is reported where it is read; a
+    // board room should still be made, just with nobody invited yet.
     return [];
   }
 

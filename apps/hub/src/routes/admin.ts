@@ -17,6 +17,7 @@ import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
 import { adminPrincipalsRouter } from "./admin-principals";
 import { agentsAdminRouter } from "./agents-admin";
+import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
 import { adminTranscriptionRoutes } from "./transcription-settings";
 
 // Models
@@ -57,6 +58,11 @@ adminRouter.route("/grants", adminGrantsRouter);
 // sides and nothing else in this API says what those ids are, so without this
 // the console can offer only a text box for a twenty-hex string.
 adminRouter.route("/principals", adminPrincipalsRouter);
+
+// The superpipeline bridge's roster. Workspace administration: every write here decides what work
+// this fleet claims and whose credential it spends. Replaces editing SUPERPIPELINE_BRIDGE_AGENTS
+// in hub.env and restarting.
+adminRouter.route("/bridge/agents", adminBridgeAgentsRouter);
 
 // Creating an agent, and putting it in a station. Mounted at the root of
 // `/api/admin` because it owns two path families — `/agents` and

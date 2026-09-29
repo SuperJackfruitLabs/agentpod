@@ -229,7 +229,8 @@ PROVISIONING_HUB_URL=https://hub.<your-domain>
 # lowercase string "true" — `1` and `TRUE` read as off.
 # ENABLE_SUPERPIPELINE_BRIDGE=false
 # SUPERPIPELINE_BASE_URL=https://superpipeline.dev
-# SUPERPIPELINE_BRIDGE_AGENTS=[{"key":"codex-mac","boardId":"brd_...","token":"spa_...","stationId":"station_...","hubUserId":"...","mode":"full-auto"}]
+# The roster itself is NOT here — it is the `bridge_agents` table, edited at
+# Admin -> Bridge in the console. ENCRYPTION_KEY above becomes required.
 EOF
 chmod 600 /etc/agentpod/hub.env
 ```
@@ -459,100 +460,59 @@ that has not opted in constructs nothing, opens no session and makes no request.
 operation — reading the ledger, spotting a halted loop — is
 [docs/OPERATING.md → The superpipeline bridge](./OPERATING.md#8-the-superpipeline-bridge).
 
-Three variables, all required together:
+Two variables, both required together:
 
 | Variable | Meaning |
 |---|---|
 | `ENABLE_SUPERPIPELINE_BRIDGE` | The gate. `isBridgeEnabled()` compares against the **literal lowercase `true`** — `1`, `TRUE` and `yes` are off. Boot validation uses the looser `getEnvBool`, so `=1` is the one value that passes validation *and* starts nothing. |
 | `SUPERPIPELINE_BASE_URL` | Origin of the superpipeline deployment, e.g. `https://superpipeline.dev`. Trailing slashes are stripped. |
-| `SUPERPIPELINE_BRIDGE_AGENTS` | The roster: a **JSON array**, one entry per agent identity. |
 
-One process, many identities. Each roster entry is a separate principal with its own token,
-board and station — "the bridge's credential" is not a thing that exists:
+`ENCRYPTION_KEY` (at least 32 characters) becomes **required** when the bridge is on, and the hub
+refuses to boot without it. Every rostered agent's credentials are encrypted with it; an unset one
+silently falls back to a development key published in this repository, so "unset" is refused rather
+than accepted.
 
-```json
-[
-  {
-    "key": "codex-mac",
-    "boardId": "brd_9c1d4e5f6a7b8c9d",
-    "token": "spa_…",
-    "stationId": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
-    "hubUserId": "usr-local-1",
-    "mode": "full-auto",
-    "permissionWaitMs": 1800000,
-    "maxConcurrency": 1,
-    "profileKey": "reviewer",
-    "mcpToken": "spa_…"
-  }
-]
-```
+### The roster is a table, not a variable
+
+`SUPERPIPELINE_BRIDGE_AGENTS` **no longer exists.** Which agents claim from which board, onto which
+station, is `bridge_agents` — a tenant-scoped table edited at **Admin → Bridge** in the console.
+
+The reason is that it was never deployment configuration. Four agent identities with two
+credentials each are *workspace* data: they change when the business changes, not when the
+deployment does, and everything comparable in AgentPod — station adoption, git identities, Matrix
+credentials — is already a row a human creates in the console. As an environment variable it also
+had no `tenant_id`, nothing validated a `stationId` against a station that exists, and there was no
+audit of who added an agent.
 
 | Field | Required | Notes |
 |---|---|---|
-| `key` | yes | Stable name. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique — a duplicate is refused at boot. |
-| `boardId` | yes | The superpipeline board to claim from. |
-| `token` | yes | This agent's own superpipeline credential, minted under "Connect an agent". Must start `spa_`. |
-| `stationId` | yes | The station its work runs on. |
-| `hubUserId` | yes | The hub user the ACP session belongs to. Sessions are authorized by user id, so a background worker needs a real owning principal — it cannot invent one. |
-| `mode` | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call, which is a great deal of asking; it suits a board somebody is watching, which is why it is not the default. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers — see `permissionWaitMs`. |
-| `permissionWaitMs` | no (default **30 minutes**) | How long a human has to answer before the run gives up. Must be a positive integer. |
-| `maxConcurrency` | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
-| `profileKey` | no | Claim under a profile, when the board routes by profile. |
-| `mcpToken` | no | A **second** superpipeline credential, handed to the harness so it can report on its own card. See below. Omit it and the harness gets no board tools, which is how every agent worked before this existed. |
+| Name | yes | Stable. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique within the workspace. |
+| Board | yes | The superpipeline board to claim from, `brd_<16 hex>`. |
+| Station | yes | Chosen from the adopted fleet. A composite foreign key makes a station in another tenant unrepresentable. |
+| Permission mode | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers. |
+| Claim credential | yes | The agent's own superpipeline token. Stored AES-256-GCM; it cannot be read back, only replaced. |
+| Run-only credential | no | Lets the agent complete or block **its own card** over MCP. Mint it with **Issue a run-only token** in superpipeline — not the claim credential, which could take a second card while working the first. |
+| Permission wait | no (default **30 minutes**) | How long a human has to answer before the run gives up. |
+| Concurrency | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
+| Profile | no | Claim under a profile, when the board routes by profile. |
 
-**What `mcpToken` is for, and why it is not `token`.**
+**A change takes effect within about ten seconds, with no restart.** The bridge reconciles the
+running loops against the table on a tick: a new agent starts claiming, a disabled or removed one
+**finishes the card it is holding** and then stops, and an edited one is rebuilt with its new
+settings. Disabling keeps the row and its credentials; removing deletes both.
 
-With it, the agent gets superpipeline's own MCP tools inside its session — it can add a reference,
-block on a question, or complete the card itself, instead of the bridge summarising what it
-said. The card prompt then names the run and tells it to call `superpipeline_get_run` first for
-the lease epoch. Without it the prompt says none of that, because a prompt naming verbs the
-harness cannot call is an instruction to fail.
+**An enabled bridge with an empty roster claims nothing and says so**, once per emptying, in the
+hub log:
 
-Mint it **run-scoped**: the roster `token` can *claim*, and an agent holding that could take a
-second card while still working the first. A `run`-scoped token can finish the card it holds and
-cannot ask for another. On superpipeline, minting is a human act — an agent cannot mint for
-itself — so mint it from superpipeline's **Workspace → Agents** tab with **Issue a run-only
-token** (the plaintext is shown once, as on create). `supi` cannot: minting is deliberately
-closed to hub-issued credentials, so the CLI's token is refused there.
+```
+[bridge] enabled, but no agents are rostered — nothing will be claimed. Add one under Bridge in the console.
+```
 
-The credential reaches the harness on ACP's `session/new`, per session, and nowhere else: no MCP
-config file is written to the station, nothing is persisted, and neither the session row nor the
-transcript the console reads contains it. The MCP endpoint is derived from `SUPERPIPELINE_BASE_URL`
-(`/mcp`), so there is no second URL to keep in agreement.
+That line is what replaces the old boot-time refusal. `validateConfig()` runs before
+`initDatabase()`, so it cannot read the table; what it still checks is the base URL and the
+encryption key.
 
-The bridge still sends its own `complete` afterwards. When the agent got there first, superpipeline
-answers `409 STALE_LEASE` — the same code it sends for a lease reclaimed out from under us — so
-the bridge re-reads the run and reports `self-reported` when the run ended with an outcome the
-agent itself could author (`completed`, `submitted`, `blocked`). A run that was `reclaimed` or
-`released` is still a lost lease.
 
-**What `permissionWaitMs` actually buys you.** When an agent asks for permission, the run keeps
-the card and keeps heartbeating, so superpipeline's 15-minute reclaim never fires — the wait is
-bounded by *this setting*, not by the lease. If it expires, the run is **`fail`ed and the card is
-re-queued** with the reason and a failure count. It is not silently dropped, and it is not
-`release`d either: a session had started, so the workspace may hold partial work, and `fail` is
-the verb that records that. The next attempt asks the question again, and a card nobody ever
-answers eventually trips superpipeline's own circuit breaker and parks for a human. Nothing is ever
-approved or declined on a human's behalf when the wait runs out.
-
-Set it per agent, because attendance is a property of a deployment: a board watched during
-office hours wants minutes, and one that runs unattended overnight wants the harness released
-quickly rather than a station pinned until morning.
-
-**A roster that fails to parse refuses the boot**, naming `SUPERPIPELINE_BRIDGE_AGENTS`. That is
-deliberate: a bridge that silently claimed nothing because its roster was malformed looks
-exactly like a quiet board. The refusals are a missing base URL, unparseable JSON, an empty
-array, a token that does not start `spa_`, a `permissionWaitMs` of zero or less, and a
-duplicate `key`.
-
-> **Quoting.** The roster is JSON on one line, which makes it the value most likely to be
-> quoted in an env file, and the value quoting most often breaks. systemd's
-> `EnvironmentFile=` strips one surrounding layer, so both `SUPERPIPELINE_BRIDGE_AGENTS=[{…}]`
-> and `SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'` reach the hub identically — but a pre-flight that
-> parses the file differently will disagree with the hub about which one works. See the
-> pre-flight notes under [Re-deploy](#re-deploy-upgrade); this variable is why they exist.
-
----
 
 ### The OAuth client registry
 
@@ -927,14 +887,15 @@ Two things about that snippet are load-bearing, and both were learned the hard w
   `env $(grep -v '^#' /etc/agentpod/hub.env | xargs) bun …` — was in this runbook
   until 2026-08-14 and is **wrong**: `xargs` re-tokenises and strips quotes wherever
   they appear, so a value containing them arrives mangled. Enabling the superpipeline
-  bridge, whose roster is a JSON array, produced `SUPERPIPELINE_BRIDGE_AGENTS is not
-  valid JSON` from a config file that was perfectly valid — a pre-flight failing on
-  a fault it invented, which is worse than no pre-flight at all.
+  bridge, whose roster was then a JSON array in `SUPERPIPELINE_BRIDGE_AGENTS`, produced
+  `is not valid JSON` from a config file that was perfectly valid — a pre-flight failing
+  on a fault it invented, which is worse than no pre-flight at all. That roster has since
+  moved into the database and the variable is gone; the lesson is not, because any value
+  with quotes in it fails the same way.
 - **Strip exactly one layer of surrounding quotes, and nothing else** — that is what
   systemd's `EnvironmentFile=` does. The replacement snippet was, briefly, *fully*
   literal, which recreated the same class of bug from the other side: an operator who
-  quoted the roster (`SUPERPIPELINE_BRIDGE_AGENTS='[{…}]'`) got the quotes handed to
-  `JSON.parse` and the same invented failure. Note systemd does **not** strip trailing
+  quoted that roster got the quotes handed to `JSON.parse` and the same invented failure. Note systemd does **not** strip trailing
   comments — `KEY=value  # note` really is a value with a comment in it, on the live
   hub as well as here, which is why the `ENCRYPTION_KEY` line in §4 keeps its comment
   on a line of its own.

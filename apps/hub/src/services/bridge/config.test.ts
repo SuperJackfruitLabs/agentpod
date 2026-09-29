@@ -1,34 +1,33 @@
 /**
- * The gate. A hub that has not opted in must behave exactly as it does today —
- * same as the provisioner drivers, which are registered only when their
- * `ENABLE_*` flag is literally "true" and are otherwise invisible.
+ * The gate, and the two environment facts that survived.
+ *
+ * A hub that has not opted in must behave exactly as it does today — same as the provisioner
+ * drivers, which are registered only when their `ENABLE_*` flag is literally "true" and are
+ * otherwise invisible.
+ *
+ * The roster is no longer among the things checked here: it moved to `bridge_agents`, and the
+ * tests for it are `tests/integration/bridge-roster.test.ts`. What is left is the deployment
+ * configuration proper — whether to run, which superpipeline, and the key without which no
+ * rostered credential can be read.
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
 
 import { isBridgeEnabled, loadBridgeConfig, BRIDGE_ENV_FLAG } from "./config";
 
-const KEYS = [BRIDGE_ENV_FLAG, "SUPERPIPELINE_BASE_URL", "SUPERPIPELINE_BRIDGE_AGENTS"] as const;
+const KEYS = [BRIDGE_ENV_FLAG, "SUPERPIPELINE_BASE_URL", "ENCRYPTION_KEY"] as const;
 const saved = Object.fromEntries(KEYS.map((k) => [k, process.env[k]]));
-
-const AGENT = {
-  key: "codex-mac",
-  boardId: "brd_9c1d4e5f6a7b8c9d",
-  token: `spa_${"a1b2c3d4".repeat(6)}`,
-  stationId: "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
-  hubUserId: "usr-local-1",
-};
 
 function env(over: Partial<Record<(typeof KEYS)[number], string | undefined>>) {
   for (const k of KEYS) delete process.env[k];
   for (const [k, v] of Object.entries(over)) if (v !== undefined) process.env[k] = v;
 }
 
-const enabled = (over: Record<string, unknown> = {}) =>
+const enabled = () =>
   env({
     [BRIDGE_ENV_FLAG]: "true",
     SUPERPIPELINE_BASE_URL: "https://superpipeline.example",
-    SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([{ ...AGENT, ...over }]),
+    ENCRYPTION_KEY: "a-test-encryption-key-0123456789",
   });
 
 afterEach(() => {
@@ -47,101 +46,48 @@ describe("the bridge is off unless it is switched on", () => {
 
   test("only the literal string 'true' enables it", () => {
     for (const v of ["false", "1", "yes", "TRUE", ""]) {
-      env({ [BRIDGE_ENV_FLAG]: v, SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "[]" });
+      env({ [BRIDGE_ENV_FLAG]: v, SUPERPIPELINE_BASE_URL: "https://k", ENCRYPTION_KEY: "k".repeat(32) });
       expect(isBridgeEnabled()).toBe(false);
+      expect(loadBridgeConfig()).toBeNull();
     }
   });
 
-  test("credentials alone never enable it", () => {
-    // The provisioner rule: nothing is inferred from credentials being present.
-    // A token left in an env file is not a decision to start claiming work.
-    env({ SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
-    expect(isBridgeEnabled()).toBe(false);
-    expect(loadBridgeConfig()).toBeNull();
-  });
-
-  test("switched on with a valid agent, it loads", () => {
-    enabled();
-    const cfg = loadBridgeConfig()!;
-    expect(cfg.baseUrl).toBe("https://superpipeline.example");
-    expect(cfg.agents).toHaveLength(1);
-    expect(cfg.agents[0]!.key).toBe("codex-mac");
-    expect(cfg.source).toBe("superpipeline");
+  test("off means nothing else is even read — a half-configured hub still boots", () => {
+    env({ [BRIDGE_ENV_FLAG]: "false" });
+    expect(() => loadBridgeConfig()).not.toThrow();
   });
 });
 
-describe("an enabled bridge refuses to start half-configured", () => {
-  test("no base URL", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT]) });
+describe("what an enabled bridge still needs from the environment", () => {
+  test("the base url, without which there is no superpipeline to claim from", () => {
+    env({ [BRIDGE_ENV_FLAG]: "true", ENCRYPTION_KEY: "k".repeat(32) });
     expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BASE_URL/);
   });
 
-  test("no agents", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "[]" });
-    expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BRIDGE_AGENTS/);
+  test("the encryption key, without which every rostered credential is unreadable", () => {
+    // The roster would load as a list of agents, none of which could claim: an outage whose cause
+    // is three layers from its symptom. This is an environment fact, so it is still catchable at
+    // boot even though the roster itself is not.
+    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BASE_URL: "https://superpipeline.example" });
+    expect(() => loadBridgeConfig()).toThrow(/ENCRYPTION_KEY/);
   });
 
-  test("unparseable agents", () => {
-    env({ [BRIDGE_ENV_FLAG]: "true", SUPERPIPELINE_BASE_URL: "https://k", SUPERPIPELINE_BRIDGE_AGENTS: "{not json" });
-    expect(() => loadBridgeConfig()).toThrow(/SUPERPIPELINE_BRIDGE_AGENTS/);
-  });
-
-  test("a token that is not a superpipeline agent token", () => {
-    enabled({ token: "hunter2" });
-    expect(() => loadBridgeConfig()).toThrow(/spa_/);
-  });
-
-  test("two agents sharing a key", () => {
-    // `key` lands in bridge_dispatches.agent_key and in every log line. Two
-    // identities under one name make an attribution question unanswerable.
+  test("a trailing slash on the base url is stripped, so paths join predictably", () => {
     env({
       [BRIDGE_ENV_FLAG]: "true",
-      SUPERPIPELINE_BASE_URL: "https://k",
-      SUPERPIPELINE_BRIDGE_AGENTS: JSON.stringify([AGENT, { ...AGENT, boardId: "brd_other" }]),
+      SUPERPIPELINE_BASE_URL: "https://superpipeline.example///",
+      ENCRYPTION_KEY: "k".repeat(32),
     });
-    expect(() => loadBridgeConfig()).toThrow(/codex-mac/);
+    expect(loadBridgeConfig()!.baseUrl).toBe("https://superpipeline.example");
   });
-});
 
-describe("permission mode", () => {
-  test("the default is still the mode that needs nobody", () => {
-    // Deliberately NOT changed when `ask` became answerable. A default is what
-    // an unattended board gets, and `ask` asks about every tool call: a hub
-    // upgraded into it would start parking cards on questions at 3am and
-    // failing them when the wait ran out.
+  test("configured, it reports the source every ledger row is written under", () => {
     enabled();
-    expect(loadBridgeConfig()!.agents[0]!.mode).toBe("full-auto");
+    expect(loadBridgeConfig()).toEqual({ baseUrl: "https://superpipeline.example", source: "superpipeline" });
   });
 
-  test("accept-edits is allowed", () => {
-    enabled({ mode: "accept-edits" });
-    expect(loadBridgeConfig()!.agents[0]!.mode).toBe("accept-edits");
-  });
-
-  test("ask is allowed — superpipeline can answer a question now", () => {
-    // The refusal this replaces was correct when it was written: the
-    // `input-required → working` transition existed and nothing invoked it.
-    // superpipeline PR #36 built the return path, so the reason is gone.
-    enabled({ mode: "ask" });
-    expect(loadBridgeConfig()!.agents[0]!.mode).toBe("ask");
-  });
-});
-
-describe("how long a human has to answer", () => {
-  test("unset means the built-in wait, not an unbounded one", () => {
+  test("it no longer carries a roster — that is the table's job now", () => {
     enabled();
-    expect(loadBridgeConfig()!.agents[0]!.permissionWaitMs).toBeUndefined();
-  });
-
-  test("a board with someone watching it can be given a different wait", () => {
-    enabled({ permissionWaitMs: 5 * 60_000 });
-    expect(loadBridgeConfig()!.agents[0]!.permissionWaitMs).toBe(300_000);
-  });
-
-  test("a wait of zero or less is refused — it is not a policy, it is a bug", () => {
-    enabled({ permissionWaitMs: 0 });
-    expect(() => loadBridgeConfig()).toThrow();
-    enabled({ permissionWaitMs: -1 });
-    expect(() => loadBridgeConfig()).toThrow();
+    expect(loadBridgeConfig()).not.toHaveProperty("agents");
   });
 });
