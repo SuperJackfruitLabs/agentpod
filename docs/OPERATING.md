@@ -1266,6 +1266,25 @@ and is on exactly when the gateway is.
   process as before; pending gates come back with the next gate sweep (≤ 5 min).
 - `LOG_LEVEL=info` logs each token registered/removed (`live-activity-tokens`)
   and each refused or failed Live Activity push (`fleet-live`).
+- **Agents that are their own Matrix client** (harness-mode Hermes with
+  `agentpod-live` ≥ 0.2.0 — every Guild agent) never pass the hub's bridge, so
+  their plugin reports each turn: one JSON line to the node's
+  `~/.agentpod/fleet.sock`, forwarded as a `fleet.report` frame over the
+  node's gateway connection (`packages/contract/src/fleet-report.ts`). The hub
+  believes a report only for the station **on that node** whose `matrix_id` is
+  the reporting agent, and only when the report's reader is that station's
+  owner's Matrix id; a room the hub knows to be another station's is refused,
+  and a report more than 2 minutes old is dropped. Reports become the same
+  fleet events the bridge notes, so plugin and bridge agents share one card.
+  An approval shows as the agent's pending decision with no inline buttons (it
+  is answered in the room). A turn that ran tools also reports its answer's
+  event id, and its room's pushes wait (≤ 500 ms, for at most 15 s after the
+  turn) for it, so the answer push carries `turn` counts too; a push that beats
+  the turn's finish report goes without them. Needs a node with the
+  `fleet.reports` capability. `LOG_LEVEL=info` logs `fleet report applied`
+  (component `fleet-agent-reports`) per turn start/finish/answer/decision, and
+  `a fleet report from an agent this node does not host; dropped` at most once
+  a minute per agent.
 
 **Defences** — the Push Gateway API has no authentication, so the route has
 its own: a 64 KiB body cap (413), a strict schema (400), an allowlist of app ids
