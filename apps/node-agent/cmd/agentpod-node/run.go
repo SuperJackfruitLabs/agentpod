@@ -12,6 +12,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/fleetreport"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
@@ -226,33 +227,66 @@ func runCmd() {
 	h = gateway.NewUpdateHandler(h, version)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
-	}, startTurnErrorIntake(ctx))
+	}, startIntakes(ctx))
+}
+
+// startIntakes opens the sockets harness plugins report into. Both feed one
+// outbox to the hub; neither is essential, and a node that cannot open one
+// runs as before without advertising it.
+func startIntakes(ctx context.Context) gateway.Extras {
+	outbox := make(chan []byte, 64)
+	extras := gateway.Extras{Outbox: outbox}
+	if startTurnErrorIntake(ctx, outbox) {
+		extras.Capabilities = append(extras.Capabilities, "turn.errors")
+	}
+	if startFleetIntake(ctx, outbox) {
+		extras.Capabilities = append(extras.Capabilities, "fleet.reports")
+	}
+	return extras
 }
 
 // startTurnErrorIntake opens the socket harness plugins report failed turns
 // on (OpenClaw and Pi drop them over ACP). It is not essential: a node that
 // cannot open it runs as before, and does not advertise "turn.errors", so
 // nothing tells a plugin installer this node can take reports.
-func startTurnErrorIntake(ctx context.Context) gateway.Extras {
-	outbox := make(chan []byte, 64)
-	extras := gateway.Extras{Outbox: outbox}
-
+func startTurnErrorIntake(ctx context.Context, outbox chan []byte) bool {
 	path, err := turnerror.DefaultSocketPath()
 	if err != nil {
 		log.Printf("turn-error intake disabled: %v", err)
-		return extras
+		return false
 	}
 	intake, err := turnerror.Listen(path, outbox)
 	if err != nil {
 		log.Printf("turn-error intake disabled: %v", err)
-		return extras
+		return false
 	}
 	go func() {
 		intake.Serve(ctx)
 	}()
 	log.Printf("turn-error intake listening on %s", path)
-	extras.Capabilities = []string{"turn.errors"}
-	return extras
+	return true
+}
+
+// startFleetIntake opens the socket an agent's own plugin reports its turns
+// on (Hermes's agentpod-live), for the hub's fleet Live Activity. Its frames
+// reach the outbox through fleetreport.Forward, which leaves half of it for
+// turn errors.
+func startFleetIntake(ctx context.Context, outbox chan []byte) bool {
+	path, err := fleetreport.DefaultSocketPath()
+	if err != nil {
+		log.Printf("fleet intake disabled: %v", err)
+		return false
+	}
+	fleet := make(chan []byte, 128)
+	intake, err := fleetreport.Listen(path, fleet)
+	if err != nil {
+		log.Printf("fleet intake disabled: %v", err)
+		return false
+	}
+	go intake.Serve(ctx)
+	go fleetreport.Forward(ctx, fleet, outbox)
+	log.Printf("fleet intake listening on %s", path)
+	return true
 }
 
 // gatherHealthReports enumerates all detected stations and collects a

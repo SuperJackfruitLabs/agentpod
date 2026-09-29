@@ -110,11 +110,17 @@ func nonEmptyString(raw json.RawMessage) bool {
 	return raw != nil && json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != ""
 }
 
+// FrameFunc turns one plugin line into the frame the hub reads, or says why not.
+type FrameFunc func(line []byte) ([]byte, error)
+
 // Intake listens for reports and queues their frames on out.
 type Intake struct {
-	path string
-	ln   net.Listener
-	out  chan<- []byte
+	path    string
+	ln      net.Listener
+	out     chan<- []byte
+	frame   FrameFunc
+	label   string
+	maxLine int
 }
 
 // Listen opens the socket at path, readable and writable by this user only —
@@ -124,28 +130,35 @@ type Intake struct {
 // replaced. One that answers belongs to a running node, and is not taken:
 // two nodes as one user would split the reports between them.
 func Listen(path string, out chan<- []byte) (*Intake, error) {
+	return ListenWith(path, out, Frame, "turn-error", MaxLineBytes)
+}
+
+// ListenWith is Listen for another kind of report: its own framing, its own
+// name in errors and logs, and its own line limit. The fleet socket
+// (internal/fleetreport) is the other one.
+func ListenWith(path string, out chan<- []byte, frame FrameFunc, label string, maxLine int) (*Intake, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("turn-error socket: %w", err)
+		return nil, fmt.Errorf("%s socket: %w", label, err)
 	}
 	if _, err := os.Lstat(path); err == nil {
 		if c, err := net.DialTimeout("unix", path, 200*time.Millisecond); err == nil {
 			c.Close()
-			return nil, fmt.Errorf("turn-error socket %s is in use by another process", path)
+			return nil, fmt.Errorf("%s socket %s is in use by another process", label, path)
 		}
 		if err := os.Remove(path); err != nil {
-			return nil, fmt.Errorf("turn-error socket: remove stale %s: %w", path, err)
+			return nil, fmt.Errorf("%s socket: remove stale %s: %w", label, path, err)
 		}
 	}
 
 	ln, err := net.Listen("unix", path)
 	if err != nil {
-		return nil, fmt.Errorf("turn-error socket: %w", err)
+		return nil, fmt.Errorf("%s socket: %w", label, err)
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		ln.Close()
-		return nil, fmt.Errorf("turn-error socket: %w", err)
+		return nil, fmt.Errorf("%s socket: %w", label, err)
 	}
-	return &Intake{path: path, ln: ln, out: out}, nil
+	return &Intake{path: path, ln: ln, out: out, frame: frame, label: label, maxLine: maxLine}, nil
 }
 
 // Path is where the intake listens.
@@ -164,7 +177,7 @@ func (i *Intake) Serve(ctx context.Context) {
 		conn, err := i.ln.Accept()
 		if err != nil {
 			if ctx.Err() == nil && !errors.Is(err, net.ErrClosed) {
-				log.Printf("turn-error intake: accept: %v", err)
+				log.Printf("%s intake: accept: %v", i.label, err)
 			}
 			return
 		}
@@ -179,12 +192,12 @@ func (i *Intake) handle(conn net.Conn) {
 	reply := func(s string) { conn.Write([]byte(s + "\n")) }
 
 	reader := bufio.NewReaderSize(conn, 4096)
-	line, err := readLine(reader, MaxLineBytes)
+	line, err := readLine(reader, i.maxLine)
 	if err != nil {
 		reply("error: " + err.Error())
 		return
 	}
-	frame, err := Frame(line)
+	frame, err := i.frame(line)
 	if err != nil {
 		reply("error: " + err.Error())
 		return
@@ -195,7 +208,7 @@ func (i *Intake) handle(conn net.Conn) {
 	default:
 		// Never block a plugin on a hub connection that may be gone for an
 		// hour. It gets told, and its harness carries on regardless.
-		log.Printf("turn-error intake: queue full, report dropped")
+		log.Printf("%s intake: queue full, report dropped", i.label)
 		reply("error: busy, report dropped")
 	}
 }
