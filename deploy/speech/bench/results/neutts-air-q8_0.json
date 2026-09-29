@@ -1,0 +1,34 @@
+{
+ "model": "neutts-air-q8_0",
+ "threads": 12,
+ "sr": 24000,
+ "meta": {
+  "voice": "jo (bundled reference)",
+  "gguf": "neutts-air.Q8_0.gguf",
+  "codec": "neucodec ONNX decoder int8 (sha256-identical mirror)"
+ },
+ "load_s": 11.11,
+ "short": {
+  "audio_s": 3.48,
+  "synth_s": 6.89,
+  "rtf": 0.5
+ },
+ "para": {
+  "audio_s": 28.8,
+  "synth_s": 52.3,
+  "rtf": 0.55
+ },
+ "tricky": {
+  "audio_s": 14.22,
+  "synth_s": 21.77,
+  "rtf": 0.65
+ },
+ "first_audio_mode": "native stream",
+ "stream_para": {
+  "first_audio_s": 3.49,
+  "total_s": 63.04,
+  "audio_s": 29.02,
+  "rtf": 0.46
+ },
+ "peak_rss_mb": 2814
+}

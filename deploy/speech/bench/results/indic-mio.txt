@@ -1,0 +1,7 @@
+# foundry, 2026-09-29. kokoro/mio_bench.py (SPRINGLab/Indic-Mio, PyTorch CPU, 12 threads); timing lines of its log.
+load 4.8s, sample rate 24000
+  hi_short  audio   2.8s  tokens   69 at   6.6 tok/s  generate   10.7s + decode  0.1s  x0.26 realtime
+  hi_para   audio  15.4s  tokens  386 at   6.1 tok/s  generate   63.0s + decode  0.3s  x0.24 realtime
+  hinglish  audio   5.6s  tokens  141 at   6.5 tok/s  generate   21.9s + decode  0.1s  x0.26 realtime
+  en_short  audio   3.0s  tokens   74 at   6.6 tok/s  generate   11.4s + decode  0.1s  x0.26 realtime
+peak RSS 4148 MB

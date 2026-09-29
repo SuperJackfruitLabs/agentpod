@@ -1,0 +1,33 @@
+{
+ "model": "kitten-mini",
+ "threads": 6,
+ "sr": 24000,
+ "meta": {
+  "voice": "Bella",
+  "repo": "KittenML/kitten-tts-mini-0.8"
+ },
+ "load_s": 0.52,
+ "short": {
+  "audio_s": 5.22,
+  "synth_s": 3.94,
+  "rtf": 1.32
+ },
+ "para": {
+  "audio_s": 39.4,
+  "synth_s": 29.64,
+  "rtf": 1.33
+ },
+ "tricky": {
+  "audio_s": 24.49,
+  "synth_s": 19.04,
+  "rtf": 1.29
+ },
+ "first_audio_mode": "sentence by sentence",
+ "stream_para": {
+  "first_audio_s": 4.01,
+  "total_s": 29.62,
+  "audio_s": 39.4,
+  "rtf": 1.33
+ },
+ "peak_rss_mb": 890
+}

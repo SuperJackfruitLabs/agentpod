@@ -1,0 +1,33 @@
+{
+ "model": "kokoro",
+ "threads": 6,
+ "sr": 24000,
+ "meta": {
+  "voice": "af_heart",
+  "variant": "kokoro-onnx fp32"
+ },
+ "load_s": 0.78,
+ "short": {
+  "audio_s": 2.92,
+  "synth_s": 0.74,
+  "rtf": 3.95
+ },
+ "para": {
+  "audio_s": 25.39,
+  "synth_s": 6.46,
+  "rtf": 3.93
+ },
+ "tricky": {
+  "audio_s": 17.02,
+  "synth_s": 4.2,
+  "rtf": 4.05
+ },
+ "first_audio_mode": "sentence by sentence",
+ "stream_para": {
+  "first_audio_s": 0.8,
+  "total_s": 6.43,
+  "audio_s": 25.64,
+  "rtf": 3.99
+ },
+ "peak_rss_mb": 1439
+}

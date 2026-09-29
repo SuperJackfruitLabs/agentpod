@@ -2,8 +2,8 @@
 
 Speech to text for voice notes sent into bridged rooms. The hub posts the
 audio here, posts the transcript under the voice note, and
-prompts the agent with it. See `server.py` for the benchmark behind the
-defaults.
+prompts the agent with it. `BENCHMARK.md` has the measurements behind the
+defaults, and `bench/` the scripts to repeat them.
 
 Runs on **foundry**, reachable only over Tailscale, with a bearer token.
 
