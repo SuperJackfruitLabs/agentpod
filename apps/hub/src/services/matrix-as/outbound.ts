@@ -43,6 +43,7 @@ import { inlinePermissionOptions, type FleetEvent } from "../push/fleet/state";
 import { createLogger } from "../../utils/logger";
 import { beginQuietSend, noteAnswerEvent, noteHubEvent, type TurnCounts } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
+import { cardName } from "../push/fleet/names";
 
 const log = createLogger("matrix-outbound");
 
@@ -500,7 +501,7 @@ export function attachRoomToSession(
       const reader = await resolveReader();
       if (!reader) return null;
       const looked = deps.nameFor ? await deps.nameFor(roomId).catch(() => null) : null;
-      return { reader, name: looked?.trim() || fallbackName(agentUser) };
+      return { reader, name: cardName(looked ?? "", agentUser) };
     })();
     const at = Date.now();
     void fleetContext.then((ctx) => {
@@ -926,12 +927,6 @@ export function attachRoomToSession(
   });
 
   attached.set(sessionId, state);
-}
-
-/** `@agent_lyra:hs` → `lyra`: a name of last resort, for a room whose station has none. */
-function fallbackName(mxid: string): string {
-  const local = mxid.replace(/^@/, "").split(":")[0] ?? mxid;
-  return local.replace(/^agent_/, "") || mxid;
 }
 
 /** An error event's words, or "unknown". */

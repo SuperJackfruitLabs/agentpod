@@ -14,6 +14,7 @@ import {
   COALESCE_MS,
   LINGER_AFTER_FINISH_S,
   STALE_AFTER_S,
+  START_TOKEN_GRACE_MS,
   fitPayload,
   initialPlan,
   planForNewUpdateToken,
@@ -126,6 +127,33 @@ describe("the late update token", () => {
     expect(r.push!.payload.aps.event).toBe("end");
     expect(r.push!.target).toBe("new-token");
     expect(r.plan.phase).toBe("idle");
+  });
+
+  test("a turn finishing before the token comes holds the start, so the late token still gets the end, showing how it finished", () => {
+    // Seen on a device, 2026-09-29: the finish reset the reader to idle, the
+    // token then looked like a card the hub knew nothing of, and the card
+    // stayed up saying "working".
+    const started = planPush(initialPlan(), input());
+    const quiet = planPush(started.plan, input({ now: T0 + 5_000, active: false, change: "important", endedOnFinish: true }));
+    expect(quiet.push).toBeNull();
+    expect(quiet.plan.phase).toBe("starting");
+    expect(quiet.wakeAt).toBe(T0 + START_TOKEN_GRACE_MS);
+    const done = content("Done", { agents: [{ roomId: "!a:hs", name: "Lyra", state: "done", completed: 3, total: 3, since: 1_790_669_000 }], working: 0 });
+    const r = planForNewUpdateToken(
+      quiet.plan,
+      input({ now: T0 + 8_000, active: false, tokens: upd, endedOnFinish: true, content: done })
+    );
+    expect(r.push!.payload.aps.event).toBe("end");
+    expect(r.push!.payload.aps["content-state"].agents[0]).toMatchObject({ state: "done", total: 3 });
+    expect(r.push!.payload.aps["dismissal-date"]).toBe(r.push!.payload.aps.timestamp + LINGER_AFTER_FINISH_S);
+  });
+
+  test("…but only for the grace period: a token that never comes cannot stop the next card starting", () => {
+    const started = planPush(initialPlan(), input());
+    const quiet = planPush(started.plan, input({ now: T0 + 5_000, active: false }));
+    const lapsed = planPush(quiet.plan, input({ now: quiet.wakeAt!, active: false, change: "none" }));
+    expect(lapsed.plan.phase).toBe("idle");
+    expect(planPush(lapsed.plan, input({ now: quiet.wakeAt! + 1 })).push!.payload.aps.event).toBe("start");
   });
 
   test("a card the hub knows nothing of, on a quiet fleet, is adopted and given the active window", () => {
