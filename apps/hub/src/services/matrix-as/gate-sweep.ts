@@ -77,6 +77,14 @@ export interface GateSweepDeps {
   decisionFor?(boardId: string, gateId: string): Promise<{ decision: string; decidedBy: string | null } | null>;
   /** Post the outcome receipt and claim it, so two sweeps leave one line. */
   settleOutcome?(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
+  /**
+   * What a board said it is still waiting on, every pass it answered. The
+   * fleet Live Activity clears the gates missing from it — an answer given on
+   * the board itself reaches the Lock Screen this way — and shows again the
+   * ones a restarted hub forgot (`fleet-gates.ts`). Not called for a board
+   * that could not be read: its gates are not therefore closed.
+   */
+  onBoardPending?(boardId: string, gates: GatePendingDelivery[]): Promise<void>;
 }
 
 /** Every way `projectGate` can end. Derived, so a new outcome cannot be forgotten here. */
@@ -172,6 +180,15 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
         error: err instanceof Error ? err.message : String(err),
       });
       continue;
+    }
+
+    if (deps.onBoardPending) {
+      await deps.onBoardPending(boardId, gates.filter(isGatePending)).catch((err) =>
+        log.warn("could not report a board's pending gates to the fleet card", {
+          boardId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
     }
 
     for (const gate of gates) {
@@ -295,7 +312,7 @@ export async function sweepGates(deps: GateSweepDeps): Promise<GateSweepResult> 
  */
 export function bridgeGateSweepDeps(
   config: BridgeConfig,
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending">,
   fetchImpl: Fetcher = fetchAdapter,
   roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = defaultRoster,
 ): GateSweepDeps {
@@ -387,7 +404,7 @@ export const GATE_SWEEP_INTERVAL_MS = 5 * 60_000;
  * belongs to something the operator actually turned on.
  */
 export function startGateSweeper(
-  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome">,
+  rest: Pick<GateSweepDeps, "tenantIdFor" | "project" | "settleOutcome" | "onBoardPending">,
   opts: {
     config?: BridgeConfig | null;
     intervalMs?: number;

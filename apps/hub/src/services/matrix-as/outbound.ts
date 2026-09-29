@@ -34,9 +34,12 @@ import {
 import {
   clearPendingPermission,
   notePendingPermission,
+  pendingPermissionFor,
   permissionPrompt,
   type PermissionOption,
 } from "./permissions";
+import { fleetSink, noteFleet, permissionDecisionKey } from "../push/fleet/sink";
+import { inlinePermissionOptions, type FleetEvent } from "../push/fleet/state";
 import { createLogger } from "../../utils/logger";
 import { beginQuietSend, noteAnswerEvent, noteHubEvent, type TurnCounts } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
@@ -82,6 +85,12 @@ export interface OutboundDeps {
    * room with nobody to show it to. Resolved once per attachment.
    */
   readerFor?: (roomId: string) => Promise<string | null>;
+  /**
+   * The agent's name as the fleet Live Activity shows it (the station's
+   * display name). Looked up once per attachment, and only when the push
+   * gateway is on. Falls back to the agent's localpart.
+   */
+  nameFor?: (roomId: string) => Promise<string | null>;
   subscribe?: (sessionId: string, fn: (e: AcpEvent) => void) => () => void;
   /**
    * A safety net, not a chunking strategy — see `FLUSH_SAFETY_MS`. 0 in tests
@@ -163,6 +172,12 @@ interface Attachment {
   pendingError: unknown;
   /** Between `working` and `idle`/`ended`: whether a held error has a turn end to wait for. */
   inTurn: boolean;
+  /**
+   * The counts `recordTurn` wrote for the turn now ending, for the fleet
+   * Live Activity's "Done · 7 steps" / "Failed at step 4 of 7". Set by the
+   * flush, read and cleared when the turn ends.
+   */
+  lastTurnCounts: { total: number; failed: number; failedAt?: number } | null;
 }
 
 /**
@@ -324,6 +339,7 @@ export function attachRoomToSession(
     reportedError: false,
     pendingError: null,
     inTurn: false,
+    lastTurnCounts: null,
   };
 
   /** Sends into the room. Returns the event id, or null when it did not land. */
@@ -441,6 +457,8 @@ export function attachRoomToSession(
   const recordTurn = async (tools: Map<string, ToolRecord>): Promise<TurnCounts> => {
     const content = turnActivityContent(sessionId, tools);
     const counts = { total: content.counts.total, failed: content.counts.failed };
+    const firstFailed = [...tools.values()].findIndex((t) => t.status === "failed");
+    state.lastTurnCounts = { ...counts, ...(firstFailed >= 0 ? { failedAt: firstFailed + 1 } : {}) };
     const send = deps.client.sendCustomEvent;
     if (!send) return counts;
     await send(agentUser, roomId, TURN_ACTIVITY_TYPE, content).catch(
@@ -466,6 +484,30 @@ export function attachRoomToSession(
       state.reader = deps.readerFor ? await deps.readerFor(roomId).catch(() => null) : null;
     }
     return state.reader;
+  };
+
+  /**
+   * Tell the fleet Live Activity what just happened in this room.
+   *
+   * The reader and the agent's name are looked up once, and only when the
+   * push gateway is on (a sink is installed). Every note chains on that one
+   * lookup, so notes reach the fleet in the order they were made.
+   */
+  let fleetContext: Promise<{ reader: string; name: string } | null> | null = null;
+  const fleet = (make: (ctx: { name: string; at: number }) => FleetEvent | null) => {
+    if (!fleetSink()) return;
+    fleetContext ??= (async () => {
+      const reader = await resolveReader();
+      if (!reader) return null;
+      const looked = deps.nameFor ? await deps.nameFor(roomId).catch(() => null) : null;
+      return { reader, name: looked?.trim() || fallbackName(agentUser) };
+    })();
+    const at = Date.now();
+    void fleetContext.then((ctx) => {
+      if (!ctx) return;
+      const event = make({ name: ctx.name, at });
+      if (event) noteFleet(ctx.reader, event);
+    });
   };
 
   /**
@@ -636,6 +678,7 @@ export function attachRoomToSession(
             }
             state.produced = true;
             state.buffer.push(text);
+            fleet(({ name, at }) => ({ type: "spoke", roomId, name, at }));
             void streamLive(false);
             scheduleFlush();
             return;
@@ -651,6 +694,11 @@ export function attachRoomToSession(
           const tool = foldToolUpdate(state.tools, event.payload);
           if (tool !== null) {
             state.produced = true;
+            const total = state.tools.size;
+            const completed = [...state.tools.values()].filter(
+              (t) => t.status === "completed" || t.status === "failed"
+            ).length;
+            fleet(({ name, at }) => ({ type: "step", roomId, name, title: tool.title, completed, total, at }));
             void streamTool(tool);
             return;
           }
@@ -686,6 +734,7 @@ export function attachRoomToSession(
               triggers.delete(sessionId);
             }
             state.inTurn = true;
+            fleet(({ name, at }) => ({ type: "turn-started", roomId, name, at }));
             await startTyping();
             await mark(REACTION.working);
             return;
@@ -704,6 +753,7 @@ export function attachRoomToSession(
           await stopTyping();
 
           if (status === "idle" || status === "ended") {
+            const wasTurn = state.inTurn || state.produced;
             state.inTurn = false;
             // An error nothing came after is the turn's outcome: report it now,
             // as it used to be reported the moment it arrived.
@@ -723,6 +773,21 @@ export function attachRoomToSession(
             // hub marks its idle state `silent`) is done, not failed: no
             // notice, and a ✅ on the message it answered by saying nothing.
             const choseSilence = isRecord(event.payload) && event.payload.silent === true;
+            if (wasTurn) {
+              const counts = state.lastTurnCounts ?? { total: 0, failed: 0 };
+              const errored = state.reportedError || (!state.produced && !choseSilence);
+              fleet(({ name, at }) => ({
+                type: "turn-finished",
+                roomId,
+                name,
+                total: counts.total,
+                failed: counts.failed,
+                ...(counts.failedAt !== undefined ? { failedAt: counts.failedAt } : {}),
+                errored,
+                at,
+              }));
+            }
+            state.lastTurnCounts = null;
             if (!state.produced && !state.reportedError && choseSilence) {
               await mark(REACTION.done);
             } else if (!state.produced && !state.reportedError) {
@@ -796,6 +861,29 @@ export function attachRoomToSession(
           );
           noteHubEvent(proseId, "permission");
 
+          // The fleet Live Activity's decision — only while the question still
+          // stands: an answer that raced this send must not leave it showing.
+          const eventSeq = event.seq;
+          if (proseId && request.options.length > 0) {
+            fleet(({ name, at }) =>
+              pendingPermissionFor(roomId)?.requestSeq === eventSeq
+                ? {
+                    type: "decision-asked",
+                    decision: {
+                      key: permissionDecisionKey(roomId),
+                      roomId,
+                      eventId: proseId,
+                      agent: name,
+                      kind: "permission",
+                      question: request.title,
+                      options: inlinePermissionOptions(request.options),
+                      askedAt: at,
+                    },
+                  }
+                : null
+            );
+          }
+
           // …and, while clients in the field still read only it, the same
           // payload again as its own event. Gated on the legacy flag
           // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on).
@@ -838,6 +926,12 @@ export function attachRoomToSession(
   });
 
   attached.set(sessionId, state);
+}
+
+/** `@agent_lyra:hs` → `lyra`: a name of last resort, for a room whose station has none. */
+function fallbackName(mxid: string): string {
+  const local = mxid.replace(/^@/, "").split(":")[0] ?? mxid;
+  return local.replace(/^agent_/, "") || mxid;
 }
 
 /** An error event's words, or "unknown". */

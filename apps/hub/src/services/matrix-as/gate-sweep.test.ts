@@ -60,6 +60,35 @@ function fake(overrides: Partial<GateSweepDeps> = {}, outcomes: Record<string, P
 }
 
 describe("the gate sweep", () => {
+  test("reports each board's pending list — the fleet card's answer to a gate settled on the board", async () => {
+    const seen: Array<[string, string[]]> = [];
+    const f = fake({
+      boards: async () => ["brd_one", "brd_two", "brd_down"],
+      pendingGates: async (boardId) => {
+        if (boardId === "brd_down") throw new Error("503");
+        return boardId === "brd_one" ? [gate("gate_1", boardId)] : [];
+      },
+      onBoardPending: async (boardId, gates) => {
+        seen.push([boardId, gates.map((g) => g.gateId)]);
+      },
+    });
+    await sweepGates(f.deps);
+    // An unreachable board says nothing: its gates are not therefore closed.
+    expect(seen).toEqual([
+      ["brd_one", ["gate_1"]],
+      ["brd_two", []],
+    ]);
+  });
+
+  test("a failing pending-list report does not stop the sweep", async () => {
+    const f = fake({
+      onBoardPending: async () => {
+        throw new Error("fleet down");
+      },
+    });
+    expect((await sweepGates(f.deps)).projected).toBe(1);
+  });
+
   test("offers every pending gate on every board this hub works", async () => {
     const f = fake({
       boards: async () => ["brd_one", "brd_two"],
