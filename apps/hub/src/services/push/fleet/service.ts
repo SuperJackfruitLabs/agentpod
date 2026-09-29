@@ -130,13 +130,24 @@ export function createFleetService(deps: FleetServiceDeps) {
           expiration,
           payload: planned.payload,
         });
-        const who = { reader: id, kind: target.kind, event: planned.payload.aps.event, token: `${target.token.slice(0, 8)}…` };
+        const who = {
+          reader: id,
+          kind: target.kind,
+          event: planned.payload.aps.event,
+          priority: planned.priority,
+          token: `${target.token.slice(0, 8)}…`,
+        };
         if (outcome.status === "rejected") {
           log.info("APNs says a Live Activity token is dead; deleted", { ...who, reason: outcome.reason });
           await deps.tokens.removeToken(id, target.token);
         } else if (outcome.status === "failed") {
           log.warn("Live Activity push failed", { ...who, reason: outcome.reason });
-        } else if (planned.payload.aps.event === "end" && target.kind === "update") {
+        } else {
+          // Logged so a card that did not change can be settled from the
+          // journal: Apple took it, at this priority, with this id.
+          log.info("Live Activity push sent", { ...who, apnsId: outcome.apnsId });
+        }
+        if (outcome.status === "sent" && planned.payload.aps.event === "end" && target.kind === "update") {
           // The activity is over; its token will never be good for another update.
           await deps.tokens.removeToken(id, target.token);
         }

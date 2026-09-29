@@ -4,7 +4,7 @@
  * and when — the pure rules have their own tests.
  */
 
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 
 import type { ApnsOutcome, ApnsSendInput } from "../apns";
 import { COALESCE_MS, LINGER_AFTER_FINISH_S } from "./planner";
@@ -162,7 +162,7 @@ describe("coalescing, through real timers", () => {
     await advance(COALESCE_MS);
     expect(sends).toHaveLength(2);
     expect(lastAps()["content-state"].agents[0].step).toBe("B");
-    expect(sends[1]!.priority).toBe(5);
+    expect(sends[1]!.priority).toBe(10);
 
     await advance(100);
     fleet.note(READER, {
@@ -187,7 +187,7 @@ describe("coalescing, through real timers", () => {
     fleet.clearDecision(`perm:${ROOM}`);
     await fleet.settled();
     expect(sends).toHaveLength(4);
-    expect(sends[3]!.priority).toBe(5);
+    expect(sends[3]!.priority).toBe(10);
     expect(lastAps()["content-state"].decision).toBeUndefined();
   });
 });
@@ -297,5 +297,28 @@ describe("a hub restart", () => {
     fleet.note(READER, { type: "turn-started", roomId: ROOM, name: "Lyra", at: now });
     await fleet.settled();
     expect(events()).toEqual(["update"]);
+  });
+});
+
+describe("the journal", () => {
+  test("every push Apple takes is logged with its event, priority and apns-id, and never the token", async () => {
+    // A report that steps never showed could not be settled from the journal
+    // (2026-09-29): only failures were logged.
+    answer = () => ({ status: "sent", apnsId: "APNS-ID-1" });
+    await registerUpdate();
+    const logSpy = spyOn(console, "log");
+    try {
+      fleet.note(READER, { type: "turn-started", roomId: ROOM, name: "Lyra", at: now });
+      await fleet.settled();
+      const lines = logSpy.mock.calls.map(([line]) => String(line));
+      const sent = lines.find((l) => l.includes("Live Activity push sent"));
+      expect(sent).toBeDefined();
+      expect(sent).toContain("APNS-ID-1");
+      expect(sent).toContain('"event":"update"');
+      expect(sent).toContain('"priority":10');
+      expect(sent).not.toContain(UPDATE);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 });
