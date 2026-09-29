@@ -202,7 +202,15 @@ function end(plan: ReaderPlan, i: PlanInput, target: PushTarget): PlanResult {
   };
 }
 
-function sendUpdate(plan: ReaderPlan, i: PlanInput, target: PushTarget, priority: 5 | 10): PlanResult {
+/**
+ * Every update goes at priority 10. `sameCard` has already dropped any that
+ * would only move the clock, so what is sent changes what the card says, and
+ * Apple holds priority-5 Live Activity updates until it chooses: on a device
+ * (2026-09-29) a 10 s turn's three steps at 5 never showed, only its start and
+ * end at 10. The 3 s coalescing window is what bounds the rate.
+ */
+function sendUpdate(plan: ReaderPlan, i: PlanInput, target: PushTarget): PlanResult {
+  const priority = 10;
   const ts = nextTimestamp(plan, i.now);
   return {
     plan: { ...plan, phase: "live", lastSentAt: i.now, lastSent: i.content, lastTimestamp: ts, dueAt: null },
@@ -233,7 +241,7 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
     case "starting": {
       if (i.tokens.update) {
         // An activity is up — after a restart, or the start's token arrived.
-        return sendUpdate(plan, i, "update-tokens", i.change === "important" ? 10 : 5);
+        return sendUpdate(plan, i, "update-tokens");
       }
       if (plan.phase === "starting" || !i.tokens.start) {
         return { plan, push: null, wakeAt: i.expiryAt };
@@ -254,10 +262,9 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
       if (sameCard(plan.lastSent, i.content)) {
         return { plan: { ...plan, dueAt: null }, push: null, wakeAt: i.expiryAt };
       }
-      if (i.change === "important") return sendUpdate(plan, i, "update-tokens", 10);
-      if (i.change === "flush") return sendUpdate(plan, i, "update-tokens", 5);
+      if (i.change === "important" || i.change === "flush") return sendUpdate(plan, i, "update-tokens");
       const openAt = plan.lastSentAt === null ? i.now : plan.lastSentAt + COALESCE_MS;
-      if (i.now >= openAt) return sendUpdate(plan, i, "update-tokens", 5);
+      if (i.now >= openAt) return sendUpdate(plan, i, "update-tokens");
       return { plan: { ...plan, dueAt: openAt }, push: null, wakeAt: earliest(openAt, i.expiryAt) };
     }
   }
@@ -278,7 +285,7 @@ export function planForNewUpdateToken(plan: ReaderPlan, i: PlanInput): PlanResul
     // updated if work arrives, ended if none does within the active window.
     return { plan: { ...plan, phase: "live", dueAt: null }, push: null, wakeAt: i.now + ACTIVE_WITHIN_MS + 1 };
   }
-  return sendUpdate(plan, i, "new-token", 5);
+  return sendUpdate(plan, i, "new-token");
 }
 
 /** The app deleted its last update token: its activity ended on the phone. */

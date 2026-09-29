@@ -169,13 +169,19 @@ describe("the late update token", () => {
     const r = planForNewUpdateToken(live(), input({ tokens: upd, change: "none" }));
     expect(r.push!.target).toBe("new-token");
     expect(r.push!.payload.aps.event).toBe("update");
+    expect(r.push!.priority).toBe(10);
   });
 });
 
 describe("coalescing", () => {
-  test("at most one routine update every 3 s; the latest state wins", () => {
+  test("at most one routine update every 3 s; the latest state wins — and it goes at priority 10", () => {
+    // Seen on a device, 2026-09-29: a 10 s OpenClaw turn's three step updates
+    // went at priority 5, which Apple delivers when it chooses; only the
+    // priority-10 start and end ever showed. Every update that is sent changes
+    // what the card says (`sameCard` drops clock-only ones), so each goes at 10;
+    // the 3 s window is what bounds the rate.
     const a = planPush(live(), input({ tokens: upd, content: content("A") }));
-    expect(a.push!.priority).toBe(5);
+    expect(a.push!.priority).toBe(10);
 
     const b = planPush(a.plan, input({ now: T0 + 1_000, tokens: upd, content: content("B") }));
     expect(b.push).toBeNull();
@@ -197,10 +203,10 @@ describe("coalescing", () => {
     expect(b.plan.dueAt).toBeNull();
   });
 
-  test("a decision clearing goes at once, at priority 5", () => {
+  test("a decision clearing goes at once, at priority 10, so its buttons leave the card promptly", () => {
     const a = planPush(live(), input({ tokens: upd, content: content("A") }));
     const b = planPush(a.plan, input({ now: T0 + 500, tokens: upd, content: content("B"), change: "flush" }));
-    expect(b.push!.priority).toBe(5);
+    expect(b.push!.priority).toBe(10);
   });
 
   test("nothing visible changed, nothing is sent — even past the window", () => {
