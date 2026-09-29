@@ -176,19 +176,22 @@ export function createAgentReportRelay(deps: AgentReportDeps) {
 
     const { roomId, event } = report;
     const name = who.name;
+    // The station's Matrix id — `resolve` matched it to `agent` — keys the card's avatar.
+    const mxid = report.agent;
     const note = (e: FleetEvent) => sink.note(who.reader, e);
 
     switch (event.type) {
       case "turn-started":
-        note({ type: "turn-started", roomId, name, at: t });
+        note({ type: "turn-started", roomId, mxid, name, at: t });
         break;
       case "step":
-        note({ type: "step", roomId, name, title: event.title, completed: event.completed, total: event.total, at: t });
+        note({ type: "step", roomId, mxid, name, title: event.title, completed: event.completed, total: event.total, at: t });
         break;
       case "turn-finished":
         note({
           type: "turn-finished",
           roomId,
+          mxid,
           name,
           total: event.total,
           failed: event.failed,

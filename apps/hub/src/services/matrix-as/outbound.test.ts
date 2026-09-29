@@ -1377,6 +1377,33 @@ describe("the fleet Live Activity", () => {
     expect(nameLookups).toBe(1);
   });
 
+  test("each turn event names the agent by its mxid, and the phase follows thought, tools and answer (spec 2026-09-30 A1)", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
+    emit(state("working", 1));
+    await settle();
+    emit(thought("Let me look.", 2));
+    emit(tool({ sessionUpdate: "tool_call", toolCallId: "c1", title: "Read a", status: "in_progress" }, 3));
+    emit(tool({ sessionUpdate: "tool_call_update", toolCallId: "c1", status: "completed" }, 4));
+    emit(thought("Now I know.", 5));
+    emit(chunk("Done.", 6));
+    await settle();
+    emit(state("idle", 7));
+    await settle();
+
+    expect(noted.map((n) => n.event.type)).toEqual([
+      "turn-started",
+      "thinking",
+      "step",
+      "step",
+      "thinking",
+      "spoke",
+      "turn-finished",
+    ]);
+    expect(noted.every((n) => n.event.mxid === AGENT && n.event.roomId === ROOM && n.event.name === "Krishna")).toBe(true);
+    // The thought's text is streamed to the reader's devices, never to the card.
+    expect(JSON.stringify(noted)).not.toContain("Let me look");
+  });
+
   test("a turn that errored with nothing after it finishes as failed", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, fleetDeps());
     emit(state("working", 1));

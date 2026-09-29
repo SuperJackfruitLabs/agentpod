@@ -495,7 +495,7 @@ export function attachRoomToSession(
    * lookup, so notes reach the fleet in the order they were made.
    */
   let fleetContext: Promise<{ reader: string; name: string } | null> | null = null;
-  const fleet = (make: (ctx: { name: string; at: number }) => FleetEvent | null) => {
+  const fleet = (make: (ctx: { name: string; mxid: string; at: number }) => FleetEvent | null) => {
     if (!fleetSink()) return;
     fleetContext ??= (async () => {
       const reader = await resolveReader();
@@ -506,7 +506,8 @@ export function attachRoomToSession(
     const at = Date.now();
     void fleetContext.then((ctx) => {
       if (!ctx) return;
-      const event = make({ name: ctx.name, at });
+      // The agent's Matrix id keys its avatar on the card.
+      const event = make({ name: ctx.name, mxid: agentUser, at });
       if (event) noteFleet(ctx.reader, event);
     });
   };
@@ -679,7 +680,7 @@ export function attachRoomToSession(
             }
             state.produced = true;
             state.buffer.push(text);
-            fleet(({ name, at }) => ({ type: "spoke", roomId, name, at }));
+            fleet(({ name, mxid, at }) => ({ type: "spoke", roomId, mxid, name, at }));
             void streamLive(false);
             scheduleFlush();
             return;
@@ -688,6 +689,8 @@ export function attachRoomToSession(
           const thought = chunkTextOfKind(event.payload, "agent_thought_chunk");
           if (thought !== undefined) {
             state.thoughtBuffer.push(thought);
+            // Only the phase reaches the card; the thought itself goes to the reader's devices.
+            fleet(({ name, mxid, at }) => ({ type: "thinking", roomId, mxid, name, at }));
             void streamThought(false);
             return;
           }
@@ -699,7 +702,7 @@ export function attachRoomToSession(
             const completed = [...state.tools.values()].filter(
               (t) => t.status === "completed" || t.status === "failed"
             ).length;
-            fleet(({ name, at }) => ({ type: "step", roomId, name, title: tool.title, completed, total, at }));
+            fleet(({ name, mxid, at }) => ({ type: "step", roomId, mxid, name, title: tool.title, completed, total, at }));
             void streamTool(tool);
             return;
           }
@@ -735,7 +738,7 @@ export function attachRoomToSession(
               triggers.delete(sessionId);
             }
             state.inTurn = true;
-            fleet(({ name, at }) => ({ type: "turn-started", roomId, name, at }));
+            fleet(({ name, mxid, at }) => ({ type: "turn-started", roomId, mxid, name, at }));
             await startTyping();
             await mark(REACTION.working);
             return;
@@ -777,9 +780,10 @@ export function attachRoomToSession(
             if (wasTurn) {
               const counts = state.lastTurnCounts ?? { total: 0, failed: 0 };
               const errored = state.reportedError || (!state.produced && !choseSilence);
-              fleet(({ name, at }) => ({
+              fleet(({ name, mxid, at }) => ({
                 type: "turn-finished",
                 roomId,
+                mxid,
                 name,
                 total: counts.total,
                 failed: counts.failed,
