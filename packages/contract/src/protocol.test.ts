@@ -122,6 +122,49 @@ it("transcription.apply's result strips unknown fields — neither the key nor t
   ).toEqual({ applied: true, mode: "on", model: "m", restarted: true });
 });
 
+it("speech.apply carries a station key AND its database id, and nothing else", () => {
+  expect(
+    VERB_PARAMS["speech.apply"].parse({
+      key: "hermes:writer-quill",
+      stationId: "station_abc123",
+      apiKey: "sk-secret",
+      url: "http://speech.internal:8841",
+      voice: "af_heart",
+    })
+  ).toEqual({ key: "hermes:writer-quill", stationId: "station_abc123" });
+  expect(() => VERB_PARAMS["speech.apply"].parse({ key: "k" })).toThrow();
+});
+it("speech.apply's result says what the profile now speaks with, when, and whether it restarted", () => {
+  const on = {
+    applied: true,
+    mode: "on",
+    voice: "af_heart:60+af_bella:40",
+    speakMode: "voice_in",
+    autoSpeak: false,
+    restarted: true,
+  };
+  expect(VERB_RESULTS["speech.apply"].parse(on)).toEqual(on);
+  const off = { applied: true, mode: "off", voice: null, speakMode: null, autoSpeak: false, restarted: false };
+  expect(VERB_RESULTS["speech.apply"].parse(off)).toEqual(off);
+  expect(() => VERB_RESULTS["speech.apply"].parse({ ...on, mode: "maybe" })).toThrow();
+  expect(() => VERB_RESULTS["speech.apply"].parse({ ...on, speakMode: "sometimes" })).toThrow();
+  expect(() => VERB_RESULTS["speech.apply"].parse({ ...on, autoSpeak: undefined })).toThrow();
+});
+it("speech.apply's result strips unknown fields — neither the key nor the url comes back", () => {
+  expect(
+    VERB_RESULTS["speech.apply"].parse({
+      applied: true,
+      mode: "on",
+      voice: "af_heart",
+      speakMode: "always",
+      autoSpeak: true,
+      restarted: true,
+      apiKey: "sk-secret",
+      url: "http://speech.internal:8841/v1",
+    })
+  ).toEqual({ applied: true, mode: "on", voice: "af_heart", speakMode: "always", autoSpeak: true, restarted: true });
+});
+
 it("matrix.avatar.set names a station and a workspace image — nothing else rides along", () => {
   expect(
     VERB_PARAMS["matrix.avatar.set"].parse({ key: "hermes:coder-kai", path: "pfp.png", accessToken: "syt_x" })
