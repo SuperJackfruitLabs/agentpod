@@ -34,6 +34,12 @@ export const COALESCE_MS = 3_000;
 export const STALE_AFTER_S = 15 * 60;
 /** After a finished turn, the ended card stays on the Lock Screen this long (spec A2). */
 export const LINGER_AFTER_FINISH_S = 120;
+/**
+ * How long a sent start waits for its update token once the fleet has gone
+ * quiet. The token comes a second or so after the card appears; a short turn
+ * can finish before it does, and that token must still get the end.
+ */
+export const START_TOKEN_GRACE_MS = 60_000;
 
 export type Phase = "idle" | "starting" | "live" | "dismissed";
 
@@ -183,7 +189,11 @@ export function fitPayload(payload: LiveActivityPushPayload): LiveActivityPushPa
 
 function end(plan: ReaderPlan, i: PlanInput, target: PushTarget): PlanResult {
   const ts = nextTimestamp(plan, i.now);
-  const shown = { ...(plan.lastSent ?? i.content), updatedAt: Math.floor(i.now / 1000) };
+  // The card as it stands when it still lists anyone — the turn that just
+  // finished, as done or failed, which is what the lingering card must say.
+  // Only a card whose agents have all aged out keeps what it last showed.
+  const base = i.content.agents.length > 0 ? i.content : (plan.lastSent ?? i.content);
+  const shown = { ...base, updatedAt: Math.floor(i.now / 1000) };
   const dismissAt = i.endedOnFinish ? ts + LINGER_AFTER_FINISH_S : ts;
   return {
     plan: { ...initialPlan(), lastTimestamp: ts },
@@ -205,6 +215,13 @@ export function planPush(plan: ReaderPlan, i: PlanInput): PlanResult {
   if (!i.active) {
     // Priority 10 on the end: it is the push that clears the Lock Screen.
     if (plan.phase === "live" && i.tokens.update) return end(plan, i, "update-tokens");
+    // A start still waiting for its token: hold it, so the token gets the end
+    // (`planForNewUpdateToken`) — but not past the grace, or a token that
+    // never comes would keep the next card from starting.
+    if (plan.phase === "starting" && plan.lastSentAt !== null) {
+      const until = plan.lastSentAt + START_TOKEN_GRACE_MS;
+      if (i.now < until) return { plan: { ...plan, dueAt: null }, push: null, wakeAt: until };
+    }
     return { plan: { ...initialPlan(), lastTimestamp: plan.lastTimestamp }, push: null, wakeAt: null };
   }
 

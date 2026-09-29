@@ -315,16 +315,38 @@ describe("options", () => {
 describe("quiet", () => {
   const room = "!a:hs";
 
-  test("an agent stays active for 15 minutes after it last did something, then drops out", () => {
+  test("the fleet goes quiet when its last turn finishes; the finished row stays for 15 minutes, then drops out", () => {
+    // Operator, 2026-09-29: an "All quiet" card that stays up for a quarter
+    // of an hour contradicts itself. Only a running turn or a pending
+    // decision keeps the card up; a finished agent is still listed while
+    // the card lingers.
     const { state } = run([
       { type: "turn-started", roomId: room, name: "Lyra", at: s(100) },
       { type: "turn-finished", roomId: room, name: "Lyra", total: 1, failed: 0, at: s(200) },
     ]);
-    expect(isFleetActive(state, s(200) + ACTIVE_WITHIN_MS)).toBe(true);
-    expect(isFleetActive(state, s(200) + ACTIVE_WITHIN_MS + 1)).toBe(false);
+    expect(isFleetActive(run([{ type: "turn-started", roomId: room, name: "Lyra", at: s(100) }]).state, s(199))).toBe(true);
+    expect(isFleetActive(state, s(200))).toBe(false);
+    expect(contentState(state, s(200) + ACTIVE_WITHIN_MS).agents[0]).toMatchObject({ state: "done" });
     expect(contentState(state, s(200) + ACTIVE_WITHIN_MS + 1).agents).toEqual([]);
     expect(nextExpiry(state, s(250))).toBe(s(200) + ACTIVE_WITHIN_MS + 1);
     expect(endedOnFinish(state)).toBe(true);
+  });
+
+  test("one agent finishing leaves the fleet active while another still works", () => {
+    const { state } = run([
+      { type: "turn-started", roomId: room, name: "Lyra", at: s(100) },
+      { type: "turn-started", roomId: "!b:hs", name: "Ray", at: s(110) },
+      { type: "turn-finished", roomId: room, name: "Lyra", total: 1, failed: 0, at: s(200) },
+    ]);
+    expect(isFleetActive(state, s(201))).toBe(true);
+  });
+
+  test("an agent that only spoke, with no turn running, does not keep the fleet active", () => {
+    const { state } = run([
+      { type: "turn-started", roomId: room, name: "Lyra", at: s(100) },
+      { type: "turn-finished", roomId: room, name: "Lyra", total: 0, failed: 0, at: s(200) },
+    ]);
+    expect(isFleetActive(state, s(201))).toBe(false);
   });
 
   test("a working turn keeps the fleet active past the window, but not forever", () => {
