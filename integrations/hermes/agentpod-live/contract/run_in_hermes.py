@@ -14,6 +14,11 @@ streaming reasoning, a tool call and an answer; another stands in for the
 Matrix homeserver and records every `sendToDevice`. The turn runs through
 `AIAgent.run_conversation`, the same entry point the gateway uses.
 
+A third stands in for the node's fleet socket and records each fleet report,
+and the test pins the two things the fleet reports lean on that no hook
+covers: the Matrix adapter's "sent event" log line (the answer's event id)
+and the approval hooks' session and turn ids.
+
 Exit status 0 means the contract holds; anything else prints what broke.
 """
 
@@ -23,6 +28,7 @@ import json
 import os
 import pathlib
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -162,6 +168,44 @@ class MatrixHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+# ─── Fake node: records fleet reports ────────────────────────────────────────
+
+
+class FleetNode:
+    def __init__(self):
+        # Short: a Unix socket path must fit sun_path (104 bytes on macOS).
+        self.dir = tempfile.mkdtemp(prefix="apf", dir="/tmp")
+        self.path = os.path.join(self.dir, "fleet.sock")
+        self.reports: list = []
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(self.path)
+        self.sock.listen(16)
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                try:
+                    self.reports.append(json.loads(data))
+                except ValueError:
+                    self.reports.append({"unparsed": data.decode("utf-8", "replace")})
+                conn.sendall(b"ok\n")
+
+    def close(self):
+        self.sock.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
 def _serve(handler) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -174,6 +218,7 @@ def _serve(handler) -> ThreadingHTTPServer:
 def main() -> int:
     model = _serve(ModelHandler)
     matrix = _serve(MatrixHandler)
+    node = FleetNode()
 
     home = pathlib.Path(tempfile.mkdtemp(prefix="agentpod-live-contract-"))
     shutil.copytree(PLUGIN_DIR, home / "plugins" / "agentpod-live",
@@ -197,6 +242,7 @@ def main() -> int:
         "MATRIX_ACCESS_TOKEN": "contract-token",
         "MATRIX_USER_ID": AGENT,
         "OPENAI_API_KEY": "contract-key",
+        "AGENTPOD_FLEET_SOCKET": node.path,
     })
 
     from hermes_cli.plugins import discover_plugins, get_plugin_manager
@@ -233,9 +279,14 @@ def main() -> int:
 
     # Hooks are asynchronous by design; give the plugin's sender a moment.
     _wait(lambda: _done_seen(MatrixHandler.sent), timeout=10)
+    _wait(lambda: any(r.get("event", {}).get("type") == "turn-finished" for r in node.reports), timeout=10)
     time.sleep(0.3)
 
     failures += _check(MatrixHandler.sent)
+    failures += _check_fleet(node.reports)
+    failures += _check_what_no_hook_covers()
+    print(f"fleet reports: {[r.get('event', {}).get('type') for r in node.reports]}")
+    node.close()
     return _report(failures, home)
 
 
@@ -331,6 +382,71 @@ def _check(sent: list) -> list[str]:
     # One turn, one id, across every channel.
     all_ids = {c.get("session_id") for c in answers + thoughts + tools}
     expect(len(all_ids) == 1, f"channels disagree on the turn id: {all_ids}")
+    return failures
+
+
+def _check_fleet(reports: list) -> list[str]:
+    """The turn, as the node's fleet socket saw it."""
+    failures = []
+
+    def expect(cond, message):
+        if not cond:
+            failures.append(message)
+
+    expect(reports, "no fleet report reached the node's socket")
+    for r in reports:
+        expect(r.get("agent") == AGENT, f"fleet report not from the agent: {r}")
+        expect(r.get("roomId") == ROOM, f"fleet report for the wrong room: {r}")
+        expect(r.get("reader") == READER, f"fleet report for the wrong reader: {r}")
+        expect(isinstance(r.get("at"), int) and abs(r["at"] / 1000 - time.time()) < 600, f"fleet report time: {r}")
+    types = [r.get("event", {}).get("type") for r in reports]
+    expect(types[:1] == ["turn-started"], f"the first fleet report is not turn-started: {types}")
+    expect(types[-1:] == ["turn-finished"], f"the last fleet report is not turn-finished: {types}")
+    steps = [r["event"] for r in reports if r.get("event", {}).get("type") == "step"]
+    expect([(s.get("completed"), s.get("total")) for s in steps] == [(0, 1), (1, 1)],
+           f"steps: {[(s.get('completed'), s.get('total')) for s in steps]}")
+    if steps:
+        title = str(steps[0].get("title", ""))
+        expect(title.startswith(ModelHandler.tool) and len(title) <= 60,
+               f"step title {title!r} is not Hermes's ACP title, bounded for the card")
+    finished = reports[-1].get("event", {}) if reports else {}
+    expect(finished == {"type": "turn-finished", "total": 1, "failed": 0}, f"turn-finished: {finished}")
+    return failures
+
+
+def _check_what_no_hook_covers() -> list[str]:
+    """What the fleet reports read from Hermes outside its hook payloads."""
+    import inspect
+
+    import hermes_cli
+    from hermes_cli.plugins import VALID_HOOKS
+
+    failures = []
+    for hook in ("pre_approval_request", "post_approval_response"):
+        if hook not in VALID_HOOKS:
+            failures.append(f"Hermes has no {hook} hook any more: approvals will not reach the fleet card")
+
+    # The approval hooks must carry the turn they belong to, or an approval
+    # cannot be placed in its room.
+    try:
+        from tools import approval_context
+        source = inspect.getsource(approval_context._fire_approval_hook)
+        for key in ("session_id", "turn_id"):
+            if key not in source:
+                failures.append(f"approval hooks no longer carry {key}: approvals will not reach the fleet card")
+    except Exception as exc:
+        failures.append(f"could not read Hermes's approval hook dispatch: {exc}")
+
+    # The answer's event id is read off this log line; nothing else gives it.
+    root = pathlib.Path(hermes_cli.__file__).resolve().parent.parent
+    adapter = root / "plugins" / "platforms" / "matrix" / "adapter.py"
+    try:
+        text = adapter.read_text()
+        needle = 'logger.info("Matrix: sent event %s to %s", last_event_id, chat_id)'
+        if needle not in text:
+            failures.append(f"{adapter} no longer logs {needle!r}: answer pushes lose their turn counts")
+    except OSError as exc:
+        failures.append(f"could not read Hermes's Matrix adapter: {exc}")
     return failures
 
 

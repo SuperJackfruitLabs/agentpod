@@ -17,11 +17,29 @@ Everything here is best-effort, like the hub's live channel: unencrypted
 to-device, no retries, every failure swallowed. The room message Hermes sends
 at the end of the turn is untouched, and is what a reader keeps.
 
+Fleet reports. The hub's fleet Live Activity (the Lock Screen card) hears
+about a bridge-mode turn from the hub's own bridge; a harness-mode turn it
+never sees. So the plugin also reports each turn's lifecycle — started, each
+tool step with its counts, an approval asked and answered, finished with its
+counts, and the event id of its answer — to the node's fleet socket
+(`~/.agentpod/fleet.sock`), one JSON line per event. The node forwards it to
+the hub over its authenticated connection; the hub decides whose card it
+belongs on. A report carries no more text than the card shows: a step title
+cut to 60 characters, a question cut to 120.
+
+The answer's event id is not given to plugins by any Hermes hook. Hermes's
+Matrix adapter logs it — `Matrix: sent event %s to %s` — the moment the send
+returns, so a logging handler reads it from there, in process and without a
+network call. If Hermes ever changes that line the only loss is the turn's
+counts on the answer's push; the contract test pins it.
+
 Threading. Hermes runs each stream hook on its own worker thread, and the
 turn hooks inline on the agent's thread. Every hook here only enqueues; one
 sender thread owns all state and does all I/O, in arrival order. That keeps
 `pre_tool_call`, which Hermes fails closed on timeout, from ever waiting on
-the network.
+the network. Fleet reports have their own thread, so a slow homeserver never
+delays a report, and a report never waits more than half a second on the
+node.
 """
 
 from __future__ import annotations
@@ -31,6 +49,7 @@ import logging
 import os
 import queue
 import re
+import socket
 import threading
 import time
 import urllib.parse
@@ -48,7 +67,7 @@ TOOL_UPDATE_TYPE = "dev.agentpod.tool.update"
 # Sent on every request. Not cosmetic: id.agentpod.dev sits behind Cloudflare,
 # which answers urllib's default `Python-urllib/3.x` with 403 (error 1010,
 # browser-signature ban). That cost the first live trial every event it sent.
-USER_AGENT = "agentpod-live/0.1.1 (Hermes plugin)"
+USER_AGENT = "agentpod-live/0.2.0 (Hermes plugin)"
 
 # Mirrors `live.ts`: a boundary with enough behind it goes at once; anything
 # else waits, until the backstop.
@@ -59,6 +78,22 @@ MAX_DELTA_WAIT_S = 1.5
 # `post_llm_call`) is closed after this long without activity, so a reader's
 # live view does not hang forever and this process does not grow.
 IDLE_TURN_S = 600.0
+
+# The card's own bounds (packages/contract/src/fleet-live.ts): a report
+# carries no more text than the card shows.
+FLEET_STEP_MAX = 60
+FLEET_QUESTION_MAX = 120
+
+# How long after a turn ends its answer's send is looked for, and how long an
+# approval waits for its prompt to be sent. Hermes sends both within moments.
+ANSWER_WAIT_S = 30.0
+
+# A report never waits longer than this on the node.
+FLEET_SOCKET_TIMEOUT_S = 0.5
+
+# What Hermes's Matrix adapter logs when a room message has been sent
+# (`plugins/platforms/matrix/adapter.py` `send`), with (event_id, room_id).
+SENT_EVENT_LOG = "Matrix: sent event %s to %s"
 
 _BOUNDARY_SENTENCE = re.compile(r"[.!?…:;][\"')\]]?\s*$")
 _BOUNDARY_NEWLINE = re.compile(r"\n\s*$")
@@ -309,6 +344,257 @@ class LiveEmitter:
                 turn.first_error = f"{event_type}: {exc}"
 
 
+# ─── Fleet reports ───────────────────────────────────────────────────────────
+
+
+def bound(text: str, limit: int) -> str:
+    """One line, at most `limit` characters, cut with an ellipsis — the card's rule."""
+    line = " ".join(str(text).split())
+    if len(line) <= limit:
+        return line
+    return line[: limit - 1].rstrip() + "…"
+
+
+def _skip_reason(session_id: str, room_id: str, reader: str, own_user: str) -> str:
+    return (
+        "no session id" if not session_id
+        else f"no room id (got {room_id!r})" if not room_id.startswith("!")
+        else f"no reader (got {reader!r})" if not reader.startswith("@")
+        else "the reader is the agent itself" if reader == own_user
+        else ""
+    )
+
+
+@dataclass
+class _FleetTurn:
+    session_id: str
+    turn_id: str
+    room_id: str
+    reader: str
+    # tool_call_id -> (title, status), in call order.
+    tools: Dict[str, List[str]] = field(default_factory=dict)
+    anonymous: Dict[str, List[str]] = field(default_factory=dict)
+    touched_at: float = 0.0
+
+    def matches(self, turn_id: str) -> bool:
+        return not turn_id or not self.turn_id or turn_id == self.turn_id
+
+    def counts(self) -> tuple:
+        statuses = [status for _, status in self.tools.values()]
+        done = sum(1 for s in statuses if s in ("completed", "failed"))
+        return done, len(statuses)
+
+
+Report = Callable[[Dict[str, Any]], None]
+
+
+class FleetReporter:
+    """Turns hook events into fleet reports for the node. Single-threaded by contract.
+
+    `report(dict)` delivers one report; `clock` is monotonic seconds and `wall`
+    epoch seconds (the report's `at`, which the hub uses only to drop stale
+    reports). All injected, so the policy is testable without a node.
+    """
+
+    def __init__(self, report: Report, own_user: str, clock: Callable[[], float] = time.monotonic,
+                 wall: Callable[[], float] = time.time):
+        self._report = report
+        self._own_user = own_user
+        self._clock = clock
+        self._wall = wall
+        self._turns: Dict[str, _FleetTurn] = {}
+        # room -> (reader, total, failed, deadline): a finished turn whose answer is not sent yet.
+        self._awaiting_answer: Dict[str, tuple] = {}
+        # room -> (reader, question, deadline): an approval whose prompt is not sent yet.
+        self._awaiting_prompt: Dict[str, tuple] = {}
+        # room -> reader: an approval shown on the card.
+        self._asked: Dict[str, str] = {}
+        self.failures = 0
+        self.first_error = ""
+
+    # Turn lifecycle ---------------------------------------------------------
+
+    def begin(self, session_id: str, turn_id: str, room_id: str, reader: str) -> None:
+        # The live stream logs why a turn is skipped; the same turns are skipped here.
+        if _skip_reason(session_id, room_id, reader, self._own_user):
+            return
+        previous = self._turns.get(session_id)
+        if previous is not None:
+            self._finish(previous)
+        turn = _FleetTurn(session_id=session_id, turn_id=turn_id, room_id=room_id, reader=reader,
+                          touched_at=self._clock())
+        self._turns[session_id] = turn
+        self._send(turn.room_id, turn.reader, {"type": "turn-started"})
+
+    def end(self, session_id: str, turn_id: str = "") -> None:
+        turn = self._turns.get(session_id)
+        if turn is None or not turn.matches(turn_id):
+            return
+        self._finish(turn)
+
+    def expire(self) -> None:
+        now = self._clock()
+        cutoff = now - IDLE_TURN_S
+        for turn in [t for t in self._turns.values() if t.touched_at < cutoff]:
+            # A turn that never ended is not shown as done.
+            self._finish(turn, errored=True)
+        for waiting in (self._awaiting_answer, self._awaiting_prompt):
+            for room in [r for r, v in waiting.items() if v[-1] < now]:
+                waiting.pop(room, None)
+
+    def _finish(self, turn: _FleetTurn, errored: bool = False) -> None:
+        self._turns.pop(turn.session_id, None)
+        self._awaiting_prompt.pop(turn.room_id, None)
+        if self._asked.pop(turn.room_id, None) is not None:
+            self._send(turn.room_id, turn.reader, {"type": "decision-cleared"})
+        statuses = [status for _, status in turn.tools.values()]
+        total = len(statuses)
+        failed = sum(1 for s in statuses if s == "failed")
+        event: Dict[str, Any] = {"type": "turn-finished", "total": total, "failed": failed}
+        if failed:
+            event["failedAt"] = statuses.index("failed") + 1
+        if errored:
+            event["errored"] = True
+        self._send(turn.room_id, turn.reader, event)
+        # A turn that ran tools gets its counts on its answer's push (A5).
+        if total and not errored:
+            self._awaiting_answer[turn.room_id] = (turn.reader, total, failed, self._clock() + ANSWER_WAIT_S)
+
+    # Tools ------------------------------------------------------------------
+
+    def tool_started(self, session_id: str, turn_id: str, tool_call_id: str, tool_name: str, args: Any) -> None:
+        turn = self._live(session_id, turn_id)
+        if turn is None:
+            return
+        if not tool_call_id:
+            tool_call_id = f"tc-{uuid.uuid4().hex[:12]}"
+            turn.anonymous.setdefault(tool_name, []).append(tool_call_id)
+        title = _describe_tool(tool_name, args if isinstance(args, dict) else {})[0]
+        turn.tools[tool_call_id] = [title, "in_progress"]
+        self._step(turn, title)
+
+    def tool_finished(self, session_id: str, turn_id: str, tool_call_id: str, tool_name: str, args: Any,
+                      failed: bool) -> None:
+        turn = self._live(session_id, turn_id)
+        if turn is None:
+            return
+        if not tool_call_id:
+            waiting = turn.anonymous.get(tool_name) or []
+            tool_call_id = waiting.pop(0) if waiting else f"tc-{uuid.uuid4().hex[:12]}"
+        if tool_call_id not in turn.tools:
+            title = _describe_tool(tool_name, args if isinstance(args, dict) else {})[0]
+            turn.tools[tool_call_id] = [title, "in_progress"]
+        turn.tools[tool_call_id][1] = "failed" if failed else "completed"
+        self._step(turn, turn.tools[tool_call_id][0])
+
+    def _step(self, turn: _FleetTurn, title: str) -> None:
+        completed, total = turn.counts()
+        self._send(turn.room_id, turn.reader, {"type": "step", "title": bound(title, FLEET_STEP_MAX),
+                                               "completed": completed, "total": total})
+
+    # Approvals --------------------------------------------------------------
+
+    def approval_asked(self, session_id: str, turn_id: str, question: str) -> None:
+        turn = self._live(session_id, turn_id)
+        if turn is None:
+            return
+        # Reported once the prompt is in the room, so the card can open it.
+        self._awaiting_prompt[turn.room_id] = (turn.reader, bound(question or "Approval needed", FLEET_QUESTION_MAX),
+                                               self._clock() + ANSWER_WAIT_S)
+
+    def approval_answered(self, session_id: str, turn_id: str) -> None:
+        turn = self._live(session_id, turn_id)
+        if turn is None:
+            return
+        self._awaiting_prompt.pop(turn.room_id, None)
+        if self._asked.pop(turn.room_id, None) is not None:
+            self._send(turn.room_id, turn.reader, {"type": "decision-cleared"})
+
+    # What Hermes sent -------------------------------------------------------
+
+    def sent(self, room_id: str, event_id: str) -> None:
+        """A room message the agent sent, as Hermes's Matrix adapter logged it."""
+        now = self._clock()
+        if not event_id.startswith("$"):
+            return
+        prompt = self._awaiting_prompt.pop(room_id, None)
+        if prompt is not None and prompt[-1] >= now:
+            reader, question, _ = prompt
+            self._asked[room_id] = reader
+            self._send(room_id, reader, {"type": "decision-asked", "eventId": event_id, "question": question})
+            return
+        answer = self._awaiting_answer.pop(room_id, None)
+        if answer is not None and answer[-1] >= now:
+            reader, total, failed, _ = answer
+            self._send(room_id, reader, {"type": "answer", "eventId": event_id, "total": total, "failed": failed})
+
+    # Plumbing ---------------------------------------------------------------
+
+    def _live(self, session_id: str, turn_id: str) -> Optional[_FleetTurn]:
+        turn = self._turns.get(session_id)
+        if turn is None or not turn.matches(turn_id):
+            return None
+        turn.touched_at = self._clock()
+        return turn
+
+    def _send(self, room_id: str, reader: str, event: Dict[str, Any]) -> None:
+        report = {"agent": self._own_user, "roomId": room_id, "reader": reader,
+                  "at": int(self._wall() * 1000), "event": event}
+        try:
+            self._report(report)
+        except Exception as exc:
+            self.failures += 1
+            if not self.first_error:
+                self.first_error = f"{event.get('type')}: {exc}"
+                # Once per process: a node without the fleet socket is a
+                # fact about the node, not news on every turn.
+                logger.info("agentpod-live: fleet report not delivered (%s); the card will not show this agent",
+                            self.first_error)
+
+
+def fleet_socket_path() -> str:
+    override = os.environ.get("AGENTPOD_FLEET_SOCKET", "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".agentpod", "fleet.sock")
+
+
+def fleet_socket_sender(path: str, timeout_s: float = FLEET_SOCKET_TIMEOUT_S) -> Report:
+    """One JSON line to the node's fleet socket; the node answers `ok` or `error: …`."""
+
+    def send(report: Dict[str, Any]) -> None:
+        line = (json.dumps(report, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+            conn.settimeout(timeout_s)
+            conn.connect(path)
+            conn.sendall(line)
+            reply = conn.recv(512).decode("utf-8", "replace").strip()
+        if reply != "ok":
+            raise RuntimeError(reply or "no answer")
+
+    return send
+
+
+class _SentEventTap(logging.Handler):
+    """Reads each sent room message's event id off Hermes's Matrix adapter log line."""
+
+    def __init__(self, on_sent: Callable[[str, str], None]):
+        super().__init__(level=logging.INFO)
+        self._on_sent = on_sent
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = record.msg
+            if not isinstance(msg, str) or not msg.startswith(SENT_EVENT_LOG):
+                return
+            args = record.args
+            if not isinstance(args, tuple) or len(args) < 2:
+                return
+            self._on_sent(str(args[1]), str(args[0]))
+        except Exception:
+            pass
+
+
 # ─── Matrix ──────────────────────────────────────────────────────────────────
 
 
@@ -337,10 +623,10 @@ def matrix_sender(homeserver: str, access_token: str, timeout_s: float = 5.0) ->
 class _Worker:
     """One daemon thread that runs every emitter call in arrival order."""
 
-    def __init__(self, emitter: LiveEmitter):
+    def __init__(self, emitter: Any, name: str = "agentpod-live"):
         self.emitter = emitter
         self.events: "queue.Queue[tuple]" = queue.Queue(maxsize=4096)
-        threading.Thread(target=self._run, daemon=True, name="agentpod-live").start()
+        threading.Thread(target=self._run, daemon=True, name=name).start()
 
     def put(self, method: str, *args: Any) -> None:
         try:
@@ -385,8 +671,26 @@ def register(ctx: Any) -> None:
         logger.info("agentpod-live: MATRIX_HOMESERVER or MATRIX_ACCESS_TOKEN unset; not registering")
         return
 
-    worker = _Worker(LiveEmitter(matrix_sender(homeserver, token), own_user=os.environ.get("MATRIX_USER_ID", "")))
+    own_user = os.environ.get("MATRIX_USER_ID", "")
+    worker = _Worker(LiveEmitter(matrix_sender(homeserver, token), own_user=own_user))
     logger.info("agentpod-live: registered; sending to %s", urllib.parse.urlsplit(homeserver).netloc or homeserver)
+
+    # The fleet card needs to know who is reporting; without our own Matrix
+    # id the hub could not place a report, so none is made.
+    fleet: Optional[_Worker] = None
+    if own_user.startswith("@"):
+        path = fleet_socket_path()
+        fleet = _Worker(FleetReporter(fleet_socket_sender(path), own_user=own_user), name="agentpod-fleet")
+        tap = _SentEventTap(lambda room_id, event_id: fleet.put("sent", room_id, event_id))
+        logging.getLogger().addHandler(tap)
+        logger.info("agentpod-live: reporting turns to the fleet card via %s", path)
+    else:
+        logger.info("agentpod-live: MATRIX_USER_ID unset; turns are streamed but not reported to the fleet card")
+
+    def both(method: str, *args: Any) -> None:
+        worker.put(method, *args)
+        if fleet is not None:
+            fleet.put(method, *args)
 
     def pre_llm_call(session_id: str = "", turn_id: str = "", platform: str = "", sender_id: str = "", **_: Any):
         if str(platform).lower() != "matrix":
@@ -395,11 +699,11 @@ def register(ctx: Any) -> None:
         # this thread and not on Hermes's stream workers.
         room_id = _session_env("HERMES_SESSION_CHAT_ID")
         reader = _session_env("HERMES_SESSION_USER_ID") or sender_id
-        worker.put("begin", session_id or "", turn_id or "", room_id, reader or "")
+        both("begin", session_id or "", turn_id or "", room_id, reader or "")
         return None
 
     def post_llm_call(session_id: str = "", turn_id: str = "", **_: Any):
-        worker.put("end", session_id or "", turn_id or "")
+        both("end", session_id or "", turn_id or "")
         return None
 
     def on_stream_delta(delta: str = "", kind: str = "text", session_id: str = "", turn_id: str = "", **_: Any):
@@ -407,16 +711,30 @@ def register(ctx: Any) -> None:
 
     def pre_tool_call(tool_name: str = "", args: Any = None, session_id: str = "", turn_id: str = "",
                       tool_call_id: str = "", **_: Any):
-        worker.put("tool_started", session_id or "", turn_id or "", tool_call_id or "", tool_name, args)
+        both("tool_started", session_id or "", turn_id or "", tool_call_id or "", tool_name, args)
         return None
 
     def post_tool_call(tool_name: str = "", args: Any = None, session_id: str = "", turn_id: str = "",
                        tool_call_id: str = "", status: Any = None, error_type: Any = None, **_: Any):
-        worker.put("tool_finished", session_id or "", turn_id or "", tool_call_id or "", tool_name, args,
-                   _failed(status, error_type))
+        both("tool_finished", session_id or "", turn_id or "", tool_call_id or "", tool_name, args,
+             _failed(status, error_type))
+
+    def pre_approval_request(command: Any = "", description: Any = "", session_id: str = "", turn_id: str = "",
+                             **_: Any):
+        if fleet is not None:
+            fleet.put("approval_asked", session_id or "", turn_id or "", str(description or command or ""))
+        return None
+
+    def post_approval_response(session_id: str = "", turn_id: str = "", **_: Any):
+        if fleet is not None:
+            fleet.put("approval_answered", session_id or "", turn_id or "")
+        return None
 
     ctx.register_hook("pre_llm_call", pre_llm_call)
     ctx.register_hook("post_llm_call", post_llm_call)
     ctx.register_hook("on_stream_delta", on_stream_delta)
     ctx.register_hook("pre_tool_call", pre_tool_call)
     ctx.register_hook("post_tool_call", post_tool_call)
+    if fleet is not None:
+        ctx.register_hook("pre_approval_request", pre_approval_request)
+        ctx.register_hook("post_approval_response", post_approval_response)

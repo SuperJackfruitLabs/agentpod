@@ -17,6 +17,20 @@ The event bodies and the pacing are the same as the hub's; see `apps/hub/src/ser
 - It sends events with the agent's own Matrix token, `PUT /sendToDevice` to the reader's devices (`*`).
 - All sending is best-effort, and the room message Hermes sends is unchanged.
 
+## The fleet card
+
+The hub's fleet Live Activity (the Lock Screen card in Supermessage) learns about a bridge-mode turn from the hub's own bridge. It never sees a harness-mode turn, so the plugin reports each turn itself:
+
+- turn started; each tool step, with its title and `completed`/`total`; turn finished, with `total`/`failed` and the first failed step;
+- an approval asked (`pre_approval_request`), once its prompt is in the room, and answered (`post_approval_response`);
+- the answer's event id, for a turn that ran tools, so the answer's push carries the turn's counts.
+
+Each report is one JSON line to the node's fleet socket, `~/.agentpod/fleet.sock` (`AGENTPOD_FLEET_SOCKET` overrides). The node forwards it to the hub over its authenticated connection, and the hub decides whose card it belongs on (`packages/contract/src/fleet-report.ts`). A report carries no more text than the card shows: a step title cut to 60 characters, a question cut to 120.
+
+- **The answer's event id** is given to plugins by no hook. Hermes's Matrix adapter logs `Matrix: sent event %s to %s` when a send returns, and a logging handler reads the id from that line. If Hermes changes the line, answer pushes lose their counts and nothing else; the contract test pins it.
+- **Best-effort, like the live events.** Reports have their own thread. A report waits at most 0.5 s on the node and is dropped on any failure. A node without the socket (older than the release that added it) costs one failed connect per report, and the plugin logs it once.
+- **Needs `MATRIX_USER_ID`.** Without it the hub could not place a report, so none is made; streaming is unaffected.
+
 ## Install on one profile
 
 `apn` ships this plugin and installs it. On the host that runs the profile:

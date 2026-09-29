@@ -63,7 +63,10 @@ export type PostureReport = z.infer<typeof PostureReport>;
 // it drops its connection on such a frame — see the hub's promptSession.
 // "turn.errors": the node listens on its turn-error intake socket and forwards
 // what harness plugins report as `turn.error` frames (see gateway.ts).
-export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors"]);
+// "fleet.reports": the node listens on its fleet socket and forwards what
+// agent plugins report about their turns as `fleet.report` frames
+// (see fleet-report.ts).
+export const NodeCapability = z.enum(["posture", "frames.large", "turn.errors", "fleet.reports"]);
 export type NodeCapability = z.infer<typeof NodeCapability>;
 
 /**

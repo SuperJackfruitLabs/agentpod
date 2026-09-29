@@ -23,6 +23,7 @@ import { completeRuntimeStartForNode } from "../services/runtimes";
 import { refreshAdoptedCapabilities, announceStationsForNode } from "../services/station-registry";
 import { recordHealth, clearNode } from "../services/health-cache";
 import { reportTurnError } from "../services/acp-sessions";
+import { reportAgentTurn } from "../services/push/fleet/agent-reports";
 
 // Node connects with `Authorization: Bearer <nodeId>:<nodeSecret>`.
 export const gatewayRoutes = new Hono().get(
@@ -185,6 +186,10 @@ export const gatewayRoutes = new Hono().get(
         } else if (parsed.data.type === "turn.error") {
           // A harness plugin's report of a failed turn, via its node.
           reportTurnError(authed, parsed.data.report);
+        } else if (parsed.data.type === "fleet.report") {
+          // An agent's plugin reporting its own turn for the fleet Live
+          // Activity, via its node. Believed only for this node's stations.
+          reportAgentTurn(authed, parsed.data.report);
         } else if (
           parsed.data.type === "res" ||
           parsed.data.type === "stream"

@@ -2,8 +2,13 @@
 
 import importlib.util
 import json
+import logging
+import os
 import pathlib
+import shutil
+import socket
 import sys
+import tempfile
 import threading
 import time
 import unittest
@@ -274,12 +279,17 @@ class RegisterTest(unittest.TestCase):
         sent = []
         ctx = self.Ctx()
         env = {"MATRIX_HOMESERVER": "https://hs", "MATRIX_ACCESS_TOKEN": "tok", "MATRIX_USER_ID": AGENT,
-               "HERMES_SESSION_CHAT_ID": ROOM, "HERMES_SESSION_USER_ID": READER}
+               "HERMES_SESSION_CHAT_ID": ROOM, "HERMES_SESSION_USER_ID": READER,
+               "AGENTPOD_FLEET_SOCKET": "/tmp/agentpod-live-test-no-node.sock"}
+        root = logging.getLogger()
+        before = list(root.handlers)
+        self.addCleanup(lambda: [root.removeHandler(h) for h in list(root.handlers) if h not in before])
         with mock.patch.dict(live.os.environ, env, clear=True), \
                 mock.patch.object(live, "matrix_sender", return_value=lambda t, r, c: sent.append((t, r, c))):
             live.register(ctx)
             self.assertEqual(set(ctx.hooks), {"pre_llm_call", "post_llm_call", "on_stream_delta",
-                                              "pre_tool_call", "post_tool_call"})
+                                              "pre_tool_call", "post_tool_call",
+                                              "pre_approval_request", "post_approval_response"})
             self.assertIsNone(ctx.hooks["pre_llm_call"](session_id="s1", turn_id="t1", platform="matrix"))
             ctx.hooks["on_stream_delta"](delta="Streaming from a harness station.", kind="text",
                                          session_id="s1", turn_id="t1", telemetry_schema_version=1)
@@ -300,6 +310,302 @@ class RegisterTest(unittest.TestCase):
         self.assertEqual(types, [live.LIVE_DELTA_TYPE, live.TOOL_UPDATE_TYPE, live.TOOL_UPDATE_TYPE,
                                  live.LIVE_DELTA_TYPE])
         self.assertTrue(sent[-1][2]["done"])
+
+    def test_hooks_report_a_matrix_turn_to_the_node(self):
+        node = _NodeSocket()
+        self.addCleanup(node.close)
+        ctx = self.Ctx()
+        env = {"MATRIX_HOMESERVER": "https://hs", "MATRIX_ACCESS_TOKEN": "tok", "MATRIX_USER_ID": AGENT,
+               "HERMES_SESSION_CHAT_ID": ROOM, "HERMES_SESSION_USER_ID": READER,
+               "AGENTPOD_FLEET_SOCKET": node.path}
+        root = logging.getLogger()
+        before = list(root.handlers)
+        self.addCleanup(lambda: [root.removeHandler(h) for h in list(root.handlers) if h not in before])
+        adapter_log = logging.getLogger("plugins.platforms.matrix.adapter")
+        adapter_log.setLevel(logging.INFO)
+        with mock.patch.dict(live.os.environ, env, clear=True), \
+                mock.patch.object(live, "matrix_sender", return_value=lambda t, r, c: None):
+            live.register(ctx)
+            ctx.hooks["pre_llm_call"](session_id="s1", turn_id="t1", platform="matrix")
+            ctx.hooks["pre_tool_call"](tool_name="terminal", args={"command": "make"}, session_id="s1",
+                                       turn_id="t1", tool_call_id="c1")
+            ctx.hooks["pre_approval_request"](command="make", description="Run make?", session_key="k",
+                                              surface="gateway", session_id="s1", turn_id="t1")
+            adapter_log.info("Matrix: sent event %s to %s", "$prompt", ROOM)
+            ctx.hooks["post_approval_response"](command="make", description="Run make?", session_key="k",
+                                                surface="gateway", choice="once", session_id="s1", turn_id="t1")
+            ctx.hooks["post_tool_call"](tool_name="terminal", args={"command": "make"}, session_id="s1",
+                                        turn_id="t1", tool_call_id="c1", status="ok")
+            ctx.hooks["post_llm_call"](session_id="s1", turn_id="t1", assistant_response="done")
+            adapter_log.info("Matrix: sent event %s to %s", "$answer", ROOM)
+
+            deadline = time.time() + 3
+            while len(node.lines) < 7 and time.time() < deadline:
+                time.sleep(0.01)
+
+        types = [line["event"]["type"] for line in node.lines]
+        self.assertEqual(types, ["turn-started", "step", "decision-asked", "decision-cleared", "step",
+                                 "turn-finished", "answer"])
+        self.assertEqual(node.lines[2]["event"], {"type": "decision-asked", "eventId": "$prompt",
+                                                  "question": "Run make?"})
+        self.assertEqual(node.lines[-1]["event"], {"type": "answer", "eventId": "$answer", "total": 1,
+                                                   "failed": 0})
+
+    def test_without_its_own_matrix_id_it_streams_but_does_not_report(self):
+        ctx = self.Ctx()
+        env = {"MATRIX_HOMESERVER": "https://hs", "MATRIX_ACCESS_TOKEN": "tok"}
+        root = logging.getLogger()
+        before = list(root.handlers)
+        with mock.patch.dict(live.os.environ, env, clear=True), \
+                mock.patch.object(live, "matrix_sender", return_value=lambda t, r, c: None):
+            live.register(ctx)
+        self.assertIn("on_stream_delta", ctx.hooks)
+        self.assertNotIn("pre_approval_request", ctx.hooks)
+        self.assertEqual(root.handlers, before)
+
+
+# ─── Fleet reports: the hub's Live Activity, for a turn it never sees ────────
+
+
+class Wall:
+    def __init__(self):
+        self.now = 1_790_000_000.0
+
+    def __call__(self):
+        return self.now
+
+
+class FleetHarness:
+    def __init__(self, fail=False):
+        self.reports = []
+        self.clock = Clock()
+        self.wall = Wall()
+
+        def report(r):
+            if fail:
+                raise OSError("no node")
+            self.reports.append(r)
+
+        self.reporter = live.FleetReporter(report, own_user=AGENT, clock=self.clock, wall=self.wall)
+
+    def events(self):
+        return [r["event"] for r in self.reports]
+
+
+class FleetTurnTest(unittest.TestCase):
+    def test_a_turn_reports_its_start_each_step_and_its_end_with_counts(self):
+        h = FleetHarness()
+        r = h.reporter
+        r.begin("s1", "t1", ROOM, READER)
+        r.tool_started("s1", "t1", "c1", "read_file", {"path": "/notes.md"})
+        r.tool_finished("s1", "t1", "c1", "read_file", {"path": "/notes.md"}, False)
+        r.tool_started("s1", "t1", "c2", "terminal", {"command": "make"})
+        r.tool_finished("s1", "t1", "c2", "terminal", {"command": "make"}, True)
+        r.end("s1", "t1")
+
+        events = h.events()
+        self.assertEqual([e["type"] for e in events],
+                         ["turn-started", "step", "step", "step", "step", "turn-finished"])
+        self.assertEqual([(e["completed"], e["total"]) for e in events if e["type"] == "step"],
+                         [(0, 1), (1, 1), (1, 2), (2, 2)])
+        self.assertEqual(events[-1], {"type": "turn-finished", "total": 2, "failed": 1, "failedAt": 2})
+        for rep in h.reports:
+            self.assertEqual(rep["agent"], AGENT)
+            self.assertEqual(rep["roomId"], ROOM)
+            self.assertEqual(rep["reader"], READER)
+            self.assertEqual(rep["at"], 1_790_000_000_000)
+            self.assertEqual(set(rep), {"agent", "roomId", "reader", "at", "event"})
+
+    def test_a_turn_that_only_talked_finishes_with_no_counts(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.end("s1", "t1")
+        self.assertEqual(h.events()[-1], {"type": "turn-finished", "total": 0, "failed": 0})
+
+    def test_a_step_carries_only_what_the_card_shows(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.tool_started("s1", "t1", "c1", "x" * 200 + "\nsecond line", {})
+        step = h.events()[-1]
+        self.assertEqual(set(step), {"type", "title", "completed", "total"})
+        self.assertLessEqual(len(step["title"]), live.FLEET_STEP_MAX)
+        self.assertNotIn("\n", step["title"])
+        self.assertTrue(step["title"].endswith("…"))
+
+    def test_turns_the_live_stream_skips_are_not_reported(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", "", READER)
+        h.reporter.begin("s2", "t2", ROOM, AGENT)
+        h.reporter.begin("s3", "t3", ROOM, "")
+        h.reporter.tool_started("s1", "t1", "c1", "todo", {})
+        h.reporter.end("s2", "t2")
+        self.assertEqual(h.reports, [])
+
+    def test_an_idle_turn_is_finished_as_errored(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.clock.now += live.IDLE_TURN_S + 1
+        h.reporter.expire()
+        self.assertEqual(h.events()[-1], {"type": "turn-finished", "total": 0, "failed": 0, "errored": True})
+
+    def test_a_node_that_is_not_there_never_raises(self):
+        h = FleetHarness(fail=True)
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.tool_started("s1", "t1", "c1", "todo", {})
+        h.reporter.end("s1", "t1")
+        h.reporter.sent(ROOM, "$answer")
+
+
+class FleetAnswerTest(unittest.TestCase):
+    def finished_with_tools(self, h):
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.tool_started("s1", "t1", "c1", "todo", {})
+        h.reporter.tool_finished("s1", "t1", "c1", "todo", {}, False)
+        h.reporter.sent(ROOM, "$interim")  # sent during the turn: not its answer
+        h.reporter.end("s1", "t1")
+
+    def test_the_first_message_sent_after_the_turn_is_its_answer(self):
+        h = FleetHarness()
+        self.finished_with_tools(h)
+        h.reporter.sent("!elsewhere:id.agentpod.dev", "$other-room")
+        h.reporter.sent(ROOM, "$answer")
+        h.reporter.sent(ROOM, "$later")
+        answers = [e for e in h.events() if e["type"] == "answer"]
+        self.assertEqual(answers, [{"type": "answer", "eventId": "$answer", "total": 1, "failed": 0}])
+
+    def test_a_turn_without_tools_has_no_answer_to_report(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.end("s1", "t1")
+        h.reporter.sent(ROOM, "$answer")
+        self.assertNotIn("answer", [e["type"] for e in h.events()])
+
+    def test_an_answer_long_after_the_turn_is_not_matched_to_it(self):
+        h = FleetHarness()
+        self.finished_with_tools(h)
+        h.clock.now += live.ANSWER_WAIT_S + 1
+        h.reporter.sent(ROOM, "$much-later")
+        self.assertNotIn("answer", [e["type"] for e in h.events()])
+
+
+class FleetDecisionTest(unittest.TestCase):
+    def test_an_approval_is_reported_with_its_prompts_event_then_cleared(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.approval_asked("s1", "t1", "Run rm -rf build?")
+        self.assertEqual(h.events()[-1]["type"], "turn-started")  # nothing until the prompt is in the room
+        h.reporter.sent(ROOM, "$prompt")
+        self.assertEqual(h.events()[-1], {"type": "decision-asked", "eventId": "$prompt",
+                                          "question": "Run rm -rf build?"})
+        h.reporter.approval_answered("s1", "t1")
+        self.assertEqual(h.events()[-1], {"type": "decision-cleared"})
+
+    def test_a_question_is_bounded_like_the_card(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.approval_asked("s1", "t1", "q" * 500)
+        h.reporter.sent(ROOM, "$prompt")
+        self.assertLessEqual(len(h.events()[-1]["question"]), live.FLEET_QUESTION_MAX)
+
+    def test_a_turn_that_ends_with_a_question_open_clears_it(self):
+        h = FleetHarness()
+        h.reporter.begin("s1", "t1", ROOM, READER)
+        h.reporter.approval_asked("s1", "t1", "Push?")
+        h.reporter.sent(ROOM, "$prompt")
+        h.reporter.end("s1", "t1")
+        self.assertEqual([e["type"] for e in h.events()][-2:], ["decision-cleared", "turn-finished"])
+
+    def test_an_approval_outside_a_reported_turn_is_ignored(self):
+        h = FleetHarness()
+        h.reporter.approval_asked("nope", "t1", "Push?")
+        h.reporter.sent(ROOM, "$prompt")
+        h.reporter.approval_answered("nope", "t1")
+        self.assertEqual(h.reports, [])
+
+
+class SentEventTapTest(unittest.TestCase):
+    def record(self, msg, args, name="plugins.platforms.matrix.adapter"):
+        return logging.LogRecord(name, logging.INFO, __file__, 1, msg, args, None)
+
+    def test_hermes_matrix_send_log_lines_become_sent_events(self):
+        seen = []
+        tap = live._SentEventTap(lambda room, event: seen.append((room, event)))
+        tap.emit(self.record("Matrix: sent event %s to %s", ("$a", ROOM)))
+        tap.emit(self.record("Matrix: sent event %s to %s (after key share)", ("$b", ROOM)))
+        tap.emit(self.record("Matrix: sent event %s", ("$c",)))
+        tap.emit(self.record("Matrix: sent event %s as a reaction in %s", ("$r", ROOM)))
+        tap.emit(self.record("something else %s to %s", ("$d", ROOM)))
+        tap.emit(self.record(None, None))
+        self.assertEqual(seen, [(ROOM, "$a"), (ROOM, "$b")])
+
+    def test_a_failing_callback_never_reaches_hermes_logging(self):
+        def boom(*_):
+            raise RuntimeError("x")
+        live._SentEventTap(boom).emit(self.record("Matrix: sent event %s to %s", ("$a", ROOM)))
+
+
+class _NodeSocket:
+    """A stand-in for the node's fleet socket: records each line, answers one."""
+
+    def __init__(self, answer="ok"):
+        self.dir = tempfile.mkdtemp(prefix="fl", dir="/tmp")
+        self.path = os.path.join(self.dir, "fleet.sock")
+        self.lines = []
+        self.answer = answer
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(self.path)
+        self.sock.listen(16)
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                self.lines.append(json.loads(data))
+                conn.sendall((self.answer + "\n").encode())
+
+    def close(self):
+        self.sock.close()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+class FleetSocketTest(unittest.TestCase):
+    def test_one_json_line_per_report(self):
+        node = _NodeSocket()
+        try:
+            live.fleet_socket_sender(node.path)({"agent": AGENT, "event": {"type": "turn-started"}})
+            self.assertEqual(node.lines, [{"agent": AGENT, "event": {"type": "turn-started"}}])
+        finally:
+            node.close()
+
+    def test_a_refusal_is_an_error_the_reporter_counts(self):
+        node = _NodeSocket(answer="error: a report needs roomId")
+        try:
+            with self.assertRaises(RuntimeError):
+                live.fleet_socket_sender(node.path)({"agent": AGENT})
+        finally:
+            node.close()
+
+    def test_no_node_fails_at_once(self):
+        started = time.monotonic()
+        with self.assertRaises(OSError):
+            live.fleet_socket_sender("/tmp/agentpod-no-such-node.sock")({"agent": AGENT})
+        self.assertLess(time.monotonic() - started, 0.2)
+
+    def test_default_path_is_the_nodes(self):
+        with mock.patch.dict(live.os.environ, {"HOME": "/root"}, clear=True):
+            self.assertEqual(live.fleet_socket_path(), "/root/.agentpod/fleet.sock")
+        with mock.patch.dict(live.os.environ, {"AGENTPOD_FLEET_SOCKET": "/run/f.sock"}, clear=True):
+            self.assertEqual(live.fleet_socket_path(), "/run/f.sock")
 
 
 if __name__ == "__main__":
