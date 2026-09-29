@@ -193,23 +193,17 @@ describe("coalescing, through real timers", () => {
 });
 
 describe("quiet → end", () => {
-  test("15 minutes after the last turn finished, the card ends, lingering two minutes, and its token is spent", async () => {
+  test("when the last turn finishes and nothing else runs, the card ends at once, lingering two minutes, and its token is spent", async () => {
     await registerUpdate();
     fleet.note(READER, { type: "turn-started", roomId: ROOM, name: "Lyra", at: now });
     await advance(10_000);
     fleet.note(READER, { type: "turn-finished", roomId: ROOM, name: "Lyra", total: 3, failed: 0, at: now });
     await fleet.settled();
-    const finishedAt = now;
-    expect(sends.at(-1)!.priority).toBe(10);
-
-    await advance(ACTIVE_WITHIN_MS);
-    expect(events().at(-1)).toBe("update");
-    await advance(1);
     expect(events().at(-1)).toBe("end");
+    expect(sends.at(-1)!.priority).toBe(10);
     const aps = lastAps();
     expect(aps["dismissal-date"]).toBe(aps.timestamp + LINGER_AFTER_FINISH_S);
     expect(aps["content-state"].agents[0]).toMatchObject({ state: "done", total: 3 });
-    expect(Math.floor(finishedAt / 1000) + ACTIVE_WITHIN_MS / 1000).toBeLessThanOrEqual(aps.timestamp);
     expect((await tokens.list(READER)).filter((t) => t.kind === "update")).toEqual([]);
 
     // The next piece of work starts a new card.
@@ -230,7 +224,7 @@ describe("tokens APNs refuses", () => {
     expect((await tokens.list(READER)).map((t) => t.kind)).toEqual(["start"]);
 
     await advance(COALESCE_MS);
-    fleet.note(READER, { type: "turn-finished", roomId: ROOM, name: "Lyra", total: 1, failed: 0, at: now });
+    fleet.note(READER, { type: "step", roomId: ROOM, name: "Lyra", title: "Reading", completed: 0, total: 1, at: now });
     await fleet.settled();
     expect(events().at(-1)).toBe("start");
   });

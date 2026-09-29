@@ -24,6 +24,7 @@ import { matrixRooms } from "../../../db/schema/matrix";
 import { stations } from "../../../db/schema/stations";
 import { principalForUser } from "../../principals";
 import type { ReportingAgent } from "./agent-reports";
+import { cardName } from "./names";
 
 export async function reportingAgentFor(nodeId: string, agent: string, roomId: string): Promise<ReportingAgent | null> {
   const [station] = await db
@@ -58,11 +59,5 @@ export async function reportingAgentFor(nodeId: string, agent: string, roomId: s
     .limit(1);
   if (!identity) return null;
 
-  return { reader: identity.externalId, name: station.displayName.trim() || localpart(agent) };
-}
-
-/** `@agent_lyra:hs` → `lyra`: a name of last resort. */
-function localpart(mxid: string): string {
-  const local = mxid.replace(/^@/, "").split(":")[0] ?? mxid;
-  return local.replace(/^agent_/, "") || mxid;
+  return { reader: identity.externalId, name: cardName(station.displayName, agent) };
 }

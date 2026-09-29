@@ -222,10 +222,14 @@ function agentState(state: FleetState, agent: AgentRecord, now: number): FleetLi
   return agent.outcome?.kind ?? "active";
 }
 
-/** Whether the card should be up: an agent active, or a decision pending. */
+/** Whether the card should be up: a turn running, or a decision pending. */
 export function isFleetActive(state: FleetState, now: number): boolean {
+  // Only a running turn or a pending decision keeps the card up (operator,
+  // 2026-09-29): an agent that merely spoke in the last fifteen minutes made
+  // an "All quiet" card that stayed up for a quarter of an hour. Finished
+  // agents are still listed (`agentState`) while the ended card lingers.
   if (state.decisions.size > 0) return true;
-  for (const agent of state.agents.values()) if (agentState(state, agent, now) !== null) return true;
+  for (const agent of state.agents.values()) if (turnIsLive(agent, now)) return true;
   return false;
 }
 
