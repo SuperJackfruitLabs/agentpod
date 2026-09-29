@@ -33,14 +33,14 @@ const chars = (max: number) => z.string().refine((s) => [...s].length <= max, `a
 const unixSeconds = z.number().int().nonnegative();
 const count = z.number().int().nonnegative();
 
-export const FleetAgentState = z.enum(["working", "needs_you", "active", "done", "failed"]);
-export type FleetAgentState = z.infer<typeof FleetAgentState>;
+export const FleetLiveAgentState = z.enum(["working", "needs_you", "active", "done", "failed"]);
+export type FleetLiveAgentState = z.infer<typeof FleetLiveAgentState>;
 
-export const FleetAgent = z
+export const FleetLiveAgent = z
   .object({
     roomId: z.string().min(1),
     name: z.string().min(1),
-    state: FleetAgentState,
+    state: FleetLiveAgentState,
     step: chars(FLEET_STEP_MAX).optional(),
     completed: count.optional(),
     total: count.optional(),
@@ -48,9 +48,9 @@ export const FleetAgent = z
     since: unixSeconds,
   })
   .strict();
-export type FleetAgent = z.infer<typeof FleetAgent>;
+export type FleetLiveAgent = z.infer<typeof FleetLiveAgent>;
 
-export const FleetDecisionOption = z
+export const FleetLiveDecisionOption = z
   .object({
     /** What the app sends back to answer: the option's name for a permission, the gate option id for a gate. */
     id: z.string().min(1),
@@ -58,9 +58,9 @@ export const FleetDecisionOption = z
     declines: z.boolean(),
   })
   .strict();
-export type FleetDecisionOption = z.infer<typeof FleetDecisionOption>;
+export type FleetLiveDecisionOption = z.infer<typeof FleetLiveDecisionOption>;
 
-export const FleetDecision = z
+export const FleetLiveDecision = z
   .object({
     roomId: z.string().min(1),
     eventId: z.string().min(1),
@@ -68,19 +68,19 @@ export const FleetDecision = z
     kind: z.enum(["permission", "gate"]),
     question: chars(FLEET_QUESTION_MAX),
     /** Inline options only — at most two. */
-    options: z.array(FleetDecisionOption).max(FLEET_DECISION_OPTIONS_MAX),
+    options: z.array(FleetLiveDecisionOption).max(FLEET_DECISION_OPTIONS_MAX),
   })
   .strict();
-export type FleetDecision = z.infer<typeof FleetDecision>;
+export type FleetLiveDecision = z.infer<typeof FleetLiveDecision>;
 
 export const FleetContentState = z
   .object({
     /** needs_you first, then working, then most recent. */
-    agents: z.array(FleetAgent).max(FLEET_AGENTS_MAX),
+    agents: z.array(FleetLiveAgent).max(FLEET_AGENTS_MAX),
     /** Active agents not listed. */
     more: count,
     /** The oldest pending decision. */
-    decision: FleetDecision.optional(),
+    decision: FleetLiveDecision.optional(),
     /** Pending decisions in all. */
     needsYou: count,
     working: count,

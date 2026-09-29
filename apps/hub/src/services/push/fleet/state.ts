@@ -18,11 +18,11 @@ import {
   FLEET_DECISION_OPTIONS_MAX,
   FLEET_QUESTION_MAX,
   FLEET_STEP_MAX,
-  type FleetAgent,
-  type FleetAgentState,
+  type FleetLiveAgent,
+  type FleetLiveAgentState,
   type FleetContentState,
-  type FleetDecision,
-  type FleetDecisionOption,
+  type FleetLiveDecision,
+  type FleetLiveDecisionOption,
 } from "@agentpod/contract";
 
 /**
@@ -79,7 +79,7 @@ export interface DecisionRecord {
   agent: string;
   kind: "permission" | "gate";
   question: string;
-  options: FleetDecisionOption[];
+  options: FleetLiveDecisionOption[];
   askedAt: number;
   /** A gate's board, so a sweep of that board can clear the gates it no longer lists. */
   boardId?: string;
@@ -215,7 +215,7 @@ function awaitsPermission(state: FleetState, roomId: string): boolean {
 }
 
 /** The agent's state as the card shows it, or null when it is not active. */
-function agentState(state: FleetState, agent: AgentRecord, now: number): FleetAgentState | null {
+function agentState(state: FleetState, agent: AgentRecord, now: number): FleetLiveAgentState | null {
   if (awaitsPermission(state, agent.roomId)) return "needs_you";
   if (turnIsLive(agent, now)) return "working";
   if (now - agent.lastActivityAt > ACTIVE_WITHIN_MS) return null;
@@ -267,13 +267,13 @@ export function pruneFleet(state: FleetState, now: number): FleetState {
   return changed ? { ...state, agents } : state;
 }
 
-const RANK: Record<FleetAgentState, number> = { needs_you: 0, working: 1, active: 2, done: 2, failed: 2 };
+const RANK: Record<FleetLiveAgentState, number> = { needs_you: 0, working: 1, active: 2, done: 2, failed: 2 };
 
 const unix = (ms: number) => Math.floor(ms / 1000);
 
 /** The card's content (spec A4), with every bound applied. */
 export function contentState(state: FleetState, now: number): FleetContentState {
-  const rows: FleetAgent[] = [];
+  const rows: FleetLiveAgent[] = [];
   for (const agent of state.agents.values()) {
     const s = agentState(state, agent, now);
     if (s === null) continue;
@@ -296,7 +296,7 @@ export function contentState(state: FleetState, now: number): FleetContentState 
   };
 }
 
-function row(agent: AgentRecord, s: FleetAgentState): FleetAgent {
+function row(agent: AgentRecord, s: FleetLiveAgentState): FleetLiveAgent {
   const base = { roomId: agent.roomId, name: bound(agent.name, NAME_MAX), state: s };
   switch (s) {
     case "needs_you":
@@ -331,7 +331,7 @@ function row(agent: AgentRecord, s: FleetAgentState): FleetAgent {
   }
 }
 
-function decision(d: DecisionRecord): FleetDecision {
+function decision(d: DecisionRecord): FleetLiveDecision {
   return {
     roomId: d.roomId,
     eventId: d.eventId,
@@ -344,7 +344,7 @@ function decision(d: DecisionRecord): FleetDecision {
 
 // ─── Options ─────────────────────────────────────────────────────────────────
 
-function option(id: string, label: string, declines: boolean): FleetDecisionOption | null {
+function option(id: string, label: string, declines: boolean): FleetLiveDecisionOption | null {
   if (id.length === 0 || id.length > OPTION_ID_MAX) return null;
   return { id, label: bound(label, OPTION_LABEL_MAX), declines };
 }
@@ -355,7 +355,7 @@ function option(id: string, label: string, declines: boolean): FleetDecisionOpti
  * and reject only — **"always" is never offered inline**: a Lock Screen tap
  * must not grant more than its button said.
  */
-export function inlinePermissionOptions(options: ReadonlyArray<{ optionId: string; name: string }>): FleetDecisionOption[] {
+export function inlinePermissionOptions(options: ReadonlyArray<{ optionId: string; name: string }>): FleetLiveDecisionOption[] {
   const norm = (s: string) => s.trim().toLowerCase();
   const names = options.map((o) => o.name);
   const allow =
@@ -365,13 +365,13 @@ export function inlinePermissionOptions(options: ReadonlyArray<{ optionId: strin
     names.find((n) => norm(n) === "reject") ??
     names.find((n) => (norm(n).startsWith("reject") || norm(n).startsWith("deny")) && !norm(n).includes("always"));
   return [allow ? option(allow, allow, false) : null, reject ? option(reject, reject, true) : null].filter(
-    (o): o is FleetDecisionOption => o !== null
+    (o): o is FleetLiveDecisionOption => o !== null
   );
 }
 
 /** A gate's inline answers: approve and reject. Request changes needs words, so it needs the app. */
-export function inlineGateOptions(options: ReadonlyArray<{ id: string; label: string }>): FleetDecisionOption[] {
-  const out: FleetDecisionOption[] = [];
+export function inlineGateOptions(options: ReadonlyArray<{ id: string; label: string }>): FleetLiveDecisionOption[] {
+  const out: FleetLiveDecisionOption[] = [];
   for (const id of ["approve", "reject"] as const) {
     const o = options.find((x) => x.id === id);
     if (!o) continue;
