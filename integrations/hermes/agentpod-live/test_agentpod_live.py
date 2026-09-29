@@ -533,6 +533,7 @@ class SentEventTapTest(unittest.TestCase):
         tap.emit(self.record("Matrix: sent event %s to %s", ("$a", ROOM)))
         tap.emit(self.record("Matrix: sent event %s to %s (after key share)", ("$b", ROOM)))
         tap.emit(self.record("Matrix: sent event %s", ("$c",)))
+        tap.emit(self.record("Matrix: sent event %s as a reaction in %s", ("$r", ROOM)))
         tap.emit(self.record("something else %s to %s", ("$d", ROOM)))
         tap.emit(self.record(None, None))
         self.assertEqual(seen, [(ROOM, "$a"), (ROOM, "$b")])
