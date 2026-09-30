@@ -112,6 +112,15 @@ export const VERB_PARAMS = {
   // database id, and the STT API key is fetched over that endpoint with the
   // node's own credential — it never rides in a broker frame.
   "transcription.apply": z.object({ key: z.string(), stationId: z.string() }),
+  // Push a station's resolved spoken-reply setting (speech service, voice,
+  // when to speak) into its harness profile. Its own verb rather than a
+  // widened transcription.apply: a node that predates it answers "unknown
+  // verb" instead of silently applying half, and nodes that know only
+  // transcription.apply keep working unchanged. Same rule as the two above:
+  // the speech service's key is fetched over
+  // POST /api/nodes/:nodeId/stations/:stationId/speech with the node's own
+  // credential and never rides in a broker frame.
+  "speech.apply": z.object({ key: z.string(), stationId: z.string() }),
   // Make a workspace image a harness-mode station's Matrix avatar. The node
   // uploads it with the harness's own access token, which it reads from the
   // profile and never sends: the hub's appservice cannot act for an identity
@@ -210,6 +219,25 @@ export const VERB_RESULTS = {
     applied: z.boolean(),
     mode: z.enum(["on", "off"]),
     model: z.string().nullable(),
+    restarted: z.boolean(),
+  }),
+  /**
+   * What the node wrote into the harness profile. `mode: "on"` = the harness's
+   * text-to-speech now points at the hub's speech service, speaking in
+   * `voice`; "off" = the station has no speech service, so the harness stops
+   * speaking unprompted and its TTS provider is left as it was. `speakMode` is
+   * what the hub asked for; `autoSpeak` is what the harness will do after the
+   * write (Hermes `voice.auto_tts`: true = it speaks every reply). They differ
+   * for `voice_in`, which Hermes has no profile setting for — see
+   * docs/OPERATING.md §7d. `restarted` as for transcription.apply. No url or
+   * key comes back.
+   */
+  "speech.apply": z.object({
+    applied: z.boolean(),
+    mode: z.enum(["on", "off"]),
+    voice: z.string().nullable(),
+    speakMode: z.enum(["off", "voice_in", "always"]).nullable(),
+    autoSpeak: z.boolean(),
     restarted: z.boolean(),
   }),
   /** Who now wears the image, and where the homeserver keeps it. */

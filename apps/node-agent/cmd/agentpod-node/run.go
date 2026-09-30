@@ -192,6 +192,19 @@ func runCmd() {
 		Write:           descriptor.WriteHermesTranscription,
 		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
 	})
+	// speech.apply: the hub's resolved spoken-reply setting (speech service,
+	// voice, when to speak), written into a harness-mode Hermes profile's own
+	// TTS config — a harness-mode agent is its own Matrix client and speaks
+	// for itself. Same seams and the same restart path as transcription.apply
+	// (the station's unit, via lifecycle — never a second gateway, #589).
+	h = gateway.NewSpeechApplyHandler(h, gateway.SpeechApplyDeps{
+		Resolver:        resolver,
+		HarnessFor:      harnessFor,
+		CapabilitiesFor: capabilitiesFor,
+		Fetch:           gateway.NewHTTPSpeechFetcher(cfg.Hub, cfg.NodeID, cfg.NodeSecret),
+		Write:           descriptor.WriteHermesSpeech,
+		Restart:         func(key string) error { return lifecycleFn(key, "restart") },
+	})
 	// matrix.avatar.set: a workspace image as a harness-mode station's Matrix
 	// avatar, uploaded with the profile's own login — the hub's appservice
 	// cannot act for that identity, and the token never leaves this node.

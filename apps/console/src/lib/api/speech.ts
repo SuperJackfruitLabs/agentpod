@@ -123,6 +123,27 @@ export const getStationSpeech = (stationId: string) =>
 export const saveStationSpeech = (stationId: string, input: StationSpeechInput) =>
   http<StationSpeech>(`/api/stations/${encodeURIComponent(stationId)}/speech`, jsonInit("PUT", input));
 
+/** What a harness-mode station's node wrote into its profile. No url, no key. */
+export interface SpeechApplyResult {
+  applied: boolean;
+  /** "on": the harness now speaks through the hub's speech service; "off": the station has none. */
+  mode: "on" | "off";
+  voice: string | null;
+  /** What the hub asked for. */
+  speakMode: SpeakMode | null;
+  /** What the harness will do: true = it speaks every reply on its own (Hermes voice.auto_tts). */
+  autoSpeak: boolean;
+  /** False when the station may not be restarted from here (a profile sharing the root gateway). */
+  restarted: boolean;
+}
+
+/**
+ * Push the station's saved voice and speak mode into its harness profile
+ * (harness-mode Hermes stations). No body: the node fetches the setting itself.
+ */
+export const applyStationSpeech = (stationId: string) =>
+  http<SpeechApplyResult>(`/api/stations/${encodeURIComponent(stationId)}/speech/apply`, { method: "POST" });
+
 export const listVoices = () => http<VoiceList>("/api/speech/voices");
 
 /**

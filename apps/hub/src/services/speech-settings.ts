@@ -24,8 +24,9 @@
  * API keys are encrypted at rest and write-only (`hasApiKey`). Answers are
  * cached for 30 s in this process; every save clears the cache.
  *
- * `resolveSpeechFor` is what the Matrix bridge asks when a turn ends; stage 3
- * (pushing the voice to harness-mode stations) will import it too.
+ * `resolveSpeechFor` is what the Matrix bridge asks when a turn ends, and what
+ * a node reads (routes/station-speech-node.ts) to write a harness-mode
+ * station's profile (`speech.apply`).
  */
 
 import { eq } from "drizzle-orm";
