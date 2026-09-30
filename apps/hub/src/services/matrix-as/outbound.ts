@@ -99,6 +99,8 @@ export interface OutboundDeps {
    * that assert on flush timing directly.
    */
   flushDelayMs?: number;
+  /** How long an event waits for the previous one — see `EVENT_ORDER_WAIT_MS`. */
+  eventOrderWaitMs?: number;
   /** How often to re-send a typing notice while a turn runs. See TYPING_REFRESH_MS. */
   typingRefreshMs?: number;
   /**
@@ -196,6 +198,11 @@ interface Attachment {
   turnTextEventId: string | null;
   /** Whether a voice note from the user started this turn. */
   voiceTriggered: boolean;
+  /**
+   * The previous event's handling, which the next one waits for — see
+   * `EVENT_ORDER_WAIT_MS`.
+   */
+  chain: Promise<void>;
 }
 
 /**
@@ -233,6 +240,24 @@ export const FLUSH_SAFETY_MS = 20_000;
 export const TYPING_REFRESH_MS = 20_000;
 
 /**
+ * How long one event's handling waits for the previous event's to finish.
+ *
+ * **A room handles a session's events in the order they happened.** Each
+ * event used to be handled on its own, concurrently with the others, and a
+ * turn's end awaits the homeserver several times — the answer, the typing
+ * stop, the ✅. A turn queued behind it (`RoomQueue`) is prompted on the same
+ * `idle` fan-out, so its `working` arrived while the previous turn was still
+ * ending and overwrote that turn's trigger and voice flag before it was
+ * spoken: krishna, 2026-09-30, a voice note answered in text only, because
+ * "Hi?" typed a second later started its turn 51 ms after the voice turn went
+ * idle. The ✅ went on the wrong message too.
+ *
+ * Bounded, not absolute: the Matrix client has no request timeout, and one
+ * hung send must delay the room, not stop it for good.
+ */
+export const EVENT_ORDER_WAIT_MS = 30_000;
+
+/**
  * What a mark on a message means.
  *
  * The vocabulary hermes's own Matrix plugin used, kept deliberately: 👀 while
@@ -268,6 +293,25 @@ const triggers = new Map<string, { eventId: string; voice: boolean }>();
  */
 export function noteTurnTrigger(sessionId: string, eventId: string, opts: { voice?: boolean } = {}): void {
   triggers.set(sessionId, { eventId, voice: opts.voice === true });
+}
+
+/**
+ * Take back a trigger whose prompt never went out — a lost busy race, a
+ * refused prompt — so the next turn, somebody else's, does not claim it.
+ * Only that message's: one already taken, or replaced, is left alone.
+ */
+export function forgetTurnTrigger(sessionId: string, eventId: string): void {
+  if (triggers.get(sessionId)?.eventId === eventId) triggers.delete(sessionId);
+}
+
+/**
+ * Taken, not read: a trigger belongs to the one turn it started. Left in the
+ * map, a later turn nobody asked for would mark it again.
+ */
+function takeTrigger(sessionId: string): { eventId: string; voice: boolean } | undefined {
+  const noted = triggers.get(sessionId);
+  triggers.delete(sessionId);
+  return noted;
 }
 
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
@@ -336,6 +380,7 @@ export function attachRoomToSession(
 
   const subscribe = deps.subscribe ?? subscribeToSession;
   const flushDelayMs = deps.flushDelayMs ?? FLUSH_SAFETY_MS;
+  const eventOrderWaitMs = deps.eventOrderWaitMs ?? EVENT_ORDER_WAIT_MS;
 
   const state: Attachment = {
     roomId,
@@ -365,6 +410,7 @@ export function attachRoomToSession(
     turnText: [],
     turnTextEventId: null,
     voiceTriggered: false,
+    chain: Promise.resolve(),
   };
 
   /** Sends into the room. Returns the event id, or null when it did not land. */
@@ -690,301 +736,338 @@ export function attachRoomToSession(
     attached.delete(sessionId);
   };
 
+  const handle = async (event: AcpEvent, noted: { eventId: string; voice: boolean } | undefined) => {
+    if (state.ended) return;
+    switch (event.type) {
+      case "agent-update": {
+        const text = messageChunkText(event.payload);
+        if (text !== undefined) {
+          if (state.pendingError !== null) {
+            // The agent is answering after all: the error was an attempt the
+            // harness recovered from, not the turn's outcome. See
+            // `pendingError`.
+            log.info("an agent error was followed by an answer; not reporting it", {
+              sessionId,
+              roomId,
+              error: errorMessage(state.pendingError),
+            });
+            state.pendingError = null;
+          }
+          state.produced = true;
+          state.buffer.push(text);
+          fleet(({ name, mxid, at }) => ({ type: "spoke", roomId, mxid, name, at }));
+          void streamLive(false);
+          scheduleFlush();
+          return;
+        }
+
+        const thought = chunkTextOfKind(event.payload, "agent_thought_chunk");
+        if (thought !== undefined) {
+          state.thoughtBuffer.push(thought);
+          // Only the phase reaches the card; the thought itself goes to the reader's devices.
+          fleet(({ name, mxid, at }) => ({ type: "thinking", roomId, mxid, name, at }));
+          void streamThought(false);
+          return;
+        }
+
+        const tool = foldToolUpdate(state.tools, event.payload);
+        if (tool !== null) {
+          state.produced = true;
+          const total = state.tools.size;
+          const completed = [...state.tools.values()].filter(
+            (t) => t.status === "completed" || t.status === "failed"
+          ).length;
+          fleet(({ name, mxid, at }) => ({ type: "step", roomId, mxid, name, title: tool.title, completed, total, at }));
+          void streamTool(tool);
+          return;
+        }
+
+        // Everything this path does not forward is recorded once, so the next
+        // capability a harness gains does not vanish here the way `tool_call`
+        // did for the whole life of the bridge. See `activity.ts`.
+        const kind = isRecord(event.payload) ? event.payload.sessionUpdate : undefined;
+        if (typeof kind === "string" && noteUnmappedKind(kind)) {
+          log.info("a session update kind reaches Matrix and is not forwarded", {
+            sessionId,
+            kind,
+          });
+        }
+        return;
+      }
+
+      case "state": {
+        const status = isRecord(event.payload) ? event.payload.status : undefined;
+
+        if (status === "working") {
+          // Without this the room looks dead for the ten seconds an agent
+          // spends thinking. The trigger is picked up here rather than at
+          // attach time, because a room outlives any one turn.
+          //
+          // Only replaced when there is a new one — `working` after a
+          // permission pause is the same turn, still owned by its message.
+          // (Taken at fan-out, in the subscriber below — see `takeTrigger`.)
+          if (noted !== undefined) {
+            state.triggerEventId = noted.eventId;
+            state.voiceTriggered = noted.voice;
+          }
+          state.inTurn = true;
+          fleet(({ name, mxid, at }) => ({ type: "turn-started", roomId, mxid, name, at }));
+          await startTyping();
+          await mark(REACTION.working);
+          return;
+        }
+
+        // A question only stands while the agent is waiting on it. A turn
+        // that moved on — answered in the console, cancelled, failed — must
+        // not leave the room able to "approve" something already decided.
+        if (status !== "waiting") clearPendingPermission(roomId);
+
+        // Anything that is not `working` means the agent is not typing —
+        // including `waiting`, which is a permission request this room cannot
+        // yet answer and could sit there for hours. Enumerating only idle and
+        // ended left typing on for exactly that case.
+        await flush();
+        await stopTyping();
+
+        if (status === "idle" || status === "ended") {
+          const wasTurn = state.inTurn || state.produced;
+          state.inTurn = false;
+          // An error nothing came after is the turn's outcome: report it now,
+          // as it used to be reported the moment it arrived.
+          if (state.pendingError !== null) await reportError();
+          // A turn that said nothing, ran nothing, and reported nothing is
+          // not a turn that worked. The hub cannot know *why* — the harness
+          // that failed did not say — but it can refuse to call silence
+          // success, and it can tell the reader that their question went
+          // unanswered rather than leaving them to infer it from a tick.
+          //
+          // Nothing is said when nobody asked: an unprompted turn (a cron
+          // job speaking) has no reader waiting and no message to mark.
+          //
+          // A session that ends mid-turn usually says why (the node went
+          // away, the harness exited), and that beats "its own logs will say".
+          // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
+          // hub marks its idle state `silent`) is done, not failed: no
+          // notice, and a ✅ on the message it answered by saying nothing.
+          const choseSilence = isRecord(event.payload) && event.payload.silent === true;
+          if (wasTurn) {
+            const counts = state.lastTurnCounts ?? { total: 0, failed: 0 };
+            const errored = state.reportedError || (!state.produced && !choseSilence);
+            fleet(({ name, mxid, at }) => ({
+              type: "turn-finished",
+              roomId,
+              mxid,
+              name,
+              total: counts.total,
+              failed: counts.failed,
+              ...(counts.failedAt !== undefined ? { failedAt: counts.failedAt } : {}),
+              errored,
+              at,
+            }));
+          }
+          state.lastTurnCounts = null;
+          if (!state.produced && !state.reportedError && choseSilence) {
+            await mark(REACTION.done);
+          } else if (!state.produced && !state.reportedError) {
+            await mark(REACTION.failed);
+            if (state.triggerEventId) {
+              const reason = isRecord(event.payload) ? event.payload.reason : undefined;
+              await say(
+                typeof reason === "string" && reason.trim() !== ""
+                  ? `This turn ended without a reply — ${reason.trim()}`
+                  : SILENT_TURN_NOTICE
+              );
+            }
+          } else if (!state.reportedError) {
+            await mark(REACTION.done);
+          }
+          // The reply, spoken — after the text is in the room, never before
+          // it and never instead of it. Not awaited: synthesis takes seconds
+          // and the next turn must not wait on it. An error turn is not
+          // spoken, but it is handed over marked as one, so the replier logs
+          // it with every other reason a turn was not spoken; the replier
+          // decides the rest (speak mode, service).
+          const spokenText = state.turnText.join("\n\n");
+          if (deps.speak && state.turnTextEventId && spokenText.trim() !== "") {
+            const turn: SpokenTurn = {
+              roomId,
+              agentUser,
+              sessionId,
+              text: spokenText,
+              textEventId: state.turnTextEventId,
+              voiceTriggered: state.voiceTriggered,
+              ...(state.reportedError ? { errorTurn: true } : {}),
+            };
+            void deps.speak(turn).catch((err) => {
+              log.warn("the voice replier failed", {
+                sessionId,
+                roomId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }
+          state.turnText = [];
+          state.turnTextEventId = null;
+          state.voiceTriggered = false;
+          state.produced = false;
+          state.reportedError = false;
+          // The turn is over, and so is its claim on the message that started
+          // it. A session that later goes `ended` between turns — a node that
+          // dropped, 90 minutes after krishna answered — must not come back
+          // and fail a message that was answered.
+          state.triggerEventId = null;
+        }
+
+        if (status === "ended") {
+          // A session that ended takes its attachment with it — an
+          // unsubscribed listener is the leak `_subscriberCountForTest`
+          // exists to catch.
+          detach();
+        }
+        return;
+      }
+
+      case "permission-request": {
+        const request = permissionRequest(event.payload);
+        if (!request) return;
+
+        // Remembered BEFORE the message is sent: an answer cannot arrive
+        // before the question, but a reply racing a slow homeserver would
+        // find nothing pending and be treated as an ordinary prompt.
+        //
+        // `event.seq` is the request's own sequence number, which is how
+        // `answerPermission` addresses it — the same address the console's
+        // WebSocket sends.
+        if (request.options.length > 0) {
+          notePendingPermission(roomId, {
+            sessionId,
+            requestSeq: event.seq,
+            options: request.options,
+          });
+        }
+
+        // One event for one question. The structured request rides INSIDE
+        // the prose message, under `dev.agentpod.permission`, the way the
+        // turn error card rides on its notice — so the one push this message
+        // raises is a push the phone can classify, in an encrypted room or
+        // not. The prose is what keeps Element and reply-by-number working;
+        // the key only lets a client that understands it render buttons.
+        // Every answer comes back as an ordinary message through the same
+        // matcher, keyed on the pending request above rather than on any
+        // event id, so nothing downstream has to know which one a reader used.
+        const structured = permissionRequestContent(
+          sessionId,
+          event.seq,
+          request.title,
+          request.options
+        );
+        const proseId = await say(
+          permissionPrompt(request.title, request.options),
+          structured ? { [PERMISSION_REQUEST_CONTENT_KEY]: structured } : undefined
+        );
+        noteHubEvent(proseId, "permission");
+
+        // The fleet Live Activity's decision — only while the question still
+        // stands: an answer that raced this send must not leave it showing.
+        const eventSeq = event.seq;
+        if (proseId && request.options.length > 0) {
+          fleet(({ name, at }) =>
+            pendingPermissionFor(roomId)?.requestSeq === eventSeq
+              ? {
+                  type: "decision-asked",
+                  decision: {
+                    key: permissionDecisionKey(roomId),
+                    roomId,
+                    eventId: proseId,
+                    agent: name,
+                    kind: "permission",
+                    question: request.title,
+                    options: inlinePermissionOptions(request.options),
+                    askedAt: at,
+                  },
+                }
+              : null
+          );
+        }
+
+        // …and, while clients in the field still read only it, the same
+        // payload again as its own event. Gated on the legacy flag
+        // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on).
+        if (structured && deps.client.sendCustomEvent && legacyRequestEvents()) {
+          const legacyId = await deps.client
+            .sendCustomEvent(agentUser, roomId, PERMISSION_REQUEST_TYPE, structured)
+            .catch((err) => {
+              log.error("could not send a structured permission request", {
+                sessionId,
+                roomId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return null;
+            });
+          // The prose already pushed; this one must not buzz a second time.
+          // Only when the prose landed — otherwise this is the question.
+          if (proseId) noteHubEvent(legacyId, "companion");
+        }
+        return;
+      }
+
+      case "error": {
+        // Held, not posted: the harness may be about to retry on a fallback
+        // model. Reported at turn end if nothing follows — see
+        // `pendingError`. The latest one wins: when every attempt fails, the
+        // last error is the one that describes the whole chain.
+        state.pendingError = event.payload ?? {};
+        // Outside a turn there is no end to wait for: said now, as before.
+        if (!state.inTurn) await reportError();
+        return;
+      }
+
+      default:
+        // user-prompt and permission-answer are echoes of what already
+        // happened in the room, or of a console action. Repeating them would
+        // make the agent quote the person it is talking to.
+        return;
+    }
+  };
+
   state.unsubscribe = subscribe(sessionId, (event: AcpEvent) => {
     if (state.ended) return;
 
-    void (async () => {
-      switch (event.type) {
-        case "agent-update": {
-          const text = messageChunkText(event.payload);
-          if (text !== undefined) {
-            if (state.pendingError !== null) {
-              // The agent is answering after all: the error was an attempt the
-              // harness recovered from, not the turn's outcome. See
-              // `pendingError`.
-              log.info("an agent error was followed by an answer; not reporting it", {
-                sessionId,
-                roomId,
-                error: errorMessage(state.pendingError),
-              });
-              state.pendingError = null;
-            }
-            state.produced = true;
-            state.buffer.push(text);
-            fleet(({ name, mxid, at }) => ({ type: "spoke", roomId, mxid, name, at }));
-            void streamLive(false);
-            scheduleFlush();
-            return;
-          }
+    // A `working` takes the trigger noted for it now, as it is fanned out,
+    // rather than when its place in the chain below comes up: by then the
+    // next prompt may have been noted, and this turn would take that one's.
+    const noted =
+      event.type === "state" && isRecord(event.payload) && event.payload.status === "working"
+        ? takeTrigger(sessionId)
+        : undefined;
 
-          const thought = chunkTextOfKind(event.payload, "agent_thought_chunk");
-          if (thought !== undefined) {
-            state.thoughtBuffer.push(thought);
-            // Only the phase reaches the card; the thought itself goes to the reader's devices.
-            fleet(({ name, mxid, at }) => ({ type: "thinking", roomId, mxid, name, at }));
-            void streamThought(false);
-            return;
-          }
-
-          const tool = foldToolUpdate(state.tools, event.payload);
-          if (tool !== null) {
-            state.produced = true;
-            const total = state.tools.size;
-            const completed = [...state.tools.values()].filter(
-              (t) => t.status === "completed" || t.status === "failed"
-            ).length;
-            fleet(({ name, mxid, at }) => ({ type: "step", roomId, mxid, name, title: tool.title, completed, total, at }));
-            void streamTool(tool);
-            return;
-          }
-
-          // Everything this path does not forward is recorded once, so the next
-          // capability a harness gains does not vanish here the way `tool_call`
-          // did for the whole life of the bridge. See `activity.ts`.
-          const kind = isRecord(event.payload) ? event.payload.sessionUpdate : undefined;
-          if (typeof kind === "string" && noteUnmappedKind(kind)) {
-            log.info("a session update kind reaches Matrix and is not forwarded", {
-              sessionId,
-              kind,
-            });
-          }
-          return;
-        }
-
-        case "state": {
-          const status = isRecord(event.payload) ? event.payload.status : undefined;
-
-          if (status === "working") {
-            // Without this the room looks dead for the ten seconds an agent
-            // spends thinking. The trigger is picked up here rather than at
-            // attach time, because a room outlives any one turn.
-            //
-            // Taken, not read: a trigger belongs to the one turn it started. Left
-            // in the map, a later turn nobody asked for would mark it again. And
-            // only replaced when there is a new one — `working` after a
-            // permission pause is the same turn, still owned by its message.
-            const noted = triggers.get(sessionId);
-            if (noted !== undefined) {
-              state.triggerEventId = noted.eventId;
-              state.voiceTriggered = noted.voice;
-              triggers.delete(sessionId);
-            }
-            state.inTurn = true;
-            fleet(({ name, mxid, at }) => ({ type: "turn-started", roomId, mxid, name, at }));
-            await startTyping();
-            await mark(REACTION.working);
-            return;
-          }
-
-          // A question only stands while the agent is waiting on it. A turn
-          // that moved on — answered in the console, cancelled, failed — must
-          // not leave the room able to "approve" something already decided.
-          if (status !== "waiting") clearPendingPermission(roomId);
-
-          // Anything that is not `working` means the agent is not typing —
-          // including `waiting`, which is a permission request this room cannot
-          // yet answer and could sit there for hours. Enumerating only idle and
-          // ended left typing on for exactly that case.
-          await flush();
-          await stopTyping();
-
-          if (status === "idle" || status === "ended") {
-            const wasTurn = state.inTurn || state.produced;
-            state.inTurn = false;
-            // An error nothing came after is the turn's outcome: report it now,
-            // as it used to be reported the moment it arrived.
-            if (state.pendingError !== null) await reportError();
-            // A turn that said nothing, ran nothing, and reported nothing is
-            // not a turn that worked. The hub cannot know *why* — the harness
-            // that failed did not say — but it can refuse to call silence
-            // success, and it can tell the reader that their question went
-            // unanswered rather than leaving them to infer it from a tick.
-            //
-            // Nothing is said when nobody asked: an unprompted turn (a cron
-            // job speaking) has no reader waiting and no message to mark.
-            //
-            // A session that ends mid-turn usually says why (the node went
-            // away, the harness exited), and that beats "its own logs will say".
-            // A turn the agent chose to leave silent (OpenClaw's NO_REPLY; the
-            // hub marks its idle state `silent`) is done, not failed: no
-            // notice, and a ✅ on the message it answered by saying nothing.
-            const choseSilence = isRecord(event.payload) && event.payload.silent === true;
-            if (wasTurn) {
-              const counts = state.lastTurnCounts ?? { total: 0, failed: 0 };
-              const errored = state.reportedError || (!state.produced && !choseSilence);
-              fleet(({ name, mxid, at }) => ({
-                type: "turn-finished",
-                roomId,
-                mxid,
-                name,
-                total: counts.total,
-                failed: counts.failed,
-                ...(counts.failedAt !== undefined ? { failedAt: counts.failedAt } : {}),
-                errored,
-                at,
-              }));
-            }
-            state.lastTurnCounts = null;
-            if (!state.produced && !state.reportedError && choseSilence) {
-              await mark(REACTION.done);
-            } else if (!state.produced && !state.reportedError) {
-              await mark(REACTION.failed);
-              if (state.triggerEventId) {
-                const reason = isRecord(event.payload) ? event.payload.reason : undefined;
-                await say(
-                  typeof reason === "string" && reason.trim() !== ""
-                    ? `This turn ended without a reply — ${reason.trim()}`
-                    : SILENT_TURN_NOTICE
-                );
-              }
-            } else if (!state.reportedError) {
-              await mark(REACTION.done);
-            }
-            // The reply, spoken — after the text is in the room, never before
-            // it and never instead of it. Not awaited: synthesis takes seconds
-            // and the next turn must not wait on it. An error turn is not
-            // spoken; the replier decides the rest (speak mode, service).
-            const spokenText = state.turnText.join("\n\n");
-            if (deps.speak && !state.reportedError && state.turnTextEventId && spokenText.trim() !== "") {
-              const turn: SpokenTurn = {
-                roomId,
-                agentUser,
-                sessionId,
-                text: spokenText,
-                textEventId: state.turnTextEventId,
-                voiceTriggered: state.voiceTriggered,
-              };
-              void deps.speak(turn).catch((err) => {
-                log.warn("the voice replier failed", {
-                  sessionId,
-                  roomId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              });
-            }
-            state.turnText = [];
-            state.turnTextEventId = null;
-            state.voiceTriggered = false;
-            state.produced = false;
-            state.reportedError = false;
-            // The turn is over, and so is its claim on the message that started
-            // it. A session that later goes `ended` between turns — a node that
-            // dropped, 90 minutes after krishna answered — must not come back
-            // and fail a message that was answered.
-            state.triggerEventId = null;
-          }
-
-          if (status === "ended") {
-            // A session that ended takes its attachment with it — an
-            // unsubscribed listener is the leak `_subscriberCountForTest`
-            // exists to catch.
-            detach();
-          }
-          return;
-        }
-
-        case "permission-request": {
-          const request = permissionRequest(event.payload);
-          if (!request) return;
-
-          // Remembered BEFORE the message is sent: an answer cannot arrive
-          // before the question, but a reply racing a slow homeserver would
-          // find nothing pending and be treated as an ordinary prompt.
-          //
-          // `event.seq` is the request's own sequence number, which is how
-          // `answerPermission` addresses it — the same address the console's
-          // WebSocket sends.
-          if (request.options.length > 0) {
-            notePendingPermission(roomId, {
-              sessionId,
-              requestSeq: event.seq,
-              options: request.options,
-            });
-          }
-
-          // One event for one question. The structured request rides INSIDE
-          // the prose message, under `dev.agentpod.permission`, the way the
-          // turn error card rides on its notice — so the one push this message
-          // raises is a push the phone can classify, in an encrypted room or
-          // not. The prose is what keeps Element and reply-by-number working;
-          // the key only lets a client that understands it render buttons.
-          // Every answer comes back as an ordinary message through the same
-          // matcher, keyed on the pending request above rather than on any
-          // event id, so nothing downstream has to know which one a reader used.
-          const structured = permissionRequestContent(
-            sessionId,
-            event.seq,
-            request.title,
-            request.options
-          );
-          const proseId = await say(
-            permissionPrompt(request.title, request.options),
-            structured ? { [PERMISSION_REQUEST_CONTENT_KEY]: structured } : undefined
-          );
-          noteHubEvent(proseId, "permission");
-
-          // The fleet Live Activity's decision — only while the question still
-          // stands: an answer that raced this send must not leave it showing.
-          const eventSeq = event.seq;
-          if (proseId && request.options.length > 0) {
-            fleet(({ name, at }) =>
-              pendingPermissionFor(roomId)?.requestSeq === eventSeq
-                ? {
-                    type: "decision-asked",
-                    decision: {
-                      key: permissionDecisionKey(roomId),
-                      roomId,
-                      eventId: proseId,
-                      agent: name,
-                      kind: "permission",
-                      question: request.title,
-                      options: inlinePermissionOptions(request.options),
-                      askedAt: at,
-                    },
-                  }
-                : null
-            );
-          }
-
-          // …and, while clients in the field still read only it, the same
-          // payload again as its own event. Gated on the legacy flag
-          // (`AGENTPOD_LEGACY_PERMISSION_EVENTS`, default on).
-          if (structured && deps.client.sendCustomEvent && legacyRequestEvents()) {
-            const legacyId = await deps.client
-              .sendCustomEvent(agentUser, roomId, PERMISSION_REQUEST_TYPE, structured)
-              .catch((err) => {
-                log.error("could not send a structured permission request", {
-                  sessionId,
-                  roomId,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-                return null;
-              });
-            // The prose already pushed; this one must not buzz a second time.
-            // Only when the prose landed — otherwise this is the question.
-            if (proseId) noteHubEvent(legacyId, "companion");
-          }
-          return;
-        }
-
-        case "error": {
-          // Held, not posted: the harness may be about to retry on a fallback
-          // model. Reported at turn end if nothing follows — see
-          // `pendingError`. The latest one wins: when every attempt fails, the
-          // last error is the one that describes the whole chain.
-          state.pendingError = event.payload ?? {};
-          // Outside a turn there is no end to wait for: said now, as before.
-          if (!state.inTurn) await reportError();
-          return;
-        }
-
-        default:
-          // user-prompt and permission-answer are echoes of what already
-          // happened in the room, or of a console action. Repeating them would
-          // make the agent quote the person it is talking to.
-          return;
+    const previous = state.chain;
+    state.chain = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = await Promise.race([
+        previous.then(() => false),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(true), eventOrderWaitMs);
+        }),
+      ]);
+      clearTimeout(timer);
+      if (late) {
+        log.warn("a room's previous event is still being handled; handling the next one anyway", {
+          sessionId,
+          roomId,
+          type: event.type,
+          waitedMs: eventOrderWaitMs,
+        });
       }
-    })();
+      await handle(event, noted);
+    })().catch((err) => {
+      log.error("could not handle a session event for its room", {
+        sessionId,
+        roomId,
+        type: event.type,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 
   attached.set(sessionId, state);

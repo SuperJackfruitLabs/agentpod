@@ -205,6 +205,46 @@ describe("speakTurn", () => {
     expect(h.synthCalls[0]!.text).toBe("The build is green.");
   });
 
+  describe("a turn that is not spoken says why, once, in the log", () => {
+    /** The skip lines the replier wrote. */
+    const skips = (h: ReturnType<typeof harness>) => h.logs.filter((l) => l.msg === "did not speak an agent's reply");
+
+    const cases: Array<[string, Parameters<typeof harness>[0], Partial<SpokenTurn>, string]> = [
+      ["speak mode off", { speech: { ...SPEECH, speakMode: "off" } }, {}, "speak_mode_off"],
+      ["voice_in, a typed turn", {}, { voiceTriggered: false }, "not_voice_turn"],
+      ["no speech service", { speech: null }, {}, "no_service"],
+      ["a harness-mode station", { identityMode: "harness" }, {}, "harness_mode"],
+      ["nothing to say", {}, { text: "  \n " }, "empty_text"],
+      ["an error turn", {}, { errorTurn: true }, "error_turn"],
+    ];
+    for (const [name, opts, turn, reason] of cases) {
+      test(`${name}: ${reason}`, async () => {
+        const h = harness(opts);
+        expect((await h.replier.speakTurn({ ...TURN, ...turn })).spoken).toBe(false);
+        expect(skips(h)).toEqual([
+          {
+            msg: "did not speak an agent's reply",
+            meta: { reason, stationId: "st_1", roomId: TURN.roomId, sessionId: TURN.sessionId },
+          },
+        ]);
+        expect(h.synthCalls).toHaveLength(0);
+        expect(JSON.stringify(h.logs)).not.toContain(TURN.text);
+      });
+    }
+
+    test("an error turn is not synthesised even when every turn is spoken", async () => {
+      const h = harness({ speech: { ...SPEECH, speakMode: "always" } });
+      expect(await h.replier.speakTurn({ ...TURN, errorTurn: true })).toEqual({ spoken: false, reason: "error-turn" });
+      expect(h.synthCalls).toHaveLength(0);
+    });
+
+    test("a spoken turn writes no skip line", async () => {
+      const h = harness();
+      expect((await h.replier.speakTurn(TURN)).spoken).toBe(true);
+      expect(skips(h)).toEqual([]);
+    });
+  });
+
   test("the service failing posts nothing, never throws, and logs once without the text", async () => {
     const h = harness({
       synth: async () => {

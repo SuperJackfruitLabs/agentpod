@@ -35,6 +35,9 @@
  *     (or paragraph) end before it, with nothing appended: the full text is
  *     right above.
  *   - **Never logged:** the text. Duration, characters, voice and latency are.
+ *   - **A skip is logged too**, once per turn, with its reason
+ *     (`SkipReason`): a reply that silently was not spoken read, on
+ *     2026-09-30, exactly like a replier that was never asked.
  */
 
 import { VOICE_REPLY_CONTENT_KEY, VoiceReply } from "@agentpod/contract";
@@ -57,13 +60,19 @@ export interface SpokenTurn {
   textEventId: string;
   /** Whether a voice note from the user started the turn. */
   voiceTriggered: boolean;
+  /**
+   * The turn ended in an error the room was shown. Never spoken — the words
+   * above the error are not the answer — but handed over all the same, so the
+   * skip is logged here with every other reason.
+   */
+  errorTurn?: boolean;
 }
 
 export type SpeakOutcome =
   | { spoken: true; eventId: string | null; durationMs: number | null; chars: number }
   | {
       spoken: false;
-      reason: "not-asked" | "no-service" | "harness-mode" | "no-station" | "empty" | "failed";
+      reason: "not-asked" | "no-service" | "harness-mode" | "no-station" | "empty" | "error-turn" | "failed";
       detail?: string;
     };
 
@@ -88,6 +97,16 @@ export interface VoiceReplyDeps {
   log: { info(msg: string, meta?: Meta): void; warn(msg: string, meta?: Meta): void; debug(msg: string, meta?: Meta): void };
   now?: () => number;
 }
+
+/** Why a finished turn with text was not spoken, as the log line says it. */
+export type SkipReason =
+  | "speak_mode_off"
+  | "not_voice_turn"
+  | "no_service"
+  | "harness_mode"
+  | "no_station"
+  | "empty_text"
+  | "error_turn";
 
 export function shouldSpeak(mode: SpeakMode, voiceTriggered: boolean): boolean {
   if (mode === "always") return true;
@@ -158,19 +177,30 @@ export function createVoiceReplier(deps: VoiceReplyDeps) {
     const started = now();
     const where = { roomId: turn.roomId, sessionId: turn.sessionId };
     let stationId: string | null = null;
+    /** One line, never the text: station, room, session and why. */
+    const skip = (reason: SkipReason, outcome: SpeakOutcome): SpeakOutcome => {
+      deps.log.info("did not speak an agent's reply", { reason, stationId, ...where });
+      return outcome;
+    };
     try {
-      if (turn.text.trim() === "") return { spoken: false, reason: "empty" };
       const station = await deps.stationFor(turn.roomId);
-      if (!station) return { spoken: false, reason: "no-station" };
+      if (!station) return skip("no_station", { spoken: false, reason: "no-station" });
       stationId = station.stationId;
-      if (station.identityMode === "harness") return { spoken: false, reason: "harness-mode" };
+      if (station.identityMode === "harness") return skip("harness_mode", { spoken: false, reason: "harness-mode" });
+      if (turn.errorTurn) return skip("error_turn", { spoken: false, reason: "error-turn" });
+      if (turn.text.trim() === "") return skip("empty_text", { spoken: false, reason: "empty" });
 
       const speech = await deps.resolveSpeech(station.stationId);
-      if (!speech) return { spoken: false, reason: "no-service" };
-      if (!shouldSpeak(speech.speakMode, turn.voiceTriggered)) return { spoken: false, reason: "not-asked" };
+      if (!speech) return skip("no_service", { spoken: false, reason: "no-service" });
+      if (!shouldSpeak(speech.speakMode, turn.voiceTriggered)) {
+        return skip(speech.speakMode === "off" ? "speak_mode_off" : "not_voice_turn", {
+          spoken: false,
+          reason: "not-asked",
+        });
+      }
 
       const text = textToSpeak(turn.text, speech.maxChars);
-      if (text === "") return { spoken: false, reason: "empty" };
+      if (text === "") return skip("empty_text", { spoken: false, reason: "empty" });
 
       const spoken = await deps.synthesize({ url: speech.url, apiKey: speech.apiKey }, { text, voice: speech.voice });
       const synthMs = Math.round(now() - started);

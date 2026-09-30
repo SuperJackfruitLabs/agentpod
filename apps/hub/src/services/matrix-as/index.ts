@@ -37,7 +37,7 @@ import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { principalById, principalForUser, principalHandle } from "../principals";
-import { attachRoomToSession, noteTurnTrigger } from "./outbound";
+import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
 import { createLogger } from "../../utils/logger";
@@ -511,6 +511,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         speak: voiceReplier.speakTurn,
       }),
     noteTrigger: noteTurnTrigger,
+    forgetTrigger: forgetTurnTrigger,
   };
 
   return {

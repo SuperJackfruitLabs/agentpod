@@ -12,6 +12,7 @@ import {
   attachRoomToSession,
   detachRoom,
   noteTurnTrigger,
+  forgetTurnTrigger,
   _attachedCountForTest,
 } from "./outbound";
 
@@ -1586,7 +1587,7 @@ describe("a turn's end hands its text to the voice replier", () => {
     });
   });
 
-  test("an error turn is not spoken", async () => {
+  test("an error turn is handed over marked as one, after the error, so the replier logs why it is silent", async () => {
     attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
     noteTurnTrigger(SESSION, "$v", { voice: true });
     emit(state("working", 1));
@@ -1595,7 +1596,35 @@ describe("a turn's end hands its text to the voice replier", () => {
     emit(state("idle", 3));
     await settle();
     expect(sent.at(-1)!.body).toMatch(/quota/);
-    expect(spoken).toEqual([]);
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0]).toMatchObject({ text: "Partial answer", errorTurn: true });
+    expect(sentAtSpeak).toEqual([2]);
+  });
+
+  test("a trigger taken back before its turn started marks nothing", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$refused", { voice: true });
+    // Someone else's message: not this one's to take back.
+    forgetTurnTrigger(SESSION, "$other");
+    forgetTurnTrigger(SESSION, "$refused");
+    emit(state("working", 1));
+    emit(chunk("A console prompt's answer."));
+    emit(state("idle", 2));
+    await settle();
+    expect(reactions).toEqual([]);
+    expect(spoken.map((t) => t.voiceTriggered)).toEqual([false]);
+  });
+
+  test("taking back another message's trigger leaves it in place", async () => {
+    attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+    noteTurnTrigger(SESSION, "$kept", { voice: true });
+    forgetTurnTrigger(SESSION, "$other");
+    emit(state("working", 1));
+    emit(chunk("Answer."));
+    emit(state("idle", 2));
+    await settle();
+    expect(reactions.map((r) => r.targetId)).toEqual(["$kept", "$kept"]);
+    expect(spoken.map((t) => t.voiceTriggered)).toEqual([true]);
   });
 
   test("an empty turn is not spoken", async () => {
@@ -1605,6 +1634,148 @@ describe("a turn's end hands its text to the voice replier", () => {
     emit(state("idle", 2));
     await settle();
     expect(spoken).toEqual([]);
+  });
+
+  /**
+   * The live sequence (krishna, 2026-09-30 03:56): a voice note, then "Hi?"
+   * typed while it was being transcribed. The voice turn ran; "Hi?" waited in
+   * the room queue and was prompted the moment the voice turn went idle — its
+   * `working` 51 ms after that `idle`, while the voice turn's end was still
+   * posting its text. Neither reply was spoken, and nothing said why.
+   */
+  describe("a queued turn that starts while the previous one is still ending", () => {
+    test("voice note first, typed message queued behind it: the voice turn is spoken", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+      noteTurnTrigger(SESSION, "$voice", { voice: true });
+      emit(state("working", 1));
+      emit(chunk("Voice answer."));
+      await settle();
+      // The queue flushes on the idle fan-out itself, so the next prompt's
+      // trigger and `working` arrive with no pause after it.
+      emit(state("idle", 2));
+      noteTurnTrigger(SESSION, "$hi");
+      emit(state("working", 3));
+      // The agent's first words come seconds later, not in the same tick.
+      await settle();
+      emit(chunk("Hi answer."));
+      emit(state("idle", 4));
+      await settle();
+      expect(spoken.map((t) => [t.text, t.voiceTriggered])).toEqual([
+        ["Voice answer.", true],
+        ["Hi answer.", false],
+      ]);
+    });
+
+    test("typed message first, voice note queued behind it: the voice turn is spoken, the typed one is not", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+      noteTurnTrigger(SESSION, "$hi");
+      emit(state("working", 1));
+      emit(chunk("Hi answer."));
+      await settle();
+      emit(state("idle", 2));
+      noteTurnTrigger(SESSION, "$voice", { voice: true });
+      emit(state("working", 3));
+      await settle();
+      emit(chunk("Voice answer."));
+      emit(state("idle", 4));
+      await settle();
+      expect(spoken.map((t) => [t.text, t.voiceTriggered])).toEqual([
+        ["Hi answer.", false],
+        ["Voice answer.", true],
+      ]);
+    });
+
+    test("each turn's marks land on the message that started it", async () => {
+      attachRoomToSession(SESSION, ROOM, AGENT, speakingDeps());
+      noteTurnTrigger(SESSION, "$voice", { voice: true });
+      emit(state("working", 1));
+      emit(chunk("Voice answer."));
+      await settle();
+      emit(state("idle", 2));
+      noteTurnTrigger(SESSION, "$hi");
+      emit(state("working", 3));
+      // The agent's first words come seconds later, not in the same tick.
+      await settle();
+      emit(chunk("Hi answer."));
+      emit(state("idle", 4));
+      await settle();
+      expect(reactions).toEqual([
+        { targetId: "$voice", key: "👀" },
+        { targetId: "$voice", key: "✅" },
+        { targetId: "$hi", key: "👀" },
+        { targetId: "$hi", key: "✅" },
+      ]);
+    });
+
+    test("a room that falls a whole turn behind still gives each turn its own trigger", async () => {
+      // A homeserver slow enough that the room is still posting turn one's
+      // answer when turn two has been prompted and noted.
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const base = speakingDeps();
+      let first = true;
+      attachRoomToSession(SESSION, ROOM, AGENT, {
+        ...base,
+        client: {
+          ...base.client,
+          sendText: async (...args: [string, string, string, Record<string, unknown>?]) => {
+            if (first) {
+              first = false;
+              await gate;
+            }
+            return base.client.sendText(...args);
+          },
+        },
+      });
+      noteTurnTrigger(SESSION, "$voice", { voice: true });
+      emit(state("working", 1));
+      emit(chunk("Voice answer."));
+      emit(state("idle", 2));
+      noteTurnTrigger(SESSION, "$hi");
+      emit(state("working", 3));
+      emit(chunk("Hi answer."));
+      emit(state("idle", 4));
+      await settle();
+      release();
+      await settle();
+      expect(sent.map((m) => m.body)).toEqual(["Voice answer.", "Hi answer."]);
+      expect(spoken.map((t) => [t.text, t.voiceTriggered])).toEqual([
+        ["Voice answer.", true],
+        ["Hi answer.", false],
+      ]);
+      expect(reactions.filter((r) => r.key === "✅").map((r) => r.targetId)).toEqual(["$voice", "$hi"]);
+    });
+  });
+
+  test("a send that never returns delays the room's next events, and does not stop them", async () => {
+    const base = speakingDeps();
+    let first = true;
+    attachRoomToSession(SESSION, ROOM, AGENT, {
+      ...base,
+      eventOrderWaitMs: 20,
+      client: {
+        ...base.client,
+        // The first typing notice hangs, holding up the `working` that sent it.
+        sendTyping: async (userId: string, roomId: string, on: boolean) => {
+          if (first) {
+            first = false;
+            return new Promise<void>(() => {});
+          }
+          return base.client.sendTyping(userId, roomId, on);
+        },
+      },
+    });
+    noteTurnTrigger(SESSION, "$one");
+    emit(state("working", 1));
+    emit(chunk("First answer."));
+    emit(state("idle", 2));
+    noteTurnTrigger(SESSION, "$two");
+    emit(state("working", 3));
+    emit(chunk("Second answer."));
+    emit(state("idle", 4));
+    for (let i = 0; i < 200 && spoken.length < 2; i++) await settle();
+    expect(sent.map((m) => m.body)).toEqual(["First answer.", "Second answer."]);
+    expect(reactions.filter((r) => r.targetId === "$two").map((r) => r.key)).toEqual(["👀", "✅"]);
   });
 
   test("once per turn, and a failing replier costs the room nothing", async () => {

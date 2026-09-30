@@ -164,6 +164,11 @@ export interface InboundDeps {
    * 👀 while working, ✅ when done. Absent for a turn nobody asked for.
    */
   noteTrigger?(sessionId: string, eventId: string, opts?: { voice?: boolean }): void;
+  /**
+   * Take back a noted trigger whose prompt did not go out, so the next turn —
+   * somebody else's — does not claim this message's marks and voice flag.
+   */
+  forgetTrigger?(sessionId: string, eventId: string): void;
 }
 
 /** The room, its station, and the node name that station's identity is built from. */
@@ -642,6 +647,7 @@ async function dispatchTurn(
   turn: QueuedPrompt,
   deps: InboundDeps
 ): Promise<DispatchOutcome> {
+  let noted: { sessionId: string; eventId: string } | null = null;
   try {
     // A session the hub has already ended is not a session. Boot reconciliation
     // ends every live one with "hub restarted", so without this check a room
@@ -686,7 +692,10 @@ async function dispatchTurn(
     // Before prompting, so the first words of the answer are not produced into
     // a stream nobody is listening to.
     deps.attach(sessionId, room.roomId, agentUser);
-    if (turn.eventId) deps.noteTrigger?.(sessionId, turn.eventId, { voice: turn.voice === true });
+    if (turn.eventId && deps.noteTrigger) {
+      deps.noteTrigger(sessionId, turn.eventId, { voice: turn.voice === true });
+      noted = { sessionId, eventId: turn.eventId };
+    }
 
     // The user's words, unchanged. Trimming or decorating them would put the
     // bridge's voice into the agent's input.
@@ -700,6 +709,8 @@ async function dispatchTurn(
     return "sent";
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
+    // This prompt did not start a turn, so its trigger must not wait for one.
+    if (noted) deps.forgetTrigger?.(noted.sessionId, noted.eventId);
     // Lost the race between the check above and the prompt: another message
     // started a turn in between. Waiting is still the answer.
     if (reason === SESSION_BUSY_MESSAGE) return "busy";
