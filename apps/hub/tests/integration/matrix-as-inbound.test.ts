@@ -6,6 +6,8 @@ import { resolveTenantForUser } from "../../src/auth/tenant";
 import { setGrant, deleteGrant } from "../../src/services/grants";
 import { createPrincipal } from "../../src/services/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
+import { SESSION_BUSY_MESSAGE } from "../../src/services/acp-sessions";
+import { pollUntil } from "../helpers/wait";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -589,6 +591,156 @@ describe("a voice note", () => {
 
     expect(transcribed).toBe(false);
     expect(prompts).toHaveLength(0);
+  });
+});
+
+/**
+ * A voice note that has to wait. Transcription takes seconds, and the appservice
+ * hands the hub a room's events one after another — so on krishna, 2026-09-30,
+ * the voice turn ran first and "Hi?" typed a second later waited in the room
+ * queue, and was prompted the moment the voice turn went idle. Whatever the
+ * order, the voice flag must reach the turn the voice note is in.
+ */
+describe("a voice note and a typed message in one room, one turn running", () => {
+  const VOICE_EVENT = {
+    type: "m.room.message",
+    sender: OWNER_MXID,
+    room_id: ROOM,
+    event_id: "$voice-q",
+    content: {
+      msgtype: "m.audio",
+      body: "Voice message.m4a",
+      url: "mxc://id.agentpod.dev/voice-q",
+      info: { mimetype: "audio/mp4", duration: 4_000 },
+    },
+  };
+  const typed = (eventId: string, body: string) => ({
+    type: "m.room.message",
+    sender: OWNER_MXID,
+    room_id: ROOM,
+    event_id: eventId,
+    content: { msgtype: "m.text", body },
+  });
+
+  /** `deps()` with a session whose turn is running until `finishTurn()`. */
+  function queueDeps() {
+    const base = deps();
+    const noted: Array<{ eventId: string; voice: boolean | undefined }> = [];
+    let busy = false;
+    let idle: (() => void) | null = null;
+    const d = {
+      ...base,
+      client: {
+        ...base.client,
+        downloadMedia: async () => new Uint8Array([1, 2, 3]),
+        sendCustomEvent: async () => "$notice",
+      },
+      transcriber: { transcribe: async () => ({ text: "what is the build status", language: "en" }) },
+      acp: {
+        ...base.acp,
+        isBusy: () => busy,
+        whenIdle: () =>
+          busy ? new Promise<"idle">((resolve) => (idle = () => resolve("idle"))) : Promise.resolve("idle" as const),
+      },
+      noteTrigger: (_s: string, eventId: string, opts?: { voice?: boolean }) => {
+        noted.push({ eventId, voice: opts?.voice });
+      },
+    };
+    return {
+      d,
+      noted,
+      startTurn: () => (busy = true),
+      finishTurn: () => {
+        busy = false;
+        idle?.();
+      },
+    };
+  }
+
+  /** Open the room's session with a first message, then hold a turn open. */
+  async function withRunningTurn(q: ReturnType<typeof queueDeps>) {
+    await handleRoomMessage(typed("$opening", "hello"), q.d);
+    q.startTurn();
+    q.noted.length = 0;
+    prompts = [];
+  }
+
+  test("a voice note queued behind a running turn is noted as a voice turn when it is sent", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const q = queueDeps();
+    await withRunningTurn(q);
+
+    await handleRoomMessage(VOICE_EVENT, q.d);
+    expect(prompts).toHaveLength(0);
+    q.finishTurn();
+
+    await pollUntil(() => prompts.length === 1);
+    expect(q.noted).toEqual([{ eventId: "$voice-q", voice: true }]);
+  });
+
+  test("voice then typed, both waiting: one turn, a voice turn, marked on the last message", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const q = queueDeps();
+    await withRunningTurn(q);
+
+    await handleRoomMessage(VOICE_EVENT, q.d);
+    await handleRoomMessage(typed("$hi", "Hi?"), q.d);
+    q.finishTurn();
+
+    await pollUntil(() => prompts.length === 1);
+    expect(q.noted).toEqual([{ eventId: "$hi", voice: true }]);
+    expect(prompts[0]!.text).toContain("what is the build status");
+    expect(prompts[0]!.text).toContain("Hi?");
+  });
+
+  test("typed then voice, both waiting: still a voice turn", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const q = queueDeps();
+    await withRunningTurn(q);
+
+    await handleRoomMessage(typed("$hi", "Hi?"), q.d);
+    await handleRoomMessage(VOICE_EVENT, q.d);
+    q.finishTurn();
+
+    await pollUntil(() => prompts.length === 1);
+    expect(q.noted).toEqual([{ eventId: "$voice-q", voice: true }]);
+  });
+
+  test("a prompt that loses the busy race takes its trigger back, and is sent again with it", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const q = queueDeps();
+    await handleRoomMessage(typed("$opening", "hello"), q.d);
+    q.noted.length = 0;
+    const forgotten: string[] = [];
+    let refuse = true;
+    const d = {
+      ...q.d,
+      acp: {
+        ...q.d.acp,
+        promptSession: async (userId: string, sessionId: string, text: string) => {
+          if (refuse) {
+            // Another prompt got in between the busy check and this one.
+            refuse = false;
+            q.startTurn();
+            throw new Error(SESSION_BUSY_MESSAGE);
+          }
+          prompts.push({ userId, sessionId, text });
+        },
+      },
+      forgetTrigger: (_s: string, eventId: string) => {
+        forgotten.push(eventId);
+      },
+    };
+
+    await handleRoomMessage(VOICE_EVENT, d);
+    expect(forgotten).toEqual(["$voice-q"]);
+    q.finishTurn();
+
+    await pollUntil(() => prompts.length === 2);
+    expect(q.noted).toEqual([
+      { eventId: "$voice-q", voice: true },
+      { eventId: "$voice-q", voice: true },
+    ]);
   });
 });
 
