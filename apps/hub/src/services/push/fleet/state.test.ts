@@ -90,9 +90,24 @@ describe("the shared fixture", () => {
     ]);
     const fixtureText = readFileSync(FIXTURE, "utf8");
     const built = contentState(state, s(1790670123));
-    expect(built).toEqual(JSON.parse(fixtureText));
+    // The v1 fixture, plus what 2026-09-30 added: the working row's phase,
+    // and a finished row's `since` as its turn's start with `endedAt` its end.
+    // (These events carry no mxid, so no row has one.)
+    const v1 = JSON.parse(fixtureText);
+    const expected = {
+      ...v1,
+      agents: [
+        v1.agents[0],
+        { ...v1.agents[1], state: "working", phase: "tools" },
+        { ...v1.agents[2], since: 1790669450, endedAt: 1790669500 },
+      ],
+    };
+    expect(built).toEqual(expected);
     // Key order too — the app decodes by key, but a reviewer diffs by eye.
-    expect(JSON.stringify(built)).toBe(JSON.stringify(JSON.parse(fixtureText)));
+    const order = (row: object) => Object.keys(row);
+    expect(order(built.agents[1]!)).toEqual(["roomId", "name", "state", "phase", "step", "completed", "total", "since"]);
+    expect(order(built.agents[2]!)).toEqual(["roomId", "name", "state", "step", "completed", "total", "since", "endedAt"]);
+    expect(Object.keys(built)).toEqual(Object.keys(v1));
     expect(FleetContentState.parse(built)).toEqual(built);
   });
 });
@@ -104,7 +119,7 @@ describe("transitions", () => {
   test("a turn starting makes the agent working, since the turn's start", () => {
     const { state, changes } = run([{ type: "turn-started", roomId: room, name, at: s(100) }]);
     const cs = contentState(state, s(110));
-    expect(cs.agents).toEqual([{ roomId: room, name, state: "working", since: 100 }]);
+    expect(cs.agents).toEqual([{ roomId: room, name, state: "working", phase: "thinking", since: 100 }]);
     expect(cs.working).toBe(1);
     expect(changes).toEqual(["routine"]);
   });
@@ -118,6 +133,7 @@ describe("transitions", () => {
       roomId: room,
       name,
       state: "working",
+      phase: "tools",
       step: "Reading files",
       completed: 1,
       total: 2,
@@ -150,7 +166,8 @@ describe("transitions", () => {
       state: "done",
       completed: 7,
       total: 7,
-      since: 160,
+      since: 100,
+      endedAt: 160,
     });
     expect(changes[1]).toBe("important");
   });
@@ -173,7 +190,7 @@ describe("transitions", () => {
       { type: "turn-started", roomId: room, name, at: s(100) },
       { type: "turn-finished", roomId: room, name, total: 0, failed: 0, errored: true, at: s(160) },
     ]);
-    expect(contentState(state, s(170)).agents[0]).toEqual({ roomId: room, name, state: "failed", since: 160 });
+    expect(contentState(state, s(170)).agents[0]).toEqual({ roomId: room, name, state: "failed", since: 100, endedAt: 160 });
   });
 
   test("a turn that only talked is active, not done", () => {
@@ -277,7 +294,122 @@ describe("transitions", () => {
       { type: "turn-finished", roomId: room, name, total: 3, failed: 1, failedAt: 2, at: s(110) },
       { type: "turn-started", roomId: room, name, at: s(120) },
     ]);
-    expect(contentState(state, s(121)).agents[0]).toEqual({ roomId: room, name, state: "working", since: 120 });
+    expect(contentState(state, s(121)).agents[0]).toEqual({ roomId: room, name, state: "working", phase: "thinking", since: 120 });
+  });
+});
+
+describe("the turn's phase, the avatar key and the finish time (spec 2026-09-30 A1)", () => {
+  const room = "!a:hs";
+  const name = "Lyra";
+  const mxid = "@agent_artistic-lyra:hs";
+  const phaseOf = (events: FleetEvent[], now = s(1_000)) => contentState(run(events).state, now).agents[0]!.phase;
+  const started = { type: "turn-started", roomId: room, mxid, name, at: s(100) } as const;
+  const step = (at: number, completed = 0, total = 1) =>
+    ({ type: "step", roomId: room, mxid, name, title: "Run tests", completed, total, at: s(at) }) as const;
+  const thinking = (at: number) => ({ type: "thinking", roomId: room, mxid, name, at: s(at) }) as const;
+  const spoke = (at: number) => ({ type: "spoke", roomId: room, mxid, name, at: s(at) }) as const;
+
+  test("a turn starts thinking", () => {
+    expect(phaseOf([started])).toBe("thinking");
+  });
+
+  test("a tool update is tools, a thought is thinking, answer text is writing — the last one wins", () => {
+    expect(phaseOf([started, step(101)])).toBe("tools");
+    expect(phaseOf([started, step(101), thinking(102)])).toBe("thinking");
+    expect(phaseOf([started, step(101), spoke(102)])).toBe("writing");
+    expect(phaseOf([started, spoke(101), step(102)])).toBe("tools");
+    expect(phaseOf([started, spoke(101), thinking(102)])).toBe("thinking");
+    expect(phaseOf([started, thinking(101), step(102, 1, 1)])).toBe("tools");
+  });
+
+  test("a thought is routine, like any other step of a turn", () => {
+    expect(run([started, thinking(101)]).changes).toEqual(["routine", "routine"]);
+  });
+
+  test("words or a thought with no turn start one, in their phase (an unprompted agent)", () => {
+    expect(phaseOf([spoke(100)])).toBe("writing");
+    expect(phaseOf([thinking(100)])).toBe("thinking");
+  });
+
+  test("a permission ask leaves the phase as it was: the row is needs_you, then back where it was", () => {
+    const asked = run([started, step(101), permission(room, name, s(102))]).state;
+    const row = contentState(asked, s(103)).agents[0]!;
+    expect(row.state).toBe("needs_you");
+    expect(row.phase).toBeUndefined();
+    // Working again after the answer is the same turn, still in its phase.
+    const resumed = run(
+      [{ type: "decision-cleared", key: `perm:${room}` }, { ...started, at: s(104) }],
+      asked
+    ).state;
+    expect(contentState(resumed, s(105)).agents[0]).toMatchObject({ state: "working", phase: "tools", since: 100 });
+  });
+
+  test("a finished turn has no phase; its since is the turn's start and endedAt its finish", () => {
+    const done = contentState(
+      run([started, step(130, 1, 1), spoke(150), { type: "turn-finished", roomId: room, mxid, name, total: 1, failed: 0, at: s(160) }])
+        .state,
+      s(170)
+    ).agents[0]!;
+    expect(done).toEqual({ roomId: room, mxid, name, state: "done", completed: 1, total: 1, since: 100, endedAt: 160 });
+
+    const failed = contentState(
+      run([started, { type: "turn-finished", roomId: room, mxid, name, total: 3, failed: 1, failedAt: 2, at: s(190) }]).state,
+      s(200)
+    ).agents[0]!;
+    expect(failed).toMatchObject({ state: "failed", since: 100, endedAt: 190 });
+    expect(failed.phase).toBeUndefined();
+  });
+
+  test("a finish with no start heard is a turn of no length, not one from the epoch", () => {
+    const row = contentState(
+      run([{ type: "turn-finished", roomId: room, mxid, name, total: 2, failed: 0, at: s(160) }]).state,
+      s(170)
+    ).agents[0]!;
+    expect(row).toMatchObject({ state: "done", since: 160, endedAt: 160 });
+  });
+
+  test("a turn that only talked is active: no end time, since its last activity", () => {
+    const row = contentState(
+      run([started, spoke(150), { type: "turn-finished", roomId: room, mxid, name, total: 0, failed: 0, at: s(160) }]).state,
+      s(170)
+    ).agents[0]!;
+    expect(row).toEqual({ roomId: room, mxid, name, state: "active", since: 160 });
+  });
+
+  test("finished rows are ordered by when they finished, not when they started", () => {
+    const { state } = run([
+      { type: "turn-started", roomId: "!long:hs", name: "Long", at: s(100) },
+      { type: "turn-started", roomId: "!short:hs", name: "Short", at: s(200) },
+      { type: "turn-finished", roomId: "!short:hs", name: "Short", total: 1, failed: 0, at: s(250) },
+      { type: "turn-finished", roomId: "!long:hs", name: "Long", total: 1, failed: 0, at: s(300) },
+    ]);
+    expect(contentState(state, s(310)).agents.map((a) => a.name)).toEqual(["Long", "Short"]);
+  });
+
+  test("every row carries the agent's mxid, whatever its state", () => {
+    const agent = (id: string) => ({ roomId: `!${id}:hs`, mxid: `@agent_${id}:hs`, name: id.toUpperCase() });
+    const [w, n, f, a, d] = ["w", "n", "f", "a", "d"].map(agent) as [ReturnType<typeof agent>, ...ReturnType<typeof agent>[]];
+    const busy = run([
+      { type: "turn-started", ...w!, at: s(100) },
+      { type: "turn-started", ...n!, at: s(100) },
+      permission(n!.roomId, n!.name, s(101)),
+      { type: "turn-started", ...f!, at: s(100) },
+      { type: "turn-finished", ...f!, total: 2, failed: 1, failedAt: 1, at: s(102) },
+    ]).state;
+    const settled = run([
+      { type: "turn-started", ...a!, at: s(100) },
+      { type: "turn-finished", ...a!, total: 0, failed: 0, at: s(102) },
+      { type: "turn-started", ...d!, at: s(100) },
+      { type: "turn-finished", ...d!, total: 1, failed: 0, at: s(103) },
+    ]).state;
+    const rows = [...contentState(busy, s(104)).agents, ...contentState(settled, s(104)).agents];
+    expect(rows.map((r) => r.state).sort()).toEqual(["active", "done", "failed", "needs_you", "working"]);
+    for (const r of rows) expect(r.mxid).toBe(`@agent_${r.roomId.slice(1, 2)}:hs`);
+  });
+
+  test("an event that does not say the mxid keeps the one already known", () => {
+    const { state } = run([started, { type: "step", roomId: room, name, title: "x", completed: 0, total: 1, at: s(101) }]);
+    expect(contentState(state, s(102)).agents[0]!.mxid).toBe(mxid);
   });
 });
 

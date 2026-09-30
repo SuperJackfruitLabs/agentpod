@@ -15,6 +15,9 @@ import {
 /** The file the app decodes too — copied byte for byte into supermessage. */
 const FIXTURE = join(import.meta.dir, "../fixtures/fleet-content-state.json");
 const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
+/** The second shape: turn phase, avatar key and finish time (spec 2026-09-30 A1). Also copied into supermessage. */
+const FIXTURE_V2 = join(import.meta.dir, "../fixtures/fleet-content-state-v2.json");
+const fixtureV2 = JSON.parse(readFileSync(FIXTURE_V2, "utf8"));
 
 describe("FleetContentState — the Live Activity's content, shared with the app", () => {
   it("round-trips the shared fixture unchanged", () => {
@@ -44,6 +47,34 @@ describe("FleetContentState — the Live Activity's content, shared with the app
     ).toBe(false);
     expect(over({ agents: [{ ...agent, state: "sleeping" }] })).toBe(false);
     expect(over({ secret: "x" })).toBe(false);
+  });
+
+  it("round-trips the v2 fixture (mxid, phase, endedAt) unchanged, and the v1 fixture still validates", () => {
+    const parsed = FleetContentState.parse(fixtureV2);
+    expect(parsed).toEqual(fixtureV2);
+    expect(JSON.stringify(parsed)).toBe(JSON.stringify(fixtureV2));
+    expect(FleetContentState.safeParse(fixture).success).toBe(true);
+  });
+
+  it("keeps the v2 agent keys in the order the fixture writes them", () => {
+    expect(Object.keys(fixtureV2.agents[0])).toEqual([
+      "roomId", "mxid", "name", "state", "phase", "step", "completed", "total", "since",
+    ]);
+    expect(Object.keys(fixtureV2.agents[2])).toEqual([
+      "roomId", "mxid", "name", "state", "step", "completed", "total", "since", "endedAt",
+    ]);
+  });
+
+  it("knows three phases and nothing else, and an end time is unix seconds", () => {
+    const agent = fixtureV2.agents[0];
+    const ok = (patch: Record<string, unknown>) =>
+      FleetContentState.safeParse({ ...fixtureV2, agents: [{ ...agent, ...patch }] }).success;
+    for (const phase of ["thinking", "tools", "writing"]) expect(ok({ phase })).toBe(true);
+    expect(ok({ phase: "done" })).toBe(false);
+    expect(ok({ phase: "Thinking" })).toBe(false);
+    expect(ok({ endedAt: -1 })).toBe(false);
+    expect(ok({ endedAt: 1.5 })).toBe(false);
+    expect(ok({ mxid: "" })).toBe(false);
   });
 
   it("counts a bound in characters, not UTF-16 units", () => {

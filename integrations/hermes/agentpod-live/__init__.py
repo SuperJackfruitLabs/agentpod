@@ -20,8 +20,9 @@ at the end of the turn is untouched, and is what a reader keeps.
 Fleet reports. The hub's fleet Live Activity (the Lock Screen card) hears
 about a bridge-mode turn from the hub's own bridge; a harness-mode turn it
 never sees. So the plugin also reports each turn's lifecycle — started, each
-tool step with its counts, an approval asked and answered, finished with its
-counts, and the event id of its answer — to the node's fleet socket
+tool step with its counts, the answer beginning to stream (no text), an
+approval asked and answered, finished with its counts, and the event id of
+its answer — to the node's fleet socket
 (`~/.agentpod/fleet.sock`), one JSON line per event. The node forwards it to
 the hub over its authenticated connection; the hub decides whose card it
 belongs on. A report carries no more text than the card shows: a step title
@@ -375,6 +376,8 @@ class _FleetTurn:
     tools: Dict[str, List[str]] = field(default_factory=dict)
     anonymous: Dict[str, List[str]] = field(default_factory=dict)
     touched_at: float = 0.0
+    # Whether the card was last told the answer is streaming (its Writing phase).
+    writing: bool = False
 
     def matches(self, turn_id: str) -> bool:
         return not turn_id or not self.turn_id or turn_id == self.turn_id
@@ -488,9 +491,26 @@ class FleetReporter:
         self._step(turn, turn.tools[tool_call_id][0])
 
     def _step(self, turn: _FleetTurn, title: str) -> None:
+        turn.writing = False
         completed, total = turn.counts()
         self._send(turn.room_id, turn.reader, {"type": "step", "title": bound(title, FLEET_STEP_MAX),
                                                "completed": completed, "total": total})
+
+    # The answer ---------------------------------------------------------------
+
+    def answer_began(self, session_id: str, turn_id: str) -> None:
+        """Answer text is streaming: the card's Writing phase. Said once per move into it, with no text."""
+        turn = self._live(session_id, turn_id)
+        if turn is None or turn.writing:
+            return
+        completed, total = turn.counts()
+        # Stream deltas arrive on Hermes's stream threads, so a preamble's last
+        # words can land after the tool call they preceded. A running tool is
+        # still the phase until it finishes.
+        if completed < total:
+            return
+        turn.writing = True
+        self._send(turn.room_id, turn.reader, {"type": "writing"})
 
     # Approvals --------------------------------------------------------------
 
@@ -620,6 +640,32 @@ def matrix_sender(homeserver: str, access_token: str, timeout_s: float = 5.0) ->
 # ─── Hermes wiring ───────────────────────────────────────────────────────────
 
 
+class _WritingGate:
+    """Which sessions the fleet worker was already told are writing.
+
+    Answer deltas come one per token on Hermes's stream threads; the fleet
+    card needs one note when a turn moves into writing. Without this every
+    token would queue on the fleet worker, and a full queue drops what comes
+    next — a turn's finish among it.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._noted: set = set()
+
+    def first(self, session_id: str) -> bool:
+        with self._lock:
+            if session_id in self._noted:
+                return False
+            self._noted.add(session_id)
+            return True
+
+    def reset(self, session_id: str) -> None:
+        with self._lock:
+            self._noted.discard(session_id)
+
+
+
 class _Worker:
     """One daemon thread that runs every emitter call in arrival order."""
 
@@ -687,6 +733,8 @@ def register(ctx: Any) -> None:
     else:
         logger.info("agentpod-live: MATRIX_USER_ID unset; turns are streamed but not reported to the fleet card")
 
+    writing = _WritingGate()
+
     def both(method: str, *args: Any) -> None:
         worker.put(method, *args)
         if fleet is not None:
@@ -700,6 +748,8 @@ def register(ctx: Any) -> None:
         room_id = _session_env("HERMES_SESSION_CHAT_ID")
         reader = _session_env("HERMES_SESSION_USER_ID") or sender_id
         both("begin", session_id or "", turn_id or "", room_id, reader or "")
+        # After the put, so a delta racing it is queued behind it.
+        writing.reset(session_id or "")
         return None
 
     def post_llm_call(session_id: str = "", turn_id: str = "", **_: Any):
@@ -708,16 +758,20 @@ def register(ctx: Any) -> None:
 
     def on_stream_delta(delta: str = "", kind: str = "text", session_id: str = "", turn_id: str = "", **_: Any):
         worker.put("delta", session_id or "", turn_id or "", delta or "", kind or "text")
+        if fleet is not None and delta and (kind or "text") != "reasoning" and writing.first(session_id or ""):
+            fleet.put("answer_began", session_id or "", turn_id or "")
 
     def pre_tool_call(tool_name: str = "", args: Any = None, session_id: str = "", turn_id: str = "",
                       tool_call_id: str = "", **_: Any):
         both("tool_started", session_id or "", turn_id or "", tool_call_id or "", tool_name, args)
+        writing.reset(session_id or "")
         return None
 
     def post_tool_call(tool_name: str = "", args: Any = None, session_id: str = "", turn_id: str = "",
                        tool_call_id: str = "", status: Any = None, error_type: Any = None, **_: Any):
         both("tool_finished", session_id or "", turn_id or "", tool_call_id or "", tool_name, args,
              _failed(status, error_type))
+        writing.reset(session_id or "")
 
     def pre_approval_request(command: Any = "", description: Any = "", session_id: str = "", turn_id: str = "",
                              **_: Any):

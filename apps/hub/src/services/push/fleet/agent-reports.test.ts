@@ -179,18 +179,24 @@ describe("whether a report is believed", () => {
 });
 
 describe("what a report becomes — the bridge's own fleet events", () => {
-  test("each event, in the agent's room, under the station's name, at the hub's time", async () => {
+  test("each event, in the agent's room, as the agent (its mxid keys the avatar), under the station's name, at the hub's time", async () => {
     const r = relay();
     await r.handle(NODE, report({ type: "turn-started" }, { at: now - 5_000 }));
     await r.handle(NODE, report({ type: "step", title: "Read notes", completed: 0, total: 1 }));
     await r.handle(NODE, report({ type: "turn-finished", total: 3, failed: 1, failedAt: 2 }));
     await r.handle(NODE, report({ type: "turn-finished", total: 0, failed: 0, errored: true }));
     expect(noted.map((n) => n.event)).toEqual([
-      { type: "turn-started", roomId: ROOM, name: "Echo", at: T0 },
-      { type: "step", roomId: ROOM, name: "Echo", title: "Read notes", completed: 0, total: 1, at: T0 },
-      { type: "turn-finished", roomId: ROOM, name: "Echo", total: 3, failed: 1, failedAt: 2, at: T0 },
-      { type: "turn-finished", roomId: ROOM, name: "Echo", total: 0, failed: 0, errored: true, at: T0 },
+      { type: "turn-started", roomId: ROOM, mxid: AGENT, name: "Echo", at: T0 },
+      { type: "step", roomId: ROOM, mxid: AGENT, name: "Echo", title: "Read notes", completed: 0, total: 1, at: T0 },
+      { type: "turn-finished", roomId: ROOM, mxid: AGENT, name: "Echo", total: 3, failed: 1, failedAt: 2, at: T0 },
+      { type: "turn-finished", roomId: ROOM, mxid: AGENT, name: "Echo", total: 0, failed: 0, errored: true, at: T0 },
     ]);
+  });
+
+  test("writing is the bridge's words-streaming event: the card's Writing phase, and nothing of the answer", async () => {
+    const r = relay();
+    await r.handle(NODE, report({ type: "writing" }));
+    expect(noted.map((n) => n.event)).toEqual([{ type: "spoke", roomId: ROOM, mxid: AGENT, name: "Echo", at: T0 }]);
   });
 
   test("an approval is the room's permission decision, answered in the room (no inline buttons)", async () => {
@@ -261,9 +267,12 @@ describe("on the card — a plugin agent and a bridge agent, one reader", () => 
     await fleet.settled();
     expect(sends).toHaveLength(1);
     expect((sends[0]!.payload as any).aps.event).toBe("start");
-    expect(content().agents).toEqual([{ roomId: ROOM, name: "Echo", state: "working", since: Math.floor(T0 / 1000) }]);
+    expect(content().agents).toEqual([
+      { roomId: ROOM, mxid: AGENT, name: "Echo", state: "working", phase: "thinking", since: Math.floor(T0 / 1000) },
+    ]);
 
     await r.handle(NODE, report({ type: "step", title: "Read notes", completed: 0, total: 1 }));
+    advance(42_000);
     await r.handle(NODE, report({ type: "turn-finished", total: 1, failed: 0 }));
     await fleet.settled();
     // Nothing is pushed to a started card until its update token arrives — the
@@ -278,7 +287,16 @@ describe("on the card — a plugin agent and a bridge agent, one reader", () => 
     });
     await fleet.settled();
     expect(content().agents).toEqual([
-      { roomId: ROOM, name: "Echo", state: "done", completed: 1, total: 1, since: Math.floor(T0 / 1000) },
+      {
+        roomId: ROOM,
+        mxid: AGENT,
+        name: "Echo",
+        state: "done",
+        completed: 1,
+        total: 1,
+        since: Math.floor(T0 / 1000),
+        endedAt: Math.floor(T0 / 1000) + 42,
+      },
     ]);
   });
 

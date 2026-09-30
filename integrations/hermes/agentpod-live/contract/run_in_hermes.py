@@ -409,6 +409,15 @@ def _check_fleet(reports: list) -> list[str]:
         title = str(steps[0].get("title", ""))
         expect(title.startswith(ModelHandler.tool) and len(title) <= 60,
                f"step title {title!r} is not Hermes's ACP title, bounded for the card")
+    # The card's Writing phase: said once, when the answer began streaming
+    # after the tool, from the text stream (not the reasoning), with no text.
+    writing = [i for i, t in enumerate(types) if t == "writing"]
+    last_step = max((i for i, t in enumerate(types) if t == "step"), default=-1)
+    expect(len(writing) == 1 and writing[0] > last_step,
+           f"the answer beginning is not one writing report after the steps: {types}")
+    if writing:
+        expect(reports[writing[0]].get("event") == {"type": "writing"},
+               f"a writing report carries more than that: {reports[writing[0]].get('event')}")
     finished = reports[-1].get("event", {}) if reports else {}
     expect(finished == {"type": "turn-finished", "total": 1, "failed": 0}, f"turn-finished: {finished}")
     return failures

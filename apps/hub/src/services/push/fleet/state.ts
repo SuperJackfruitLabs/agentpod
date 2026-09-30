@@ -23,6 +23,7 @@ import {
   type FleetContentState,
   type FleetLiveDecision,
   type FleetLiveDecisionOption,
+  type FleetLivePhase,
 } from "@agentpod/contract";
 
 /**
@@ -49,6 +50,13 @@ export const WAITING_FOR_YOU = "Waiting for you";
 
 export interface TurnProgress {
   startedAt: number;
+  /**
+   * Where the turn is on the card's track (spec 2026-09-30 A1): `thinking`
+   * from its start and after a thought, `tools` after a tool update,
+   * `writing` once answer text streams. The last of them wins; a permission
+   * ask leaves it as it was.
+   */
+  phase: FleetLivePhase;
   step?: string;
   completed: number;
   total: number;
@@ -59,10 +67,15 @@ export interface TurnOutcome {
   /** For a failed turn, the step it failed at. */
   completed: number;
   total: number;
+  /** When the turn started (its finish, when its start was never heard) and finished — "Done in 3m 57s". */
+  startedAt: number;
+  endedAt: number;
 }
 
 export interface AgentRecord {
   roomId: string;
+  /** The agent's Matrix id, which the app keys its cached avatar by. */
+  mxid?: string;
   name: string;
   /** The running turn, or null between turns. */
   turn: TurnProgress | null;
@@ -98,14 +111,28 @@ export function emptyFleet(): FleetState {
 
 // ─── Events ──────────────────────────────────────────────────────────────────
 
-/** Times are epoch milliseconds. */
+/**
+ * Times are epoch milliseconds. `mxid` is the agent's Matrix id; every
+ * producer knows it, and an event without one keeps the one already known.
+ */
 export type FleetEvent =
   /** The session went `working`. After a permission pause it is the same turn. */
-  | { type: "turn-started"; roomId: string; name: string; at: number }
+  | { type: "turn-started"; roomId: string; mxid?: string; name: string; at: number }
   /** A tool call started or changed. `completed`/`total` are this turn's tool counts so far. */
-  | { type: "step"; roomId: string; name: string; title: string; completed: number; total: number; at: number }
+  | {
+      type: "step";
+      roomId: string;
+      mxid?: string;
+      name: string;
+      title: string;
+      completed: number;
+      total: number;
+      at: number;
+    }
+  /** The agent is thinking (a thought chunk). Starts a turn if none is running. */
+  | { type: "thinking"; roomId: string; mxid?: string; name: string; at: number }
   /** The agent is writing its answer. Starts a turn if none is running (an unprompted agent). */
-  | { type: "spoke"; roomId: string; name: string; at: number }
+  | { type: "spoke"; roomId: string; mxid?: string; name: string; at: number }
   /**
    * The turn ended. `total`/`failed` are the tool counts `recordTurn` wrote;
    * `failedAt` is the 1-based position of the first failed tool; `errored`
@@ -114,6 +141,7 @@ export type FleetEvent =
   | {
       type: "turn-finished";
       roomId: string;
+      mxid?: string;
       name: string;
       total: number;
       failed: number;
@@ -136,12 +164,18 @@ export type FleetChange = "none" | "routine" | "flush" | "important";
 export function applyFleetEvent(state: FleetState, event: FleetEvent): { state: FleetState; change: FleetChange } {
   switch (event.type) {
     case "turn-started":
+    case "thinking":
     case "spoke": {
       const prev = state.agents.get(event.roomId);
-      const turn = prev?.turn ?? { startedAt: event.at, completed: 0, total: 0 };
+      const running = prev?.turn ?? null;
+      // Working again after a permission pause is the same turn, in the phase it was.
+      const phase: FleetLivePhase =
+        event.type === "spoke" ? "writing" : event.type === "thinking" ? "thinking" : (running?.phase ?? "thinking");
+      const turn = running ? { ...running, phase } : { startedAt: event.at, phase, completed: 0, total: 0 };
       return {
         state: withAgent(state, {
           roomId: event.roomId,
+          ...mxidOf(event, prev),
           name: event.name,
           turn,
           lastActivityAt: Math.max(prev?.lastActivityAt ?? 0, event.at),
@@ -156,8 +190,9 @@ export function applyFleetEvent(state: FleetState, event: FleetEvent): { state: 
       return {
         state: withAgent(state, {
           roomId: event.roomId,
+          ...mxidOf(event, prev),
           name: event.name,
-          turn: { ...started, step: event.title, completed: event.completed, total: event.total },
+          turn: { ...started, phase: "tools", step: event.title, completed: event.completed, total: event.total },
           lastActivityAt: Math.max(prev?.lastActivityAt ?? 0, event.at),
           outcome: prev?.turn ? prev.outcome : null,
         }),
@@ -165,15 +200,18 @@ export function applyFleetEvent(state: FleetState, event: FleetEvent): { state: 
       };
     }
     case "turn-finished": {
+      const prev = state.agents.get(event.roomId);
       const failed = event.failed > 0 || event.errored === true;
+      const span = { startedAt: Math.min(prev?.turn?.startedAt ?? event.at, event.at), endedAt: event.at };
       const outcome: TurnOutcome | null = failed
-        ? { kind: "failed", completed: event.failedAt ?? event.total, total: event.total }
+        ? { kind: "failed", completed: event.failedAt ?? event.total, total: event.total, ...span }
         : event.total > 0
-          ? { kind: "done", completed: event.total, total: event.total }
+          ? { kind: "done", completed: event.total, total: event.total, ...span }
           : null;
       return {
         state: withAgent(state, {
           roomId: event.roomId,
+          ...mxidOf(event, prev),
           name: event.name,
           turn: null,
           lastActivityAt: event.at,
@@ -196,6 +234,11 @@ export function applyFleetEvent(state: FleetState, event: FleetEvent): { state: 
       return { state: { ...state, decisions }, change: "flush" };
     }
   }
+}
+
+function mxidOf(event: { mxid?: string }, prev: AgentRecord | undefined): { mxid?: string } {
+  const mxid = event.mxid ?? prev?.mxid;
+  return mxid ? { mxid } : {};
 }
 
 function withAgent(state: FleetState, agent: AgentRecord): FleetState {
@@ -283,7 +326,9 @@ export function contentState(state: FleetState, now: number): FleetContentState 
     if (s === null) continue;
     rows.push(row(agent, s));
   }
-  rows.sort((a, b) => RANK[a.state] - RANK[b.state] || b.since - a.since || a.name.localeCompare(b.name));
+  // Most recent first: a finished row by when it finished, since its `since` is its start.
+  const recency = (r: FleetLiveAgent) => r.endedAt ?? r.since;
+  rows.sort((a, b) => RANK[a.state] - RANK[b.state] || recency(b) - recency(a) || a.name.localeCompare(b.name));
 
   let oldest: DecisionRecord | null = null;
   for (const d of state.decisions.values()) {
@@ -301,7 +346,13 @@ export function contentState(state: FleetState, now: number): FleetContentState 
 }
 
 function row(agent: AgentRecord, s: FleetLiveAgentState): FleetLiveAgent {
-  const base = { roomId: agent.roomId, name: bound(agent.name, NAME_MAX), state: s };
+  // Keys in the order the contract (and its v2 fixture) writes them.
+  const base = {
+    roomId: agent.roomId,
+    ...(agent.mxid ? { mxid: agent.mxid } : {}),
+    name: bound(agent.name, NAME_MAX),
+    state: s,
+  };
   switch (s) {
     case "needs_you":
       return { ...base, step: WAITING_FOR_YOU, since: unix(agent.turn?.startedAt ?? agent.lastActivityAt) };
@@ -310,25 +361,27 @@ function row(agent: AgentRecord, s: FleetLiveAgentState): FleetLiveAgent {
       const step = turn.step ? bound(turn.step, FLEET_STEP_MAX) : "";
       return {
         ...base,
+        phase: turn.phase,
         ...(step ? { step } : {}),
         ...(turn.total > 0 ? { completed: turn.completed, total: turn.total } : {}),
         since: unix(turn.startedAt),
       };
     }
     case "failed": {
-      const o = agent.outcome;
-      if (!o || o.total === 0) return { ...base, since: unix(agent.lastActivityAt) };
+      const o = agent.outcome!;
+      const span = { since: unix(o.startedAt), endedAt: unix(o.endedAt) };
+      if (o.total === 0) return { ...base, ...span };
       return {
         ...base,
         step: bound(`Failed at step ${o.completed} of ${o.total}`, FLEET_STEP_MAX),
         completed: o.completed,
         total: o.total,
-        since: unix(agent.lastActivityAt),
+        ...span,
       };
     }
     case "done": {
       const o = agent.outcome!;
-      return { ...base, completed: o.completed, total: o.total, since: unix(agent.lastActivityAt) };
+      return { ...base, completed: o.completed, total: o.total, since: unix(o.startedAt), endedAt: unix(o.endedAt) };
     }
     case "active":
       return { ...base, since: unix(agent.lastActivityAt) };
