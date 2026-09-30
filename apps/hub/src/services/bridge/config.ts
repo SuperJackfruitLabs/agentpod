@@ -46,11 +46,19 @@ export const BRIDGE_SOURCE = "superpipeline";
  * something fixed, kept because the reason it was right is the reason the fix
  * had to be built somewhere.
  *
- * The default is deliberately NOT `ask`. A default is what an unattended board
- * gets, `ask` asks about every tool call, and a hub upgraded into it would
- * start parking cards on questions nobody is awake to answer. `accept-edits` is
- * the supervised setting an operator should reach for: file writes proceed,
- * anything that executes waits for a human.
+ * The default is deliberately NOT `ask`. A default is what an unattended board gets, and a hub
+ * upgraded into `ask` would start parking cards on questions nobody is awake to answer.
+ *
+ * **What the mode actually controls is EDITS.** The hub's policy
+ * (`acp-sessions.ts` `handlePermissionRequest`) auto-allows `kind === "edit"` under
+ * `accept-edits` and parks everything else for a human — which is right, and which has never
+ * once been reached for a command. Across every ACP session this hub has run, 254 tool calls of
+ * kind `execute` produced ZERO permission requests; all 27 ever seen were edits. The harness
+ * decides what to ask about, and none of them ask before running something. hermes is explicit:
+ * its modes live in `_MODE_TO_EDIT_APPROVAL_POLICY` and every one of them is an edit policy.
+ *
+ * So no mode here supervises execution. Do not document one as though it does — that claim was
+ * in three places and in this comment, and it was false in all four (agentpod#637).
  */
 
 /** The wait, when an agent does not set its own. See `permissionWaitMs`. */

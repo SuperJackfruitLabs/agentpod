@@ -227,11 +227,24 @@
             bind:value={fMode}
             class="border-input bg-background w-full rounded-md border px-3 py-2 text-sm"
           >
-            <option value="full-auto">full-auto — never asks a human</option>
-            <option value="accept-edits">accept-edits — asks before anything that executes</option>
-            <option value="ask">ask — asks about every tool call</option>
+            <option value="full-auto">full-auto — never asks</option>
+            <option value="accept-edits">accept-edits — auto-approves edits in the workspace</option>
+            <option value="ask">ask — asks before an edit</option>
           </select>
         </label>
+
+        <p class="text-muted-foreground sm:col-span-2 text-xs leading-relaxed">
+          <!--
+            Written because the previous text here said accept-edits "asks before anything that
+            executes", which is what the hub implements and what no harness delivers: across every
+            session this fleet has run, 254 `execute` tool calls produced zero permission requests.
+            A mode picker that implies supervision nobody provides is worse than one that says
+            nothing.
+          -->
+          <strong>The mode controls edits, not commands.</strong> No harness currently asks before
+          running one, so an agent you dispatch can execute on its station unasked whatever you pick
+          here. Supervising execution needs it enforced where the process runs.
+        </p>
 
         <label class="space-y-1.5 text-sm">
           <span class="font-medium">Claim credential</span>

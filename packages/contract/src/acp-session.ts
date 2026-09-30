@@ -2,6 +2,18 @@ import { z } from "zod";
 
 // ─── ACP session ────────────────────────────────────────────────────────────
 
+/**
+ * How much a station's agent is asked before it acts — **on edits**.
+ *
+ * Not on execution, though the names suggest otherwise. The hub's policy parks any non-edit
+ * permission request for a human, correctly; but across every ACP session this fleet has run,
+ * 254 tool calls of kind `execute` produced zero permission requests, while all 27 requests ever
+ * seen were edits. The harness chooses what to ask about and none of them ask before running a
+ * command — hermes keeps its three modes in `_MODE_TO_EDIT_APPROVAL_POLICY`, all of them edit
+ * policies.
+ *
+ * So: an agent in any of these modes can run commands unasked. See agentpod#637.
+ */
 export const AcpSessionMode = z.enum(["ask", "accept-edits", "full-auto"]);
 export type AcpSessionMode = z.infer<typeof AcpSessionMode>;
 
