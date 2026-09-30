@@ -489,12 +489,23 @@ audit of who added an agent.
 | Name | yes | Stable. Lands in `bridge_dispatches.agent_key` and every log line, so it must be unique within the workspace. |
 | Board | yes | The superpipeline board to claim from, `brd_<16 hex>`. |
 | Station | yes | Chosen from the adopted fleet. A composite foreign key makes a station in another tenant unrepresentable. |
-| Permission mode | no (default `full-auto`) | `full-auto` never asks a human. `accept-edits` — the supervised setting — auto-approves file writes and **asks about anything that executes**. `ask` asks about every tool call. Anything `accept-edits` or `ask` asks about parks the card in `input-required` until a person answers. |
+| Permission mode | no (default `full-auto`) | **An edit policy, not an execution policy** — see the warning below. `full-auto` never asks. `accept-edits` auto-approves edits in the workspace. `ask` asks about edits. Anything actually asked about parks the card in `input-required` until a person answers. |
 | Claim credential | yes | The agent's own superpipeline token. Stored AES-256-GCM; it cannot be read back, only replaced. |
 | Run-only credential | no | Lets the agent complete or block **its own card** over MCP. Mint it with **Issue a run-only token** in superpipeline — not the claim credential, which could take a second card while working the first. |
 | Permission wait | no (default **30 minutes**) | How long a human has to answer before the run gives up. |
 | Concurrency | no | How many of this agent's runs may be in flight. superpipeline defaults to 1. |
 | Profile | no | Claim under a profile, when the board routes by profile. |
+
+> ⚠️ **No harness gates execution.** Across every ACP session this hub has run — 254 tool calls of
+> kind `execute` — not one produced a permission request. All 27 requests ever seen were edits. The
+> hub's own policy is correct and untouched (`accept-edits` auto-allows `kind === "edit"` and parks
+> everything else for a human), but it is unreachable: the harness decides what to ask about, and
+> none of them ask before running a command. hermes is explicit — its three modes are held in
+> `_MODE_TO_EDIT_APPROVAL_POLICY` and described as "Ask before edits", "Auto-allow workspace and
+> /tmp edits", "Auto-allow file edits for this session". There is no execution gate to select.
+> 
+> So: **an agent you dispatch can run commands without anyone being asked, in every mode.** The mode
+> controls edits. Supervising execution has to be enforced where the process runs — agentpod#637.
 
 **A change takes effect within about ten seconds, with no restart.** The bridge reconciles the
 running loops against the table on a tick: a new agent starts claiming, a disabled or removed one
