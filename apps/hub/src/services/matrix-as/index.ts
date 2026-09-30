@@ -49,6 +49,10 @@ import {
   createSigningKeyUploader,
 } from "./crypto-transport";
 import { withEncryption } from "./crypto-send";
+import { createVoiceReplier } from "./voice-reply";
+import { stationForRoom } from "./stations";
+import { resolveSpeechFor } from "../speech-settings";
+import { synthesize } from "../speech-client";
 
 const log = createLogger("matrix-bridge");
 
@@ -445,6 +449,22 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
       }
     : undefined;
 
+  /**
+   * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
+   * when the station's speech settings say so — the console's station and
+   * hub settings, then SPEECH_* env. Bridge-mode stations only; runs after
+   * the text is in the room and posts nothing when speech fails.
+   */
+  const voiceReplier = createVoiceReplier({
+    stationFor: stationForRoom,
+    resolveSpeech: resolveSpeechFor,
+    synthesize: (endpoint, request) => synthesize(endpoint, request),
+    // The encrypting client: it knows which rooms are encrypted, and it
+    // encrypts the voice message event itself as it does every other.
+    client: speakingClient,
+    log: createLogger("matrix-voice-reply"),
+  });
+
   const inboundDeps = {
     domain: cfg.domain,
     // Absent for a plaintext bridge, which is the default. The
@@ -488,6 +508,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
         client: speakingClient,
         readerFor: readerForRoom,
         nameFor: agentNameForRoom,
+        speak: voiceReplier.speakTurn,
       }),
     noteTrigger: noteTurnTrigger,
   };

@@ -203,6 +203,33 @@ export const VoiceTranscript = z.object({
 });
 export type VoiceTranscript = z.infer<typeof VoiceTranscript>;
 
+/**
+ * An agent's reply, spoken: what the hub's voice message says it is.
+ *
+ * Carried on the `m.audio` voice message (MSC3245) the hub posts after a
+ * bridge-mode agent's text reply, under this one namespaced key. The text
+ * reply is posted first and stays the reply; this names it
+ * (`text_event_id`) so a client can draw the voice note with the text it
+ * speaks, or fold the two into one bubble. Not an `m.in_reply_to`: a reply
+ * relation would make every other client quote the text a second time.
+ *
+ * `voice` is the speech service's voice id, or a blend
+ * (`af_heart:60+af_bella:40`). Versioned like {@link VoiceTranscript}:
+ * additive changes bump `schema_version`, unknown fields are stripped.
+ */
+export const VOICE_REPLY_CONTENT_KEY = "dev.agentpod.voice_reply";
+
+export const VoiceReply = z.object({
+  schema_version: z.literal(1),
+  /** The agent's text message this voice note speaks. */
+  text_event_id: z.string().min(1).max(255),
+  /** The voice it was spoken in. */
+  voice: z.string().min(1).max(64),
+  /** Length of the audio in whole seconds. */
+  seconds: z.number().int().nonnegative().max(3600).optional(),
+});
+export type VoiceReply = z.infer<typeof VoiceReply>;
+
 // ─── Requests that ride on the prose message ─────────────────────────────────
 //
 // A permission request and a superpipeline gate were each sent as TWO events: a

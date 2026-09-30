@@ -67,6 +67,7 @@ PARAGRAPH_GAP = 0.5  # ... and between paragraphs (list items, table rows)
 MAX_BLEND_PARTS = 4
 DEFAULT_VOICE = "af_heart"
 PREVIEW_TEXT = "Hi, I'm {name}. This is how I sound when I read your messages aloud."
+WAVEFORM_POINTS = 60  # amplitudes in X-Audio-Waveform; clients resample to their width
 
 
 # --- voices -------------------------------------------------------------------------------
@@ -260,6 +261,28 @@ def encode(audio: np.ndarray, sample_rate: int, fmt: str) -> bytes:
     return out.getvalue()
 
 
+def waveform(audio: np.ndarray, points: int = WAVEFORM_POINTS) -> list[int]:
+    """
+    The loudness of `points` equal slices of the audio, 0..1024, loudest = 1024:
+    the MSC3246 `waveform` a Matrix voice message carries, so Element and
+    Supermessage draw the bars without decoding Opus. RMS per slice, from the
+    PCM before encoding. Silence (or no audio) is all zeros.
+    """
+    n = len(audio)
+    if n == 0:
+        return [0] * points
+    edges = np.linspace(0, n, points + 1).astype(int)
+    levels = []
+    for i in range(points):
+        start = min(edges[i], n - 1)
+        seg = audio[start : max(edges[i + 1], start + 1)]
+        levels.append(float(np.sqrt(np.mean(np.square(seg, dtype=np.float64)))))
+    peak = max(levels)
+    if peak <= 1e-6:
+        return [0] * points
+    return [min(1024, max(0, round(level / peak * 1024))) for level in levels]
+
+
 # --- one at a time ---------------------------------------------------------------------------------
 
 
@@ -313,6 +336,9 @@ class SpeechRequest(BaseModel):
     voice: str = DEFAULT_VOICE
     response_format: str = "opus"
     speed: float = 1.0
+    # Opt-in: answer with X-Audio-Waveform (see `waveform`). The header
+    # `X-Want-Waveform: 1` asks the same, for a client that cannot add fields.
+    waveform: bool = False
 
 
 def create_app(
@@ -371,13 +397,14 @@ def create_app(
         if not authorization or not hmac.compare_digest(authorization, expected):
             raise HTTPException(status_code=401, detail="unauthorized")
 
-    async def synthesise(sentences, parts, lang, speed, fmt, deadline) -> tuple[bytes, int, float]:
+    async def synthesise(sentences, parts, lang, speed, fmt, deadline, want_waveform=False):
         eng = state["engine"]
 
         def work():
             started = time.monotonic()
             audio = np.concatenate(list(speak(eng, sentences, parts, lang, speed, deadline)))
-            return encode(audio, eng.sample_rate, fmt), len(audio), time.monotonic() - started
+            wave = waveform(np.clip(audio, -1.0, 1.0)) if want_waveform else None
+            return encode(audio, eng.sample_rate, fmt), len(audio), time.monotonic() - started, wave
 
         try:
             return await queue.run(work, deadline)
@@ -398,7 +425,7 @@ def create_app(
     authorised = [Depends(check_token)]
 
     @app.post("/v1/audio/speech", dependencies=authorised)
-    async def speech(body: SpeechRequest) -> Response:
+    async def speech(body: SpeechRequest, x_want_waveform: str | None = Header(None)) -> Response:
         received = time.monotonic()
         deadline = received + timeout
         if not body.input.strip():
@@ -417,7 +444,10 @@ def create_app(
         sentences = speech_text.split_sentences(await asyncio.to_thread(speech_text.to_speech, body.input))
         if not sentences:
             raise HTTPException(status_code=400, detail="input has nothing to say aloud")
-        data, samples, synth_s = await synthesise(sentences, parts, lang, body.speed, fmt, deadline)
+        want_waveform = body.waveform or (x_want_waveform or "").strip().lower() in ("1", "true", "yes")
+        data, samples, synth_s, wave = await synthesise(
+            sentences, parts, lang, body.speed, fmt, deadline, want_waveform
+        )
         duration_ms = round(samples * 1000 / SAMPLE_RATE)
         log.info(
             "speech voice=%s format=%s chars=%d sentences=%d audio_ms=%d synth_ms=%d total_ms=%d",
@@ -429,7 +459,10 @@ def create_app(
             round(synth_s * 1000),
             round((time.monotonic() - received) * 1000),
         )
-        return Response(content=data, media_type=FORMATS[fmt][0], headers={"X-Audio-Duration-Ms": str(duration_ms)})
+        headers = {"X-Audio-Duration-Ms": str(duration_ms)}
+        if wave is not None:
+            headers["X-Audio-Waveform"] = ",".join(str(x) for x in wave)
+        return Response(content=data, media_type=FORMATS[fmt][0], headers=headers)
 
     @app.get("/v1/voices", dependencies=authorised)
     def voices() -> dict:
@@ -457,7 +490,7 @@ def create_app(
         path = cache / "previews" / f"{voice.id}.ogg"
         if not path.exists():
             text = speech_text.to_speech(PREVIEW_TEXT.format(name=voice.name))
-            data, _, _ = await synthesise(
+            data, _, _, _ = await synthesise(
                 speech_text.split_sentences(text), [(voice.id, 1.0)], voice.lang, 1.0, "opus", time.monotonic() + timeout
             )
             path.parent.mkdir(parents=True, exist_ok=True)

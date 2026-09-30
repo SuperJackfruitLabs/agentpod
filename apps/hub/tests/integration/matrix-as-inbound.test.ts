@@ -531,6 +531,32 @@ describe("a voice note", () => {
     );
   });
 
+  test("the turn it starts is noted as a voice turn, so a station set to answer voice with voice speaks it", async () => {
+    await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
+    const { deps: d } = voiceDeps("send the report by Friday");
+    const noted: Array<{ eventId: string; voice: boolean | undefined }> = [];
+    const withTrigger = {
+      ...d,
+      noteTrigger: (_s: string, eventId: string, opts?: { voice?: boolean }) => {
+        noted.push({ eventId, voice: opts?.voice });
+      },
+    };
+
+    await handleRoomMessage(voice(OWNER_MXID), withTrigger);
+    // Even one that could not be heard: the user spoke, so the answer may be spoken.
+    await handleRoomMessage(voice(OWNER_MXID, { info: { mimetype: "audio/mp4", duration: 999_000 } }), withTrigger);
+    await handleRoomMessage(
+      { type: "m.room.message", sender: OWNER_MXID, room_id: ROOM, event_id: "$typed", content: { msgtype: "m.text", body: "hi" } },
+      withTrigger
+    );
+
+    expect(noted).toEqual([
+      { eventId: "$voice1", voice: true },
+      { eventId: "$voice1", voice: true },
+      { eventId: "$typed", voice: false },
+    ]);
+  });
+
   test("a lookup that throws is a voice note that cannot be heard, not a lost message", async () => {
     await setGrant(OWNER_PRINCIPAL, { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false });
     const { deps: d } = voiceDeps("never used");

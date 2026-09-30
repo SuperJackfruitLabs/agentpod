@@ -992,6 +992,7 @@ never spoken Matrix can be talked to from a phone. Design:
 | switch | `ENABLE_MATRIX_BRIDGE` — the **literal lowercase `true`**; `1`, `TRUE` and `yes` are off |
 | config | `MATRIX_HOMESERVER_URL` (default `http://127.0.0.1:6167`), `MATRIX_SERVER_NAME`, `MATRIX_AS_TOKEN`, `MATRIX_HS_TOKEN` |
 | voice notes | Set in the console: **Admin → Transcription** (the hub default: provider, URL, model, API key, longest note, 10–600 s; *Test connection* sends one second of silence) and per station in the station page's **Voice notes** section (inherit / off / custom). API keys are stored encrypted with `ENCRYPTION_KEY` and never shown again. Until an admin saves the hub default, the hub falls back to `TRANSCRIBE_URL`, `TRANSCRIBE_API_KEY`, `TRANSCRIBE_MODEL` (default `large-v3-turbo`); once saved, the env is ignored. Any OpenAI-compatible `/v1/audio/transcriptions`: the self-hosted transcriber on foundry (`deploy/transcriber`), or a hosted provider. None configured, a voice note reaches the agent as a note that it could not be heard. Settings are cached for 30 s per hub process; a save clears the cache |
+| voice replies | Set in the console: **Admin → Speech** (the hub default: URL, API key, default voice, when agents speak, longest reply spoken 100–4096 characters; *Test and play* speaks a sentence and plays it) and per station in the station page's **Voice replies** section. Until an admin saves the hub default, the hub falls back to `SPEECH_URL`, `SPEECH_API_KEY`, `SPEECH_VOICE` (empty: each agent its own), `SPEECH_MODE` (`off` \| `voice_in` \| `always`, default `voice_in`) and `SPEECH_MAX_CHARS` (default 1500). See **Voice replies** below |
 | a station's user | `@agent_<node>__<station>:id.agentpod.dev` — **two** underscores between the halves |
 | its room | `#agentpod_<node>__<station>:id.agentpod.dev` |
 
@@ -1006,6 +1007,68 @@ posted in the room as a reply to the note, and the agent gets it marked
 longest note is a setting). The self-hosted transcriber takes ~13 s for a
 short note and ~80 s for five minutes on foundry's CPU; a hosted provider is
 seconds. See `deploy/transcriber/README.md`.
+
+**Voice replies.** A bridge-mode agent (Claude Code, Codex, opencode, Pi, any
+ACP-bridged agent — the hub posts its messages) can answer with a voice note
+after its text. The speech service is anything with OpenAI's
+`POST /v1/audio/speech`; AgentPod's own (`deploy/speech`, Kokoro on foundry,
+`http://100.78.52.87:8841`) also returns the waveform the voice note draws.
+
+- **Which service**, most specific first: the station's own (*custom*), the
+  station saying *off*, the hub default saved in **Admin → Speech**, the
+  `SPEECH_*` env (only while nothing is saved), none. A saved but disabled hub
+  default is off, not a fall-through to the env. Cached 30 s per hub process;
+  a save clears it. Keys are encrypted with `ENCRYPTION_KEY`, never shown
+  again, and kept out of the generic settings dump.
+- **Which voice**: the station's, else the hub's default voice, else one
+  **assigned from the station's id** — FNV-1a of the id over fifteen curated
+  voices (`CURATED_VOICES` in `services/speech-settings.ts`; append only, since
+  reordering re-voices every unassigned agent). Stable across restarts, and
+  different agents mostly sound different. The station page shows it as
+  *Assigned: …* and the owner may pick another, or type a blend
+  (`af_heart:60+af_bella:40`).
+- **When it speaks** — *speak replies*, the station's else the hub's:
+  `voice_in` answers a voice note with a voice note (any turn a user voice
+  note started, heard or not, including a queued batch holding one);
+  `always` speaks every turn that ended with text; `off` never.
+- **What is spoken**: the whole turn's text as posted (a turn that flushed in
+  parts, e.g. around a permission question, is joined). Longer than the
+  limit, it is spoken up to the last sentence (or paragraph) end within it,
+  and nothing is added — the text above has the rest. The service normalises
+  markdown, code and numbers itself. An error turn, a silent turn and an
+  empty turn are never spoken.
+- **Order and failure**: the text is posted first and is never delayed by
+  speech; synthesis starts after the turn ends and is not awaited. If the
+  service is down, busy (503), slow (150 s) or the upload is refused, the hub
+  logs **one** warning (`could not speak an agent's reply`, with station, room
+  and reason) and posts nothing — no error card; the answer already arrived.
+  One voice reply per turn. Logs carry duration, characters, voice and
+  latency; never the text.
+- **What is posted**, as the agent: `m.room.message` / `msgtype: m.audio`,
+  `body` and `filename` `Voice message.ogg`, `info {mimetype: audio/ogg, size,
+  duration}`, `org.matrix.msc1767.audio {duration, waveform}`,
+  `org.matrix.msc3245.voice: {}` and `dev.agentpod.voice_reply {schema_version:
+  1, text_event_id, voice, seconds}`. **Not** an `m.in_reply_to` to the text:
+  every client that does not know the key would quote the whole answer again
+  above the voice note; `text_event_id` says which message it speaks. Noted as
+  a quiet hub event, so the push gateway does not buzz a second time.
+- **Encrypted rooms**: the Ogg is encrypted per the spec's attachment scheme
+  (AES-256-CTR, SHA-256 of the ciphertext, JWK key, `v2` —
+  `attachments.encryptAttachment`), the ciphertext is uploaded as
+  `application/octet-stream`, and the event carries `file` instead of `url`;
+  the event itself is then Megolm-encrypted like every other agent message. A
+  plaintext bridge (no crypto store) sends `url`, as it sends everything in
+  the clear.
+- **Harness-mode stations** (Hermes, OpenClaw with their own Matrix client)
+  speak for themselves: the hub never speaks for them. Their voice is stored
+  and editable now; pushing it to the harness is a later stage.
+- **Fallback**: none. A Cloudflare Workers AI (Aura) fallback for when
+  foundry is down is not implemented — the hub has no Workers AI credentials
+  (its `CLOUDFLARE_*` settings are for Sandboxes). TODO once it does.
+
+The console lists voices and plays samples through the hub
+(`GET /api/speech/voices`, cached 5 min; `GET /api/speech/voices/:id/preview`),
+so browsers never need the service's token or its Tailscale address.
 
 **Harness-mode stations** hear voice notes through their own Matrix client and
 transcribe them with their harness's own STT config, so saving the setting does

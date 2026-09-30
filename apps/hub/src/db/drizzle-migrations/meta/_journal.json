@@ -575,6 +575,13 @@
       "when": 1790760000000,
       "tag": "0081_live_activity_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1790800000000,
+      "tag": "0082_station_speech",
+      "breakpoints": true
     }
   ]
 }

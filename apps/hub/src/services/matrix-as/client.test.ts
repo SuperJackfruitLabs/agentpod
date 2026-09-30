@@ -515,3 +515,35 @@ describe("downloading media as an agent", () => {
   });
 });
 
+describe("uploadMedia", () => {
+  test("uploads the bytes as the agent, with their type and name, and returns the mxc", async () => {
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    const c = createMatrixClient({
+      homeserverUrl: HS,
+      asToken: AS_TOKEN,
+      domain: "id.agentpod.dev",
+      fetch: (async (url: string, init: RequestInit) => {
+        seen.push({ url, init });
+        return Response.json({ content_uri: "mxc://id.agentpod.dev/voice1" });
+      }) as unknown as typeof fetch,
+    });
+    const bytes = new Uint8Array([0x4f, 0x67, 0x67, 0x53]);
+    expect(await c.uploadMedia(USER, bytes, "audio/ogg", "Voice message.ogg")).toBe("mxc://id.agentpod.dev/voice1");
+    expect(seen[0]!.url).toBe(
+      `${HS}/_matrix/media/v3/upload?user_id=${encodeURIComponent(USER)}&filename=Voice%20message.ogg`
+    );
+    expect((seen[0]!.init.headers as Record<string, string>)["Content-Type"]).toBe("audio/ogg");
+    expect(seen[0]!.init.body).toBe(bytes as never);
+  });
+
+  test("a refused upload is null", async () => {
+    const c = createMatrixClient({
+      homeserverUrl: HS,
+      asToken: AS_TOKEN,
+      domain: "id.agentpod.dev",
+      fetch: (async () => new Response("{}", { status: 413 })) as unknown as typeof fetch,
+    });
+    expect(await c.uploadMedia(USER, new Uint8Array([1]), "audio/ogg")).toBeNull();
+  });
+});
+

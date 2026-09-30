@@ -117,6 +117,56 @@ def test_container_formats(client, engine, fmt, content_type, magic):
     assert abs(len(decoded) / rate - samples / SAMPLE_RATE) < 0.08  # mp3 pads a frame
 
 
+# --- waveform (MSC3246), opt-in -----------------------------------------------------
+
+
+def waveform_of(r) -> list[int]:
+    return [int(x) for x in r.headers["x-audio-waveform"].split(",")]
+
+
+def test_no_waveform_unless_asked(client):
+    r = speak(client)
+    assert r.status_code == 200
+    assert "x-audio-waveform" not in r.headers
+
+
+@pytest.mark.parametrize("how", ["body", "header"])
+def test_waveform_when_asked(client, how):
+    if how == "body":
+        r = speak(client, input="Hello there. How are you today?", waveform=True)
+    else:
+        r = client.post(
+            "/v1/audio/speech",
+            json={"input": "Hello there. How are you today?"},
+            headers={**AUTH, "X-Want-Waveform": "1"},
+        )
+    assert r.status_code == 200
+    w = waveform_of(r)
+    assert len(w) == server.WAVEFORM_POINTS
+    assert all(0 <= x <= 1024 for x in w)
+    # Normalised: the loudest bucket is full scale.
+    assert max(w) == 1024
+    # The gap between the two sentences is silence, and shows as a dip.
+    assert min(w) < 100
+
+
+def test_waveform_shape_follows_the_audio():
+    rate = 1000
+    loud = np.full(rate, 0.8, dtype=np.float32)
+    quiet = np.full(rate, 0.2, dtype=np.float32)
+    w = server.waveform(np.concatenate([loud, quiet]), points=10)
+    assert len(w) == 10
+    assert w[:5] == [1024] * 5
+    assert all(200 <= x <= 300 for x in w[5:])
+
+
+def test_waveform_of_silence_or_very_short_audio():
+    assert server.waveform(np.zeros(10_000, dtype=np.float32), points=60) == [0] * 60
+    short = server.waveform(np.full(7, 0.5, dtype=np.float32), points=60)
+    assert len(short) == 60 and all(0 <= x <= 1024 for x in short)
+    assert server.waveform(np.zeros(0, dtype=np.float32), points=60) == [0] * 60
+
+
 def test_pcm_is_raw_16_bit_little_endian_at_24_khz(client, engine):
     r = speak(client, voice="af_heart", response_format="pcm")
     assert r.status_code == 200

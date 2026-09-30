@@ -148,6 +148,8 @@ export function withEncryption(
   return {
     ...client,
 
+    isRoomEncrypted: (userId, roomId) => isEncrypted(roomId, userId),
+
     // `extra` carries namespaced keys beside the body — the turn error card,
     // `dev.agentpod.turn_error`. It must survive both branches: every agent
     // room is encrypted, and rebuilding the content from `body` alone is how

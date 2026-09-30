@@ -21,6 +21,8 @@ export interface QueuedPrompt {
   images: PromptImage[];
   /** The Matrix event the turn answers, for its 👀/✅ marks. */
   eventId?: string;
+  /** A voice note from the user — its answer may be spoken (`voice-reply.ts`). */
+  voice?: boolean;
 }
 
 /** What waiting for the agent came to. */
@@ -52,7 +54,9 @@ export function mergeQueued(items: QueuedPrompt[]): QueuedPrompt {
     .join("\n\n");
   const images = items.flatMap((item) => item.images);
   const eventId = [...items].reverse().find((item) => item.eventId)?.eventId;
-  return eventId ? { text, images, eventId } : { text, images };
+  // Any voice note among them makes the merged turn one the user spoke in.
+  const voice = items.some((item) => item.voice === true);
+  return { text, images, ...(eventId ? { eventId } : {}), ...(voice ? { voice } : {}) };
 }
 
 export class RoomQueue {

@@ -44,6 +44,7 @@ import { createLogger } from "../../utils/logger";
 import { beginQuietSend, noteAnswerEvent, noteHubEvent, type TurnCounts } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
 import { cardName } from "../push/fleet/names";
+import type { SpokenTurn } from "./voice-reply";
 
 const log = createLogger("matrix-outbound");
 
@@ -100,6 +101,13 @@ export interface OutboundDeps {
   flushDelayMs?: number;
   /** How often to re-send a typing notice while a turn runs. See TYPING_REFRESH_MS. */
   typingRefreshMs?: number;
+  /**
+   * Speak a finished turn's reply as a voice message (`voice-reply.ts`).
+   * Called — never awaited — once per turn that ended with text in the room
+   * and no error; it decides from the station's settings whether to speak.
+   * Optional: without it replies are text only, as before.
+   */
+  speak?: (turn: SpokenTurn) => Promise<unknown>;
 }
 
 interface Attachment {
@@ -179,6 +187,15 @@ interface Attachment {
    * flush, read and cleared when the turn ends.
    */
   lastTurnCounts: { total: number; failed: number; failedAt?: number } | null;
+  /**
+   * What this turn put in the room as text, and the last message's id — for
+   * the voice reply. A turn can flush more than once (a permission pause, the
+   * safety timer), so the parts are kept until the turn ends.
+   */
+  turnText: string[];
+  turnTextEventId: string | null;
+  /** Whether a voice note from the user started this turn. */
+  voiceTriggered: boolean;
 }
 
 /**
@@ -242,11 +259,15 @@ const SILENT_TURN_NOTICE =
  * Set by the inbound path before it prompts. Kept outside the attachment because
  * a turn can be noted before the room is attached — and cleared with it.
  */
-const triggers = new Map<string, string>();
+const triggers = new Map<string, { eventId: string; voice: boolean }>();
 
-/** Note which message started the next turn on this session. */
-export function noteTurnTrigger(sessionId: string, eventId: string): void {
-  triggers.set(sessionId, eventId);
+/**
+ * Note which message started the next turn on this session, and whether it
+ * was a voice note — a station set to answer voice with voice speaks only
+ * those turns.
+ */
+export function noteTurnTrigger(sessionId: string, eventId: string, opts: { voice?: boolean } = {}): void {
+  triggers.set(sessionId, { eventId, voice: opts.voice === true });
 }
 
 /** Leak detection, mirroring `_subscriberCountForTest` in acp-sessions. */
@@ -341,6 +362,9 @@ export function attachRoomToSession(
     pendingError: null,
     inTurn: false,
     lastTurnCounts: null,
+    turnText: [],
+    turnTextEventId: null,
+    voiceTriggered: false,
   };
 
   /** Sends into the room. Returns the event id, or null when it did not land. */
@@ -393,8 +417,13 @@ export function attachRoomToSession(
     state.toolSeq = 0;
     const counts = tools.size > 0 ? await recordTurn(tools) : null;
     if (text.trim() === "") return;
+    const posted = (id: string | null) => {
+      if (!id) return;
+      state.turnText.push(text);
+      state.turnTextEventId = id;
+    };
     if (!counts) {
-      await say(text);
+      posted(await say(text));
       return;
     }
     // The answer that ends a turn with a record carries the turn's counts on
@@ -402,7 +431,9 @@ export function attachRoomToSession(
     // push that beats the send's response waits for them — see `hub-events.ts`.
     const end = beginQuietSend(roomId);
     try {
-      noteAnswerEvent(await say(text), counts);
+      const id = await say(text);
+      noteAnswerEvent(id, counts);
+      posted(id);
     } finally {
       end();
     }
@@ -734,7 +765,8 @@ export function attachRoomToSession(
             // permission pause is the same turn, still owned by its message.
             const noted = triggers.get(sessionId);
             if (noted !== undefined) {
-              state.triggerEventId = noted;
+              state.triggerEventId = noted.eventId;
+              state.voiceTriggered = noted.voice;
               triggers.delete(sessionId);
             }
             state.inTurn = true;
@@ -808,6 +840,31 @@ export function attachRoomToSession(
             } else if (!state.reportedError) {
               await mark(REACTION.done);
             }
+            // The reply, spoken — after the text is in the room, never before
+            // it and never instead of it. Not awaited: synthesis takes seconds
+            // and the next turn must not wait on it. An error turn is not
+            // spoken; the replier decides the rest (speak mode, service).
+            const spokenText = state.turnText.join("\n\n");
+            if (deps.speak && !state.reportedError && state.turnTextEventId && spokenText.trim() !== "") {
+              const turn: SpokenTurn = {
+                roomId,
+                agentUser,
+                sessionId,
+                text: spokenText,
+                textEventId: state.turnTextEventId,
+                voiceTriggered: state.voiceTriggered,
+              };
+              void deps.speak(turn).catch((err) => {
+                log.warn("the voice replier failed", {
+                  sessionId,
+                  roomId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+            }
+            state.turnText = [];
+            state.turnTextEventId = null;
+            state.voiceTriggered = false;
             state.produced = false;
             state.reportedError = false;
             // The turn is over, and so is its claim on the message that started

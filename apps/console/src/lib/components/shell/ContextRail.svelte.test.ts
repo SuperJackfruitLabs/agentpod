@@ -29,6 +29,14 @@ vi.mock("$lib/api/transcription", () => ({
   applyStationTranscription: vi.fn(),
 }));
 
+// …and its Voice replies section reads the station's speech setting.
+vi.mock("$lib/api/speech", () => ({
+  getStationSpeech: vi.fn(() => new Promise(() => {})),
+  saveStationSpeech: vi.fn(),
+  listVoices: vi.fn(() => new Promise(() => {})),
+  fetchVoicePreview: vi.fn(),
+}));
+
 function station(over: Partial<StationRow> = {}): StationRow {
   return {
     id: "station_1",
@@ -279,4 +287,41 @@ test("the rail carries the station's voice-note setting, and a harness station's
   expect(loadTranscription).toHaveBeenCalledWith("station_1");
   expect(getByTestId("voice-harness-note")).toBeTruthy();
   expect(getByRole("button", { name: "Apply to harness" })).toBeTruthy();
+});
+
+// ─── voice replies ──────────────────────────────────────────────────────────
+
+test("the rail carries the station's voice replies, with the harness note for a harness station", async () => {
+  vi.spyOn(api, "stationMoveState").mockResolvedValue({ status: "unknown" });
+  const loadSpeech = vi.fn(async () => ({
+    mode: "inherit" as const,
+    hasApiKey: false,
+    assignedVoice: "bf_emma",
+    inheritedVoice: "bf_emma",
+    inheritedVoiceSource: "assigned" as const,
+    effective: {
+      enabled: true,
+      url: "http://100.78.52.87:8841",
+      voice: "bf_emma",
+      voiceSource: "assigned" as const,
+      speakMode: "voice_in" as const,
+      maxChars: 1500,
+      source: "hub" as const,
+    },
+  }));
+  const loadVoices = vi.fn(async () => ({ voices: [], default: "af_heart", aliases: {}, assignable: [] }));
+
+  const { findByTestId, getByTestId } = render(ContextRail, {
+    props: {
+      station: station({ matrixId: "@hermes:example.org", matrixIdentityMode: "harness" }),
+      node,
+      loadSpeech,
+      loadVoices,
+    },
+  });
+
+  expect(getByTestId("rail-voice-replies")).toBeTruthy();
+  expect((await findByTestId("voice-replies-effective")).textContent).toContain("bf_emma");
+  expect(loadSpeech).toHaveBeenCalledWith("station_1");
+  expect(getByTestId("voice-replies-harness-note")).toBeTruthy();
 });
