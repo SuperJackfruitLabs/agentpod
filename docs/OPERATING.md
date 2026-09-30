@@ -1381,6 +1381,12 @@ and is on exactly when the gateway is.
   last 15 minutes (at most 3 rows, the rest counted), and the oldest pending
   permission or gate with up to two inline options (allow-once/reject,
   approve/reject — never "always").
+  Each row also carries the agent's Matrix id (the app keys its cached avatar
+  by it); a working row its phase (`thinking` from the turn's start and after
+  a thought, `tools` after a tool update, `writing` once answer text streams —
+  the phase only, never the thought or the answer); and a done or failed row
+  its turn's start as `since` and its finish as `endedAt` (supermessage spec
+  `2026-09-30-fleet-card-a-plus-c-design.md`, A1).
 - **When it pushes** — `start` (push-to-start) only when the reader has no
   update token; routine changes at most once per 3 s at priority 5; a decision
   arriving or a turn finishing at once at priority 10 (a decision arriving never
@@ -1405,7 +1411,10 @@ and is on exactly when the gateway is.
   and a report more than 2 minutes old is dropped. Reports become the same
   fleet events the bridge notes, so plugin and bridge agents share one card.
   An approval shows as the agent's pending decision with no inline buttons (it
-  is answered in the room). A turn that ran tools also reports its answer's
+  is answered in the room). The plugin's `writing` report (the answer began, no text)
+  gives its row the Writing phase; with a plugin older than that, or a hub
+  older than that report kind (which drops it), the row goes thinking → tools
+  and never shows writing. A turn that ran tools also reports its answer's
   event id, and its room's pushes wait (≤ 500 ms, for at most 15 s after the
   turn) for it, so the answer push carries `turn` counts too; a push that beats
   the turn's finish report goes without them. Needs a node with the

@@ -22,6 +22,7 @@ The event bodies and the pacing are the same as the hub's; see `apps/hub/src/ser
 The hub's fleet Live Activity (the Lock Screen card in Supermessage) learns about a bridge-mode turn from the hub's own bridge. It never sees a harness-mode turn, so the plugin reports each turn itself:
 
 - turn started; each tool step, with its title and `completed`/`total`; turn finished, with `total`/`failed` and the first failed step;
+- the answer beginning to stream (`writing`, no text), once each time the turn moves into it, for the card's Writing phase. Text that arrives while a tool is still running does not count. A hub older than this report kind drops it;
 - an approval asked (`pre_approval_request`), once its prompt is in the room, and answered (`post_approval_response`);
 - the answer's event id, for a turn that ran tools, so the answer's push carries the turn's counts.
 

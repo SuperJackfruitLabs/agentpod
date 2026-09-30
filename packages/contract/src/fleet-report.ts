@@ -37,6 +37,12 @@ export const FleetTurnEvent = z.discriminatedUnion("type", [
   /** A tool call started or finished. `completed`/`total` are this turn's tool counts so far. */
   z.object({ type: z.literal("step"), title: chars(FLEET_STEP_MAX), completed: count, total: count }).strict(),
   /**
+   * The agent began writing its answer (the card's Writing phase). Only that
+   * it began: the answer's text never rides in a report. Sent once each time
+   * the turn moves into writing. A hub older than this kind drops the frame.
+   */
+  z.object({ type: z.literal("writing") }).strict(),
+  /**
    * The turn ended. `failedAt` is the 1-based position of the first failed
    * tool; `errored` is a turn that did not end normally.
    */

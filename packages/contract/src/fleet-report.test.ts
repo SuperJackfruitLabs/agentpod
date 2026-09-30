@@ -20,6 +20,7 @@ describe("FleetTurnReport — what a plugin writes to its node's fleet socket", 
   const events = [
     { type: "turn-started" },
     { type: "step", title: "Read notes.md", completed: 1, total: 2 },
+    { type: "writing" },
     { type: "turn-finished", total: 7, failed: 1, failedAt: 4 },
     { type: "turn-finished", total: 0, failed: 0, errored: true },
     { type: "answer", eventId: "$answer:id.agentpod.dev", total: 7, failed: 1 },
@@ -49,6 +50,8 @@ describe("FleetTurnReport — what a plugin writes to its node's fleet socket", 
   it("refuses anything it does not list — a report is not a place to carry more", () => {
     expect(FleetTurnReport.safeParse({ ...base, event: { type: "turn-started" }, text: "the answer" }).success).toBe(false);
     expect(FleetTurnReport.safeParse({ ...base, event: { type: "turn-started", text: "hi" } }).success).toBe(false);
+    // "writing" says the answer began; the answer's text never rides with it.
+    expect(FleetTurnReport.safeParse({ ...base, event: { type: "writing", text: "Here is" } }).success).toBe(false);
     expect(FleetTurnReport.safeParse({ ...base, event: { type: "spoke" } }).success).toBe(false);
   });
 

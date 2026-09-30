@@ -327,8 +327,12 @@ class RegisterTest(unittest.TestCase):
                 mock.patch.object(live, "matrix_sender", return_value=lambda t, r, c: None):
             live.register(ctx)
             ctx.hooks["pre_llm_call"](session_id="s1", turn_id="t1", platform="matrix")
+            # Reasoning is the Thinking phase the turn starts in: no report.
+            ctx.hooks["on_stream_delta"](delta="Should build", kind="reasoning", session_id="s1", turn_id="t1")
             ctx.hooks["pre_tool_call"](tool_name="terminal", args={"command": "make"}, session_id="s1",
                                        turn_id="t1", tool_call_id="c1")
+            # A preamble's last words, landing after the tool call began: not writing yet.
+            ctx.hooks["on_stream_delta"](delta="Building.", kind="text", session_id="s1", turn_id="t1")
             ctx.hooks["pre_approval_request"](command="make", description="Run make?", session_key="k",
                                               surface="gateway", session_id="s1", turn_id="t1")
             adapter_log.info("Matrix: sent event %s to %s", "$prompt", ROOM)
@@ -336,20 +340,49 @@ class RegisterTest(unittest.TestCase):
                                                 surface="gateway", choice="once", session_id="s1", turn_id="t1")
             ctx.hooks["post_tool_call"](tool_name="terminal", args={"command": "make"}, session_id="s1",
                                         turn_id="t1", tool_call_id="c1", status="ok")
+            ctx.hooks["on_stream_delta"](delta="It built", kind="reasoning", session_id="s1", turn_id="t1")
+            for word in ("The ", "build ", "passed."):
+                ctx.hooks["on_stream_delta"](delta=word, kind="text", session_id="s1", turn_id="t1")
             ctx.hooks["post_llm_call"](session_id="s1", turn_id="t1", assistant_response="done")
             adapter_log.info("Matrix: sent event %s to %s", "$answer", ROOM)
 
             deadline = time.time() + 3
-            while len(node.lines) < 7 and time.time() < deadline:
+            while len(node.lines) < 8 and time.time() < deadline:
                 time.sleep(0.01)
 
         types = [line["event"]["type"] for line in node.lines]
         self.assertEqual(types, ["turn-started", "step", "decision-asked", "decision-cleared", "step",
-                                 "turn-finished", "answer"])
+                                 "writing", "turn-finished", "answer"])
+        self.assertEqual(node.lines[5]["event"], {"type": "writing"})
         self.assertEqual(node.lines[2]["event"], {"type": "decision-asked", "eventId": "$prompt",
                                                   "question": "Run make?"})
         self.assertEqual(node.lines[-1]["event"], {"type": "answer", "eventId": "$answer", "total": 1,
                                                    "failed": 0})
+
+    def test_each_turn_in_a_session_reports_its_own_writing(self):
+        node = _NodeSocket()
+        self.addCleanup(node.close)
+        ctx = self.Ctx()
+        env = {"MATRIX_HOMESERVER": "https://hs", "MATRIX_ACCESS_TOKEN": "tok", "MATRIX_USER_ID": AGENT,
+               "HERMES_SESSION_CHAT_ID": ROOM, "HERMES_SESSION_USER_ID": READER,
+               "AGENTPOD_FLEET_SOCKET": node.path}
+        root = logging.getLogger()
+        before = list(root.handlers)
+        self.addCleanup(lambda: [root.removeHandler(h) for h in list(root.handlers) if h not in before])
+        with mock.patch.dict(live.os.environ, env, clear=True), \
+                mock.patch.object(live, "matrix_sender", return_value=lambda t, r, c: None):
+            live.register(ctx)
+            for turn in ("t1", "t2"):
+                ctx.hooks["pre_llm_call"](session_id="s1", turn_id=turn, platform="matrix")
+                ctx.hooks["on_stream_delta"](delta="Hi.", kind="text", session_id="s1", turn_id=turn)
+                ctx.hooks["post_llm_call"](session_id="s1", turn_id=turn)
+
+            deadline = time.time() + 3
+            while len(node.lines) < 6 and time.time() < deadline:
+                time.sleep(0.01)
+
+        self.assertEqual([line["event"]["type"] for line in node.lines],
+                         ["turn-started", "writing", "turn-finished"] * 2)
 
     def test_without_its_own_matrix_id_it_streams_but_does_not_report(self):
         ctx = self.Ctx()
@@ -454,6 +487,58 @@ class FleetTurnTest(unittest.TestCase):
         h.reporter.tool_started("s1", "t1", "c1", "todo", {})
         h.reporter.end("s1", "t1")
         h.reporter.sent(ROOM, "$answer")
+
+
+class FleetPhaseTest(unittest.TestCase):
+    """The card's track: Thinking (turn-started), Tools (step), Writing (writing), Done."""
+
+    def test_answer_text_reports_writing_once_and_carries_none_of_it(self):
+        h = FleetHarness()
+        r = h.reporter
+        r.begin("s1", "t1", ROOM, READER)
+        r.answer_began("s1", "t1")
+        r.answer_began("s1", "t1")
+        self.assertEqual(h.events(), [{"type": "turn-started"}, {"type": "writing"}])
+
+    def test_writing_again_after_a_tool(self):
+        h = FleetHarness()
+        r = h.reporter
+        r.begin("s1", "t1", ROOM, READER)
+        r.answer_began("s1", "t1")
+        r.tool_started("s1", "t1", "c1", "todo", {})
+        r.tool_finished("s1", "t1", "c1", "todo", {}, False)
+        r.answer_began("s1", "t1")
+        r.end("s1", "t1")
+        self.assertEqual([e["type"] for e in h.events()],
+                         ["turn-started", "writing", "step", "step", "writing", "turn-finished"])
+
+    def test_text_while_a_tool_runs_is_not_writing(self):
+        # Stream deltas come on Hermes's stream threads, so a preamble's last
+        # words can land after the tool call they preceded. The tool is still
+        # the phase until it finishes.
+        h = FleetHarness()
+        r = h.reporter
+        r.begin("s1", "t1", ROOM, READER)
+        r.tool_started("s1", "t1", "c1", "todo", {})
+        r.answer_began("s1", "t1")
+        self.assertEqual([e["type"] for e in h.events()], ["turn-started", "step"])
+
+    def test_outside_a_reported_turn_nothing_is_said(self):
+        h = FleetHarness()
+        h.reporter.answer_began("s1", "t1")
+        h.reporter.begin("s2", "t2", ROOM, READER)
+        h.reporter.answer_began("s2", "other-turn")
+        self.assertEqual(h.events(), [{"type": "turn-started"}])
+
+
+class WritingGateTest(unittest.TestCase):
+    def test_one_note_per_move_into_writing_not_one_per_delta(self):
+        gate = live._WritingGate()
+        self.assertTrue(gate.first("s1"))
+        self.assertFalse(gate.first("s1"))
+        self.assertTrue(gate.first("s2"))
+        gate.reset("s1")
+        self.assertTrue(gate.first("s1"))
 
 
 class FleetAnswerTest(unittest.TestCase):

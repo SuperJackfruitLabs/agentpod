@@ -13,7 +13,8 @@ import { z } from "zod";
 // message push (`push.ts`) still carries ids only.
 //
 // `ContentState` is shared with Swift (`FleetActivityAttributes.ContentState`)
-// and pinned by `fixtures/fleet-content-state.json`, which is copied into both
+// and pinned by `fixtures/fleet-content-state.json` and `-v2.json` (turn phase,
+// avatar key and finish time), which are copied into both
 // repositories. JSON keys are camelCase. The hub applies every bound here; the
 // app decodes leniently (unknown keys ignored, a missing optional key is none).
 // Strict on this side so a key the app has never heard of cannot leave.
@@ -36,16 +37,33 @@ const count = z.number().int().nonnegative();
 export const FleetLiveAgentState = z.enum(["working", "needs_you", "active", "done", "failed"]);
 export type FleetLiveAgentState = z.infer<typeof FleetLiveAgentState>;
 
+/**
+ * Where a working turn is on the card's track (Thinking → Tools → Writing →
+ * Done). Spec 2026-09-30 A1. Optional: without it the app draws the track
+ * from the counts alone.
+ */
+export const FleetLivePhase = z.enum(["thinking", "tools", "writing"]);
+export type FleetLivePhase = z.infer<typeof FleetLivePhase>;
+
+// Keys in the order `fixtures/fleet-content-state-v2.json` writes them; zod
+// emits them in this order. `mxid`, `phase` and `endedAt` are the 2026-09-30
+// additions, all optional, so an app built before them still decodes.
 export const FleetLiveAgent = z
   .object({
     roomId: z.string().min(1),
+    /** The agent's Matrix id; the app keys its cached avatar by it. */
+    mxid: z.string().min(1).optional(),
     name: z.string().min(1),
     state: FleetLiveAgentState,
+    /** Only while `state` is `working`. */
+    phase: FleetLivePhase.optional(),
     step: chars(FLEET_STEP_MAX).optional(),
     completed: count.optional(),
     total: count.optional(),
-    /** Unix seconds: when the turn started, or the last activity. */
+    /** Unix seconds: when the turn started (also for a finished row), or the last activity. */
     since: unixSeconds,
+    /** Unix seconds: when the turn finished. Only while `state` is `done` or `failed`. */
+    endedAt: unixSeconds.optional(),
   })
   .strict();
 export type FleetLiveAgent = z.infer<typeof FleetLiveAgent>;
