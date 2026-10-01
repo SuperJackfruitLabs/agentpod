@@ -66,6 +66,7 @@ const makeAgent = (overrides: Partial<FleetAgent> & { stationId: string }): Flee
   cpuPct: null,
   memBytes: null,
   uptimeSec: null,
+  note: null,
   ...overrides,
 });
 

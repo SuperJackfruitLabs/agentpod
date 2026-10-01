@@ -32,6 +32,7 @@ const agent: FleetAgent = {
   cpuPct: 1,
   memBytes: 100,
   uptimeSec: 10,
+  note: null,
 };
 
 const stats: FleetStats = {
