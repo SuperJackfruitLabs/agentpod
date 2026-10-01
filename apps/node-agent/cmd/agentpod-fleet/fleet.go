@@ -68,6 +68,28 @@ func fleetCmd(args []string) {
 		fleetPlugins(args[1:])
 	case "devices":
 		fleetDevices(args[1:])
+	case "bridge":
+		fleetBridge(args[1:])
+	case "grants":
+		fleetGrants(args[1:])
+	case "principals":
+		fleetPrincipals(args[1:])
+	case "users":
+		fleetUsers(args[1:])
+	case "runtimes":
+		fleetRuntimes(args[1:])
+	case "station":
+		// Singular, beside the plural `stations`. `stations` acts on the fleet's SHAPE —
+		// detect, adopt, unadopt, list; `station` acts on ONE station's contents — lifecycle,
+		// disk, diffs, files. One verb for both would make `delete` ambiguous between
+		// unadopting a station and deleting a file inside it.
+		fleetStationOps(args[1:])
+	case "invite":
+		fleetInvite(args[1:])
+	case "staff":
+		fleetStaff(args[1:])
+	case "settings":
+		fleetSettings(args[1:])
 	case "update":
 		fleetUpdate(args[1:])
 	default:
