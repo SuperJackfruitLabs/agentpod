@@ -69,6 +69,10 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 	// (see servesRootGateway).
 	rootMxid := h.matrixIDOf(h.home)
 
+	// Read once, not per profile: on a multiplexed host NO profile has a gateway of
+	// its own, so none of them can offer "lifecycle".
+	multiplexed := h.multiplexProfiles()
+
 	stations := []Station{
 		{
 			Key:           "hermes",
@@ -100,14 +104,21 @@ func (h *hermesDescriptor) Detect() ([]Station, error) {
 		profileDir := wsPath
 		mxid := h.matrixIDOf(profileDir)
 
-		// A profile that shares the root's Matrix identity IS the agent the root
-		// gateway already runs; it is a VIEW onto that gateway, not a separately
-		// startable one. Its files/logs/health stay available, but "lifecycle" is
-		// withheld so the console never offers a Start that would put a second
-		// gateway on the same messaging identity (issue #273). The root "hermes"
-		// station is the control point for that agent.
+		// A profile with no gateway of its own is a VIEW onto the root gateway, not a
+		// separately startable station. Its files/logs/health stay available, but
+		// "lifecycle" is withheld so no surface offers a Start that would put a SECOND
+		// gateway on an agent the root gateway already serves. Two ways to get here:
+		//
+		//   - it shares the root's Matrix identity, so two gateways would double-sync
+		//     one account (issue #273); or
+		//   - this host multiplexes, so one gateway serves every profile and a
+		//     per-profile Start would duplicate the one already serving it.
+		//
+		// Either way the root "hermes" station is the control point. Note "acp" is NOT
+		// withheld: these agents remain fully dispatchable, and on the live fleet they
+		// kept working throughout — it was only the reporting that was wrong.
 		profileCaps := caps
-		if sameMatrixIdentity(rootMxid, mxid) {
+		if sameMatrixIdentity(rootMxid, mxid) || multiplexed {
 			profileCaps = withoutCap(caps, "lifecycle")
 		}
 
@@ -239,6 +250,80 @@ func (h *hermesDescriptor) servesRootGateway(key string) bool {
 	)
 }
 
+// multiplexProfiles reports whether this Hermes home runs ONE gateway for every
+// profile (`gateway.multiplex_profiles: true`) instead of one gateway per profile.
+//
+// Read line by line and nesting-aware, for the same reason rootDisplayName is read
+// that way: no YAML dependency, and only the intended field is ever read. Nesting
+// matters HERE in a way it does not there — `multiplex_profiles` under any other
+// top-level section is a different setting, and reading it as this one would report
+// every station through the root gateway on a host that never multiplexed anything.
+//
+// Absent or unreadable config means false, so a host we cannot read keeps the
+// per-profile behaviour it had before this existed.
+func (h *hermesDescriptor) multiplexProfiles() bool {
+	data, err := os.ReadFile(filepath.Join(h.home, "config.yaml"))
+	if err != nil {
+		return false
+	}
+	inGateway := false
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		// An unindented line opens a new top-level section, which closes any previous one.
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			inGateway = strings.TrimSpace(strings.SplitN(line, ":", 2)[0]) == "gateway"
+			continue
+		}
+		if !inGateway || !strings.HasPrefix(trimmed, "multiplex_profiles:") {
+			continue
+		}
+		v := strings.TrimSpace(strings.TrimPrefix(trimmed, "multiplex_profiles:"))
+		if i := strings.Index(v, "#"); i >= 0 {
+			v = strings.TrimSpace(v[:i])
+		}
+		return strings.EqualFold(strings.Trim(v, `"'`), "true")
+	}
+	return false
+}
+
+// servedByRootGateway reports whether key's agent is run by the ROOT gateway rather
+// than by a gateway of its own. Two different hosts arrive here:
+//
+//   - the profile that IS the root gateway's profile — identical Matrix identity,
+//     the #273 case, true whether or not this host multiplexes; and
+//   - any profile on a host that multiplexes every profile into one gateway.
+//
+// Both mean the same operationally: there is no per-profile gateway to start, stop,
+// or ask about. They differ only in what to TELL someone, which is why the callers
+// that produce a message still distinguish them.
+func (h *hermesDescriptor) servedByRootGateway(key string) bool {
+	if !strings.HasPrefix(key, "hermes:") || strings.TrimPrefix(key, "hermes:") == "" {
+		return false
+	}
+	return h.servesRootGateway(key) || h.multiplexProfiles()
+}
+
+// probeTarget decides which process Health should ask about for a station key, and
+// whether the answer describes the root gateway rather than the station itself.
+//
+// The ordering is the whole point: a profile's OWN process is the most specific
+// evidence available, so it wins even when the config says multiplex. A host
+// part-way through a migration — or one where an operator started a standalone
+// gateway by hand — then reports what is actually running rather than what the
+// config implies.
+func probeTarget(key string, perProfileRunning, servedByRoot bool) (probeKey string, rootView bool) {
+	if perProfileRunning {
+		return key, false
+	}
+	if servedByRoot {
+		return "hermes", true
+	}
+	return key, false
+}
+
 // workspaceFor maps a station key to its workspace root path.
 func (h *hermesDescriptor) workspaceFor(key string) (string, error) {
 	if key == "hermes" {
@@ -283,23 +368,34 @@ func (h *hermesDescriptor) Health(key string) (Health, error) {
 	// Disk usage from the shared async cache — never walk on the request path.
 	health.DiskBytes = diskUsage(workspace)
 
-	// A profile that IS the root gateway's profile has no process of its own:
-	// report the ROOT gateway's liveness and metrics (it is literally the same
-	// process) and say so in the note, so the console does not show a live agent
-	// as "stopped" beside a Start button it deliberately no longer offers.
-	probeKey := key
-	rootGatewayView := h.servesRootGateway(key)
-	if rootGatewayView {
-		probeKey = "hermes"
+	// A profile with no process of its own is reported THROUGH the root gateway —
+	// it is literally the same process — and the note says so, so no surface shows a
+	// live agent as "stopped" beside a Start button it deliberately does not offer.
+	//
+	// Two hosts land here: the profile that IS the root gateway's profile (#273), and
+	// every profile on a multiplexed host. Guild became the second kind on 2026-10-02
+	// and all fifteen stations read `stopped` with no metrics, because only the first
+	// kind was handled.
+	//
+	// The per-profile check comes FIRST and wins, so a standalone host — still the
+	// common case — and a host mid-migration both report what is really running.
+	perProfileRunning, _ := hermesProcessRunning(key)
+	probeKey, rootGatewayView := probeTarget(key, perProfileRunning, h.servedByRootGateway(key))
+
+	if probeKey == key {
+		health.Running = perProfileRunning
+	} else {
+		health.Running, _ = hermesProcessRunning(probeKey)
 	}
 
-	// Best-effort process check via pgrep.
-	health.Running, _ = hermesProcessRunning(probeKey)
-
-	// Live process metrics: best-effort — when the profile is running, resolve
-	// its PID and gather CPU/memory/uptime. Hermes runs a separate process per
-	// profile, so these are honest PER-AGENT numbers. Any failure leaves the
-	// metric fields nil; Health() never fails on a ps hiccup.
+	// Live process metrics: best-effort — resolve the PID of whichever process answered
+	// and gather CPU/memory/uptime. Any failure leaves the metric fields nil; Health()
+	// never fails on a ps hiccup.
+	//
+	// On a standalone host these are honest PER-AGENT numbers. Under multiplex they are
+	// the shared gateway's, identical across every profile it serves — which the note
+	// below is what makes legible, rather than leaving a reader to wonder why fifteen
+	// agents report the same megabytes.
 	if health.Running {
 		if pid, err := hermesPID(probeKey); err == nil {
 			health.PID = &pid
@@ -308,9 +404,15 @@ func (h *hermesDescriptor) Health(key string) (Health, error) {
 	}
 
 	if rootGatewayView {
-		note := "served by the root Hermes gateway (station \"hermes\") — not separately startable"
+		why := "same Matrix identity"
+		shared := ""
+		if !h.servesRootGateway(key) {
+			why = "gateway.multiplex_profiles"
+			shared = "; CPU/memory/uptime are the shared gateway's, not this agent's"
+		}
+		note := fmt.Sprintf("served by the root Hermes gateway (station \"hermes\"; %s) — not separately startable%s", why, shared)
 		if health.PID != nil {
-			note = fmt.Sprintf("served by the root Hermes gateway (station \"hermes\", PID %d) — not separately startable", *health.PID)
+			note = fmt.Sprintf("served by the root Hermes gateway (station \"hermes\", PID %d; %s) — not separately startable%s", *health.PID, why, shared)
 		}
 		health.Note = &note
 	}
@@ -427,10 +529,21 @@ func (h *hermesDescriptor) Start(key string) error {
 	// independently (issue #273). Refuse before any of them — including the
 	// systemd and startCmd paths, which duplicate just as effectively as the
 	// native fallback.
-	if h.servesRootGateway(key) {
+	if h.servedByRootGateway(key) {
+		if h.servesRootGateway(key) {
+			return fmt.Errorf(
+				"hermes: %q is the profile the root gateway already runs (same Matrix identity); "+
+					"starting it would run a second gateway on that identity — use the \"hermes\" station instead",
+				key,
+			)
+		}
+		// Deliberately NOT the identity message: these profiles have their own
+		// identities, and an operator told otherwise would go hunting for a problem
+		// that does not exist.
 		return fmt.Errorf(
-			"hermes: %q is the profile the root gateway already runs (same Matrix identity); "+
-				"starting it would run a second gateway on that identity — use the \"hermes\" station instead",
+			"hermes: %q is served by this host's multiplexed root gateway (gateway.multiplex_profiles); "+
+				"starting it would add a second gateway for a profile the multiplexer already serves — "+
+				"use the \"hermes\" station, or `hermes gateway migrate --standalone` for per-profile gateways",
 			key,
 		)
 	}
