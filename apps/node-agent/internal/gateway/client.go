@@ -46,6 +46,12 @@ type HealthReport struct {
 	CPUPct    *float64 `json:"cpuPct"`
 	MemBytes  *int64   `json:"memBytes"`
 	UptimeSec *int64   `json:"uptimeSec"`
+	// Note explains a reading that would otherwise look wrong — today, that a
+	// profile's figures are the SHARED multiplexed gateway's rather than its own.
+	// Without it on the frame the explanation never leaves the node, which is what
+	// happened: the descriptor set it, nothing transmitted it, and fifteen stations
+	// reported identical memory with nothing to say why.
+	Note *string `json:"note,omitempty"`
 }
 
 // wsURL derives the WebSocket gateway URL from the hub's HTTP(S) URL.
@@ -322,4 +328,3 @@ func connectOnce(parent context.Context, cfg config.Config, h Handler, onConnect
 // finite so a broken hub cannot exhaust a node's memory. Advertised to the hub
 // as the "frames.large" node capability.
 const gatewayReadLimitBytes = 32 << 20 // 32 MiB
-

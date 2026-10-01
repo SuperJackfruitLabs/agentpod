@@ -333,6 +333,7 @@ func gatherHealthReports(reg *descriptor.Registry) []gateway.HealthReport {
 			CPUPct:    h.CpuPct,
 			MemBytes:  h.MemBytes,
 			UptimeSec: h.UptimeSec,
+			Note:      h.Note,
 		})
 	}
 	return reports

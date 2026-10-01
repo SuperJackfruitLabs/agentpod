@@ -133,6 +133,7 @@ const mockAgents = [
     cpuPct: null,
     memBytes: null,
     uptimeSec: null,
+    note: null,
   },
   {
     stationId: "s2",
@@ -151,6 +152,7 @@ const mockAgents = [
     cpuPct: null,
     memBytes: null,
     uptimeSec: null,
+    note: null,
   },
 ];
 

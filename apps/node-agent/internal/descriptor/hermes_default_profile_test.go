@@ -219,21 +219,41 @@ func TestHermesStart_UnknownRootIdentityLeavesProfilesStartable(t *testing.T) {
 func TestHermesHealth_DefaultProfileReportsRootGateway(t *testing.T) {
 	home := defaultProfileHome(t)
 
-	// pgrep stub: matches ONLY the broad root pattern ("hermes"), never a
+	// pgrep stub: matches ONLY the root gateway's pattern ("gateway run"), never a
 	// per-profile pattern — exactly the situation on the affected host, where the
 	// root gateway runs and no `-p <name> gateway` process exists. It reports this
 	// test process's PID so the metrics lookup (real `ps`) succeeds.
+	//
+	// The pattern is "gateway run" and not the bare "hermes" this stub used until
+	// the root resolver was narrowed: the loose pattern matched any process with the
+	// word in its argv, and on a live host the first hit was a `hermes dashboard`
+	// 34 days old, so every multiplexed profile reported the dashboard's metrics.
 	dir := t.TempDir()
 	script := fmt.Sprintf(`#!/bin/sh
 case "$2" in
-  hermes) echo %d; exit 0 ;;
+  "gateway run") echo %d; exit 0 ;;
   *) exit 1 ;;
 esac
 `, os.Getpid())
 	if err := os.WriteFile(filepath.Join(dir, "pgrep"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write pgrep stub: %v", err)
 	}
-	prependPath(t, dir) // keep the real `ps` reachable
+	// ps stub: the resolver now reads each candidate's argv to reject impostors, and
+	// this test process's real argv is a go test binary, not a gateway. Answer the
+	// argv query with a gateway command line and hand every other ps query — the
+	// metrics lookup — to the real ps, which must keep working.
+	psStub := `#!/bin/sh
+for a in "$@"; do
+  case "$a" in
+    args=) echo "/usr/local/bin/hermes gateway run"; exit 0 ;;
+  esac
+done
+exec /bin/ps "$@"
+`
+	if err := os.WriteFile(filepath.Join(dir, "ps"), []byte(psStub), 0o755); err != nil {
+		t.Fatalf("write ps stub: %v", err)
+	}
+	prependPath(t, dir)
 
 	d := NewHermes(home)
 

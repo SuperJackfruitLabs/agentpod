@@ -22,6 +22,7 @@ function makeAgent(overrides: Partial<FleetAgent> = {}): FleetAgent {
     cpuPct: 1,
     memBytes: 100,
     uptimeSec: 10,
+    note: null,
     ...overrides,
   };
 }

@@ -94,19 +94,25 @@ export function deriveStatus(
   cpuPct: number | null;
   memBytes: number | null;
   uptimeSec: number | null;
+  note: string | null;
 } {
   if (nodeStatus === "offline" || !cached || now - cached.at > STALE_MS) {
-    return { status: "unknown", cpuPct: null, memBytes: null, uptimeSec: null };
+    return { status: "unknown", cpuPct: null, memBytes: null, uptimeSec: null, note: null };
   }
   const { report } = cached;
   if (!report.ok) {
-    return { status: "error", cpuPct: null, memBytes: null, uptimeSec: null };
+    return { status: "error", cpuPct: null, memBytes: null, uptimeSec: null, note: null };
   }
   return {
     status: report.running ? "running" : "stopped",
     cpuPct: report.cpuPct,
     memBytes: report.memBytes,
     uptimeSec: report.uptimeSec,
+    // Passed through rather than dropped. This projection is where the note died:
+    // the descriptor set it and the contract carried it, and the four fields listed
+    // here were the whole of what reached a caller. `?? null` because a node that
+    // predates the field omits it entirely.
+    note: report.note ?? null,
   };
 }
 
