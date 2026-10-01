@@ -32,6 +32,15 @@ export const StationHealthReport = z.object({
   cpuPct: z.number().nullable(),
   memBytes: z.number().int().nullable(),
   uptimeSec: z.number().int().nullable(),
+  /**
+   * Why a reading looks the way it does, when it needs saying — currently that a
+   * profile's metrics are the shared multiplexed gateway's, not its own.
+   *
+   * OPTIONAL, not merely nullable: node-agents up to v0.1.83 do not send this key
+   * at all, and a required field would fail their whole health frame — turning an
+   * additive improvement into every station on an un-updated node going dark.
+   */
+  note: z.string().nullable().optional(),
 });
 export type StationHealthReport = z.infer<typeof StationHealthReport>;
 

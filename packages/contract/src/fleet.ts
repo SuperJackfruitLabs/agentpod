@@ -45,6 +45,16 @@ export const FleetAgent = z.object({
   memBytes: z.number().nullable(),
   /** Process uptime in seconds — null when status is "unknown" or "error". */
   uptimeSec: z.number().nullable(),
+  /**
+   * An explanation attached by the node when a reading needs one, else null.
+   *
+   * The case that put it here: on a host running ONE multiplexed Hermes gateway,
+   * every profile reports that gateway's cpu/memory/uptime, so fifteen agents show
+   * identical figures. The note is what makes that legible instead of looking like
+   * a bug — and it is on this shape because a note nothing surfaces is the same as
+   * no note at all.
+   */
+  note: z.string().nullable(),
 });
 export type FleetAgent = z.infer<typeof FleetAgent>;
 

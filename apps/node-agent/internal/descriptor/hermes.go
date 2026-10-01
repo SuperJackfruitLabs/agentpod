@@ -455,6 +455,9 @@ func hermesUnitKnown(unit string) bool {
 // matching only the short form reported such profiles as stopped while running.
 func hermesPattern(key string) string {
 	if key == "hermes" {
+		// Kept only for callers that build a pattern for display or for Stop; the
+		// liveness and pid paths no longer come here for the root key, because this
+		// bare pattern matches every process with "hermes" anywhere in its argv.
 		return "hermes"
 	}
 	name := strings.TrimPrefix(key, "hermes:")
@@ -464,6 +467,12 @@ func hermesPattern(key string) string {
 // hermesPID returns the PID of the running Hermes process for key,
 // or an error if no matching process is found.
 func hermesPID(key string) (int, error) {
+	if key == "hermes" {
+		// The root gateway is resolved by filtering, not by first-match: see
+		// hermes_root_gateway.go. A loose match here reported a `hermes dashboard`
+		// process as the gateway for every multiplexed profile.
+		return rootGatewayPID()
+	}
 	out, err := exec.Command("pgrep", "-f", hermesPattern(key)).Output()
 	if err != nil {
 		return 0, fmt.Errorf("no hermes process for key %q", key)
@@ -480,6 +489,13 @@ func hermesPID(key string) (int, error) {
 // For the root key it looks for any "hermes" process.
 // Returns false (not an error) when the check cannot be performed.
 func hermesProcessRunning(key string) (bool, error) {
+	if key == "hermes" {
+		// Same resolver as hermesPID, so "running" and the metrics beside it can never
+		// describe different processes — which is precisely what went wrong: liveness
+		// was true from one process while the numbers came from another.
+		_, err := rootGatewayPID()
+		return err == nil, nil
+	}
 	cmd := exec.Command("pgrep", "-f", hermesPattern(key))
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
