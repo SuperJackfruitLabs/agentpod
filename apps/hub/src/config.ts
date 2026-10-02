@@ -421,6 +421,37 @@ export interface OAuthClient {
 export const HUB_AUDIENCE = config.publicUrl;
 
 /**
+ * The planes a STATION token may be spent at, beyond the hub itself.
+ *
+ * `WORK_PLANE_AUDIENCES`, comma-separated. Empty by default, which keeps a deployment that never
+ * asked for this exactly as it was: a station token's `aud` is then `[HUB_AUDIENCE]` alone, the
+ * value `signServiceToken` already fell back to.
+ *
+ * **Why configuration and not a request parameter.** The node asks for a token; it does not get to
+ * say where the token may be spent. A station token is minted against an enrollment secret, so a
+ * node that could name its own audiences could mint credentials for any plane it liked — which is
+ * exactly the blast radius `act: { sub: nodeId }` exists to bound. The device exchange can take a
+ * `?client=` because a client is a REGISTERED entry whose audiences an operator wrote down; there
+ * is no client here, and there should not be: the caller is a node spending a secret, not an OAuth
+ * client.
+ *
+ * The hub is always unioned in, which is the one place this deliberately differs from
+ * `OAuthClient.audiences` ("Nothing here unions `HUB_AUDIENCE` into an explicit list"). That rule is
+ * about a client an operator configured end to end and may legitimately want kept off the hub. A
+ * station token is not configured per station: the agent holding it talks to the hub constantly —
+ * MCP self-reporting is live — so a list that omitted the hub would be a deployment that broke its
+ * own agents the moment it named a work plane. Being unable to express "a station token that cannot
+ * reach the hub" is the intended trade.
+ */
+export const STATION_TOKEN_AUDIENCES: string[] = [
+  HUB_AUDIENCE,
+  ...getEnv('WORK_PLANE_AUDIENCES', '')
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => a !== '' && a !== HUB_AUDIENCE),
+];
+
+/**
  * Parse `HUB_OAUTH_CLIENTS`:
  *
  *   superpipeline|https://superpipeline.dev/hub/callback,supermessage|https://…

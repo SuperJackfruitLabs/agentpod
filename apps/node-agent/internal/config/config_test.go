@@ -1,6 +1,6 @@
 package config
 
-import ("path/filepath"; "testing")
+import ("path/filepath"; "reflect"; "testing")
 
 func TestSaveLoadRoundTrip(t *testing.T) {
   p := filepath.Join(t.TempDir(), "config.json")
@@ -15,9 +15,13 @@ func TestSaveLoadRoundTrip(t *testing.T) {
     CodexAcpBinary: "/opt/bin/codex-acp",
     CodexBinary: "/usr/local/bin/codex",
     NodeBinary: "/opt/node-22/bin/node",
+    // Round-tripped like every other field. `StationTokens` is what made Config
+    // non-comparable, so the check below is DeepEqual rather than `!=` — which is also
+    // the honest comparison for a struct that now contains a slice.
+    StationTokens: []StationToken{{StationID: "station_9", Path: "/run/agentpod/chotu.jwt"}},
   }
   if err := Save(p, want); err != nil { t.Fatal(err) }
   got, err := Load(p)
   if err != nil { t.Fatal(err) }
-  if got != want { t.Fatalf("got %+v want %+v", got, want) }
+  if !reflect.DeepEqual(got, want) { t.Fatalf("got %+v want %+v", got, want) }
 }

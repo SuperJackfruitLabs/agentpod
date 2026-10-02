@@ -535,6 +535,8 @@ to the hub — which `Lax` permits — and hand the plane's server a one-time co
 | Variable | Meaning |
 |---|---|
 | `HUB_OAUTH_CLIENTS` | Who may **receive** a token, and **where that token may be spent**. Comma-separated `client\|redirect_uri` or `client\|redirect_uri\|audiences`; repeat the client key for several URIs. **Empty by default**, and a hub that has not opted in refuses every authorize. |
+| `WORK_PLANE_AUDIENCES` | Where a **station token** may be spent, beyond the hub itself. Comma-separated origins. **Empty by default**, which leaves a station token's `aud` as the hub alone — the value it always had, and the reason superpipeline refused every one of them with a 401. Set this to the work plane's origin (e.g. `https://app.superpipeline.dev`) for agents to reach it. Taken from configuration and never from the request: a node exchanges an enrollment secret for these tokens, so a node that could name its own audiences could mint credentials for any plane. |
+| `stationTokens` (node config, not hub) | On a NODE, in `~/.config/agentpod-node/config.json`: the stations whose hub token the node keeps fresh on disk, as `[{"stationId": "station_…", "path": "/root/.agentpod/station-tokens/<name>.jwt"}]`. Empty by default. An agent points its own client at that path (`SUPERPIPELINE_AGENT_TOKEN_FILE` for `supi`) and spends a token that is always current, without ever holding the node's credential. The operator names the stations because the node cannot discover its own ids — `GET /api/nodes/:nodeId/stations` authenticates a human — and because a credential reaching another plane is not something every station should silently acquire. Requires `WORK_PLANE_AUDIENCES` above, or the token names only the hub. |
 
 **This is deliberately not `ALLOWED_ORIGINS`.** They answer different questions: that list says
 who may *call* the hub from a browser; this one says who may *be handed a credential for whoever
@@ -564,6 +566,7 @@ Example, registering the web plane and the CLI:
 
 ```
 HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev
+WORK_PLANE_AUDIENCES=https://app.superpipeline.dev
 ```
 
 **The third field is the audiences**, comma-separated, and it decides which planes a token

@@ -2,6 +2,7 @@ package main
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
@@ -21,7 +22,9 @@ func TestSetPluginManagementPreservesNodeConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	want.PluginManagement = true
-	if got != want {
+	// DeepEqual, not `!=`: `Config` gained a slice field (`StationTokens`) and is no longer
+	// comparable. The assertion is unchanged in meaning — every field must round-trip.
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuration = %#v, want %#v", got, want)
 	}
 	if changed, err := setPluginManagement(path, true); err != nil || changed {
