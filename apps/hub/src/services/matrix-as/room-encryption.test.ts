@@ -9,19 +9,22 @@ import { createMatrixClient } from "./client";
  * visibility only. Whether a room ended up encrypted therefore depended entirely on
  * whether some CLIENT in it turned encryption on afterwards.
  *
- * On 2026-10-02 that produced a clean and entirely accidental split on the live fleet:
+ * What that left on the live homeserver, read room by room on 2026-10-02:
  *
- *   original cast   10 rooms   ENCRYPTED   harness-mode agents, each with its own Matrix
- *                                          account and Hermes' matrix adapter, which
- *                                          enables encryption in its own room
- *   new cast        16 rooms   PLAINTEXT   `matrixIdentityMode: "bridge"` — the appservice
- *                                          speaks for them and no Matrix client ever joins,
- *                                          so nothing ever asked for encryption
+ *   53 station rooms   46 ENCRYPTED, 7 PLAINTEXT
+ *    4 board rooms      4 ENCRYPTED   — they call `enableRoomEncryption` after creating
  *
- * Those sixteen were about to handle repository contents, release artefacts and security
- * review in the clear. The bridge could encrypt the whole time (`AgentCrypto`, an
- * `OlmMachine` per agent, 37 device stores on disk); it simply had no encrypted room to
- * encrypt into.
+ * The seven plaintext ones were created between 21 and 24 September. They are real reads,
+ * not failed lookups: `m.room.create` answered 200 for each while `m.room.encryption`
+ * answered "Not found in room state".
+ *
+ * The point is not the ratio, it is that ONE creation path produced both outcomes and
+ * nothing in it decided which. A room was encrypted if something in it happened to ask.
+ *
+ * An earlier version of this comment claimed the split fell along identity mode — harness
+ * encrypted, bridge plaintext, sixteen agents in the clear. That was wrong; the sixteen
+ * newest rooms are encrypted. Kept here as a correction because it is a plausible story
+ * that would otherwise be re-derived.
  *
  * Encryption is one-way in Matrix: a room can be turned on and never off. So the right
  * place to decide is room creation, where the choice is still free.
