@@ -276,6 +276,8 @@ describe("VoiceReply — an agent's reply, spoken, on its voice message", () => 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  ELICITATION_REQUEST_CONTENT_KEY,
+  ElicitationRequestCard,
   GATE_REQUEST_CONTENT_KEY,
   GateRequestCard,
   PERMISSION_REQUEST_CONTENT_KEY,
@@ -308,5 +310,82 @@ describe("requests embedded in the prose message", () => {
       const { body: _body, ...card } = content;
       expect(GateRequestCard.safeParse(card).success).toBe(false);
     }
+  });
+});
+
+/**
+ * An agent's question, embedded in the prose message.
+ *
+ * Its own key rather than either neighbour's, and the reasons are the point:
+ *
+ *  - not `dev.superpipeline.gate`, whose `options[].id` is a closed enum of three
+ *    decisions, where an elicitation's options are whatever the agent offered;
+ *  - not `dev.agentpod.permission`, whose payload is addressed by ACP `session_id` and
+ *    `request_seq` — how `answerPermission` finds its request — where an elicitation is
+ *    addressed by `elicitation_id` at the board. Borrowing that key would have saved
+ *    every client a change, at the cost of lying in the two fields a reader trusts for
+ *    addressing.
+ */
+describe("an agent's question, embedded in the prose message", () => {
+  const card = {
+    schema_version: 1,
+    board_id: "brd_6a899b0f0d054046",
+    card_id: "crd_a9619fe",
+    elicitation_id: "elc_7f3c",
+    run_id: "run_12",
+    stage_key: "research",
+    card_title: "Add OAuth login",
+    asked_by: "agt_r",
+    prompt: "May I run the test suite?",
+    options: [
+      { id: "run_them", label: "Run the tests" },
+      { id: "skip", label: "Skip them" },
+    ],
+  };
+
+  it("is namespaced and fixed — a client reads it by name", () => {
+    expect(ELICITATION_REQUEST_CONTENT_KEY).toBe("dev.superpipeline.elicitation");
+  });
+
+  it("parses a question with options", () => {
+    expect(ElicitationRequestCard.safeParse(card).success).toBe(true);
+  });
+
+  it("parses a question with NO options", () => {
+    // An agent can stop on an open question. The card still exists so a reader can say
+    // where it is answerable, rather than silence meaning both "no question" and "a
+    // question you cannot tap".
+    expect(ElicitationRequestCard.safeParse({ ...card, options: [] }).success).toBe(true);
+  });
+
+  it("refuses more options than a client will draw", () => {
+    // supermessage draws four and silently drops the rest. The cap is enforced here so
+    // the sender cannot ship something it knows will be discarded — applied where it
+    // can still be reported rather than where it can only be lost.
+    const five = Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `Option ${i}` }));
+    expect(ElicitationRequestCard.safeParse({ ...card, options: five }).success).toBe(false);
+  });
+
+  it("refuses duplicate option ids", () => {
+    // Answering is by id, so two options sharing one is a question with an ambiguous
+    // answer — the same rule the gate card already enforces.
+    expect(
+      ElicitationRequestCard.safeParse({
+        ...card,
+        options: [{ id: "same", label: "One" }, { id: "same", label: "Two" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires the id the answer is addressed to", () => {
+    const { elicitation_id: _gone, ...without } = card;
+    expect(ElicitationRequestCard.safeParse(without).success).toBe(false);
+    expect(ElicitationRequestCard.safeParse({ ...card, elicitation_id: "" }).success).toBe(false);
+  });
+
+  it("tolerates a higher schema_version, as a floor rather than a literal", () => {
+    // A renderer must ignore what it does not know rather than refuse the card; the
+    // gate card documents the same rule.
+    expect(ElicitationRequestCard.safeParse({ ...card, schema_version: 2 }).success).toBe(true);
   });
 });

@@ -290,6 +290,72 @@ export type GateRequestOption = z.infer<typeof GateRequestOption>;
  */
 export const GATE_REQUEST_CONTENT_KEY = "dev.superpipeline.gate";
 
+/**
+ * An agent's question, embedded in the prose message under this key.
+ *
+ * A gate asks a human to approve finished work; this asks a human to unblock a run that
+ * has stopped mid-flight. Both are "a person must answer before this card moves", which
+ * is why the shape rhymes with {@link GateRequestCard} — and why it is NOT that type.
+ *
+ * Its own key rather than either neighbour's:
+ *
+ *  - not `dev.superpipeline.gate`: a gate's `options[].id` is a closed enum of three
+ *    decisions, and an elicitation's options are whatever the agent chose to offer.
+ *  - not `dev.agentpod.permission`: that payload is addressed by ACP `session_id` and
+ *    `request_seq`, which is how `answerPermission` finds its request. An elicitation is
+ *    addressed by `elicitation_id` at the board. Reusing the key would have spared every
+ *    client a change, at the price of putting false values in the two fields a reader
+ *    trusts to address an answer.
+ *
+ * **Answering does not reference this event.** As with a permission request, the answer
+ * is an ordinary room message carrying an option's `id`, its `label`, or its 1-based
+ * number as printed in the prose — matched by `matchPermissionAnswer` against the
+ * question the hub is holding for that room. That is what makes a question answerable
+ * from any Matrix client on the day it ships, with buttons following whenever a client
+ * learns to draw this key.
+ */
+export const ELICITATION_REQUEST_CONTENT_KEY = "dev.superpipeline.elicitation";
+
+export const ElicitationRequestOption = z.object({ id: z.string().min(1), label: z.string() });
+export type ElicitationRequestOption = z.infer<typeof ElicitationRequestOption>;
+
+export const ElicitationRequestCard = z.object({
+  /** A floor, not a literal: a renderer tolerates a higher version by ignoring it. */
+  schema_version: z.number().int().min(1),
+  board_id: z.string(),
+  card_id: z.string(),
+  /** What an answer is addressed to. Without it the question cannot be answered at all. */
+  elicitation_id: z.string().min(1),
+  run_id: z.string(),
+  stage_key: z.string(),
+  card_title: z.string(),
+  /** The agent that is waiting — and the one identity the board will not let answer. */
+  asked_by: z.string(),
+  /** The question. The carrying message has it as its body too. */
+  prompt: z.string(),
+  /**
+   * **May be empty, and four at most.**
+   *
+   * Empty because an agent can stop on an open question, and a reader needs the card to
+   * exist so it can say where that question is answerable.
+   *
+   * Four because supermessage draws four and silently drops the rest
+   * (`DECISION_MAX_OPTIONS`), which {@link PermissionRequestEvent} already documents.
+   * The sender caps it here, where the drop can still be reported, rather than letting
+   * it happen where it can only be lost — the prose message lists every option numbered,
+   * so a fifth stays answerable by name or number and simply gets no button.
+   *
+   * Unique by id, because answering is by id: two options sharing one would be a
+   * question with an ambiguous answer.
+   */
+  options: z
+    .array(ElicitationRequestOption)
+    .max(4)
+    .refine((opts) => new Set(opts.map((o) => o.id)).size === opts.length, "duplicate option ids"),
+  deep_link: z.string().optional(),
+});
+export type ElicitationRequestCard = z.infer<typeof ElicitationRequestCard>;
+
 export const GateRequestCard = z.object({
   schema_version: z.number().int().min(1),
   board_id: z.string(),
