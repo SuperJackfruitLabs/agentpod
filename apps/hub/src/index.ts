@@ -427,7 +427,10 @@ if (matrixBridge) {
      * A gate used to go to the station's room, which this hub encrypts for but must
      * never decrypt for — so it could be delivered and never answered.
      */
-    boardRoom: (boardId: string, tenantId: string) =>
+    // `boardOpts`, not `opts`: the `ensureRoom` lambda below already binds `opts` to
+    // the ROOM's creation options, and two different `opts` in one expression is how
+    // the wrong one gets passed.
+    boardRoom: (boardId: string, tenantId: string, boardOpts?: { boardName?: string }) =>
       ensureBoardRoom(boardId, tenantId, {
         domain: matrixBridge.config.domain,
         ensureUser: (localpart, displayName) =>
@@ -437,6 +440,8 @@ if (matrixBridge) {
           matrixBridge.client.invite(asUserId, roomId, invitee),
         enableEncryption: (asUserId: string, roomId: string) =>
           matrixBridge.client.enableRoomEncryption(asUserId, roomId),
+        setName: (asUserId: string, roomId: string, name: string) =>
+          matrixBridge.client.setRoomName(asUserId, roomId, name),
         /**
          * The humans who may answer this board's gates.
          *
@@ -449,7 +454,7 @@ if (matrixBridge) {
          * Matrix id they actually read on.
          */
         humansFor: async () => matrixIdsForBoardHumans(boardId),
-      }),
+      }, boardOpts),
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
       noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),

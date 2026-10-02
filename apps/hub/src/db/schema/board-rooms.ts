@@ -40,6 +40,19 @@ export const matrixBoardRooms = pgTable(
      */
     speakerMxid: text("speaker_mxid").notNull(),
     alias: text("alias").notNull(),
+    /**
+     * What the room is CALLED, as last set by this service.
+     *
+     * Stored so "has the name changed" is a local comparison rather than a
+     * homeserver read on every gate — and so a rename that FAILED is not recorded
+     * as though it landed, which would leave the room misnamed forever because the
+     * next pass would see nothing to do.
+     *
+     * Null means never set. That is every room that existed when this column was
+     * added, each named after the product rather than its board, and it is what
+     * makes the backfill happen on a room's next gate rather than in a migration.
+     */
+    name: text("name"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [index("matrix_board_rooms_tenant_id_idx").on(t.tenantId)],

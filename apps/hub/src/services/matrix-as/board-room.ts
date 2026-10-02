@@ -57,6 +57,14 @@ export interface BoardRoomDeps {
   /** Turn on encryption. A board room is always encrypted; the hub owns the keys. */
   enableEncryption(asUserId: string, roomId: string): Promise<boolean>;
   /**
+   * Rename the room, answering whether the homeserver took it.
+   *
+   * Separate from `ensureRoom`'s `name`, which only applies at creation: Matrix sets a
+   * room's name with a state event, and every room that predates this was created with
+   * the product's name rather than its board's.
+   */
+  setName(asUserId: string, roomId: string, name: string): Promise<boolean>;
+  /**
    * The Matrix ids of the humans who may answer this board's gates.
    *
    * **A list from the first day, though today it holds one.** superpipeline owns
@@ -90,6 +98,7 @@ export async function ensureBoardRoom(
   boardId: string,
   tenantId: string,
   deps: BoardRoomDeps,
+  opts: { boardName?: string } = {},
 ): Promise<BoardRoom | null> {
   const [existing] = await db
     .select()
@@ -99,6 +108,11 @@ export async function ensureBoardRoom(
     // Membership is re-checked even for a room we already have: a person added to
     // the board after the room was made would otherwise never be invited.
     await inviteHumans(boardId, existing.roomId, existing.speakerMxid, deps);
+    // And so is the name, for the same reason and in the same place: a board renamed
+    // after its room was made would otherwise keep the old name forever. This is also
+    // the whole backfill — every room older than the `name` column is named after the
+    // product, and gets its board's name on its next gate.
+    await renameIfNeeded(boardId, existing.roomId, existing.speakerMxid, existing.name, deps, opts);
     return {
       boardId,
       roomId: existing.roomId,
@@ -112,10 +126,14 @@ export async function ensureBoardRoom(
 
   const alias = boardRoomAlias(boardId);
   const humans = await deps.humansFor(boardId);
+  // The id is the fallback, not a default: a hub newer than its board receives no
+  // name, and `brd_6a899b0f…` is at least unambiguous where "superpipeline" was the
+  // same for every board on the fleet.
+  const name = opts.boardName?.trim() || boardId;
   const roomId = await deps.ensureRoom(alias, {
     creator: speaker,
-    name: "superpipeline",
-    topic: `Approvals for board ${boardId}. Answer here and the board hears it.`,
+    name,
+    topic: `Approvals for ${name}. Answer here and the board hears it.`,
     // The first invitee rides on creation; the rest follow. `is_direct` and the
     // room's People filing depend on the invite being part of the create.
     ...(humans[0] ? { invite: humans[0] } : {}),
@@ -138,13 +156,65 @@ export async function ensureBoardRoom(
 
   await db
     .insert(matrixBoardRooms)
-    .values({ boardId, roomId, tenantId, speakerMxid: speaker, alias })
+    .values({ boardId, roomId, tenantId, speakerMxid: speaker, alias, name })
     .onConflictDoNothing();
 
   await inviteHumans(boardId, roomId, speaker, deps, humans);
 
   log.info("board room ready", { boardId, roomId, speaker, humans: humans.length });
   return { boardId, roomId, speakerMxid: speaker, created: true };
+}
+
+/**
+ * Rename the room when — and only when — the board's name has actually changed.
+ *
+ * Three cases, and the middle one is the one that can do damage:
+ *
+ *  - **No name sent.** Do nothing. A hub newer than its board receives no name, and
+ *    falling back to the id here would rename a perfectly readable room to `brd_…`,
+ *    which is the unreadable state this whole change exists to remove. The fallback
+ *    belongs at creation, where there is no existing name to destroy.
+ *  - **Name unchanged.** Do nothing. Otherwise every gate on every board writes a state
+ *    event that says nothing — noise in the timeline, and a request per gate.
+ *  - **Name changed, or never recorded.** Rename, and record it only if the homeserver
+ *    took it. A failed rename that was recorded anyway would leave the room misnamed
+ *    forever, because the next pass would compare equal and find nothing to do.
+ *
+ * Never throws. A room that cannot be renamed is still a room gates close in — unlike
+ * encryption, where refusing to record is the safe answer, a wrong name leaks nothing.
+ */
+async function renameIfNeeded(
+  boardId: string,
+  roomId: string,
+  speaker: string,
+  recorded: string | null,
+  deps: BoardRoomDeps,
+  opts: { boardName?: string },
+): Promise<void> {
+  const wanted = opts.boardName?.trim();
+  if (!wanted || wanted === recorded) return;
+
+  try {
+    const ok = await deps.setName(speaker, roomId, wanted);
+    if (!ok) {
+      log.warn("board room could not be renamed; leaving the recorded name alone", {
+        boardId,
+        roomId,
+      });
+      return;
+    }
+    await db
+      .update(matrixBoardRooms)
+      .set({ name: wanted })
+      .where(eq(matrixBoardRooms.boardId, boardId));
+    log.info("board room renamed", { boardId, roomId, name: wanted });
+  } catch (err) {
+    log.warn("board room rename did not reach the homeserver", {
+      boardId,
+      roomId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**

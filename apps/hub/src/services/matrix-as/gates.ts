@@ -101,6 +101,16 @@ export interface GatePendingDelivery {
    * and a gate without it must still render.
    */
   handoffSummary?: string | null;
+  /**
+   * What the board is CALLED, which this hub has no other way to learn — the board's
+   * metadata route resolves a user session, the same wall that makes `humansFor` an
+   * injected dependency.
+   *
+   * Optional, and that is load-bearing rather than politeness: a board that has not
+   * shipped the field yet sends none, and the room must keep the name it has rather
+   * than be renamed to nothing. See `renameIfNeeded`.
+   */
+  boardName?: string | null;
   options: Array<{ id: string; label: string }>;
   ts: string;
 }
@@ -141,6 +151,7 @@ export interface GateProjectionDeps {
   boardRoom(
     boardId: string,
     tenantId: string,
+    opts?: { boardName?: string },
   ): Promise<{ roomId: string; speakerMxid: string } | null>;
 
   /** Sends as a station's own virtual user. Returns the event id, or null. */
@@ -430,7 +441,7 @@ export async function projectGate(
    * station, a station answering as an mxid nothing registered, and a station
    * mid-identity-move. A board is always there.
    */
-  const found = await deps.boardRoom(d.boardId, tenantId);
+  const found = await deps.boardRoom(d.boardId, tenantId, { boardName: d.boardName ?? undefined });
   if (!found) {
     // No `midMove` here any more, and nothing to attribute it to. A board room
     // failing to exist is the hub being unable to make or encrypt one — a fault in
