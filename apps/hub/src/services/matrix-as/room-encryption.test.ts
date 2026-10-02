@@ -136,7 +136,7 @@ describe("station rooms are created encrypted", () => {
     // so the next person adding a room type has to think about which kind it is.
     replies = [{ status: 200, body: { room_id: "!space:id.agentpod.dev" } }];
 
-    await client().createSpace({ creator: USER, name: "Guild", topic: "t", alias: "guild" });
+    await client().createSpace({ creator: USER, name: "Workspace" });
 
     const create = calls.find((c) => c.url.includes("/createRoom"))!;
     expect(create.body!.creation_content).toBeDefined();
