@@ -48,6 +48,7 @@ import { stations } from "../db/schema/stations";
 import { verifyNodeCredential } from "../services/enrollment";
 import { buildTokenPayload, TOKEN_TTL } from "../auth/jwt-claims";
 import { signServiceToken } from "../auth/service-signing";
+import { STATION_TOKEN_AUDIENCES } from "../config";
 
 export const stationTokenRoutes = new Hono().post(
   "/nodes/:nodeId/stations/:stationId/token",
@@ -123,6 +124,19 @@ export const stationTokenRoutes = new Hono().post(
       // this is the fact that scopes the blast radius to that node instead
       // of reading as "the agent acted" with nothing to tell the two apart.
       extraClaims: { act: { sub: nodeId } },
+      /**
+       * Where this token may be spent. Passing nothing let `signServiceToken` fall back to the
+       * hub's own URL, so every station token was refused by every other plane — superpipeline
+       * demands its own `APP_URL` in `aud` and got the hub's instead. Nothing consumed this route
+       * yet, which is the only reason that never showed up as a bug report.
+       *
+       * From CONFIGURATION, never from the request. A station token is minted against an enrollment
+       * secret, so a node able to name its own audiences could mint credentials for any plane it
+       * liked — precisely the blast radius `act: { sub: nodeId }` above exists to bound. The device
+       * exchange may take a `?client=` because a client is a registered entry an operator wrote
+       * down; there is no client here, and there should not be.
+       */
+      audiences: STATION_TOKEN_AUDIENCES,
     });
 
     // Read back from the signed token rather than a second constant, so

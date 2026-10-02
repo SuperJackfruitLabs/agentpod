@@ -165,6 +165,26 @@ describe("a node exchanges for one of its stations", () => {
     // acted" apart from "node N minted for the agent", the fact that scopes
     // a compromised node's blast radius (service-signing.ts:19-25).
     expect(claims.act).toEqual({ sub: nodeId });
+    /**
+     * `aud` names the planes this token may be spent at — and it is the CONFIGURED list, not the
+     * hub's own URL.
+     *
+     * Before this, the mint passed no `audiences`, so `signServiceToken` fell back to
+     * `config.publicUrl`. superpipeline demands its own `APP_URL` in `aud` and got the hub's, so it
+     * refused every station token with a 401. The claims were always right; only this was missing.
+     *
+     * Asserted against `STATION_TOKEN_AUDIENCES` rather than a literal, which is the honest split:
+     * this test proves the MINT spends the configured list, and `station-token-audiences.test.ts`
+     * proves the list is built correctly from `WORK_PLANE_AUDIENCES`. Setting the env var here would
+     * not work anyway — a preload imports `config.ts` before this file's body runs, and `config.ts`
+     * reads the environment once, at import time.
+     */
+    const { STATION_TOKEN_AUDIENCES, HUB_AUDIENCE } = await import("../config.ts");
+    expect(claims.aud).toEqual(STATION_TOKEN_AUDIENCES);
+    // The hub is always in it, whatever else is configured: an agent holding a station token talks
+    // to the hub constantly (MCP self-reporting), so a list that omitted it would break its own
+    // agents the moment a work plane was named.
+    expect(claims.aud).toContain(HUB_AUDIENCE);
   });
 
   test("refuses a station hosted by a different node", async () => {
