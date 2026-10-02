@@ -320,14 +320,24 @@ export const isMatrixExclusiveNamespace = (e: unknown): e is MatrixExclusiveName
  *
  * It was never requested before, and `preset: "private_chat"` does not imply it — the preset
  * covers join rules and history visibility only. Whether a room ended up encrypted therefore
- * depended on whether some client in it switched encryption on afterwards, which produced an
- * exact split on the live fleet: harness-mode agents, each running Hermes' matrix adapter,
- * had encrypted rooms; bridge-mode agents, which have no Matrix client at all, had plaintext
- * ones. Sixteen agents handling repository contents and release artefacts were in the clear
- * because of which identity mode they happened to use.
+ * depended on a CLIENT in the room switching encryption on afterwards, which is not a property
+ * of the room at all.
  *
- * The bridge could always encrypt — `AgentCrypto` keeps an `OlmMachine` per agent — it simply
- * had no encrypted room to encrypt into.
+ * Measured against the live homeserver on 2026-10-02, before this landed: of 53 station rooms,
+ * 46 carried `m.megolm.v1.aes-sha2` and **7 did not** — seven rooms created between 21 and 24
+ * September, each read directly (`m.room.create` 200, `m.room.encryption` "Not found in room
+ * state", so plaintext and not a failed lookup). The rooms that were encrypted got there
+ * because something in them happened to ask, which is the part worth removing: the same
+ * creation path produced both outcomes, and nothing in it decided which.
+ *
+ * The seven are NOT fixed by this change, because encryption cannot be added to a room through
+ * its creation. `enableRoomEncryption` is the route for an existing room and board rooms
+ * already use it (`index.ts`); station rooms never did.
+ *
+ * An earlier draft of this comment claimed the split fell along identity mode — harness
+ * encrypted, bridge plaintext, sixteen agents in the clear. The homeserver does not say that:
+ * the sixteen newest rooms are encrypted. The claim is recorded here as wrong rather than
+ * deleted, because it is the kind of plausible story that gets re-derived.
  *
  * NOT applied to `createSpace`: a space is a container, carries no messages, and an encrypted
  * space is something clients do not expect and cannot read.
