@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
@@ -17,6 +18,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
@@ -238,6 +240,7 @@ func runCmd() {
 		descriptor.NewCapabilityHandler(reg).ACPCommand,
 	)))
 	h = gateway.NewUpdateHandler(h, version)
+	startStationTokens(ctx, cfg)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
 		return gatherHealthReports(reg)
 	}, startIntakes(ctx))
@@ -256,6 +259,35 @@ func startIntakes(ctx context.Context) gateway.Extras {
 		extras.Capabilities = append(extras.Capabilities, "fleet.reports")
 	}
 	return extras
+}
+
+// startStationTokens keeps each configured station's hub token fresh on disk.
+//
+// Off unless the operator named stations in `stationTokens`: a credential that reaches
+// another plane is not something every station should silently acquire. Its own goroutine,
+// independent of the gateway connection, because an agent's ability to reach a work plane
+// must not depend on the node's websocket to the hub being up at that moment — the token on
+// disk is still valid for minutes after the connection drops.
+func startStationTokens(ctx context.Context, cfg config.Config) {
+	if len(cfg.StationTokens) == 0 {
+		return
+	}
+	wants := make([]stationtoken.Want, 0, len(cfg.StationTokens))
+	for _, w := range cfg.StationTokens {
+		if strings.TrimSpace(w.StationID) == "" || strings.TrimSpace(w.Path) == "" {
+			// Named but incomplete is a configuration mistake, and a silent skip would look
+			// to the agent exactly like a token nobody configured.
+			log.Printf("station token: skipping entry with an empty stationId or path")
+			continue
+		}
+		wants = append(wants, stationtoken.Want{StationID: w.StationID, Path: w.Path})
+	}
+	if len(wants) == 0 {
+		return
+	}
+	k := &stationtoken.Keeper{Hub: cfg.Hub, NodeID: cfg.NodeID, NodeSecret: cfg.NodeSecret, Wants: wants}
+	go k.Run(ctx)
+	log.Printf("station tokens: keeping %d fresh", len(wants))
 }
 
 // startTurnErrorIntake opens the socket harness plugins report failed turns
