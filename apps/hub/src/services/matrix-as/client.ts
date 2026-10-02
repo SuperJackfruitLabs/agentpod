@@ -312,6 +312,34 @@ export class MatrixExclusiveNamespace extends Error {
 export const isMatrixExclusiveNamespace = (e: unknown): e is MatrixExclusiveNamespace =>
   e instanceof MatrixExclusiveNamespace;
 
+/**
+ * `initial_state` every station ROOM is created with.
+ *
+ * Encryption is decided here because it can only be decided once: Matrix lets a room be
+ * turned on and never off, so creation is the last moment the choice is still free.
+ *
+ * It was never requested before, and `preset: "private_chat"` does not imply it — the preset
+ * covers join rules and history visibility only. Whether a room ended up encrypted therefore
+ * depended on whether some client in it switched encryption on afterwards, which produced an
+ * exact split on the live fleet: harness-mode agents, each running Hermes' matrix adapter,
+ * had encrypted rooms; bridge-mode agents, which have no Matrix client at all, had plaintext
+ * ones. Sixteen agents handling repository contents and release artefacts were in the clear
+ * because of which identity mode they happened to use.
+ *
+ * The bridge could always encrypt — `AgentCrypto` keeps an `OlmMachine` per agent — it simply
+ * had no encrypted room to encrypt into.
+ *
+ * NOT applied to `createSpace`: a space is a container, carries no messages, and an encrypted
+ * space is something clients do not expect and cannot read.
+ */
+const STATION_ROOM_INITIAL_STATE = [
+  {
+    type: "m.room.encryption",
+    state_key: "",
+    content: { algorithm: "m.megolm.v1.aes-sha2" },
+  },
+] as const;
+
 export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
   const doFetch = deps.fetch ?? fetch;
 
@@ -568,6 +596,7 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
           name: opts.name,
           topic: opts.topic,
           preset: "private_chat",
+          initial_state: [...STATION_ROOM_INITIAL_STATE],
           ...(opts.invite ? { invite: [opts.invite] } : {}),
           ...(opts.isDirect ? { is_direct: true } : {}),
         },
@@ -621,6 +650,7 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
           name: opts.name,
           topic: opts.topic,
           preset: "private_chat",
+          initial_state: [...STATION_ROOM_INITIAL_STATE],
           ...(opts.invite ? { invite: [opts.invite] } : {}),
           ...(opts.isDirect ? { is_direct: true } : {}),
         },
