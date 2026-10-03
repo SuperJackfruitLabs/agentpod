@@ -42,6 +42,7 @@ import { account, session, user, verification, jwks } from "./schema/auth";
 import { serviceSigningKeys } from "./schema/service-keys";
 import {
   matrixAsTransactions,
+  matrixElicitationEvents,
   matrixGateEvents,
   matrixRooms,
   matrixMissions,
@@ -140,6 +141,7 @@ export const TENANT_SCOPED_TABLES = {
   cloudflareSandboxes,
   matrixRooms,
   matrixGateEvents,
+  matrixElicitationEvents,
   matrixBoardRooms,
   matrixMissions,
   matrixMissionMembers,
