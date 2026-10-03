@@ -830,3 +830,63 @@ describe("answering a permission request from the room", () => {
     expect(prompts.at(-1)!.text).toBe("1");
   });
 });
+
+/**
+ * A plain message in a BOARD room is an answer, not a prompt.
+ *
+ * A board room has no station — that is the whole point of it: it is spoken by an
+ * identity whose keys this hub owns, so it can both encrypt and decrypt there. Until
+ * now a message typed into one fell through to the station lookup, found nothing, and
+ * was dropped in silence. That is correct for chatter and wrong for the one thing a
+ * board room exists to carry back.
+ */
+describe("a message in a board room", () => {
+  const BOARD_ROOM = "!board-inbound:id.agentpod.dev";
+  const SPEAKER = "@agent_superpipeline:id.agentpod.dev";
+
+  function withElicitations() {
+    const answered: Array<{ sender: string; body: string; roomId: string }> = [];
+    const base = deps() as ReturnType<typeof deps> & {
+      elicitations?: { handle(e: { sender: string; body: string }, roomId: string): Promise<unknown> };
+    };
+    base.elicitations = {
+      handle: async (e, roomId) => {
+        answered.push({ ...e, roomId });
+        return { status: "answered" };
+      },
+    };
+    return { deps: base, answered };
+  }
+
+  beforeAll(async () => {
+    const tenant = await rawSql`SELECT tenant_id FROM stations WHERE id = ${STATION}`;
+    await rawSql`DELETE FROM matrix_board_rooms WHERE room_id = ${BOARD_ROOM}`;
+    await rawSql`
+      INSERT INTO matrix_board_rooms (board_id, room_id, tenant_id, speaker_mxid, alias, created_at)
+      VALUES ('brd_inbound_test', ${BOARD_ROOM}, ${tenant[0]!.tenant_id}, ${SPEAKER},
+              'agentpod_board_brd_inbound_test', now())`;
+  });
+
+  test("is offered to the elicitation answerer", async () => {
+    const { deps: d, answered } = withElicitations();
+    await handleRoomMessage(message(OWNER_MXID, "2", BOARD_ROOM), d);
+
+    expect(answered).toEqual([{ sender: OWNER_MXID, body: "2", roomId: BOARD_ROOM }]);
+  });
+
+  test("the board's own voice is never read as an answer", async () => {
+    // The hub posts the question AS the speaker, and the appservice hands that message
+    // straight back. Without this guard the hub answers its own question the moment it
+    // asks it — and the option it "chose" would be whatever its own prose matched.
+    const { deps: d, answered } = withElicitations();
+    await handleRoomMessage(message(SPEAKER, "1. Run the tests", BOARD_ROOM), d);
+
+    expect(answered).toEqual([]);
+  });
+
+  test("a deployment with no board wired up behaves exactly as before", async () => {
+    // `elicitations` absent: the message is dropped as it always was, with nothing
+    // thrown. This is the path every deployment without a board takes.
+    await handleRoomMessage(message(OWNER_MXID, "hello", BOARD_ROOM), deps());
+  });
+});
