@@ -65,7 +65,15 @@ import { openAcpWire, type AcpWire } from "./acp-transport";
 import * as broker from "./broker";
 import { nodes } from "../db/schema/nodes";
 import { promptBlocks, type PromptImage } from "./matrix-as/attachments";
-import { turnErrorForSilentTurn, turnErrorFromPlugin, turnErrorFromReason, turnErrorFromRejection } from "./turn-error";
+import {
+  gatewayUnreachable,
+  rejectionSaidNothing,
+  turnErrorForSilentTurn,
+  turnErrorForUnreachableGateway,
+  turnErrorFromPlugin,
+  turnErrorFromReason,
+  turnErrorFromRejection,
+} from "./turn-error";
 
 const log = createLogger("acp-sessions");
 
@@ -1307,7 +1315,25 @@ export async function promptSession(
     .catch(async (err) => {
       // The harness's words, with what it put in `data` — Codex's quota
       // sentence is only there — classified into one shape for every reader.
-      const error = turnErrorFromRejection(err, live.harness);
+      let error = turnErrorFromRejection(err, live.harness);
+      // …and when it gave us no words at all, go and find out why.
+      //
+      // A bare JSON-RPC generic is not a failure any amount of text matching can
+      // classify. It is also exactly what a harness sends when the thing it talks
+      // THROUGH has gone away but its own process has not: observed on 2026-10-03,
+      // when an agent restarted the OpenClaw gateway hosting its own session and
+      // three prompts in a row came back as "Internal error". `pgrep` said the
+      // gateway was running the whole time, so nothing short of a dial could tell.
+      //
+      // One question, only when we learned nothing, and only an explicit "not
+      // reachable" is allowed to replace the harness's own error — see
+      // `gatewayUnreachable` for why the asymmetry matters.
+      if (rejectionSaidNothing(err)) {
+        const probe = await broker.request(live.nodeId, "acp.transport", { key: live.stationKey });
+        if (probe.ok && gatewayUnreachable(probe.data)) {
+          error = turnErrorForUnreachableGateway(live.harness);
+        }
+      }
       await audit
         .done("error", error.message)
         .catch(() => {});

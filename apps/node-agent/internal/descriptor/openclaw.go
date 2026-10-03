@@ -2,9 +2,12 @@ package descriptor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +49,11 @@ type openclawDescriptor struct {
 	// field so tests can declare the answer without spawning or pgrep-ing a
 	// process; production wiring in NewOpenClawFrom uses openclawGatewayPID.
 	gatewayUp func() bool
+
+	// dial opens a TCP connection to the gateway. Injected for the same reason
+	// gatewayUp and resolveBinary are: a test must never touch the host's
+	// network, and a probe is only useful if its failure path can be exercised.
+	dial func(network, addr string, timeout time.Duration) (net.Conn, error)
 
 	// resolveBinary returns the openclaw executable to spawn. Like gatewayUp it
 	// is a field so tests never depend on the host's PATH or filesystem;
@@ -90,6 +98,7 @@ func NewOpenClawFrom(cfg OpenClawConfig) Descriptor {
 		sessionLabel: label,
 		acpHelp:      openclawACPHelp,
 		gatewayUp:    func() bool { _, err := openclawGatewayPID(); return err == nil },
+		dial:         net.DialTimeout,
 		resolveBinary: func() (string, error) {
 			return resolveOpenClawBinary(binary, userHome, exec.LookPath, isExecutableFile)
 		},
@@ -680,4 +689,103 @@ func openclawACPHelp(binary string) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+// openclawDefaultGatewayPort is OpenClaw's own default, used when its config
+// names none.
+const openclawDefaultGatewayPort = 18789
+
+// openclawProbeTimeout bounds a reachability dial.
+//
+// Short on purpose: this runs while somebody is waiting to be told why their
+// turn failed. A probe that takes longer than the explanation is worth has
+// already failed at its job, and an unreachable gateway refuses immediately
+// anyway — the timeout only matters for a host that blackholes packets.
+const openclawProbeTimeout = 2 * time.Second
+
+// openclawConfigPort reads gateway.port from OpenClaw's own config.
+//
+// Zero means "the config said nothing", which the caller turns into OpenClaw's
+// default. A missing or malformed config must not stop the probe from
+// happening: the most likely reason to be probing at all is that something
+// about this installation is already wrong.
+func openclawConfigPort(home string) int {
+	raw, err := os.ReadFile(filepath.Join(home, "openclaw.json"))
+	if err != nil {
+		return 0
+	}
+	var cfg struct {
+		Gateway struct {
+			Port int `json:"port"`
+		} `json:"gateway"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return 0
+	}
+	return cfg.Gateway.Port
+}
+
+// openclawGatewayAddress resolves the host:port an ACP bridge would dial.
+//
+// A configured URL wins, because it names a gateway that may not be on this
+// host at all — probing loopback in that case would answer about the wrong
+// machine. Without one the bridge dials the local gateway, which is loopback by
+// OpenClaw's own default bind.
+//
+// An unparseable URL is an ERROR rather than a fallback to loopback. Falling
+// back would probe a gateway nobody asked about and very possibly report it
+// healthy, which is the confident-wrong-answer failure this whole probe exists
+// to prevent.
+func openclawGatewayAddress(gatewayURL string, configPort int) (string, error) {
+	if strings.TrimSpace(gatewayURL) != "" {
+		u, err := url.Parse(gatewayURL)
+		if err != nil {
+			return "", fmt.Errorf("openclaw: gateway URL %q is not a URL: %w", gatewayURL, err)
+		}
+		host := u.Hostname()
+		if host == "" {
+			return "", fmt.Errorf("openclaw: gateway URL %q names no host", gatewayURL)
+		}
+		port := u.Port()
+		if port == "" {
+			// Scheme defaults, as any URL parser would apply them.
+			port = "80"
+			if u.Scheme == "wss" || u.Scheme == "https" {
+				port = "443"
+			}
+		}
+		return net.JoinHostPort(host, port), nil
+	}
+
+	port := configPort
+	if port == 0 {
+		port = openclawDefaultGatewayPort
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil
+}
+
+// ProbeTransport implements TransportProber: can an ACP bridge actually reach
+// the gateway right now?
+//
+// `key` is accepted and unused — one gateway serves every agent on the host, so
+// there is nothing per-station to probe. It stays in the signature because the
+// interface is about harnesses in general, and the next one may well differ.
+func (o *openclawDescriptor) ProbeTransport(_ string) TransportProbe {
+	addr, err := openclawGatewayAddress(o.gatewayURL, openclawConfigPort(o.home))
+	if err != nil {
+		return TransportProbe{Reachable: false, Detail: err.Error()}
+	}
+
+	dial := o.dial
+	if dial == nil {
+		dial = net.DialTimeout
+	}
+	conn, err := dial("tcp", addr, openclawProbeTimeout)
+	if err != nil {
+		return TransportProbe{Reachable: false, Address: addr, Detail: err.Error()}
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	return TransportProbe{Reachable: true, Address: addr}
 }

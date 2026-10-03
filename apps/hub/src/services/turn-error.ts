@@ -152,6 +152,9 @@ const RETRYABLE: Partial<Record<TurnErrorKind, boolean>> = {
   timeout: true,
   provider_unavailable: true,
   node_offline: true,
+  // The conversation is on disk and the next prompt works once the transport is
+  // back, which is the whole reason this kind exists separately.
+  harness_disconnected: true,
   quota: false,
   auth: false,
   bad_request: false,
@@ -230,6 +233,78 @@ export function turnErrorFromRejection(err: unknown, harness: string): TurnError
   // OpenCode names the provider only in `data` on an auth failure.
   const provider = nonEmpty(data.providerID) ?? nonEmpty(data.provider);
   return build(message, kind, harness, "acp-rejection", provider ? { provider } : {});
+}
+
+/**
+ * Did this rejection tell us anything at all?
+ *
+ * True when the harness rejected `session/prompt` with the SDK's generic and nothing
+ * else: no words of its own, no `data.message`, no typed kind. That is not a failure
+ * this module can classify, and guessing a kind from an empty message is exactly the
+ * "confident wrong kind" the header refuses.
+ *
+ * It exists so a CALLER can go and find out. Observed on ashram 2026-10-03: an OpenClaw
+ * agent restarted the gateway it was running through, the bridge stayed up holding a
+ * dead socket, and three prompts in a row came back as bare `"Internal error"`. Nothing
+ * in the text could ever have revealed that; one question to the node does.
+ *
+ * Deliberately conservative — anything that carries a sentence or a typed kind said
+ * SOMETHING, and asking the node about it would be a round trip to learn what we were
+ * just told. The cost of a false positive is a pointless probe; the cost of a false
+ * negative is the reader seeing "Internal error" again.
+ */
+export function rejectionSaidNothing(err: unknown): boolean {
+  if (err === null || err === undefined) return true;
+  const raw = err instanceof Error ? err.message : isRecord(err) ? String(err.message ?? "") : String(err);
+  const record = isRecord(err) ? err : {};
+  const data = isRecord(record.data) ? record.data : {};
+
+  // Same stripping `readableMessage` does, so the two cannot disagree about what
+  // "generic" means.
+  const own = raw.replace(/^Internal error:\s*/i, "").trim();
+  if (!(own === "" || /^internal error$/i.test(own))) return false;
+  if (nonEmpty(data.message) || nonEmpty(data.additionalDetails)) return false;
+  if (typedKind(data)) return false;
+  return true;
+}
+
+/**
+ * Did the node tell us, in so many words, that the harness's transport is down?
+ *
+ * Only `supported: true` **and** `reachable: false` counts. A harness with no notion of
+ * a transport, a node too old to know the verb, an absent answer (`broker.request` never
+ * rejects, so "offline" arrives as silence), or a shape that is not this one — all read
+ * as *unknown*, and unknown must leave the harness's own error alone.
+ *
+ * The asymmetry is the point. A false positive tells somebody their gateway is down when
+ * it is not, and sends them to fix the wrong thing; the bare "Internal error" it would
+ * replace is unhelpful but not misleading, and that is the better failure to keep.
+ */
+export function gatewayUnreachable(probe: unknown): boolean {
+  if (!isRecord(probe)) return false;
+  return probe.supported === true && probe.reachable === false;
+}
+
+/**
+ * What the room should have been told.
+ *
+ * Says the three things a person needs and "Internal error" gave none of: what broke,
+ * that their conversation is intact, and what to do. The second matters most — the
+ * transcript survives on disk (proven: 321 lines still being written after the crash),
+ * but somebody shown a generic failure has no way to know that and will reasonably
+ * assume an afternoon's context is gone.
+ *
+ * It does NOT offer to resend. The interrupted turn was running inside the thing that
+ * went away and may have already had effects; re-sending it is the person's call, not
+ * this hub's.
+ */
+export function turnErrorForUnreachableGateway(harness: string): TurnError {
+  return build(
+    `${harness}'s gateway stopped answering, so the turn was interrupted. The conversation is intact — send again to carry on.`,
+    "harness_disconnected",
+    harness,
+    "hub"
+  );
 }
 
 const SILENT: Record<string, { message: string; kind: TurnErrorKind }> = {

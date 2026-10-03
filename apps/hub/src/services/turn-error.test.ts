@@ -6,6 +6,9 @@ import {
   turnErrorFromRejection,
   turnErrorForSilentTurn,
   turnErrorFromPlugin,
+  rejectionSaidNothing,
+  turnErrorForUnreachableGateway,
+  gatewayUnreachable,
 } from "./turn-error";
 
 /**
@@ -307,5 +310,131 @@ describe("the HTTP status decides only when type and words cannot", () => {
   test("403 alone is not a verdict: Kimi sends it for a used-up quota", () => {
     expect(kind("You've reached your weekly (7-day) usage limit.", 403)).toBe("quota");
     expect(kind("Something went wrong upstream", 403)).toBe("unknown");
+  });
+});
+
+/**
+ * A rejection that said nothing at all.
+ *
+ * Observed on ashram, 2026-10-03, station `openclaw:buddhimaan`, recorded verbatim in
+ * `acp_events`:
+ *
+ *   {"kind":"unknown","source":"acp-rejection","harness":"openclaw","message":"Internal error"}
+ *
+ * …three times in one session. The agent had restarted the OpenClaw gateway it was
+ * itself running through, and the gateway's bind contradicted its mode, so the bridge's
+ * socket was gone. The bridge did NOT exit — it stayed up and rejected `session/prompt`
+ * with a bare JSON-RPC generic. So no wire closed, no `eof` arrived, and none of the
+ * existing recovery paths could see it. The person was shown "Internal error".
+ *
+ * No phrase match can rescue this, and inventing one would be the "confident wrong kind"
+ * this module refuses. What a bare rejection supports is exactly one inference: *we
+ * learned nothing*. That is a question to ask elsewhere, not an answer to guess here.
+ */
+describe("rejectionSaidNothing — when the harness told us nothing at all", () => {
+  test("a bare Internal error said nothing", () => {
+    expect(rejectionSaidNothing(new Error("Internal error"))).toBe(true);
+  });
+
+  test("the SDK's prefixed form said nothing either", () => {
+    // `readableMessage` strips this prefix; the predicate must agree with it.
+    expect(rejectionSaidNothing(new Error("Internal error: "))).toBe(true);
+  });
+
+  test("an empty rejection said nothing", () => {
+    expect(rejectionSaidNothing(new Error(""))).toBe(true);
+  });
+
+  test("a rejection carrying real words said something", () => {
+    expect(rejectionSaidNothing(new Error("API Error: 429 rate_limit_error"))).toBe(false);
+  });
+
+  test("a generic message with detail in data said something", () => {
+    // The detail in `data` is often the only real sentence there is, and
+    // `readableMessage` already prefers it. Probing the node for this would be a
+    // round trip to learn what we were just told.
+    expect(
+      rejectionSaidNothing({ message: "Internal error", data: { message: "You've reached your weekly usage limit." } }),
+    ).toBe(false);
+  });
+
+  test("a generic message with a typed kind said something", () => {
+    expect(rejectionSaidNothing({ message: "Internal error", data: { errorKind: "rate_limit" } })).toBe(false);
+  });
+
+  test("a non-error value says nothing rather than throwing", () => {
+    expect(rejectionSaidNothing(null)).toBe(true);
+    expect(rejectionSaidNothing(undefined)).toBe(true);
+  });
+});
+
+describe("turnErrorForUnreachableGateway — what the room should have been told", () => {
+  const err = turnErrorForUnreachableGateway("openclaw");
+
+  test("names the gateway, not the machinery", () => {
+    expect(err.message.toLowerCase()).toContain("gateway");
+    expect(err.message).not.toContain("Internal error");
+  });
+
+  test("says the conversation survived, because it does", () => {
+    // Proven on ashram: the interrupted session's transcript was 321 lines and still
+    // being written after the crash. Someone told "Internal error" has no way to know
+    // whether their afternoon's work is gone.
+    expect(err.message.toLowerCase()).toContain("conversation");
+  });
+
+  test("is its own kind — the harness neither exited nor is the node offline", () => {
+    expect(err.kind).toBe("harness_disconnected");
+    expect(TurnError.safeParse(err).success).toBe(true);
+  });
+
+  test("is retryable, because the next prompt works once the gateway is back", () => {
+    expect(err.retryable).toBe(true);
+  });
+
+  test("keeps the harness it came from", () => {
+    expect(turnErrorForUnreachableGateway("pi").harness).toBe("pi");
+  });
+});
+
+/**
+ * Reading the node's answer about the harness's transport.
+ *
+ * Only an explicit "I checked, and it is not reachable" may override the harness's own
+ * rejection. Everything else — a harness with no such notion, a node too old to know the
+ * verb, a malformed or missing answer — leaves the original error alone.
+ *
+ * The asymmetry is deliberate. A false positive here tells somebody their gateway is
+ * down when it is not, and sends them to fix the wrong thing; the original "Internal
+ * error" is unhelpful, but it is at least not misleading.
+ */
+describe("gatewayUnreachable — only an explicit no counts", () => {
+  test("supported and unreachable is the one true case", () => {
+    expect(gatewayUnreachable({ supported: true, reachable: false, detail: "connection refused" })).toBe(true);
+  });
+
+  test("supported and reachable is not", () => {
+    expect(gatewayUnreachable({ supported: true, reachable: true, address: "127.0.0.1:18789" })).toBe(false);
+  });
+
+  test("a harness with no notion of transport is not an unreachable one", () => {
+    expect(gatewayUnreachable({ supported: false })).toBe(false);
+  });
+
+  test("silence is not a no", () => {
+    // A node too old for the verb, or offline: broker.request never rejects, so the
+    // answer is simply absent. That must read as "unknown", never as "down".
+    expect(gatewayUnreachable(undefined)).toBe(false);
+    expect(gatewayUnreachable(null)).toBe(false);
+    expect(gatewayUnreachable({})).toBe(false);
+    expect(gatewayUnreachable("nope")).toBe(false);
+  });
+
+  test("a half-answer is not a no", () => {
+    // `reachable: false` without `supported` could be a different verb's shape
+    // entirely. Both fields, or nothing.
+    expect(gatewayUnreachable({ reachable: false })).toBe(false);
+    expect(gatewayUnreachable({ supported: true })).toBe(false);
+    expect(gatewayUnreachable({ supported: "yes", reachable: false })).toBe(false);
   });
 });
