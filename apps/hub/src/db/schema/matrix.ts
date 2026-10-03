@@ -236,6 +236,70 @@ export const matrixMissionMembers = pgTable(
  * because the gate is the identity: there is no such thing as two projections
  * of one gate, and a schema able to represent one will eventually hold one.
  */
+/**
+ * A question this hub posted into a board's room, and what it has said about it.
+ *
+ * The mirror of {@link matrixGateEvents}, deliberately field for field: both answer
+ * "did we already put this in a room, and have we already acknowledged the answer",
+ * and a reader who knows one should not have to learn the other.
+ *
+ * Keyed by the board's `elc_…` because that is what an answer is addressed to. The
+ * room index is the inbound lookup — a typed reply arrives holding a room and needing
+ * the question — and it works because a room holds at most one unanswered question:
+ * the board retires the previous one when an agent asks again.
+ */
+export const matrixElicitationEvents = pgTable(
+  "matrix_elicitation_events",
+  {
+    elicitationId: text("elicitation_id").primaryKey(),
+    /**
+     * Carried rather than derived through the room, for the same reason
+     * `matrixGateEvents` carries it: "reachable only through a scoped parent" is a
+     * claim about the routes that exist today.
+     */
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "restrict" }),
+    /** The board, needed to address the answer endpoint. */
+    boardId: text("board_id").notNull(),
+    cardId: text("card_id").notNull(),
+    roomId: text("room_id").notNull(),
+    /**
+     * The prose message that carries the question.
+     *
+     * Unlike a gate, an answer does not REFERENCE this event — a reply is matched
+     * against the question open in the room. It is stored because settling the
+     * question means editing or replying to the message that asked it, and because
+     * uniqueness here is what stops two questions sharing one message.
+     */
+    eventId: text("event_id").notNull(),
+    /**
+     * The options the question was ASKED with, as `[{id,label}]`.
+     *
+     * Stored rather than re-fetched, for two reasons. A typed reply is matched against
+     * them, so matching must not cost a round trip to the board on every message that
+     * lands in the room. And a question has to be answered against the set it was asked
+     * with — an agent that asked again with different options would otherwise change
+     * the question out from under the person answering it.
+     */
+    optionsJson: text("options_json").notNull().default("[]"),
+    /**
+     * When this hub said in the room that the board accepted an answer.
+     *
+     * The claim that stops a second receipt: an answer delivered twice — a double tap,
+     * a re-sent appservice transaction — must leave one line in the room, not two that
+     * read as though the question were answered twice.
+     */
+    outcomePostedAt: timestamp("outcome_posted_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("matrix_elicitation_events_tenant_id_idx").on(t.tenantId),
+    uniqueIndex("matrix_elicitation_events_event_idx").on(t.eventId),
+    index("matrix_elicitation_events_room_idx").on(t.roomId),
+  ]
+);
+
 export const matrixGateEvents = pgTable(
   "matrix_gate_events",
   {
