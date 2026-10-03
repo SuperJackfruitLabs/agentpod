@@ -636,6 +636,90 @@ test("promptSession keeps the words a harness put in the error's data (Codex quo
   }
 });
 
+/**
+ * A rejection that said nothing, and the node knows why.
+ *
+ * ashram, 2026-10-03: an OpenClaw agent restarted the gateway hosting its own session.
+ * The bridge stayed up holding a dead socket and rejected three prompts with a bare
+ * "Internal error". `pgrep` said the gateway was running the whole time, so nothing in
+ * the hub could tell — and the person was shown the generic three times.
+ */
+test("a rejection that said nothing, with the gateway unreachable, names the gateway", async () => {
+  const { server, fake, station } = await setupRig("acpsess-transport-down", {
+    stationKey: "acp-transport-down-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED 127.0.0.1:18789" },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({
+      kind: "harness_disconnected",
+      source: "hub",
+      retryable: true,
+    });
+    const message = (hit.payload as { message: string }).message;
+    expect(message).not.toBe("Internal error");
+    expect(message.toLowerCase()).toContain("gateway");
+    // The one thing a person cannot find out for themselves from a failed turn.
+    expect(message.toLowerCase()).toContain("conversation");
+
+    // And the session is still usable, not torn down.
+    await pollForEvent(row.id, stateWith("idle"), 8_000);
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
+test("a rejection that said nothing, with the gateway reachable, keeps the harness's own error", async () => {
+  // The asymmetry that matters: telling somebody their gateway is down when it is not
+  // sends them to fix the wrong thing. Unhelpful beats misleading.
+  const { server, fake, station } = await setupRig("acpsess-transport-up", {
+    stationKey: "acp-transport-up-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: true },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({ message: "Internal error", kind: "unknown", source: "acp-rejection" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
+test("a node that does not know the transport verb keeps the harness's own error", async () => {
+  // Silence is not a no. `broker.request` never rejects, so an older node's
+  // non-answer arrives as a failed result — which must read as unknown.
+  const { server, fake, station } = await setupRig("acpsess-transport-unknown", {
+    stationKey: "acp-transport-unknown-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    // `transport` deliberately absent: the fake refuses the verb, as an old node does.
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    const { hit } = await pollForEvent(row.id, (event) => event.type === "error", 8_000);
+
+    expect(hit.payload).toMatchObject({ message: "Internal error", kind: "unknown", source: "acp-rejection" });
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 20_000);
+
 test("promptSession reports an adapter that completes without any visible update", async () => {
   // No plugin reports here; the wait for one only slows the suite.
   _setTurnErrorGraceMsForTest(50);
