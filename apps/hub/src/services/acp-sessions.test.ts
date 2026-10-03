@@ -760,8 +760,18 @@ test("a disconnected harness is re-attached, and the next prompt works", async (
     // process existing only means the node was asked to spawn one.
     await pollUntil(
       () => fake.processes[1]!.agentReceived.some((m) => m.method === "session/new"),
-      10_000,
+      15_000,
     );
+
+    // …and then that the session is actually ready to take one. The handshake
+    // completing and the row reaching `idle` are two different moments, and under a
+    // full-suite load they are far enough apart that prompting between them answers
+    // "Session is busy". Waiting on the state the caller actually depends on is the
+    // fix; widening a timeout would only make the race rarer.
+    await pollUntil(async () => {
+      const rows = await rawSql`SELECT status FROM acp_sessions WHERE id = ${row.id}`;
+      return rows[0]?.status === "idle";
+    }, 15_000);
 
     // And the session answers again, with no new session created by the caller.
     await promptSession(TEST_USER, row.id, "are you back?");
