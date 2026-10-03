@@ -62,6 +62,11 @@ function delivery(over: Partial<ElicitationPendingDelivery> = {}): ElicitationPe
   };
 }
 
+// Event ids are unique across the whole file, not per rig. A homeserver never
+// issues the same id twice, the schema enforces it, and a per-rig counter made two
+// questions in one room collide — which is how that constraint got noticed.
+let events = 0;
+
 function rig(over: Partial<ElicitationProjectionDeps> = {}) {
   const sent: Array<{ roomId: string; body: string; extra?: Record<string, unknown> }> = [];
   const roomCalls: Array<{ boardId: string; boardName?: string }> = [];
@@ -72,7 +77,7 @@ function rig(over: Partial<ElicitationProjectionDeps> = {}) {
     },
     sendText: async (_user, roomId, body, extra) => {
       sent.push({ roomId, body, extra });
-      return `$event-${sent.length}`;
+      return `$event-${++events}`;
     },
     ...over,
   };
@@ -111,7 +116,7 @@ describe("a question is posted into its board's room", () => {
       .from(matrixElicitationEvents)
       .where(eq(matrixElicitationEvents.elicitationId, d.elicitationId));
     expect(row!.roomId).toBe(ROOM);
-    expect(row!.eventId).toBe("$event-1");
+    expect(row!.eventId).toMatch(/^\$event-\d+$/);
     // Not a `pending:` placeholder — a row left at that is a question nothing will
     // ever treat as open.
     expect(row!.eventId.startsWith("pending:")).toBe(false);
@@ -247,6 +252,25 @@ describe("the question a room is waiting on", () => {
     await projectElicitation(BOOTSTRAP_TENANT_ID, newer, rig().deps);
 
     expect((await openQuestionInRoom(ROOM))!.elicitationId).toBe(newer.elicitationId);
+  });
+});
+
+describe("two questions cannot share one message", () => {
+  test("a second question projected onto the same event id is refused", async () => {
+    // Enforced by `matrix_elicitation_events_event_idx`, and not theoretical: a test
+    // rig that reused an id hit it immediately. A reply arrives holding a room and
+    // needing the question, so two questions on one message would make the first
+    // unanswerable — and silently, because the newer row would simply win.
+    const first = delivery();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, first, rig().deps);
+
+    const second = delivery();
+    const fixed = rig({ sendText: async () => "$event-collide" });
+    await projectElicitation(BOOTSTRAP_TENANT_ID, second, fixed.deps);
+    const third = delivery();
+    const same = rig({ sendText: async () => "$event-collide" });
+
+    await expect(projectElicitation(BOOTSTRAP_TENANT_ID, third, same.deps)).rejects.toThrow();
   });
 });
 
