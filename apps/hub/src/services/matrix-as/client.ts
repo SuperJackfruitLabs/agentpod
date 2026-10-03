@@ -239,6 +239,14 @@ export interface MatrixClient {
    * emptied, and a client reading a `via`-less edge skips it.
    */
   removeSpaceChild(creator: string, spaceRoomId: string, childRoomId: string): Promise<void>;
+  /**
+   * Rename a room, returning whether the homeserver accepted it.
+   *
+   * Returns a boolean rather than throwing, because a room that cannot be renamed
+   * is still a room that works — unlike `enableRoomEncryption`, whose failure means
+   * a room must not be used. The caller decides what a refused rename costs.
+   */
+  setRoomName(asUserId: string, roomId: string, name: string): Promise<boolean>;
   /** Set a user's avatar. Optional for an agent; uniform across harnesses. */
   setAvatar(userId: string, mxcUrl: string): Promise<void>;
   /**
@@ -857,6 +865,18 @@ export function createMatrixClient(deps: MatrixClientDeps): MatrixClient {
       if (res.status === 404) return null;
       const url = res.body.avatar_url;
       return typeof url === "string" && url !== "" ? url : null;
+    },
+
+    async setRoomName(asUserId, roomId, name) {
+      const res = await call(
+        `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/m.room.name/`,
+        { method: "PUT", userId: asUserId, body: { name } },
+      );
+      const ok = res.status >= 200 && res.status < 300;
+      if (!ok) {
+        log.warn("could not set room name", { roomId, asUserId, status: res.status });
+      }
+      return ok;
     },
 
     async setAvatar(userId, mxcUrl) {

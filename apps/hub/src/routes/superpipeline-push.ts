@@ -28,6 +28,8 @@ import {
   type GatePendingDelivery,
   type GateProjectionDeps,
 } from "../services/matrix-as/gates";
+import { isElicitationPending } from "../services/matrix-as/elicitation-card";
+import { projectElicitation } from "../services/matrix-as/elicitations";
 
 const log = createLogger("superpipeline-push");
 
@@ -85,6 +87,29 @@ export function createSuperpipelinePushRoutes(deps: SuperpipelinePushDeps) {
     } catch {
       // A retry does not fix malformed JSON, so this is terminal on purpose.
       return c.json({ error: "invalid json" }, 400);
+    }
+
+    /**
+     * An agent's question travels the same door as a gate.
+     *
+     * Both are "a person must answer before this card moves", both are signed the
+     * same way, and both are refused the same way when the shape is not one this
+     * build knows. Checked before the gate so the two predicates cannot both claim a
+     * body — they are disjoint today, and a future field that made them overlap
+     * should fail here rather than project twice.
+     */
+    if (isElicitationPending(body)) {
+      const tenantId = await deps.tenantIdFor(body.boardId);
+      if (!tenantId) {
+        log.warn("push for a board mapped to no fleet", { boardId: body.boardId });
+        return c.json({ error: "unknown board" }, 404);
+      }
+      const outcome = await projectElicitation(tenantId, body, deps);
+      log.info("question projected", {
+        elicitationId: body.elicitationId,
+        status: outcome.status,
+      });
+      return c.json({ ok: true, status: outcome.status }, 200);
     }
 
     if (!isGatePending(body)) {

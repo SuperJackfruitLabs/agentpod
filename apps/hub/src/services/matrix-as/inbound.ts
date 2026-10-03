@@ -86,6 +86,21 @@ export interface InboundDeps {
       roomId: string
     ): Promise<unknown>;
   };
+  /**
+   * Answering an agent's question — a plain message in a board room.
+   *
+   * Unlike a gate, which arrives as a structured event pointing at the message it
+   * answers, this is ordinary text matched against the question currently open in
+   * that room. That is what lets a question be answered from any Matrix client
+   * rather than only one that knows a custom event type.
+   *
+   * Optional for the same reason `gates` is: a deployment with no board wired up
+   * behaves exactly as before, and the tests that predate it construct deps without
+   * it.
+   */
+  elicitations?: {
+    handle(event: { sender: string; body: string }, roomId: string): Promise<unknown>;
+  };
   client: {
     sendText(userId: string, roomId: string, body: string): Promise<string | null>;
     /**
@@ -402,6 +417,26 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   // it and cost an agent a round trip to say so. A bare image or voice note is
   // not nothing.
   if (text.trim() === "" && !image && !audio) return;
+
+  // ── A board room answers questions; it never starts sessions ──────────────
+  //
+  // A board room has no station, which is the point of it: it is spoken by an
+  // identity whose keys this hub owns outright, so it can both encrypt and decrypt
+  // there. Before this, a message typed into one fell through to the station lookup
+  // below, found nothing, and was dropped in silence — correct for chatter, and
+  // wrong for the one thing a board room exists to carry back.
+  //
+  // The sender check is not a nicety. The hub posts the question AS the speaker and
+  // the appservice hands that message straight back; without this the hub would
+  // answer its own question the instant it asked it, choosing whichever option its
+  // own prose happened to match.
+  const board = await boardRoomFor(event.room_id);
+  if (board) {
+    if (deps.elicitations && event.sender !== board.speakerMxid) {
+      await deps.elicitations.handle({ sender: event.sender, body: text }, event.room_id);
+    }
+    return;
+  }
 
   const room = await roomContext(event.room_id);
   // A room we do not own is not ours to answer in — anyone can invite the bot

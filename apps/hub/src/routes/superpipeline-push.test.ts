@@ -122,3 +122,83 @@ describe("the signed push receiver", () => {
     expect(res.status).toBe(404);
   });
 });
+
+/**
+ * A board telling the hub an agent is blocked on a person.
+ *
+ * The same door as a gate, the same signature, and the same refusal to guess: a body
+ * this build does not recognise is answered 200-and-ignored, because a non-2xx makes
+ * the board retry something it will never like.
+ */
+const ELICITATION = {
+  event: "elicitation.pending",
+  boardId: "brd_7c1f",
+  boardName: "Client Quality",
+  cardId: "crd_9a22",
+  cardTitle: "Add OAuth login",
+  elicitationId: "elc_4e8b",
+  runId: "run_12",
+  stageKey: "research",
+  agentId: "agt_31d0",
+  question: "May I run the test suite?",
+  options: [
+    { id: "run_them", label: "Run the tests" },
+    { id: "skip", label: "Skip them" },
+  ],
+  ts: "2026-10-02T12:00:00.000Z",
+};
+
+test("a signed elicitation.pending is routed to the elicitation projection", async () => {
+  // This file tests the DOOR, not what happens through it: the projection's own
+  // behaviour — the card, the claim, the release on a failed send — is covered
+  // against a database in `elicitations.test.ts`. Here the board room is refused, so
+  // the projection answers `no-room` before it writes anything, and the outcome in
+  // the response is what proves the body reached the elicitation path rather than
+  // being ignored as an unknown shape.
+  // A list, not a `let`: TypeScript cannot see a callback run, so a nullable
+  // variable narrows to `null` and the assertion below stops compiling.
+  const askedFor: string[] = [];
+  const d = deps({
+    boardRoom: async (boardId: string) => {
+      askedFor.push(boardId);
+      return null;
+    },
+  });
+  const raw = JSON.stringify(ELICITATION);
+
+  const res = await post(d, raw, await sign(SECRET, raw));
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ok: true, status: "no-room" });
+  expect(askedFor).toEqual([ELICITATION.boardId]);
+});
+
+test("an unsigned elicitation is refused, exactly as a gate is", async () => {
+  const d = deps();
+  const raw = JSON.stringify(ELICITATION);
+  const res = await post(d, raw, "sha256=deadbeef");
+  expect(res.status).toBe(401);
+});
+
+test("an elicitation for a board this hub does not know is 404, not a crash", async () => {
+  const d = deps({ tenantIdFor: async () => null });
+  const raw = JSON.stringify(ELICITATION);
+  const res = await post(d, raw, await sign(SECRET, raw));
+  expect(res.status).toBe(404);
+});
+
+test("an elicitation missing the id an answer is addressed to is ignored, not projected", async () => {
+  // The predicate's whole job: a board a version ahead or behind must not have this
+  // hub posting a question nobody can answer, which reads like a button that does
+  // nothing.
+  const said: unknown[] = [];
+  const d = deps({ sendText: async () => { said.push(1); return "$x"; } });
+  const { elicitationId: _gone, ...without } = ELICITATION;
+  const raw = JSON.stringify(without);
+
+  const res = await post(d, raw, await sign(SECRET, raw));
+
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ ignored: true });
+  expect(said).toHaveLength(0);
+});

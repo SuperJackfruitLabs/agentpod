@@ -22,6 +22,8 @@ import { projectGate, projectionForGate, tenantForBoard } from './services/matri
 import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
 import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
+import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
+import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -427,7 +429,10 @@ if (matrixBridge) {
      * A gate used to go to the station's room, which this hub encrypts for but must
      * never decrypt for — so it could be delivered and never answered.
      */
-    boardRoom: (boardId: string, tenantId: string) =>
+    // `boardOpts`, not `opts`: the `ensureRoom` lambda below already binds `opts` to
+    // the ROOM's creation options, and two different `opts` in one expression is how
+    // the wrong one gets passed.
+    boardRoom: (boardId: string, tenantId: string, boardOpts?: { boardName?: string }) =>
       ensureBoardRoom(boardId, tenantId, {
         domain: matrixBridge.config.domain,
         ensureUser: (localpart, displayName) =>
@@ -437,6 +442,8 @@ if (matrixBridge) {
           matrixBridge.client.invite(asUserId, roomId, invitee),
         enableEncryption: (asUserId: string, roomId: string) =>
           matrixBridge.client.enableRoomEncryption(asUserId, roomId),
+        setName: (asUserId: string, roomId: string, name: string) =>
+          matrixBridge.client.setRoomName(asUserId, roomId, name),
         /**
          * The humans who may answer this board's gates.
          *
@@ -449,7 +456,7 @@ if (matrixBridge) {
          * Matrix id they actually read on.
          */
         humansFor: async () => matrixIdsForBoardHumans(boardId),
-      }),
+      }, boardOpts),
     /** A posted gate is a pending decision on each of the board's humans' fleet card. */
     onPosted: (d: Parameters<typeof noteGatePosted>[0], posted: Parameters<typeof noteGatePosted>[1]) =>
       noteGatePosted(d, posted, { humansFor: matrixIdsForBoardHumans }),
@@ -491,6 +498,17 @@ if (matrixBridge) {
     // board, and shows again the ones a restart forgot.
     onBoardPending: (boardId, gates) =>
       reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
+  });
+
+  // The same floor, for an agent's questions. `projectElicitation` is idempotent on
+  // `elicitation_id`, so push and sweep are meant to overlap rather than be arbitrated
+  // between — and the settling half matters more here than it does for gates, because
+  // a question is also retired when the same agent asks the next one.
+  startElicitationSweeper({
+    tenantIdFor: tenantForBoard,
+    project: (tenantId, delivery) => projectElicitation(tenantId, delivery, gateProjection),
+    postedAwaitingOutcome: postedElicitationsAwaitingOutcome,
+    settle: (elicitationId, roomId) => matrixBridge.settleElicitation(elicitationId, roomId),
   });
 
   app.route(
