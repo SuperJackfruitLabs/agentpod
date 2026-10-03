@@ -81,6 +81,15 @@ export interface FakeAcpNodeOpts {
   /** Respond to acp.open with ok:false and this error. */
   failOpen?: string;
   /**
+   * What `acp.transport` answers — the node's verdict on whether the harness can
+   * still reach the thing it talks THROUGH.
+   *
+   * Absent means the verb is never answered at all, which is what an older node
+   * does, and the hub must read that as "unknown" rather than "down". Mutable, so a
+   * test can take the gateway away and give it back.
+   */
+  transport?: { supported: boolean; reachable: boolean; detail?: string } | null;
+  /**
    * Behave like a node from before slice 4b: accept acp.open but answer with
    * only {sessionId} — never echoing the requested instance. That missing echo
    * is exactly how the hub detects an old node and degrades to one session per
@@ -466,6 +475,27 @@ export async function connectFakeAcpNode(
             })
           );
           break;
+
+        case "acp.transport": {
+          // No configured answer: behave like a node that does not know the verb.
+          if (!opts.transport) {
+            ws.send(JSON.stringify({ type: "res", id, ok: false, error: "unknown verb" }));
+            break;
+          }
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id,
+              ok: true,
+              data: {
+                supported: opts.transport.supported,
+                reachable: opts.transport.reachable,
+                ...(opts.transport.detail ? { detail: opts.transport.detail } : {}),
+              },
+            })
+          );
+          break;
+        }
 
         case "acp.open":
           if (opts.failOpen) {
