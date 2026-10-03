@@ -86,7 +86,21 @@ export type AcpEvent = z.infer<typeof AcpEvent>;
 export const TurnErrorKind = z.enum([
   "quota", "rate_limit", "auth", "bad_request", "context_exhausted", "timeout",
   "provider_unavailable", "refusal", "max_tokens", "cancelled", "node_offline",
-  "harness_exited", "unknown",
+  "harness_exited",
+  /**
+   * The harness is running but lost whatever it talks THROUGH, so a turn was
+   * rejected with nothing in it.
+   *
+   * Distinct from `harness_exited` (the process is alive) and from `node_offline`
+   * (the node is fine and answering). Seen first on 2026-10-03: an OpenClaw agent
+   * restarted the gateway hosting its own session, the bridge stayed up with a dead
+   * socket, and every prompt came back as a bare JSON-RPC "Internal error".
+   *
+   * Retryable, and that is the point of having it: the conversation is on disk and
+   * the next prompt works once the transport is back.
+   */
+  "harness_disconnected",
+  "unknown",
 ]);
 export type TurnErrorKind = z.infer<typeof TurnErrorKind>;
 

@@ -37,6 +37,9 @@ func NewHandler(reg *Registry) gateway.Handler {
 		case "health":
 			return handleHealth(reg, params)
 
+		case "acp.transport":
+			return handleTransportProbe(reg, params)
+
 		case "fs.list":
 			return handleFsList(reg, params)
 
@@ -112,6 +115,37 @@ func handleHealth(reg *Registry, params json.RawMessage) (any, bool, error) {
 		return nil, false, err
 	}
 	return h, false, nil
+}
+
+// handleTransportProbe answers whether this station's harness can still reach
+// the thing it talks THROUGH.
+//
+// A harness whose descriptor does not implement TransportProber returns
+// `supported: false` rather than an error: "this harness has no such notion" is
+// an answer, and an error here would make the caller — which is trying to
+// explain a failure to a person — have a second failure to explain.
+func handleTransportProbe(reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		Key string `json:"key"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("acp.transport: bad params: %w", err)
+	}
+	d, err := reg.For(p.Key)
+	if err != nil {
+		return nil, false, err
+	}
+	prober, ok := d.(TransportProber)
+	if !ok {
+		return map[string]any{"supported": false}, false, nil
+	}
+	probe := prober.ProbeTransport(p.Key)
+	return map[string]any{
+		"supported": true,
+		"reachable": probe.Reachable,
+		"address":   probe.Address,
+		"detail":    probe.Detail,
+	}, false, nil
 }
 
 func handleFsList(reg *Registry, params json.RawMessage) (any, bool, error) {
