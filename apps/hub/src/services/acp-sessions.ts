@@ -280,6 +280,18 @@ interface LiveSession {
    * fails, where a note in the text is a turn it can answer.
    */
   acceptsImages: boolean;
+  /**
+   * What a re-open needs, captured at open rather than re-read.
+   *
+   * Re-attaching is resuming THIS conversation on the node it is already on. A
+   * station that has since moved, lost its workspace or changed its MCP servers is a
+   * different place to run, and silently following it would resume somebody's
+   * conversation somewhere they did not ask for. Re-reading would do exactly that.
+   */
+  workspacePath: string | null;
+  mcpServers: McpServer[];
+  /** A re-attach is running; a second would race it for the same wire. */
+  reattaching: boolean;
 }
 
 /** Live sessions per station — one-to-many since slice 4b. */
@@ -482,6 +494,143 @@ function setStatus(
       ...(opts.endedReason !== undefined ? { endedReason: opts.endedReason } : {}),
     }
   );
+}
+
+/**
+ * Build the ACP client over a wire and complete the handshake.
+ *
+ * Shared by the first open and by a re-attach, so the two can never drift into
+ * handshaking differently — which would mean a resumed session quietly having
+ * different capabilities from the one it replaced.
+ */
+async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<void> {
+  const app = client({ name: "agentpod-hub" })
+    .onNotification("session/update", ({ params }) => {
+      handleSessionUpdate(live, params);
+    })
+    .onRequest("session/request_permission", ({ params }) => handlePermissionRequest(live, params));
+  const connection = app.connect(ndJsonStream(wire.writable, wire.readable));
+  live.connection = connection;
+  live.agent = connection.agent;
+  connection.closed.catch(() => {
+    // Post-exit stream errors surface here; teardown runs via wire.closed.
+  });
+  void wire.closed.then(
+    (reason) => void handleWireClosed(live, reason),
+    () => void handleWireClosed(live, "wire error")
+  );
+
+  const initialized = await withDeadline(
+    connection.agent.request("initialize", {
+      protocolVersion: PROTOCOL_VERSION,
+      clientCapabilities: {},
+      clientInfo: { name: "agentpod-hub", version: "0.1.0" },
+    }),
+    handshakeTimeoutMs,
+    HANDSHAKE_TIMEOUT_MESSAGE
+  );
+  // Read, not assumed: every adapter probed on 2026-09-24 says yes, and the one
+  // that someday says no should get a note instead of a failed turn.
+  live.acceptsImages =
+    (initialized as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } } | undefined)
+      ?.agentCapabilities?.promptCapabilities?.image === true;
+  const created = await withDeadline(
+    connection.agent.request("session/new", {
+      // The SDK requires an absolute cwd; the station workspace is the natural
+      // one, "/" the fallback for workspace-less stations.
+      cwd: live.workspacePath ?? "/",
+      mcpServers: live.mcpServers,
+    }),
+    handshakeTimeoutMs,
+    HANDSHAKE_TIMEOUT_MESSAGE
+  );
+  live.acpSessionId = created.sessionId;
+}
+
+/**
+ * How many times a lost transport is re-attached, and how long between tries.
+ *
+ * Bounded, and short. A gateway that is coming back does so in seconds — it is a
+ * service restart — so a long tail buys nothing. A gateway that is NOT coming back
+ * must not turn into a process-spawn loop that runs for as long as the session row
+ * exists, asking the node to start an agent every few seconds forever.
+ */
+const REATTACH_BACKOFF_MS = [1_000, 2_000, 4_000];
+
+/**
+ * Put the session back on a live agent process after its transport went away.
+ *
+ * Runs in the BACKGROUND, after the failure has already been reported. Making
+ * somebody wait out a retry budget to be told what went wrong would be a worse
+ * answer delivered later; they get the explanation at once, and the session quietly
+ * becomes usable again behind it.
+ *
+ * It re-opens with the SAME instance — `live.id`, stable by construction — so the
+ * node spawns the bridge against the same harness session key and the conversation
+ * resumes rather than restarting. That is the whole reason the transcript survives a
+ * gateway restart.
+ *
+ * Deliberately does NOT re-send the interrupted prompt. That turn was running inside
+ * the thing that went away and may already have had effects; repeating it is the
+ * person's decision to make, not this function's.
+ */
+async function reattachAfterTransportLoss(live: LiveSession): Promise<void> {
+  if (live.reattaching || live.ended) return;
+  live.reattaching = true;
+  try {
+    for (const wait of REATTACH_BACKOFF_MS) {
+      await new Promise((r) => setTimeout(r, wait));
+      // Every reason to stop, re-checked each pass: the session ended, somebody
+      // started a new turn (which owns the wire now), or the node went away and the
+      // offline path has it.
+      if (live.ended || live.turnInFlight) return;
+      if (!connectionManager.isOnline(live.nodeId)) continue;
+
+      // Ask before spawning. Re-opening into a gateway that is still down costs the
+      // node a process that will fail the same way, and tells the reader nothing.
+      const probe = await broker.request(live.nodeId, "acp.transport", { key: live.stationKey });
+      if (probe.ok && gatewayUnreachable(probe.data)) continue;
+
+      try {
+        // The old wire is holding a dead socket; let it go before taking another.
+        try {
+          await live.wire?.close();
+        } catch {
+          // Already gone — which is the case this exists for.
+        }
+        const wire = await openAcpWire(live.nodeId, live.stationKey, live.id);
+        if (live.ended) {
+          await wire.close();
+          return;
+        }
+        live.wire = wire;
+        live.nodeSessionId = wire.nodeSessionId;
+        live.instanceEchoed = wire.instanceEchoed;
+        await connectAndHandshake(live, wire);
+        await db
+          .update(acpSessions)
+          .set({ nodeSessionId: wire.nodeSessionId })
+          .where(eq(acpSessions.id, live.id));
+        await setStatus(live, "idle").done;
+        log.info("ACP session re-attached after its transport came back", {
+          sessionId: live.id,
+          stationId: live.stationId,
+        });
+        return;
+      } catch (err) {
+        log.warn("ACP re-attach attempt failed", {
+          sessionId: live.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    log.info("ACP session not re-attached; its transport did not come back in time", {
+      sessionId: live.id,
+      stationId: live.stationId,
+    });
+  } finally {
+    live.reattaching = false;
+  }
 }
 
 // ─── Live-session lifecycle helpers ──────────────────────────────────────────
@@ -869,6 +1018,9 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
     turnResolution: null,
     lastTurnSettledAt: 0,
     acceptsImages: false,
+    workspacePath: workspacePath ?? null,
+    mcpServers: input.mcpServers ?? [],
+    reattaching: false,
   };
   // Register before any await so siblings (and the layers above) can see this
   // session while it is starting. Every failure exit below MUST run
@@ -914,49 +1066,7 @@ async function openSession(input: CreateSessionInput): Promise<AcpSessionRow> {
       throw new Error(ACTIVE_SESSION_MESSAGE);
     }
 
-    const app = client({ name: "agentpod-hub" })
-      .onNotification("session/update", ({ params }) => {
-        handleSessionUpdate(live, params);
-      })
-      .onRequest("session/request_permission", ({ params }) =>
-        handlePermissionRequest(live, params)
-      );
-    const connection = app.connect(ndJsonStream(wire.writable, wire.readable));
-    live.connection = connection;
-    live.agent = connection.agent;
-    connection.closed.catch(() => {
-      // Post-exit stream errors surface here; teardown runs via wire.closed.
-    });
-    void wire.closed.then(
-      (reason) => void handleWireClosed(live, reason),
-      () => void handleWireClosed(live, "wire error")
-    );
-
-    const initialized = await withDeadline(
-      connection.agent.request("initialize", {
-        protocolVersion: PROTOCOL_VERSION,
-        clientCapabilities: {},
-        clientInfo: { name: "agentpod-hub", version: "0.1.0" },
-      }),
-      handshakeTimeoutMs,
-      HANDSHAKE_TIMEOUT_MESSAGE
-    );
-    // Read, not assumed: every adapter probed on 2026-09-24 says yes, and
-    // the one that someday says no should get a note instead of a failed turn.
-    live.acceptsImages =
-      (initialized as { agentCapabilities?: { promptCapabilities?: { image?: boolean } } } | undefined)
-        ?.agentCapabilities?.promptCapabilities?.image === true;
-    const created = await withDeadline(
-      connection.agent.request("session/new", {
-        // The SDK requires an absolute cwd; the station workspace is the
-        // natural one, "/" the fallback for workspace-less stations.
-        cwd: workspacePath ?? "/",
-        mcpServers: input.mcpServers ?? [],
-      }),
-      handshakeTimeoutMs,
-      HANDSHAKE_TIMEOUT_MESSAGE
-    );
-    live.acpSessionId = created.sessionId;
+    await connectAndHandshake(live, wire);
 
     await boundedDb(
       db
@@ -1332,6 +1442,9 @@ export async function promptSession(
         const probe = await broker.request(live.nodeId, "acp.transport", { key: live.stationKey });
         if (probe.ok && gatewayUnreachable(probe.data)) {
           error = turnErrorForUnreachableGateway(live.harness);
+          // Background, deliberately: the reader already has their answer, and the
+          // session quietly becomes usable again behind it.
+          void reattachAfterTransportLoss(live);
         }
       }
       await audit

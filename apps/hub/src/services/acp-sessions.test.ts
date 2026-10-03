@@ -720,6 +720,109 @@ test("a node that does not know the transport verb keeps the harness's own error
   }
 }, 20_000);
 
+/**
+ * After the gateway comes back, the session is usable again without the person
+ * starting a new one.
+ *
+ * Reporting the failure well (above) still leaves somebody with a session whose bridge
+ * holds a dead socket: every later prompt fails the same way. The node spawns the bridge
+ * with a stable `--session agent:<agent>:<label>` key, which is why the transcript
+ * survives a gateway restart at all — so re-opening the process resumes the SAME
+ * conversation rather than starting a new one.
+ */
+test("a disconnected harness is re-attached, and the next prompt works", async () => {
+  const { server, fake, station } = await setupRig("acpsess-reattach", {
+    stationKey: "acp-reattach-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    expect(fake.processes).toHaveLength(1);
+
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { kind?: string }).kind === "harness_disconnected",
+      8_000,
+    );
+
+    // The gateway comes back, and the harness stops failing with it.
+    fake.opts.transport = { supported: true, reachable: true };
+    fake.opts.failPrompt = undefined;
+
+    // A second agent process for the SAME session: the re-attach.
+    await pollUntil(() => fake.processes.length >= 2, 10_000);
+    expect(fake.processes[1]!.instance).toBe(fake.processes[0]!.instance);
+
+    // The handshake landing on the NEW process is what "re-attached" means — the
+    // process existing only means the node was asked to spawn one.
+    await pollUntil(
+      () => fake.processes[1]!.agentReceived.some((m) => m.method === "session/new"),
+      10_000,
+    );
+
+    // And the session answers again, with no new session created by the caller.
+    await promptSession(TEST_USER, row.id, "are you back?");
+    await pollForEvent(row.id, (event) => event.type === "agent-update", 8_000);
+
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 30_000);
+
+test("a harness that stays unreachable is not re-attached forever", async () => {
+  // A dead gateway must not become a respawn loop: the node would be asked to spawn a
+  // process every few seconds for as long as the session row exists.
+  const { server, fake, station } = await setupRig("acpsess-reattach-bounded", {
+    stationKey: "acp-reattach-bounded-station",
+    failPrompt: "Internal error",
+    failPromptCode: -32603,
+    transport: { supported: true, reachable: false, detail: "connect ECONNREFUSED" },
+  });
+  try {
+    const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "ask" });
+    await promptSession(TEST_USER, row.id, "hello");
+    await pollForEvent(
+      row.id,
+      (event) => event.type === "error" && (event.payload as { kind?: string }).kind === "harness_disconnected",
+      8_000,
+    );
+
+    // Counting PROBES, not processes: with the gateway still down the retry loop
+    // never opens anything, so a process count would sit at one whether the loop
+    // were bounded or endless — a test that cannot fail. Each retry asks the node
+    // first, so the probes are the attempts.
+    const probes = () =>
+      fake.nodeMsgs.filter((raw) => {
+        try {
+          return (JSON.parse(raw) as { verb?: string }).verb === "acp.transport";
+        } catch {
+          return false;
+        }
+      }).length;
+
+    // Longer than the whole budget (1s + 2s + 4s) before the first reading, or the
+    // last retry lands inside the observation window and looks like an endless loop.
+    await new Promise((r) => setTimeout(r, 9_000));
+    const settled = probes();
+    await new Promise((r) => setTimeout(r, 3_000));
+    expect(probes()).toBe(settled);
+    // One from the failed turn plus the bounded retries — never an open-ended
+    // stream of them for as long as the session row exists.
+    expect(settled).toBeLessThanOrEqual(1 + 3);
+    expect(settled).toBeGreaterThan(1);
+
+    await endSession(TEST_USER, row.id, "cleanup");
+    fake.close();
+  } finally {
+    server.stop(true);
+  }
+}, 30_000);
+
 test("promptSession reports an adapter that completes without any visible update", async () => {
   // No plugin reports here; the wait for one only slows the suite.
   _setTurnErrorGraceMsForTest(50);
