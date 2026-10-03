@@ -44,6 +44,7 @@
 
 import type { BoardActivity } from "./coalesce";
 import type { GatePendingDelivery } from "../matrix-as/gates";
+import type { ElicitationPendingDelivery } from "../matrix-as/elicitation-card";
 
 /** Injected so the client runs in a test with no network and no wrangler. */
 export type Fetcher = (
@@ -369,6 +370,22 @@ export class SuperpipelineClient {
       gates?: GatePendingDelivery[];
     };
     return res.gates ?? [];
+  }
+
+  /**
+   * Every question the board is still waiting on a person to answer.
+   *
+   * The mirror of `pendingGates`, and the read half of the elicitation sweep. An
+   * empty list and a board that could not be read are NOT the same thing — a throw
+   * from `send` stays a throw, because absence from this list is what settles a room
+   * card, and treating a failed read as "nothing pending" would close every open
+   * question on the board.
+   */
+  async pendingElicitations(): Promise<ElicitationPendingDelivery[]> {
+    const res = (await this.send("GET", `/v1/boards/${this.boardId}/elicitations/pending`)) as {
+      elicitations?: ElicitationPendingDelivery[];
+    };
+    return res.elicitations ?? [];
   }
 
   private verb(lease: RunLease, action: string, extra: Record<string, unknown> = {}): Promise<unknown> {

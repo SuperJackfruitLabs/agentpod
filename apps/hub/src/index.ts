@@ -22,6 +22,8 @@ import { projectGate, projectionForGate, tenantForBoard } from './services/matri
 import { noteGatePosted, reconcileBoardGates } from './services/matrix-as/fleet-gates.ts';
 import { ensureBoardRoom, matrixIdsForBoardHumans } from './services/matrix-as/board-room.ts';
 import { startGateSweeper } from './services/matrix-as/gate-sweep.ts';
+import { startElicitationSweeper } from './services/matrix-as/elicitation-sweep.ts';
+import { projectElicitation, postedElicitationsAwaitingOutcome } from './services/matrix-as/elicitations.ts';
 import { createLogger } from './utils/logger.ts';
 import { healthRoutes } from './routes/health.ts';
 // Node gateway WebSocket routes
@@ -496,6 +498,17 @@ if (matrixBridge) {
     // board, and shows again the ones a restart forgot.
     onBoardPending: (boardId, gates) =>
       reconcileBoardGates(boardId, gates, { humansFor: matrixIdsForBoardHumans, projectionFor: projectionForGate }),
+  });
+
+  // The same floor, for an agent's questions. `projectElicitation` is idempotent on
+  // `elicitation_id`, so push and sweep are meant to overlap rather than be arbitrated
+  // between — and the settling half matters more here than it does for gates, because
+  // a question is also retired when the same agent asks the next one.
+  startElicitationSweeper({
+    tenantIdFor: tenantForBoard,
+    project: (tenantId, delivery) => projectElicitation(tenantId, delivery, gateProjection),
+    postedAwaitingOutcome: postedElicitationsAwaitingOutcome,
+    settle: (elicitationId, roomId) => matrixBridge.settleElicitation(elicitationId, roomId),
   });
 
   app.route(

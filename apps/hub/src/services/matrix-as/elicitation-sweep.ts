@@ -15,6 +15,8 @@
  * failing to read a board can never be treated as "nothing is pending": that would
  * settle every open question on a timeout.
  */
+import { SuperpipelineClient, fetchAdapter, type Fetcher } from "../bridge/superpipeline";
+import { isBridgeEnabled, loadBridgeConfig, type BridgeConfig } from "../bridge/config";
 import { createLogger } from "../../utils/logger";
 import type { ElicitationPendingDelivery } from "./elicitation-card";
 import type { ElicitationProjectionOutcome } from "./elicitations";
@@ -127,4 +129,89 @@ export async function sweepElicitations(deps: ElicitationSweepDeps): Promise<Eli
   }
 
   return result;
+}
+
+/**
+ * Build the sweep's dependencies from the bridge's own configuration.
+ *
+ * Credentials are read PER SWEEP rather than once at start, for the reason the gate
+ * sweeper gives: the roster is a table an operator edits from the console, so a board
+ * added at noon would otherwise go unswept until the next restart, and a rotated token
+ * would go on being refused with a 401 that arrives as "this board could not be read".
+ */
+export function bridgeElicitationSweepDeps(
+  config: BridgeConfig,
+  rest: Pick<ElicitationSweepDeps, "tenantIdFor" | "project" | "postedAwaitingOutcome" | "settle">,
+  fetchImpl: Fetcher = fetchAdapter,
+  roster: (() => Promise<Array<{ boardId: string; token: string }>>) | undefined = undefined,
+): ElicitationSweepDeps {
+  const tokensForBoards = async () => {
+    const map = new Map<string, string>();
+    for (const agent of await (roster ?? bridgeRoster)()) {
+      if (!map.has(agent.boardId)) map.set(agent.boardId, agent.token);
+    }
+    return map;
+  };
+
+  return {
+    ...rest,
+    boards: async () => [...(await tokensForBoards()).keys()],
+    pendingElicitations: async (boardId) => {
+      const token = (await tokensForBoards()).get(boardId);
+      // No credential is not an empty board. Answering `[]` here would settle every
+      // question this hub ever posted on it; a throw is read as "could not be read",
+      // which settles nothing.
+      if (!token) throw new Error(`no bridge credential for board ${boardId}`);
+      return new SuperpipelineClient({
+        baseUrl: config.baseUrl,
+        boardId,
+        token,
+        fetch: fetchImpl,
+      }).pendingElicitations();
+    },
+  };
+}
+
+/** How often the sweep runs. The same cadence as the gate sweep. */
+const ELICITATION_SWEEP_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * Start the sweep, or do not start it at all.
+ *
+ * Null rather than a timer over an empty list: most hubs run no bridge, and a
+ * subsystem that is off should not be constructed — the rule `startSuperpipelineBridge`
+ * and the gate sweeper both follow. It also means anything logged from in here belongs
+ * to something the operator actually turned on.
+ */
+export function startElicitationSweeper(
+  rest: Pick<ElicitationSweepDeps, "tenantIdFor" | "project" | "postedAwaitingOutcome" | "settle">,
+  opts: {
+    config?: BridgeConfig | null;
+    intervalMs?: number;
+    roster?: () => Promise<Array<{ boardId: string; token: string }>>;
+  } = {},
+): (() => void) | null {
+  const config =
+    opts.config !== undefined ? opts.config : isBridgeEnabled() ? loadBridgeConfig() : null;
+  if (!config) return null;
+
+  const deps = bridgeElicitationSweepDeps(config, rest, fetchAdapter, opts.roster);
+  const intervalMs = opts.intervalMs ?? ELICITATION_SWEEP_INTERVAL_MS;
+  const timer = setInterval(() => {
+    void sweepElicitations(deps).catch((err) =>
+      log.error("elicitation sweep failed", {
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
+  }, intervalMs);
+
+  log.info("elicitation sweep started", { intervalMs });
+  return () => clearInterval(timer);
+}
+
+/** The rostered agents, read from the table the console edits. */
+async function bridgeRoster(): Promise<Array<{ boardId: string; token: string }>> {
+  const { readBridgeRoster } = await import("../bridge/roster");
+  const { BOOTSTRAP_TENANT_ID } = await import("../../db/schema/tenants");
+  return readBridgeRoster(BOOTSTRAP_TENANT_ID);
 }

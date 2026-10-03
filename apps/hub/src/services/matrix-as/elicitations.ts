@@ -322,6 +322,35 @@ export async function answerElicitationAtSuperpipeline(
   return { ok: false, code };
 }
 
+/**
+ * Questions this hub put in a room on a given board and has said nothing final about.
+ *
+ * The local half of the sweep. The table is the record of what we projected and
+ * `outcome_posted_at IS NULL` the record of what we have not settled — neither of
+ * which is knowable from the board, which is why this half reads here and the other
+ * half reads there.
+ *
+ * Rows still mid-send (`pending:`) are excluded: nothing is in the room for them yet,
+ * so there is nothing to settle and saying so would be answering a question nobody
+ * has been asked.
+ */
+export async function postedElicitationsAwaitingOutcome(
+  boardId: string,
+): Promise<Array<{ elicitationId: string; roomId: string }>> {
+  const rows = await db
+    .select()
+    .from(matrixElicitationEvents)
+    .where(
+      and(
+        eq(matrixElicitationEvents.boardId, boardId),
+        isNull(matrixElicitationEvents.outcomePostedAt),
+      ),
+    );
+  return rows
+    .filter((r) => !r.eventId.startsWith("pending:"))
+    .map((r) => ({ elicitationId: r.elicitationId, roomId: r.roomId }));
+}
+
 /** What a reply in a board room turned out to be. */
 export type ElicitationAnswerOutcome =
   | { status: "answered"; elicitationId: string }

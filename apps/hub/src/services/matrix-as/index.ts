@@ -187,6 +187,13 @@ export interface MatrixBridge {
    */
   settleGate(gateId: string, decision: string, decidedBy: string | null): Promise<boolean>;
   /**
+   * Close a room card for a question that is over — answered on the board, or
+   * retired by a newer question from the same agent.
+   *
+   * True only when THIS call claimed the outcome, so two sweeps leave one line.
+   */
+  settleElicitation(elicitationId: string, roomId: string): Promise<boolean>;
+  /**
    * Feed the encryption side-channels of one transaction to the agents it
    * concerns. Null when no crypto store is configured — a plaintext bridge
    * never calls it, and the route checks for exactly that.
@@ -560,6 +567,21 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     client: speakingClient,
     config: cfg,
     provisionDeps,
+
+    settleElicitation: async (elicitationId, roomId) => {
+      // Claim first: the line in the room is the visible half, and posting it before
+      // claiming would let two sweeps both post and only one record it.
+      if (!(await claimElicitationOutcome(elicitationId))) return false;
+      const speaker = await roomSpeakerFor(roomId, cfg.domain);
+      if (speaker) {
+        await speakingClient.sendText(
+          speaker,
+          roomId,
+          "That question is closed — it was answered on the board, or the agent has moved on.",
+        );
+      }
+      return true;
+    },
 
     settleGate: async (gateId, decision, decidedBy) => {
       const [row] = await db
