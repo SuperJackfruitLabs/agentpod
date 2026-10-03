@@ -36,6 +36,7 @@ import {
 import { mintPrincipalAssertion } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
+import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
 import { principalById, principalForUser, principalHandle } from "../principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
@@ -450,6 +451,46 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
     : undefined;
 
   /**
+   * Answering an agent's question, wired on exactly the same condition as gates.
+   *
+   * Without a board there is no question to answer, so leaving this undefined is the
+   * honest state rather than a half-built path that fails at the last step.
+   *
+   * The subject comes from `principalForMatrixId` and nowhere else — the same control
+   * that makes minting an assertion for another principal safe to have at all. Unlike
+   * a gate, the kind is not narrowed here: the board itself refuses the ASKING agent
+   * by identity, so the one rule that matters is enforced where it cannot be bypassed
+   * by a surface that forgot it.
+   */
+  const elicitations = superpipelineBaseUrl
+    ? {
+        handle: async (event: { sender: string; body: string }, roomId: string) =>
+          handleElicitationAnswer(event, roomId, {
+            principalForMatrixId: async (mxid: string) => {
+              const identity = await resolveMatrixId(mxid);
+              if (identity?.kind !== "principal") return null;
+              const principal = await principalById(identity.principalId);
+              return principal ? { id: principal.id, kind: principal.kind } : null;
+            },
+            answer: (input) =>
+              answerElicitationAtSuperpipeline(input, {
+                baseUrl: superpipelineBaseUrl,
+                // Named for the plane that will verify it, for the reason the gate
+                // path spells out: an assertion with no audience carries the hub's
+                // own URL, which is not an audience check at all.
+                mint: (principalId) =>
+                  mintPrincipalAssertion({ principalId, audiences: [superpipelineBaseUrl] }),
+              }),
+            reply: async (room: string, body: string) => {
+              const speaker = await roomSpeakerFor(room, cfg.domain);
+              return speaker ? speakingClient.sendText(speaker, room, body) : null;
+            },
+            claimOutcome: claimElicitationOutcome,
+          }),
+      }
+    : undefined;
+
+  /**
    * An agent's reply, spoken (`voice-reply.ts`): after a turn ends with text,
    * when the station's speech settings say so — the console's station and
    * hub settings, then SPEECH_* env. Bridge-mode stations only; runs after
@@ -475,6 +516,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
           (await crypto.decrypt(asUserId, roomId, event)) as any
       : undefined,
     gates,
+    elicitations,
     client: speakingClient,
     // Voice notes to text, looked up per voice note for the room's station:
     // its own setting, then the hub's (both in the console), then the
