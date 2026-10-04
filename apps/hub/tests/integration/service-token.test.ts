@@ -147,6 +147,20 @@ describe("POST /api/auth/service-token", () => {
   });
 });
 
+describe("a service principal granted both scopes", () => {
+  test("is created with both and its token carries both", async () => {
+    const res = await post(adminApp(), "/service-principals", {
+      handle: `${HANDLE}-both`, oauthClient: "superwitness", scopes: ["evidence:read", "cards:queue"],
+    });
+    expect(res.status).toBe(201);
+    const created = (await res.json()) as { principalId: string; credential: { id: string; secret: string } };
+    expect((await getGrant(created.principalId))!.scopes).toEqual(["evidence:read", "cards:queue"]);
+    const ok = await exchange(`${created.credential.id}:${created.credential.secret}`);
+    expect(ok.status).toBe(200);
+    expect(decodeJwt(((await ok.json()) as { token: string }).token).scope).toBe("evidence:read cards:queue");
+  });
+});
+
 describe("creating a service principal is all or nothing", () => {
   test("a credential that cannot be written leaves no principal and no grant behind", async () => {
     const handle = `${HANDLE}-atomic`;

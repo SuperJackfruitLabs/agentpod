@@ -217,4 +217,14 @@ describe("buildTokenPayload carries the grant's scopes", () => {
     });
     expect("scope" in without).toBe(false);
   });
+
+  test("a grant holding both scopes issues them space-delimited, in grant order", async () => {
+    const payload = await buildTokenPayload({
+      principalId: "prn_0123456789abcdef0123",
+      resolvePrincipalById: async () => ({ id: "prn_0123456789abcdef0123", kind: "service" as const }),
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read", "cards:queue"] }),
+    });
+    expect(payload.scope).toBe("evidence:read cards:queue");
+  });
 });

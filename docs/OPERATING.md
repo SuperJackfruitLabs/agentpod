@@ -200,16 +200,40 @@ endpoint, not these verbs.
 
 A service principal is a program that reads, with no person behind it — today, superwitness. It
 holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
-five-minute token, and its grant holds scopes only (`evidence:read`), never dispatch or reach.
+five-minute token. Its grant holds scopes (`evidence:read`, and `cards:queue` to queue cards on
+superpipeline, as the superwitness canary does) and never reach. A service holding `cards:queue`
+must also name in `mayDispatch` the agent(s) that will claim its cards: superpipeline uses the
+token's `mayDispatch` as the card's queued grant, and an empty list is refused with 403
+`NO_DISPATCH_AUTHORITY`.
 
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
    `superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev`
-   (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
+   (the URN redirect marks this client as not intended for the browser flow). The canary needs its
+   own entry, separated from the first by a comma, whose audiences are superwitness's public URL
+   (`SW_PUBLIC_URL`) and superpipeline, because its one token calls both services:
+   `superwitness-canary|urn:ietf:wg:oauth:2.0:oob|<SW_PUBLIC_URL>,https://app.superpipeline.dev`
+   (see superwitness `docs/canary.md`). Restart the hub.
 2. Create it — the secret is printed once:
    ```sh
    fleet principals add-service superwitness --client superwitness --scope evidence:read
    ```
+   Plain `superwitness` holds only `evidence:read` (contract C6). Only the canary holds both
+   scopes, as its own principal on its own registered client (see superwitness `docs/canary.md`):
+   ```sh
+   fleet principals add-service superwitness-canary --client superwitness-canary --scope evidence:read,cards:queue
+   ```
+   `add-service` creates the grant with an empty `mayDispatch`. For a `cards:queue` service, set
+   it afterwards. `add-service` on a handle that already exists answers 409 with its
+   `principalId`, so to upgrade an EXISTING service principal use `grants set` with that id. A
+   document that includes `scopes` replaces the stored ones, one that omits `scopes` keeps them,
+   and `mayDispatch` and `mayGrantReach` are always replaced:
+   ```sh
+   echo '{"mayDispatch":["prn_…"],"mayGrantReach":false,"scopes":["evidence:read","cards:queue"]}' \
+     | fleet grants set prn_… --file -
+   ```
+   On the superpipeline side, a board admin must then list the service on the board:
+   `supi board-queuers <board> --add prn_…`.
 3. Put `credential.id` in the service's `SW_HUB_CLIENT_ID` and `credential.secret` in the file
    `SW_HUB_CLIENT_SECRET_FILE` names (mode 0600).
 4. Rotate with an overlap, so the service always holds a credential that works:

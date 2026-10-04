@@ -15,6 +15,7 @@ const grantsUsage = `usage:
   fleet grants list
   fleet grants show PRINCIPAL_ID
   fleet grants set PRINCIPAL_ID --file PATH|-
+      (document keys: mayDispatch, mayGrantReach, scopes; scopes: evidence:read, cards:queue)
   fleet grants rm PRINCIPAL_ID`
 
 // fleetGrants reads and writes dispatch authority: which principals a principal may
@@ -61,6 +62,7 @@ const principalsUsage = `usage:
   fleet principals suspend ID
   fleet principals restore ID
   fleet principals add-service HANDLE --client CLIENT --scope SCOPE[,SCOPE]
+      (scopes: evidence:read, cards:queue)
   fleet principals add-credential PRN_ID --client CLIENT
   fleet principals revoke-credential SVC_ID`
 
@@ -92,7 +94,7 @@ func fleetPrincipals(args []string) {
 		handle := needArg(args, 1, "add-service", principalsUsage)
 		fs := flag.NewFlagSet("fleet principals add-service", flag.ExitOnError)
 		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
-		scope := fs.String("scope", "", "comma-separated grant scopes, e.g. evidence:read")
+		scope := fs.String("scope", "", "comma-separated grant scopes: evidence:read, cards:queue (e.g. evidence:read,cards:queue)")
 		fs.Parse(args[2:])
 		if *client == "" || *scope == "" {
 			fmt.Fprintf(os.Stderr, "add-service requires --client and --scope\n\n%s\n", principalsUsage)

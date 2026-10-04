@@ -19,16 +19,18 @@ import { db, type DbExecutor } from "../db/drizzle";
 import { principalGrants } from "../db/schema/grants";
 
 /** Every scope a grant may hold. A writer refuses anything else; a reader ignores it. */
-export const GRANT_SCOPES = ["evidence:read"] as const;
+export const GRANT_SCOPES = ["evidence:read", "cards:queue"] as const;
 export type GrantScope = (typeof GRANT_SCOPES)[number];
 /** Read run evidence: attempts, fingerprints, the dispatch ledger (superwitness contract C5/C6). */
 export const EVIDENCE_READ: GrantScope = "evidence:read";
+/** Queue cards on a superpipeline board the service principal has been listed on (canary, contract C6). */
+export const CARDS_QUEUE: GrantScope = "cards:queue";
 
 export interface Grant {
   /** Principal ids. Empty means "may dispatch nothing", which is a decision. */
   mayDispatch: string[];
   mayGrantReach: boolean;
-  /** Read permissions beyond the pair. Empty means none. */
+  /** Permissions beyond the pair. Empty means none. */
   scopes: string[];
 }
 
