@@ -58,6 +58,9 @@ import {
   pollUntil,
   type FakeAcpNodeOpts,
 } from "../../tests/helpers/acp-fake-node";
+import { context, trace } from "@opentelemetry/api";
+import { tracer } from "../telemetry/otel";
+import { useTestTelemetry } from "../../tests/helpers/telemetry";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
 import { adoptStations } from "./station-registry";
 import { gatewayRoutes } from "../routes/gateway";
@@ -84,6 +87,8 @@ import {
 } from "./acp-sessions";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+
+useTestTelemetry();
 
 const TEST_USER = "test-user-acpsess-001";
 const OTHER_USER = "test-user-acpsess-002";
@@ -3000,6 +3005,73 @@ test(
     try {
       const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
       expect(sessionNewParams(fake)?.mcpServers).toEqual([]);
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+// ─── Trace context to the harness (superwitness C2) ─────────────────────────
+
+type WithMeta = { _meta?: { traceparent?: string } };
+
+test(
+  "session/new and session/prompt carry the active trace in params._meta",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-trace", { stationKey: "acp-trace" });
+    try {
+      const parent = tracer().startSpan("dispatch");
+      const ctx = trace.setSpan(context.active(), parent);
+      const want = new RegExp(`^00-${parent.spanContext().traceId}-[0-9a-f]{16}-01$`);
+
+      const row = await context.with(ctx, () => createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" }));
+      expect((sessionNewParams(fake) as WithMeta | undefined)?._meta?.traceparent).toMatch(want);
+
+      await context.with(ctx, () => promptSession(TEST_USER, row.id, "hello"));
+      const prompt = await pollUntil(() => fake.agentReceived.find((m) => m.method === "session/prompt"));
+      expect((prompt.params as WithMeta | undefined)?._meta?.traceparent).toMatch(want);
+
+      parent.end();
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "AGENTPOD_ACP_TRACE_META=false sends no _meta, for a harness that refuses it",
+  async () => {
+    const saved = process.env.AGENTPOD_ACP_TRACE_META;
+    process.env.AGENTPOD_ACP_TRACE_META = "false";
+    const { server, fake, station } = await setupRig("acpsess-trace-off", { stationKey: "acp-trace-off" });
+    try {
+      const parent = tracer().startSpan("dispatch");
+      const row = await context.with(trace.setSpan(context.active(), parent), () =>
+        createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" })
+      );
+      expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
+      parent.end();
+      await endSession(TEST_USER, row.id, "cleanup");
+    } finally {
+      if (saved === undefined) delete process.env.AGENTPOD_ACP_TRACE_META;
+      else process.env.AGENTPOD_ACP_TRACE_META = saved;
+      server.stop(true);
+    }
+  },
+  30_000
+);
+
+test(
+  "outside any trace, session/new carries no _meta",
+  async () => {
+    const { server, fake, station } = await setupRig("acpsess-trace-none", { stationKey: "acp-trace-none" });
+    try {
+      const row = await createSession({ stationId: station.id, userId: TEST_USER, mode: "full-auto" });
+      expect("_meta" in ((sessionNewParams(fake) ?? {}) as object)).toBe(false);
       await endSession(TEST_USER, row.id, "cleanup");
     } finally {
       server.stop(true);

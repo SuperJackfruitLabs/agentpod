@@ -18,10 +18,11 @@ const headersGetter = {
   },
 };
 
-export interface TraceMeta {
+// A type alias, not an interface: ACP's `_meta` is an open record, and only an alias is assignable to one.
+export type TraceMeta = {
   traceparent: string;
   tracestate?: string;
-}
+};
 
 /** The active trace as C2's `_meta` object, or null when there is none. */
 export function traceMeta(ctx: Context = context.active()): TraceMeta | null {
