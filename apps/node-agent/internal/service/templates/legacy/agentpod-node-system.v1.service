@@ -1,0 +1,51 @@
+[Unit]
+Description=AgentPod node-agent — fleet management daemon
+Documentation=https://github.com/rakeshgangwar/agentpod
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# -----------------------------------------------------------------------
+# User= / Group=
+# Run as the operator account that owns the managed-agent config dirs
+# (e.g. Hermes profiles under ~/profiles/, OpenClaw configs).
+# Set this to the Linux user that runs those agents.
+# On a single-operator host "root" works; for a dedicated service account
+# create one and set User=agentpod Group=agentpod here.
+# -----------------------------------------------------------------------
+User=root
+
+# Enroll once before starting the service:
+#   agentpod-node enroll --hub <HUB_URL> --token <TOKEN>
+# That writes ~/.config/agentpod-node/config.json (or
+# /root/.config/agentpod-node/config.json when User=root).
+# The config is read automatically by `agentpod-node run`.
+ExecStart={{.BinaryPath}} run
+
+Restart=always
+RestartSec=5
+
+# --- Hardening -------------------------------------------------------
+# NOTE: the node-agent is a PRIVILEGED facilities daemon — its job is to
+# read AND write the operator's filesystem (fs.write/cleanup), spawn
+# interactive PTY shells (terminal), and manage agents under the operator's
+# home. So filesystem/namespace isolation is intentionally MINIMAL:
+# ProtectSystem/ProtectHome/PrivateTmp/PrivateDevices are deliberately NOT
+# set, or write ops, cleanup, config edits, and terminals would fail.
+# We keep only the privilege/kernel hardening that does not restrict the
+# agent's legitimate file + PTY access.
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+
+# --- Logging ---------------------------------------------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agentpod-node
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=AgentPod node-agent (user service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart={{.BinaryPath}} run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
