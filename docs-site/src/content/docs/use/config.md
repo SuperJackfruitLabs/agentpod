@@ -60,9 +60,15 @@ or Codex has no document to land in.
 
 Hermes is the exception: there, a station **is** a profile, and a profile is exactly the
 document Hermes's settings live in. That is the only harness where declaring a setting at
-the station level corresponds to a real, single document, which is why `--station` is
-accepted for Hermes settings and refused — `out-of-scope` — for a setting whose registered
-`scope` says otherwise.
+the station level corresponds to a real, single document.
+
+`--station` is **accepted for any setting**, including one whose registered `scope` is not
+`profile`. The declaration is stored; nothing is refused at `set` time. The mismatch
+surfaces later, when the declaration is **read back** — every comparison for that station
+reports the setting as `out-of-scope`, with a reason naming the scope, instead of
+`matches`, `drifted` or `absent`. So a `--station` declaration of a `user`- or
+`project`-scoped setting is not an error you are told about when you make it; it is a state
+you see the next time you ask where things stand.
 
 ## The three policies
 
@@ -97,13 +103,22 @@ nothing to this list, and is named separately so its absence isn't silent.
 ## Seeing where things stand
 
 ```sh
-fleet config show                     # every declaration in the fleet, compared
-fleet config show --node nod_123      # one node's declarations
-fleet config show --station st_abc    # one station: declared vs observed
+fleet config show                     # every declaration in the fleet, as stored
+fleet config show --node nod_123      # one node's declarations, as stored
+fleet config show --station st_abc    # one station: declared vs observed, compared
 fleet config drift                    # every station whose value differs from what's declared
 ```
 
-Each comparison reports, per setting, a **state**:
+**Only `--station` compares anything.** With no flag, and with `--node`, `show` returns the
+**declaration rows themselves** — what was declared, at which level, by whom — and no
+station is contacted: there is no `observed` value and no state in that answer. That is not
+a gap in the output, it is what the question means at those levels: a fleet-wide or
+node-wide declaration is one row that may apply to many stations, and comparing it requires
+naming which station you mean. `--station` names one, so that form asks its node for the
+current values and reports a state per setting. `fleet config drift` is the other compared
+form, across every station at once.
+
+Each **comparison** — `show --station` and `drift` — reports, per setting, a **state**:
 
 | State | Meaning |
 |---|---|
@@ -112,11 +127,33 @@ Each comparison reports, per setting, a **state**:
 | `absent` | Declared, but the key isn't in the document at all. |
 | `opted-out` | An operator explicitly opted this station out of the declaration — reachable only once writing ships. |
 | `awaiting-restart` | A value was written but the harness hasn't picked it up yet — reachable only once writing ships. |
-| `unreadable` | The document couldn't be read or parsed. Never reported as `matches` — an unreadable document is not evidence of agreement. |
+| `unreadable` | The document couldn't be read, or the key is there but holds a value this release can't read (see below). Never reported as `matches` — an unreadable value is not evidence of agreement. |
 | `out-of-scope` | A per-station declaration was made for a setting whose registered scope isn't the station's document (see above). |
 
 `fleet config drift` only reports states other than `matches`, plus the list of stations it
 could not reach at all — a station it couldn't ask is never silently left out of the total.
+
+That list is narrower than "every station that is down", and deliberately so. It holds the
+stations that **had something declared for them** and whose node could not be asked. A
+station with **no** declaration resolving to it is never contacted in the first place, so
+it appears neither in the observations nor in the unreachable list, however offline it is;
+and a station that does not advertise `config.manage` at all is not a candidate for this
+command. Read the list as "declarations I could not check", not as a fleet health report —
+`fleet nodes` is where you see what is up.
+
+### List-valued settings read as `unreadable`
+
+This release reads **scalar** values only. A registered setting whose key holds a list or a
+nested map is reported `unreadable`, with a reason saying so — not `absent`, and not
+`drifted`.
+
+`hermes.approvals.command_allowlist` is the one registered setting this affects today, and
+it is a list in every real document. Declaring it is accepted and the declaration is stored,
+but every station will report it `unreadable` until reading lists ships. It stays in the
+registry deliberately: the alternative was to report a key that is plainly in the document
+as "not in the document at all", which is a false sentence, or to compare an inline list's
+raw text and report drift forever. An honest `unreadable` with a reason is the state that
+tells you what is actually true.
 
 ## A setting that can't be found
 

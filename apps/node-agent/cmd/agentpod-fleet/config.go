@@ -12,13 +12,21 @@ import (
 
 const configUsage = `usage:
   fleet config settings                          every setting the fleet can declare
-  fleet config show   [--station ID | --node ID] declared vs observed, with state
+  fleet config show   [--node ID]                the declarations themselves, as stored
+  fleet config show   --station ID               one station: declared vs observed, with state
   fleet config set    SETTING_ID --value V [--station ID | --node ID]
   fleet config unset  SETTING_ID [--station ID | --node ID]
   fleet config drift                             every station whose value differs
 
 ` + "`set` records a DECLARATION; it does not write to a station. Writing is a\n" +
-	"separate reviewed operation, and is not in this release."
+	"separate reviewed operation, and is not in this release.\n\n" +
+	"Only `show --station` and `drift` compare anything. Without --station, `show`\n" +
+	"returns the declaration rows and contacts no station: no observed value, no\n" +
+	"state. A fleet- or node-level declaration is one row that may apply to many\n" +
+	"stations, so comparing it means naming which station you mean.\n\n" +
+	"--station is accepted for any setting. A setting whose registered scope is\n" +
+	"not `profile` is NOT refused here; it is stored, and reported `out-of-scope`\n" +
+	"when the declaration is read back."
 
 // fleetConfig declares what a harness setting should be, and reports what each
 // station actually has.

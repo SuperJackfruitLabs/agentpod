@@ -80,7 +80,14 @@ export const ConfigValue = z.object({
   settingId: z.string().min(1),
   /** Absent when the key is not in the document, or when it could not be read. */
   observed: z.unknown().optional(),
-  /** Required: a reader that forgot to set it must not report success. */
+  /**
+   * Required: a reader that forgot to set it must not report success.
+   *
+   * False covers two things that must not look like a missing key: a document
+   * that could not be read at all, and a key that IS present but holds a value
+   * the reader cannot speak for — a list or a nested map, where the node reads
+   * scalars only. `compare()` maps both to `unreadable`, never to `absent`.
+   */
   readable: z.boolean(),
   reason: z.string().optional(),
 });
