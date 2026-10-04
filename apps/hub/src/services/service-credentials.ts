@@ -1,7 +1,8 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { ServiceCredentialId } from "@agentpod/contract";
 
-import { db } from "../db/drizzle";
+import { db, type DbExecutor } from "../db/drizzle";
+import { tenantScope } from "../db/tenant-scope";
 import { serviceCredentials } from "../db/schema/service-credentials";
 import { prefixedId } from "../utils/ids";
 import { constantTimeEqualHex, randomSecret, sha256 } from "./device-credentials";
@@ -18,10 +19,10 @@ export async function mintServiceCredential(input: {
   principalId: string;
   oauthClient: string;
   name: string;
-}): Promise<MintedServiceCredential> {
+}, exec: DbExecutor = db): Promise<MintedServiceCredential> {
   const id = prefixedId("svc");
   const secret = randomSecret();
-  await db.insert(serviceCredentials).values({
+  await exec.insert(serviceCredentials).values({
     id,
     tenantId: input.tenantId,
     principalId: input.principalId,
@@ -49,11 +50,12 @@ export async function exchangeServiceCredential(
   return { id: row.id, principalId: row.principalId, oauthClient: row.oauthClient, tenantId: row.tenantId };
 }
 
-export async function revokeServiceCredential(id: string): Promise<boolean> {
+/** False when no live credential with this id exists IN THIS TENANT — another tenant's is not found. */
+export async function revokeServiceCredential(tenantId: string, id: string): Promise<boolean> {
   const rows = await db
     .update(serviceCredentials)
     .set({ revokedAt: new Date() })
-    .where(and(eq(serviceCredentials.id, id), isNull(serviceCredentials.revokedAt)))
+    .where(tenantScope(serviceCredentials, tenantId, eq(serviceCredentials.id, id), isNull(serviceCredentials.revokedAt)))
     .returning({ id: serviceCredentials.id });
   return rows.length > 0;
 }

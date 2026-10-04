@@ -15,7 +15,7 @@
  */
 
 import { eq } from "drizzle-orm";
-import { db } from "../db/drizzle";
+import { db, type DbExecutor } from "../db/drizzle";
 import { principalGrants } from "../db/schema/grants";
 
 /** Every scope a grant may hold. A writer refuses anything else; a reader ignores it. */
@@ -76,7 +76,7 @@ export async function getGrant(principalId: string): Promise<Grant | null> {
   };
 }
 
-export async function setGrant(principalId: string, grant: GrantInput): Promise<void> {
+export async function setGrant(principalId: string, grant: GrantInput, exec: DbExecutor = db): Promise<void> {
   if (!Array.isArray(grant.mayDispatch) || grant.mayDispatch.some((v) => typeof v !== "string")) {
     throw new Error("mayDispatch must be an array of principal ids");
   }
@@ -93,7 +93,7 @@ export async function setGrant(principalId: string, grant: GrantInput): Promise<
 
   const now = new Date();
   const scopes = grant.scopes !== undefined ? JSON.stringify([...new Set(grant.scopes)]) : undefined;
-  await db
+  await exec
     .insert(principalGrants)
     .values({
       principalId,

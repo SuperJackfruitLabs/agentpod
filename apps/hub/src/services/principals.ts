@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 
-import { db } from "../db/drizzle";
+import { db, type DbExecutor } from "../db/drizzle";
 import { user } from "../db/schema/auth";
 import { principalIdentities } from "../db/schema/identities";
 import { BOOTSTRAP_ORG_ID, principals, type PrincipalKind } from "../db/schema/organization";
@@ -32,9 +32,9 @@ export async function createPrincipal(input: {
   displayName?: string;
   /** When present, links the Better Auth user as this principal's login identity. */
   userId?: string;
-}): Promise<string> {
+}, exec: DbExecutor = db): Promise<string> {
   const id = prefixedId("prn");
-  await db.insert(principals).values({
+  await exec.insert(principals).values({
     id,
     kind: input.kind,
     orgId: BOOTSTRAP_ORG_ID,
@@ -42,7 +42,7 @@ export async function createPrincipal(input: {
     displayName: input.displayName ?? null,
   });
   if (input.userId) {
-    await db.insert(principalIdentities).values({
+    await exec.insert(principalIdentities).values({
       id: crypto.randomUUID(),
       principalId: id,
       system: "better-auth",
