@@ -23,3 +23,4 @@ export * from "./plugin-operation";
 export * from "./push";
 export * from "./fleet-live";
 export * from "./fleet-report";
+export * from "./evidence";

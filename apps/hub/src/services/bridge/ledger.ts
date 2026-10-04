@@ -28,6 +28,7 @@ import { db } from "../../db/drizzle";
 import { acpRuns } from "../../db/schema/acp";
 import { bridgeDispatches, type DispatchOutcome } from "../../db/schema/bridge";
 import { tenantScope } from "../../db/tenant-scope";
+import { makeFingerprint, toStored, type Fingerprint } from "../evidence/fingerprint";
 
 /** Everything that identifies one dispatched work run. */
 export interface DispatchKey {
@@ -50,6 +51,13 @@ export interface StartAttemptInput extends DispatchKey {
   stationId: string;
   /** `acp_events.seq` of the prompt that opened this attempt. */
   startSeq: number;
+  /**
+   * What ran it (contract C3), resolved by the caller when the attempt opens. Absent is recorded
+   * as the all-unknown fingerprint — unknown is a value, NULL is reserved for rows that predate it.
+   */
+  fingerprint?: Fingerprint;
+  /** The station's occupant when the attempt opened (contract C5). Absent or null: none. */
+  agentPrincipalId?: string | null;
 }
 
 export interface PriorOutput {
@@ -114,6 +122,7 @@ export async function startAttempt(input: StartAttemptInput): Promise<string> {
 
   const id = mintAttemptId();
   const now = new Date();
+  const fingerprint = input.fingerprint ?? makeFingerprint({}, "hub");
   await db.insert(acpRuns).values({
     id,
     tenantId: input.tenantId,
@@ -126,6 +135,11 @@ export async function startAttempt(input: StartAttemptInput): Promise<string> {
     state: "working",
     startSeq: input.startSeq,
     startedAt: now,
+    // Written here and nowhere else: `endAttempt` never touches these, which is what
+    // "recorded when the attempt opens, never recomputed" means in code.
+    fingerprintDigest: fingerprint.digest,
+    fingerprint: toStored(fingerprint),
+    agentPrincipalId: input.agentPrincipalId ?? null,
   });
 
   await db.update(bridgeDispatches).set({ acpRunId: id, updatedAt: now }).where(scope(input));

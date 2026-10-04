@@ -57,6 +57,13 @@ export interface TokenPayload extends Record<string, unknown> {
   email?: string;
   email_verified?: boolean;
   /**
+   * OAuth's space-delimited scope list (RFC 8693 §4.2): the grant's read permissions beyond the
+   * control pair — today only `evidence:read`. ABSENT when the grant holds none, so a consumer
+   * never reads permission into its absence. `fixtures/ecosystem-identity/token_claims.json`
+   * (version 7) describes it.
+   */
+  scope?: string;
+  /**
    * Where this token may be spent. Present only when minted for a registered
    * client (`OAuthClient.audiences`, `../config`) — absent, never `?? [iss]`,
    * for every other mint (`GET /api/auth/token`'s own `definePayload`, the
@@ -107,7 +114,7 @@ export type BuildPayloadInput = BuildPayloadSubject & {
   /** Injectable for the same reason. Keyed by principal id, not user id. */
   loadGrant?: (
     principalId: string
-  ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean } | null>;
+  ) => Promise<{ mayDispatch: string[]; mayGrantReach: boolean; scopes?: string[] } | null>;
   /** Injectable for the same reason. Defaults to `principalForUser`. Used only on the `user` path. */
   resolvePrincipal?: (userId: string) => Promise<ResolvedPrincipalInput | null>;
   /** Injectable for the same reason. Defaults to `principalById`. Used only on the `principalId` path. */
@@ -228,6 +235,8 @@ export async function buildTokenPayload(input: BuildPayloadInput): Promise<Token
     ...(principal.email
       ? { email: principal.email, email_verified: principal.emailVerified === true }
       : {}),
+    // Conditional, like email: a grant with no scopes issues no `scope` claim at all.
+    ...(grant?.scopes && grant.scopes.length > 0 ? { scope: grant.scopes.join(" ") } : {}),
     // Same reasoning as the email spread above: absent, not `aud: undefined`
     // sitting in the object, for a caller that passed no `audiences` — an
     // actually-absent key is what leaves `GET /api/auth/token` and the agent

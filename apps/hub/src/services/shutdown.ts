@@ -3,6 +3,8 @@ export interface ShutdownDeps {
   stopSweeper: () => void;
   stopBridge?: () => Promise<void>;
   closeMatrixBridge?: () => Promise<void>;
+  /** Flushes OTel last, so nothing that stopped above can still emit into a closed provider. Bounded internally. */
+  flushTelemetry?: () => Promise<void>;
   log?: (message: string, error?: unknown) => void;
   exit?: (code: number) => void;
 }
@@ -37,6 +39,7 @@ export function createGracefulShutdown(deps: ShutdownDeps) {
       await release("node sweeper", deps.stopSweeper);
       await release("superpipeline bridge", deps.stopBridge);
       await release("Matrix bridge", deps.closeMatrixBridge);
+      await release("telemetry", deps.flushTelemetry);
       exit(failed ? 1 : 0);
     })();
 

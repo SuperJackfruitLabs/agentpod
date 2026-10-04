@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
@@ -17,8 +18,10 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
@@ -32,6 +35,16 @@ func runCmd() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	otelShutdown, err := telemetry.Setup(ctx, telemetry.FromEnv(version, os.Getenv))
+	if err != nil {
+		log.Printf("telemetry: disabled: %v", err)
+		otelShutdown = func(context.Context) error { return nil }
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = otelShutdown(c)
+	}()
 	fmt.Println("connecting to", cfg.Hub, "as", cfg.NodeID)
 
 	reg := buildRegistry(cfg)
@@ -239,6 +252,10 @@ func runCmd() {
 		gitIdentityRoot,
 		descriptor.NewCapabilityHandler(reg).ACPCommand,
 	)))
+	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
+	// system unit with User= still reads the system file, and a node that is not the
+	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.
+	h = gateway.NewTelemetryHandler(h, otelenv.DaemonPath)
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {

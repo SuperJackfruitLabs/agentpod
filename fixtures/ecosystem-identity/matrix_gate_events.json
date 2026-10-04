@@ -23,7 +23,7 @@
     "labelsAreFree": "`label` is display text and carries no meaning. Per-board wording belongs there."
   },
   "droppedDeliberately": {
-    "run_id": "There is no run column on a gate. A gate is card-and-stage scoped. superpipeline#34 asked whether run_id was meaningful here; it is not.",
+    "run_id": "superpipeline's gates gained a nullable `run_id` for evidence (superpipeline gate-run-id PR, SuperJackfruitLabs/superpipeline#145). The Matrix event still does not carry it: a room needs no run to ask or answer, and the event shape is unchanged.",
     "task_id": "No such row exists in superpipeline's model. The pair is card and stage.",
     "expires_at": "Gates do not expire. No column, no sweep, no alarm. An optional field nothing will ever set invites client code for an impossible case.",
     "tenant_id": "superpipeline's internal isolation boundary. A room may have wider membership than a board, and no consumer needs it — the Application Service recorded which board a gate came from. (#34's sketch also wrote the prefix as `tn_`; the grammar pins `tnt_`.)"

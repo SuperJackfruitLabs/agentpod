@@ -11,6 +11,7 @@ import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
 import { deviceRoutes } from './routes/devices.ts';
+import { serviceTokenRoutes } from './routes/service-token.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
@@ -41,6 +42,8 @@ import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
 import { fleetRoutes } from './routes/fleet.ts';
 // GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
 import { dispatchableRoutes } from './routes/fleet-dispatchable.ts';
+// GET /api/evidence/* — superwitness's reads (contract C5), a hub JWT verified by the route
+import { evidenceRoutes } from './routes/evidence.ts';
 import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 // Runtime provisioning routes
 import { runtimeRoutes } from './routes/runtimes.ts';
@@ -85,6 +88,8 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startSuperpipelineBridge } from './services/bridge/loop.ts';
 import { createGracefulShutdown } from './services/shutdown.ts';
+import { httpServerSpans } from './telemetry/http-middleware.ts';
+import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
@@ -103,6 +108,10 @@ import { createMissionRoutes } from './routes/missions.ts';
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
 validateConfig();
+
+const telemetryConfig = readTelemetryConfig();
+const telemetry = await initTelemetry(telemetryConfig);
+console.log('telemetry:', telemetry ? `exporting OTLP to ${telemetryConfig.endpoint}` : '(disabled)');
 
 console.log('Initializing database...');
 await initDatabase();
@@ -124,6 +133,8 @@ const errorLogger = createLogger('error-handler');
 const matrixBridge = createMatrixBridge();
 
 const app = new Hono()
+  // Before the request logger, so a span covers every later middleware too.
+  .use('*', httpServerSpans())
   // Middleware
   //
   // The print function is not decoration. The homeserver authenticates appservice
@@ -222,6 +233,12 @@ const app = new Hono()
    * outlives its revocation.
    */
   .route('/api/auth', deviceRoutes)
+  /**
+   * POST /api/auth/service-token — a service principal's credential exchange (superwitness
+   * contract C6). Self-authenticating like the device exchange above, and for the same reason it
+   * must sit ahead of Better Auth's `/api/auth/*` catch-all below.
+   */
+  .route('/api/auth', serviceTokenRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);
@@ -282,6 +299,12 @@ const app = new Hono()
    * there later cannot quietly pull this path behind the middleware.
    */
   .route('/', dispatchableRoutes)
+  /**
+   * GET /api/evidence/runs/:source/:externalRunId and /api/evidence/attempts/:attemptId —
+   * superwitness's reads (contract C5). A hub JWT, verified by the route itself, so it sits here
+   * ahead of `authMiddleware`, exactly as `dispatchableRoutes` does above.
+   */
+  .route('/', evidenceRoutes)
   /**
    * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
    *
@@ -672,6 +695,7 @@ const shutdown = createGracefulShutdown({
   stopSweeper: stopNodeSweeper,
   stopBridge: bridge?.stop.bind(bridge),
   closeMatrixBridge: matrixBridge?.close.bind(matrixBridge),
+  flushTelemetry: () => shutdownTelemetry(3_000),
 });
 process.on('SIGINT', () => { void shutdown('SIGINT'); });
 process.on('SIGTERM', () => { void shutdown('SIGTERM'); });

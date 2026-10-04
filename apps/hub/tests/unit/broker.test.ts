@@ -9,6 +9,11 @@ import { test, expect } from "bun:test";
 import * as broker from "../../src/services/broker";
 import { connectionManager } from "../../src/services/connection-manager";
 import type { GatewayServerMessage } from "@agentpod/contract";
+import { context, trace } from "@opentelemetry/api";
+import { tracer } from "../../src/telemetry/otel";
+import { useTestTelemetry } from "../helpers/telemetry";
+
+useTestTelemetry();
 
 // ─── Stub helpers ──────────────────────────────────────────────────────────────
 
@@ -295,6 +300,30 @@ test("cancel() sends {type:cancel} and drops the stream handler", async () => {
     // Double-cancel is a no-op (does not send another cancel)
     cancel();
     expect(msgs).toHaveLength(2);
+  } finally {
+    restore();
+  }
+});
+
+test("a request sent inside a trace carries it as _meta; one outside carries no _meta key", () => {
+  const { msgs, restore } = makeSendStub("node-1");
+  try {
+    const span = tracer().startSpan("parent");
+    void context.with(trace.setSpan(context.active(), span), () =>
+      broker.request("node-1", "acp.open", {}, { timeoutMs: 20 }),
+    );
+    void broker.request("node-1", "detect", {}, { timeoutMs: 20 });
+    const s = context.with(trace.setSpan(context.active(), span), () =>
+      broker.stream("node-1", "acp.attach", {}, () => {}),
+    );
+    s.cancel();
+
+    const [inside, outside, streamed] = msgs as unknown as Array<Record<string, unknown>>;
+    const want = `00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`;
+    expect((inside!._meta as { traceparent: string }).traceparent).toBe(want);
+    expect("_meta" in outside!).toBe(false);
+    expect((streamed!._meta as { traceparent: string }).traceparent).toBe(want);
+    span.end();
   } finally {
     restore();
   }

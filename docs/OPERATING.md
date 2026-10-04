@@ -196,6 +196,38 @@ not do this**. `fleet` reports them differently on purpose. In particular a hub 
 **agent** is refused from the operator API with 403 — agents reach the hub through its MCP
 endpoint, not these verbs.
 
+## 1b. Service principals
+
+A service principal is a program that reads, with no person behind it — today, superwitness. It
+holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
+five-minute token, and its grant holds scopes only (`evidence:read`), never dispatch or reach.
+
+1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
+   `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
+   `superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev`
+   (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
+2. Create it — the secret is printed once:
+   ```sh
+   fleet principals add-service superwitness --client superwitness --scope evidence:read
+   ```
+3. Put `credential.id` in the service's `SW_HUB_CLIENT_ID` and `credential.secret` in the file
+   `SW_HUB_CLIENT_SECRET_FILE` names (mode 0600).
+4. Rotate with an overlap, so the service always holds a credential that works:
+   1. Add a second credential beside the live one — its secret is printed once (the principal id
+      is the `principalId` from step 2, or find it with `fleet principals list`):
+      ```sh
+      fleet principals add-credential prn_… --client superwitness
+      ```
+   2. Switch the consumer: put the new `credential.id` in `SW_HUB_CLIENT_ID`, write the new
+      `credential.secret` to the `SW_HUB_CLIENT_SECRET_FILE` file, and restart the service.
+   3. Revoke the old one: `fleet principals revoke-credential svc_…` (the OLD id). It is refused
+      at the exchange at once; tokens already minted from it expire within five minutes.
+
+   After a leak, revoke first and then add: the service is down for the gap, which is the point.
+
+`fleet grants set` on a service principal keeps its scopes: a grant write that does not mention
+`scopes` leaves them as stored.
+
 ## 2. Adopt stations
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.
@@ -1653,3 +1685,102 @@ The agent asked for permission and is waiting for a person. The question is on t
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.
+
+## 10. Telemetry
+
+The hub and node-agent export OpenTelemetry over OTLP/HTTP to the host collector, normally
+`http://127.0.0.1:4318`, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Unset, or with
+`OTEL_SDK_DISABLED=true`, nothing is loaded and nothing changes. Export never blocks: each
+process has a bounded queue (2048 spans) that drops and counts what it cannot send as
+`otel.spans.dropped`, which a Prometheus gateway exposes as `otel_spans_dropped_total`
+(labelled by `service.name`: `agentpod-hub` or `agentpod-node-agent`). No prompt, message or
+tool content goes into any span.
+
+### Hub
+
+The hub reads the variables from `/etc/agentpod/hub.env` and exports traces, metrics and logs.
+
+- Every claimed superpipeline run is one trace with a `dispatch` root span. The standard
+  agent spans (`attempt`, `turn`, `tool_call`, `permission`) are built from the ACP
+  events the hub already stores. They carry ids and sequence numbers, never content.
+  The transcript stays in `acp_events`.
+- Tuning, all optional: `OTEL_LOGS_EXPORTER=none` stops exporting log records (traces and
+  metrics continue); `OTEL_BSP_MAX_QUEUE_SIZE` sets the span and log queue (default 2048);
+  `OTEL_EXPORTER_OTLP_TIMEOUT` sets the per-export timeout in milliseconds (default 10000).
+- Metrics, with explicit dimensions only (no run, attempt or station ids):
+  `bridge.dispatches{dispatch.status}`, `http.server.request.duration`
+  (`http.request.method`, `http.route`, `http.response.status_code`), and
+  `otel.spans.dropped`.
+- The boot line says which state the hub is in: `telemetry: exporting OTLP to <endpoint>` or
+  `telemetry: (disabled)`. A malformed endpoint, such as one with no scheme
+  (`127.0.0.1:4318` instead of `http://127.0.0.1:4318`), does not stop the hub: it logs a
+  `telemetry: disabled, could not start the exporters` warning and runs with telemetry off.
+- `AGENTPOD_ACP_TRACE_META=false` stops the hub sending `_meta.traceparent` on ACP
+  `session/new` and `session/prompt`, for a harness that rejects the key. It takes
+  effect on the next hub restart, and no node-agent needs to change.
+
+### node-agent
+
+node-agent exports traces and metrics. It emits a SERVER span per broker verb that arrives
+carrying `_meta` (continuing the hub's trace; a node never starts traces of its own),
+`acp.forward session/new` and `acp.forward session/prompt` PRODUCER spans where it hands the
+trace context to the harness, and the `otel.spans.dropped` counter. `acp.attach` and
+`term.attach` verb spans last for the whole stream, so they export only when it ends.
+
+Configure it with commands, not by editing files. Linux nodes read the variables from
+`/etc/agentpod-node/otel.env` (system service) or `~/.config/agentpod-node/otel.env` (user
+service); the commands below are the only supported way to change it.
+
+- **The file.** `apn service install` writes `otel.env` as a commented template (mode 0644)
+  documenting every variable node-agent honours: the endpoint, `OTEL_SDK_DISABLED`, the
+  sampler (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`), `OTEL_EXPORTER_OTLP_HEADERS`, the
+  metrics timeout (`OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`, or `OTEL_EXPORTER_OTLP_TIMEOUT`, which
+  sets the metrics timeout only; traces keep a fixed 10 s) and `OTEL_RESOURCE_ATTRIBUTES` (extra
+  attributes; `service.name`, `service.version` and `host.name` stay node-agent's own, so
+  `OTEL_SERVICE_NAME` has no effect). It enables nothing, and it is written only if the file is absent; an
+  existing file is never overwritten. A unit installed before the file hook existed does not
+  read it until `apn service install` runs again.
+- **On the node.** `apn telemetry status [--json]` shows the config path, the endpoint,
+  enabled or disabled, and whether the collector answers (one short GET of
+  `<endpoint>/v1/traces`; any HTTP reply counts). `apn telemetry enable --endpoint <url>`
+  and `apn telemetry disable` rewrite the file atomically and restart the service.
+  `apn enroll --otlp-endpoint <url>` sets the endpoint at install time.
+- **From the fleet, no SSH.** `fleet nodes telemetry` lists each node's setting.
+  `fleet nodes telemetry [--node NAME|ID ...] --endpoint <url>` or `--off` sets it on every
+  node, or only the named ones (repeatable). The hub asks each node in turn
+  (`GET`/`POST /api/nodes/telemetry`) and the node applies it through the same code as
+  `apn telemetry`. Offline nodes are listed; for a set they count as not applied, so the
+  exit status is 1, as it is for a failed or unsupported node. Listing does not fail on
+  offline nodes, but does on unsupported ones. When a node is still exporting to an older
+  endpoint than its file says (it has not restarted yet), the listing adds
+  `(running <endpoint> until restart)`.
+- **Restarts.** A node restarts itself only when the file's content actually changed
+  (`changed`, with `restarting`); re-applying the same setting reports `unchanged` and
+  restarts nothing. Only the node-agent restarts: harnesses that run as their own services
+  keep running, but live terminal and ACP sessions on that node are dropped and have to
+  reconnect.
+- **Guards.** The routes are admin-only (any other account gets 403, and the CLI says
+  "admin role required"). Every node asked is recorded in the hub admin audit log as
+  `node_telemetry_update` with the endpoint (or `off`) and the result. The endpoint must be
+  an `http` or `https` URL with a host; the hub (400) and the node both refuse whitespace,
+  control and non-ASCII characters, any of `=` `"` `'` `` ` `` `\` `$` `#`, and embedded
+  credentials (`user:pass@`). The node writes only its known keys and refuses anything else,
+  leaving the file untouched.
+- **Older nodes.** A node that predates this verb shows `unsupported` (with "run
+  `fleet nodes update`") rather than failing silently; roll it with `fleet nodes update`,
+  then set telemetry again.
+- **Only the systemd service.** A node answers `unsupported`, writes nothing and does not
+  restart unless it is running as the `agentpod-node` systemd service (it checks its own
+  cgroup, which also tells it whether the system or the user file is the one its unit
+  reads). That covers container and fixed-image nodes (Cloudflare, Modal, Fly, docker) and a
+  hand-started `apn run` (tmux, nohup), which nothing would restart. The hub does not even
+  ask a node whose runtime boots from a fixed image: it reports `unsupported` ("node boots
+  from a fixed image; telemetry is configured in the image/substrate") and audits nothing.
+  Set `OTEL_EXPORTER_OTLP_ENDPOINT` in the image or substrate environment instead.
+- **macOS.** launchd has no env-file hook, so telemetry cannot be configured on macOS nodes:
+  `apn telemetry` refuses, and the fleet shows `unsupported`.
+
+Only hosts with a collector (infra, guild) need an endpoint.
+
+With the collector down, otel-go logs one line per failed export (at most about every 2 s
+while spans are flowing); the node keeps working and the queue drops what it cannot send.

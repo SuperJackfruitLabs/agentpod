@@ -36,6 +36,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
+    await rawSql`DELETE FROM principal_grants WHERE principal_id IN (SELECT id FROM principals WHERE handle LIKE 'scopes-it-%' OR handle LIKE 'scopes-bad-%')`;
+    await rawSql`DELETE FROM principals WHERE handle LIKE 'scopes-it-%' OR handle LIKE 'scopes-bad-%'`;
     await rawSql`DELETE FROM principal_grants WHERE principal_id IN (${ALICE}, ${BOB})`;
     await rawSql`DELETE FROM principals WHERE handle IN ('grants-it-alice', 'grants-it-bob')`;
     await rawSql`DELETE FROM "user" WHERE id IN (${ALICE_USER}, ${BOB_USER})`;
@@ -61,6 +63,7 @@ describe("the grant store", () => {
     expect(grant).toEqual({
       mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
       mayGrantReach: true,
+      scopes: [],
     });
   });
 
@@ -114,3 +117,25 @@ describe("the grant store", () => {
 // The matcher itself — equality, no patterns, no namespace — is pure logic
 // with no database dependency, so its tests live beside it in
 // `src/services/grants.test.ts` rather than here among the DB-bound ones.
+
+describe("scopes", () => {
+  test("a grant stores scopes, and an update that does not mention them keeps them", async () => {
+    const id = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
+    await setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
+    expect((await getGrant(id))!.scopes).toEqual(["evidence:read"]);
+
+    // An older client (`fleet grants set`) speaks only the control pair. Absent is not empty.
+    await setGrant(id, { mayDispatch: [], mayGrantReach: true });
+    expect(await getGrant(id)).toEqual({ mayDispatch: [], mayGrantReach: true, scopes: ["evidence:read"] });
+
+    await setGrant(id, { mayDispatch: [], mayGrantReach: true, scopes: [] });
+    expect((await getGrant(id))!.scopes).toEqual([]);
+  });
+
+  test("an unknown scope is refused at the writer", async () => {
+    const id = await createPrincipal({ kind: "service", handle: `scopes-bad-${crypto.randomUUID().slice(0, 8)}` });
+    await expect(setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:write"] })).rejects.toThrow(
+      /unknown scope/,
+    );
+  });
+});

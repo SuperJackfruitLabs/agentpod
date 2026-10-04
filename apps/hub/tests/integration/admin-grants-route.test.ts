@@ -79,6 +79,7 @@ describe("/api/admin/grants", () => {
     expect(await getGrant(SUBJECT)).toEqual({
       mayDispatch: ["prn_0123456789abcdef0123", "prn_ffffffffffffffffffff"],
       mayGrantReach: true,
+      scopes: [],
     });
   });
 
@@ -137,6 +138,7 @@ describe("/api/admin/grants", () => {
     expect(await getGrant(SUBJECT)).toEqual({
       mayDispatch: ["prn_0123456789abcdef0123"],
       mayGrantReach: false,
+      scopes: [],
     });
   });
 
@@ -189,5 +191,35 @@ describe("/api/admin/grants", () => {
 
     const res = await app().request(`/grants/${SUBJECT}`);
     expect(((await res.json()) as { granted: boolean }).granted).toBe(false);
+  });
+
+  test("PUT accepts scopes from the known vocabulary and refuses anything else", async () => {
+    let res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] }),
+    });
+    expect(res.status).toBe(200);
+    expect((await getGrant(SUBJECT))!.scopes).toEqual(["evidence:read"]);
+
+    res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mayDispatch: [], mayGrantReach: false, scopes: ["admin"] }),
+    });
+    expect(res.status).toBe(400);
+  });
+  test("PUT without scopes answers with the STORED grant, which kept them — not an echo of the body", async () => {
+    await setGrant(SUBJECT, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
+    const res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mayDispatch: [], mayGrantReach: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { principalId: string; grant: { scopes: string[]; mayGrantReach: boolean } };
+    expect(body.principalId).toBe(SUBJECT);
+    expect(body.grant).toEqual({ mayDispatch: [], mayGrantReach: true, scopes: ["evidence:read"] });
+    expect((await getGrant(SUBJECT))!.scopes).toEqual(["evidence:read"]);
   });
 });

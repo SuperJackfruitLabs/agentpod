@@ -45,6 +45,9 @@
 import type { BoardActivity } from "./coalesce";
 import type { GatePendingDelivery } from "../matrix-as/gates";
 import type { ElicitationPendingDelivery } from "../matrix-as/elicitation-card";
+import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
+import { tracer } from "../../telemetry/otel";
+import { injectTraceHeaders } from "../../telemetry/propagation";
 
 /** Injected so the client runs in a test with no network and no wrangler. */
 export type Fetcher = (
@@ -231,6 +234,28 @@ function readError(body: unknown): { code: string | null; message: string } {
   return { code: null, message: "" };
 }
 
+/** A request path with its ids replaced, for span names. Never a raw path: ids in names are cardinality. */
+export function pathTemplate(path: string): string {
+  const segs = path.split("?")[0]!.split("/");
+  return segs
+    .map((seg, i) => {
+      const prev = segs[i - 1];
+      if (prev === "boards") return "{boardId}";
+      if (prev === "runs") return "{runId}";
+      if (prev === "gates" && seg !== "pending") return "{gateId}";
+      return seg;
+    })
+    .join("/");
+}
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+};
+
 export class SuperpipelineClient {
   private readonly baseUrl: string;
   private readonly boardId: string;
@@ -256,12 +281,57 @@ export class SuperpipelineClient {
     return { "Content-Type": "application/json", Authorization: `Bearer ${this.token}` };
   }
 
+  /**
+   * A traced call when there is a trace to join (a dispatch, an HTTP request), an untraced one
+   * otherwise. The bridge polls `claims` every five seconds per agent, and a root span per poll
+   * would fill the trace store with nothing.
+   */
   private async send(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
+    if (!trace.getSpan(context.active())) return this.request(method, path, body, this.headers());
+    const template = pathTemplate(path);
+    const runId = /\/runs\/(run_[^/?]+)/.exec(path)?.[1];
+    return tracer().startActiveSpan(
+      `${method} ${template}`,
+      {
+        kind: SpanKind.CLIENT,
+        attributes: {
+          "http.request.method": method,
+          "url.template": template,
+          "server.address": hostOf(this.baseUrl),
+          ...(runId ? { "run.id": runId } : {}),
+        },
+      },
+      async (span) => {
+        try {
+          const headers = this.headers();
+          injectTraceHeaders(headers);
+          return await this.request(method, path, body, headers, (status) => {
+            span.setAttribute("http.response.status_code", status);
+            if (status >= 400) span.setStatus({ code: SpanStatusCode.ERROR });
+          });
+        } catch (err) {
+          span.setStatus({ code: SpanStatusCode.ERROR });
+          throw err;
+        } finally {
+          span.end();
+        }
+      },
+    );
+  }
+
+  private async request(
+    method: "GET" | "POST",
+    path: string,
+    body: unknown,
+    headers: Record<string, string>,
+    onStatus: (status: number) => void = () => {},
+  ): Promise<unknown> {
     const res = await this.fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: this.headers(),
+      headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    onStatus(res.status);
     if (res.ok) return res.json();
 
     let parsed: unknown = null;

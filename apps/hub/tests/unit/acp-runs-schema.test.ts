@@ -37,6 +37,14 @@ describe("acp_runs — the join key", () => {
     expect(RunState.options).toContain("auth-required");
     expect(isRunTerminal("canceled")).toBe(true);
   });
+
+  test("records the fingerprint it opened with, nullable for rows written before it existed", () => {
+    const cols = Object.keys(acpRuns);
+    expect(cols).toContain("fingerprintDigest");
+    expect(cols).toContain("fingerprint");
+    expect(acpRuns.fingerprintDigest.notNull).toBe(false);
+    expect(acpRuns.fingerprint.notNull).toBe(false);
+  });
 });
 
 describe("acp_events retention shape", () => {
