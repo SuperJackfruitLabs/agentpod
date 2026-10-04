@@ -14,5 +14,16 @@
 
 import { afterAll } from "bun:test";
 import { closeOpenMachines } from "../src/services/matrix-as/open-machines";
+import { shutdownTelemetry } from "../src/telemetry/otel";
 
-afterAll(closeOpenMachines);
+afterAll(async () => {
+  await closeOpenMachines();
+  // After the crypto machines (ws1 A2): an exporting provider left open must not keep
+  // bun test alive or abort it. A no-op when no test started one. Never throws: a
+  // collector that is down must not fail the run.
+  try {
+    await shutdownTelemetry(1_000);
+  } catch {
+    // best effort
+  }
+});

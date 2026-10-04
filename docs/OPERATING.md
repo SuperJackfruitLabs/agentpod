@@ -1685,3 +1685,20 @@ The agent asked for permission and is waiting for a person. The question is on t
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.
+
+## 10. Telemetry
+
+The hub exports OpenTelemetry traces, metrics and logs over OTLP/HTTP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set in `/etc/agentpod/hub.env`, normally to the host
+collector at `http://127.0.0.1:4318`. Unset, or with `OTEL_SDK_DISABLED=true`, nothing
+is loaded and nothing changes.
+
+- Every claimed superpipeline run is one trace with a `dispatch` root span. The standard
+  agent spans (`attempt`, `turn`, `tool_call`, `permission`) are built from the ACP
+  events the hub already stores. They carry ids and sequence numbers, never content.
+  The transcript stays in `acp_events`.
+- Export never blocks. When the queue (2048 spans) is full, spans are dropped and counted
+  as `otel_spans_dropped_total`.
+- `AGENTPOD_ACP_TRACE_META=false` stops the hub sending `_meta.traceparent` on ACP
+  `session/new` and `session/prompt`, for a harness that rejects the key. It takes
+  effect on the next hub restart, and no node-agent needs to change.
