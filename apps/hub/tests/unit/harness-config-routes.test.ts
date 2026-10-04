@@ -9,6 +9,9 @@
  *      setting must come back with a ConfigValue, synthesised when the broker
  *      call itself fails.
  *   4. GET /fleet/config/drift lists only stations whose state is not `matches`.
+ *   5. A node that answers `ok:true` with a SHORT or EMPTY values array still
+ *      closes every requested setting as `unreadable` — the likelier failure
+ *      mode than an outright offline node, because it looks like success.
  *
  * Follows apps/hub/src/routes/station-acp.test.ts: a minimal test Hono app with
  * a fake `X-Test-User-Id` auth middleware, the real gateway routes, and a fake
@@ -48,6 +51,15 @@ import type { AuthUser } from "../../src/auth/middleware";
 const TEST_USER = "test-user-cfgroute-001";
 const AGENT_USER = "test-user-cfgroute-agent-001";
 const SETTING_ID = "hermes.approvals.timeout";
+
+/** What a fake Hermes-harness node answers `config.settings` with — mirrors
+ *  the real node's registry (apps/node-agent/internal/descriptor/hermes_config.go)
+ *  closely enough for these tests, which only exercise `hermes.approvals.*`. */
+const HERMES_REGISTRY = [
+  { id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
+  { id: "hermes.approvals.mode", harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: true },
+  { id: "hermes.approvals.command_allowlist", harness: "hermes", scope: "profile", policy: "additive-only", restartToTakeEffect: true },
+];
 
 // ─── Minimal test app ─────────────────────────────────────────────────────────
 
@@ -166,7 +178,21 @@ async function connectFakeNode(
     } catch {
       return;
     }
-    if (msg.type !== "req" || msg.verb !== "config.observe") return;
+    if (msg.type !== "req") return;
+
+    if (msg.verb === "config.settings") {
+      ws.send(
+        JSON.stringify({
+          type: "res",
+          id: msg.id,
+          ok: true,
+          data: { settings: HERMES_REGISTRY },
+        }),
+      );
+      return;
+    }
+
+    if (msg.verb !== "config.observe") return;
     const params = msg.params as { settings: string[] };
     ws.send(
       JSON.stringify({
@@ -330,6 +356,140 @@ test(
       expect(body.observations.some((o) => o.stationId === driftedStation.id)).toBe(true);
 
       fake.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "a short or empty node response still closes every requested setting as unreadable",
+  async () => {
+    // This is the likelier failure mode than an outright offline node — the
+    // node answers `ok:true`, which looks like success, but leaves a
+    // requested setting out of `values`. ensureEveryValue() must close the
+    // gap for BOTH a short array (one of two requested settings missing)
+    // and a fully empty one (none of the requested settings present),
+    // scoped per-station so no other test's tenant-wide data interferes.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgroute-shortempty-host");
+
+      const shortKey = "cfgroute-short-station";
+      const emptyKey = "cfgroute-empty-station";
+      const [shortStation] = await adoptStations(
+        TEST_USER,
+        nodeId,
+        [shortKey],
+        detectedFor(shortKey),
+      );
+      const [emptyStation] = await adoptStations(
+        TEST_USER,
+        nodeId,
+        [emptyKey],
+        detectedFor(emptyKey),
+      );
+      if (!shortStation || !emptyStation) throw new Error("station adoption failed");
+
+      // Two settings declared on the "short" station; the node will answer
+      // with only one of them. One setting declared on the "empty" station;
+      // the node will answer with none at all.
+      await declare({
+        settingId: SETTING_ID,
+        stationId: shortStation.id,
+        nodeId: null,
+        value: "900",
+        tenantId: BOOTSTRAP_TENANT_ID,
+        declaredBy: TEST_USER,
+      });
+      await declare({
+        settingId: "hermes.approvals.mode",
+        stationId: shortStation.id,
+        nodeId: null,
+        value: "ask",
+        tenantId: BOOTSTRAP_TENANT_ID,
+        declaredBy: TEST_USER,
+      });
+      await declare({
+        settingId: SETTING_ID,
+        stationId: emptyStation.id,
+        nodeId: null,
+        value: "900",
+        tenantId: BOOTSTRAP_TENANT_ID,
+        declaredBy: TEST_USER,
+      });
+
+      const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+        headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+      } as RequestInit & { headers: Record<string, string> });
+      await new Promise<void>((res, rej) => {
+        ws.onopen = () => res();
+        ws.onerror = () => rej(new Error("Node WS connection error"));
+      });
+      ws.onmessage = (e) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(String(e.data));
+        } catch {
+          return;
+        }
+        if (msg.type !== "req") return;
+
+        if (msg.verb === "config.settings") {
+          ws.send(
+            JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: HERMES_REGISTRY } }),
+          );
+          return;
+        }
+
+        if (msg.verb !== "config.observe") return;
+        const params = msg.params as { stationKey: string; settings: string[] };
+        if (params.stationKey === shortKey) {
+          // Short: answer only the FIRST requested setting, omitting the second.
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: msg.id,
+              ok: true,
+              data: { values: [{ settingId: params.settings[0], readable: true, observed: "900" }] },
+            }),
+          );
+        } else if (params.stationKey === emptyKey) {
+          // Empty: ok:true, but no values at all — not a broker failure.
+          ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { values: [] } }));
+        }
+      };
+      await waitForNodeOnline(nodeId);
+
+      const shortRes = await appFetch(baseUrl, `/api/stations/${shortStation.id}/config`, {
+        token: TEST_USER,
+      });
+      expect(shortRes.status).toBe(200);
+      const shortBody = (await shortRes.json()) as {
+        observations: Array<{ settingId: string; state: string; reason?: string }>;
+      };
+      expect(shortBody.observations).toHaveLength(2);
+      const answered = shortBody.observations.find((o) => o.settingId === SETTING_ID);
+      const missing = shortBody.observations.find((o) => o.settingId === "hermes.approvals.mode");
+      expect(answered?.state).toBe("matches");
+      expect(missing?.state).toBe("unreadable");
+      expect(missing?.reason).toBeTruthy();
+
+      const emptyRes = await appFetch(baseUrl, `/api/stations/${emptyStation.id}/config`, {
+        token: TEST_USER,
+      });
+      expect(emptyRes.status).toBe(200);
+      const emptyBody = (await emptyRes.json()) as {
+        observations: Array<{ settingId: string; state: string; reason?: string }>;
+      };
+      expect(emptyBody.observations).toHaveLength(1);
+      expect(emptyBody.observations[0]?.state).toBe("unreadable");
+      expect(emptyBody.observations[0]?.reason).toBeTruthy();
+
+      ws.close();
       await new Promise((r) => setTimeout(r, 100));
     } finally {
       server.stop(true);

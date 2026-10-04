@@ -33,6 +33,18 @@
  * never a partial list. A route that answered `matches` for a station it
  * could not reach would report agreement it never observed — the exact
  * failure this feature exists to end.
+ *
+ * **No registry is held in this file.** An earlier version of this route
+ * carried a static `KNOWN_SETTINGS` constant, hand-copied from the node's
+ * `hermesConfigRegistry` — rejected on review, correctly: two copies of a
+ * registry is the exact defect this feature exists to DETECT (a value true
+ * when written, with nothing watching it keep agreeing), and shipping that
+ * inside a feature about catching drift would refute the feature. Every
+ * `ConfigSetting[]` used below is fetched live, per request, from the node
+ * that actually holds the registry, via the broker's `config.settings` verb
+ * (`apps/node-agent/internal/descriptor/handler.go`) — the sibling of
+ * `config.observe` that answers "what can you manage" instead of "what do
+ * you currently have".
  */
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
@@ -58,45 +70,93 @@ import type { AuthUser } from "../auth/middleware";
 /** The capability a station must advertise to be a candidate for this feature. */
 const CONFIG_MANAGE = "config.manage";
 
-/**
- * The harness config registry this hub knows about.
- *
- * Mirrors `apps/node-agent/internal/descriptor/hermes_config.go`'s
- * `hermesConfigRegistry` exactly — same three ids, same scope/policy/restart.
- * There is no broker verb that returns `ConfigSettings()` remotely (Task 4
- * built only `config.observe`, which reads VALUES for ids the caller already
- * names), so until one exists this is the hub's own copy of the same list —
- * the identical duplication the contract's `ConfigSetting`/`ConfigValue` Go
- * JSON tags already carry across the node/hub boundary. Keep the two in sync
- * by hand; a mismatch here makes `UNKNOWN_SETTING` refuse an id the node
- * would honour, or admit one it would refuse.
- */
-const KNOWN_SETTINGS: ConfigSetting[] = [
-  {
-    id: "hermes.approvals.timeout",
-    harness: "hermes",
-    scope: "profile",
-    policy: "reconcilable",
-    restartToTakeEffect: true,
-  },
-  {
-    id: "hermes.approvals.mode",
-    harness: "hermes",
-    scope: "profile",
-    policy: "reconcilable",
-    restartToTakeEffect: true,
-  },
-  {
-    id: "hermes.approvals.command_allowlist",
-    harness: "hermes",
-    scope: "profile",
-    policy: "additive-only",
-    restartToTakeEffect: true,
-  },
-];
-const KNOWN_SETTINGS_BY_ID = new Map(KNOWN_SETTINGS.map((s) => [s.id, s]));
-
 // ─── Shared helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Ask one station's node for the registry its harness manages — the
+ * `config.settings` broker verb, never cached: a registry read is cheap (it
+ * touches no disk on the node, see `ConfigSettings()`) and caching it would
+ * reintroduce exactly the "true when written" staleness this file exists to
+ * avoid. `null` on ANY failure (offline, timeout, disconnected, or a response
+ * that isn't the expected shape) — never a thrown error, so every caller
+ * here can treat "could not verify" as one outcome rather than a try/catch.
+ */
+async function fetchRegistry(nodeId: string, stationKey: string): Promise<ConfigSetting[] | null> {
+  const result = await broker.request(nodeId, "config.settings", { stationKey });
+  if (!result.ok) return null;
+  const settings = (result.data as { settings?: ConfigSetting[] } | undefined)?.settings;
+  return Array.isArray(settings) ? settings : null;
+}
+
+/** Every tenant station advertising `config.manage`, tenant-scoped. */
+async function manageableStations(tenantId: string): Promise<StationRow[]> {
+  const allStations = await db.select().from(stations).where(tenantScope(stations, tenantId));
+  return allStations.filter(
+    (s) => Array.isArray(s.capabilities) && s.capabilities.includes(CONFIG_MANAGE),
+  );
+}
+
+/** Node ids this tenant's nodes table currently records as online. */
+async function onlineNodeIds(tenantId: string): Promise<Set<string>> {
+  const allNodes = await db.select().from(nodes).where(tenantScope(nodes, tenantId));
+  return new Set(allNodes.filter((n) => n.status === "online").map((n) => n.id));
+}
+
+/**
+ * Resolve one `settingId` against the LIVE registry, so `PUT` never has to
+ * trust a copy. `hint` narrows which station(s) may answer — the exact
+ * target the caller named, when one was named — because a declaration
+ * naming a station or node is a claim about THAT station's or node's
+ * harness, not about whichever one happens to answer first.
+ *
+ * If no candidate can currently be asked, the declaration is REFUSED, not
+ * accepted by default: admitting a setting nobody could verify is the same
+ * failure as reporting agreement for a station nobody could reach — the
+ * write-side mirror of the read-side `unreadable` rule.
+ */
+async function verifySettingKnown(
+  settingId: string,
+  tenantId: string,
+  hint: { stationId: string | null; nodeId: string | null },
+): Promise<{ ok: true; setting: ConfigSetting } | { ok: false; reason: string }> {
+  const manageable = await manageableStations(tenantId);
+
+  let pool = manageable;
+  if (hint.stationId) pool = pool.filter((s) => s.id === hint.stationId);
+  else if (hint.nodeId) pool = pool.filter((s) => s.nodeId === hint.nodeId);
+
+  // Settings are namespaced "<harness>.<path>" (spec D1). Preferring a
+  // harness-matching station keeps a fleet-level declaration from being
+  // answered by an unrelated harness's registry when more than one is
+  // present; falling back to the full pool only when nothing matches the
+  // namespace at all still lets an unexpected id be looked up rather than
+  // refused for a reason that has nothing to do with it.
+  const harness = settingId.split(".")[0];
+  const harnessMatched = pool.filter((s) => s.harness === harness);
+  const candidates = harnessMatched.length > 0 ? harnessMatched : pool;
+
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      reason: "no station in this tenant could be asked to confirm this setting's registry",
+    };
+  }
+
+  const online = await onlineNodeIds(tenantId);
+  for (const station of candidates) {
+    if (!online.has(station.nodeId)) continue;
+    const registry = await fetchRegistry(station.nodeId, station.stationKey);
+    if (registry === null) continue;
+    const found = registry.find((s) => s.id === settingId);
+    if (found) return { ok: true, setting: found };
+    return { ok: false, reason: `${settingId} is not a setting this harness manages` };
+  }
+
+  return {
+    ok: false,
+    reason: "the registry could not be read: no reachable node could confirm this setting",
+  };
+}
 
 /**
  * Agent-kind principals are refused on every route below. `null` means the
@@ -118,15 +178,6 @@ async function agentRefusal(user: AuthUser): Promise<{ error: string } | null> {
 }
 
 /**
- * Every requested setting, synthesised as `readable: false` with the same
- * reason — the shape a route falls back to for EVERY settingId at once, never
- * a subset.
- */
-function allUnreadable(settingIds: string[], reason: string): ConfigValue[] {
-  return settingIds.map((settingId) => ({ settingId, readable: false, reason }));
-}
-
-/**
  * Fill in any settingId the node's response did not cover, so `compare()`
  * never receives a short list. Covers both total failure (no response at
  * all) and a partial one (the node answered but left an id out) with the one
@@ -143,12 +194,20 @@ function ensureEveryValue(
 
 /**
  * Observe one station: resolve its declarations, ask the node for the
- * current values, and compare. Returns `unreachable: true` whenever the
- * broker call itself failed (offline node, timeout, disconnect) — distinct
- * from the per-setting `unreadable` state in `observations`, because a
- * station with nothing declared yields zero observations on a failed call
- * just as it would on a successful one, and the caller (the drift route)
- * still needs to know it could not be asked.
+ * current values AND its registry (in parallel — two different questions to
+ * the same node), and compare. Returns `unreachable: true` whenever the
+ * VALUES call failed (offline node, timeout, disconnect) — distinct from the
+ * per-setting `unreadable` state in `observations`, because a station with
+ * nothing declared yields zero observations on a failed call just as it
+ * would on a successful one, and the caller (the drift route) still needs
+ * to know it could not be asked.
+ *
+ * A registry fetch that fails independently of the values call degrades
+ * gracefully rather than failing the whole observation: `compare()`'s
+ * out-of-scope rule needs a setting's `scope` to fire, and without it the
+ * row falls through to the ordinary matches/drifted/absent/unreadable
+ * states — correct in the common case this happens, which is the SAME node
+ * failing both calls, where every row is already `unreadable` regardless.
  */
 async function observeStation(
   station: Pick<StationRow, "id" | "nodeId" | "stationKey">,
@@ -160,10 +219,13 @@ async function observeStation(
     return { observations: [], unreachable: false };
   }
 
-  const result = await broker.request(station.nodeId, "config.observe", {
-    stationKey: station.stationKey,
-    settings: settingIds,
-  });
+  const [registry, result] = await Promise.all([
+    fetchRegistry(station.nodeId, station.stationKey),
+    broker.request(station.nodeId, "config.observe", {
+      stationKey: station.stationKey,
+      settings: settingIds,
+    }),
+  ]);
 
   const raw = result.ok
     ? ((result.data as { values?: ConfigValue[] } | undefined)?.values ?? [])
@@ -173,8 +235,9 @@ async function observeStation(
     : (result.error ?? "the node could not be reached");
   const values = ensureEveryValue(settingIds, raw, reason);
 
+  const registryById = new Map((registry ?? []).map((s) => [s.id, s]));
   const settings = settingIds
-    .map((id) => KNOWN_SETTINGS_BY_ID.get(id))
+    .map((id) => registryById.get(id))
     .filter((s): s is ConfigSetting => s !== undefined);
 
   return {
@@ -214,32 +277,41 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const tenantId = user.tenantId;
-    const [allStations, allNodes] = await Promise.all([
-      db.select().from(stations).where(tenantScope(stations, tenantId)),
-      db.select().from(nodes).where(tenantScope(nodes, tenantId)),
-    ]);
-    const statusByNode = new Map(allNodes.map((n) => [n.id, n.status]));
+    const manageable = await manageableStations(tenantId);
+    const online = await onlineNodeIds(tenantId);
 
-    const harnessesByNode = new Map<string, Set<string>>();
-    for (const s of allStations) {
-      if (!Array.isArray(s.capabilities) || !s.capabilities.includes(CONFIG_MANAGE)) continue;
-      const set = harnessesByNode.get(s.nodeId) ?? new Set<string>();
-      set.add(s.harness);
-      harnessesByNode.set(s.nodeId, set);
+    // One representative station per (node, harness) pair — the registry is
+    // the harness's, not the station's, so asking twice for the same pair
+    // would be two round trips for one answer.
+    const seen = new Set<string>();
+    const representatives: StationRow[] = [];
+    for (const s of manageable) {
+      const key = `${s.nodeId}\u0000${s.harness}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      representatives.push(s);
     }
 
-    const reachableHarnesses = new Set<string>();
-    const unreachableNodes: string[] = [];
-    for (const [nodeId, harnesses] of harnessesByNode) {
-      if (statusByNode.get(nodeId) === "online") {
-        for (const h of harnesses) reachableHarnesses.add(h);
-      } else {
-        unreachableNodes.push(nodeId);
+    const settingsById = new Map<string, ConfigSetting>();
+    const unreachableNodes = new Set<string>();
+
+    for (const station of representatives) {
+      if (!online.has(station.nodeId)) {
+        unreachableNodes.add(station.nodeId);
+        continue;
       }
+      const registry = await fetchRegistry(station.nodeId, station.stationKey);
+      if (registry === null) {
+        unreachableNodes.add(station.nodeId);
+        continue;
+      }
+      for (const s of registry) settingsById.set(s.id, s);
     }
 
-    const settings = KNOWN_SETTINGS.filter((s) => reachableHarnesses.has(s.harness));
-    return c.json({ settings, unreachableNodes });
+    return c.json({
+      settings: Array.from(settingsById.values()),
+      unreachableNodes: Array.from(unreachableNodes),
+    });
   })
 
   /**
@@ -278,8 +350,13 @@ export const harnessConfigRoutes = new Hono()
    * surfaces that as this route's 400, not a 500, because the refusal
    * happens before any handler code runs.
    *
-   * A `settingId` no registry knows is refused by name (`UNKNOWN_SETTING`,
-   * D1): this system declares named settings only, never one sight-unseen.
+   * A `settingId` no reachable registry knows is refused by name
+   * (`UNKNOWN_SETTING`, D1): this system declares named settings only, never
+   * one sight-unseen. The registry is read live from the node named by the
+   * declaration's own target (its station, its node, or — for a fleet-level
+   * declaration — any reachable station of the matching harness); when
+   * nothing can currently be asked, the declaration is refused rather than
+   * accepted on trust (`verifySettingKnown`).
    */
   .put("/fleet/config/declared", zValidator("json", DeclaredSetting), async (c) => {
     const user = c.get("user") as AuthUser | undefined;
@@ -288,8 +365,12 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const body = c.req.valid("json");
-    if (!KNOWN_SETTINGS_BY_ID.has(body.settingId)) {
-      return c.json({ error: "UNKNOWN_SETTING", settingId: body.settingId }, 400);
+    const verdict = await verifySettingKnown(body.settingId, user.tenantId, {
+      stationId: body.stationId,
+      nodeId: body.nodeId,
+    });
+    if (!verdict.ok) {
+      return c.json({ error: "UNKNOWN_SETTING", settingId: body.settingId, reason: verdict.reason }, 400);
     }
 
     try {
@@ -353,10 +434,7 @@ export const harnessConfigRoutes = new Hono()
     if (refusal) return c.json(refusal, 403);
 
     const tenantId = user.tenantId;
-    const allStations = await db.select().from(stations).where(tenantScope(stations, tenantId));
-    const candidates = allStations.filter(
-      (s) => Array.isArray(s.capabilities) && s.capabilities.includes(CONFIG_MANAGE),
-    );
+    const candidates = await manageableStations(tenantId);
 
     const observations: ConfigObservation[] = [];
     const stationsUnreachable: string[] = [];
