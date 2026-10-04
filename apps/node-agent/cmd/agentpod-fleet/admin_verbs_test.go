@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -192,5 +193,30 @@ func TestPrincipalsAddCredentialSendsTheClient(t *testing.T) {
 
 	if _, code := run(t, bin, env, "principals", "add-credential", "prn_1"); code != 2 {
 		t.Errorf("add-credential without --client: exit = %d, want 2", code)
+	}
+}
+
+// TestPrincipalsAddServiceSplitsScopes: --scope is comma-separated, and cards:queue is as
+// sendable as evidence:read. The hub owns the vocabulary; the CLI must not narrow it.
+func TestPrincipalsAddServiceSplitsScopes(t *testing.T) {
+	bin := build(t)
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"principalId":"prn_1"}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	if _, code := run(t, bin, env, "principals", "add-service", "superwitness", "--client", "superwitness", "--scope", "evidence:read,cards:queue"); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	scopes, _ := got["scopes"].([]any)
+	if len(scopes) != 2 || scopes[0] != "evidence:read" || scopes[1] != "cards:queue" {
+		t.Errorf("scopes = %v, want [evidence:read cards:queue]", got["scopes"])
+	}
+	out, _ := run(t, bin, env, "principals")
+	if !strings.Contains(out, "cards:queue") {
+		t.Errorf("usage does not mention cards:queue:\n%s", out)
 	}
 }

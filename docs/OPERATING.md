@@ -200,7 +200,7 @@ endpoint, not these verbs.
 
 A service principal is a program that reads, with no person behind it — today, superwitness. It
 holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
-five-minute token, and its grant holds scopes only (`evidence:read`), never dispatch or reach.
+five-minute token, and its grant holds scopes only (`evidence:read`, and `cards:queue` for a service that queues cards on superpipeline, such as the superwitness canary), never dispatch or reach.
 
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
@@ -208,7 +208,7 @@ five-minute token, and its grant holds scopes only (`evidence:read`), never disp
    (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
 2. Create it — the secret is printed once:
    ```sh
-   fleet principals add-service superwitness --client superwitness --scope evidence:read
+   fleet principals add-service superwitness --client superwitness --scope evidence:read,cards:queue
    ```
 3. Put `credential.id` in the service's `SW_HUB_CLIENT_ID` and `credential.secret` in the file
    `SW_HUB_CLIENT_SECRET_FILE` names (mode 0600).

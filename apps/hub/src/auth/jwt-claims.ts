@@ -58,9 +58,9 @@ export interface TokenPayload extends Record<string, unknown> {
   email_verified?: boolean;
   /**
    * OAuth's space-delimited scope list (RFC 8693 §4.2): the grant's read permissions beyond the
-   * control pair — today only `evidence:read`. ABSENT when the grant holds none, so a consumer
+   * control pair — `evidence:read` and `cards:queue`. ABSENT when the grant holds none, so a consumer
    * never reads permission into its absence. `fixtures/ecosystem-identity/token_claims.json`
-   * (version 7) describes it.
+   * (version 8) describes it.
    */
   scope?: string;
   /**
