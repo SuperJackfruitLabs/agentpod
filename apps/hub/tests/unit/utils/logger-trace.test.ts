@@ -1,4 +1,4 @@
-import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test, type Mock } from "bun:test";
 import { context, trace } from "@opentelemetry/api";
 import { createLogger } from "../../../src/utils/logger";
 import { tracer } from "../../../src/telemetry/otel";
@@ -7,9 +7,21 @@ import { useTestTelemetry } from "../../helpers/telemetry";
 const t = useTestTelemetry();
 
 describe("logger and traces", () => {
-  const out = spyOn(console, "log").mockImplementation(() => {});
-  afterEach(() => out.mockClear());
-  afterAll(() => out.mockRestore()); // every hub test file shares one process
+  // Scoped to this file: every hub test file shares one process.
+  let out: Mock<(...a: unknown[]) => void>;
+  let warn: Mock<(...a: unknown[]) => void>;
+  beforeAll(() => {
+    out = spyOn(console, "log").mockImplementation(() => {});
+    warn = spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    out.mockClear();
+    warn.mockClear();
+  });
+  afterAll(() => {
+    out.mockRestore();
+    warn.mockRestore();
+  });
 
   test("a line written inside a span carries trace_id and span_id", () => {
     const span = tracer().startSpan("dispatch");
