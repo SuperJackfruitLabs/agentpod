@@ -8,6 +8,11 @@ import (
 	"sync/atomic"
 
 	"github.com/coder/websocket"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
 )
 
 // reqIDKey is an unexported context key used to pass the current request ID
@@ -42,10 +47,11 @@ type FrameHandler interface {
 
 // inboundEnvelope is the decoded shape of a hub→node message.
 type inboundEnvelope struct {
-	Type   string          `json:"type"`
-	ID     string          `json:"id"`
-	Verb   string          `json:"verb"`
-	Params json.RawMessage `json:"params"`
+	Type   string               `json:"type"`
+	ID     string               `json:"id"`
+	Verb   string               `json:"verb"`
+	Params json.RawMessage      `json:"params"`
+	Meta   *telemetry.TraceMeta `json:"_meta,omitempty"`
 }
 
 // serve is the read-loop for inbound hub→node messages. It dispatches req
@@ -105,6 +111,7 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 			reqID := env.ID
 			verb := env.Verb
 			params := env.Params
+			meta := env.Meta
 
 			reqCtx, cancel := context.WithCancel(ctx)
 			cancelsMu.Lock()
@@ -152,7 +159,23 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 				// Embed the request ID in context so handlers such as
 				// term.attach can key per-attach state by request ID.
 				reqCtxWithID := context.WithValue(reqCtx, reqIDKey{}, reqID)
-				result, streamed, herr := h.Handle(reqCtxWithID, verb, params, emit)
+				// Continue the hub's trace (superwitness C2). No `_meta`, no span: a node does not
+				// start traces of its own.
+				handleCtx := telemetry.Extract(reqCtxWithID, meta)
+				var span trace.Span
+				if trace.SpanContextFromContext(handleCtx).IsValid() {
+					handleCtx, span = telemetry.Tracer().Start(handleCtx, verb,
+						trace.WithSpanKind(trace.SpanKindServer),
+						trace.WithAttributes(attribute.String("agentpod.verb", verb)))
+				}
+				result, streamed, herr := h.Handle(handleCtx, verb, params, emit)
+				if span != nil {
+					if herr != nil {
+						// Never herr.Error(): an error can quote a path or a harness's words.
+						span.SetStatus(codes.Error, "handler error")
+					}
+					span.End()
+				}
 
 				if streamed {
 					// Send the terminal eof frame; use the parent ctx so we
