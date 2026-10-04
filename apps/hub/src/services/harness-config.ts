@@ -142,32 +142,34 @@ export async function resolveFor(
  * about a setting nobody mentioned, and reporting one would make the drift
  * list a list of every setting in the fleet.
  *
- * `declaredAtStationLevel` is how the caller carries forward the `level` that
- * `resolveFor` attached to its resolution, without folding it into the bare
- * declared value — the level is load-bearing: `out-of-scope` fires only when
- * the winning declaration was made at STATION level for a setting whose
- * document is not per-station (`scope !== "profile"`).
+ * `declared` takes each setting's full `Resolved` — value AND the level it
+ * came from — exactly as `resolveFor` returns it. The level is load-bearing:
+ * `out-of-scope` fires only when the winning declaration was made at STATION
+ * level for a setting whose document is not per-station (`scope !==
+ * "profile"`). It is passed through here rather than reduced to a bare value
+ * or round-tripped into a side-channel set, because a second structure
+ * carrying the same fact is exactly the split that drifts: an optional
+ * parameter a caller forgets to populate loses the out-of-scope refusal with
+ * no type error — spec §6's protection disappearing silently.
  */
 export function compare(args: {
   stationId: string;
   values: ConfigValue[];
   settings: ConfigSetting[];
-  declared: Record<string, unknown>;
-  declaredAtStationLevel?: Set<string>;
+  declared: Record<string, Resolved>;
 }): ConfigObservation[] {
   const byId = new Map(args.settings.map((s) => [s.id, s]));
-  const stationLevel = args.declaredAtStationLevel ?? new Set<string>();
   const out: ConfigObservation[] = [];
 
   for (const v of args.values) {
     if (!(v.settingId in args.declared)) continue; // undeclared: no opinion, not reported
-    const declared = args.declared[v.settingId];
+    const { value: declared, level } = args.declared[v.settingId]!;
     const setting = byId.get(v.settingId);
     const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
 
     // Scope first: a declaration that cannot be honoured is not drift, and
     // calling it "drifted" would invite an apply that must then refuse.
-    if (setting && setting.scope !== "profile" && stationLevel.has(v.settingId)) {
+    if (setting && setting.scope !== "profile" && level === "station") {
       out.push({
         ...row,
         state: "out-of-scope",

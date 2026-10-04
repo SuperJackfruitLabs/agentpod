@@ -7,14 +7,19 @@ const SETTING = {
 };
 const base = { stationId: "station_a", settings: [SETTING] };
 
+/** A `Resolved` fixture — `resolveFor`'s shape, value and the level it came from. */
+function at(value: unknown, level: "station" | "node" | "fleet") {
+  return { value, level };
+}
+
 describe("comparing a station against the declaration", () => {
   test("equal values match", () => {
-    const [o] = compare({ ...base, declared: { [SETTING.id]: "900" }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
+    const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
     expect(o.state).toBe("matches");
   });
 
   test("different values drift, and the reason names both", () => {
-    const [o] = compare({ ...base, declared: { [SETTING.id]: "900" }, values: [{ settingId: SETTING.id, readable: true, observed: "300" }] });
+    const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "300" }] });
     expect(o.state).toBe("drifted");
     expect(o.reason).toContain("900");
     expect(o.reason).toContain("300");
@@ -23,17 +28,17 @@ describe("comparing a station against the declaration", () => {
   test("declared values compare by value, not by type — 900 and \"900\" agree", () => {
     // The node reads YAML as text; a declaration arrives as JSON. Treating these
     // as different would report drift on every numeric setting, forever.
-    const [o] = compare({ ...base, declared: { [SETTING.id]: 900 }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
+    const [o] = compare({ ...base, declared: { [SETTING.id]: at(900, "station") }, values: [{ settingId: SETTING.id, readable: true, observed: "900" }] });
     expect(o.state).toBe("matches");
   });
 
   test("declared but absent from the document is `absent`, not `drifted`", () => {
-    const [o] = compare({ ...base, declared: { [SETTING.id]: "900" }, values: [{ settingId: SETTING.id, readable: true }] });
+    const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: true }] });
     expect(o.state).toBe("absent");
   });
 
   test("an unreadable document is `unreadable` — never `matches` and never `absent`", () => {
-    const [o] = compare({ ...base, declared: { [SETTING.id]: "900" }, values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }] });
+    const [o] = compare({ ...base, declared: { [SETTING.id]: at("900", "station") }, values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }] });
     expect(o.state).toBe("unreadable");
     expect(o.reason).toContain("no such file");
   });
@@ -46,8 +51,8 @@ describe("comparing a station against the declaration", () => {
     const userScoped = { ...SETTING, id: "openclaw.hooks.allowConversationAccess", harness: "openclaw", scope: "user" as const };
     const [o] = compare({
       stationId: "station_a", settings: [userScoped],
-      declared: { [userScoped.id]: true }, values: [{ settingId: userScoped.id, readable: true, observed: true }],
-      declaredAtStationLevel: new Set([userScoped.id]),
+      declared: { [userScoped.id]: { value: true, level: "station" as const } },
+      values: [{ settingId: userScoped.id, readable: true, observed: true }],
     });
     expect(o.state).toBe("out-of-scope");
   });
