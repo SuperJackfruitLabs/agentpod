@@ -212,11 +212,18 @@ token's `mayDispatch` as the card's queued grant, and an empty list is refused w
    (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
 2. Create it — the secret is printed once:
    ```sh
-   fleet principals add-service superwitness --client superwitness --scope evidence:read,cards:queue
+   fleet principals add-service superwitness --client superwitness --scope evidence:read
+   ```
+   Plain `superwitness` holds only `evidence:read` (contract C6). Only the canary holds both
+   scopes, as its own principal on its own registered client (see superwitness `docs/canary.md`):
+   ```sh
+   fleet principals add-service superwitness-canary --client superwitness-canary --scope evidence:read,cards:queue
    ```
    `add-service` creates the grant with an empty `mayDispatch`. For a `cards:queue` service, set
-   it afterwards, and use the same command to upgrade an EXISTING service principal (the
-   document replaces the grant whole, so list every scope it should keep):
+   it afterwards. `add-service` on a handle that already exists answers 409 with its
+   `principalId`, so to upgrade an EXISTING service principal use `grants set` with that id. A
+   document that includes `scopes` replaces the stored ones, one that omits `scopes` keeps them,
+   and `mayDispatch` and `mayGrantReach` are always replaced:
    ```sh
    echo '{"mayDispatch":["prn_…"],"mayGrantReach":false,"scopes":["evidence:read","cards:queue"]}' \
      | fleet grants set prn_… --file -
