@@ -1733,8 +1733,11 @@ service); the commands below are the only supported way to change it.
 
 - **The file.** `apn service install` writes `otel.env` as a commented template (mode 0644)
   documenting every variable node-agent honours: the endpoint, `OTEL_SDK_DISABLED`, the
-  sampler (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`), `OTEL_EXPORTER_OTLP_HEADERS` and
-  the metrics timeout. It enables nothing, and it is written only if the file is absent; an
+  sampler (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`), `OTEL_EXPORTER_OTLP_HEADERS`, the
+  metrics timeout (`OTEL_EXPORTER_OTLP_METRICS_TIMEOUT`, or `OTEL_EXPORTER_OTLP_TIMEOUT`, which
+  sets the metrics timeout only; traces keep a fixed 10 s) and `OTEL_RESOURCE_ATTRIBUTES` (extra
+  attributes; `service.name`, `service.version` and `host.name` stay node-agent's own, so
+  `OTEL_SERVICE_NAME` has no effect). It enables nothing, and it is written only if the file is absent; an
   existing file is never overwritten. A unit installed before the file hook existed does not
   read it until `apn service install` runs again.
 - **On the node.** `apn telemetry status [--json]` shows the config path, the endpoint,
@@ -1748,18 +1751,32 @@ service); the commands below are the only supported way to change it.
   (`GET`/`POST /api/nodes/telemetry`) and the node applies it through the same code as
   `apn telemetry`. Offline nodes are listed; for a set they count as not applied, so the
   exit status is 1, as it is for a failed or unsupported node. Listing does not fail on
-  offline nodes.
+  offline nodes, but does on unsupported ones. When a node is still exporting to an older
+  endpoint than its file says (it has not restarted yet), the listing adds
+  `(running <endpoint> until restart)`.
 - **Restarts.** A node restarts itself only when the file's content actually changed
   (`changed`, with `restarting`); re-applying the same setting reports `unchanged` and
-  restarts nothing. Only the node-agent restarts; the harnesses it serves keep running.
+  restarts nothing. Only the node-agent restarts: harnesses that run as their own services
+  keep running, but live terminal and ACP sessions on that node are dropped and have to
+  reconnect.
 - **Guards.** The routes are admin-only (any other account gets 403, and the CLI says
   "admin role required"). Every node asked is recorded in the hub admin audit log as
   `node_telemetry_update` with the endpoint (or `off`) and the result. The endpoint must be
-  an `http` or `https` URL with no whitespace, control characters or `=`; the node writes
-  only its known keys and refuses anything else, leaving the file untouched.
+  an `http` or `https` URL with a host; the hub (400) and the node both refuse whitespace,
+  control and non-ASCII characters, any of `=` `"` `'` `` ` `` `\` `$` `#`, and embedded
+  credentials (`user:pass@`). The node writes only its known keys and refuses anything else,
+  leaving the file untouched.
 - **Older nodes.** A node that predates this verb shows `unsupported` (with "run
   `fleet nodes update`") rather than failing silently; roll it with `fleet nodes update`,
   then set telemetry again.
+- **Only the systemd service.** A node answers `unsupported`, writes nothing and does not
+  restart unless it is running as the `agentpod-node` systemd service (it checks its own
+  cgroup, which also tells it whether the system or the user file is the one its unit
+  reads). That covers container and fixed-image nodes (Cloudflare, Modal, Fly, docker) and a
+  hand-started `apn run` (tmux, nohup), which nothing would restart. The hub does not even
+  ask a node whose runtime boots from a fixed image: it reports `unsupported` ("node boots
+  from a fixed image; telemetry is configured in the image/substrate") and audits nothing.
+  Set `OTEL_EXPORTER_OTLP_ENDPOINT` in the image or substrate environment instead.
 - **macOS.** launchd has no env-file hook, so telemetry cannot be configured on macOS nodes:
   `apn telemetry` refuses, and the fleet shows `unsupported`.
 
