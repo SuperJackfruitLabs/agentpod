@@ -270,3 +270,113 @@ func TestTelemetryBrokerRoundTrip(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+// fakeUnit records unit checks; the env file's existence at call time shows ordering.
+type fakeUnit struct {
+	state, detail string
+	calls         []bool
+	envExisted    []bool
+	envPath       string
+}
+
+func (f *fakeUnit) check(apply bool) (string, string) {
+	f.calls = append(f.calls, apply)
+	_, err := os.Stat(f.envPath)
+	f.envExisted = append(f.envExisted, err == nil)
+	return f.state, f.detail
+}
+
+func newUnitHandler(t *testing.T, state, detail string) (*telemetryHandler, chan int, *fakeUnit, string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "otel.env")
+	h, ex := newTestTelemetryHandler(p)
+	f := &fakeUnit{state: state, detail: detail, envPath: p}
+	h.unit = f.check
+	return h, ex, f, p
+}
+
+func TestTelemetryStatusReportsUnitFromDryRun(t *testing.T) {
+	h, ex, f, _ := newUnitHandler(t, "stale", "unit predates the current template")
+	m, exited := callTelemetry(t, h, ex, "telemetry.status", `{}`)
+	if exited || m["unit"] != "stale" || m["unitDetail"] != "unit predates the current template" {
+		t.Fatalf("%v exited=%v", m, exited)
+	}
+	if len(f.calls) != 1 || f.calls[0] {
+		t.Fatalf("status must dry-run: %v", f.calls)
+	}
+	h2, ex2, _, _ := newUnitHandler(t, "current", "")
+	m, _ = callTelemetry(t, h2, ex2, "telemetry.status", `{}`)
+	if _, has := m["unitDetail"]; m["unit"] != "current" || has {
+		t.Fatalf("current: %v", m)
+	}
+}
+
+func TestTelemetryNilUnitIsNA(t *testing.T) {
+	h, ex := newTestTelemetryHandler(filepath.Join(t.TempDir(), "otel.env"))
+	m, _ := callTelemetry(t, h, ex, "telemetry.status", `{}`)
+	if m["unit"] != "n/a" {
+		t.Fatalf("%v", m)
+	}
+}
+
+func TestTelemetrySetReconcilesBeforeEnvWriteAndExitsOnce(t *testing.T) {
+	h, ex, f, p := newUnitHandler(t, "reconciled", "rewrote x")
+	m, exited := callTelemetry(t, h, ex, "telemetry.set", `{"endpoint":"http://10.0.0.1:4318"}`)
+	if !exited || m["changed"] != true || m["restarting"] != true || m["unit"] != "reconciled" || m["unitDetail"] != "rewrote x" {
+		t.Fatalf("%v exited=%v", m, exited)
+	}
+	if len(f.calls) != 1 || !f.calls[0] || f.envExisted[0] {
+		t.Fatalf("want one apply call before env write: calls=%v envExisted=%v", f.calls, f.envExisted)
+	}
+	if st, _ := otelenv.Read(p); !st.Enabled {
+		t.Fatalf("env not written")
+	}
+	select {
+	case <-ex:
+		t.Fatal("exit fired twice")
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestTelemetrySetUnchangedEnvButReconciledUnitRestarts(t *testing.T) {
+	h, ex, _, p := newUnitHandler(t, "reconciled", "")
+	if _, err := otelenv.SetEndpoint(p, "http://10.0.0.1:4318"); err != nil {
+		t.Fatal(err)
+	}
+	m, exited := callTelemetry(t, h, ex, "telemetry.set", `{"endpoint":"http://10.0.0.1:4318"}`)
+	if !exited || m["changed"] != false || m["restarting"] != true || m["unit"] != "reconciled" {
+		t.Fatalf("%v exited=%v", m, exited)
+	}
+}
+
+func TestTelemetrySetDriftedUnitStillWritesEnv(t *testing.T) {
+	h, ex, _, p := newUnitHandler(t, "drifted", "manual edits; left in place")
+	m, exited := callTelemetry(t, h, ex, "telemetry.set", `{"endpoint":"http://10.0.0.1:4318"}`)
+	if !exited || m["ok"] != true || m["unit"] != "drifted" || m["restarting"] != true {
+		t.Fatalf("changed: %v exited=%v", m, exited)
+	}
+	if st, _ := otelenv.Read(p); !st.Enabled {
+		t.Fatal("env not written")
+	}
+	m, exited = callTelemetry(t, h, ex, "telemetry.set", `{"endpoint":"http://10.0.0.1:4318"}`)
+	if exited || m["unit"] != "drifted" || m["restarting"] != false {
+		t.Fatalf("unchanged: %v exited=%v", m, exited)
+	}
+}
+
+func TestTelemetrySetBadInputDoesNotReconcile(t *testing.T) {
+	h, ex, f, _ := newUnitHandler(t, "reconciled", "")
+	callTelemetry(t, h, ex, "telemetry.set", `{}`)
+	if len(f.calls) != 0 {
+		t.Fatalf("reconciled on bad input: %v", f.calls)
+	}
+}
+
+func TestTelemetryUnsupportedSkipsUnitCheck(t *testing.T) {
+	h, ex, f, _ := newUnitHandler(t, "reconciled", "")
+	h.path = func() (string, error) { return "", otelenv.ErrNotService }
+	m, _ := callTelemetry(t, h, ex, "telemetry.set", `{"off":true}`)
+	if _, has := m["unit"]; has || len(f.calls) != 0 {
+		t.Fatalf("%v %v", m, f.calls)
+	}
+}
