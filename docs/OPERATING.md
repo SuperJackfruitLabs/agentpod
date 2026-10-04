@@ -200,7 +200,11 @@ endpoint, not these verbs.
 
 A service principal is a program that reads, with no person behind it — today, superwitness. It
 holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
-five-minute token, and its grant holds scopes only (`evidence:read`, and `cards:queue` for a service that queues cards on superpipeline, such as the superwitness canary), never dispatch or reach.
+five-minute token. Its grant holds scopes (`evidence:read`, and `cards:queue` to queue cards on
+superpipeline, as the superwitness canary does) and never reach. A service holding `cards:queue`
+must also name in `mayDispatch` the agent(s) that will claim its cards: superpipeline uses the
+token's `mayDispatch` as the card's queued grant, and an empty list is refused with 403
+`NO_DISPATCH_AUTHORITY`.
 
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
@@ -210,6 +214,15 @@ five-minute token, and its grant holds scopes only (`evidence:read`, and `cards:
    ```sh
    fleet principals add-service superwitness --client superwitness --scope evidence:read,cards:queue
    ```
+   `add-service` creates the grant with an empty `mayDispatch`. For a `cards:queue` service, set
+   it afterwards, and use the same command to upgrade an EXISTING service principal (the
+   document replaces the grant whole, so list every scope it should keep):
+   ```sh
+   echo '{"mayDispatch":["prn_…"],"mayGrantReach":false,"scopes":["evidence:read","cards:queue"]}' \
+     | fleet grants set prn_… --file -
+   ```
+   On the superpipeline side, a board admin must then list the service on the board:
+   `supi board-queuers <board> --add prn_…`.
 3. Put `credential.id` in the service's `SW_HUB_CLIENT_ID` and `credential.secret` in the file
    `SW_HUB_CLIENT_SECRET_FILE` names (mode 0600).
 4. Rotate with an overlap, so the service always holds a credential that works:

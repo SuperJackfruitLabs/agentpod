@@ -15,6 +15,7 @@ const grantsUsage = `usage:
   fleet grants list
   fleet grants show PRINCIPAL_ID
   fleet grants set PRINCIPAL_ID --file PATH|-
+      (document keys: mayDispatch, mayGrantReach, scopes; scopes: evidence:read, cards:queue)
   fleet grants rm PRINCIPAL_ID`
 
 // fleetGrants reads and writes dispatch authority: which principals a principal may

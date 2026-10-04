@@ -51,7 +51,7 @@ export const principalGrants = pgTable(
     mayGrantReach: boolean("may_grant_reach").notNull().default(false),
 
     /**
-     * Read permissions beyond the control pair, as a JSON array (`["evidence:read"]`). Issued as
+     * Permissions beyond the control pair, as a JSON array (`["evidence:read"]`). Issued as
      * OAuth's `scope` claim. Never a capability — capabilities are superpipeline's vocabulary.
      */
     scopes: text("scopes").notNull().default("[]"),
