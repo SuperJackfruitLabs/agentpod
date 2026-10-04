@@ -9,6 +9,7 @@
     "canonical": "JSON object of exactly these five string fields, keys sorted, no whitespace, UTF-8, `<` `>` `&` and non-ASCII NOT escaped (JSON.stringify output).",
     "digest": "\"sha256:\" + lowercase hex of SHA-256 over the canonical bytes",
     "unknown": "A value that cannot be determined is the literal \"unknown\"; values are trimmed and an empty value becomes \"unknown\".",
+    "encoding": "Values are hashed exactly as the producer holds them: UTF-8 bytes, no Unicode normalisation (no NFC/NFD).",
     "notInDigest": "reported_by"
   },
   "accept": [

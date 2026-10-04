@@ -94,7 +94,7 @@ export async function fingerprintWithin(
     timer = setTimeout(() => done(makeFingerprint({}, "hub")), timeoutMs);
   });
   try {
-    return await Promise.race([resolve().catch(() => makeFingerprint({}, "hub")), late]);
+    return await Promise.race([Promise.resolve().then(resolve).catch(() => makeFingerprint({}, "hub")), late]);
   } finally {
     clearTimeout(timer);
   }

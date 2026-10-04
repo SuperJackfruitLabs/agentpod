@@ -30,6 +30,14 @@ describe("fingerprintWithin — an attempt never waits on its fingerprint", () =
     expect(await fingerprintWithin(() => Promise.reject(new Error("db down")), 1_000)).toEqual(ALL_UNKNOWN);
   });
 
+  test("a resolver that throws synchronously yields unknown", async () => {
+    const f = await fingerprintWithin(() => {
+      throw new Error("sync");
+    }, 1_000);
+    expect(f).toEqual(ALL_UNKNOWN);
+    expect(f.reported_by).toBe("hub");
+  });
+
   test("a resolver that answers is believed", async () => {
     const f = makeFingerprint({ harness: "hermes", profile: "press", skill_release: "none" }, "hub");
     expect(await fingerprintWithin(async () => f, 1_000)).toEqual(f);
