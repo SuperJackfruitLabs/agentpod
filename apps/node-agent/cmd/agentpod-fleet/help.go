@@ -16,6 +16,7 @@ Usage: fleet <verb> [flags]
   fleet devices revoke <id>  revoke one
   fleet nodes                the fleet's nodes
   fleet nodes update         roll the newest release to every node (or --node NAME)
+  fleet nodes telemetry      OpenTelemetry endpoint per node (--endpoint URL | --off; admin)
   fleet agents               the agents you may dispatch
   fleet stations …           detect, adopt and unadopt stations on a node
   fleet stats                fleet totals

@@ -81,14 +81,30 @@ var commands = []struct {
 			"a no-op when nothing is installed. Leaves config/enrollment untouched.",
 	},
 	{
+		name: "telemetry", group: "Service",
+		oneline: "Show, enable or disable OpenTelemetry export (--endpoint URL)",
+		detail: "apn telemetry <status|enable|disable> — control this node's OpenTelemetry\n" +
+			"export through its otel.env file.\n\n" +
+			"status [--json]: the config path, endpoint, enabled/disabled and, when\n" +
+			"enabled, whether the collector answers (a ~2 s GET of <endpoint>/v1/traces;\n" +
+			"any HTTP response counts).\n" +
+			"enable --endpoint URL: validate (http/https only), write, restart the service.\n" +
+			"disable: comment the endpoint out, restart the service.\n" +
+			"Nothing is restarted when the file would not change.\n\n" +
+			"Unsupported on macOS (launchd has no env-file hook).",
+	},
+	{
 		name: "enroll", group: "Node",
-		oneline: "Enroll this machine with a hub (--hub, --token, --force)",
-		detail: "apn enroll [--hub URL] [--token TOKEN] [--force] — enroll this\n" +
+		oneline: "Enroll this machine with a hub (--hub, --token, --force, --otlp-endpoint)",
+		detail: "apn enroll [--hub URL] [--token TOKEN] [--force] [--otlp-endpoint URL] — enroll this\n" +
 			"machine with a hub.\n\n" +
 			"Falls back to the AGENTPOD_HUB_URL/AGENTPOD_ENROLL_TOKEN environment\n" +
 			"variables when the flags are omitted. Idempotent: running it again on\n" +
 			"an already-enrolled machine is a friendly no-op unless the stored\n" +
-			"credential is no longer valid, or --force is passed.",
+			"credential is no longer valid, or --force is passed.\n\n" +
+			"--otlp-endpoint URL also enables OpenTelemetry export to that collector (validated\n" +
+			"before contacting the hub; applies on an already-enrolled machine too; no restart —\n" +
+			"same as 'apn telemetry enable'). Ignored with a warning on macOS.",
 	},
 	{
 		name: "run", group: "Node",

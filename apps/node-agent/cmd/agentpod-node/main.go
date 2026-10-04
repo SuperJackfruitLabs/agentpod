@@ -8,6 +8,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/enroll"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/host"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/selfupdate"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 	"os"
@@ -68,7 +69,28 @@ func main() {
 		flagHub := fs.String("hub", "", "hub base URL")
 		flagToken := fs.String("token", "", "enrollment token")
 		flagForce := fs.Bool("force", false, "re-enroll even when a valid config exists")
+		flagOTLP := fs.String("otlp-endpoint", "", "OTLP/HTTP collector base URL to enable telemetry export")
 		fs.Parse(os.Args[2:])
+		// Validate before contacting the hub: a typo must not cost a one-time token.
+		if *flagOTLP != "" {
+			if err := otelenv.ValidateEndpoint(*flagOTLP); err != nil {
+				fmt.Fprintln(os.Stderr, "enroll: invalid --otlp-endpoint:", err)
+				os.Exit(1)
+			}
+		}
+		// Applied on every outcome (including the already-enrolled early returns) so a
+		// re-run of the installer with a new endpoint still takes effect. Never restarts.
+		applyOTLP := func() {
+			if *flagOTLP == "" {
+				return
+			}
+			mgr, err := service.NewManager(nil)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "warning: could not apply --otlp-endpoint:", err)
+				return
+			}
+			applyEnrollOTLP(mgr, *flagOTLP, os.Stderr)
+		}
 		existing, loadErr := config.Load(config.DefaultPath())
 		haveConfig := alreadyEnrolled(existing, loadErr)
 		hub, token, err := resolveEnrollArgs(*flagHub, *flagToken, os.Getenv)
@@ -76,6 +98,7 @@ func main() {
 			// Bare `enroll` on an already-enrolled machine stays a friendly no-op.
 			if haveConfig {
 				fmt.Println("already enrolled:", existing.NodeID)
+				applyOTLP()
 				return
 			}
 			fmt.Fprintln(os.Stderr, err)
@@ -85,10 +108,12 @@ func main() {
 		switch decision {
 		case decisionKeep:
 			fmt.Printf("already enrolled: %s (%s)\n", existing.NodeID, reason)
+			applyOTLP()
 			return
 		case decisionKeepUnverified:
 			// Keep a possibly-valid identity; `run` retries connecting anyway.
 			fmt.Fprintf(os.Stderr, "warning: keeping existing config (%s)\n", reason)
+			applyOTLP()
 			return
 		}
 		if haveConfig {
@@ -107,6 +132,7 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Println("enrolled:", id)
+		applyOTLP()
 	case "run":
 		if maybeShowHelp(os.Stdout, "run", os.Args[2:]) {
 			os.Exit(0)
@@ -230,6 +256,16 @@ func main() {
 			os.Exit(1)
 		}
 		os.Exit(logsCmd(mgr, os.Args[2:], os.Stdout, os.Stderr))
+	case "telemetry":
+		if maybeShowHelp(os.Stdout, "telemetry", os.Args[2:]) {
+			os.Exit(0)
+		}
+		mgr, err := service.NewManager(nil)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(telemetryCmd(mgr, os.Args[2:], os.Stdout, httpProbe(probeTimeout)))
 	case "service":
 		mgr, err := service.NewManager(nil)
 		if err != nil {

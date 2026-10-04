@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -226,4 +227,9 @@ func parsePID(printOutput string) (int, bool) {
 // without it is not a command anyone can run.
 func (m *launchdManager) RestartHint() string {
 	return fmt.Sprintf("launchctl kickstart -k gui/%d/%s  (or re-run: apn run)", m.uid, launchdLabel)
+}
+
+// OTelEnvPath: a LaunchAgent plist has no environment-file hook, so there is no file to manage.
+func (m *launchdManager) OTelEnvPath() (string, error) {
+	return "", otelenv.ErrUnsupported
 }
