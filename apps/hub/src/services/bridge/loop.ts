@@ -20,6 +20,7 @@ import { readBridgeRoster, type BridgeAgentSecrets } from "./roster";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { runOnce, type AcpPort, type DispatchResult } from "./dispatch";
 import { SuperpipelineApiError, SuperpipelineClient, fetchAdapter } from "./superpipeline";
+import { createLogger } from "../../utils/logger";
 
 /** How long to wait after a claim that found nothing. */
 const DEFAULT_POLL_MS = 5_000;
@@ -203,7 +204,8 @@ export async function startSuperpipelineBridge(
   if (!baseUrl) return null;
 
   const acp = deps.acp ?? hubAcpPort;
-  const log = deps.log ?? ((m: string, meta?: Record<string, unknown>) => console.log(`[bridge] ${m}`, meta ?? ""));
+  const bridgeLog = createLogger("bridge");
+  const log = deps.log ?? ((m: string, meta?: Record<string, unknown>) => bridgeLog.info(m, meta));
   /**
    * superpipeline serves MCP at one origin-level path, not per board — the board is the agent's,
    * carried by its credential (`apps/api/src/index.ts`, `path === '/mcp'`). Derived from the
