@@ -24,11 +24,26 @@ where they sit. Nothing moves, and nothing is rewritten to a new format.
 - **Cleanup** — plan a disk reclaim, inspect the plan, then apply it
 - **Changesets** — what the agent has actually changed in its working tree
 - **Activity** — an audit trail of what was done to the station, and by whom
+- **Skills** — what a station actually has, installed under review and verified in a session
+- **Plugins** — reviewed harness plugin changes, planned and applied
 - **Provisioning** — create new runtimes on Docker, Cloudflare, Modal or Fly
 
 Not every station offers all of these. Each one is gated on a capability the harness
 declares, and a station that does not declare it is refused before the request ever
 reaches the machine.
+
+## And a way to talk to them
+
+The console is for operating the ground an agent stands on. The other half of AgentPod is for
+working *with* the agent: turn on the **bridge** and every adopted station gets a chat identity and
+a room of its own.
+
+You message it from a client you already have. The agent's reply comes back as that agent. It can
+be sent a voice note and answer with one; it asks for permission before running a tool and you
+reply with a number; when a turn fails you get the provider's own sentence rather than silence. The
+harness itself never learns any of this is happening.
+
+See [Talking to an agent in a room](/use/rooms/).
 
 ## Three tiers
 
@@ -67,7 +82,13 @@ job in a different plane — that is what [superpipeline](https://docs.superpipe
 AgentPod answers "where does this agent live, and is it healthy", not "what should it work
 on".
 
+The two do join up: AgentPod can **claim work from a board** and run it on a station, and the
+decisions that work stops on come back to a room where you can answer them. That is a bridge
+between two planes rather than one plane growing into the other — see
+[Working a board](/use/boards/).
+
 ## Next
 
 - [Enroll your first node](/start/first-node/) — a machine in the fleet in about five minutes
 - [Concepts](/start/concepts/) — nodes, stations, harnesses and principals
+- [Talking to an agent in a room](/use/rooms/) — the bridge, if you want the other half

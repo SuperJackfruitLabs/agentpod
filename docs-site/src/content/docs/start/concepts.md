@@ -1,9 +1,9 @@
 ---
 title: Concepts
-description: Nodes, stations, harnesses, principals and the hub — the six words the rest of the documentation assumes.
+description: Nodes, stations, harnesses, principals, grants and the hub — the words the rest of the documentation assumes.
 ---
 
-Six words carry most of AgentPod. They are worth ten minutes.
+Eight words carry most of AgentPod. They are worth ten minutes.
 
 ## Node
 
@@ -69,6 +69,25 @@ may dispatch refuses an agent token outright. An agent enumerating its siblings 
 doing reconnaissance, so that answer is read from the signed token and from nothing the
 caller can influence.
 
+## Grant
+
+**Who may spend an agent's time.** Messaging an agent, approving a tool call for it, and putting a
+card in front of it are all the same act under different names, and all three are checked against a
+`mayDispatch` claim the hub signed into the caller's token.
+
+A grant is read from the signed token and from nothing the caller sent. A missing claim means
+*permitted nothing* — never *permitted everything*. See [Dispatch and grants](/use/grants/).
+
+Operating a station is a **different** authority from dispatching the agent in it. Reading logs is
+not dispatching; sending a message is.
+
+## Room
+
+If the bridge is on, every adopted station has a **chat identity and a room**. It is how an agent
+whose harness never spoke a messaging protocol can be reached from a phone — and how permission
+questions, failed turns and a board's approval gates get in front of a person who is not at a
+console. See [Talking to an agent in a room](/use/rooms/).
+
 ## Hub
 
 The **one place that knows everything**: the registry of nodes and stations, the broker
@@ -88,10 +107,11 @@ hub
            └── station
 ```
 
-A **principal** acts on those stations. A **harness** is what the station is an instance
-of.
+A **principal** acts on those stations, bounded by a **grant**. A **harness** is what the station
+is an instance of. With the bridge on, each station also has a **room**.
 
 ## Next
 
 - [Nodes](/use/nodes/) and [Stations](/use/stations/) — operating both
 - [What you can do to a station](/use/panels/) — the panels, and what each one needs
+- [Dispatch and grants](/use/grants/) — who may act on whom

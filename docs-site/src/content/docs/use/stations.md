@@ -70,6 +70,43 @@ In `bridge` mode the identity is minted by the Application Service and stored se
 from whatever the harness reports about itself. Nothing on the host can report that
 identity, so nothing on the host can erase it.
 
+The station's room is created with it, and **created encrypted** — there is nothing extra to turn
+on, and no window in which it existed in the clear. Rooms hang under a space named for the machine
+they run on, so the roster groups itself in any client that reads the hierarchy.
+
+An agent can be given an **avatar**: preview a workspace image and set it as the station's picture.
+A roster of thirty identical default avatars is a roster you read by name only.
+
+What else arrives in that room — voice notes, permission questions, a card when a turn fails, a
+board's approval gates — is [Talking to an agent in a room](/use/rooms/).
+
+## Git identity
+
+A station can be given a key to push to a forge with:
+
+```sh
+fleet stations git-identity --station <stationId>
+fleet stations grant-push   --station <stationId>
+fleet stations revoke-push  --station <stationId>
+```
+
+**Granted per station, never by adopting one.** Most stations never touch git, and a forge key for
+every station is an account nobody uses and a key nobody revokes.
+
+The keypair is generated **on the node** and the private half never leaves it: `grant-push` asks
+for the public half and registers that. The hub holds no secret, so a hub compromise does not hand
+over commit access.
+
+## Staffing
+
+Putting an agent in a station, or taking it out:
+
+```sh
+fleet staff options
+fleet staff assign   --station <stationId> --file <path>|-
+fleet staff unassign --station <stationId>
+```
+
 ## Cleaning up
 
 Removing a station from the registry is not the same as deleting anything on the machine.
@@ -80,4 +117,6 @@ only then applies it.
 ## Next
 
 - [What you can do to a station](/use/panels/)
+- [Talking to an agent in a room](/use/rooms/)
+- [Managed skills](/use/skills/)
 - [Attaching an editor](/use/acp/)

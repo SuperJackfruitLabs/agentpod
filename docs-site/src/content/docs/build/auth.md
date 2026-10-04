@@ -12,7 +12,22 @@ published key set, rather than calling back to ask whether a token is good.
 fleet login
 ```
 
-This runs an **authorization code flow with PKCE**:
+The browser opens **once**, not once per lapse. A hub token lasts five minutes, which is short on
+purpose; `fleet login` also registers this machine as a **device**, and every later command
+exchanges that device credential for a fresh token without a browser.
+
+```sh
+fleet devices            # machines that may act as you
+fleet devices revoke <id>
+fleet logout             # revoke this device and forget both credentials
+```
+
+The device credential lasts 90 days and renews itself whenever it is used. A machine you no longer
+have is revoked from any other machine, by id.
+
+### The sign-in itself
+
+`fleet login` runs an **authorization code flow with PKCE**:
 
 1. `fleet` binds a loopback listener on an ephemeral port, *before* sending you anywhere. Asking
    for a port after the browser is already open is a race the browser wins.
@@ -41,6 +56,26 @@ Two properties worth knowing:
 - **A token names a principal kind** — `human`, `agent` or `service` — and that kind is
   load-bearing. The operator API refuses non-human principals at the door. `/mcp` accepts
   agents, because serving agents is its whole purpose, and serves them a different tool set.
+- **A token carries `email` and `email_verified`** when the principal is a person and the hub
+  knows them. They are *conditional* claims — present when there is something true to say, absent
+  rather than empty otherwise.
+
+## Where a token may be spent
+
+A token's `aud` names **the planes it may be presented to**, and a verifier checks it against its
+own origin. This is what lets one sign-in serve two products: `fleet nodes` presents the token to
+the hub, `supi boards` presents the same token to superpipeline.
+
+A client reaches only the audiences it was **registered** with, and a client that declares none
+gets the hub alone. The registry lives in the hub's deployment configuration and nowhere else, so
+widening what a CLI can reach is a deployment decision rather than something a caller can ask for.
+
+The same rule binds a **station** token, with one extra reason: a node exchanges an enrollment
+secret for those tokens, so a node that could name its own audiences could mint credentials for any
+plane. The audiences come from configuration, never from the request.
+
+A token that is valid, fresh and correctly located still gets a `401` from a plane it does not name.
+That is the failure to look for first when a credential "works" on one product and not the other.
 
 ## Redirect URIs
 
@@ -87,3 +122,4 @@ An agent's token is refused here regardless of what it may dispatch.
 
 - [MCP tools](/build/mcp/) — what a token opens
 - [apn and fleet](/use/cli/) — the two credentials, and why they never mix
+- [Dispatch and grants](/use/grants/) — who may send an agent a message, and answer for it
