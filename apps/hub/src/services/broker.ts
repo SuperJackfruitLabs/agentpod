@@ -14,6 +14,7 @@
  * after timeoutMs so callers can use a simple await without try/catch.
  */
 
+import { traceMeta } from "../telemetry/propagation";
 import type { ResponseMsg, StreamMsg, InputMsg, ResizeMsg } from "@agentpod/contract";
 import { connectionManager } from "./connection-manager";
 
@@ -89,11 +90,13 @@ export function request(
 
     pending.set(id, { nodeId, resolve, timer });
 
+    const meta = traceMeta();
     const sent = connectionManager.send(nodeId, {
       type: "req",
       id,
       verb,
       params,
+      ...(meta ? { _meta: meta } : {}),
     });
 
     if (!sent) {
@@ -123,11 +126,13 @@ export function stream(
 
   streams.set(id, { nodeId, handler: onChunk });
 
+  const meta = traceMeta();
   const sent = connectionManager.send(nodeId, {
     type: "req",
     id,
     verb,
     params,
+    ...(meta ? { _meta: meta } : {}),
   });
 
   if (!sent) {
