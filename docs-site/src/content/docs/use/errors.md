@@ -53,17 +53,30 @@ Two harnesses dropped their error before it ever reached the hub, so no amount o
 could recover it. For those, AgentPod ships a small plugin that runs inside the harness and reports
 what the harness knows and the protocol discards:
 
-| plugin | for |
-|---|---|
-| `agentpod-errors` | OpenClaw |
-| `agentpod-errors` | Pi |
+| harness | what it ships | installed with |
+|---|---|---|
+| OpenClaw | the `agentpod-errors` plugin | `apn openclaw-errors enable --apply` |
+| Pi | the `agentpod-errors` extension | `apn pi-errors enable --apply` |
 
-They report the failure; the hub normalises it into the shape above. Install them with `apn`, or
-review and apply plugin changes across stations with `fleet plugins` — see
-[apn and fleet](/use/cli/#plugins).
+They report the failure; the hub normalises it into the shape above.
 
-A third plugin, `agentpod-live`, reports a turn's *progress* rather than its failure: that the
-agent is thinking, that an answer has begun streaming, and when the turn ended.
+Both are installed **on the node, with `apn`** — they are not reachable through the console or
+`fleet plugins`, which manage one plugin on one harness (see below). Without `--apply` each command
+prints the exact change and writes nothing. Neither restarts anything you did not ask it to: the
+OpenClaw gateway is yours to restart, and each new Pi session picks its extension up by itself.
+
+### The third plugin, and the one the console manages
+
+`agentpod-live` reports a turn's *progress* rather than its failure — that the agent is thinking,
+that an answer has begun streaming, and when the turn ended. A harness-mode Hermes profile streams
+into AgentPod clients only with it.
+
+It is the **only** plugin the console and `fleet plugins` can install, enable or disable, and only
+on Hermes. That path is off by default and a node opts in with `apn plugin-management enable`;
+after that each change is planned on the node, reviewed, and applied only if the profile still
+matches the review. Nothing there restarts a gateway.
+
+`apn hermes-live` does the same thing locally, per profile.
 
 ## Why not just fix the harnesses
 
