@@ -1685,3 +1685,13 @@ The agent asked for permission and is waiting for a person. The question is on t
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.
+
+---
+
+## 10. Telemetry
+
+node-agent reads the same variables from `/etc/agentpod-node/otel.env` (system service) or
+`~/.config/agentpod-node/otel.env` (user service), normally one line:
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Only hosts with a collector (infra,
+guild) set it. A unit installed before this release does not read the file until
+`apn service install` rewrites it.
