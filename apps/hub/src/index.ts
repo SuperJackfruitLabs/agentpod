@@ -11,6 +11,7 @@ import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
 import { deviceRoutes } from './routes/devices.ts';
+import { serviceTokenRoutes } from './routes/service-token.ts';
 import { securityHeadersMiddleware } from './middleware/security-headers.ts';
 import { rateLimitMiddleware } from './middleware/rate-limit.ts';
 import { csrfMiddleware } from './middleware/csrf.ts';
@@ -222,6 +223,12 @@ const app = new Hono()
    * outlives its revocation.
    */
   .route('/api/auth', deviceRoutes)
+  /**
+   * POST /api/auth/service-token — a service principal's credential exchange (superwitness
+   * contract C6). Self-authenticating like the device exchange above, and for the same reason it
+   * must sit ahead of Better Auth's `/api/auth/*` catch-all below.
+   */
+  .route('/api/auth', serviceTokenRoutes)
   // Better Auth routes - handle authentication (public, no auth middleware)
   .on(['GET', 'POST'], '/api/auth/*', (c) => {
     return auth.handler(c.req.raw);

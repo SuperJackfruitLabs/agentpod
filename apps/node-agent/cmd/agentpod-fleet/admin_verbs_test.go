@@ -33,6 +33,9 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"principals list", []string{"principals", "list"}, "GET", "/api/admin/principals"},
 		{"principals suspend", []string{"principals", "suspend", "prn_1"}, "POST", "/api/admin/principals/prn_1/suspend"},
 		{"principals restore", []string{"principals", "restore", "prn_1"}, "POST", "/api/admin/principals/prn_1/restore"},
+		{"principals add-service", []string{"principals", "add-service", "superwitness", "--client", "superwitness", "--scope", "evidence:read"}, "POST", "/api/admin/service-principals"},
+		{"principals revoke-credential", []string{"principals", "revoke-credential", "svc_1"}, "POST", "/api/admin/service-principals/credentials/svc_1/revoke"},
+		{"principals add-credential", []string{"principals", "add-credential", "prn_1", "--client", "superwitness"}, "POST", "/api/admin/service-principals/prn_1/credentials"},
 
 		{"users list", []string{"users", "list"}, "GET", "/api/admin/users"},
 		{"users show", []string{"users", "show", "u1"}, "GET", "/api/admin/users/u1"},
@@ -164,5 +167,30 @@ func TestSignupWithNoDirectionReads(t *testing.T) {
 	}
 	if method != "GET" {
 		t.Errorf("bare `settings signup` used %s — it must read, never toggle", method)
+	}
+}
+
+// TestPrincipalsAddCredentialSendsTheClient pins the body, not only the route: the hub refuses a
+// credential with no client, and the client is what decides where its tokens may be spent.
+func TestPrincipalsAddCredentialSendsTheClient(t *testing.T) {
+	bin := build(t)
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"credential":{"id":"svc_1"}}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+
+	if _, code := run(t, bin, env, "principals", "add-credential", "prn_1", "--client", "superwitness"); code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if got["oauthClient"] != "superwitness" {
+		t.Errorf("body = %v, want oauthClient superwitness", got)
+	}
+
+	if _, code := run(t, bin, env, "principals", "add-credential", "prn_1"); code != 2 {
+		t.Errorf("add-credential without --client: exit = %d, want 2", code)
 	}
 }

@@ -58,6 +58,7 @@ import { oauthCodes } from "./schema/oauth";
 import { agentTasks, cloudflareSandboxes } from "./schema/cloudflare";
 import { enrollmentTokens, nodes, provisionedRuntimes } from "./schema/nodes";
 import { deviceCredentials } from "./schema/devices";
+import { serviceCredentials } from "./schema/service-credentials";
 import { stations } from "./schema/stations";
 import { stationSetups } from "./schema/station-setup";
 import { stationTranscription } from "./schema/transcription";
@@ -120,6 +121,7 @@ export type TenantScopedTable = Table & { tenantId: Parameters<typeof eq>[0] };
 export const TENANT_SCOPED_TABLES = {
   nodes,
   deviceCredentials,
+  serviceCredentials,
   provisionedRuntimes,
   enrollmentTokens,
   stations,

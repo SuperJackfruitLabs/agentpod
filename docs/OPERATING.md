@@ -196,6 +196,38 @@ not do this**. `fleet` reports them differently on purpose. In particular a hub 
 **agent** is refused from the operator API with 403 — agents reach the hub through its MCP
 endpoint, not these verbs.
 
+## 1b. Service principals
+
+A service principal is a program that reads, with no person behind it — today, superwitness. It
+holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
+five-minute token, and its grant holds scopes only (`evidence:read`), never dispatch or reach.
+
+1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
+   `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
+   `superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev`
+   (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
+2. Create it — the secret is printed once:
+   ```sh
+   fleet principals add-service superwitness --client superwitness --scope evidence:read
+   ```
+3. Put `credential.id` in the service's `SW_HUB_CLIENT_ID` and `credential.secret` in the file
+   `SW_HUB_CLIENT_SECRET_FILE` names (mode 0600).
+4. Rotate with an overlap, so the service always holds a credential that works:
+   1. Add a second credential beside the live one — its secret is printed once (the principal id
+      is the `principalId` from step 2, or find it with `fleet principals list`):
+      ```sh
+      fleet principals add-credential prn_… --client superwitness
+      ```
+   2. Switch the consumer: put the new `credential.id` in `SW_HUB_CLIENT_ID`, write the new
+      `credential.secret` to the `SW_HUB_CLIENT_SECRET_FILE` file, and restart the service.
+   3. Revoke the old one: `fleet principals revoke-credential svc_…` (the OLD id). It is refused
+      at the exchange at once; tokens already minted from it expire within five minutes.
+
+   After a leak, revoke first and then add: the service is down for the gap, which is the point.
+
+`fleet grants set` on a service principal keeps its scopes: a grant write that does not mention
+`scopes` leaves them as stored.
+
 ## 2. Adopt stations
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.

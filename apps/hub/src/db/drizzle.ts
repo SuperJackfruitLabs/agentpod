@@ -52,6 +52,12 @@ export const db = drizzle(client, { schema });
 
 export type Database = typeof db;
 
+/**
+ * The database or a transaction on it — what a service function takes when a caller may need its
+ * write to commit or roll back together with others (`admin-service-principals.ts`'s create).
+ */
+export type DbExecutor = Database | Parameters<Parameters<Database["transaction"]>[0]>[0];
+
 // =============================================================================
 // Database Operations
 // =============================================================================
