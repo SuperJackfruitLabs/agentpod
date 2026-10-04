@@ -48,6 +48,9 @@ type TelemetryRow = {
   restarting?: boolean;
   /** The endpoint the node process is exporting to now (status only). */
   effective?: string;
+  /** State of the node's systemd unit: current|stale|reconciled|drifted|error|n/a (absent on older nodes). */
+  unit?: string;
+  unitDetail?: string;
   error?: string;
 };
 
@@ -61,6 +64,8 @@ type TelemetryData = {
   changed?: boolean;
   restarting?: boolean;
   effective?: string;
+  unit?: string;
+  unitDetail?: string;
 };
 
 /**
@@ -140,6 +145,8 @@ async function askTelemetry(
   const row: TelemetryRow = { ...base, status, endpoint: d.endpoint, enabled: d.enabled };
   if (verb === "telemetry.set") row.restarting = d.restarting === true;
   if (typeof d.effective === "string") row.effective = d.effective;
+  if (typeof d.unit === "string") row.unit = d.unit;
+  if (typeof d.unitDetail === "string") row.unitDetail = d.unitDetail;
   return row;
 }
 

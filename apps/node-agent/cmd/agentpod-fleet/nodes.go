@@ -146,6 +146,16 @@ type telemetryRow struct {
 	// Effective is the endpoint the node process started with (status only; absent
 	// on older nodes). It differs from Endpoint until the node restarts.
 	Effective *string `json:"effective"`
+	// Unit is the state of the node's systemd unit (current, stale, reconciled,
+	// drifted, error, n/a); nil on older nodes. UnitDetail explains an error.
+	Unit       *string `json:"unit"`
+	UnitDetail string  `json:"unitDetail"`
+}
+
+// unitBlocksRestart reports whether the node's unit is in a state where a restart
+// would not pick up the configured endpoint.
+func (r telemetryRow) unitBlocksRestart() bool {
+	return r.Unit != nil && (*r.Unit == "drifted" || *r.Unit == "error")
 }
 
 func (r telemetryRow) detail() string {
@@ -167,7 +177,27 @@ func (r telemetryRow) detail() string {
 			if running == "" {
 				running = "off"
 			}
-			parts = append(parts, "(running "+running+" until restart)")
+			// A restart only applies the configured endpoint when the unit is
+			// healthy; with a drifted or errored unit the hint would be a lie.
+			if !r.unitBlocksRestart() {
+				parts = append(parts, "(running "+running+" until restart)")
+			}
+		}
+	}
+	if r.Unit != nil {
+		switch *r.Unit {
+		case "drifted":
+			parts = append(parts, "unit: drifted (manual edits)")
+		case "error":
+			if r.UnitDetail != "" {
+				parts = append(parts, "unit: error: "+r.UnitDetail)
+			} else {
+				parts = append(parts, "unit: error")
+			}
+		case "stale":
+			parts = append(parts, "unit: stale (re-rendered on next set or restart)")
+		default:
+			parts = append(parts, "unit: "+*r.Unit)
 		}
 	}
 	if r.Restarting {

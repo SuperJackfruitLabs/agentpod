@@ -354,3 +354,51 @@ func TestNodesUsageMentionsTelemetry(t *testing.T) {
 		t.Fatalf("usage: %s", out)
 	}
 }
+
+// The unit state of the node's systemd service rides along on each row. A restart
+// only applies the configured endpoint when the unit is not drifted/errored, so the
+// "(running X until restart)" hint is suppressed for those.
+func TestTelemetryRowDetailUnitRendering(t *testing.T) {
+	on := true
+	str := func(s string) *string { return &s }
+	guild := func(unit *string, detail string) telemetryRow {
+		return telemetryRow{Enabled: &on, Endpoint: "http://foundry:4318", Effective: str(""), Unit: unit, UnitDetail: detail}
+	}
+	cases := []struct {
+		name string
+		row  telemetryRow
+		want string
+	}{
+		{"old node, no unit", guild(nil, ""), "enabled http://foundry:4318 (running off until restart)"},
+		{"current", guild(str("current"), ""), "enabled http://foundry:4318 (running off until restart) unit: current"},
+		{"reconciled", guild(str("reconciled"), ""), "enabled http://foundry:4318 (running off until restart) unit: reconciled"},
+		{"stale", guild(str("stale"), ""), "enabled http://foundry:4318 (running off until restart) unit: stale (re-rendered on next set or restart)"},
+		{"drifted", guild(str("drifted"), ""), "enabled http://foundry:4318 unit: drifted (manual edits)"},
+		{"error with detail", guild(str("error"), "daemon-reload failed"), "enabled http://foundry:4318 unit: error: daemon-reload failed"},
+		{"error without detail", guild(str("error"), ""), "enabled http://foundry:4318 unit: error"},
+		{"n/a", guild(str("n/a"), ""), "enabled http://foundry:4318 (running off until restart) unit: n/a"},
+	}
+	for _, c := range cases {
+		if got := c.row.detail(); got != c.want {
+			t.Errorf("%s: detail() = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestNodesTelemetryShowsUnitState(t *testing.T) {
+	bin := build(t)
+	hub := &fakeTelemetryHub{results: `[
+ {"nodeId":"node_guild","name":"guild","status":"ok","endpoint":"http://foundry:4318","enabled":true,"effective":"","unit":"drifted"},
+ {"nodeId":"node_ashram","name":"ashram","status":"ok","endpoint":"http://foundry:4318","enabled":true,"effective":"","unit":"current"}]`}
+	srv := hub.server(t)
+	out, code := run(t, bin, rolloutEnv(srv.URL), "nodes", "telemetry")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "unit: drifted (manual edits)") || !strings.Contains(out, "unit: current") {
+		t.Fatalf("unit states must render: %s", out)
+	}
+	if strings.Count(out, "until restart") != 1 {
+		t.Fatalf("only the non-drifted node keeps the restart hint: %s", out)
+	}
+}

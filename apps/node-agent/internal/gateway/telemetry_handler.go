@@ -27,6 +27,9 @@ type telemetryHandler struct {
 	effective string
 	exit      func(int)
 	delay     time.Duration
+	// unit checks the installed systemd unit: apply=false is a read-only dry run,
+	// apply=true re-renders a stale unit. nil means "n/a".
+	unit func(apply bool) (state, detail string)
 
 	// mu serialises status/set so concurrent requests cannot interleave a
 	// read-modify-write of the file.
@@ -36,11 +39,13 @@ type telemetryHandler struct {
 // NewTelemetryHandler wraps inner with handlers for telemetry.status / telemetry.set.
 // path is called lazily on every request; any error (otelenv.ErrUnsupported,
 // otelenv.ErrNotService, ...) makes both verbs answer "unsupported" without touching the
-// file or exiting.
-func NewTelemetryHandler(inner Handler, path func() (string, error)) Handler {
+// file or exiting. unit (nil allowed) reports/heals the systemd unit; the gateway
+// stays free of systemd specifics.
+func NewTelemetryHandler(inner Handler, path func() (string, error), unit func(apply bool) (string, string)) Handler {
 	return &telemetryHandler{
 		inner:     inner,
 		path:      path,
+		unit:      unit,
 		effective: telemetry.FromEnv("", os.Getenv).Endpoint,
 		exit:      os.Exit,
 		delay:     time.Second,
@@ -74,13 +79,16 @@ func (h *telemetryHandler) Handle(
 		if err != nil {
 			return telemetryFail(err), false, nil
 		}
-		return map[string]any{
+		res := map[string]any{
 			"ok":        true,
 			"path":      path,
 			"endpoint":  st.Endpoint,
 			"enabled":   st.Enabled,
 			"effective": h.effective,
-		}, false, nil
+		}
+		us, ud := h.checkUnit(false)
+		unitFields(res, us, ud)
+		return res, false, nil
 	}
 
 	// telemetry.set: exactly one of a non-empty endpoint or off:true.
@@ -99,6 +107,9 @@ func (h *telemetryHandler) Handle(
 		return map[string]any{"ok": false, "error": `params must have exactly one of "endpoint" (non-empty string) or "off":true`}, false, nil
 	}
 
+	// Heal a pre-#659 unit first so the env file written below is one systemd passes.
+	unitState, unitDetail := h.checkUnit(true)
+
 	var changed bool
 	if wantOff {
 		changed, err = otelenv.Disable(path)
@@ -113,20 +124,37 @@ func (h *telemetryHandler) Handle(
 		return telemetryFail(err), false, nil
 	}
 
-	if changed {
+	restart := changed || unitState == "reconciled"
+	if restart {
 		// Respond before exiting so the dispatcher can write the response frame.
 		go func() {
 			time.Sleep(h.delay)
 			h.exit(0)
 		}()
 	}
-	return map[string]any{
+	res := map[string]any{
 		"ok":         true,
 		"changed":    changed,
 		"endpoint":   st.Endpoint,
 		"enabled":    st.Enabled,
-		"restarting": changed,
-	}, false, nil
+		"restarting": restart,
+	}
+	unitFields(res, unitState, unitDetail)
+	return res, false, nil
+}
+
+func (h *telemetryHandler) checkUnit(apply bool) (string, string) {
+	if h.unit == nil {
+		return "n/a", ""
+	}
+	return h.unit(apply)
+}
+
+func unitFields(res map[string]any, state, detail string) {
+	res["unit"] = state
+	if detail != "" {
+		res["unitDetail"] = detail
+	}
 }
 
 func telemetryFail(err error) map[string]any {

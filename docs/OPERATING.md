@@ -1738,8 +1738,25 @@ service); the commands below are the only supported way to change it.
   sets the metrics timeout only; traces keep a fixed 10 s) and `OTEL_RESOURCE_ATTRIBUTES` (extra
   attributes; `service.name`, `service.version` and `host.name` stay node-agent's own, so
   `OTEL_SERVICE_NAME` has no effect). It enables nothing, and it is written only if the file is absent; an
-  existing file is never overwritten. A unit installed before the file hook existed does not
-  read it until `apn service install` runs again.
+  existing file is never overwritten.
+- **The unit heals itself.** A unit installed before the file hook existed has no
+  `EnvironmentFile=` line, so it would never read `otel.env`. When node-agent is the
+  `agentpod-node` systemd service it re-renders its own unit from the current template on
+  every service start and before applying `telemetry.set`; nobody runs `apn service install`
+  by hand. It rewrites only when the installed unit equals a known agentpod-node template
+  (the current one, or the one before the env-file hook), ignoring trailing whitespace. The
+  system unit's `User=`/`Group=` lines are kept, the binary path comes from the installed
+  `ExecStart=`, and drop-ins (`agentpod-node.service.d/`) are never touched. A unit with any
+  other manual edit is left alone and reported as drifted. A rewrite is atomic (a symlinked unit is
+  treated as drifted and never replaced), followed by
+  `systemctl daemon-reload`; if the reload fails the original file is restored and the node
+  reports `error`. Otherwise the node then exits once so systemd restarts it into the new
+  unit. A marker file `unit.sha256` in the node's config directory (`~/.config/agentpod-node/`,
+  which for a root system unit is `/root/.config/agentpod-node/`, not `/etc/agentpod-node`)
+  records the last unit written (before the rewrite); if the same rewrite is needed again (it did not take
+  effect), the node reports `error` instead of restarting again. At service start that error
+  is only logged (in the journal); `fleet nodes telemetry` and a set report it. The marker is
+  removed once the unit is current (a listing or status check never removes it).
 - **On the node.** `apn telemetry status [--json]` shows the config path, the endpoint,
   enabled or disabled, and whether the collector answers (one short GET of
   `<endpoint>/v1/traces`; any HTTP reply counts). `apn telemetry enable --endpoint <url>`
@@ -1753,7 +1770,17 @@ service); the commands below are the only supported way to change it.
   exit status is 1, as it is for a failed or unsupported node. Listing does not fail on
   offline nodes, but does on unsupported ones. When a node is still exporting to an older
   endpoint than its file says (it has not restarted yet), the listing adds
-  `(running <endpoint> until restart)`.
+  `(running <endpoint> until restart)`, only when a restart would apply the configured
+  endpoint, so not for a drifted or errored unit.
+- **Unit state.** The listing shows `unit: <state>` as a dry run, so it reads `current` (the
+  unit reads `otel.env`), `stale` (an old template; it is re-rendered on the next set or
+  restart), `drifted (manual edits)` (the unit has edits node-agent will not overwrite; fix it
+  by hand or with a drop-in) or `error: <detail>` (the heal failed or did not take effect; a unit stopped by the loop guard
+  shows here, not as `stale`).
+  `reconciled` (re-rendered just now; the node restarts once) appears only in the result of a
+  set. Nodes that cannot be checked (containers, fixed-image nodes, hand-started `apn run`,
+  macOS) answer `unsupported` and show no `unit:` part, as do nodes that predate the field.
+  The node itself reports `n/a` when the unit check does not apply.
 - **Restarts.** A node restarts itself only when the file's content actually changed
   (`changed`, with `restarting`); re-applying the same setting reports `unchanged` and
   restarts nothing. Only the node-agent restarts: harnesses that run as their own services

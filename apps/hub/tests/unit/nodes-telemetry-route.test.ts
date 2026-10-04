@@ -88,6 +88,20 @@ describe("GET /api/nodes/telemetry", () => {
     expect(body.results.find((r: any) => r.nodeId === "n_a")).toMatchObject({ endpoint: "http://new", effective: "http://old" });
   });
 
+  test("passes unit and unitDetail through on status; omits them for older nodes", async () => {
+    const { app } = setup({
+      reply: (c) =>
+        c.nodeId === "n_a"
+          ? { ok: true, data: { ok: true, endpoint: "", enabled: false, unit: "error", unitDetail: "daemon-reload failed" } }
+          : { ok: true, data: { ok: true, endpoint: "", enabled: false } },
+    });
+    const body = (await (await get(app)).json()) as any;
+    expect(body.results.find((r: any) => r.nodeId === "n_a")).toMatchObject({ unit: "error", unitDetail: "daemon-reload failed" });
+    const b = body.results.find((r: any) => r.nodeId === "n_b");
+    expect("unit" in b).toBe(false);
+    expect("unitDetail" in b).toBe(false);
+  });
+
   test("unknown verb maps to unsupported with roll-forward hint", async () => {
     const { app } = setup({
       reply: (c) =>
@@ -298,5 +312,21 @@ describe("POST /api/nodes/telemetry", () => {
     const res = await post(app, { off: true });
     expect(res.status).toBe(200);
     expect(((await res.json()) as any).summary.changed).toBe(2);
+  });
+});
+
+describe("POST /api/nodes/telemetry unit passthrough", () => {
+  test("telemetry.set rows carry unit/unitDetail when the node answers them, omit otherwise", async () => {
+    const { app } = setup({
+      reply: (c) =>
+        c.nodeId === "n_a"
+          ? { ok: true, data: { ok: true, changed: true, endpoint: "http://x", enabled: true, restarting: true, unit: "reconciled", unitDetail: "rewrote unit" } }
+          : { ok: true, data: { ok: true, changed: false, endpoint: "http://x", enabled: true } },
+    });
+    const body = (await (await post(app, { endpoint: "http://x" })).json()) as any;
+    expect(body.results.find((r: any) => r.nodeId === "n_a")).toMatchObject({ unit: "reconciled", unitDetail: "rewrote unit" });
+    const b = body.results.find((r: any) => r.nodeId === "n_b");
+    expect("unit" in b).toBe(false);
+    expect("unitDetail" in b).toBe(false);
   });
 });
