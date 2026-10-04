@@ -1,6 +1,6 @@
 {
   "corpus": "ecosystem-identity/id-grammar",
-  "version": 1,
+  "version": 2,
   "authoredAt": "2026-08-13",
   "authoredFrom": "code, not documentation \u2014 every `grammarSource` and `mintSource` is a file:line that was read",
   "purpose": "Two repos with separate release cadences must agree on what an identifier means. Neither can import the other's types, so this corpus is the shared artefact: each repo checks it in, maps the entities it owns or consumes onto its own validators, and proves acceptance and rejection against these lists. A repo that disagrees with a peer fails its own test suite rather than failing in production.",
@@ -795,6 +795,63 @@
           "value": "dev_0123456789abcdef0123:somesecret",
           "reason": "other-entity",
           "note": "the WHOLE credential, not its id half. A parser that splits on the first colon must never hand this through as an id \u2014 it is the mistake that would send a secret into a log line that prints ids."
+        },
+        {
+          "value": "",
+          "reason": "empty"
+        }
+      ]
+    },
+    {
+      "entity": "agentpod.serviceCredential",
+      "owner": "agentpod",
+      "prefix": "svc",
+      "grammar": "^svc_[0-9a-f]{20}$",
+      "grammarSource": "agentpod apps/hub/src/services/service-credentials.ts — prefixedId('svc')",
+      "mintedAs": "^svc_[0-9a-f]{20}$",
+      "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId(), called in mintServiceCredential()",
+      "note": "A service principal's credential (superwitness), presented as `svc_…:<secret>`. Not the service SIGNING key's `kid` (`svc-<uuid>`, hyphen) — different separator, different thing.",
+      "accept": [
+        {
+          "value": "svc_0123456789abcdef0123",
+          "mint": true
+        },
+        {
+          "value": "svc_ffffffffffffffffffff",
+          "mint": true
+        }
+      ],
+      "reject": [
+        {
+          "value": "dev_0123456789abcdef0123",
+          "reason": "other-entity",
+          "note": "a device credential id: a valid id of another entity"
+        },
+        {
+          "value": "svc-0123456789abcdef0123",
+          "reason": "no-separator",
+          "note": "the service SIGNING key's `kid` hyphen (`svc-<uuid>`) where the underscore belongs — the separator is not the declared one"
+        },
+        {
+          "value": "svc_0123456789abcdef012",
+          "reason": "too-short"
+        },
+        {
+          "value": "svc_0123456789ABCDEF0123",
+          "reason": "wrong-alphabet"
+        },
+        {
+          "value": "svc_",
+          "reason": "prefix-only"
+        },
+        {
+          "value": "xsvc_0123456789abcdef0123",
+          "reason": "prefix-not-anchored"
+        },
+        {
+          "value": "svc_0123456789abcdef0123:somesecret",
+          "reason": "credential-not-identifier",
+          "note": "the WHOLE credential, not its id half. A parser that splits on the first colon must never hand this through as an id — it is the mistake that would send a secret into a log line that prints ids."
         },
         {
           "value": "",

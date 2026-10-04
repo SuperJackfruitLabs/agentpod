@@ -610,6 +610,13 @@
       "when": 1791100600000,
       "tag": "0086_principal_grant_scopes",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791101200000,
+      "tag": "0087_service_credentials",
+      "breakpoints": true
     }
   ]
 }
