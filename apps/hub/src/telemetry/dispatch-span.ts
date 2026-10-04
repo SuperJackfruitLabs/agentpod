@@ -5,7 +5,7 @@
  * when the claim was made and ends when the dispatch returns, with the outcome as
  * `dispatch.status`. `reason` is never recorded, because it can carry harness text.
  */
-import { context, ROOT_CONTEXT, SpanStatusCode, trace } from "@opentelemetry/api";
+import { context, ROOT_CONTEXT, SpanStatusCode, trace, type Context, type Span } from "@opentelemetry/api";
 import type { DispatchResult } from "../services/bridge/dispatch";
 import { AgentSpanRecorder } from "./agent-spans";
 import { instruments, tracer } from "./otel";
@@ -26,10 +26,7 @@ const ERRORED: ReadonlySet<Status> = new Set(["failed", "foreign-run", "threw"])
 
 export const attemptStateFor = (status: Status): "completed" | "failed" => (COMPLETED.has(status) ? "completed" : "failed");
 
-export async function inDispatchSpan(
-  input: DispatchSpanInput,
-  work: (spans: AgentSpanRecorder) => Promise<DispatchResult>,
-): Promise<DispatchResult> {
+function startDispatch(input: DispatchSpanInput): { span: Span; ctx: Context; spans: AgentSpanRecorder } {
   const span = tracer().startSpan(
     "dispatch",
     {
@@ -52,6 +49,24 @@ export async function inDispatchSpan(
     runId: input.runId,
     onOpen: (f) => span.setAttributes({ "attempt.id": f.attemptId, "fingerprint.digest": f.fingerprintDigest }),
   });
+  return { span, ctx, spans };
+}
+
+export async function inDispatchSpan(
+  input: DispatchSpanInput,
+  work: (spans: AgentSpanRecorder) => Promise<DispatchResult>,
+): Promise<DispatchResult> {
+  let started: { span: Span; ctx: Context; spans: AgentSpanRecorder } | null = null;
+  try {
+    started = startDispatch(input);
+  } catch {
+    // Products never block on telemetry. A throw here comes after the claim, so running `work`
+    // without telemetry is the only safe fallback: failing would strand the card.
+  }
+  if (!started) {
+    return work(new AgentSpanRecorder({ tracer: trace.getTracer("noop"), parent: ROOT_CONTEXT, stationId: input.stationId, runId: input.runId }));
+  }
+  const { span, ctx, spans } = started;
   let status: Status = "threw";
   try {
     const result = await context.with(ctx, () => work(spans));

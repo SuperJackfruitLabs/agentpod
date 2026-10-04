@@ -65,7 +65,7 @@
  *    never reclaimed. See `askTheHuman`.
  */
 
-import { context } from "@opentelemetry/api";
+import { context, trace } from "@opentelemetry/api";
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
@@ -467,6 +467,7 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
     // context, so run the body inside the context captured here: board calls queued from it keep
     // the run's traceparent.
     const dispatchCtx = context.active();
+    const recording = trace.getSpan(dispatchCtx)?.isRecording() === true;
     unsubscribe = acp.subscribe(session.id, (event) => context.with(dispatchCtx, () => {
       try {
         spans.onEvent(event);
@@ -511,6 +512,8 @@ async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSp
           });
           attemptId = startedId;
           try {
+            // With telemetry off nothing records the attempt: skip the extra read entirely.
+            if (!recording) return;
             const facts = await attemptSpanFacts(startedId).catch(() => ({ fingerprintDigest: "unknown", harnessName: "unknown" }));
             spans.openAttempt({ attemptId: startedId, sessionId: session.id, startSeq: event.seq, ...facts });
           } catch {

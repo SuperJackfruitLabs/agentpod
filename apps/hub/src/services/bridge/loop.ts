@@ -169,6 +169,16 @@ const hubAcpPort: AcpPort = {
     acpSessions.answerPermission(userId, sessionId, requestSeq, optionId),
 };
 
+/**
+ * `deps.log` takes (message, meta) with no level, so the default sink derives one: a halt is an
+ * error, anything carrying an `error` in its meta is a warning, the rest is routine.
+ */
+export function bridgeLogLevel(message: string, meta?: Record<string, unknown>): "info" | "warn" | "error" {
+  if (message.startsWith("halting")) return "error";
+  if (meta && meta.error !== undefined) return "warn";
+  return "info";
+}
+
 export interface BridgeHandle {
   /** The keys currently running. Changes as the roster does. */
   readonly agents: string[];
@@ -205,7 +215,8 @@ export async function startSuperpipelineBridge(
 
   const acp = deps.acp ?? hubAcpPort;
   const bridgeLog = createLogger("bridge");
-  const log = deps.log ?? ((m: string, meta?: Record<string, unknown>) => bridgeLog.info(m, meta));
+  const log =
+    deps.log ?? ((m: string, meta?: Record<string, unknown>) => bridgeLog[bridgeLogLevel(m, meta)](m, meta));
   /**
    * superpipeline serves MCP at one origin-level path, not per board — the board is the agent's,
    * carried by its credential (`apps/api/src/index.ts`, `path === '/mcp'`). Derived from the

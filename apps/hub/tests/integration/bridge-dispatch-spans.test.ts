@@ -15,6 +15,7 @@ import { ROOT_CONTEXT, context } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { db, rawSql } from "../../src/db/drizzle";
 import { acpRuns, acpSessions } from "../../src/db/schema/acp";
+import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { runOnce, type AcpPort } from "../../src/services/bridge/dispatch";
 import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
@@ -130,8 +131,12 @@ test("a claimed run is one trace: dispatch > attempt > turn > tool_call, with no
     "attempt.id": row!.id, "station.id": STATION_ID, "run.id": RUN_ID,
     "acp.session_id": SESSION_ID, "acp.seq_from": row!.startSeq, "attempt.state": "completed",
   });
-  expect(String(attempt!.attributes["fingerprint.digest"])).toMatch(/^(sha256:[0-9a-f]{64}|unknown)$/);
-  expect(typeof attempt!.attributes["harness.name"]).toBe("string");
+  // Read from the row ws3 wrote; "unknown" only when the row has none.
+  expect(attempt!.attributes["fingerprint.digest"]).toBe(row!.fingerprintDigest ?? "unknown");
+  // The test station has no stations row, so the harness is "unknown".
+  const [stationRow] = await db.select({ harness: stations.harness }).from(stations).where(eq(stations.id, STATION_ID));
+  expect(attempt!.attributes["harness.name"]).toBe(stationRow?.harness || "unknown");
+  expect(stationRow).toBeUndefined();
 
   expect(turn!.parentSpanContext?.spanId).toBe(attempt!.spanContext().spanId);
   expect(tool!.parentSpanContext?.spanId).toBe(turn!.spanContext().spanId);
