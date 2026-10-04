@@ -19,6 +19,7 @@ function setup(opts: {
   admin?: boolean;
   reply?: (c: Call) => { ok: boolean; data?: unknown; error?: string };
   auditFails?: boolean;
+  fixed?: string[];
 }) {
   const calls: Call[] = [];
   const audits: any[] = [];
@@ -36,7 +37,7 @@ function setup(opts: {
         return opts.reply ? opts.reply(call) : { ok: true, data: { ok: true } };
       },
       listNodesFn: async () => fleet,
-      fixedImageNodesFn: async () => new Set(),
+      fixedImageNodesFn: async () => new Set(opts.fixed ?? []),
       isAdminFn: async () => opts.admin ?? true,
       auditFn: async (e) => {
         if (opts.auditFails) throw new Error("db down");
@@ -79,6 +80,14 @@ describe("GET /api/nodes/telemetry", () => {
     expect(body.results.find((r: any) => r.nodeId === "n_c").status).toBe("offline");
   });
 
+  test("passes the node's running (effective) endpoint through", async () => {
+    const { app } = setup({
+      reply: () => ({ ok: true, data: { ok: true, endpoint: "http://new", enabled: true, effective: "http://old" } }),
+    });
+    const body = (await (await get(app)).json()) as any;
+    expect(body.results.find((r: any) => r.nodeId === "n_a")).toMatchObject({ endpoint: "http://new", effective: "http://old" });
+  });
+
   test("unknown verb maps to unsupported with roll-forward hint", async () => {
     const { app } = setup({
       reply: (c) =>
@@ -107,6 +116,46 @@ describe("GET /api/nodes/telemetry", () => {
   });
 });
 
+describe("fixed-image nodes (C1)", () => {
+  const FIXED = "node boots from a fixed image; telemetry is configured in the image/substrate";
+
+  test("GET reports a fixed-image node unsupported without asking it", async () => {
+    const { app, calls } = setup({
+      fixed: ["n_a"],
+      reply: () => ({ ok: true, data: { ok: true, endpoint: "", enabled: false } }),
+    });
+    const body = (await (await get(app)).json()) as any;
+    expect(calls.map((c) => c.nodeId)).toEqual(["n_b"]);
+    expect(body.results.find((r: any) => r.nodeId === "n_a")).toEqual({
+      nodeId: "n_a",
+      name: "alpha",
+      status: "unsupported",
+      error: FIXED,
+    });
+    expect(body.summary).toEqual({ unsupported: 1, ok: 1, offline: 1 });
+  });
+
+  test("POST never sends telemetry.set to a fixed-image node and does not audit it", async () => {
+    const { app, calls, audits } = setup({
+      fixed: ["n_a"],
+      reply: () => ({ ok: true, data: { ok: true, changed: true, endpoint: "", enabled: false, restarting: true } }),
+    });
+    const body = (await (await post(app, { off: true })).json()) as any;
+    expect(calls.map((c) => c.nodeId)).toEqual(["n_b"]);
+    expect(audits.map((a) => a.targetResourceId)).toEqual(["n_b"]);
+    expect(body.results.find((r: any) => r.nodeId === "n_a")).toMatchObject({ status: "unsupported", error: FIXED });
+    expect(body.summary).toEqual({ unsupported: 1, changed: 1, offline: 1 });
+  });
+
+  test("POST naming only a fixed-image node contacts nothing", async () => {
+    const { app, calls, audits } = setup({ fixed: ["n_a"] });
+    const body = (await (await post(app, { endpoint: "http://c:4318", only: ["alpha"] })).json()) as any;
+    expect(calls).toEqual([]);
+    expect(audits).toEqual([]);
+    expect(body.summary).toEqual({ unsupported: 1 });
+  });
+});
+
 describe("POST /api/nodes/telemetry", () => {
   test("non-admin gets 403, nothing sent or audited", async () => {
     const { app, calls, audits } = setup({ admin: false });
@@ -124,12 +173,42 @@ describe("POST /api/nodes/telemetry", () => {
     [{ endpoint: "http://x/?a=b" }],
     [{ endpoint: "http://x\n" }],
     [{ endpoint: "not a url" }],
+    // Mirrors the node's otelenv.ValidateEndpoint (M1).
+    [{ endpoint: "http://x/#frag" }],
+    [{ endpoint: 'http://x/"q' }],
+    [{ endpoint: "http://x/'q" }],
+    [{ endpoint: "http://x/$HOME" }],
+    [{ endpoint: "http://x/`id`" }],
+    [{ endpoint: "http://x/\\a" }],
+    [{ endpoint: "http://user:pass@x:4318" }],
+    [{ endpoint: "http://user@x:4318" }],
+    [{ endpoint: "http://exämple.com:4318" }],
+    [{ endpoint: "http://x\t:4318" }],
+    [{ endpoint: "http://x\u007f" }],
+    [{ endpoint: "" }],
+    [{ endpoint: "http://" }],
     [{ endpoint: 5 }],
     [{ off: true, only: "alpha" }],
   ])("invalid body %j -> 400, no node contacted", async (body) => {
     const { app, calls } = setup({});
     expect((await post(app, body)).status).toBe(400);
     expect(calls).toEqual([]);
+  });
+
+  test.each([["http://otel:4318"], ["https://otel.example.com/base/"], ["http://10.0.0.1:4318/v1?x"]])(
+    "valid endpoint %s is accepted",
+    async (endpoint) => {
+      const { app, calls } = setup({});
+      expect((await post(app, { endpoint })).status).toBe(200);
+      expect(calls.length).toBe(2);
+    }
+  );
+
+  test("400 message names the rejected characters", async () => {
+    const { app } = setup({});
+    const body = (await (await post(app, { endpoint: "http://x/#a" })).json()) as any;
+    expect(body.error).toContain("#");
+    expect(body.error).toContain("credentials");
   });
 
   test("unknown only names -> 400 listing them, nothing sent", async () => {

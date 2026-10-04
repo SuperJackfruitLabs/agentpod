@@ -46,6 +46,8 @@ type TelemetryRow = {
   endpoint?: string;
   enabled?: boolean;
   restarting?: boolean;
+  /** The endpoint the node process is exporting to now (status only). */
+  effective?: string;
   error?: string;
 };
 
@@ -58,20 +60,42 @@ type TelemetryData = {
   enabled?: boolean;
   changed?: boolean;
   restarting?: boolean;
+  effective?: string;
 };
 
-/** Hub-side mirror of the node's endpoint validation: http(s), no whitespace, `=` or control chars. */
+/**
+ * Hub-side mirror of the node's otelenv.ValidateEndpoint, so a bad endpoint is a
+ * 400 here instead of a per-node failure: http(s) with a host; no whitespace,
+ * control or non-ASCII characters; none of = " ' ` \ $ # (they would change
+ * the meaning of the env-file line); no embedded credentials.
+ */
+const TELEMETRY_ENDPOINT_RULES =
+  "endpoint must be an http(s) URL with a host and no whitespace, control or non-ASCII characters, " +
+  "none of = \" ' ` \\ $ #, and no embedded credentials";
+
 function validTelemetryEndpoint(v: unknown): v is string {
   if (typeof v !== "string" || v.length === 0) return false;
-  // eslint-disable-next-line no-control-regex
-  if (/[\s=\u0000-\u001f\u007f]/.test(v)) return false;
+  for (const ch of v) {
+    const code = ch.codePointAt(0)!;
+    if (code <= 0x20 || code >= 0x7f) return false;
+    if ("=\"'`\\$#".includes(ch)) return false;
+  }
   try {
     const u = new URL(v);
-    return (u.protocol === "http:" || u.protocol === "https:") && u.host !== "";
+    return (
+      (u.protocol === "http:" || u.protocol === "https:") &&
+      u.hostname !== "" &&
+      u.username === "" &&
+      u.password === ""
+    );
   } catch {
     return false;
   }
 }
+
+/** The fixed-image answer: such a node has no supervisor to restart it (#349). */
+const FIXED_IMAGE_TELEMETRY =
+  "node boots from a fixed image; telemetry is configured in the image/substrate";
 
 function countBy(rows: TelemetryRow[]): Record<string, number> {
   const out: Record<string, number> = {};
@@ -115,6 +139,7 @@ async function askTelemetry(
     verb === "telemetry.status" ? "ok" : d.changed ? "changed" : "unchanged";
   const row: TelemetryRow = { ...base, status, endpoint: d.endpoint, enabled: d.enabled };
   if (verb === "telemetry.set") row.restarting = d.restarting === true;
+  if (typeof d.effective === "string") row.effective = d.effective;
   return row;
 }
 
@@ -188,7 +213,8 @@ export function createNodeRoutes(deps?: {
        * GET /api/nodes/telemetry  (admin only)
        *
        * Fans out `telemetry.status` to every online node. Always 200 with a row
-       * per node: `ok | unsupported | offline | failed`.
+       * per node: `ok | unsupported | offline | failed`. A fixed-image node is
+       * answered `unsupported` by the hub without being asked (#349).
        */
       .get("/telemetry", async (c) => {
         const userId = c.get("user").id;
@@ -196,12 +222,15 @@ export function createNodeRoutes(deps?: {
           return c.json({ ok: false as const, error: "Forbidden: Admin access required" }, 403);
         }
         const nodes = (await _listNodes(userId)).slice().sort((a, b) => a.name.localeCompare(b.name));
+        const fixed = await _fixedImageNodes(userId);
         const results: TelemetryRow[] = [];
         for (const n of nodes) {
           results.push(
-            n.status !== "online"
-              ? { nodeId: n.id, name: n.name, status: "offline" }
-              : await askTelemetry(_request, n, "telemetry.status", {})
+            fixed.has(n.id)
+              ? { nodeId: n.id, name: n.name, status: "unsupported", error: FIXED_IMAGE_TELEMETRY }
+              : n.status !== "online"
+                ? { nodeId: n.id, name: n.name, status: "offline" }
+                : await askTelemetry(_request, n, "telemetry.status", {})
           );
         }
         return c.json({ ok: true as const, summary: countBy(results), results });
@@ -213,7 +242,10 @@ export function createNodeRoutes(deps?: {
        *
        * Sequential `telemetry.set` per online node. Every node that was
        * actually asked (anything but offline) gets one audit entry; an audit
-       * write failure is logged and never hides the node result.
+       * write failure is logged and never hides the node result. Fixed-image
+       * nodes are never asked: the node would write a file nothing reads and
+       * exit, which stops a container station (#349). They are reported
+       * `unsupported` and not audited.
        */
       .post("/telemetry", async (c) => {
         const user = c.get("user");
@@ -230,7 +262,7 @@ export function createNodeRoutes(deps?: {
         if (hasEndpoint === hasOff) return bad('provide exactly one of "endpoint" or "off":true');
         if (hasOff && body.off !== true) return bad('"off" must be true');
         if (hasEndpoint && !validTelemetryEndpoint(body.endpoint)) {
-          return bad("endpoint must be an http(s) URL with no whitespace, '=' or control characters");
+          return bad(TELEMETRY_ENDPOINT_RULES);
         }
         let only: string[] | undefined;
         if (body.only !== undefined) {
@@ -251,8 +283,13 @@ export function createNodeRoutes(deps?: {
         targets = targets.slice().sort((a, b) => a.name.localeCompare(b.name));
 
         const params = hasOff ? { off: true } : { endpoint: body.endpoint as string };
+        const fixed = await _fixedImageNodes(user.id);
         const results: TelemetryRow[] = [];
         for (const n of targets) {
+          if (fixed.has(n.id)) {
+            results.push({ nodeId: n.id, name: n.name, status: "unsupported", error: FIXED_IMAGE_TELEMETRY });
+            continue;
+          }
           if (n.status !== "online") {
             results.push({ nodeId: n.id, name: n.name, status: "offline" });
             continue;
