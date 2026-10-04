@@ -12,7 +12,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { BRIDGE_ENV_FLAG } from "./config";
 import type { DispatchResult } from "./dispatch";
 import { SuperpipelineApiError } from "./superpipeline";
-import { startAgentLoop, startSuperpipelineBridge } from "./loop";
+import { bridgeLogLevel, startAgentLoop, startSuperpipelineBridge } from "./loop";
 
 const saved = process.env[BRIDGE_ENV_FLAG];
 afterEach(() => {
@@ -262,5 +262,14 @@ describe("a cycle is not bounded, and that is deliberate", () => {
     });
     await handle.done;
     expect(finished).toBe(true); // not cut short
+  });
+});
+
+describe("bridgeLogLevel", () => {
+  test("errors are not logged at info", () => {
+    expect(bridgeLogLevel("halting: a run belonged to another agent", { run: "r" })).toBe("error");
+    expect(bridgeLogLevel("a claim cycle threw", { error: "Error: x" })).toBe("warn");
+    expect(bridgeLogLevel("cycle", { n: 1 })).toBe("info");
+    expect(bridgeLogLevel("claiming")).toBe("info");
   });
 });
