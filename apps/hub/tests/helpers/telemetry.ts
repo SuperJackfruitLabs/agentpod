@@ -22,7 +22,7 @@ export function useTestTelemetry() {
   const spanExporter = new InMemorySpanExporter();
   const logExporter = new InMemoryLogRecordExporter();
   const tracerProvider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spanExporter)] });
-  const loggerProvider = new LoggerProvider({ processors: [new SimpleLogRecordProcessor(logExporter)] });
+  const loggerProvider = new LoggerProvider({ processors: [new SimpleLogRecordProcessor({ exporter: logExporter })] });
 
   beforeAll(() => {
     ensureContextManager();

@@ -88,6 +88,7 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startSuperpipelineBridge } from './services/bridge/loop.ts';
 import { createGracefulShutdown } from './services/shutdown.ts';
+import { httpServerSpans } from './telemetry/http-middleware.ts';
 import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
@@ -132,6 +133,8 @@ const errorLogger = createLogger('error-handler');
 const matrixBridge = createMatrixBridge();
 
 const app = new Hono()
+  // Before the request logger, so a span covers every later middleware too.
+  .use('*', httpServerSpans())
   // Middleware
   //
   // The print function is not decoration. The homeserver authenticates appservice
