@@ -141,6 +141,11 @@ export const acpRuns = pgTable("acp_runs", {
    */
   fingerprintDigest: text("fingerprint_digest"),
   fingerprint: jsonb("fingerprint").$type<StoredFingerprint>(),
+  /**
+   * The agent principal this attempt ran as — the station's occupant when it OPENED.
+   * Null for an unoccupied station and for rows written before migration 0088.
+   */
+  agentPrincipalId: text("agent_principal_id"),
 }, (t) => [
   index("acp_runs_session_idx").on(t.sessionId),
   index("acp_runs_station_started_idx").on(t.stationId, t.startedAt.desc()),
@@ -179,5 +184,9 @@ export const acpRuns = pgTable("acp_runs", {
   check(
     "acp_runs_fingerprint_digest_shape",
     sql`${t.fingerprintDigest} IS NULL OR ${t.fingerprintDigest} ~ '^sha256:[0-9a-f]{64}$'`,
+  ),
+  check(
+    "acp_runs_agent_principal_shape",
+    sql`${t.agentPrincipalId} IS NULL OR ${t.agentPrincipalId} ~ '^prn_[0-9a-f]{20}$'`,
   ),
 ]);

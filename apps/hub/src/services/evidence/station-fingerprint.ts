@@ -84,18 +84,43 @@ export async function resolveStationFingerprint(tenantId: string, stationId: str
   }
 }
 
+/** The agent principal occupying a station right now, or null. Never throws. */
+export async function resolveStationOccupant(tenantId: string, stationId: string): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ principalId: stations.principalId })
+      .from(stations)
+      .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
+      .limit(1);
+    return row?.principalId ?? null;
+  } catch (err) {
+    log.warn("occupant unresolved; recording none", { stationId, error: String(err) });
+    return null;
+  }
+}
+
+/** Bound any attempt-time lookup: a late or failed answer becomes `fallback`. */
+export async function within<T>(
+  resolve: () => Promise<T>,
+  fallback: T,
+  timeoutMs: number = FINGERPRINT_TIMEOUT_MS,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((done) => {
+    timer = setTimeout(() => done(fallback), timeoutMs);
+  });
+  try {
+    // `Promise.resolve().then` so a resolver that throws synchronously is bounded too.
+    return await Promise.race([Promise.resolve().then(resolve).catch(() => fallback), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Bound any resolver: a late or failed answer becomes the all-unknown fingerprint. */
 export async function fingerprintWithin(
   resolve: () => Promise<Fingerprint>,
   timeoutMs: number = FINGERPRINT_TIMEOUT_MS,
 ): Promise<Fingerprint> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<Fingerprint>((done) => {
-    timer = setTimeout(() => done(makeFingerprint({}, "hub")), timeoutMs);
-  });
-  try {
-    return await Promise.race([Promise.resolve().then(resolve).catch(() => makeFingerprint({}, "hub")), late]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return within(resolve, makeFingerprint({}, "hub"), timeoutMs);
 }

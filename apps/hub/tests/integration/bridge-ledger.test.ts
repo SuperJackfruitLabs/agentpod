@@ -371,3 +371,37 @@ describe("the fingerprint is written once, when the attempt opens", () => {
     expect(row!.fingerprintDigest).toBe(fp.digest);
   });
 });
+
+describe("the agent principal is written once, when the attempt opens", () => {
+  const PRN = "prn_0123456789abcdef0123";
+
+  test("an attempt records the principal it ran as", async () => {
+    await open();
+    const id = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, agentPrincipalId: PRN });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(row!.agentPrincipalId).toBe(PRN);
+    await endAttempt(id, "completed", 2);
+    const [after] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(after!.agentPrincipalId).toBe(PRN);
+  });
+
+  test("an unoccupied station records null, never a guess", async () => {
+    await open();
+    const id = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1 });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(row!.agentPrincipalId).toBeNull();
+  });
+
+  test("a value that is not a principal id is refused by the table", async () => {
+    await open();
+    // drizzle wraps the PG error; the constraint name is on `cause` (ruling 9a-1).
+    const err = await startAttempt({
+      ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, agentPrincipalId: "agt_researcher",
+    }).then(() => null, (e: unknown) => e);
+    expect(err).not.toBeNull();
+    const cause = (err as { cause?: { constraint_name?: string } }).cause;
+    expect((err as { constraint_name?: string }).constraint_name ?? cause?.constraint_name).toBe(
+      "acp_runs_agent_principal_shape",
+    );
+  });
+});

@@ -56,6 +56,8 @@ export interface StartAttemptInput extends DispatchKey {
    * as the all-unknown fingerprint — unknown is a value, NULL is reserved for rows that predate it.
    */
   fingerprint?: Fingerprint;
+  /** The station's occupant when the attempt opened (contract C5). Absent or null: none. */
+  agentPrincipalId?: string | null;
 }
 
 export interface PriorOutput {
@@ -137,6 +139,7 @@ export async function startAttempt(input: StartAttemptInput): Promise<string> {
     // "recorded when the attempt opens, never recomputed" means in code.
     fingerprintDigest: fingerprint.digest,
     fingerprint: toStored(fingerprint),
+    agentPrincipalId: input.agentPrincipalId ?? null,
   });
 
   await db.update(bridgeDispatches).set({ acpRunId: id, updatedAt: now }).where(scope(input));
