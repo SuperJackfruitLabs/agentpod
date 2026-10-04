@@ -9,7 +9,7 @@ process.env.NODE_ENV = "test";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { EvidenceAttemptResponse, EvidenceRunResponse } from "@agentpod/contract";
+import { EvidenceAttemptResponse, EvidencePrincipalResponse, EvidenceRunResponse } from "@agentpod/contract";
 import { SignJWT, generateKeyPair } from "jose";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
@@ -208,5 +208,72 @@ describe("the evidence routes are mounted where they can be reached", () => {
     expect(mount, "evidenceRoutes is not mounted in index.ts at all").toBeGreaterThan(-1);
     expect(middleware).toBeGreaterThan(-1);
     expect(mount, "evidenceRoutes is behind authMiddleware").toBeLessThan(middleware);
+  });
+});
+
+describe("who ran it, and who a principal is", () => {
+  const OCC_RUN = `run_occ${RUN}`;
+  let agentPrn = "";
+  let gone = "";
+
+  beforeAll(async () => {
+    agentPrn = await createPrincipal({ kind: "agent", handle: `ev-agent-${RUN}` });
+    gone = await createPrincipal({ kind: "human", handle: `ev-gone-${RUN}` });
+    await suspendPrincipal(gone);
+    const key = { tenantId: BOOTSTRAP_TENANT_ID, externalSource: "superpipeline", boardId: BOARD, externalCardId: CARD, externalRunId: OCC_RUN };
+    await openDispatch({ ...key, agentKey: "hermes-press", stationId: STATION, leaseEpoch: 1 });
+    await startAttempt({ ...key, sessionId: SESSION, stationId: STATION, startSeq: 30, agentPrincipalId: agentPrn });
+  });
+
+  test("each attempt names the agent principal it ran as", async () => {
+    const body = (await (await get(`/api/evidence/runs/superpipeline/${OCC_RUN}`, await serviceToken(reader))).json()) as any;
+    expect(EvidenceRunResponse.safeParse(body).error).toBeUndefined();
+    expect(body.attempts[0].agent_principal_id).toBe(agentPrn);
+  });
+
+  test("an attempt recorded without one says null", async () => {
+    const body = (await (await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, await serviceToken(reader))).json()) as any;
+    expect(body.attempts.map((a: { agent_principal_id: string | null }) => a.agent_principal_id)).toEqual([null, null]);
+  });
+
+  test("a principal reads as its kind, handle and suspension", async () => {
+    const t = await serviceToken(reader);
+    for (const [id, kind, handle, suspended] of [
+      [agentPrn, "agent", `ev-agent-${RUN}`, false],
+      [reader, "service", `ev-reader-${RUN}`, false],
+      [gone, "human", `ev-gone-${RUN}`, true],
+    ] as const) {
+      const res = await get(`/api/evidence/principals/${id}`, t);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(EvidencePrincipalResponse.safeParse(body).error).toBeUndefined();
+      expect(body).toEqual({ id, kind, handle, suspended });
+    }
+  });
+
+  test("a hub auth user id resolves to the principal it is linked to, in the same shape", async () => {
+    const authUserId = `baUser${RUN}`;
+    const human = await createPrincipal({ kind: "human", handle: `ev-human-${RUN}`, userId: authUserId });
+    const res = await get(`/api/evidence/principals/${authUserId}`, await serviceToken(reader));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(EvidencePrincipalResponse.safeParse(body).error).toBeUndefined();
+    // `id` is the principal, never the auth user id that was asked for.
+    expect(body).toEqual({ id: human, kind: "human", handle: `ev-human-${RUN}`, suspended: false });
+  });
+
+  test("an unknown principal id, an unlinked auth user id or a malformed segment is 404 not_found", async () => {
+    const t = await serviceToken(reader);
+    for (const id of ["prn_00000000000000000000", `nobodyLinked${RUN}`, "prn_*", "a/b", "x".repeat(200)]) {
+      const res = await get(`/api/evidence/principals/${encodeURIComponent(id)}`, t);
+      expect(res.status).toBe(404);
+      expect(await res.json()).toEqual({ error: "not_found" });
+    }
+  });
+
+  test("the same authorization applies: 401 without a token, 403 without evidence:read", async () => {
+    expect((await get(`/api/evidence/principals/${agentPrn}`)).status).toBe(401);
+    const plain = await createPrincipal({ kind: "service", handle: `ev-plain2-${RUN}` });
+    expect((await get(`/api/evidence/principals/${agentPrn}`, await serviceToken(plain))).status).toBe(403);
   });
 });

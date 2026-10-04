@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { EvidenceAttemptResponse, EvidenceRunResponse } from "./evidence";
+import { EvidenceAttemptResponse, EvidencePrincipalResponse, EvidenceRunResponse } from "./evidence";
 
 const dir = join(import.meta.dir, "../../../fixtures/evidence");
 const read = (f: string) => JSON.parse(readFileSync(join(dir, f), "utf8"));
@@ -38,4 +38,24 @@ describe("hub_evidence_attempt.json", () => {
       expect(EvidenceAttemptResponse.safeParse(ex.response).error).toBeUndefined();
     });
   }
+});
+
+describe("hub_evidence_principal.json", () => {
+  const corpus = read("hub_evidence_principal.json");
+  for (const ex of corpus.examples) {
+    test(`accepts: ${ex.name}`, () => {
+      expect(EvidencePrincipalResponse.safeParse(ex.response).error).toBeUndefined();
+    });
+  }
+  for (const r of corpus.reject) {
+    test(`rejects: ${r.reason}`, () => {
+      expect(EvidencePrincipalResponse.safeParse(r.response).success).toBe(false);
+    });
+  }
+});
+
+test("an attempt without agent_principal_id is refused: absent is not null", () => {
+  const ex = read("hub_evidence_run.json").examples[0].response;
+  const { agent_principal_id: _drop, ...attempt } = ex.attempts[0];
+  expect(EvidenceRunResponse.safeParse({ ...ex, attempts: [attempt] }).success).toBe(false);
 });

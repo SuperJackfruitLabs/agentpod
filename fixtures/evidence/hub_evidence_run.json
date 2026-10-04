@@ -6,7 +6,8 @@
   "purpose": "What superwitness's agentpod source reads for one work run. The producer's CI parses every example with packages/contract/src/evidence.ts AND compares the live route's key shape to examples[0], so a renamed or added field fails here before superwitness reads it.",
   "howToRead": {
     "nullable": "board_id, card_id and dispatch are null when the ledger holds no row for the run; ended_at/end_seq are null while an attempt is live.",
-    "fingerprint": "digest \"unknown\" with every field \"unknown\" and reported_by \"hub\" is an attempt recorded before fingerprints existed — not one whose fields were all unknown, which has a real sha256 digest."
+    "fingerprint": "digest \"unknown\" with every field \"unknown\" and reported_by \"hub\" is an attempt recorded before fingerprints existed — not one whose fields were all unknown, which has a real sha256 digest.",
+    "agent_principal_id": "The station's occupant when the attempt OPENED, not now. null for an unoccupied station and for attempts recorded before migration 0088."
   },
   "examples": [
     {
@@ -27,6 +28,7 @@
             "end_seq": 9,
             "started_at": "2026-10-04T10:12:40.000Z",
             "ended_at": "2026-10-04T10:14:58.000Z",
+            "agent_principal_id": "prn_0123456789abcdef0123",
             "fingerprint": {
               "digest": "sha256:b38ccbea6e3b6a65fcbfc4402709554b5f9579555c91407498257fbad815ea92",
               "harness": "hermes", "harness_version": "unknown", "model": "unknown",
@@ -42,6 +44,7 @@
             "end_seq": null,
             "started_at": "2026-10-04T10:15:10.000Z",
             "ended_at": null,
+            "agent_principal_id": null,
             "fingerprint": {
               "digest": "unknown",
               "harness": "unknown", "harness_version": "unknown", "model": "unknown",

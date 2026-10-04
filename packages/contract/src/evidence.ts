@@ -5,7 +5,7 @@
  */
 import { z } from "zod";
 
-import { AcpRunId, AcpSessionId } from "./ids";
+import { AcpRunId, AcpSessionId, PrincipalId } from "./ids";
 
 const Known = z.string().min(1);
 const Iso = z.iso.datetime();
@@ -45,6 +45,8 @@ export const EvidenceAttempt = z
     end_seq: z.number().int().nonnegative().nullable(),
     started_at: Iso,
     ended_at: Iso.nullable(),
+    /** The station's occupant when the attempt opened (C5). null: unoccupied, or recorded before 0088. */
+    agent_principal_id: PrincipalId.nullable(),
     fingerprint: EvidenceFingerprint,
   })
   .strict();
@@ -81,3 +83,14 @@ export const EvidenceAttemptResponse = z
   })
   .strict();
 export type EvidenceAttemptResponse = z.infer<typeof EvidenceAttemptResponse>;
+
+/** `GET /api/evidence/principals/:principalId` (C5): just enough to derive a judge's kind. */
+export const EvidencePrincipalResponse = z
+  .object({
+    id: PrincipalId,
+    kind: z.enum(["human", "agent", "service"]),
+    handle: Known,
+    suspended: z.boolean(),
+  })
+  .strict();
+export type EvidencePrincipalResponse = z.infer<typeof EvidencePrincipalResponse>;

@@ -1,5 +1,5 @@
 /**
- * The hub's evidence routes (superwitness contract C5; charter
+ * The hub's evidence routes: runs, attempts and principals (superwitness contract C5; charter
  * decisions/2026-10-04-superwitness-owns-observability-and-evaluation.md, decision 3).
  *
  * Read-only views over `acp_runs` and `bridge_dispatches`, for a principal whose grant holds
@@ -11,14 +11,16 @@
  * beside `dispatchableRoutes` in `index.ts`.
  */
 import { Hono } from "hono";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { JSONWebKeySet } from "jose";
-import { UNKNOWN_FINGERPRINT_VIEW, type EvidenceFingerprint } from "@agentpod/contract";
+import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, type EvidenceFingerprint } from "@agentpod/contract";
 
 import { publishedJwks, verifyHubToken } from "../auth/hub-token";
 import { db } from "../db/drizzle";
 import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
+import { principalIdentities } from "../db/schema/identities";
+import { principals } from "../db/schema/organization";
 import { tenantScope } from "../db/tenant-scope";
 import { EVIDENCE_READ, getGrant } from "../services/grants";
 import { principalById, principalForUser } from "../services/principals";
@@ -62,8 +64,26 @@ function attemptView(row: typeof acpRuns.$inferSelect) {
     end_seq: row.endSeq ?? null,
     started_at: row.startedAt.toISOString(),
     ended_at: row.endedAt ? row.endedAt.toISOString() : null,
+    agent_principal_id: row.agentPrincipalId ?? null,
     fingerprint: fingerprintView(row),
   };
+}
+
+/**
+ * A path segment -> a principal id. Either it already IS one, or it is a hub auth user id
+ * (superpipeline's `decided_by_hub_sub`: the `sub` a session-minted token carries, because Better
+ * Auth's jwt plugin overwrites `sub` with the user id) linked through `principal_identities`.
+ * The same table `userIdForTokenSubject` reads, in the other direction. Anything else is null.
+ */
+async function principalIdFor(segment: string): Promise<string | null> {
+  if (PrincipalId.safeParse(segment).success) return segment;
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(segment)) return null;
+  const [row] = await db
+    .select({ principalId: principalIdentities.principalId })
+    .from(principalIdentities)
+    .where(and(eq(principalIdentities.system, "better-auth"), eq(principalIdentities.externalId, segment)))
+    .limit(1);
+  return row?.principalId ?? null;
 }
 
 export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
@@ -131,6 +151,25 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
         boardId = d?.boardId ?? null;
       }
       return c.json({ external_source: row.externalSource ?? null, external_run_id: row.externalRunId ?? null, board_id: boardId });
+    })
+    /**
+     * A principal's kind, handle and suspension, so superwitness can derive `judge_kind` for a
+     * verdict it did not receive from the caller (C5, C6b). Not tenant-scoped: principals belong
+     * to the organisation, of which this hub has one (`BOOTSTRAP_ORG_ID`). A suspended principal
+     * is still answered: a decision made before the suspension is still that principal's.
+     */
+    .get("/api/evidence/principals/:principalId", async (c) => {
+      const auth = await authorize(c.req.header("authorization"), jwks);
+      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const id = await principalIdFor(c.req.param("principalId"));
+      if (!id) return c.json({ error: "not_found" }, 404);
+      const [p] = await db
+        .select({ id: principals.id, kind: principals.kind, handle: principals.handle, suspendedAt: principals.suspendedAt })
+        .from(principals)
+        .where(eq(principals.id, id))
+        .limit(1);
+      if (!p) return c.json({ error: "not_found" }, 404);
+      return c.json({ id: p.id, kind: p.kind, handle: p.handle, suspended: p.suspendedAt !== null });
     });
 }
 
