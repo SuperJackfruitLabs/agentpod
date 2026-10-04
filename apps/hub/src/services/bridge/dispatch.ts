@@ -69,6 +69,8 @@ import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type 
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import { isControlPairDenied } from "../control-pair";
+import type { Fingerprint } from "../evidence/fingerprint";
+import { fingerprintWithin, resolveStationFingerprint } from "../evidence/station-fingerprint";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -137,6 +139,14 @@ export interface DispatchDeps {
    * itself; either one missing means it cannot, and is told nothing about it.
    */
   mcpUrl?: string;
+  /**
+   * What executed the attempt (contract C3). A seam so a test can state one; defaults to
+   * `resolveStationFingerprint`. Bounded by `fingerprintWithin`, so a slow or failing resolver
+   * opens the attempt with the all-unknown fingerprint instead of holding the turn. It is awaited
+   * inside the serial post queue, so board posts may lag by up to `FINGERPRINT_TIMEOUT_MS`; the
+   * ACP turn itself is never held.
+   */
+  fingerprint?: (input: { tenantId: string; stationId: string }) => Promise<Fingerprint>;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -343,6 +353,8 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
 
   const coalescer = new ActivityCoalescer();
   let attemptId: string | null = null;
+  /** The fingerprint the attempt opened with. ws4's `attempt` span reads `.digest` from here. */
+  let attemptFingerprint: Fingerprint | null = null;
   let lastSeq = 0;
   const said: string[] = [];
   /**
@@ -443,11 +455,14 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
         attemptStarted = true;
         // The run join, written as soon as the attempt has a first seq.
         queue(async () => {
+          const resolve = deps.fingerprint ?? ((i) => resolveStationFingerprint(i.tenantId, i.stationId));
+          attemptFingerprint = await fingerprintWithin(() => resolve({ tenantId, stationId: agent.stationId }));
           attemptId = await startAttempt({
             ...key,
             sessionId: session.id,
             stationId: agent.stationId,
             startSeq: event.seq,
+            fingerprint: attemptFingerprint,
           });
         });
       }
