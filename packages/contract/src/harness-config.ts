@@ -47,10 +47,27 @@ export const DeclaredSetting = z
     settingId: z.string().min(1),
     stationId: z.string().nullable(),
     nodeId: z.string().nullable(),
+    /**
+     * Any type is welcome — this is the fleet's value, in whatever shape the
+     * harness's own document holds it — but the field itself must be
+     * PRESENT. An omitted `value` is not the same thing as a literal `null`:
+     * `compare()` would read it back as declared-but-undefined and report
+     * the setting permanently `drifted`, with no write able to satisfy it,
+     * because nothing a station could ever observe equals "nothing was
+     * declared". `undeclare` (DELETE) is the way to remove a declaration;
+     * `PUT` with no `value` is refused rather than silently manufacturing
+     * that state. The explicit `.refine()` below does not lean on whichever
+     * way a given zod version treats a bare `z.unknown()` field's
+     * optionality — that is an implementation default, not a contract.
+     */
     value: z.unknown(),
   })
   .refine((d) => !(d.stationId !== null && d.nodeId !== null), {
     message: "a declaration targets one level: station, node, or fleet (both null)",
+  })
+  .refine((d) => d.value !== undefined, {
+    message: "value is required — an omitted value is not a declaration; use DELETE to remove one",
+    path: ["value"],
   });
 export type DeclaredSetting = z.infer<typeof DeclaredSetting>;
 

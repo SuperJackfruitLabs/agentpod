@@ -142,16 +142,27 @@ async function verifySettingKnown(
     };
   }
 
+  // Try every candidate before refusing. A `continue` on "this one doesn't
+  // know it" rather than an early `return` is load-bearing on the fallback
+  // path: when nothing matched the harness-prefix heuristic above, `pool`
+  // (and so `candidates`) can hold stations of SEVERAL unrelated harnesses,
+  // and the first one to answer is not authoritative for the others. Only
+  // after every reachable candidate has been asked, and none confirmed the
+  // id, is it genuinely unknown.
   const online = await onlineNodeIds(tenantId);
+  let askedAny = false;
   for (const station of candidates) {
     if (!online.has(station.nodeId)) continue;
     const registry = await fetchRegistry(station.nodeId, station.stationKey);
     if (registry === null) continue;
+    askedAny = true;
     const found = registry.find((s) => s.id === settingId);
     if (found) return { ok: true, setting: found };
-    return { ok: false, reason: `${settingId} is not a setting this harness manages` };
   }
 
+  if (askedAny) {
+    return { ok: false, reason: `${settingId} is not a setting any reachable harness manages` };
+  }
   return {
     ok: false,
     reason: "the registry could not be read: no reachable node could confirm this setting",

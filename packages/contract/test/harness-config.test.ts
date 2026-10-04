@@ -49,6 +49,20 @@ describe("harness config contract", () => {
     expect(ConfigValue.safeParse({ settingId: "x" }).success).toBe(false);
   });
 
+  test("a declaration's value must be present — omitting it is not a literal null", () => {
+    // compare() reads a declared-but-undefined value back as permanently
+    // `drifted`, with nothing a station could ever observe able to satisfy
+    // it. Removing a declaration is DELETE's job, not an absent `value`.
+    expect(DeclaredSetting.safeParse({
+      settingId: "hermes.approvals.timeout", stationId: null, nodeId: null,
+    }).success).toBe(false);
+    // A literal `null` is a real, present value and must still be accepted
+    // — only OMISSION is refused.
+    expect(DeclaredSetting.safeParse({
+      settingId: "hermes.approvals.timeout", stationId: null, nodeId: null, value: null,
+    }).success).toBe(true);
+  });
+
   test("observation states are closed, and include every honest non-match", () => {
     for (const state of [
       "matches", "drifted", "absent", "opted-out", "awaiting-restart", "unreadable", "out-of-scope",

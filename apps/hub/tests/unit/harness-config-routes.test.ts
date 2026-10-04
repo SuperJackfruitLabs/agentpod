@@ -12,6 +12,10 @@
  *   5. A node that answers `ok:true` with a SHORT or EMPTY values array still
  *      closes every requested setting as `unreadable` — the likelier failure
  *      mode than an outright offline node, because it looks like success.
+ *   6. PUT's registry check tries every reachable candidate before refusing
+ *      UNKNOWN_SETTING — not just the first one that answers (regression:
+ *      an early `return` on "not found" used to make the verdict depend on
+ *      an arbitrary, possibly unrelated candidate).
  *
  * Follows apps/hub/src/routes/station-acp.test.ts: a minimal test Hono app with
  * a fake `X-Test-User-Id` auth middleware, the real gateway routes, and a fake
@@ -488,6 +492,81 @@ test(
       expect(emptyBody.observations).toHaveLength(1);
       expect(emptyBody.observations[0]?.state).toBe("unreadable");
       expect(emptyBody.observations[0]?.reason).toBeTruthy();
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "PUT tries every reachable candidate before refusing UNKNOWN_SETTING, not just the first",
+  async () => {
+    // Regression for an early-`return` bug: when a declaration's target is
+    // ambiguous (here, a node with more than one config.manage station) the
+    // registry check must try every reachable candidate before refusing —
+    // an id that the FIRST one answered does not manage, but the SECOND
+    // does, must still be accepted. Both stations live on one node and are
+    // asked over one WebSocket connection, so "first"/"second" follows this
+    // node's own adoption order.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgroute-fallback-host");
+
+      const unknowingKey = "cfgroute-fallback-unknowing";
+      const knowingKey = "cfgroute-fallback-knowing";
+      const [unknowingStation] = await adoptStations(
+        TEST_USER,
+        nodeId,
+        [unknowingKey],
+        detectedFor(unknowingKey),
+      );
+      const [knowingStation] = await adoptStations(
+        TEST_USER,
+        nodeId,
+        [knowingKey],
+        detectedFor(knowingKey),
+      );
+      if (!unknowingStation || !knowingStation) throw new Error("station adoption failed");
+
+      const TARGET_SETTING_ID = "hermes.approvals.command_allowlist";
+
+      const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+        headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+      } as RequestInit & { headers: Record<string, string> });
+      await new Promise<void>((res, rej) => {
+        ws.onopen = () => res();
+        ws.onerror = () => rej(new Error("Node WS connection error"));
+      });
+      ws.onmessage = (e) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(String(e.data));
+        } catch {
+          return;
+        }
+        if (msg.type !== "req" || msg.verb !== "config.settings") return;
+        const params = msg.params as { stationKey: string };
+        // The "unknowing" station's registry omits the target id entirely;
+        // the "knowing" one carries the full registry.
+        const settings =
+          params.stationKey === unknowingKey
+            ? HERMES_REGISTRY.filter((s) => s.id !== TARGET_SETTING_ID)
+            : HERMES_REGISTRY;
+        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings } }));
+      };
+      await waitForNodeOnline(nodeId);
+
+      const res = await appFetch(baseUrl, "/api/fleet/config/declared", {
+        method: "PUT",
+        token: TEST_USER,
+        body: { settingId: TARGET_SETTING_ID, stationId: null, nodeId, value: "git,ls" },
+      });
+      expect(res.status).toBe(204);
 
       ws.close();
       await new Promise((r) => setTimeout(r, 100));
