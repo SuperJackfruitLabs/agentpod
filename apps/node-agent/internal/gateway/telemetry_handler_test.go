@@ -127,12 +127,58 @@ func TestTelemetryUnsupported(t *testing.T) {
 		h.path = func() (string, error) { return "", perr }
 		for _, verb := range []string{"telemetry.status", "telemetry.set"} {
 			m, exited := callTelemetry(t, h, ex, verb, `{"off":true}`)
-			e, _ := m["error"].(string)
-			if exited || m["ok"] != false || m["unsupported"] != true ||
-				!strings.HasPrefix(e, "telemetry config unsupported on this platform: ") {
+			if exited || m["ok"] != false || m["unsupported"] != true || m["error"] != perr.Error() {
 				t.Fatalf("%s: %v exited=%v", verb, m, exited)
 			}
 		}
+	}
+}
+
+// A node that is not the agentpod-node systemd service (container, fixed image, `apn run`
+// in tmux) must answer unsupported for both verbs without writing a file or exiting:
+// exiting there stops a sandbox or loses a hand-started node for good (C1).
+func TestTelemetryNotUnderServiceWritesNothingAndStaysUp(t *testing.T) {
+	for name, cgroup := range map[string]string{
+		"container": "0::/\n",
+		"docker v1": "1:name=systemd:/docker/3f2a9c\n",
+		"tmux":      "0::/user.slice/user-1000.slice/session-4.scope\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			h, ex := newTestTelemetryHandler("")
+			h.path = func() (string, error) { return otelenv.ServicePathFromCgroup(cgroup, home) }
+			for _, tc := range []struct{ verb, params string }{
+				{"telemetry.status", `{}`},
+				{"telemetry.set", `{"endpoint":"http://10.0.0.1:4318"}`},
+				{"telemetry.set", `{"off":true}`},
+			} {
+				m, exited := callTelemetry(t, h, ex, tc.verb, tc.params)
+				e, _ := m["error"].(string)
+				if exited || m["ok"] != false || m["unsupported"] != true ||
+					!strings.HasPrefix(e, "node is not running under the agentpod-node systemd service") {
+					t.Fatalf("%s %s: %v exited=%v", tc.verb, tc.params, m, exited)
+				}
+			}
+			if _, err := os.Stat(otelenv.UserPath(home)); !os.IsNotExist(err) {
+				t.Fatalf("file written: %v", err)
+			}
+			if entries, _ := os.ReadDir(home); len(entries) != 0 {
+				t.Fatalf("home touched: %v", entries)
+			}
+		})
+	}
+}
+
+func TestTelemetryStatusReportsEffectiveEndpoint(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "otel.env")
+	h, ex := newTestTelemetryHandler(p)
+	h.effective = "http://started-with:4318"
+	if _, err := otelenv.SetEndpoint(p, "http://10.0.0.1:4318"); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := callTelemetry(t, h, ex, "telemetry.status", `{}`)
+	if m["effective"] != "http://started-with:4318" || m["endpoint"] != "http://10.0.0.1:4318" {
+		t.Fatalf("%v", m)
 	}
 }
 

@@ -143,6 +143,9 @@ type telemetryRow struct {
 	Enabled    *bool  `json:"enabled"`
 	Restarting bool   `json:"restarting"`
 	Error      string `json:"error"`
+	// Effective is the endpoint the node process started with (status only; absent
+	// on older nodes). It differs from Endpoint until the node restarts.
+	Effective *string `json:"effective"`
 }
 
 func (r telemetryRow) detail() string {
@@ -152,6 +155,19 @@ func (r telemetryRow) detail() string {
 			parts = append(parts, "enabled "+r.Endpoint)
 		} else {
 			parts = append(parts, "disabled")
+		}
+	}
+	if r.Effective != nil && r.Enabled != nil {
+		configured := ""
+		if *r.Enabled {
+			configured = r.Endpoint
+		}
+		if *r.Effective != configured {
+			running := *r.Effective
+			if running == "" {
+				running = "off"
+			}
+			parts = append(parts, "(running "+running+" until restart)")
 		}
 	}
 	if r.Restarting {

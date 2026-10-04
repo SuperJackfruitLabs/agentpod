@@ -219,6 +219,26 @@ func TestNodesTelemetryDisabledNode(t *testing.T) {
 	}
 }
 
+// "effective" is the endpoint the running process started with; when the file says
+// something else (a restart has not happened yet) the listing must say so.
+func TestNodesTelemetryShowsRunningEndpointWhenItDiffers(t *testing.T) {
+	bin := build(t)
+	hub := &fakeTelemetryHub{results: `[
+ {"nodeId":"node_guild","name":"guild","status":"ok","endpoint":"http://new:4318","enabled":true,"effective":"http://old:4318"},
+ {"nodeId":"node_ashram","name":"ashram","status":"ok","endpoint":"http://same:4318","enabled":true,"effective":"http://same:4318"}]`}
+	srv := hub.server(t)
+	out, code := run(t, bin, rolloutEnv(srv.URL), "nodes", "telemetry")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "running http://old:4318") {
+		t.Fatalf("the stale running endpoint must show: %s", out)
+	}
+	if strings.Contains(out, "running http://same:4318") {
+		t.Fatalf("a matching running endpoint is noise: %s", out)
+	}
+}
+
 func TestNodesTelemetrySetEndpointFleetWide(t *testing.T) {
 	bin := build(t)
 	hub := &fakeTelemetryHub{results: `[

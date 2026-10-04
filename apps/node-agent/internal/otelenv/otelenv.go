@@ -34,7 +34,9 @@ func UserPath(home string) string {
 	return filepath.Join(home, ".config", "agentpod-node", "otel.env")
 }
 
-// knownKeys are the only variables this package writes or documents.
+// knownKeys are the variables the template documents. This package only ever writes
+// OTEL_EXPORTER_OTLP_ENDPOINT (and comments out OTEL_SDK_DISABLED=true); the others are for
+// operators to set by hand, and a test asserts no rewrite introduces anything outside this set.
 var knownKeys = map[string]bool{
 	keyEndpoint:                          true,
 	keyDisabled:                          true,
@@ -42,6 +44,7 @@ var knownKeys = map[string]bool{
 	"OTEL_TRACES_SAMPLER_ARG":            true,
 	"OTEL_EXPORTER_OTLP_HEADERS":         true,
 	"OTEL_EXPORTER_OTLP_METRICS_TIMEOUT": true,
+	"OTEL_RESOURCE_ATTRIBUTES":           true,
 }
 
 const template = `# agentpod-node telemetry (OpenTelemetry, OTLP/HTTP).
@@ -57,11 +60,12 @@ const template = `# agentpod-node telemetry (OpenTelemetry, OTLP/HTTP).
 # Kill switch: true disables export even when an endpoint is set.
 # OTEL_SDK_DISABLED=false
 #
-# Tuning. Only the variables below take effect, because node-agent passes its own explicit
-# options for the endpoint URL, the trace export timeout (10s), trace retry (off) and the
-# span queue size (2048), and those override the matching OTEL_* variables. Ignored on
-# purpose: OTEL_EXPORTER_OTLP_TIMEOUT / _TRACES_TIMEOUT, OTEL_*_RETRY, OTEL_BSP_*,
-# OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES.
+# Tuning. node-agent passes its own explicit options for the endpoint URL, the trace export
+# timeout (10s), trace retry (off) and the span queue (2048; node-agent's own span processor,
+# not the batch span processor), and explicit options win over OTEL_* variables. So these
+# have no effect: OTEL_EXPORTER_OTLP_TRACES_TIMEOUT (and OTEL_EXPORTER_OTLP_TIMEOUT for
+# traces), OTEL_*_RETRY, OTEL_BSP_*, and OTEL_SERVICE_NAME (service.name is always
+# agentpod-node-agent).
 #
 # Trace sampler (read by the OpenTelemetry SDK): always_on, always_off, traceidratio,
 # parentbased_always_on, parentbased_traceidratio, ...
@@ -72,8 +76,14 @@ const template = `# agentpod-node telemetry (OpenTelemetry, OTLP/HTTP).
 # Extra request headers for the collector, as k1=v1,k2=v2 (for example an auth token).
 # OTEL_EXPORTER_OTLP_HEADERS=
 #
-# Metrics export timeout in milliseconds (metrics only; traces use the fixed 10s).
+# Metrics export timeout in milliseconds. OTEL_EXPORTER_OTLP_TIMEOUT also sets it (the
+# METRICS_ one wins); neither changes traces, which keep the fixed 10s.
 # OTEL_EXPORTER_OTLP_METRICS_TIMEOUT=10000
+#
+# Extra resource attributes on every span and metric, as k1=v1,k2=v2. Honoured for keys
+# node-agent does not set itself; service.name, service.version and host.name are always
+# node-agent's own.
+# OTEL_RESOURCE_ATTRIBUTES=deployment.environment=production
 `
 
 // Template is the commented default file: documents every honoured variable, enables nothing.

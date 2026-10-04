@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
 )
 
 // telemetryHandler wraps an inner Handler and answers the "telemetry.status" and
@@ -20,9 +21,12 @@ type telemetryHandler struct {
 	inner Handler
 	// path resolves the otel.env path per call; an error (including
 	// otelenv.ErrUnsupported) is answered as "unsupported".
-	path  func() (string, error)
-	exit  func(int)
-	delay time.Duration
+	path func() (string, error)
+	// effective is the endpoint this process started exporting to (telemetry.FromEnv: ""
+	// when off), which differs from the file until the next restart.
+	effective string
+	exit      func(int)
+	delay     time.Duration
 
 	// mu serialises status/set so concurrent requests cannot interleave a
 	// read-modify-write of the file.
@@ -30,9 +34,17 @@ type telemetryHandler struct {
 }
 
 // NewTelemetryHandler wraps inner with handlers for telemetry.status / telemetry.set.
-// path is called lazily on every request.
+// path is called lazily on every request; any error (otelenv.ErrUnsupported,
+// otelenv.ErrNotService, ...) makes both verbs answer "unsupported" without touching the
+// file or exiting.
 func NewTelemetryHandler(inner Handler, path func() (string, error)) Handler {
-	return &telemetryHandler{inner: inner, path: path, exit: os.Exit, delay: time.Second}
+	return &telemetryHandler{
+		inner:     inner,
+		path:      path,
+		effective: telemetry.FromEnv("", os.Getenv).Endpoint,
+		exit:      os.Exit,
+		delay:     time.Second,
+	}
 }
 
 func (h *telemetryHandler) Handle(
@@ -53,7 +65,7 @@ func (h *telemetryHandler) Handle(
 		return map[string]any{
 			"ok":          false,
 			"unsupported": true,
-			"error":       "telemetry config unsupported on this platform: " + err.Error(),
+			"error":       err.Error(),
 		}, false, nil
 	}
 
@@ -62,7 +74,13 @@ func (h *telemetryHandler) Handle(
 		if err != nil {
 			return telemetryFail(err), false, nil
 		}
-		return map[string]any{"ok": true, "path": path, "endpoint": st.Endpoint, "enabled": st.Enabled}, false, nil
+		return map[string]any{
+			"ok":        true,
+			"path":      path,
+			"endpoint":  st.Endpoint,
+			"enabled":   st.Enabled,
+			"effective": h.effective,
+		}, false, nil
 	}
 
 	// telemetry.set: exactly one of a non-empty endpoint or off:true.

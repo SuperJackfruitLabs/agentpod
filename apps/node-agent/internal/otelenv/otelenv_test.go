@@ -35,6 +35,42 @@ func TestTemplateContent(t *testing.T) {
 	}
 }
 
+// The template is permanent once written (never overwritten), so what it claims about the
+// SDK must be right: every documented "# KEY=" example is a known key and vice versa, and the
+// keys the SDK does honour (resource attributes, the generic timeout for metrics) are not
+// listed as ignored (verified against otel-go v1.47.0).
+func TestTemplateDocumentsKnownKeys(t *testing.T) {
+	tpl := Template()
+	documented := map[string]bool{}
+	for _, line := range strings.Split(tpl, "\n") {
+		s := strings.TrimSpace(strings.TrimPrefix(line, "#"))
+		if k, _, ok := strings.Cut(s, "="); ok && strings.HasPrefix(k, "OTEL_") && !strings.ContainsAny(k, " /*") {
+			documented[k] = true
+		}
+	}
+	for k := range knownKeys {
+		if !documented[k] {
+			t.Errorf("known key %s has no example line", k)
+		}
+	}
+	for k := range documented {
+		if !knownKeys[k] {
+			t.Errorf("example line for unknown key %s", k)
+		}
+	}
+	for _, want := range []string{
+		"# OTEL_RESOURCE_ATTRIBUTES=",
+		"OTEL_EXPORTER_OTLP_TIMEOUT also sets it",
+	} {
+		if !strings.Contains(tpl, want) {
+			t.Errorf("template missing %q", want)
+		}
+	}
+	if strings.Contains(tpl, "OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES") {
+		t.Error("template still claims OTEL_RESOURCE_ATTRIBUTES is ignored")
+	}
+}
+
 func writeTemplate(t *testing.T) string {
 	p := tmpPath(t)
 	if _, err := EnsureTemplate(p); err != nil {
