@@ -40,6 +40,11 @@ type Manager interface {
 	// operator to run `systemctl restart` on a host whose node is a user unit, sending them to
 	// a second dead end after the first.
 	RestartHint() string
+	// OTelEnvPath is the otel.env file the installed unit reads, matching the unit's scope
+	// (system /etc/agentpod-node/otel.env, user $HOME/.config/agentpod-node/otel.env). It
+	// returns otelenv.ErrUnsupported where the service has no env-file hook (launchd). Scope
+	// lives here so callers of package otelenv never repeat the scope decision.
+	OTelEnvPath() (string, error)
 }
 
 // NewManager picks the platform implementation. darwin: launchd per-user

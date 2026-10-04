@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
 
@@ -279,6 +280,7 @@ func serviceInstallCmd(mgr service.Manager, out io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(out, "installed and started.")
+	ensureOTelEnvTemplate(mgr, out)
 	// A Status() failure here is cosmetic — the install itself already
 	// succeeded — so it gets a one-line warning instead of silently
 	// dropping the operating summary (which would look like install just
@@ -290,6 +292,28 @@ func serviceInstallCmd(mgr service.Manager, out io.Writer) int {
 	}
 	printServiceSummary(runtime.GOOS, st.UnitPath, out)
 	return 0
+}
+
+// ensureOTelEnvTemplate drops the commented otel.env template where the unit reads it, only
+// if absent (never overwrites an operator's file). The service is already installed, so a
+// failure here is a warning; platforms without an env-file hook (launchd) are skipped silently.
+func ensureOTelEnvTemplate(mgr service.Manager, out io.Writer) {
+	path, err := mgr.OTelEnvPath()
+	if errors.Is(err, otelenv.ErrUnsupported) {
+		return
+	}
+	if err != nil {
+		fmt.Fprintln(out, "warning: could not resolve the telemetry config path:", err)
+		return
+	}
+	wrote, err := otelenv.EnsureTemplate(path)
+	if err != nil {
+		fmt.Fprintf(out, "warning: could not write the telemetry config template %s: %v\n", path, err)
+		return
+	}
+	if wrote {
+		fmt.Fprintf(out, "telemetry config template written to %s (off by default; enable with: apn telemetry enable --endpoint <url>)\n", path)
+	}
 }
 
 func serviceUninstallCmd(mgr service.Manager, out io.Writer) int {

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 )
 
@@ -22,6 +23,9 @@ type fakeManager struct {
 
 	installErr, uninstallErr, startErr, stopErr, restartErr error
 
+	otelPath    string
+	otelPathErr error
+
 	installCalled, uninstallCalled, startCalled, stopCalled, restartCalled bool
 }
 
@@ -31,6 +35,9 @@ func (f *fakeManager) Start() error        { f.startCalled = true; return f.star
 func (f *fakeManager) Stop() error         { f.stopCalled = true; return f.stopErr }
 func (f *fakeManager) Restart() error      { f.restartCalled = true; return f.restartErr }
 func (f *fakeManager) RestartHint() string { return "fake restart hint" }
+func (f *fakeManager) OTelEnvPath() (string, error) {
+	return f.otelPath, f.otelPathErr
+}
 func (f *fakeManager) Status() (service.Status, error) {
 	return f.status, f.statusErr
 }
@@ -752,6 +759,56 @@ func TestResolveLogsCmd(t *testing.T) {
 		}
 		if called {
 			t.Error("linux path should never call stat")
+		}
+	})
+}
+
+func TestServiceInstallWritesOTelEnvTemplate(t *testing.T) {
+	t.Run("writes_template_when_absent_and_never_overwrites", func(t *testing.T) {
+		p := filepath.Join(t.TempDir(), "agentpod-node", "otel.env")
+		mgr := &fakeManager{otelPath: p}
+		var buf bytes.Buffer
+		if code := runServiceVerb("install", nil, mgr, &buf); code != 0 {
+			t.Fatalf("exit %d", code)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil || !strings.Contains(string(b), "OTEL_EXPORTER_OTLP_ENDPOINT") {
+			t.Fatalf("template not written: %v", err)
+		}
+		if !strings.Contains(buf.String(), p) {
+			t.Errorf("output should mention the file, got:\n%s", buf.String())
+		}
+		os.WriteFile(p, []byte("OTEL_EXPORTER_OTLP_ENDPOINT=http://keep:1\n"), 0o644)
+		buf.Reset()
+		runServiceVerb("install", nil, mgr, &buf)
+		b, _ = os.ReadFile(p)
+		if string(b) != "OTEL_EXPORTER_OTLP_ENDPOINT=http://keep:1\n" {
+			t.Errorf("existing file overwritten: %q", b)
+		}
+	})
+
+	t.Run("write_failure_is_a_warning_not_fatal", func(t *testing.T) {
+		d := t.TempDir()
+		blocker := filepath.Join(d, "blocker")
+		os.WriteFile(blocker, []byte("x"), 0o644)
+		mgr := &fakeManager{otelPath: filepath.Join(blocker, "otel.env")}
+		var buf bytes.Buffer
+		if code := runServiceVerb("install", nil, mgr, &buf); code != 0 {
+			t.Errorf("exit %d, want 0", code)
+		}
+		if !strings.Contains(buf.String(), "warning:") {
+			t.Errorf("no warning:\n%s", buf.String())
+		}
+	})
+
+	t.Run("unsupported_platform_is_silent", func(t *testing.T) {
+		mgr := &fakeManager{otelPathErr: otelenv.ErrUnsupported}
+		var buf bytes.Buffer
+		if code := runServiceVerb("install", nil, mgr, &buf); code != 0 {
+			t.Errorf("exit %d", code)
+		}
+		if strings.Contains(buf.String(), "warning") || strings.Contains(buf.String(), "otel") {
+			t.Errorf("should be silent:\n%s", buf.String())
 		}
 	})
 }
