@@ -866,6 +866,7 @@ git commit -m "node: config.manage, off until an operator enables it"
 - Create: `apps/hub/src/db/schema/harness-config.ts`
 - Modify: `apps/hub/src/db/schema/index.ts`
 - Create: one generated migration under `apps/hub/src/db/drizzle-migrations/`
+- Modify: `apps/hub/src/db/tenant-scope.ts` — register the table in `TENANT_SCOPED_TABLES`. **Not optional:** `tenantScope()` throws `TenantIsolationError` for any table absent from that list, so the store does not function without it, and an existing guard test enforces it.
 - Test: `apps/hub/tests/unit/harness-config-store.test.ts`
 
 **Interfaces:**
@@ -891,7 +892,10 @@ const SETTING = "hermes.approvals.timeout";
 // The fixture tenant the other hub unit tests use; `tenantId` is REQUIRED on every
 // call and is never made optional to suit a test (a cross-tenant write is the most
 // expensive defect class in this repo).
-const TENANT = "tnt_test";
+// `tenants.id` is CHECK-constrained to `fleet_<20 hex>` — an invented id like
+// "tnt_test" fails the constraint AND `tenantScope`'s `assertTenantId`. Use the
+// bootstrap tenant the other hub unit tests use.
+const TENANT = BOOTSTRAP_TENANT_ID;
 const WHO = "usr_test";
 
 const fleet = { settingId: SETTING, stationId: null, nodeId: null, tenantId: TENANT, declaredBy: WHO };
@@ -1023,9 +1027,23 @@ export async function declare(
   input: Level & { settingId: string; value: unknown; tenantId: string; declaredBy: string },
 ): Promise<void> {
   assertOneLevel(input);
-  await db
-    .insert(declaredHarnessConfig)
-    .values({
+  // Delete-then-insert in a transaction, NOT `onConflictDoUpdate`.
+  //
+  // An earlier draft of this plan used `onConflictDoUpdate` targeting the
+  // `(tenantId, settingId, stationId)` index. That is broken for two of the three
+  // levels: Postgres treats NULL as distinct, so `declared_cfg_station` only
+  // constrains rows with a non-null `stationId`, and a node-level or fleet-level
+  // declaration made twice would never conflict — it would INSERT A DUPLICATE
+  // instead of replacing. `ON CONFLICT` can target only one index, so no single
+  // call covers all three levels.
+  //
+  // Known cost, accepted: a replacement gets a fresh `id` and a fresh
+  // `createdAt`, so "first declared at" does not survive a replace. Nothing reads
+  // it today. If an audit ever needs it, read the row before deleting and carry
+  // the original `createdAt` forward.
+  await db.transaction(async (tx) => {
+    await tx.delete(declaredHarnessConfig).where(levelWhere(input));
+    await tx.insert(declaredHarnessConfig).values({
       id: newId("dcfg"),
       tenantId: input.tenantId,
       settingId: input.settingId,
@@ -1033,11 +1051,23 @@ export async function declare(
       nodeId: input.nodeId,
       value: input.value,
       declaredBy: input.declaredBy,
-    })
-    .onConflictDoUpdate({
-      target: [declaredHarnessConfig.tenantId, declaredHarnessConfig.settingId, declaredHarnessConfig.stationId],
-      set: { value: input.value, declaredBy: input.declaredBy, updatedAt: new Date() },
     });
+  });
+}
+
+/**
+ * The WHERE that identifies exactly one level, with NULL compared as NULL.
+ *
+ * Shared by `declare` and `undeclare` so the two cannot disagree about which row
+ * a level names — the disagreement that `onConflictDoUpdate` hid.
+ */
+function levelWhere(l: Level & { settingId: string; tenantId: string }) {
+  return and(
+    eq(declaredHarnessConfig.tenantId, l.tenantId),
+    eq(declaredHarnessConfig.settingId, l.settingId),
+    l.stationId === null ? isNull(declaredHarnessConfig.stationId) : eq(declaredHarnessConfig.stationId, l.stationId),
+    l.nodeId === null ? isNull(declaredHarnessConfig.nodeId) : eq(declaredHarnessConfig.nodeId, l.nodeId),
+  );
 }
 
 export async function undeclare(input: Level & { settingId: string; tenantId: string }): Promise<void> {
@@ -1087,7 +1117,9 @@ export async function resolveFor(
 }
 ```
 
-**Note:** `tenantId` and `declaredBy` are required on every call. If the fixture tenant in this repo's other hub unit tests is named something other than `tnt_test`, use that name — but **do not make the parameters optional to suit a test.** Every hub query is tenant-scoped and an optional tenant is a cross-tenant write.
+**Note:** `tenantId` and `declaredBy` are required on every call — **do not make them optional to suit a test.** Every hub query is tenant-scoped and an optional tenant is a cross-tenant write. Use `BOOTSTRAP_TENANT_ID`: `tenants.id` is CHECK-constrained to `fleet_<20 hex>`, so an invented id is rejected twice over.
+
+**Reading the generated migration is a step, not a formality.** `drizzle-kit generate` re-emits DDL for any table whose snapshot is missing — migrations 0083/0084 are hand-written and have none — so it will offer `CREATE`/`ALTER` for tables already live. Strip those; keep only this table and the hand-added partial index. Committing them would break every environment where 0084 has already run.
 
 - [ ] **Step 6: Run the tests**
 
