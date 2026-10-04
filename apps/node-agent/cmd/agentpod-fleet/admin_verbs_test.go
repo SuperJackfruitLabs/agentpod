@@ -33,6 +33,8 @@ func TestAdminVerbsUseTheHubRoutes(t *testing.T) {
 		{"principals list", []string{"principals", "list"}, "GET", "/api/admin/principals"},
 		{"principals suspend", []string{"principals", "suspend", "prn_1"}, "POST", "/api/admin/principals/prn_1/suspend"},
 		{"principals restore", []string{"principals", "restore", "prn_1"}, "POST", "/api/admin/principals/prn_1/restore"},
+		{"principals add-service", []string{"principals", "add-service", "superwitness", "--client", "superwitness", "--scope", "evidence:read"}, "POST", "/api/admin/service-principals"},
+		{"principals revoke-credential", []string{"principals", "revoke-credential", "svc_1"}, "POST", "/api/admin/service-principals/credentials/svc_1/revoke"},
 
 		{"users list", []string{"users", "list"}, "GET", "/api/admin/users"},
 		{"users show", []string{"users", "show", "u1"}, "GET", "/api/admin/users/u1"},

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 )
 
 const grantsUsage = `usage:
@@ -58,7 +59,9 @@ func fleetGrants(args []string) {
 const principalsUsage = `usage:
   fleet principals list
   fleet principals suspend ID
-  fleet principals restore ID`
+  fleet principals restore ID
+  fleet principals add-service HANDLE --client CLIENT --scope SCOPE[,SCOPE]
+  fleet principals revoke-credential SVC_ID`
 
 // fleetPrincipals lists the identities the hub knows, and suspends or restores one.
 //
@@ -80,6 +83,24 @@ func fleetPrincipals(args []string) {
 	case "suspend", "restore":
 		id := needArg(args, 1, args[0], principalsUsage)
 		fleetSkillJSON(http.MethodPost, base+"/"+url.PathEscape(id)+"/"+args[0], map[string]any{})
+	case "add-service":
+		// Prints the credential's secret ONCE, in the hub's response. Pipe it straight into the
+		// service's secret file; it is not retrievable afterwards.
+		handle := needArg(args, 1, "add-service", principalsUsage)
+		fs := flag.NewFlagSet("fleet principals add-service", flag.ExitOnError)
+		client := fs.String("client", "", "the HUB_OAUTH_CLIENTS id whose audiences its tokens carry")
+		scope := fs.String("scope", "", "comma-separated grant scopes, e.g. evidence:read")
+		fs.Parse(args[2:])
+		if *client == "" || *scope == "" {
+			fmt.Fprintf(os.Stderr, "add-service requires --client and --scope\n\n%s\n", principalsUsage)
+			os.Exit(2)
+		}
+		fleetSkillJSON(http.MethodPost, "/api/admin/service-principals", map[string]any{
+			"handle": handle, "oauthClient": *client, "scopes": strings.Split(*scope, ","),
+		})
+	case "revoke-credential":
+		id := needArg(args, 1, "revoke-credential", principalsUsage)
+		fleetSkillJSON(http.MethodPost, "/api/admin/service-principals/credentials/"+url.PathEscape(id)+"/revoke", map[string]any{})
 	default:
 		fmt.Fprintln(os.Stderr, principalsUsage)
 		os.Exit(2)

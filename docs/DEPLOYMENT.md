@@ -565,7 +565,7 @@ what it cannot find. The refusal names this variable.
 Example, registering the web plane and the CLI:
 
 ```
-HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev
+HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev,superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev
 WORK_PLANE_AUDIENCES=https://app.superpipeline.dev
 ```
 

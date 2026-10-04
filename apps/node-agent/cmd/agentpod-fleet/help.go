@@ -31,7 +31,7 @@ Usage: fleet <verb> [flags]
   fleet bridge …             the superpipeline roster: which agent claims from
                              which board, onto which station
   fleet users …              people: list, show, ban, unban, role
-  fleet principals …         identities: list, suspend, restore
+  fleet principals …         identities: list, suspend, restore, add-service, revoke-credential
   fleet grants …             dispatch authority, as a document
 
   fleet update [--check]     replace this binary with the newest release
