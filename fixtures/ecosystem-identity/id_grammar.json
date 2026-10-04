@@ -807,7 +807,7 @@
       "owner": "agentpod",
       "prefix": "svc",
       "grammar": "^svc_[0-9a-f]{20}$",
-      "grammarSource": "agentpod apps/hub/src/services/service-credentials.ts — prefixedId('svc')",
+      "grammarSource": "agentpod packages/contract/src/ids.ts — ServiceCredentialId",
       "mintedAs": "^svc_[0-9a-f]{20}$",
       "mintSource": "agentpod apps/hub/src/utils/ids.ts prefixedId(), called in mintServiceCredential()",
       "note": "A service principal's credential (superwitness), presented as `svc_…:<secret>`. Not the service SIGNING key's `kid` (`svc-<uuid>`, hyphen) — different separator, different thing.",

@@ -160,7 +160,7 @@
       "required": false,
       "meaning": "OAuth's space-delimited scope list (RFC 8693 §4.2, RFC 9068 §2.2.3): read permissions this principal's grant holds beyond the control pair. The only value issued today is `evidence:read`.",
       "whyItExists": "charter decisions/2026-10-04-superwitness-owns-observability-and-evaluation.md decision 3: superwitness reads other planes' evidence through their APIs and holds no human token. A plane that verifies offline needs the permission inside the token.",
-      "consumerObligation": "Split on single spaces. IGNORE a value you do not recognise; never deny because of one. Grant nothing because the claim is absent — absent means this principal holds no scope. A consumer MUST still check `principalKind` and `tenant` as it would for any token.",
+      "consumerObligation": "Split on single spaces. IGNORE a value you do not recognise; never deny because of one. Grant nothing because the claim is absent — absent means this principal holds no scope. A consumer MUST still check `principalKind` and `tenant` as it would for any token. A plane that verifies tokens offline can only trust this claim as minted, so narrowing a grant reaches that plane only once tokens minted before the change expire (TOKEN_TTL, five minutes); the hub itself re-reads the grant on every request.",
       "source": "agentpod apps/hub/src/auth/jwt-claims.ts buildTokenPayload; apps/hub/src/services/grants.ts GRANT_SCOPES"
     }
   ]
