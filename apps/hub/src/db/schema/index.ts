@@ -77,3 +77,8 @@ export * from "./board-rooms";
 // Where the fleet Live Activity is pushed: a device's push-to-start token and
 // each running activity's update token (supermessage spec 2026-09-29, A1).
 export * from "./live-activity";
+
+// What the fleet wants a harness setting to be, per station/node/fleet level.
+// Never what a station HAS — that is read live from the node (declared
+// harness config, observe arc, task 5).
+export * from "./harness-config";
