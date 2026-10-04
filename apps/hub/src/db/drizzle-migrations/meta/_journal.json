@@ -624,6 +624,13 @@
       "when": 1791101800000,
       "tag": "0088_acp_runs_agent_principal",
       "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1791141299736,
+      "tag": "0089_declared_harness_config",
+      "breakpoints": true
     }
   ]
 }
