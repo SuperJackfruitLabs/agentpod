@@ -17,7 +17,8 @@
  * the node round trip — the same four ingredients `station-skills.ts` and
  * `station-cleanup.ts` use.
  *
- * **Agent-kind principals are refused on every route in this file.**
+ * **Non-human principals are refused on every route in this file** — `service`
+ * as well as `agent`, fail-closed on the kind rather than on a list.
  * `fleet-dispatchable.ts` and `missions.ts` draw the same line: an agent's
  * authority is to be dispatched, never to operate the fleet that dispatches
  * it, and these routes declare fleet policy — what the fleet wants a setting
@@ -149,10 +150,22 @@ async function verifySettingKnown(
   // and the first one to answer is not authoritative for the others. Only
   // after every reachable candidate has been asked, and none confirmed the
   // id, is it genuinely unknown.
+  //
+  // One ask per (node, harness) PAIR, not per station — the same
+  // de-duplication `GET /fleet/config/settings` does below, and for the same
+  // reason: a registry is the harness's, not the station's, so a second
+  // station on the same node under the same harness answers an identical
+  // question. A 30-profile Hermes host made that 30 identical `config.settings`
+  // calls for one id, and one online-but-hung node could hold a single `PUT`
+  // for 30 × the broker timeout.
   const online = await onlineNodeIds(tenantId);
+  const askedPairs = new Set<string>();
   let askedAny = false;
   for (const station of candidates) {
     if (!online.has(station.nodeId)) continue;
+    const pair = `${station.nodeId}\u0000${station.harness}`;
+    if (askedPairs.has(pair)) continue;
+    askedPairs.add(pair);
     const registry = await fetchRegistry(station.nodeId, station.stationKey);
     if (registry === null) continue;
     askedAny = true;
@@ -170,19 +183,31 @@ async function verifySettingKnown(
 }
 
 /**
- * Agent-kind principals are refused on every route below. `null` means the
- * caller may proceed (a human, or a caller with no principal row at all —
- * every caller was treated as human before principals existed, and this
- * endpoint fails open on "unmapped" for the same reason `principalForUser`
- * returning null never 403s elsewhere: a bootstrap caller with no row yet is
- * not an agent).
+ * NON-HUMAN principals are refused on every route below — `service` as well as
+ * `agent`. `null` means the caller may proceed (a human, or a caller with no
+ * principal row at all — every caller was treated as human before principals
+ * existed, and this endpoint fails open on "unmapped" for the same reason
+ * `principalForUser` returning null never 403s elsewhere: a bootstrap caller
+ * with no row yet is not a non-human one).
+ *
+ * Fail-closed on the KIND, not a list of refused kinds. This file's header
+ * claims parity with `fleet-dispatchable.ts`, which refuses any
+ * `principalKind !== "human"`, and `auth/middleware.ts` refuses a non-human
+ * hub token outright before a route is reached. Naming `agent` alone was a
+ * third, looser answer to the same question, reachable through the non-hub-token
+ * auth paths: it admitted `service` — the third kind the principals table
+ * allows — to routes that declare FLEET POLICY. Nothing in this repo calls
+ * these routes with a service principal (the only in-repo caller is
+ * `fleet config`, a human CLI), so closing it breaks nothing and a route later
+ * audited as correct for a service can opt in from a position where the
+ * default was closed.
  */
-async function agentRefusal(user: AuthUser): Promise<{ error: string } | null> {
+async function nonHumanRefusal(user: AuthUser): Promise<{ error: string } | null> {
   const principal = await principalForUser(user.id);
-  if (principal?.kind === "agent") {
+  if (principal && principal.kind !== "human") {
     return {
       error:
-        "This endpoint takes a human principal. Declared configuration is fleet policy, not a station an agent is dispatched to work in.",
+        `This endpoint takes a human principal. Declared configuration is fleet policy, not a station a ${principal.kind} principal is dispatched to work in.`,
     };
   }
   return null;
@@ -284,7 +309,7 @@ export const harnessConfigRoutes = new Hono()
   .get("/fleet/config/settings", async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const tenantId = user.tenantId;
@@ -336,7 +361,7 @@ export const harnessConfigRoutes = new Hono()
   .get("/fleet/config/declared", async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.query("station");
@@ -372,7 +397,7 @@ export const harnessConfigRoutes = new Hono()
   .put("/fleet/config/declared", zValidator("json", DeclaredSetting), async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const body = c.req.valid("json");
@@ -411,7 +436,7 @@ export const harnessConfigRoutes = new Hono()
   .delete("/fleet/config/declared", zValidator("json", UndeclareBody), async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const body = c.req.valid("json");
@@ -441,7 +466,7 @@ export const harnessConfigRoutes = new Hono()
   .get("/fleet/config/drift", async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const tenantId = user.tenantId;
@@ -474,7 +499,7 @@ export const harnessConfigRoutes = new Hono()
   .get("/stations/:stationId/config", async (c) => {
     const user = c.get("user") as AuthUser | undefined;
     if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
-    const refusal = await agentRefusal(user);
+    const refusal = await nonHumanRefusal(user);
     if (refusal) return c.json(refusal, 403);
 
     const stationId = c.req.param("stationId");

@@ -2,7 +2,9 @@
  * Route Test: declared harness configuration (Task 7)
  *
  * Verifies src/routes/harness-config.ts:
- *   1. Agent-kind principals are refused (403) on every route.
+ *   1. Non-human principals — agent AND service — are refused (403) on every
+ *      route: these routes declare fleet policy, and the documented parity
+ *      (`fleet-dispatchable.ts`) is fail-closed on non-human.
  *   2. PUT /fleet/config/declared refuses a declaration naming two levels (400).
  *   3. GET /stations/:id/config reports `unreadable`, never `matches`, when the
  *      station's node is offline — the Task 6 caller contract: every declared
@@ -15,7 +17,9 @@
  *   6. PUT's registry check tries every reachable candidate before refusing
  *      UNKNOWN_SETTING — not just the first one that answers (regression:
  *      an early `return` on "not found" used to make the verdict depend on
- *      an arbitrary, possibly unrelated candidate).
+ *      an arbitrary, possibly unrelated candidate). Asserted without
+ *      depending on the order Postgres returns station rows in.
+ *   7. PUT asks each (node, harness) pair ONCE, not once per station.
  *
  * Follows apps/hub/src/routes/station-acp.test.ts: a minimal test Hono app with
  * a fake `X-Test-User-Id` auth middleware, the real gateway routes, and a fake
@@ -54,6 +58,7 @@ import type { AuthUser } from "../../src/auth/middleware";
 
 const TEST_USER = "test-user-cfgroute-001";
 const AGENT_USER = "test-user-cfgroute-agent-001";
+const SERVICE_USER = "test-user-cfgroute-service-001";
 const SETTING_ID = "hermes.approvals.timeout";
 
 /** What a fake Hermes-harness node answers `config.settings` with — mirrors
@@ -93,6 +98,7 @@ const testApp = new Hono()
 // ─── Setup & Teardown ─────────────────────────────────────────────────────────
 
 let agentPrincipalId: string;
+let servicePrincipalId: string;
 
 beforeAll(async () => {
   await ensurePgMigrations();
@@ -106,23 +112,33 @@ beforeAll(async () => {
     email: "cfgroute-agent@example.com",
     name: "Config Route Agent User",
   });
+  await createTestUser({
+    id: SERVICE_USER,
+    email: "cfgroute-service@example.com",
+    name: "Config Route Service User",
+  });
   agentPrincipalId = await createPrincipal({
     kind: "agent",
     handle: "cfgroute-test-agent",
     userId: AGENT_USER,
   });
+  servicePrincipalId = await createPrincipal({
+    kind: "service",
+    handle: "cfgroute-test-service",
+    userId: SERVICE_USER,
+  });
 });
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM declared_harness_config WHERE declared_by IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM principal_identities    WHERE principal_id = ${agentPrincipalId}`;
-    await rawSql`DELETE FROM principals              WHERE id = ${agentPrincipalId}`;
-    await rawSql`DELETE FROM station_audit           WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM stations                WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM nodes                   WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM enrollment_tokens        WHERE user_id IN (${TEST_USER}, ${AGENT_USER})`;
-    await rawSql`DELETE FROM "user"                  WHERE id IN (${TEST_USER}, ${AGENT_USER})`;
+    await rawSql`DELETE FROM declared_harness_config WHERE declared_by IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
+    await rawSql`DELETE FROM principal_identities    WHERE principal_id IN (${agentPrincipalId}, ${servicePrincipalId})`;
+    await rawSql`DELETE FROM principals              WHERE id IN (${agentPrincipalId}, ${servicePrincipalId})`;
+    await rawSql`DELETE FROM station_audit           WHERE user_id IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
+    await rawSql`DELETE FROM stations                WHERE user_id IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
+    await rawSql`DELETE FROM nodes                   WHERE user_id IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
+    await rawSql`DELETE FROM enrollment_tokens        WHERE user_id IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
+    await rawSql`DELETE FROM "user"                  WHERE id IN (${TEST_USER}, ${AGENT_USER}, ${SERVICE_USER})`;
   } catch {
     // Ignore cleanup errors
   }
@@ -140,11 +156,11 @@ async function enrollTestNode(hostname: string) {
   });
 }
 
-function detectedFor(stationKey: string): DetectedStation[] {
+function detectedFor(stationKey: string, harness = "hermes"): DetectedStation[] {
   return [
     {
       key: stationKey,
-      harness: "hermes",
+      harness,
       kind: "leaf",
       displayName: "Config Route Test",
       parentKey: null,
@@ -506,35 +522,53 @@ test(
   "PUT tries every reachable candidate before refusing UNKNOWN_SETTING, not just the first",
   async () => {
     // Regression for an early-`return` bug: when a declaration's target is
-    // ambiguous (here, a node with more than one config.manage station) the
-    // registry check must try every reachable candidate before refusing —
-    // an id that the FIRST one answered does not manage, but the SECOND
-    // does, must still be accepted. Both stations live on one node and are
-    // asked over one WebSocket connection, so "first"/"second" follows this
-    // node's own adoption order.
+    // ambiguous the registry check must try EVERY reachable candidate before
+    // refusing — an id the first candidate does not manage, but a later one
+    // does, must still be accepted.
+    //
+    // **This test does not depend on which row Postgres returns first.** The
+    // earlier version declared one setting across two stations and asserted a
+    // 204; had the row order ever flipped, the knowing station would have been
+    // asked first, the early `return` would never have been reached, and the
+    // test would have passed while guarding nothing — a guard that stops
+    // guarding without telling anyone, which is the defect class this whole
+    // feature exists to end.
+    //
+    // Instead, the two candidates know DIFFERENT ids: station A's registry
+    // carries `A_SETTING` only, station B's carries `B_SETTING` only. Whichever
+    // order the rows arrive in, one of the two PUTs must walk past a candidate
+    // that does not know its id, so the early-`return` bug fails one of them in
+    // either order. Both candidates are therefore asked across the pair, which
+    // is also asserted directly.
+    //
+    // The two stations sit on ONE node under DIFFERENT harnesses, which is the
+    // real shape of the fallback path the `continue` serves: when nothing
+    // matches the setting id's harness prefix, `candidates` holds stations of
+    // several unrelated harnesses and the first to answer is not authoritative
+    // for the others. Different harnesses also mean the per-(node, harness)
+    // de-duplication keeps both, as it must.
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;
     try {
       const { nodeId, nodeSecret } = await enrollTestNode("cfgroute-fallback-host");
 
-      const unknowingKey = "cfgroute-fallback-unknowing";
-      const knowingKey = "cfgroute-fallback-knowing";
-      const [unknowingStation] = await adoptStations(
-        TEST_USER,
-        nodeId,
-        [unknowingKey],
-        detectedFor(unknowingKey),
-      );
-      const [knowingStation] = await adoptStations(
-        TEST_USER,
-        nodeId,
-        [knowingKey],
-        detectedFor(knowingKey),
-      );
-      if (!unknowingStation || !knowingStation) throw new Error("station adoption failed");
+      const keyA = "cfgroute-fallback-a";
+      const keyB = "cfgroute-fallback-b";
+      // `pi.*` matches NEITHER station's harness, so `verifySettingKnown`
+      // falls through its harness-prefix heuristic to the full pool — the
+      // only path on which the `continue` is load-bearing.
+      const A_SETTING = "pi.approvals.timeout";
+      const B_SETTING = "pi.approvals.mode";
+      const registryFor = (key: string) =>
+        key === keyA
+          ? [{ id: A_SETTING, harness: "pi", scope: "profile", policy: "reconcilable", restartToTakeEffect: true }]
+          : [{ id: B_SETTING, harness: "pi", scope: "profile", policy: "reconcilable", restartToTakeEffect: true }];
 
-      const TARGET_SETTING_ID = "hermes.approvals.command_allowlist";
+      const [stationA] = await adoptStations(TEST_USER, nodeId, [keyA], detectedFor(keyA, "hermes"));
+      const [stationB] = await adoptStations(TEST_USER, nodeId, [keyB], detectedFor(keyB, "openclaw"));
+      if (!stationA || !stationB) throw new Error("station adoption failed");
 
+      const asked: string[] = [];
       const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
         headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
       } as RequestInit & { headers: Record<string, string> });
@@ -551,22 +585,32 @@ test(
         }
         if (msg.type !== "req" || msg.verb !== "config.settings") return;
         const params = msg.params as { stationKey: string };
-        // The "unknowing" station's registry omits the target id entirely;
-        // the "knowing" one carries the full registry.
-        const settings =
-          params.stationKey === unknowingKey
-            ? HERMES_REGISTRY.filter((s) => s.id !== TARGET_SETTING_ID)
-            : HERMES_REGISTRY;
-        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings } }));
+        asked.push(params.stationKey);
+        ws.send(
+          JSON.stringify({
+            type: "res",
+            id: msg.id,
+            ok: true,
+            data: { settings: registryFor(params.stationKey) },
+          }),
+        );
       };
       await waitForNodeOnline(nodeId);
 
-      const res = await appFetch(baseUrl, "/api/fleet/config/declared", {
-        method: "PUT",
-        token: TEST_USER,
-        body: { settingId: TARGET_SETTING_ID, stationId: null, nodeId, value: "git,ls" },
-      });
-      expect(res.status).toBe(204);
+      for (const settingId of [A_SETTING, B_SETTING]) {
+        const res = await appFetch(baseUrl, "/api/fleet/config/declared", {
+          method: "PUT",
+          token: TEST_USER,
+          body: { settingId, stationId: null, nodeId, value: "900" },
+        });
+        expect(res.status).toBe(204);
+      }
+
+      // Both candidates were asked — the one that did not know the id it was
+      // asked about was not skipped. This is the assertion the previous
+      // version lacked, and it holds whichever row order Postgres returns.
+      expect(asked).toContain(keyA);
+      expect(asked).toContain(keyB);
 
       ws.close();
       await new Promise((r) => setTimeout(r, 100));
@@ -576,3 +620,102 @@ test(
   },
   20_000,
 );
+
+test(
+  "PUT asks each (node, harness) pair once, not once per station",
+  async () => {
+    // A Hermes host with 30 profiles is 30 `config.manage` stations of ONE
+    // harness on ONE node. The registry is the harness's, not the station's,
+    // so asking each station is 30 identical round trips for one answer — and
+    // one online-but-hung node holds a single PUT for 30 × the broker timeout.
+    // `GET /fleet/config/settings` already de-duplicates by (node, harness);
+    // the write path must use the same idiom.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgroute-dedup-host");
+
+      const keys = ["cfgroute-dedup-1", "cfgroute-dedup-2", "cfgroute-dedup-3"];
+      for (const key of keys) {
+        const [station] = await adoptStations(TEST_USER, nodeId, [key], detectedFor(key));
+        if (!station) throw new Error("station adoption failed");
+      }
+
+      const asked: string[] = [];
+      const ws = new WebSocket(`ws://localhost:${server.port}/public/nodes/gateway`, {
+        headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+      } as RequestInit & { headers: Record<string, string> });
+      await new Promise<void>((res, rej) => {
+        ws.onopen = () => res();
+        ws.onerror = () => rej(new Error("Node WS connection error"));
+      });
+      ws.onmessage = (e) => {
+        let msg: Record<string, unknown>;
+        try {
+          msg = JSON.parse(String(e.data));
+        } catch {
+          return;
+        }
+        if (msg.type !== "req" || msg.verb !== "config.settings") return;
+        asked.push((msg.params as { stationKey: string }).stationKey);
+        ws.send(
+          JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: HERMES_REGISTRY } }),
+        );
+      };
+      await waitForNodeOnline(nodeId);
+
+      // An id NO registry carries, so the loop cannot short-circuit on
+      // "found" and must exhaust its candidates — the exact shape that cost
+      // one call per station, and the one where a hung node's cost multiplies.
+      // The refusal is expected; the ONE ask is what is under test.
+      const res = await appFetch(baseUrl, "/api/fleet/config/declared", {
+        method: "PUT",
+        token: TEST_USER,
+        body: { settingId: "hermes.approvals.not_a_real_setting", stationId: null, nodeId, value: "900" },
+      });
+      expect(res.status).toBe(400);
+      expect(asked).toHaveLength(1);
+      expect(keys).toContain(asked[0]!);
+
+      // And a known id still resolves through that one ask.
+      const known = await appFetch(baseUrl, "/api/fleet/config/declared", {
+        method: "PUT",
+        token: TEST_USER,
+        body: { settingId: SETTING_ID, stationId: null, nodeId, value: "900" },
+      });
+      expect(known.status).toBe(204);
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test("a service-kind token is refused on every route", async () => {
+  // These routes declare FLEET POLICY. `fleet-dispatchable.ts` — the parity
+  // this file's header claims — is fail-closed on any non-human principal,
+  // and the hub's own middleware refuses a non-human hub token outright. A
+  // `service` principal admitted here would be a third, looser answer to the
+  // same question, reached only through a non-hub-token auth path. Closed by
+  // default; a route audited and found correct for a service can opt in from
+  // there.
+  const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+  const baseUrl = `http://localhost:${server.port}`;
+  try {
+    for (const path of ["/api/fleet/config/settings", "/api/fleet/config/drift"]) {
+      const res = await appFetch(baseUrl, path, { token: SERVICE_USER });
+      expect(res.status).toBe(403);
+    }
+    const put = await appFetch(baseUrl, "/api/fleet/config/declared", {
+      method: "PUT",
+      token: SERVICE_USER,
+      body: { settingId: SETTING_ID, stationId: null, nodeId: null, value: 900 },
+    });
+    expect(put.status).toBe(403);
+  } finally {
+    server.stop(true);
+  }
+});
