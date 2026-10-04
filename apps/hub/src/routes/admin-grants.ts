@@ -94,7 +94,9 @@ export const adminGrantsRouter = new Hono()
       by: c.get("user")?.id,
     });
 
-    return c.json({ principalId, grant: body });
+    // The stored grant, not the body: a body without `scopes` kept the stored ones, and echoing
+    // it would tell the caller the principal now holds none.
+    return c.json({ principalId, grant: (await getGrant(principalId)) ?? NO_GRANT });
   })
 
   /**
