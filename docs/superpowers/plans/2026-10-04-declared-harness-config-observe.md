@@ -452,14 +452,14 @@ import (
 func hermesWithProfile(t *testing.T, body string) (*hermesDescriptor, string) {
 	t.Helper()
 	home := t.TempDir()
-	profile := filepath.Join(home, "agents", "one")
+	profile := filepath.Join(home, "profiles", "one")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return NewHermes(home, "").(*hermesDescriptor), "hermes:one"
+	return NewHermes(home).(*hermesDescriptor), "hermes:one"
 }
 
 func TestHermesConfigSettingsRegistry(t *testing.T) {
@@ -516,7 +516,7 @@ func TestHermesObserveConfigAbsentKeyIsReadableWithNoValue(t *testing.T) {
 func TestHermesObserveConfigUnreadableDocumentIsNotAbsent(t *testing.T) {
 	h, key := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	// Remove the file: the document cannot be read at all.
-	if err := os.Remove(filepath.Join(h.home, "agents", "one", "config.yaml")); err != nil {
+	if err := os.Remove(filepath.Join(h.home, "profiles", "one", "config.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	vals, _ := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
@@ -525,6 +525,17 @@ func TestHermesObserveConfigUnreadableDocumentIsNotAbsent(t *testing.T) {
 	}
 	if vals[0].Reason == "" {
 		t.Fatal("unreadable must carry a reason")
+	}
+}
+
+func TestHermesObserveConfigRefusesTheCompositeRoot(t *testing.T) {
+	// `workspaceFor("hermes")` returns the HOME, not a profile. Reading the home's
+	// config.yaml and reporting it as a profile's value would attribute a wrong
+	// readout to the wrong station, so the root is refused by name (spec §6).
+	h, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	_, err := h.ObserveConfig(context.Background(), "hermes", []string{"hermes.approvals.timeout"})
+	if err == nil || !strings.Contains(err.Error(), "composite root") {
+		t.Fatalf("the composite root must be refused, got %v", err)
 	}
 }
 
@@ -653,7 +664,17 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 		}
 	}
 
-	dir, err := h.profileDirFor(key)
+	// workspaceFor is the EXISTING key→directory resolver (hermes.go). A second
+	// one is how two readers come to disagree about which profile a station is.
+	//
+	// It returns h.home for the bare key "hermes" — the COMPOSITE root, which has
+	// no profile of its own. A profile-scoped setting declared against the root is
+	// refused rather than read from the home or fanned out to every child
+	// (spec §6).
+	if key == "hermes" {
+		return nil, fmt.Errorf("config: %s is the composite root, which has no profile of its own — declare this per profile, or at node or fleet level", key)
+	}
+	dir, err := h.workspaceFor(key)
 	if err != nil {
 		return nil, err
 	}
@@ -679,12 +700,12 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 }
 ```
 
-**Note for the implementer:** `profileDirFor(key)` is the existing resolver Hermes already uses to turn a station key into its profile directory — the same one `localManagedSkillWorkspace` reaches through `ManagedSkillWorkspace`. If its name differs in the current tree, use that one; **do not add a second key→directory resolver.** A second one is how two readers come to disagree about which profile a station is.
+**Note for the implementer:** `workspaceFor(key)` is the existing resolver, at `hermes.go:327`. It maps `hermes:<name>` to `<home>/profiles/<name>` and the bare key `hermes` to the home itself. **Do not add a second key→directory resolver** — a second one is how two readers come to disagree about which profile a station is.
 
 - [ ] **Step 5: Run the test**
 
 Run: `cd apps/node-agent && go test ./internal/descriptor/ -run TestHermesConfig -v`
-Expected: PASS, five tests.
+Expected: PASS, six tests.
 
 - [ ] **Step 6: Mutation-test the unreadable case**
 
@@ -717,7 +738,7 @@ git commit -m "node: Hermes reports its approvals settings, and never guesses on
 // append to apps/node-agent/internal/descriptor/registry_test.go
 func TestDetectAllAdvertisesConfigManage(t *testing.T) {
 	home := t.TempDir()
-	profile := filepath.Join(home, "agents", "one")
+	profile := filepath.Join(home, "profiles", "one")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -849,7 +870,15 @@ git commit -m "node: config.manage, off until an operator enables it"
 
 **Interfaces:**
 - Consumes: the contract's `DeclaredSetting` (Task 1).
-- Produces: table `declared_harness_config`; `declare()`, `undeclare()`, `resolveFor(stationId, nodeId)` in `apps/hub/src/services/harness-config.ts` (the store half; comparison is Task 6).
+- Produces: table `declared_harness_config`; `declare()`, `undeclare()`, and
+  `resolveFor(stationId, nodeId, tenantId): Promise<Record<string, Resolved>>` where
+  `Resolved = { value: unknown; level: "station" | "node" | "fleet" }`, in
+  `apps/hub/src/services/harness-config.ts` (the store half; comparison is Task 6).
+
+  **`level` is load-bearing, not informational.** Task 6 refuses a station-scoped
+  declaration of a `user`-scoped setting, and it can only know the declaration was made
+  at station level if this function says so. Returning bare values makes that refusal
+  unreachable.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -859,39 +888,49 @@ import { describe, test, expect, beforeEach } from "bun:test";
 import { declare, undeclare, resolveFor } from "../../src/services/harness-config";
 
 const SETTING = "hermes.approvals.timeout";
+// The fixture tenant the other hub unit tests use; `tenantId` is REQUIRED on every
+// call and is never made optional to suit a test (a cross-tenant write is the most
+// expensive defect class in this repo).
+const TENANT = "tnt_test";
+const WHO = "usr_test";
+
+const fleet = { settingId: SETTING, stationId: null, nodeId: null, tenantId: TENANT, declaredBy: WHO };
+const atNode = { ...fleet, nodeId: "node_1" };
+const atStation = { ...fleet, stationId: "station_a" };
+const resolved = async (station: string) => (await resolveFor(station, "node_1", TENANT))[SETTING];
 
 describe("declared harness config", () => {
   beforeEach(async () => { /* truncate declared_harness_config — follow TESTING.md's helper */ });
 
   test("the most specific declaration wins: station over node over fleet", async () => {
-    await declare({ settingId: SETTING, stationId: null, nodeId: null, value: 300 });
-    expect((await resolveFor("station_a", "node_1"))[SETTING]).toBe(300);
+    await declare({ ...fleet, value: 300 });
+    expect(await resolved("station_a")).toEqual({ value: 300, level: "fleet" });
 
-    await declare({ settingId: SETTING, stationId: null, nodeId: "node_1", value: 600 });
-    expect((await resolveFor("station_a", "node_1"))[SETTING]).toBe(600);
+    await declare({ ...atNode, value: 600 });
+    expect(await resolved("station_a")).toEqual({ value: 600, level: "node" });
 
-    await declare({ settingId: SETTING, stationId: "station_a", nodeId: null, value: 900 });
-    expect((await resolveFor("station_a", "node_1"))[SETTING]).toBe(900);
+    await declare({ ...atStation, value: 900 });
+    expect(await resolved("station_a")).toEqual({ value: 900, level: "station" });
 
     // A sibling on the same node still gets the node's value, not the station's.
-    expect((await resolveFor("station_b", "node_1"))[SETTING]).toBe(600);
+    expect(await resolved("station_b")).toEqual({ value: 600, level: "node" });
   });
 
   test("declaring twice at one level replaces rather than duplicates", async () => {
-    await declare({ settingId: SETTING, stationId: null, nodeId: null, value: 300 });
-    await declare({ settingId: SETTING, stationId: null, nodeId: null, value: 900 });
-    expect((await resolveFor("station_a", "node_1"))[SETTING]).toBe(900);
+    await declare({ ...fleet, value: 300 });
+    await declare({ ...fleet, value: 900 });
+    expect(await resolved("station_a")).toEqual({ value: 900, level: "fleet" });
   });
 
   test("undeclaring a level falls back to the next one out", async () => {
-    await declare({ settingId: SETTING, stationId: null, nodeId: null, value: 300 });
-    await declare({ settingId: SETTING, stationId: "station_a", nodeId: null, value: 900 });
-    await undeclare({ settingId: SETTING, stationId: "station_a", nodeId: null });
-    expect((await resolveFor("station_a", "node_1"))[SETTING]).toBe(300);
+    await declare({ ...fleet, value: 300 });
+    await declare({ ...atStation, value: 900 });
+    await undeclare({ ...atStation });
+    expect(await resolved("station_a")).toEqual({ value: 300, level: "fleet" });
   });
 
   test("nothing declared resolves to nothing — never to a default", async () => {
-    expect(await resolveFor("station_a", "node_1")).toEqual({});
+    expect(await resolveFor("station_a", "node_1", TENANT)).toEqual({});
   });
 });
 ```
@@ -1048,7 +1087,7 @@ export async function resolveFor(
 }
 ```
 
-**Note:** the tests above call `declare`/`resolveFor` without `tenantId`/`declaredBy` for brevity. Add them to the test calls using the fixture tenant the other hub unit tests use — do not make the parameters optional to suit the test.
+**Note:** `tenantId` and `declaredBy` are required on every call. If the fixture tenant in this repo's other hub unit tests is named something other than `tnt_test`, use that name — but **do not make the parameters optional to suit a test.** Every hub query is tenant-scoped and an optional tenant is a cross-tenant write.
 
 - [ ] **Step 6: Run the tests**
 
@@ -1157,24 +1196,27 @@ import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/co
  */
 export function compare(args: {
   stationId: string;
-  declared: Record<string, unknown>;
   values: ConfigValue[];
   settings: ConfigSetting[];
-  /** Setting ids whose winning declaration was made at station level. */
-  declaredAtStationLevel?: Set<string>;
+  /**
+   * The resolution from `resolveFor`: value AND the level it came from. The level
+   * is load-bearing — `out-of-scope` fires only when the winning declaration was
+   * made at STATION level for a setting whose document is not per-station.
+   */
+  declared: Record<string, { value: unknown; level: "station" | "node" | "fleet" }>;
 }): ConfigObservation[] {
   const byId = new Map(args.settings.map((s) => [s.id, s]));
   const out: ConfigObservation[] = [];
 
   for (const v of args.values) {
     if (!(v.settingId in args.declared)) continue;
-    const declared = args.declared[v.settingId];
+    const { value: declared, level } = args.declared[v.settingId]!;
     const setting = byId.get(v.settingId);
     const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
 
     // Scope first: a declaration that cannot be honoured is not drift, and
     // saying "drifted" would invite an apply that must then refuse.
-    if (setting && setting.scope !== "profile" && args.declaredAtStationLevel?.has(v.settingId)) {
+    if (setting && setting.scope !== "profile" && level === "station") {
       out.push({ ...row, state: "out-of-scope",
         reason: `${v.settingId} is ${setting.scope}-scoped: declaring it for one station would change its siblings on the same host` });
       continue;
@@ -1298,6 +1340,10 @@ Expected: FAIL — the routes 404.
 Follow `apps/hub/src/routes/station-acp.ts` for the Hono router shape, the auth middleware and the station-ownership check. Four handlers:
 
 - `GET /api/fleet/config/settings` — the union of every online node's `ConfigSettings()`, de-duplicated by `id`. A node that cannot be reached is **named in a `unreachableNodes` array** rather than omitted silently.
+- `GET /api/fleet/config/declared` — every declaration for the tenant, with optional
+  `?station=<id>` and `?node=<id>` filters. The filters exist because `fleet config show
+  --node` already calls it that way; without them that flag silently returns the whole
+  fleet's declarations.
 - `PUT /api/fleet/config/declared` — validate with the contract's `DeclaredSetting`, then `declare()`. A `settingId` that no node's registry knows is refused `400` with `UNKNOWN_SETTING` and the id.
 - `DELETE /api/fleet/config/declared` — `undeclare()`.
 - `GET /api/stations/:stationId/config` — `resolveFor` + broker `config.observe` + `compare`. A broker failure (offline node, timeout) yields `ConfigValue{readable:false, reason}` for every requested setting, so the route still answers 200 with honest `unreadable` rows.
