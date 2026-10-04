@@ -1,6 +1,6 @@
 ---
 title: What you can do to a station
-description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets and activity — and what each one requires.
+description: The panels — files, logs, terminal, config, health, lifecycle, cleanup, changesets, skills, voice and activity — and what each one requires.
 ---
 
 Open an adopted station in the console and you get a set of panels. Which ones appear
@@ -89,8 +89,35 @@ The audit trail for the station: what was done, when, and by which principal.
 
 ## Chat
 
-Where a station has a Matrix identity, talking to the agent is messaging it. See
-[Stations](/use/stations/#matrix-identity) for the two identity modes.
+Where a station has a chat identity, talking to the agent is messaging it. See
+[Stations](/use/stations/#matrix-identity) for the two identity modes, and
+[Talking to an agent in a room](/use/rooms/) for what else arrives there.
+
+## Skills
+
+What this station actually has, and the review screen for installing something. Present, eligible
+and loaded are reported as separate observations rather than inferred from each other — see
+[Managed skills](/use/skills/).
+
+## Plugins
+
+Harness plugins on this station, and reviewed changes to them: the node plans, you read the plan,
+and the apply sends the digest you reviewed. Nothing here restarts the station.
+
+## Voice notes and voice replies
+
+Two sections, each offering *inherit*, *off*, or settings of its own, over the hub-wide defaults in
+**Admin → Transcription** and **Admin → Speech**. The voice-replies section also shows which voice
+this station was assigned, and lets the owner pick another. See [Voice notes](/use/voice/).
+
+## Git identity
+
+What this station can push to a forge as, if anything. Push access is granted per station and never
+by adopting one — most stations never touch git, and a key for every station is an account nobody
+uses and a key nobody revokes.
+
+The keypair is generated **on the node**; the private half never leaves it and the hub holds no
+secret. Granted and revoked with `fleet stations grant-push` / `revoke-push`.
 
 ## Posture
 
@@ -100,4 +127,6 @@ A banner surfaces exposure problems found on the host — the same checks
 ## Next
 
 - [Attaching an editor](/use/acp/) — your own editor against a remote station
+- [Managed skills](/use/skills/) — the review model behind the Skills panel
+- [Talking to an agent in a room](/use/rooms/) — the other half of a station
 - [Checking for exposure](/use/scan/)

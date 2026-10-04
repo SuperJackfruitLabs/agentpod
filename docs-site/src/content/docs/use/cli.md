@@ -13,9 +13,9 @@ anywhere that is **not** an enrolled node — a laptop, CI, an agent's own works
 `scan`, `service`, `acp`, `update`. Those that talk to the hub use the credential `apn enroll`
 stored on this host, which says *"I am this host."*
 
-`fleet` acts on the fleet **as you**: `login`, `whoami`, `logout`, `nodes`, `agents`, `stats`,
-`activity`. It uses a hub-issued token held by a person or an agent — the one `fleet login`
-writes, or `$AGENTPOD_TOKEN`.
+`fleet` acts on the fleet **as you** — everything from `whoami` to rolling a release to editing a
+grant. It uses a hub-issued token held by a person or an agent: the one `fleet login` writes, or
+`$AGENTPOD_TOKEN`.
 
 ```sh
 apn status          # how is this machine?
@@ -49,7 +49,17 @@ installer; see [Enrolling a node](/use/nodes/).
 fleet login
 ```
 
-This opens a browser, you sign in to the hub, and the token is written to disk. After that:
+The browser opens **once** — not once per lapse. A hub token lasts five minutes, and `fleet login`
+also registers this machine as a **device**; every later command exchanges that credential for a
+fresh token without a browser. The device credential lasts 90 days and renews whenever it is used.
+
+```sh
+fleet devices                 # machines that may act as you
+fleet devices revoke <id>     # revoke one
+fleet logout                  # revoke this device and forget both credentials
+```
+
+Then:
 
 ```sh
 fleet whoami            # who the stored token says you are
@@ -58,10 +68,10 @@ fleet nodes             # the fleet's nodes
 fleet agents            # the agents you may dispatch
 fleet stats             # fleet totals
 fleet activity          # recent fleet activity
-fleet logout            # forget the stored token
 ```
 
-Set `$AGENTPOD_HUB` to talk to a hub other than the default.
+Set `$AGENTPOD_HUB` to talk to a hub other than the default, and `$AGENTPOD_DEVICE_NAME` to name
+this machine in the device list.
 
 ### What `fleet agents` actually answers
 
@@ -76,6 +86,136 @@ authority to *find out what else exists*.
 
 If you have been granted nothing, you get an empty list rather than an error. That is the
 truth, and it is something you can act on.
+
+## The rest of `fleet`
+
+Everything the hub exposes should be reachable from here. If something is not, that is a gap rather
+than a decision — with two deliberate exceptions: anything that acts as **this machine** rather
+than as you (that is `apn`), and the interactive surfaces — a terminal, an ACP session — which are
+a console's job rather than a script's.
+
+### Nodes and stations
+
+```sh
+fleet nodes                                  # the fleet's nodes
+fleet nodes update [--node <name>]           # roll the newest release to every node
+fleet invite                                 # mint a token a machine presents to `apn enroll`
+
+fleet stations detected --node <nodeId>      # what the node reports right now
+fleet stations list     --node <nodeId>      # adopted stations, with their ids
+fleet stations adopt    --node <nodeId> --key <key> [--key <key> …]
+fleet stations unadopt  --station <stationId>
+```
+
+**A detected station is not an agent until it is adopted.** Adopting re-detects on the node first,
+so a key that has gone away is not adopted from a stale list.
+
+`fleet nodes update` rolls a release without needing the hub's root credential.
+
+### One station
+
+```sh
+fleet station lifecycle --station <id> --action start|stop|restart
+fleet station cleanup plan  --station <id>
+fleet station cleanup apply --station <id> --path <p> [--path <p> …]
+fleet station changeset status --station <id> [--base <ref>]
+fleet station changeset diff   --station <id> --side uncommitted|committed [--path <p>]
+fleet station fs write|mkdir|move|delete --station <id> …
+```
+
+The same operations as the console's panels, each gated on a capability the station declares. See
+[What you can do to a station](/use/panels/).
+
+### Git identity
+
+```sh
+fleet stations git-identity --station <stationId>   # what it can push to forge as
+fleet stations grant-push   --station <stationId>   # give it a forge push key
+fleet stations revoke-push  --station <stationId>   # take that key away
+```
+
+**Push access is granted per station and never by adopting one.** Most stations never touch git,
+and a forge key for every station is an account nobody uses and a key nobody revokes.
+
+The keypair is generated **on the node** and the private half never leaves it — `grant-push` asks
+for the public half and registers that. The hub holds no secret.
+
+### Staffing
+
+```sh
+fleet staff options
+fleet staff create   --file <path>|-
+fleet staff assign   --station <stationId> --file <path>|-
+fleet staff unassign --station <stationId>
+```
+
+Putting an agent in a station, or taking it out.
+
+### Skills
+
+```sh
+fleet skills …    # artifacts, releases, cohorts, canaries, native placement
+```
+
+Its own page: [Managed skills](/use/skills/).
+
+<a id="plugins"></a>
+
+### Plugins
+
+```sh
+fleet plugins inventory --station <stationId>
+fleet plugins plan      --station <stationId> --action enable|disable
+fleet plugins show      --station <stationId> --operation <opId>
+fleet plugins inspect   --station <stationId> --operation <opId>
+fleet plugins apply     --station <stationId> --operation <opId> --plan-digest <sha256>
+fleet plugins history   --station <stationId>
+```
+
+The same plan → inspect → apply shape as skills: the node plans, you read the plan, and the apply
+sends only the digest you reviewed. **Nothing here restarts a station.** These are the harness plugins behind
+[voice replies](/use/voice/), live turn reporting, and [error reporting](/use/errors/).
+
+### Authority
+
+```sh
+fleet grants list|show|set|rm            # dispatch authority, as a document
+fleet principals list|suspend|restore    # identities
+fleet users list|show|role|ban|unban     # people
+```
+
+See [Dispatch and grants](/use/grants/).
+
+### The board bridge
+
+```sh
+fleet bridge list
+fleet bridge add --key <key> …
+fleet bridge set <key> …
+fleet bridge rm  <key>
+```
+
+Which agent claims from which board, onto which station. See [Working a board](/use/boards/).
+
+### Hub settings and substrate
+
+```sh
+fleet settings show
+fleet settings signup|transcription|speech …
+fleet runtimes list|providers|create|start|stop|rm
+```
+
+`settings` is hub-wide configuration — whether signup is open, and the
+[voice](/use/voice/) defaults. `runtimes` is the substrate nodes run on.
+
+### Keeping it current
+
+```sh
+fleet update [--check]
+fleet version
+```
+
+The binary a person invokes drifts more than the one a service runs, not less.
 
 ## Commands that need no enrolment
 
