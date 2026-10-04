@@ -18,6 +18,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gateway"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/gitidentity"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/service"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
@@ -251,6 +252,7 @@ func runCmd() {
 		gitIdentityRoot,
 		descriptor.NewCapabilityHandler(reg).ACPCommand,
 	)))
+	h = gateway.NewTelemetryHandler(h, telemetryEnvPath)
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {
@@ -381,4 +383,14 @@ func gatherHealthReports(reg *descriptor.Registry) []gateway.HealthReport {
 		})
 	}
 	return reports
+}
+
+// telemetryEnvPath resolves the otel.env path the service unit reads, per request, so the
+// telemetry verbs answer "unsupported" (macOS, or no resolvable path) instead of failing node start.
+func telemetryEnvPath() (string, error) {
+	mgr, err := service.NewManager(nil)
+	if err != nil {
+		return "", err
+	}
+	return mgr.OTelEnvPath()
 }
