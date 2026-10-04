@@ -65,6 +65,10 @@ func ReconcileDaemonUnit(userScope bool, home, markerDir string, dryRun bool) Re
 // ReconcileUnit re-renders the installed unit when, and only when, it equals a known
 // agentpod-node template render (current or legacy). Anything else is left alone.
 func ReconcileUnit(o ReconcileOptions) ReconcileResult {
+	// A symlinked unit (e.g. `systemctl link`) would be replaced by the rename: leave it.
+	if fi, err := os.Lstat(o.UnitPath); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return ReconcileResult{UnitDrifted, fmt.Sprintf("%s is a symlink; left in place", o.UnitPath)}
+	}
 	raw, err := os.ReadFile(o.UnitPath)
 	if err != nil {
 		return ReconcileResult{UnitError, fmt.Sprintf("read %s: %v", o.UnitPath, err)}
@@ -91,8 +95,10 @@ func ReconcileUnit(o ReconcileOptions) ReconcileResult {
 
 	norm := normalizeUnit(installed, o.UserScope)
 	if norm == normalizeUnit(string(current), o.UserScope) {
-		if err := os.Remove(o.MarkerPath); err != nil && !os.IsNotExist(err) {
-			return ReconcileResult{UnitError, fmt.Sprintf("remove marker %s: %v", o.MarkerPath, err)}
+		if !o.DryRun { // status stays read-only
+			if err := os.Remove(o.MarkerPath); err != nil && !os.IsNotExist(err) {
+				return ReconcileResult{UnitError, fmt.Sprintf("remove marker %s: %v", o.MarkerPath, err)}
+			}
 		}
 		return ReconcileResult{State: UnitCurrent}
 	}
@@ -101,24 +107,25 @@ func ReconcileUnit(o ReconcileOptions) ReconcileResult {
 	}
 
 	desired := desiredUnit(string(current), installed, o.UserScope)
-	if o.DryRun {
-		return ReconcileResult{UnitStale, "unit predates the current template"}
-	}
-
 	sum := sha256.Sum256([]byte(desired))
 	hash := hex.EncodeToString(sum[:])
 	if m, err := os.ReadFile(o.MarkerPath); err == nil && strings.TrimSpace(string(m)) == hash {
 		return ReconcileResult{UnitError, fmt.Sprintf("a previous rewrite of %s did not take effect; not rewriting/restarting again", o.UnitPath)}
 	}
-
-	if err := writeFileAtomic(o.UnitPath, []byte(desired), 0o644); err != nil {
-		return ReconcileResult{UnitError, fmt.Sprintf("write %s: %v", o.UnitPath, err)}
+	if o.DryRun {
+		return ReconcileResult{UnitStale, "unit predates the current template"}
 	}
+
+	// Marker first: if it cannot be written the unit is untouched, and if the rewrite
+	// later fails to take effect the marker is the durable evidence for the next run.
 	if err := os.MkdirAll(filepath.Dir(o.MarkerPath), 0o700); err != nil {
 		return ReconcileResult{UnitError, fmt.Sprintf("create marker dir: %v", err)}
 	}
 	if err := os.WriteFile(o.MarkerPath, []byte(hash+"\n"), 0o600); err != nil {
 		return ReconcileResult{UnitError, fmt.Sprintf("write marker %s: %v", o.MarkerPath, err)}
+	}
+	if err := writeFileAtomic(o.UnitPath, []byte(desired), 0o644); err != nil {
+		return ReconcileResult{UnitError, fmt.Sprintf("write %s: %v", o.UnitPath, err)}
 	}
 
 	run := o.Run
@@ -130,6 +137,11 @@ func ReconcileUnit(o ReconcileOptions) ReconcileResult {
 		args = []string{"--user", "daemon-reload"}
 	}
 	if out, err := run("systemctl", args...); err != nil {
+		// systemd still holds the old definition: put the original bytes back so disk
+		// and daemon agree; the kept marker makes the next run a loop-guard error.
+		if rerr := writeFileAtomic(o.UnitPath, raw, 0o644); rerr != nil {
+			return ReconcileResult{UnitError, fmt.Sprintf("daemon-reload: %v %s; restore %s: %v", err, out, o.UnitPath, rerr)}
+		}
 		return ReconcileResult{UnitError, fmt.Sprintf("daemon-reload: %v %s", err, out)}
 	}
 	return ReconcileResult{State: UnitReconciled, Detail: "rewrote " + o.UnitPath}

@@ -242,3 +242,107 @@ func TestReconcileErrors(t *testing.T) {
 		t.Fatalf("reload failure: %+v", res)
 	}
 }
+
+func TestReconcileDaemonReloadFailureRestoresOriginalAndNextRunErrors(t *testing.T) {
+	bothScopes(t, func(t *testing.T, user bool) {
+		e := newReconcileEnv(t)
+		legacy := mustRender(t, legacyTpl(user), reconcileTestBin)
+		e.write(t, legacy)
+		e.run.on(argv(base(user), "daemon-reload"), "", errors.New("boom"))
+		res := ReconcileUnit(e.opts(user, false))
+		if res.State != "error" || !strings.Contains(res.Detail, "boom") {
+			t.Fatalf("res = %+v", res)
+		}
+		if e.read(t) != legacy {
+			t.Fatal("original bytes not restored")
+		}
+		res = ReconcileUnit(e.opts(user, false))
+		if res.State != "error" || !strings.Contains(res.Detail, "did not take effect") {
+			t.Fatalf("next run = %+v", res)
+		}
+	})
+}
+
+func TestReconcileMarkerWriteFailureLeavesUnitUntouched(t *testing.T) {
+	e := newReconcileEnv(t)
+	legacy := mustRender(t, legacySystemUnitTemplateV1, reconcileTestBin)
+	e.write(t, legacy)
+	// marker's parent is a regular file, so it cannot be created
+	blocker := filepath.Join(e.dir, "state")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := ReconcileUnit(e.opts(false, false))
+	if res.State != "error" {
+		t.Fatalf("res = %+v", res)
+	}
+	if e.read(t) != legacy || len(e.run.calls) != 0 {
+		t.Fatal("unit touched despite marker failure")
+	}
+}
+
+func TestReconcileDryRunLoopGuardReportsError(t *testing.T) {
+	bothScopes(t, func(t *testing.T, user bool) {
+		e := newReconcileEnv(t)
+		legacy := mustRender(t, legacyTpl(user), reconcileTestBin)
+		e.write(t, legacy)
+		desired := mustRender(t, currentTpl(user), reconcileTestBin)
+		os.MkdirAll(filepath.Dir(e.marker), 0o700)
+		os.WriteFile(e.marker, []byte(sha(desired)+"\n"), 0o600)
+		res := ReconcileUnit(e.opts(user, true))
+		if res.State != "error" || !strings.Contains(res.Detail, "did not take effect") {
+			t.Fatalf("res = %+v", res)
+		}
+		if e.read(t) != legacy || len(e.run.calls) != 0 {
+			t.Fatal("dry run wrote")
+		}
+	})
+}
+
+func TestReconcileDryRunKeepsMarkerWhenCurrent(t *testing.T) {
+	e := newReconcileEnv(t)
+	e.write(t, mustRender(t, systemdSystemUnitTemplate, reconcileTestBin))
+	os.MkdirAll(filepath.Dir(e.marker), 0o700)
+	os.WriteFile(e.marker, []byte("x\n"), 0o600)
+	res := ReconcileUnit(e.opts(false, true))
+	if res.State != "current" {
+		t.Fatalf("res = %+v", res)
+	}
+	if _, err := os.Stat(e.marker); err != nil {
+		t.Fatalf("dry run removed marker: %v", err)
+	}
+}
+
+func TestReconcileSymlinkedUnitIsDrifted(t *testing.T) {
+	e := newReconcileEnv(t)
+	target := filepath.Join(e.dir, "real.service")
+	legacy := mustRender(t, legacySystemUnitTemplateV1, reconcileTestBin)
+	if err := os.WriteFile(target, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Dir(e.unit), 0o755)
+	if err := os.Symlink(target, e.unit); err != nil {
+		t.Fatal(err)
+	}
+	res := ReconcileUnit(e.opts(false, false))
+	if res.State != "drifted" || !strings.Contains(res.Detail, "symlink") {
+		t.Fatalf("res = %+v", res)
+	}
+	if fi, _ := os.Lstat(e.unit); fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("symlink replaced")
+	}
+	if b, _ := os.ReadFile(target); string(b) != legacy || len(e.run.calls) != 0 {
+		t.Fatal("touched")
+	}
+}
+
+func TestDeployUnitMatchesSystemTemplate(t *testing.T) {
+	want := mustRender(t, systemdSystemUnitTemplate, reconcileTestBin)
+	got, err := os.ReadFile(filepath.Join("..", "..", "deploy", "agentpod-node.service"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatal("deploy/agentpod-node.service drifted from the system template; regenerate it (render with BinaryPath /usr/local/bin/agentpod-node)")
+	}
+}

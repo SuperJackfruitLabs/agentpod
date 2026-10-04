@@ -70,7 +70,7 @@ func TestReconcileUnitAtStartup(t *testing.T) {
 		if !c.scopeOK && reconciled != 0 {
 			t.Errorf("reconciled without scope")
 		}
-		if c.wantExit && !strings.Contains(logs[0], "restarting") {
+		if c.wantExit && (len(logs) == 0 || !strings.Contains(logs[0], "restarting")) {
 			t.Errorf("log: %v", logs)
 		}
 	}
