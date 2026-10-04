@@ -90,3 +90,16 @@ func TestRewriteHandlesTwoLinesInOneFrame(t *testing.T) {
 		t.Fatalf("want 1 span, got %d", len(sr.Ended()))
 	}
 }
+
+func TestRewriteIsAPassThroughWhenTelemetryIsOff(t *testing.T) {
+	// No recorder installed: the global provider is the non-recording default.
+	in := line("session/prompt", `,"_meta":{"traceparent":"`+tp+`"}`)
+	want := append([]byte(nil), in...)
+	out := Rewrite(in, "acp_node_1")
+	if !bytes.Equal(out, want) {
+		t.Fatalf("bytes changed:\n%s\n%s", want, out)
+	}
+	if &out[0] != &in[0] || len(out) != len(in) {
+		t.Fatal("expected the very same slice back when telemetry is off")
+	}
+}

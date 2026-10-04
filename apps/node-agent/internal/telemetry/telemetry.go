@@ -119,6 +119,8 @@ func Setup(ctx context.Context, cfg Config) (func(context.Context) error, error)
 	if err != nil {
 		return nil, err
 	}
+	// Create the series at 0 so it exists from the first export.
+	dropped.Add(ctx, 0)
 	texp, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpointURL(cfg.Endpoint+"/v1/traces"),
 		otlptracehttp.WithTimeout(10*time.Second),

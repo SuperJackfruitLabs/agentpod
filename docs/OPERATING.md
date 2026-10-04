@@ -1690,8 +1690,22 @@ The agent asked for permission and is waiting for a person. The question is on t
 
 ## 10. Telemetry
 
-node-agent reads the same variables from `/etc/agentpod-node/otel.env` (system service) or
+The node-agent exports OpenTelemetry traces and metrics over OTLP/HTTP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set (for example `http://127.0.0.1:4318`). It is off, with
+no change in behaviour, when that variable is unset or `OTEL_SDK_DISABLED=true`. It emits a
+SERVER span per broker verb that arrives carrying `_meta` (continuing the hub's trace),
+`acp.forward session/new` and `acp.forward session/prompt` PRODUCER spans where it hands the
+trace context to the harness, and the `otel.spans.dropped` counter
+(`otel_spans_dropped_total`), which counts spans dropped because the bounded export queue
+was full. No prompt, message or tool content goes into any span. `acp.attach` and
+`term.attach` verb spans last for the whole stream, so they export only when it ends.
+
+Linux nodes read the variables from `/etc/agentpod-node/otel.env` (system service) or
 `~/.config/agentpod-node/otel.env` (user service), normally one line:
 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Only hosts with a collector (infra,
 guild) set it. A unit installed before this release does not read the file until
-`apn service install` rewrites it.
+`apn service install` rewrites it. macOS (launchd) nodes have no env-file hook, so
+telemetry is not available there.
+
+With the collector down, otel-go logs one line per failed export (at most about every 2 s
+while spans are flowing); the node keeps working and the queue drops what it cannot send.
