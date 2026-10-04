@@ -76,10 +76,29 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 			continue
 		}
 		where := hermesConfigPath[id]
-		v, found := yamlScalar(data, where[0], where[1])
+		v, state := yamlValue(data, where[0], where[1])
 		cv := ConfigValue{SettingID: id, Readable: true}
-		if found {
+		switch state {
+		case yamlScalarValue:
 			cv.Observed = v
+		case yamlNotScalar:
+			// PRESENT, and not a shape this reader can speak for — a list or a
+			// nested map. Reported as unreadable, never as absent: "the key is
+			// not in the document" would be a false sentence about a document
+			// that contains it, and handing back an inline list's raw text
+			// would compare as drift forever.
+			//
+			// `approvals.command_allowlist` is the one registered setting this
+			// reaches today. It stays registered — a later plan needs it — and
+			// the limitation is stated here rather than hidden behind a wrong
+			// state.
+			cv.Readable = false
+			cv.Reason = fmt.Sprintf(
+				"%s.%s is present in %s but holds a list or a nested map; this reader reports scalars only",
+				where[0], where[1], path,
+			)
+		case yamlAbsent:
+			// Readable, with no value: the caller decides what an absent key means.
 		}
 		out = append(out, cv)
 	}

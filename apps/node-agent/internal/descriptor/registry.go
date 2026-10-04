@@ -47,7 +47,7 @@ func (r *Registry) DetectAll() []Station {
 				if r.pluginManagement && d.Harness() == PluginManagementHarness && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "plugins.manage")
 				}
-				if r.configManagement && configurable && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+				if r.configManagement && configurable && !isCompositeRoot(station) && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "config.manage")
 				}
 				all = append(all, station)
@@ -55,6 +55,24 @@ func (r *Registry) DetectAll() []Station {
 		}
 	}
 	return all
+}
+
+// isCompositeRoot reports whether station stands for a GROUP of stations rather
+// than for a configuration document of its own.
+//
+// A composite root (Hermes's "hermes", OpenClaw's equivalent) carries the
+// harness HOME as its workspace path, which is nobody's profile. `config.manage`
+// must not be advertised on it: `ObserveConfig` refuses the root by name, and a
+// station advertising a capability its own node then refuses is read by the hub
+// as a station it could not reach — which labels every declared setting on a
+// perfectly readable document `unreadable`, for every Hermes host in the fleet,
+// on the ordinary fleet-level declaration.
+//
+// Parentless AND composite, not composite alone: Hermes and OpenClaw give their
+// PROFILE stations Kind "composite" as well, and those profiles are exactly the
+// stations whose document this feature reads. Only the root has no parent.
+func isCompositeRoot(s Station) bool {
+	return s.Kind == "composite" && s.ParentKey == nil
 }
 
 // EnableNativeSkillManagement is called only when the daemon's operator
