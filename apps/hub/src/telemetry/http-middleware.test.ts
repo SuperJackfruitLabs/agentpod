@@ -69,6 +69,14 @@ describe("HTTP server spans", () => {
     expect(JSON.stringify([s.attributes, s.events, s.status])).not.toContain("CANARY-CONTENT-7f3a");
   });
 
+  test("a malformed percent-escape in an id segment leaves the response alone and ends one span", async () => {
+    const res = await app.request("/api/evidence/runs/x/%E0%A4%A");
+    expect(res.status).toBe(200);
+    const s = only();
+    expect(s.attributes["http.response.status_code"]).toBe(200);
+    expect(s.attributes["run.id"]).toBe("%E0%A4%A");
+  });
+
   test("health checks are not traced", async () => {
     await app.request("/health");
     expect(t.spans()).toHaveLength(0);
@@ -84,5 +92,6 @@ describe("idAttributesFor", () => {
       "attempt.id": "attempt_9",
     });
     expect(idAttributesFor("/api/stations/:id", "/api/stations/s")).toEqual({});
+    expect(() => idAttributesFor("/runs/:runId", "/runs/%E0%A4%A")).not.toThrow();
   });
 });

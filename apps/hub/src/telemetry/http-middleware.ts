@@ -30,6 +30,15 @@ export function routeTemplate(c: HonoContext): string | null {
   return null;
 }
 
+/** A malformed escape (`%E0%A4%A`) must not throw: keep the raw segment. */
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
 /** Ids a route is about, read from the path at the template's param positions. */
 export function idAttributesFor(template: string, path: string): Record<string, string> {
   const t = template.split("/");
@@ -40,7 +49,7 @@ export function idAttributesFor(template: string, path: string): Record<string, 
     if (!seg.startsWith(":")) continue;
     const name = seg.slice(1).replace(/\{.*\}$/, "").replace(/\?$/, "");
     const attr = ID_PARAMS[name];
-    if (attr && p[i]) out[attr] = decodeURIComponent(p[i]!);
+    if (attr && p[i]) out[attr] = safeDecode(p[i]!);
   }
   return out;
 }
@@ -63,24 +72,39 @@ export function httpServerSpans(): MiddlewareHandler {
       threw = true;
       throw err;
     } finally {
-      const route = routeTemplate(c);
-      const status = threw ? 500 : c.res.status;
-      if (route) {
-        span.updateName(`${method} ${route}`);
-        span.setAttribute("http.route", route);
-        span.setAttributes(idAttributesFor(route, c.req.path));
+      // Telemetry never replaces the response or the original error, and always ends the span.
+      let route: string | null = null;
+      let status = 500;
+      try {
+        route = routeTemplate(c);
+        status = threw ? 500 : c.res.status;
+        if (route) {
+          span.updateName(`${method} ${route}`);
+          span.setAttribute("http.route", route);
+          span.setAttributes(idAttributesFor(route, c.req.path));
+        }
+        span.setAttribute("http.response.status_code", status);
+        if (status >= 500) {
+          span.setAttribute("error.type", String(status));
+          span.setStatus({ code: SpanStatusCode.ERROR });
+        }
+      } catch {
+        // dropped on purpose
       }
-      span.setAttribute("http.response.status_code", status);
-      if (status >= 500) {
-        span.setAttribute("error.type", String(status));
-        span.setStatus({ code: SpanStatusCode.ERROR });
+      try {
+        span.end();
+      } catch {
+        // dropped on purpose
       }
-      span.end();
-      instruments().httpDuration.record((performance.now() - started) / 1000, {
-        "http.request.method": method,
-        "http.route": route ?? "unmatched",
-        "http.response.status_code": status,
-      });
+      try {
+        instruments().httpDuration.record((performance.now() - started) / 1000, {
+          "http.request.method": method,
+          "http.route": route ?? "unmatched",
+          "http.response.status_code": status,
+        });
+      } catch {
+        // dropped on purpose
+      }
     }
   };
 }
