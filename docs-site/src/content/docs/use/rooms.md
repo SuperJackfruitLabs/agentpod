@@ -81,9 +81,27 @@ The hub is the **push gateway**. A client registers a pusher with the homeserver
 calls the hub for every event that should reach a phone, and the hub turns each call into one push
 per device.
 
-A push carries the room, the event id and an unread count — **never message content**. The device
-fetches and decrypts the event itself. A push that carried the text would put an encrypted room's
-contents through a service that has no business seeing them.
+A **message** push carries the room, the event id and an unread count — not the message. The
+device fetches and decrypts the event itself and words the notification locally. A push that
+carried the text would put an encrypted room's contents through a service that has no business
+seeing them.
+
+One addition, and it is counts rather than text: the push for an agent's answer that ended a turn
+with tool calls also carries how many steps ran and how many failed, which is what a client's
+widget recap reads.
+
+### The one exception: the fleet Live Activity
+
+By operator decision of 2026-09-29, the Lock Screen fleet card is **pushed by the hub**, and those
+pushes carry **agent names, the current step's title, and a pending decision's question and option
+labels in plaintext** — readable by Apple in transit.
+
+That is a deliberate widening of the gateway's otherwise strict line, taken so the card can say
+something useful rather than "an agent needs you". It is the only place it applies: message pushes
+still carry ids only, and nothing else changed.
+
+A permission request or a gate the hub posted is also tagged on the push as time-sensitive, so it
+reaches a person through Focus — the tag, not the text.
 
 Pushes are configured per deployment and are optional: a hub with no push configuration answers
 that route with a `404` and still boots. Pushes are not worth taking a control plane down for.
