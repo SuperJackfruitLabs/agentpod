@@ -8,7 +8,18 @@ import { SkillNativePlanParams, SkillNativeApplyParams, SkillNativeOperationPara
 import { SkillPlacementPlan, SkillPlacementReceipt } from "./skill-placement";
 import { PluginPlanParams, PluginApplyParams, PluginInspectParams, PluginOperationPlan, PluginOperationReceipt, PluginOperationResult } from "./plugin-operation";
 
-export const RequestMsg = z.object({ type: z.literal("req"), id: z.string(), verb: z.string(), params: z.unknown() });
+/**
+ * `_meta` carries W3C trace context (superwitness C2). Optional: a node that predates it
+ * ignores the key, and a request made outside any trace has none.
+ */
+export const TraceMetaSchema = z.object({ traceparent: z.string(), tracestate: z.string().optional() });
+export const RequestMsg = z.object({
+  type: z.literal("req"),
+  id: z.string(),
+  verb: z.string(),
+  params: z.unknown(),
+  _meta: TraceMetaSchema.optional(),
+});
 export const ResponseMsg = z.object({ type: z.literal("res"), id: z.string(), ok: z.boolean(), data: z.unknown().optional(), error: z.string().optional() });
 export const StreamMsg = z.object({ type: z.literal("stream"), id: z.string(), seq: z.number().int(), chunk: z.string().nullable(), eof: z.boolean(), enc: z.enum(["utf8","base64"]).optional() });
 export const CancelMsg = z.object({ type: z.literal("cancel"), id: z.string() });

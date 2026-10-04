@@ -1685,3 +1685,31 @@ The agent asked for permission and is waiting for a person. The question is on t
 **Hub startup fails with migration error:**
 - Confirm `DATABASE_URL` is correct and Postgres is running: `systemctl status postgresql`.
 - Run migrations manually: `cd /opt/agentpod/apps/hub && bun run db:migrate`.
+
+## 10. Telemetry
+
+The hub exports OpenTelemetry traces, metrics and logs over OTLP/HTTP when
+`OTEL_EXPORTER_OTLP_ENDPOINT` is set in `/etc/agentpod/hub.env`, normally to the host
+collector at `http://127.0.0.1:4318`. Unset, or with `OTEL_SDK_DISABLED=true`, nothing
+is loaded and nothing changes.
+
+- Every claimed superpipeline run is one trace with a `dispatch` root span. The standard
+  agent spans (`attempt`, `turn`, `tool_call`, `permission`) are built from the ACP
+  events the hub already stores. They carry ids and sequence numbers, never content.
+  The transcript stays in `acp_events`.
+- Export never blocks. When the queue (2048 spans) is full, spans are dropped and counted
+  as `otel_spans_dropped_total`.
+- Tuning, all optional: `OTEL_LOGS_EXPORTER=none` stops exporting log records (traces and
+  metrics continue); `OTEL_BSP_MAX_QUEUE_SIZE` sets the span and log queue (default 2048);
+  `OTEL_EXPORTER_OTLP_TIMEOUT` sets the per-export timeout in milliseconds (default 10000).
+- Metrics, with explicit dimensions only (no run, attempt or station ids):
+  `bridge.dispatches{dispatch.status}`, `http.server.request.duration`
+  (`http.request.method`, `http.route`, `http.response.status_code`), and
+  `otel.spans.dropped`, which a Prometheus gateway exposes as `otel_spans_dropped_total`.
+- The boot line says which state the hub is in: `telemetry: exporting OTLP to <endpoint>` or
+  `telemetry: (disabled)`. A malformed endpoint, such as one with no scheme
+  (`127.0.0.1:4318` instead of `http://127.0.0.1:4318`), does not stop the hub: it logs a
+  `telemetry: disabled, could not start the exporters` warning and runs with telemetry off.
+- `AGENTPOD_ACP_TRACE_META=false` stops the hub sending `_meta.traceparent` on ACP
+  `session/new` and `session/prompt`, for a harness that rejects the key. It takes
+  effect on the next hub restart, and no node-agent needs to change.

@@ -65,9 +65,13 @@
  *    never reclaimed. See `askTheHuman`.
  */
 
+import { context, trace } from "@opentelemetry/api";
 import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type AcpMcpServer, type AcpSessionMode } from "@agentpod/contract";
 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
+import type { AgentSpanRecorder } from "../../telemetry/agent-spans";
+import { attemptSpanFacts } from "../../telemetry/attempt-facts";
+import { inDispatchSpan } from "../../telemetry/dispatch-span";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
 import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
@@ -297,7 +301,7 @@ async function probeReadiness(
 }
 
 export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
-  const { client, acp, agent, tenantId, source } = deps;
+  const { client, acp, agent } = deps;
   const log = deps.log ?? (() => {});
 
   // ─── requirement 4a: do not claim work there is nowhere to run ─────────────
@@ -312,10 +316,22 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
     return { status: "not-ready", reason };
   }
 
+  const claimedAt = new Date();
   const work = await client.claim({ maxConcurrency: agent.maxConcurrency, profileKey: agent.profileKey });
   // A bare "not claimed" covers an empty queue, an over-budget board and an
   // agent at its concurrency cap alike. superpipeline does not say which.
   if (!work) return { status: "idle" };
+
+  return inDispatchSpan(
+    { runId: work.runId, boardId: agent.boardId, cardId: work.card.id, source: deps.source, stationId: agent.stationId, startTime: claimedAt },
+    (spans) => workClaimed(deps, work, spans),
+  );
+}
+
+/** Everything after a successful claim. Runs inside the run's `dispatch` span. */
+async function workClaimed(deps: DispatchDeps, work: ClaimedWork, spans: AgentSpanRecorder): Promise<DispatchResult> {
+  const { client, acp, agent, tenantId, source } = deps;
+  const log = deps.log ?? (() => {});
 
   const key: DispatchKey = {
     tenantId,
@@ -447,7 +463,17 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       }
     };
 
-    unsubscribe = acp.subscribe(session.id, (event) => {
+    // In production the broker's WebSocket handler fires this outside the dispatch span's async
+    // context, so run the body inside the context captured here: board calls queued from it keep
+    // the run's traceparent.
+    const dispatchCtx = context.active();
+    const recording = trace.getSpan(dispatchCtx)?.isRecording() === true;
+    unsubscribe = acp.subscribe(session.id, (event) => context.with(dispatchCtx, () => {
+      try {
+        spans.onEvent(event);
+      } catch {
+        // products never block on telemetry
+      }
       lastSeq = Math.max(lastSeq, event.seq);
       // Every event, before any branch drops one — this is the number an
       // operator can cross-check against `SELECT count(*) FROM acp_events`.
@@ -476,7 +502,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
             }
           }
           attemptFingerprint = fingerprint;
-          attemptId = await startAttempt({
+          const startedId = await startAttempt({
             ...key,
             sessionId: session.id,
             stationId: agent.stationId,
@@ -484,6 +510,15 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
             fingerprint,
             agentPrincipalId,
           });
+          attemptId = startedId;
+          try {
+            // With telemetry off nothing records the attempt: skip the extra read entirely.
+            if (!recording) return;
+            const facts = await attemptSpanFacts(startedId).catch(() => ({ fingerprintDigest: "unknown", harnessName: "unknown" }));
+            spans.openAttempt({ attemptId: startedId, sessionId: session.id, startSeq: event.seq, ...facts });
+          } catch {
+            // products never block on telemetry
+          }
         });
       }
 
@@ -507,7 +542,7 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
       }
 
       post(coalescer.push(event));
-    });
+    }));
     let attemptStarted = false;
 
     // Started before the turn and stopped only when every segment is over —

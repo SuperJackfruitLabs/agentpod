@@ -88,6 +88,8 @@ import { enabledProviders } from './services/provisioner/registry.ts';
 import { startNodeSweeper } from './services/node-sweeper.ts';
 import { startSuperpipelineBridge } from './services/bridge/loop.ts';
 import { createGracefulShutdown } from './services/shutdown.ts';
+import { httpServerSpans } from './telemetry/http-middleware.ts';
+import { initTelemetry, readTelemetryConfig, shutdownTelemetry } from './telemetry/otel.ts';
 import { mcpUnauthorized, resolveMcpCaller } from './mcp/auth.ts';
 import { handleMcpRequest } from './mcp/server.ts';
 import { createMatrixBridge, matrixBridgeConfig, startMatrixBridge } from './services/matrix-as/index.ts';
@@ -106,6 +108,10 @@ import { createMissionRoutes } from './routes/missions.ts';
 import { reconcileOnBoot as reconcileAcpSessions } from './services/acp-sessions.ts';
 
 validateConfig();
+
+const telemetryConfig = readTelemetryConfig();
+const telemetry = await initTelemetry(telemetryConfig);
+console.log('telemetry:', telemetry ? `exporting OTLP to ${telemetryConfig.endpoint}` : '(disabled)');
 
 console.log('Initializing database...');
 await initDatabase();
@@ -127,6 +133,8 @@ const errorLogger = createLogger('error-handler');
 const matrixBridge = createMatrixBridge();
 
 const app = new Hono()
+  // Before the request logger, so a span covers every later middleware too.
+  .use('*', httpServerSpans())
   // Middleware
   //
   // The print function is not decoration. The homeserver authenticates appservice
@@ -687,6 +695,7 @@ const shutdown = createGracefulShutdown({
   stopSweeper: stopNodeSweeper,
   stopBridge: bridge?.stop.bind(bridge),
   closeMatrixBridge: matrixBridge?.close.bind(matrixBridge),
+  flushTelemetry: () => shutdownTelemetry(3_000),
 });
 process.on('SIGINT', () => { void shutdown('SIGINT'); });
 process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
