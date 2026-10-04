@@ -464,6 +464,17 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
             fingerprintWithin(() => resolve(at)),
             within(() => resolveOccupant(at), null),
           ]);
+          if (agentPrincipalId === null) {
+            // Null covers no occupant, a lookup that timed out and one that threw; the resolver logs
+            // a throw itself. Say so here so an operator can tell why agent_principal_id is empty.
+            try {
+              log("attempt opened without an agent principal (no occupant, or lookup late/failed)", {
+                station: agent.stationId,
+              });
+            } catch {
+              // a broken sink must never cost the attempt row
+            }
+          }
           attemptFingerprint = fingerprint;
           attemptId = await startAttempt({
             ...key,

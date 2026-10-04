@@ -116,6 +116,20 @@ describe("resolveStationOccupant", () => {
     await rawSql`DELETE FROM principals WHERE id = ${prn}`;
   });
 
+  test("an occupant id that is not a well-formed principal id is none, not a value the attempt insert would reject", async () => {
+    // principals.id is only CHECKed LIKE 'prn\\_%'; acp_runs.agent_principal_id is CHECKed ^prn_[0-9a-f]{20}$.
+    const prn = await createPrincipal({ kind: "agent", handle: `station-fp-bad-${crypto.randomUUID().slice(0, 8)}` });
+    const bad = "prn_NOT-HEX";
+    await rawSql`UPDATE principals SET id = ${bad} WHERE id = ${prn}`;
+    await rawSql`UPDATE stations SET principal_id = ${bad} WHERE id = ${STATION}`;
+    try {
+      expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBeNull();
+    } finally {
+      await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
+      await rawSql`DELETE FROM principals WHERE id = ${bad}`;
+    }
+  });
+
   test("an unknown station has no occupant, and is not an error", async () => {
     expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, `station_${crypto.randomUUID()}`)).toBeNull();
   });

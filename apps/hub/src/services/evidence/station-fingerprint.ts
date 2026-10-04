@@ -13,6 +13,7 @@
  *   - harness_version, model: "unknown", reported_by "hub". No harness reports either to the hub;
  *     the node probes versions for skill gating but never sends them, and ACP carries no model.
  */
+import { PrincipalId } from "@agentpod/contract";
 import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../../db/drizzle";
@@ -92,7 +93,15 @@ export async function resolveStationOccupant(tenantId: string, stationId: string
       .from(stations)
       .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
       .limit(1);
-    return row?.principalId ?? null;
+    const id = row?.principalId ?? null;
+    if (id === null) return null;
+    // principals.id is only CHECKed `LIKE 'prn\_%'`; acp_runs.agent_principal_id is CHECKed to the
+    // strict shape. A looser id would make startAttempt throw and lose the attempt row.
+    if (!PrincipalId.safeParse(id).success) {
+      log.warn("occupant id is not a well-formed principal id; recording none", { stationId, principalId: id });
+      return null;
+    }
+    return id;
   } catch (err) {
     log.warn("occupant unresolved; recording none", { stationId, error: String(err) });
     return null;

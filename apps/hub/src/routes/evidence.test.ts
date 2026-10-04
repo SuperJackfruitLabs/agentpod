@@ -194,7 +194,9 @@ describe("GET /api/evidence/attempts/:attemptId", () => {
 
   test("an unknown attempt is 404, and the same authorization applies", async () => {
     expect((await get(`/api/evidence/attempts/attempt_${crypto.randomUUID()}`, await serviceToken(reader))).status).toBe(404);
-    expect((await get(`/api/evidence/attempts/${firstAttempt}`)).status).toBe(401);
+    const anon = await get(`/api/evidence/attempts/${firstAttempt}`);
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toEqual({ error: "unauthorized" });
   });
 });
 
@@ -272,8 +274,12 @@ describe("who ran it, and who a principal is", () => {
   });
 
   test("the same authorization applies: 401 without a token, 403 without evidence:read", async () => {
-    expect((await get(`/api/evidence/principals/${agentPrn}`)).status).toBe(401);
+    const anon = await get(`/api/evidence/principals/${agentPrn}`);
+    expect(anon.status).toBe(401);
+    expect(await anon.json()).toEqual({ error: "unauthorized" });
     const plain = await createPrincipal({ kind: "service", handle: `ev-plain2-${RUN}` });
-    expect((await get(`/api/evidence/principals/${agentPrn}`, await serviceToken(plain))).status).toBe(403);
+    const denied = await get(`/api/evidence/principals/${agentPrn}`, await serviceToken(plain));
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: "forbidden" });
   });
 });
