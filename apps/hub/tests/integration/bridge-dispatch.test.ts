@@ -398,6 +398,25 @@ describe("a card worked start to finish", () => {
     expect(run!.fingerprintDigest).toBe(makeFingerprint({}, "hub").digest);
   });
 
+  test("the attempt records the agent principal the occupant seam resolved", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    await runOnce(deps(board.client, acp.port, undefined, { occupant: async () => "prn_0123456789abcdef0abc" }));
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.agentPrincipalId).toBe("prn_0123456789abcdef0abc");
+  });
+
+  test("an occupant seam that throws still opens the attempt, with no principal", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { occupant: async () => { throw new Error("db down"); } }),
+    );
+    expect(result.status).toBe("reported");
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.agentPrincipalId).toBeNull();
+  });
+
   test("what the agent said reaches the board, coalesced", async () => {
     const board = fakeBoard(happyBoard);
     // 300 chunks of one sentence: the Hermes shape, in miniature.

@@ -70,7 +70,7 @@ import { CARD_PROMPT_VERSION, CardPrompt, renderCardPrompt, type AcpEvent, type 
 import { ActivityCoalescer, type BoardActivity } from "./coalesce";
 import { isControlPairDenied } from "../control-pair";
 import type { Fingerprint } from "../evidence/fingerprint";
-import { fingerprintWithin, resolveStationFingerprint } from "../evidence/station-fingerprint";
+import { fingerprintWithin, resolveStationFingerprint, resolveStationOccupant, within } from "../evidence/station-fingerprint";
 import { DEFAULT_PERMISSION_WAIT_MS, type BridgeAgentConfig } from "./config";
 import { isAutoAnswered, selectedOptionId } from "./permission";
 import {
@@ -147,6 +147,8 @@ export interface DispatchDeps {
    * ACP turn itself is never held.
    */
   fingerprint?: (input: { tenantId: string; stationId: string }) => Promise<Fingerprint>;
+  /** Who the station runs as (contract C5). A seam; defaults to `resolveStationOccupant`, bounded by `within`. */
+  occupant?: (input: { tenantId: string; stationId: string }) => Promise<string | null>;
   log?: (message: string, meta?: Record<string, unknown>) => void;
 }
 
@@ -456,13 +458,31 @@ export async function runOnce(deps: DispatchDeps): Promise<DispatchResult> {
         // The run join, written as soon as the attempt has a first seq.
         queue(async () => {
           const resolve = deps.fingerprint ?? ((i) => resolveStationFingerprint(i.tenantId, i.stationId));
-          attemptFingerprint = await fingerprintWithin(() => resolve({ tenantId, stationId: agent.stationId }));
+          const resolveOccupant = deps.occupant ?? ((i) => resolveStationOccupant(i.tenantId, i.stationId));
+          const at = { tenantId, stationId: agent.stationId };
+          const [fingerprint, agentPrincipalId] = await Promise.all([
+            fingerprintWithin(() => resolve(at)),
+            within(() => resolveOccupant(at), null),
+          ]);
+          if (agentPrincipalId === null) {
+            // Null covers no occupant, a lookup that timed out and one that threw; the resolver logs
+            // a throw itself. Say so here so an operator can tell why agent_principal_id is empty.
+            try {
+              log("attempt opened without an agent principal (no occupant, or lookup late/failed)", {
+                station: agent.stationId,
+              });
+            } catch {
+              // a broken sink must never cost the attempt row
+            }
+          }
+          attemptFingerprint = fingerprint;
           attemptId = await startAttempt({
             ...key,
             sessionId: session.id,
             stationId: agent.stationId,
             startSeq: event.seq,
-            fingerprint: attemptFingerprint,
+            fingerprint,
+            agentPrincipalId,
           });
         });
       }

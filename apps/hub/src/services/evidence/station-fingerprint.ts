@@ -13,6 +13,7 @@
  *   - harness_version, model: "unknown", reported_by "hub". No harness reports either to the hub;
  *     the node probes versions for skill gating but never sends them, and ACP carries no model.
  */
+import { PrincipalId } from "@agentpod/contract";
 import { eq } from "drizzle-orm";
 
 import { db, rawSql } from "../../db/drizzle";
@@ -84,18 +85,51 @@ export async function resolveStationFingerprint(tenantId: string, stationId: str
   }
 }
 
+/** The agent principal occupying a station right now, or null. Never throws. */
+export async function resolveStationOccupant(tenantId: string, stationId: string): Promise<string | null> {
+  try {
+    const [row] = await db
+      .select({ principalId: stations.principalId })
+      .from(stations)
+      .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
+      .limit(1);
+    const id = row?.principalId ?? null;
+    if (id === null) return null;
+    // principals.id is only CHECKed `LIKE 'prn\_%'`; acp_runs.agent_principal_id is CHECKed to the
+    // strict shape. A looser id would make startAttempt throw and lose the attempt row.
+    if (!PrincipalId.safeParse(id).success) {
+      log.warn("occupant id is not a well-formed principal id; recording none", { stationId, principalId: id });
+      return null;
+    }
+    return id;
+  } catch (err) {
+    log.warn("occupant unresolved; recording none", { stationId, error: String(err) });
+    return null;
+  }
+}
+
+/** Bound any attempt-time lookup: a late or failed answer becomes `fallback`. */
+export async function within<T>(
+  resolve: () => Promise<T>,
+  fallback: T,
+  timeoutMs: number = FINGERPRINT_TIMEOUT_MS,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((done) => {
+    timer = setTimeout(() => done(fallback), timeoutMs);
+  });
+  try {
+    // `Promise.resolve().then` so a resolver that throws synchronously is bounded too.
+    return await Promise.race([Promise.resolve().then(resolve).catch(() => fallback), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Bound any resolver: a late or failed answer becomes the all-unknown fingerprint. */
 export async function fingerprintWithin(
   resolve: () => Promise<Fingerprint>,
   timeoutMs: number = FINGERPRINT_TIMEOUT_MS,
 ): Promise<Fingerprint> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const late = new Promise<Fingerprint>((done) => {
-    timer = setTimeout(() => done(makeFingerprint({}, "hub")), timeoutMs);
-  });
-  try {
-    return await Promise.race([Promise.resolve().then(resolve).catch(() => makeFingerprint({}, "hub")), late]);
-  } finally {
-    clearTimeout(timer);
-  }
+  return within(resolve, makeFingerprint({}, "hub"), timeoutMs);
 }

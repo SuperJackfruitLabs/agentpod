@@ -42,6 +42,8 @@ import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
 import { fleetRoutes } from './routes/fleet.ts';
 // GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
 import { dispatchableRoutes } from './routes/fleet-dispatchable.ts';
+// GET /api/evidence/* — superwitness's reads (contract C5), a hub JWT verified by the route
+import { evidenceRoutes } from './routes/evidence.ts';
 import { enrollmentTokenRoutes } from './routes/enrollment-tokens.ts';
 // Runtime provisioning routes
 import { runtimeRoutes } from './routes/runtimes.ts';
@@ -289,6 +291,12 @@ const app = new Hono()
    * there later cannot quietly pull this path behind the middleware.
    */
   .route('/', dispatchableRoutes)
+  /**
+   * GET /api/evidence/runs/:source/:externalRunId and /api/evidence/attempts/:attemptId —
+   * superwitness's reads (contract C5). A hub JWT, verified by the route itself, so it sits here
+   * ahead of `authMiddleware`, exactly as `dispatchableRoutes` does above.
+   */
+  .route('/', evidenceRoutes)
   /**
    * The MCP endpoint, mounted AHEAD of `authMiddleware` and resolving its own auth.
    *

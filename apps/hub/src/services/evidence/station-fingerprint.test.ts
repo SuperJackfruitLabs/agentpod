@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { makeFingerprint } from "./fingerprint";
-import { fingerprintWithin, profileFromStationKey } from "./station-fingerprint";
+import { fingerprintWithin, profileFromStationKey, within } from "./station-fingerprint";
 
 const ALL_UNKNOWN = makeFingerprint({}, "hub");
 
@@ -41,5 +41,17 @@ describe("fingerprintWithin — an attempt never waits on its fingerprint", () =
   test("a resolver that answers is believed", async () => {
     const f = makeFingerprint({ harness: "hermes", profile: "press", skill_release: "none" }, "hub");
     expect(await fingerprintWithin(async () => f, 1_000)).toEqual(f);
+  });
+});
+
+describe("within — any attempt-time lookup is bounded", () => {
+  test("a lookup that never answers yields the fallback in time", async () => {
+    expect(await within(() => new Promise<string | null>(() => {}), null, 20)).toBeNull();
+  });
+  test("a lookup that throws yields the fallback", async () => {
+    expect(await within(() => Promise.reject(new Error("x")), "fallback", 1_000)).toBe("fallback");
+  });
+  test("an answer is believed, including null", async () => {
+    expect(await within(async () => "prn_0123456789abcdef0123", null, 1_000)).toBe("prn_0123456789abcdef0123");
   });
 });

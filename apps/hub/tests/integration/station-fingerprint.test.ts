@@ -12,8 +12,9 @@ import { db, rawSql } from "../../src/db/drizzle";
 import { nodes } from "../../src/db/schema/nodes";
 import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
-import { appliedSkillRelease, resolveStationFingerprint } from "../../src/services/evidence/station-fingerprint";
+import { appliedSkillRelease, resolveStationFingerprint, resolveStationOccupant } from "../../src/services/evidence/station-fingerprint";
 import { fingerprintDigest } from "../../src/services/evidence/fingerprint";
+import { createPrincipal } from "../../src/services/principals";
 import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
@@ -102,5 +103,34 @@ describe("resolveStationFingerprint", () => {
     const c = await artifact("press", "3");
     await applied("press", "install", c, new Date("2026-10-03T00:00:00Z"));
     expect(await appliedSkillRelease(BOOTSTRAP_TENANT_ID, STATION)).toBe("unknown");
+  });
+});
+
+describe("resolveStationOccupant", () => {
+  test("names the agent principal occupying the station, and null once it is vacated", async () => {
+    const prn = await createPrincipal({ kind: "agent", handle: `station-fp-occ-${crypto.randomUUID().slice(0, 8)}` });
+    await rawSql`UPDATE stations SET principal_id = ${prn} WHERE id = ${STATION}`;
+    expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBe(prn);
+    await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
+    expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBeNull();
+    await rawSql`DELETE FROM principals WHERE id = ${prn}`;
+  });
+
+  test("an occupant id that is not a well-formed principal id is none, not a value the attempt insert would reject", async () => {
+    // principals.id is only CHECKed LIKE 'prn\\_%'; acp_runs.agent_principal_id is CHECKed ^prn_[0-9a-f]{20}$.
+    const prn = await createPrincipal({ kind: "agent", handle: `station-fp-bad-${crypto.randomUUID().slice(0, 8)}` });
+    const bad = "prn_NOT-HEX";
+    await rawSql`UPDATE principals SET id = ${bad} WHERE id = ${prn}`;
+    await rawSql`UPDATE stations SET principal_id = ${bad} WHERE id = ${STATION}`;
+    try {
+      expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBeNull();
+    } finally {
+      await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
+      await rawSql`DELETE FROM principals WHERE id = ${bad}`;
+    }
+  });
+
+  test("an unknown station has no occupant, and is not an error", async () => {
+    expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, `station_${crypto.randomUUID()}`)).toBeNull();
   });
 });
