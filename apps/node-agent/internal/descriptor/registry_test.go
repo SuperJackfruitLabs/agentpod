@@ -2,6 +2,8 @@ package descriptor
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -109,6 +111,42 @@ func TestSafeJoin_AbsolutePath(t *testing.T) {
 	_, err := safeJoin("/workspace", "/etc/passwd")
 	if err == nil {
 		t.Fatal("expected error for absolute path")
+	}
+}
+
+func TestDetectAllAdvertisesConfigManage(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	// Off by default: advertising a capability the operator has not enabled is
+	// how the console offers an action that then refuses.
+	for _, s := range reg.DetectAll() {
+		for _, c := range s.Capabilities {
+			if c == "config.manage" {
+				t.Fatal("config.manage must not be advertised before it is enabled")
+			}
+		}
+	}
+
+	reg.EnableConfigManagement()
+	found := false
+	for _, s := range reg.DetectAll() {
+		for _, c := range s.Capabilities {
+			if c == "config.manage" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("config.manage should be advertised on a Hermes profile station once enabled")
 	}
 }
 

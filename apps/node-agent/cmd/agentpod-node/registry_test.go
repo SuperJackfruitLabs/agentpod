@@ -118,6 +118,43 @@ func TestBuildRegistry_ThreadsClaudeCodeACPKeys(t *testing.T) {
 	}
 }
 
+// ConfigManagement is an operator opt-in threaded straight into the registry
+// at build time (unlike plugin/skill management, which also wrap the gateway
+// handler in run.go): buildRegistry is the one place that can enable it.
+func TestBuildRegistry_EnablesConfigManagement(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, ".hermes", "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	off := buildRegistry(config.Config{})
+	for _, s := range off.DetectAll() {
+		for _, c := range s.Capabilities {
+			if c == "config.manage" {
+				t.Fatal("config.manage must not be advertised when ConfigManagement is unset")
+			}
+		}
+	}
+
+	on := buildRegistry(config.Config{ConfigManagement: true})
+	found := false
+	for _, s := range on.DetectAll() {
+		for _, c := range s.Capabilities {
+			if c == "config.manage" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("config.manage should be advertised once ConfigManagement is enabled")
+	}
+}
+
 // The codex ACP keys are the same escape hatch for the codex-acp adapter. This
 // goes through the production seams (real LookPath, real os.Getenv), so a HOME
 // fixture supplies the ~/.codex/config.toml the station comes from and the

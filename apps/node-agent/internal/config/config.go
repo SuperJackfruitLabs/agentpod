@@ -67,6 +67,10 @@ type Config struct {
 	// PluginManagement lets the Console install and remove the agentpod-live
 	// Hermes plugin through reviewed plans. It is off by default.
 	PluginManagement bool `json:"pluginManagement,omitempty"`
+	// ConfigManagement lets the Console read a registered subset of a
+	// descriptor's own harness configuration (config.manage). It is off by
+	// default.
+	ConfigManagement bool `json:"configManagement,omitempty"`
 	// StationTokens names the stations whose hub token this node keeps fresh on disk, so an
 	// agent can reach a work plane as ITSELF without ever holding the node's credential.
 	// Empty by default: a token that reaches another plane is not something every station

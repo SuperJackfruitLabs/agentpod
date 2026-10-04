@@ -12,6 +12,7 @@ type Registry struct {
 	skillManagement       bool
 	nativeSkillManagement bool
 	pluginManagement      bool
+	configManagement      bool
 }
 
 // NewRegistry returns an empty Registry.
@@ -35,6 +36,7 @@ func (r *Registry) DetectAll() []Station {
 		if err == nil {
 			_, managed := d.(SkillManagementProvider)
 			_, native := d.(NativeSkillReadinessProvider)
+			_, configurable := d.(ConfigManager)
 			for _, station := range stations {
 				if r.skillManagement && managed && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "skills.manage")
@@ -44,6 +46,9 @@ func (r *Registry) DetectAll() []Station {
 				}
 				if r.pluginManagement && d.Harness() == PluginManagementHarness && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
 					station.Capabilities = append(append([]string(nil), station.Capabilities...), "plugins.manage")
+				}
+				if r.configManagement && configurable && station.WorkspacePath != nil && filepath.IsAbs(*station.WorkspacePath) {
+					station.Capabilities = append(append([]string(nil), station.Capabilities...), "config.manage")
 				}
 				all = append(all, station)
 			}
@@ -57,6 +62,11 @@ func (r *Registry) DetectAll() []Station {
 // rechecked during the mutation itself; detection only advertises that the
 // harness has a native-readiness implementation.
 func (r *Registry) EnableNativeSkillManagement() { r.nativeSkillManagement = true }
+
+// EnableConfigManagement is called at startup only when the node's operator
+// configuration permits reading managed settings. Detection then advertises
+// config.manage on stations whose descriptor implements ConfigManager.
+func (r *Registry) EnableConfigManagement() { r.configManagement = true }
 
 // For resolves the Descriptor responsible for key.
 //

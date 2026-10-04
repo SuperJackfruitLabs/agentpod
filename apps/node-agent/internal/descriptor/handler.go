@@ -55,6 +55,9 @@ func NewHandler(reg *Registry) gateway.Handler {
 		case "cleanup.apply":
 			return handleCleanupApply(reg, params)
 
+		case "config.observe":
+			return handleConfigObserve(ctx, reg, params)
+
 		default:
 			return nil, false, fmt.Errorf("descriptor: unknown verb %q", verb)
 		}
@@ -303,4 +306,27 @@ func handleCleanupApply(reg *Registry, params json.RawMessage) (any, bool, error
 	return map[string]any{
 		"removedBytes": removed,
 	}, false, nil
+}
+
+func handleConfigObserve(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey string   `json:"stationKey"`
+		Settings   []string `json:"settings"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.observe: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.observe: %s does not manage configuration", d.Harness())
+	}
+	values, err := cm.ObserveConfig(ctx, p.StationKey, p.Settings)
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"values": values}, false, nil
 }
