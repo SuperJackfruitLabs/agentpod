@@ -730,7 +730,14 @@ git commit -m "node: Hermes reports its approvals settings, and never guesses on
 
 **Interfaces:**
 - Consumes: `ConfigManager` from Task 3.
-- Produces: the `config.manage` capability string on qualifying stations; a `config.observe` broker verb taking `{stationKey, settings[]}` and returning `{values: ConfigValue[]}`.
+- Produces: the `config.manage` capability string on qualifying stations; a `config.observe` broker verb taking `{stationKey, settings[]}` → `{values: ConfigValue[]}`; and a `config.settings` broker verb taking `{stationKey}` → `{settings: ConfigSetting[]}`.
+
+  **Both verbs, not just the first.** `ConfigSettings()` exists on the interface but is
+  useless to the hub unless something exposes it: without `config.settings` the hub
+  cannot learn what a node manages, and the only way to serve
+  `GET /fleet/config/settings` or to validate `UNKNOWN_SETTING` is to keep a second
+  hand-written copy of the registry in the hub. Two copies of a list that must agree is
+  the exact defect this feature exists to detect.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1379,7 +1386,11 @@ Expected: FAIL — the routes 404.
 
 Follow `apps/hub/src/routes/station-acp.ts` for the Hono router shape, the auth middleware and the station-ownership check. Four handlers:
 
-- `GET /api/fleet/config/settings` — the union of every online node's `ConfigSettings()`, de-duplicated by `id`. A node that cannot be reached is **named in a `unreachableNodes` array** rather than omitted silently.
+- `GET /api/fleet/config/settings` — the union of every online node's registry, fetched
+  through the `config.settings` broker verb and de-duplicated by `id`. A node that cannot
+  be reached is **named in an `unreachableNodes` array** rather than omitted silently.
+  **Do not keep a copy of the registry in the hub** — it would drift from the node's, and
+  `UNKNOWN_SETTING` would then be wrong in either direction.
 - `GET /api/fleet/config/declared` — every declaration for the tenant, with optional
   `?station=<id>` and `?node=<id>` filters. The filters exist because `fleet config show
   --node` already calls it that way; without them that flag silently returns the whole
