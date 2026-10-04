@@ -32,5 +32,8 @@ func buildRegistry(cfg config.Config) *descriptor.Registry {
 		CodexBinary: cfg.CodexBinary,
 		NodeBinary:  cfg.NodeBinary,
 	}))
+	if cfg.ConfigManagement {
+		reg.EnableConfigManagement()
+	}
 	return reg
 }

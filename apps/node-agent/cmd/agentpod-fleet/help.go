@@ -35,6 +35,7 @@ Usage: fleet <verb> [flags]
   fleet principals …         identities: list, suspend, restore, add-service,
                              add-credential, revoke-credential
   fleet grants …             dispatch authority, as a document
+  fleet config …             what a harness setting should be, and what it is
 
   fleet update [--check]     replace this binary with the newest release
   fleet version              print version and platform

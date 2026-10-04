@@ -68,6 +68,7 @@ export default defineConfig({
             { label: 'Talking to an agent in a room', slug: 'use/rooms' },
             { label: 'Voice notes', slug: 'use/voice' },
             { label: 'When a turn fails', slug: 'use/errors' },
+            { label: 'Declared harness settings', slug: 'use/config' },
             { label: 'Working a board', slug: 'use/boards' },
             { label: 'Dispatch and grants', slug: 'use/grants' },
             { label: 'apn and fleet', slug: 'use/cli' },

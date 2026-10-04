@@ -3,6 +3,8 @@ package descriptor
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -122,6 +124,106 @@ func TestHandlerLogsTail_IsStreamed(t *testing.T) {
 	}
 	if len(chunks) == 0 {
 		t.Fatal("expected at least one chunk emitted")
+	}
+}
+
+func TestHandlerConfigObserve_RoutesToDescriptor(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"hermes:one","settings":["hermes.approvals.timeout"]}`)
+	result, streamed, err := h.Handle(context.Background(), "config.observe", params, nil)
+	if err != nil {
+		t.Fatalf("config.observe: %v", err)
+	}
+	if streamed {
+		t.Fatal("config.observe should not be streamed")
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+	values, ok := m["values"].([]ConfigValue)
+	if !ok {
+		t.Fatalf("expected []ConfigValue under \"values\", got %T", m["values"])
+	}
+	if len(values) != 1 || values[0].SettingID != "hermes.approvals.timeout" {
+		t.Fatalf("unexpected values: %+v", values)
+	}
+	if !values[0].Readable {
+		t.Fatalf("expected readable value, got %+v", values[0])
+	}
+	if values[0].Observed != "300" {
+		t.Fatalf("expected observed \"300\", got %v (%T)", values[0].Observed, values[0].Observed)
+	}
+}
+
+func TestHandlerConfigObserve_UnsupportedHarnessReturnsError(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "fake"})
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"fake:s1","settings":["anything"]}`)
+	_, _, err := h.Handle(context.Background(), "config.observe", params, nil)
+	if err == nil {
+		t.Fatal("expected error: fake descriptor does not implement ConfigManager")
+	}
+}
+
+func TestHandlerConfigSettings_RoutesToDescriptor(t *testing.T) {
+	home := t.TempDir()
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"hermes:one"}`)
+	result, streamed, err := h.Handle(context.Background(), "config.settings", params, nil)
+	if err != nil {
+		t.Fatalf("config.settings: %v", err)
+	}
+	if streamed {
+		t.Fatal("config.settings should not be streamed")
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map, got %T", result)
+	}
+	settings, ok := m["settings"].([]ConfigSetting)
+	if !ok {
+		t.Fatalf("expected []ConfigSetting under \"settings\", got %T", m["settings"])
+	}
+	if len(settings) == 0 {
+		t.Fatal("expected at least one registered setting")
+	}
+	found := false
+	for _, s := range settings {
+		if s.ID == "hermes.approvals.timeout" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected hermes.approvals.timeout in the registry, got %+v", settings)
+	}
+}
+
+func TestHandlerConfigSettings_UnsupportedHarnessReturnsError(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "fake"})
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"fake:s1"}`)
+	_, _, err := h.Handle(context.Background(), "config.settings", params, nil)
+	if err == nil {
+		t.Fatal("expected error: fake descriptor does not implement ConfigManager")
 	}
 }
 

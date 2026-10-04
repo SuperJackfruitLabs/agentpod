@@ -55,6 +55,12 @@ func NewHandler(reg *Registry) gateway.Handler {
 		case "cleanup.apply":
 			return handleCleanupApply(reg, params)
 
+		case "config.observe":
+			return handleConfigObserve(ctx, reg, params)
+
+		case "config.settings":
+			return handleConfigSettings(reg, params)
+
 		default:
 			return nil, false, fmt.Errorf("descriptor: unknown verb %q", verb)
 		}
@@ -303,4 +309,51 @@ func handleCleanupApply(reg *Registry, params json.RawMessage) (any, bool, error
 	return map[string]any{
 		"removedBytes": removed,
 	}, false, nil
+}
+
+func handleConfigObserve(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey string   `json:"stationKey"`
+		Settings   []string `json:"settings"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.observe: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.observe: %s does not manage configuration", d.Harness())
+	}
+	values, err := cm.ObserveConfig(ctx, p.StationKey, p.Settings)
+	if err != nil {
+		return nil, false, err
+	}
+	return map[string]any{"values": values}, false, nil
+}
+
+// handleConfigSettings answers the registry a station's harness manages —
+// never the values, which is config.observe's job. The hub asks this to
+// learn which setting ids a station's harness actually knows, rather than
+// holding its own copy of the list: a second copy, anywhere, is the exact
+// defect this feature exists to detect (a value true when written, with
+// nothing watching it keep agreeing).
+func handleConfigSettings(reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey string `json:"stationKey"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.settings: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.settings: %s does not manage configuration", d.Harness())
+	}
+	return map[string]any{"settings": cm.ConfigSettings()}, false, nil
 }

@@ -78,3 +78,8 @@ export * from "./board-rooms";
 // each running activity's update token (supermessage spec 2026-09-29, A1).
 export * from "./live-activity";
 export * from "./service-credentials";
+
+// What the fleet wants a harness setting to be, per station/node/fleet level.
+// Never what a station HAS — that is read live from the node (declared
+// harness config, observe arc, task 5).
+export * from "./harness-config";
