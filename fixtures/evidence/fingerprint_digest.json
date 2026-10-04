@@ -1,0 +1,66 @@
+{
+  "corpus": "evidence/fingerprint-digest",
+  "version": 1,
+  "authoredAt": "2026-10-04",
+  "authoredFrom": "agentpod apps/hub/src/services/evidence/fingerprint.ts; superwitness milestone-1 index contract C3; charter decisions/2026-09-29-evidence-joins-on-the-work-run.md decision 3",
+  "purpose": "The fingerprint digest is what an evaluation groups by, and three runtimes compute it: the hub (TypeScript), superwitness (Go) and the agent-skills offline runner. A digest that differs by one escaped character silently splits one configuration into two. These vectors make that a failing test in every one of them.",
+  "rules": {
+    "fields": ["harness", "harness_version", "model", "profile", "skill_release"],
+    "canonical": "JSON object of exactly these five string fields, keys sorted, no whitespace, UTF-8, `<` `>` `&` and non-ASCII NOT escaped (JSON.stringify output).",
+    "digest": "\"sha256:\" + lowercase hex of SHA-256 over the canonical bytes",
+    "unknown": "A value that cannot be determined is the literal \"unknown\"; values are trimmed and an empty value becomes \"unknown\".",
+    "notInDigest": "reported_by"
+  },
+  "accept": [
+    {
+      "name": "hermes on a profile, nothing reported, no skills",
+      "fields": { "harness": "hermes", "harness_version": "unknown", "model": "unknown", "profile": "press", "skill_release": "none" },
+      "canonical": "{\"harness\":\"hermes\",\"harness_version\":\"unknown\",\"model\":\"unknown\",\"profile\":\"press\",\"skill_release\":\"none\"}",
+      "digest": "sha256:b38ccbea6e3b6a65fcbfc4402709554b5f9579555c91407498257fbad815ea92"
+    },
+    {
+      "name": "everything known",
+      "fields": { "harness": "hermes", "harness_version": "0.9.1", "model": "kimi-k2", "profile": "default", "skill_release": "press@1.2.0:sha256:abababababababababababababababababababababababababababababababab" },
+      "canonical": "{\"harness\":\"hermes\",\"harness_version\":\"0.9.1\",\"model\":\"kimi-k2\",\"profile\":\"default\",\"skill_release\":\"press@1.2.0:sha256:abababababababababababababababababababababababababababababababab\"}",
+      "digest": "sha256:7fef099b6af3ba7f3b7036e74140cb113f973daafdd048c3657179afd0644c9a"
+    },
+    {
+      "name": "nothing known at all",
+      "fields": { "harness": "unknown", "harness_version": "unknown", "model": "unknown", "profile": "unknown", "skill_release": "unknown" },
+      "canonical": "{\"harness\":\"unknown\",\"harness_version\":\"unknown\",\"model\":\"unknown\",\"profile\":\"unknown\",\"skill_release\":\"unknown\"}",
+      "digest": "sha256:bc79bbe07b552d8b4be8ed0669f5daf679efb25c02e870561dfe661d0ffd9bb4"
+    },
+    {
+      "name": "html-significant and non-ASCII characters stay literal",
+      "fields": { "harness": "codex", "harness_version": "0.154.0", "model": "a<b>&c", "profile": "café", "skill_release": "unknown" },
+      "canonical": "{\"harness\":\"codex\",\"harness_version\":\"0.154.0\",\"model\":\"a<b>&c\",\"profile\":\"café\",\"skill_release\":\"unknown\"}",
+      "digest": "sha256:7801465317f7704ddd5fb7ad7a80698cb0abbb05b0ac8c7018d8244d70588801"
+    }
+  ],
+  "reject": [
+    {
+      "reason": "whitespace",
+      "bytes": "{\n \"harness\": \"hermes\",\n \"harness_version\": \"unknown\",\n \"model\": \"unknown\",\n \"profile\": \"press\",\n \"skill_release\": \"none\"\n}",
+      "digest": "sha256:a15fa2abf3e48c460cd353efbcd2da8487aff42fbeb93e18d614ccf270433914",
+      "sameConfigurationAs": 0
+    },
+    {
+      "reason": "reported_by included",
+      "bytes": "{\"harness\":\"hermes\",\"harness_version\":\"unknown\",\"model\":\"unknown\",\"profile\":\"press\",\"skill_release\":\"none\",\"reported_by\":\"hub\"}",
+      "digest": "sha256:9458112c936ac9e1a929c4af14492c679df7edeac4506bfcb5fc8c50b8c71179",
+      "sameConfigurationAs": 0
+    },
+    {
+      "reason": "keys not sorted",
+      "bytes": "{\"profile\":\"press\",\"harness\":\"hermes\",\"harness_version\":\"unknown\",\"model\":\"unknown\",\"skill_release\":\"none\"}",
+      "digest": "sha256:044df9f4ceccadd5c3df08b20f53bb611add504f3391b298a047d5cb0d4cd127",
+      "sameConfigurationAs": 0
+    },
+    {
+      "reason": "html-escaped (Go json.Marshal default)",
+      "bytes": "{\"harness\":\"codex\",\"harness_version\":\"0.154.0\",\"model\":\"a\\u003cb\\u003e\\u0026c\",\"profile\":\"café\",\"skill_release\":\"unknown\"}",
+      "digest": "sha256:749d1e43e4f594ba058984acfacb0288ade189d83844397f50ec4d90ae070670",
+      "sameConfigurationAs": 3
+    }
+  ]
+}

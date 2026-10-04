@@ -23,6 +23,20 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 
+/**
+ * What an attempt ran with, as stored on `acp_runs.fingerprint` (contract C3).
+ * Declared here rather than imported from the service, so the schema depends on nothing above it.
+ * `reported_by` says where `model` came from; it is NOT part of `fingerprint_digest`.
+ */
+export type StoredFingerprint = {
+  harness: string;
+  harness_version: string;
+  model: string;
+  profile: string;
+  skill_release: string;
+  reported_by: "harness" | "station" | "hub";
+};
+
 export const acpSessions = pgTable("acp_sessions", {
   id: text("id").primaryKey(),                                        // "acps_" + uuid-ish
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
