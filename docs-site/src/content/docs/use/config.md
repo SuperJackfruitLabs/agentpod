@@ -71,8 +71,8 @@ toward making a station's value match the declaration:
 
 | Policy | Meaning |
 |---|---|
-| `reconcilable` | The value can be fully reconciled to the declaration — whatever is there can be replaced outright. |
-| `additive-only` | The declaration is a floor, never the whole value. Items can be added; nothing already there is ever removed. |
+| `reconcilable` | The value can be fully reconciled to the declaration — whatever is there can be replaced outright — once writing ships. |
+| `additive-only` | The declaration is a floor, never the whole value. Items can be added; nothing already there is ever removed — once writing ships. |
 | `report-only` | The value is only ever compared and reported. Nothing here would ever write it, even once writing ships. |
 
 `additive-only` exists because a harness persists an operator's own decisions into the same
@@ -110,7 +110,7 @@ Each comparison reports, per setting, a **state**:
 | `matches` | The observed value agrees with what's declared. |
 | `drifted` | Declared and observed disagree. |
 | `absent` | Declared, but the key isn't in the document at all. |
-| `opted-out` | An operator explicitly opted this station out of the declaration. |
+| `opted-out` | An operator explicitly opted this station out of the declaration — reachable only once writing ships. |
 | `awaiting-restart` | A value was written but the harness hasn't picked it up yet — reachable only once writing ships. |
 | `unreadable` | The document couldn't be read or parsed. Never reported as `matches` — an unreadable document is not evidence of agreement. |
 | `out-of-scope` | A per-station declaration was made for a setting whose registered scope isn't the station's document (see above). |
