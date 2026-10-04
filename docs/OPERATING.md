@@ -1747,14 +1747,16 @@ service); the commands below are the only supported way to change it.
   (the current one, or the one before the env-file hook), ignoring trailing whitespace. The
   system unit's `User=`/`Group=` lines are kept, the binary path comes from the installed
   `ExecStart=`, and drop-ins (`agentpod-node.service.d/`) are never touched. A unit with any
-  other manual edit is left alone and reported as drifted. A rewrite is atomic, followed by
-  `systemctl daemon-reload`, and the node then exits once so systemd restarts it into the new
+  other manual edit is left alone and reported as drifted. A rewrite is atomic (a symlinked unit is
+  treated as drifted and never replaced), followed by
+  `systemctl daemon-reload`; if the reload fails the original file is restored and the node
+  reports `error`. Otherwise the node then exits once so systemd restarts it into the new
   unit. A marker file `unit.sha256` in the node's config directory (`~/.config/agentpod-node/`,
   which for a root system unit is `/root/.config/agentpod-node/`, not `/etc/agentpod-node`)
-  records the last unit written; if the same rewrite is needed again (it did not take
+  records the last unit written (before the rewrite); if the same rewrite is needed again (it did not take
   effect), the node reports `error` instead of restarting again. At service start that error
   is only logged (in the journal); `fleet nodes telemetry` and a set report it. The marker is
-  removed once the unit is current.
+  removed once the unit is current (a listing or status check never removes it).
 - **On the node.** `apn telemetry status [--json]` shows the config path, the endpoint,
   enabled or disabled, and whether the collector answers (one short GET of
   `<endpoint>/v1/traces`; any HTTP reply counts). `apn telemetry enable --endpoint <url>`
@@ -1773,7 +1775,8 @@ service); the commands below are the only supported way to change it.
 - **Unit state.** The listing shows `unit: <state>` as a dry run, so it reads `current` (the
   unit reads `otel.env`), `stale` (an old template; it is re-rendered on the next set or
   restart), `drifted (manual edits)` (the unit has edits node-agent will not overwrite; fix it
-  by hand or with a drop-in) or `error: <detail>` (the heal failed or did not take effect).
+  by hand or with a drop-in) or `error: <detail>` (the heal failed or did not take effect; a unit stopped by the loop guard
+  shows here, not as `stale`).
   `reconciled` (re-rendered just now; the node restarts once) appears only in the result of a
   set. Nodes that cannot be checked (containers, fixed-image nodes, hand-started `apn run`,
   macOS) answer `unsupported` and show no `unit:` part, as do nodes that predate the field.
