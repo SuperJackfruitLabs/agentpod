@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EvidenceAttemptResponse, EvidenceRunResponse } from "@agentpod/contract";
+import { SignJWT, generateKeyPair } from "jose";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { auth } from "../auth/drizzle-auth";
@@ -136,8 +137,19 @@ describe("GET /api/evidence/runs/:source/:externalRunId", () => {
   });
 
   test("no token, a foreign token or garbage is 401", async () => {
-    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`)).status).toBe(401);
-    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, "not.a.jwt")).status).toBe(401);
+    // A well-formed hub token for a granted principal, signed by a key the hub never published.
+    const { privateKey } = await generateKeyPair("EdDSA");
+    const foreign = await new SignJWT({ ...(await buildTokenPayload({ principalId: reader })) })
+      .setProtectedHeader({ alg: "EdDSA", kid: "not-a-hub-key" })
+      .setSubject(reader)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    for (const token of [undefined, foreign, "not.a.jwt"]) {
+      const res = await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, token);
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "unauthorized" });
+    }
   });
 
   test("a principal without evidence:read is 403", async () => {
