@@ -47,11 +47,11 @@ type FrameHandler interface {
 
 // inboundEnvelope is the decoded shape of a hub→node message.
 type inboundEnvelope struct {
-	Type   string               `json:"type"`
-	ID     string               `json:"id"`
-	Verb   string               `json:"verb"`
-	Params json.RawMessage      `json:"params"`
-	Meta   *telemetry.TraceMeta `json:"_meta,omitempty"`
+	Type   string          `json:"type"`
+	ID     string          `json:"id"`
+	Verb   string          `json:"verb"`
+	Params json.RawMessage `json:"params"`
+	Meta   json.RawMessage `json:"_meta,omitempty"`
 }
 
 // serve is the read-loop for inbound hub→node messages. It dispatches req
@@ -111,7 +111,15 @@ func serve(ctx context.Context, c *websocket.Conn, h Handler, mus ...*sync.Mutex
 			reqID := env.ID
 			verb := env.Verb
 			params := env.Params
-			meta := env.Meta
+			// _meta is best-effort: a malformed value means no trace
+			// continuation, never a dropped request.
+			var meta *telemetry.TraceMeta
+			if len(env.Meta) > 0 {
+				var m telemetry.TraceMeta
+				if json.Unmarshal(env.Meta, &m) == nil {
+					meta = &m
+				}
+			}
 
 			reqCtx, cancel := context.WithCancel(ctx)
 			cancelsMu.Lock()

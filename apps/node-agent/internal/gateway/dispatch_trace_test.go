@@ -61,3 +61,48 @@ func TestDispatchContinuesTheHubTraceFromMeta(t *testing.T) {
 		t.Fatal("the handler must run under the verb span")
 	}
 }
+
+func TestDispatchSurvivesMalformedMeta(t *testing.T) {
+	for name, meta := range map[string]string{
+		"string":          `"x"`,
+		"numeric_tparent": `{"traceparent":5}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			sr := telemetrytest.UseRecorder(t)
+			done := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				c, _ := websocket.Accept(w, r, nil)
+				defer c.Close(websocket.StatusNormalClosure, "")
+				ctx := context.Background()
+				c.Write(ctx, websocket.MessageText, []byte(`{"type":"req","id":"1","verb":"ping","params":{},"_meta":`+meta+`}`))
+				rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				defer cancel()
+				if _, _, err := c.Read(rctx); err == nil {
+					close(done)
+				}
+			}))
+			defer srv.Close()
+
+			ran := make(chan struct{}, 1)
+			c, _, _ := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+			go serve(context.Background(), c, HandlerFunc(func(ctx context.Context, verb string, _ json.RawMessage, _ func(int, string, bool, string) error) (any, bool, error) {
+				ran <- struct{}{}
+				return map[string]bool{"ok": true}, false, nil
+			}))
+
+			select {
+			case <-done:
+			case <-time.After(4 * time.Second):
+				t.Fatal("request with malformed _meta got no response")
+			}
+			select {
+			case <-ran:
+			default:
+				t.Fatal("handler did not run")
+			}
+			if n := len(sr.Ended()); n != 0 {
+				t.Fatalf("want no span, got %d", n)
+			}
+		})
+	}
+}
