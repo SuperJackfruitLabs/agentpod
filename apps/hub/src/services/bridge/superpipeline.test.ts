@@ -14,7 +14,10 @@
 
 import { describe, expect, test } from "bun:test";
 
-import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded } from "./superpipeline";
+import { SuperpipelineApiError, SuperpipelineClient, isForeignRun, isLeaseSuperseded, pathTemplate } from "./superpipeline";
+import { context, trace } from "@opentelemetry/api";
+import { tracer } from "../../telemetry/otel";
+import { useTestTelemetry } from "../../../tests/helpers/telemetry";
 import type { GatePendingDelivery } from "../matrix-as/gates";
 
 const TOKEN = `spa_${"a1b2c3d4".repeat(6)}`;
@@ -260,5 +263,48 @@ describe("SuperpipelineClient — pending gates", () => {
     // report healthy forever while every gate it exists to catch stayed silent.
     const { client } = fakeBoard(() => ({ status: 401, body: boardError("UNAUTHORIZED") }));
     await expect(client.pendingGates()).rejects.toBeInstanceOf(SuperpipelineApiError);
+  });
+});
+
+const tel = useTestTelemetry();
+
+describe("SuperpipelineClient: tracing", () => {
+  test("pathTemplate keeps ids out of span names", () => {
+    expect(pathTemplate(`/v1/boards/${BOARD}/runs/run_1/heartbeat`)).toBe("/v1/boards/{boardId}/runs/{runId}/heartbeat");
+    expect(pathTemplate(`/v1/boards/${BOARD}/gates/gate_9`)).toBe("/v1/boards/{boardId}/gates/{gateId}");
+    expect(pathTemplate(`/v1/boards/${BOARD}/gates/pending`)).toBe("/v1/boards/{boardId}/gates/pending");
+  });
+
+  test("outside a trace: no span, no traceparent (idle polls stay out of the trace store)", async () => {
+    const { calls, client } = fakeBoard(() => ({ status: 200, body: { claimed: false } }));
+    await client.claim();
+    expect(calls[0]!.headers.traceparent).toBeUndefined();
+    expect(tel.spans()).toHaveLength(0);
+  });
+
+  test("inside a trace: a CLIENT span per call, and the header names that span", async () => {
+    const { calls, client } = fakeBoard(() => ({ status: 200, body: {} }));
+    const parent = tracer().startSpan("dispatch");
+    await context.with(trace.setSpan(context.active(), parent), () => client.context("run_e074a2160c4b4f28"));
+    parent.end();
+
+    const span = tel.named("GET /v1/boards/{boardId}/runs/{runId}")[0]!;
+    expect(span.attributes["run.id"]).toBe("run_e074a2160c4b4f28");
+    expect(span.attributes["http.response.status_code"]).toBe(200);
+    expect(span.parentSpanContext?.spanId).toBe(parent.spanContext().spanId);
+    expect(calls[0]!.headers.traceparent).toBe(`00-${span.spanContext().traceId}-${span.spanContext().spanId}-01`);
+  });
+
+  test("a refused call marks the span and still throws the typed error", async () => {
+    const { client } = fakeBoard(() => ({ status: 409, body: boardError("STALE_LEASE") }));
+    const parent = tracer().startSpan("dispatch");
+    const err = await context
+      .with(trace.setSpan(context.active(), parent), () => client.heartbeat(work))
+      .catch((e) => e);
+    parent.end();
+    expect(isLeaseSuperseded(err)).toBe(true);
+    const span = tel.spans().find((s) => s.name.startsWith("POST /v1/boards/{boardId}/runs/{runId}/"))!;
+    expect(span.attributes["http.response.status_code"]).toBe(409);
+    expect(span.status.code).toBe(2);
   });
 });
