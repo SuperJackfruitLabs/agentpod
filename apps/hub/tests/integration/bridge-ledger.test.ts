@@ -39,6 +39,7 @@ import {
   startAttempt,
   endAttempt,
 } from "../../src/services/bridge/ledger";
+import { makeFingerprint } from "../../src/services/evidence/fingerprint";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const STATION_ID = "bridge-ledger-station";
@@ -337,5 +338,70 @@ describe("migration 0039, against a table that already has rows", () => {
     expect(observed).toBeDefined();
     expect(observed!.events_received).toBeNull();
     expect(observed!.activities_posted).toBeNull();
+  });
+});
+
+describe("the fingerprint is written once, when the attempt opens", () => {
+  test("an attempt records the fingerprint it was opened with", async () => {
+    await open();
+    const fp = makeFingerprint({ harness: "hermes", profile: "press", skill_release: "none" }, "hub");
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, fingerprint: fp });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(fp.digest);
+    expect(row!.fingerprint).toEqual({
+      harness: "hermes", harness_version: "unknown", model: "unknown", profile: "press",
+      skill_release: "none", reported_by: "hub",
+    });
+  });
+
+  test("an attempt opened without one records unknown, never NULL", async () => {
+    await open();
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1 });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(makeFingerprint({}, "hub").digest);
+    expect(row!.fingerprint?.harness).toBe("unknown");
+  });
+
+  test("closing the attempt never recomputes it", async () => {
+    await open();
+    const fp = makeFingerprint({ harness: "hermes" }, "hub");
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, fingerprint: fp });
+    await endAttempt(attemptId, "completed", 9);
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(fp.digest);
+  });
+});
+
+describe("the agent principal is written once, when the attempt opens", () => {
+  const PRN = "prn_0123456789abcdef0123";
+
+  test("an attempt records the principal it ran as", async () => {
+    await open();
+    const id = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, agentPrincipalId: PRN });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(row!.agentPrincipalId).toBe(PRN);
+    await endAttempt(id, "completed", 2);
+    const [after] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(after!.agentPrincipalId).toBe(PRN);
+  });
+
+  test("an unoccupied station records null, never a guess", async () => {
+    await open();
+    const id = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1 });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, id));
+    expect(row!.agentPrincipalId).toBeNull();
+  });
+
+  test("a value that is not a principal id is refused by the table", async () => {
+    await open();
+    // drizzle wraps the PG error; the constraint name is on `cause` (ruling 9a-1).
+    const err = await startAttempt({
+      ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, agentPrincipalId: "agt_researcher",
+    }).then(() => null, (e: unknown) => e);
+    expect(err).not.toBeNull();
+    const cause = (err as { cause?: { constraint_name?: string } }).cause;
+    expect((err as { constraint_name?: string }).constraint_name ?? cause?.constraint_name).toBe(
+      "acp_runs_agent_principal_shape",
+    );
   });
 });

@@ -516,7 +516,7 @@ settings. Disabling keeps the row and its credentials; removing deletes both.
 hub log:
 
 ```
-[bridge] enabled, but no agents are rostered — nothing will be claimed. Add one under Bridge in the console.
+{"timestamp":"…","level":"info","service":"agentpod-api","component":"bridge","message":"enabled, but no agents are rostered — nothing will be claimed. Add one under Bridge in the console."}
 ```
 
 That line is what replaces the old boot-time refusal. `validateConfig()` runs before
@@ -565,7 +565,7 @@ what it cannot find. The refusal names this variable.
 Example, registering the web plane and the CLI:
 
 ```
-HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev
+HUB_OAUTH_CLIENTS=superpipeline|https://superpipeline.dev/hub/callback,apn|loopback|https://hub.agentpod.dev,https://app.superpipeline.dev,superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev
 WORK_PLANE_AUDIENCES=https://app.superpipeline.dev
 ```
 

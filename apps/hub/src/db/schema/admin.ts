@@ -100,4 +100,5 @@ export type AdminAction =
   | "user_unban"
   | "user_role_change"
   | "user_create"
-  | "settings_update";
+  | "settings_update"
+  | "node_telemetry_update";

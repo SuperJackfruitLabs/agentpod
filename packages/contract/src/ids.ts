@@ -156,6 +156,13 @@ export const PrincipalId = truncatedUuidId("prn");
 export const DeviceCredentialId = truncatedUuidId("dev");
 
 /**
+ * A service principal's long-lived credential (superwitness contract C6), presented as
+ * `svc_…:<secret>` to `POST /api/auth/service-token`. Same shape as `DeviceCredentialId`, and for
+ * the same reason: whatever splits on the first colon must agree about the left side.
+ */
+export const ServiceCredentialId = truncatedUuidId("svc");
+
+/**
  * An organisation. Minted by the hub, which IS the Organization plane until
  * the plane is extracted into its own service — see `TenantId`'s doc comment
  * for why AgentPod and superpipeline each keep a local tenant in the meantime.

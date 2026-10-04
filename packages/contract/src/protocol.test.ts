@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { VERB_PARAMS, VERB_RESULTS, InputMsg, ResizeMsg, StreamMsg } from "./protocol";
+import { VERB_PARAMS, VERB_RESULTS, InputMsg, ResizeMsg, StreamMsg, RequestMsg } from "./protocol";
 import { Capability } from "./station";
 
 it("capability enum includes write capabilities", () => {
@@ -216,4 +216,12 @@ describe("git identity verbs", () => {
     ).toBe(true);
     expect(VERB_RESULTS["git.identity.ensure"].safeParse({ publicKey: "ssh-ed25519 AAAA" }).success).toBe(false);
   });
+});
+
+it("RequestMsg carries an optional trace _meta (C2), and stays valid without one", () => {
+  const tp = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+  expect(RequestMsg.parse({ type: "req", id: "1", verb: "acp.open", params: {}, _meta: { traceparent: tp } })._meta).toEqual({
+    traceparent: tp,
+  });
+  expect(RequestMsg.parse({ type: "req", id: "1", verb: "x", params: {} })._meta).toBeUndefined();
 });

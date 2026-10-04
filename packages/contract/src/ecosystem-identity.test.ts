@@ -38,6 +38,7 @@ import {
   UserId,
   PrincipalId,
   DeviceCredentialId,
+  ServiceCredentialId,
   OrganizationId,
 } from "./ids";
 import { Run, RunState, TERMINAL_RUN_STATES, INTERRUPTED_RUN_STATES } from "./run";
@@ -105,6 +106,7 @@ const VALIDATORS: Record<string, ZodType> = {
   "agentpod.user": UserId,
   "agentpod.principal": PrincipalId,
   "agentpod.deviceCredential": DeviceCredentialId,
+  "agentpod.serviceCredential": ServiceCredentialId,
   "agentpod.organization": OrganizationId,
 };
 

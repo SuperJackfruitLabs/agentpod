@@ -50,6 +50,12 @@ export const principalGrants = pgTable(
     /** The second half of the pair. Not optional — see the service. */
     mayGrantReach: boolean("may_grant_reach").notNull().default(false),
 
+    /**
+     * Read permissions beyond the control pair, as a JSON array (`["evidence:read"]`). Issued as
+     * OAuth's `scope` claim. Never a capability — capabilities are superpipeline's vocabulary.
+     */
+    scopes: text("scopes").notNull().default("[]"),
+
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
@@ -63,5 +69,6 @@ export const principalGrants = pgTable(
      * generously.
      */
     check("principal_grants_may_dispatch_is_array", sql`${t.mayDispatch} LIKE '[%]'`),
+    check("principal_grants_scopes_is_array", sql`${t.scopes} LIKE '[%]'`),
   ]
 );

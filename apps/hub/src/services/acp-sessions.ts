@@ -27,6 +27,7 @@
  */
 
 import { and, asc, desc, eq, gt, isNotNull, lt, ne, or, sql } from "drizzle-orm";
+import { acpTraceMeta } from "../telemetry/propagation";
 import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import {
   client,
@@ -540,6 +541,8 @@ async function connectAndHandshake(live: LiveSession, wire: AcpWire): Promise<vo
       // one, "/" the fallback for workspace-less stations.
       cwd: live.workspacePath ?? "/",
       mcpServers: live.mcpServers,
+      // superwitness C2: the harness may continue the run's trace. Ids only.
+      ...acpTraceMeta(),
     }),
     handshakeTimeoutMs,
     HANDSHAKE_TIMEOUT_MESSAGE
@@ -1366,6 +1369,7 @@ export async function promptSession(
     .request("session/prompt", {
       sessionId: live.acpSessionId,
       prompt: promptBlocks(text, images, imageRefusal),
+      ...acpTraceMeta(),
     })
     .then(async (response) => {
       if (isCurrentTurn()) {

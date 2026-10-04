@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/otelenv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -223,4 +224,12 @@ func (m *systemdManager) Status() (Status, error) {
 // RestartHint names the scope this manager actually uses, so the advice works where it is read.
 func (m *systemdManager) RestartHint() string {
 	return "systemctl " + strings.Join(append(m.baseArgs(), "restart", systemdUnitName), " ")
+}
+
+// OTelEnvPath is the EnvironmentFile the unit template names for this scope.
+func (m *systemdManager) OTelEnvPath() (string, error) {
+	if m.userScope {
+		return otelenv.UserPath(m.home), nil
+	}
+	return otelenv.SystemPath, nil
 }

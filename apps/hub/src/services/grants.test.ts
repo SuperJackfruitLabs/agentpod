@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { grantAllowsPrincipal } from "./grants";
 
-const grant = (ids: string[]) => ({ mayDispatch: ids, mayGrantReach: false });
+const grant = (ids: string[]) => ({ mayDispatch: ids, mayGrantReach: false, scopes: [] });
 
 describe("a grant names one principal", () => {
   test("allows exactly the principal it names", () => {

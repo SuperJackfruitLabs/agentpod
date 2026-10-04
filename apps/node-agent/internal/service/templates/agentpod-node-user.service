@@ -5,6 +5,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart={{.BinaryPath}} run
+EnvironmentFile=-%h/.config/agentpod-node/otel.env
 Restart=always
 RestartSec=5
 

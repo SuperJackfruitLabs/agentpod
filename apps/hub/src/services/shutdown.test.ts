@@ -59,4 +59,18 @@ describe("graceful hub shutdown", () => {
     expect(calls).toContain("matrix");
     expect(calls).toContain("exit:1");
   });
+
+  test("flushes telemetry last, after everything that could still emit", async () => {
+    const calls: string[] = [];
+    const shutdown = createGracefulShutdown({
+      stopSweeper: () => calls.push("sweeper"),
+      stopBridge: async () => { calls.push("bridge"); },
+      closeMatrixBridge: async () => { calls.push("matrix"); },
+      flushTelemetry: async () => { calls.push("telemetry"); },
+      exit: (code) => calls.push(`exit:${code}`),
+      log: () => {},
+    });
+    await shutdown("SIGTERM");
+    expect(calls).toEqual(["sweeper", "bridge", "matrix", "telemetry", "exit:0"]);
+  });
 });

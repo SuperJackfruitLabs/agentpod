@@ -1,0 +1,21 @@
+{
+  "corpus": "evidence/hub-principal",
+  "version": 1,
+  "authoredAt": "2026-10-04",
+  "authoredFrom": "agentpod apps/hub/src/routes/evidence.ts; superwitness contract C5",
+  "purpose": "How superwitness learns a principal's kind for verdicts it did not receive from the caller (gate decisions). It maps `service` to judge_kind `grader`. Answered for suspended principals too: a past decision does not stop being a human's because the human was later suspended.",
+  "howToRead": {
+    "lookup": "The path segment is a `prn_…` OR a hub auth user id (superpipeline's `gates[].decided_by_hub_sub`, the `sub` of a session-minted hub token). The second is resolved through principal_identities (system `better-auth`). Both answer the same shape, and `id` is always the principal id — never the auth user id that was asked for.",
+    "notFound": "404 {\"error\":\"not_found\"} when neither form names a principal. superwitness then shows judge_kind `unknown`; it does not block anything."
+  },
+  "examples": [
+    { "name": "a human", "response": { "id": "prn_0123456789abcdef0123", "kind": "human", "handle": "rakesh", "suspended": false } },
+    { "name": "an agent, suspended", "response": { "id": "prn_abcdefabcdefabcdef01", "kind": "agent", "handle": "press-writer", "suspended": true } },
+    { "name": "a service", "response": { "id": "prn_fedcba9876543210fedc", "kind": "service", "handle": "superwitness", "suspended": false } }
+  ],
+  "reject": [
+    { "reason": "a timestamp instead of a boolean", "response": { "id": "prn_0123456789abcdef0123", "kind": "human", "handle": "rakesh", "suspended": "2026-10-01T00:00:00.000Z" } },
+    { "reason": "a kind the hub does not mint", "response": { "id": "prn_0123456789abcdef0123", "kind": "grader", "handle": "rakesh", "suspended": false } },
+    { "reason": "not a principal id", "response": { "id": "usr_abc", "kind": "human", "handle": "rakesh", "suspended": false } }
+  ]
+}

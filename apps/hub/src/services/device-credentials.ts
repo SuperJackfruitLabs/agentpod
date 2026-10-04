@@ -35,20 +35,20 @@ import { prefixedId } from "../utils/ids";
 export const DEVICE_CREDENTIAL_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
 /** SHA-256 hex, the same digest `enrollment.ts` uses for its token hashes. */
-async function sha256(s: string): Promise<string> {
+export async function sha256(s: string): Promise<string> {
   return Buffer.from(
     await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)),
   ).toString("hex");
 }
 
 /** Equal-length hex compare that does not reveal, in the timing, where it differed. */
-function constantTimeEqualHex(a: string, b: string): boolean {
+export function constantTimeEqualHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a, "hex"), Buffer.from(b, "hex"));
 }
 
 /** 32 CSPRNG bytes, base64url — 43 characters, no padding. */
-function randomSecret(): string {
+export function randomSecret(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);

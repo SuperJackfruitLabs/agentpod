@@ -21,6 +21,9 @@ User=root
 # /root/.config/agentpod-node/config.json when User=root).
 # The config is read automatically by `agentpod-node run`.
 ExecStart={{.BinaryPath}} run
+# Optional OpenTelemetry settings (docs/OPERATING.md §10). The leading "-" means a host
+# without the file runs exactly as before, with telemetry off.
+EnvironmentFile=-/etc/agentpod-node/otel.env
 
 Restart=always
 RestartSec=5

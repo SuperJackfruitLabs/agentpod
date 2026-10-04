@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/acptrace"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 )
 
@@ -256,7 +257,7 @@ func (h *acpHandler) HandleFrame(frameType, id string, raw json.RawMessage) erro
 			if err != nil {
 				return fmt.Errorf("acp input: bad base64: %w", err)
 			}
-			return sess.Write(data)
+			return sess.Write(acptrace.Rewrite(data, id))
 		}
 	}
 

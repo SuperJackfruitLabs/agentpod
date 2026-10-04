@@ -31,6 +31,7 @@ import type { BridgeAgentConfig } from "../../src/services/bridge/config";
 import { runOnce, type AcpPort, type DispatchDeps } from "../../src/services/bridge/dispatch";
 import { SuperpipelineClient } from "../../src/services/bridge/superpipeline";
 import { dispatchOutcome, openDispatch, recordProduced } from "../../src/services/bridge/ledger";
+import { makeFingerprint } from "../../src/services/evidence/fingerprint";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const STATION_ID = "bridge-dispatch-station";
@@ -375,6 +376,45 @@ describe("a card worked start to finish", () => {
 
     expect(board.verbs().filter((v) => v === "complete")).toHaveLength(1);
     expect(await dispatchOutcome(key())).toMatchObject({ outcome: "reported" });
+  });
+
+  test("the attempt records the fingerprint the seam resolved", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    const fp = makeFingerprint({ harness: "hermes", profile: "press", skill_release: "none" }, "hub");
+    await runOnce(deps(board.client, acp.port, undefined, { fingerprint: async () => fp }));
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.fingerprintDigest).toBe(fp.digest);
+  });
+
+  test("a fingerprint seam that throws still opens the attempt, as unknown", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { fingerprint: async () => { throw new Error("db down"); } }),
+    );
+    expect(result.status).toBe("reported");
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.fingerprintDigest).toBe(makeFingerprint({}, "hub").digest);
+  });
+
+  test("the attempt records the agent principal the occupant seam resolved", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    await runOnce(deps(board.client, acp.port, undefined, { occupant: async () => "prn_0123456789abcdef0abc" }));
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.agentPrincipalId).toBe("prn_0123456789abcdef0abc");
+  });
+
+  test("an occupant seam that throws still opens the attempt, with no principal", async () => {
+    const board = fakeBoard(happyBoard);
+    const acp = fakeAcp(() => [chunk("done"), idle()]);
+    const result = await runOnce(
+      deps(board.client, acp.port, undefined, { occupant: async () => { throw new Error("db down"); } }),
+    );
+    expect(result.status).toBe("reported");
+    const [run] = await db.select().from(acpRuns).where(eq(acpRuns.stationId, STATION_ID));
+    expect(run!.agentPrincipalId).toBeNull();
   });
 
   test("what the agent said reaches the board, coalesced", async () => {

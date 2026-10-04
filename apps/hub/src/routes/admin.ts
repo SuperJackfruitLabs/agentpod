@@ -20,6 +20,7 @@ import { agentsAdminRouter } from "./agents-admin";
 import { adminBridgeAgentsRouter } from "./admin-bridge-agents";
 import { adminTranscriptionRoutes } from "./transcription-settings";
 import { adminSpeechRoutes } from "./speech-settings";
+import { createAdminServicePrincipalsRouter } from "./admin-service-principals";
 
 // Models
 import {
@@ -59,6 +60,9 @@ adminRouter.route("/grants", adminGrantsRouter);
 // sides and nothing else in this API says what those ids are, so without this
 // the console can offer only a text box for a twenty-hex string.
 adminRouter.route("/principals", adminPrincipalsRouter);
+
+/** Service principals (superwitness): create with a read-only grant and one credential; revoke one. */
+adminRouter.route("/service-principals", createAdminServicePrincipalsRouter());
 
 // The superpipeline bridge's roster. Workspace administration: every write here decides what work
 // this fleet claims and whose credential it spends. Replaces editing SUPERPIPELINE_BRIDGE_AGENTS
