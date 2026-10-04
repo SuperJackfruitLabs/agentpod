@@ -23,6 +23,20 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 
+/**
+ * What an attempt ran with, as stored on `acp_runs.fingerprint` (contract C3).
+ * Declared here rather than imported from the service, so the schema depends on nothing above it.
+ * `reported_by` says where `model` came from; it is NOT part of `fingerprint_digest`.
+ */
+export type StoredFingerprint = {
+  harness: string;
+  harness_version: string;
+  model: string;
+  profile: string;
+  skill_release: string;
+  reported_by: "harness" | "station" | "hub";
+};
+
 export const acpSessions = pgTable("acp_sessions", {
   id: text("id").primaryKey(),                                        // "acps_" + uuid-ish
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
@@ -120,12 +134,21 @@ export const acpRuns = pgTable("acp_runs", {
   endSeq: integer("end_seq"),                                         // null while live
   startedAt: timestamp("started_at").notNull(),
   endedAt: timestamp("ended_at"),
+
+  /**
+   * What ran this attempt, recorded once when it opened and never recomputed (contract C3).
+   * Null only on rows written before migration 0085; the evidence route reads that as "unknown".
+   */
+  fingerprintDigest: text("fingerprint_digest"),
+  fingerprint: jsonb("fingerprint").$type<StoredFingerprint>(),
 }, (t) => [
   index("acp_runs_session_idx").on(t.sessionId),
   index("acp_runs_station_started_idx").on(t.stationId, t.startedAt.desc()),
   // The join from the board's side: given superpipeline's runId, find what ran.
   index("acp_runs_external_idx").on(t.externalRunId),
   index("acp_runs_tenant_id_idx").on(t.tenantId),
+  // What an evaluation groups by.
+  index("acp_runs_fingerprint_idx").on(t.fingerprintDigest),
   foreignKey({
     columns: [t.sessionId, t.tenantId],
     foreignColumns: [acpSessions.id, acpSessions.tenantId],
@@ -150,5 +173,11 @@ export const acpRuns = pgTable("acp_runs", {
   check(
     "acp_runs_external_pair",
     sql`(${t.externalRunId} IS NULL) = (${t.externalSource} IS NULL)`,
+  ),
+  // One fact, two columns — the same rule as the external pair above.
+  check("acp_runs_fingerprint_pair", sql`(${t.fingerprintDigest} IS NULL) = (${t.fingerprint} IS NULL)`),
+  check(
+    "acp_runs_fingerprint_digest_shape",
+    sql`${t.fingerprintDigest} IS NULL OR ${t.fingerprintDigest} ~ '^sha256:[0-9a-f]{64}$'`,
   ),
 ]);

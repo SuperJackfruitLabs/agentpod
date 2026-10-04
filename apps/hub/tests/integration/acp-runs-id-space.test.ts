@@ -162,3 +162,17 @@ describe("acp_runs — AgentPod's own id space, enforced by the database", () =>
     expect(await violation(runRow({ externalRunId: null, externalSource: null }))).toBe(ACCEPTED);
   });
 });
+
+describe("the fingerprint pair is one fact", () => {
+  test("a digest without its fields, or a malformed digest, is refused by the table", async () => {
+    const id = `attempt_${crypto.randomUUID()}`;
+    await expect(
+      Promise.resolve(rawSql`INSERT INTO acp_runs (id, tenant_id, session_id, station_id, state, start_seq, started_at, fingerprint_digest)
+             VALUES (${id}, ${BOOTSTRAP_TENANT_ID}, ${SESSION_ID}, ${STATION_ID}, 'working', 0, now(), ${"sha256:" + "a".repeat(64)})`),
+    ).rejects.toThrow(/acp_runs_fingerprint_pair/);
+    await expect(
+      Promise.resolve(rawSql`INSERT INTO acp_runs (id, tenant_id, session_id, station_id, state, start_seq, started_at, fingerprint_digest, fingerprint)
+             VALUES (${id}, ${BOOTSTRAP_TENANT_ID}, ${SESSION_ID}, ${STATION_ID}, 'working', 0, now(), 'md5:abc', '{"harness":"x"}'::jsonb)`),
+    ).rejects.toThrow(/acp_runs_fingerprint_digest_shape/);
+  });
+});

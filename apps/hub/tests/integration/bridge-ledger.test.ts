@@ -39,6 +39,7 @@ import {
   startAttempt,
   endAttempt,
 } from "../../src/services/bridge/ledger";
+import { makeFingerprint } from "../../src/services/evidence/fingerprint";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const STATION_ID = "bridge-ledger-station";
@@ -337,5 +338,36 @@ describe("migration 0039, against a table that already has rows", () => {
     expect(observed).toBeDefined();
     expect(observed!.events_received).toBeNull();
     expect(observed!.activities_posted).toBeNull();
+  });
+});
+
+describe("the fingerprint is written once, when the attempt opens", () => {
+  test("an attempt records the fingerprint it was opened with", async () => {
+    await open();
+    const fp = makeFingerprint({ harness: "hermes", profile: "press", skill_release: "none" }, "hub");
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, fingerprint: fp });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(fp.digest);
+    expect(row!.fingerprint).toEqual({
+      harness: "hermes", harness_version: "unknown", model: "unknown", profile: "press",
+      skill_release: "none", reported_by: "hub",
+    });
+  });
+
+  test("an attempt opened without one records unknown, never NULL", async () => {
+    await open();
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1 });
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(makeFingerprint({}, "hub").digest);
+    expect(row!.fingerprint?.harness).toBe("unknown");
+  });
+
+  test("closing the attempt never recomputes it", async () => {
+    await open();
+    const fp = makeFingerprint({ harness: "hermes" }, "hub");
+    const attemptId = await startAttempt({ ...key(), sessionId: SESSION_ID, stationId: STATION_ID, startSeq: 1, fingerprint: fp });
+    await endAttempt(attemptId, "completed", 9);
+    const [row] = await db.select().from(acpRuns).where(eq(acpRuns.id, attemptId));
+    expect(row!.fingerprintDigest).toBe(fp.digest);
   });
 });
