@@ -17,7 +17,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { PrincipalId } from "@agentpod/contract";
 import { createLogger } from "../utils/logger";
-import { getGrant, setGrant, deleteGrant, listGrants, NO_GRANT } from "../services/grants";
+import { getGrant, setGrant, deleteGrant, listGrants, NO_GRANT, GRANT_SCOPES } from "../services/grants";
 import { isControlPairEnforced } from "../services/control-pair";
 
 const log = createLogger("admin-grants");
@@ -42,6 +42,8 @@ const grantValue = PrincipalId;
 const grantBody = z.object({
   mayDispatch: z.array(grantValue),
   mayGrantReach: z.boolean(),
+  /** Optional on purpose: a client that predates scopes keeps them as stored (see `GrantInput`). */
+  scopes: z.array(z.enum(GRANT_SCOPES)).optional(),
 });
 
 export const adminGrantsRouter = new Hono()
@@ -71,20 +73,24 @@ export const adminGrantsRouter = new Hono()
     return c.json({ principalId, granted: grant !== null, grant: grant ?? NO_GRANT });
   })
 
-  /** Set a principal's grant. Whole-object, not a patch — see below. */
+  /** Set a principal's grant. The control pair is whole-object, not a patch; `scopes` is the one optional field — see below. */
   .put("/:principalId", zValidator("json", grantBody), async (c) => {
     const principalId = c.req.param("principalId");
     const body = c.req.valid("json");
 
-    // Whole-object on purpose. A PATCH that merged arrays would make removing a
-    // permission harder than adding one, and an authorization surface should
-    // never be easier to widen than to narrow.
+    // Whole-object for the control pair, on purpose. A PATCH that merged arrays
+    // would make removing a permission harder than adding one, and an
+    // authorization surface should never be easier to widen than to narrow.
+    // `scopes` is the exception: absent keeps the stored scopes (a client that
+    // predates them must not strip them), present REPLACES them (never merges),
+    // so `[]` still removes — narrowing stays as easy as widening.
     await setGrant(principalId, body);
 
     log.info("grant updated", {
       principalId,
       mayDispatch: body.mayDispatch,
       mayGrantReach: body.mayGrantReach,
+      scopes: body.scopes,
       by: c.get("user")?.id,
     });
 

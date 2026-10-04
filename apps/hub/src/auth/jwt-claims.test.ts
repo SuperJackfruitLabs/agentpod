@@ -197,3 +197,24 @@ describe("a multi-audience token still verifies against a single-audience check 
     expect(verified.sub).toBe(payload.sub);
   });
 });
+
+describe("buildTokenPayload carries the grant's scopes", () => {
+  test("a grant's scopes are issued as OAuth's space-delimited `scope`, and absent when empty", async () => {
+    const base = {
+      principalId: "prn_0123456789abcdef0123",
+      resolvePrincipalById: async () => ({ id: "prn_0123456789abcdef0123", kind: "service" as const }),
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+    };
+    const withScope = await buildTokenPayload({
+      ...base,
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] }),
+    });
+    expect(withScope.scope).toBe("evidence:read");
+
+    const without = await buildTokenPayload({
+      ...base,
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false, scopes: [] }),
+    });
+    expect("scope" in without).toBe(false);
+  });
+});

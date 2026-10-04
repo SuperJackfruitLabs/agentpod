@@ -210,4 +210,21 @@ describe("the token claim contract (#332)", () => {
       })
     ).rejects.toThrow(/tenant/i);
   });
+
+  test("a payload carrying `scope` is described by the fixture", async () => {
+    const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
+    const payload = await buildTokenPayload({
+      principalId: "prn_test0123456789abcdef",
+      resolvePrincipalById: async () => ({ id: "prn_test0123456789abcdef", kind: "service" as const }),
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+      loadGrant: async () => ({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] }),
+    });
+    const described = new Set([
+      ...fixture.issued.map((c) => c.claim),
+      ...fixture.standard.map((c) => c.claim),
+      ...fixture.reserved.map((c) => c.claim),
+      ...fixture.conditional.map((c) => c.claim),
+    ]);
+    expect(Object.keys(payload).filter((k) => !described.has(k))).toEqual([]);
+  });
 });
