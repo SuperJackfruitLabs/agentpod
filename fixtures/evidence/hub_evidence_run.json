@@ -1,0 +1,73 @@
+{
+  "corpus": "evidence/hub-run",
+  "version": 1,
+  "authoredAt": "2026-10-04",
+  "authoredFrom": "agentpod apps/hub/src/routes/evidence.ts; superwitness milestone-1 index contract C5 (as amended by ws3 Task 0)",
+  "purpose": "What superwitness's agentpod source reads for one work run. The producer's CI parses every example with packages/contract/src/evidence.ts AND compares the live route's key shape to examples[0], so a renamed or added field fails here before superwitness reads it.",
+  "howToRead": {
+    "nullable": "board_id, card_id and dispatch are null when the ledger holds no row for the run; ended_at/end_seq are null while an attempt is live.",
+    "fingerprint": "digest \"unknown\" with every field \"unknown\" and reported_by \"hub\" is an attempt recorded before fingerprints existed — not one whose fields were all unknown, which has a real sha256 digest."
+  },
+  "examples": [
+    {
+      "name": "a dispatched run, one fingerprinted attempt and one written before migration 0085",
+      "response": {
+        "external_source": "superpipeline",
+        "external_run_id": "run_e074a2160c4b4f28",
+        "board_id": "brd_9c1d4e5f6a7b8c9d",
+        "card_id": "card_1a2b3c4d5e6f7a8b",
+        "dispatch": { "outcome": "reported", "detail": null, "station_id": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90", "updated_at": "2026-10-04T10:15:02.000Z" },
+        "attempts": [
+          {
+            "id": "attempt_9f1c2ab0-4d7e-4b3a-8c88-0d6e2f7c1b90",
+            "station_id": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+            "session_id": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+            "state": "completed",
+            "start_seq": 1,
+            "end_seq": 9,
+            "started_at": "2026-10-04T10:12:40.000Z",
+            "ended_at": "2026-10-04T10:14:58.000Z",
+            "fingerprint": {
+              "digest": "sha256:b38ccbea6e3b6a65fcbfc4402709554b5f9579555c91407498257fbad815ea92",
+              "harness": "hermes", "harness_version": "unknown", "model": "unknown",
+              "profile": "press", "skill_release": "none", "reported_by": "hub"
+            }
+          },
+          {
+            "id": "attempt_1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9",
+            "station_id": "station_4a1482de-9c3f-4b17-8a55-0d6e2f7c1b90",
+            "session_id": "acps_e074a216-0c4b-4f28-9d3a-51b6c7e8f0a2",
+            "state": "working",
+            "start_seq": 10,
+            "end_seq": null,
+            "started_at": "2026-10-04T10:15:10.000Z",
+            "ended_at": null,
+            "fingerprint": {
+              "digest": "unknown",
+              "harness": "unknown", "harness_version": "unknown", "model": "unknown",
+              "profile": "unknown", "skill_release": "unknown", "reported_by": "hub"
+            }
+          }
+        ],
+        "as_of": "2026-10-04T10:20:00.000Z"
+      }
+    },
+    {
+      "name": "an attempt with no ledger row",
+      "response": {
+        "external_source": "superpipeline",
+        "external_run_id": "run_a1b2c3d4e5f60718",
+        "board_id": null,
+        "card_id": null,
+        "dispatch": null,
+        "attempts": [],
+        "as_of": "2026-10-04T10:20:00.000Z"
+      }
+    }
+  ],
+  "reject": [
+    { "reason": "zero standing in for unknown", "patch": { "attempts": [{ "fingerprint": { "digest": "" } }] } },
+    { "reason": "unknown reporter", "patch": { "attempts": [{ "fingerprint": { "reported_by": "guess" } }] } },
+    { "reason": "an extra field", "patch": { "cost": 0 } }
+  ]
+}

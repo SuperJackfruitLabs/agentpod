@@ -1,0 +1,11 @@
+{
+  "corpus": "evidence/hub-attempt",
+  "version": 1,
+  "authoredAt": "2026-10-04",
+  "authoredFrom": "agentpod apps/hub/src/routes/evidence.ts; superwitness contract C5",
+  "purpose": "The by-attempt lookup superwitness redirects through. Null fields mean the attempt was not dispatched by an orchestrator, or its ledger row is gone.",
+  "examples": [
+    { "name": "dispatched", "response": { "external_source": "superpipeline", "external_run_id": "run_e074a2160c4b4f28", "board_id": "brd_9c1d4e5f6a7b8c9d" } },
+    { "name": "not dispatched", "response": { "external_source": null, "external_run_id": null, "board_id": null } }
+  ]
+}
