@@ -516,7 +516,7 @@ settings. Disabling keeps the row and its credentials; removing deletes both.
 hub log:
 
 ```
-[bridge] enabled, but no agents are rostered — nothing will be claimed. Add one under Bridge in the console.
+{"timestamp":"…","level":"info","service":"agentpod-api","component":"bridge","message":"enabled, but no agents are rostered — nothing will be claimed. Add one under Bridge in the console."}
 ```
 
 That line is what replaces the old boot-time refusal. `validateConfig()` runs before
