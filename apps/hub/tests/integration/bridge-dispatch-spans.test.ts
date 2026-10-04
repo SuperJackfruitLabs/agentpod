@@ -162,6 +162,10 @@ test("events delivered outside the dispatch context still post board calls insid
       context.with(ROOT_CONTEXT, () => {
         setTimeout(() => {
           for (const e of [
+            // A thought, then a message: the coalescer emits the thought's activity from
+            // inside this root-context push, during the turn. (A lone chunk would only be
+            // emitted by the post-turn flush, which runs inside the dispatch context anyway.)
+            ev("agent-update", { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thinking" } }),
             ev("agent-update", { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "working" } }),
             ev("state", { status: "idle" }),
           ]) subs.forEach((fn) => fn(e));
@@ -183,7 +187,8 @@ test("events delivered outside the dispatch context still post board calls insid
   });
   expect(result.status).toBe("reported");
   const dispatch = t.named("dispatch").at(-1)!;
-  const activities = b.calls.filter((c) => c.path.endsWith("/activity") || c.path.includes("activit"));
-  expect(activities.length).toBeGreaterThan(0);
+  const activities = b.calls.filter((c) => c.path.endsWith("/activities"));
+  // The thought's activity is posted mid-turn (the message chunk is flushed after it).
+  expect(activities.length).toBeGreaterThanOrEqual(2);
   for (const c of activities) expect(c.headers.traceparent?.split("-")[1]).toBe(dispatch.spanContext().traceId);
 });
