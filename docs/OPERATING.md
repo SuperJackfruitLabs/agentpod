@@ -1688,24 +1688,29 @@ The agent asked for permission and is waiting for a person. The question is on t
 
 ## 10. Telemetry
 
-The hub exports OpenTelemetry traces, metrics and logs over OTLP/HTTP when
-`OTEL_EXPORTER_OTLP_ENDPOINT` is set in `/etc/agentpod/hub.env`, normally to the host
-collector at `http://127.0.0.1:4318`. Unset, or with `OTEL_SDK_DISABLED=true`, nothing
-is loaded and nothing changes.
+The hub and node-agent export OpenTelemetry over OTLP/HTTP to the host collector, normally
+`http://127.0.0.1:4318`, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Unset, or with
+`OTEL_SDK_DISABLED=true`, nothing is loaded and nothing changes. Export never blocks: each
+process has a bounded queue (2048 spans) that drops and counts what it cannot send as
+`otel.spans.dropped`, which a Prometheus gateway exposes as `otel_spans_dropped_total`
+(labelled by `service.name`: `agentpod-hub` or `agentpod-node-agent`). No prompt, message or
+tool content goes into any span.
+
+### Hub
+
+The hub reads the variables from `/etc/agentpod/hub.env` and exports traces, metrics and logs.
 
 - Every claimed superpipeline run is one trace with a `dispatch` root span. The standard
   agent spans (`attempt`, `turn`, `tool_call`, `permission`) are built from the ACP
   events the hub already stores. They carry ids and sequence numbers, never content.
   The transcript stays in `acp_events`.
-- Export never blocks. When the queue (2048 spans) is full, spans are dropped and counted
-  as `otel_spans_dropped_total`.
 - Tuning, all optional: `OTEL_LOGS_EXPORTER=none` stops exporting log records (traces and
   metrics continue); `OTEL_BSP_MAX_QUEUE_SIZE` sets the span and log queue (default 2048);
   `OTEL_EXPORTER_OTLP_TIMEOUT` sets the per-export timeout in milliseconds (default 10000).
 - Metrics, with explicit dimensions only (no run, attempt or station ids):
   `bridge.dispatches{dispatch.status}`, `http.server.request.duration`
   (`http.request.method`, `http.route`, `http.response.status_code`), and
-  `otel.spans.dropped`, which a Prometheus gateway exposes as `otel_spans_dropped_total`.
+  `otel.spans.dropped`.
 - The boot line says which state the hub is in: `telemetry: exporting OTLP to <endpoint>` or
   `telemetry: (disabled)`. A malformed endpoint, such as one with no scheme
   (`127.0.0.1:4318` instead of `http://127.0.0.1:4318`), does not stop the hub: it logs a
@@ -1713,3 +1718,21 @@ is loaded and nothing changes.
 - `AGENTPOD_ACP_TRACE_META=false` stops the hub sending `_meta.traceparent` on ACP
   `session/new` and `session/prompt`, for a harness that rejects the key. It takes
   effect on the next hub restart, and no node-agent needs to change.
+
+### node-agent
+
+node-agent exports traces and metrics. It emits a SERVER span per broker verb that arrives
+carrying `_meta` (continuing the hub's trace; a node never starts traces of its own),
+`acp.forward session/new` and `acp.forward session/prompt` PRODUCER spans where it hands the
+trace context to the harness, and the `otel.spans.dropped` counter. `acp.attach` and
+`term.attach` verb spans last for the whole stream, so they export only when it ends.
+
+Linux nodes read the variables from `/etc/agentpod-node/otel.env` (system service) or
+`~/.config/agentpod-node/otel.env` (user service), normally one line:
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`. Only hosts with a collector (infra,
+guild) set it. A unit installed before this release does not read the file until
+`apn service install` rewrites it. macOS (launchd) nodes have no env-file hook, so
+telemetry is not available there.
+
+With the collector down, otel-go logs one line per failed export (at most about every 2 s
+while spans are flowing); the node keeps working and the queue drops what it cannot send.
