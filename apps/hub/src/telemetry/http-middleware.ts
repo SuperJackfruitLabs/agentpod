@@ -5,7 +5,8 @@
  * string, either: the Matrix homeserver authenticates appservice transactions with
  * `?access_token=…`, the same leak `redactUrlSecrets` closes in the request log.
  * The name is set after `next()`, from Hono's matched routes: the last match whose
- * method is not `ALL` (middleware registers as `ALL`).
+ * method is not `ALL` (middleware registers as `ALL`), else the last non-wildcard `ALL`
+ * route (an `.all('/mcp')` handler).
  */
 import { context, SpanKind, SpanStatusCode, trace } from "@opentelemetry/api";
 import type { Context as HonoContext, MiddlewareHandler } from "hono";
@@ -26,6 +27,12 @@ export function routeTemplate(c: HonoContext): string | null {
   for (let i = routes.length - 1; i >= 0; i--) {
     const r = routes[i]!;
     if (r.method !== "ALL") return r.path;
+  }
+  // `.all('/mcp', …)` registers as ALL. Prefer it over "unmatched", but never a wildcard
+  // (`*`, `/api/*`), which is middleware and names nothing.
+  for (let i = routes.length - 1; i >= 0; i--) {
+    const r = routes[i]!;
+    if (!r.path.endsWith("*")) return r.path;
   }
   return null;
 }

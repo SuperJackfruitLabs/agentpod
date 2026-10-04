@@ -106,9 +106,38 @@ export interface TelemetryHandle {
 
 let active: TelemetryHandle | null = null;
 
+/**
+ * Starts exporting when an endpoint is configured. Never throws: a malformed endpoint
+ * (no scheme) or a failed SDK import must not stop the hub from booting. On failure it
+ * warns on stdout, tears down whatever it half built, and returns null (telemetry off).
+ */
 export async function initTelemetry(cfg: TelemetryConfig): Promise<TelemetryHandle | null> {
   if (!cfg.endpoint) return null;
   if (active) return active;
+  const partial: Array<{ shutdown(): Promise<void> }> = [];
+  try {
+    return await startTelemetry(cfg, partial);
+  } catch (err) {
+    resetTelemetry();
+    active = null;
+    for (const p of partial) {
+      try {
+        void p.shutdown().catch(() => undefined);
+      } catch {
+        // best effort
+      }
+    }
+    // The error name only: the message of an exporter URL error quotes the endpoint.
+    const kind = err instanceof Error ? err.name : "Error";
+    console.log(`telemetry: disabled, could not start the exporters (${kind}); check OTEL_EXPORTER_OTLP_ENDPOINT includes a scheme, e.g. http://host:port`);
+    return null;
+  }
+}
+
+async function startTelemetry(
+  cfg: TelemetryConfig,
+  partial: Array<{ shutdown(): Promise<void> }>,
+): Promise<TelemetryHandle> {
   ensureContextManager();
 
   const [
@@ -147,6 +176,7 @@ export async function initTelemetry(cfg: TelemetryConfig): Promise<TelemetryHand
       }),
     ],
   });
+  partial.push(meterProvider);
   const dropped = meterProvider.getMeter(SCOPE).createCounter("otel.spans.dropped", {
     description: "Spans dropped because the export queue was full",
     unit: "{span}",
@@ -161,6 +191,8 @@ export async function initTelemetry(cfg: TelemetryConfig): Promise<TelemetryHand
       ),
     ],
   });
+
+  partial.push(tracerProvider);
 
   const loggerProvider = cfg.logs
     ? new SdkLoggerProvider({
@@ -177,6 +209,7 @@ export async function initTelemetry(cfg: TelemetryConfig): Promise<TelemetryHand
         ],
       })
     : null;
+  if (loggerProvider) partial.push(loggerProvider);
 
   state.tracerProvider = tracerProvider;
   state.meterProvider = meterProvider;

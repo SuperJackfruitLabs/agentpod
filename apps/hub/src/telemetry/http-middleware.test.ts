@@ -45,6 +45,17 @@ describe("HTTP server spans", () => {
     expect(JSON.stringify(s.attributes)).not.toContain("st_999");
   });
 
+  test("an ALL route with a concrete path (like /mcp) names the span; a wildcard does not", async () => {
+    const a = new Hono()
+      .use("*", httpServerSpans())
+      .all("/mcp", (c) => c.text("ok"))
+      .all("/proxy/*", (c) => c.text("ok"));
+    await a.request("/mcp", { method: "POST" });
+    const s = only();
+    expect(s.name).toBe("POST /mcp");
+    expect(s.attributes["http.route"]).toBe("/mcp");
+  });
+
   test("continue an incoming traceparent", async () => {
     await app.request("/api/stations/x", {
       headers: { traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" },

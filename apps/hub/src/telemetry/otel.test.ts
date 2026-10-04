@@ -46,4 +46,21 @@ describe("initTelemetry", () => {
     // After shutdown the hub is back on the no-op tracer.
     expect(tracer().startSpan("y").isRecording()).toBe(false);
   });
+
+  test("a malformed endpoint warns and leaves telemetry off instead of throwing", async () => {
+    const lines: string[] = [];
+    const orig = console.log;
+    console.log = (...a: unknown[]) => void lines.push(a.join(" "));
+    try {
+      expect(await initTelemetry(readTelemetryConfig({ OTEL_EXPORTER_OTLP_ENDPOINT: "127.0.0.1:4318" }))).toBeNull();
+    } finally {
+      console.log = orig;
+    }
+    expect(tracer().startSpan("x").isRecording()).toBe(false);
+    expect(lines.join("\n")).toContain("telemetry");
+    expect(lines.join("\n")).not.toContain("4318");
+    // A later valid init is not blocked by the failed one.
+    const handle = await initTelemetry(readTelemetryConfig({ OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:9" }));
+    expect(handle).not.toBeNull();
+  });
 });
