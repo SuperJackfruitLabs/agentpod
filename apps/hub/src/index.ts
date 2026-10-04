@@ -71,6 +71,7 @@ import { stationWriteRoutes } from './routes/station-writes.ts';
 import { stationLifecycleRoutes } from './routes/station-lifecycle.ts';
 import { stationCleanupRoutes } from './routes/station-cleanup.ts';
 import { stationSkillsRoutes } from './routes/station-skills.ts';
+import { harnessConfigRoutes } from './routes/harness-config.ts';
 import { createSkillManagementRoutes, skillArtifactDownloadRoutes } from './routes/skill-management.ts';
 import { stationChangesetRoutes } from './routes/station-changeset.ts';
 import { nodePostureRoutes } from './routes/node-posture.ts';
@@ -332,6 +333,7 @@ const app = new Hono()
   .route('/api', stationSkillsRoutes)
   .route('/api', createSkillManagementRoutes())
   .route('/api', stationChangesetRoutes)                   // POST /api/stations/:id/changeset/{status,diff}
+  .route('/api', harnessConfigRoutes)                       // GET/PUT/DELETE /api/fleet/config/*, GET /api/stations/:id/config
   /**
    * Giving one station a forge push key, and taking it away.
    *
