@@ -1,0 +1,42 @@
+name: ACP adapter pins
+
+# Are the pinned ACP adapter versions behind what npm publishes?
+#
+# **Scheduled, not a pull-request gate, on purpose.** A pin being behind is
+# never caused by the change under review, so failing that review punishes the
+# wrong commit — and a job that blocks unrelated work the day an adapter
+# publishes is a job somebody switches off, which leaves the pins less watched
+# than before it existed. Weekly, matching dependabot's cadence, plus
+# `workflow_dispatch` for asking on demand.
+#
+# Dependabot cannot do this itself: it reads manifests, and these pins are Go
+# string constants in the descriptor package, structurally invisible to it. That
+# is the gap this fills, and the reason the script reads the constants rather
+# than restating the versions here.
+#
+# It never upgrades anything. Raising a pin is a decision taken with the ACP
+# contract tests behind it; this only makes sure the decision gets offered.
+
+on:
+  schedule:
+    # Mondays, 09:30 UTC — after dependabot's 09:00, so a week's dependency
+    # noise arrives together rather than twice.
+    - cron: "30 9 * * 1"
+  workflow_dispatch:
+
+jobs:
+  pins:
+    name: Adapter pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # No `bun install`: the script imports only node builtins and uses global
+      # fetch, so there is nothing to install and nothing whose absence could
+      # make this pass vacuously.
+      - name: Check the pins
+        run: bun run scripts/check-acp-adapter-pins.ts --check
