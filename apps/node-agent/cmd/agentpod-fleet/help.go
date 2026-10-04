@@ -33,6 +33,7 @@ Usage: fleet <verb> [flags]
   fleet users …              people: list, show, ban, unban, role
   fleet principals …         identities: list, suspend, restore
   fleet grants …             dispatch authority, as a document
+  fleet config …             what a harness setting should be, and what it is
 
   fleet update [--check]     replace this binary with the newest release
   fleet version              print version and platform

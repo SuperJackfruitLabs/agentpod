@@ -72,6 +72,8 @@ func fleetCmd(args []string) {
 		fleetBridge(args[1:])
 	case "grants":
 		fleetGrants(args[1:])
+	case "config":
+		fleetConfig(args[1:])
 	case "principals":
 		fleetPrincipals(args[1:])
 	case "users":
