@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/acp"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/stationtoken"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/telemetry"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/terminal"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/turnerror"
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/workspacegate"
@@ -32,6 +34,16 @@ func runCmd() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	otelShutdown, err := telemetry.Setup(ctx, telemetry.FromEnv(version, os.Getenv))
+	if err != nil {
+		log.Printf("telemetry: disabled: %v", err)
+		otelShutdown = func(context.Context) error { return nil }
+	}
+	defer func() {
+		c, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = otelShutdown(c)
+	}()
 	fmt.Println("connecting to", cfg.Hub, "as", cfg.NodeID)
 
 	reg := buildRegistry(cfg)
