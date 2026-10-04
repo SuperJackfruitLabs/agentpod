@@ -1,17 +1,17 @@
 /**
- * What the fleet wants a harness setting to be — declared, stored, resolved.
- *
- * This is the store half (comparing a declaration against what a station
- * actually has is Task 6). It has no opinion about the observed side at all:
- * a station's live value is read from the node and never cached in this
- * table, because a cached observation is a claim about a machine that may
- * have changed since — the class of bug this whole design exists to end.
+ * What the fleet wants a harness setting to be — declared, stored, resolved —
+ * and `compare`, which weighs that against what a station actually has.
+ * The store half has no opinion about the observed side at all: a station's
+ * live value is read from the node and never cached in this table, because a
+ * cached observation is a claim about a machine that may have changed since
+ * — the class of bug this whole design exists to end.
  *
  * `tenantId` is REQUIRED on every exported function here, never optional.
  * Every hub query is tenant-scoped, and an optional tenant on a write is a
  * cross-tenant write — the most expensive defect class in this repo.
  */
 import { eq, isNull, SQL } from "drizzle-orm";
+import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { declaredHarnessConfig } from "../db/schema/harness-config";
 import { tenantScope } from "../db/tenant-scope";
@@ -133,4 +133,90 @@ export async function resolveFor(
     }
   }
   return out;
+}
+
+/**
+ * Compare a station's observed values with what was declared for it.
+ *
+ * Only settings that were DECLARED are reported: this system has no opinion
+ * about a setting nobody mentioned, and reporting one would make the drift
+ * list a list of every setting in the fleet.
+ *
+ * `declaredAtStationLevel` is how the caller carries forward the `level` that
+ * `resolveFor` attached to its resolution, without folding it into the bare
+ * declared value — the level is load-bearing: `out-of-scope` fires only when
+ * the winning declaration was made at STATION level for a setting whose
+ * document is not per-station (`scope !== "profile"`).
+ */
+export function compare(args: {
+  stationId: string;
+  values: ConfigValue[];
+  settings: ConfigSetting[];
+  declared: Record<string, unknown>;
+  declaredAtStationLevel?: Set<string>;
+}): ConfigObservation[] {
+  const byId = new Map(args.settings.map((s) => [s.id, s]));
+  const stationLevel = args.declaredAtStationLevel ?? new Set<string>();
+  const out: ConfigObservation[] = [];
+
+  for (const v of args.values) {
+    if (!(v.settingId in args.declared)) continue; // undeclared: no opinion, not reported
+    const declared = args.declared[v.settingId];
+    const setting = byId.get(v.settingId);
+    const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
+
+    // Scope first: a declaration that cannot be honoured is not drift, and
+    // calling it "drifted" would invite an apply that must then refuse.
+    if (setting && setting.scope !== "profile" && stationLevel.has(v.settingId)) {
+      out.push({
+        ...row,
+        state: "out-of-scope",
+        reason: `${v.settingId} is ${setting.scope}-scoped: declaring it for one station would change its siblings on the same host`,
+      });
+      continue;
+    }
+
+    // `unreadable` must never collapse into `absent`: a document that could
+    // not be read must not look like one whose key is simply missing,
+    // because "missing" reads as agreement where "unreadable" does not.
+    if (!v.readable) {
+      out.push({ ...row, observed: undefined, state: "unreadable", reason: v.reason ?? "the document could not be read" });
+      continue;
+    }
+
+    if (v.observed === undefined) {
+      out.push({ ...row, state: "absent", reason: "declared, and the key is not in the document" });
+      continue;
+    }
+
+    if (sameValue(declared, v.observed)) {
+      out.push({ ...row, state: "matches" });
+      continue;
+    }
+
+    out.push({
+      ...row,
+      state: "drifted",
+      reason: `declared ${JSON.stringify(declared)}, observed ${JSON.stringify(v.observed)}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * Do a declaration and an observation agree?
+ *
+ * Compared as text, because the node reads YAML as text while a declaration
+ * arrives as JSON: treating `900` and `"900"` as different would report
+ * drift on every numeric setting forever, and a drift report that is always
+ * wrong is one nobody reads.
+ */
+function sameValue(declared: unknown, observed: unknown): boolean {
+  if (declared === null || declared === undefined || observed === null || observed === undefined) {
+    return declared === observed;
+  }
+  if (typeof declared === "object" || typeof observed === "object") {
+    return JSON.stringify(declared) === JSON.stringify(observed);
+  }
+  return String(declared) === String(observed);
 }
