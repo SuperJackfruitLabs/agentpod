@@ -266,27 +266,8 @@ func (h *hermesDescriptor) multiplexProfiles() bool {
 	if err != nil {
 		return false
 	}
-	inGateway := false
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		// An unindented line opens a new top-level section, which closes any previous one.
-		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
-			inGateway = strings.TrimSpace(strings.SplitN(line, ":", 2)[0]) == "gateway"
-			continue
-		}
-		if !inGateway || !strings.HasPrefix(trimmed, "multiplex_profiles:") {
-			continue
-		}
-		v := strings.TrimSpace(strings.TrimPrefix(trimmed, "multiplex_profiles:"))
-		if i := strings.Index(v, "#"); i >= 0 {
-			v = strings.TrimSpace(v[:i])
-		}
-		return strings.EqualFold(strings.Trim(v, `"'`), "true")
-	}
-	return false
+	v, found := yamlScalar(data, "gateway", "multiplex_profiles")
+	return found && strings.EqualFold(v, "true")
 }
 
 // servedByRootGateway reports whether key's agent is run by the ROOT gateway rather
