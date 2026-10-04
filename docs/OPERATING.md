@@ -209,7 +209,11 @@ token's `mayDispatch` as the card's queued grant, and an empty list is refused w
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
    `superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev`
-   (the URN redirect marks this client as not intended for the browser flow). Restart the hub.
+   (the URN redirect marks this client as not intended for the browser flow). The canary needs its
+   own entry, separated from the first by a comma, whose audiences are superwitness's public URL
+   (`SW_PUBLIC_URL`) and superpipeline, because its one token calls both services:
+   `superwitness-canary|urn:ietf:wg:oauth:2.0:oob|<SW_PUBLIC_URL>,https://app.superpipeline.dev`
+   (see superwitness `docs/canary.md`). Restart the hub.
 2. Create it — the secret is printed once:
    ```sh
    fleet principals add-service superwitness --client superwitness --scope evidence:read
