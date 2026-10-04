@@ -77,15 +77,24 @@ describe("published docs", () => {
     // dispatched for months while missing from help, back when it still lived under `apn` —
     // is why this test trusts the switch over the table.
     const known = new Set(
-      [...read("apps/node-agent/cmd/agentpod-node/main.go").matchAll(/^\tcase "([a-z]+)"/gm)].map(
-        (m) => m[1]!,
-      ),
+      [
+        ...read("apps/node-agent/cmd/agentpod-node/main.go").matchAll(
+          // `[a-z][a-z-]*`, not `[a-z]+`: six apn commands are hyphenated
+          // (`openclaw-errors`, `pi-errors`, `hermes-live`, `hermes-skills`,
+          // `native-skills`, `plugin-management`) and `[a-z]+` followed by `"`
+          // matched none of them, so none was ever in `known`. The prose scan
+          // below had the same bound and captured `openclaw` out of
+          // `apn openclaw-errors`, so the first page to name one failed against
+          // a set that could not contain it.
+          /^\tcase "([a-z][a-z-]*)"/gm,
+        ),
+      ].map((m) => m[1]!),
     );
     known.add("node"); // stripped before the switch, so both spellings reach one dispatch
     expect(known.size).toBeGreaterThan(10);
 
     for (const page of all()) {
-      for (const [, cmd] of page.text.matchAll(/`apn ([a-z]+)/g)) {
+      for (const [, cmd] of page.text.matchAll(/`apn ([a-z][a-z-]*)/g)) {
         expect(known, `${page.file} names \`apn ${cmd}\``).toContain(cmd);
       }
     }
@@ -100,7 +109,7 @@ describe("published docs", () => {
     // mode this file exists to prevent.
     const known = new Set(
       [
-        ...read("apps/node-agent/cmd/agentpod-fleet/fleet.go").matchAll(/^\tcase "([a-z]+)":/gm),
+        ...read("apps/node-agent/cmd/agentpod-fleet/fleet.go").matchAll(/^\tcase "([a-z][a-z-]*)":/gm),
       ].map((m) => m[1]!),
     );
     // `help` and `version` are dispatched by agentpod-fleet's main.go, one level above
@@ -111,7 +120,7 @@ describe("published docs", () => {
     expect(known.size).toBeGreaterThan(5);
 
     for (const page of all()) {
-      for (const [, cmd] of page.text.matchAll(/`fleet ([a-z]+)/g)) {
+      for (const [, cmd] of page.text.matchAll(/`fleet ([a-z][a-z-]*)/g)) {
         expect(known, `${page.file} names \`fleet ${cmd}\``).toContain(cmd);
       }
     }
