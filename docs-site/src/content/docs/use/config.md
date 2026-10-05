@@ -242,6 +242,14 @@ it refuses to run without `--plan-digest`: that digest must be the one `plan` pr
 this operation, so a human reviewed the exact edit being written rather than whatever the
 current plan happens to be by the time `apply` runs.
 
+`create` covers a key the document does not have yet, including the case where its whole
+top-level section is absent — the ordinary state of a freshly adopted station whose operator
+has customised nothing. That section is **appended at the end of the document**, holding
+only the declared key, so no line already there is moved, reindented or reflowed. A section
+that *is* there but holds something this editor will not extend — a scalar, a bare key with
+nothing under it, a list, or an inline `{...}` mapping — is refused `SHAPE_UNEXPECTED` and
+named, never rewritten. Only one level of section is ever created.
+
 `fleet config plan --station ID` plans **every** setting currently declared for that
 station, at whatever level resolves to it — there is no flag to narrow the plan to one
 setting. A setting the station is opted out of is left out of that plan and named in
