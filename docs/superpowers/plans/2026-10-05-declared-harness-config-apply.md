@@ -40,6 +40,7 @@ Copied verbatim from the spec. Every task's requirements implicitly include thes
 | `OUT_OF_SCOPE` | station-scoped declaration for a `user`-scoped setting (D7) |
 | `SHAPE_UNEXPECTED` | the document is not the shape the writer knows — `ErrConflict`'s meaning |
 | `PLAN_STALE` | the document changed since the plan was reviewed (D8) |
+| `PLAN_DIGEST_MISMATCH` | the applied digest is not the recorded plan's — an eighth code added during Task 5; the remedy differs from `PLAN_STALE` (re-read the plan vs re-plan) |
 | `OPTED_OUT` | an explicit operator opt-out (D6) |
 | `UNREADABLE` | the document could not be parsed; nothing is inferred |
 | `CREDENTIAL_PATH` | the target resolves to a credential file (`auth.json`, `.env`) |
