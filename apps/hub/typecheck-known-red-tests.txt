@@ -1,0 +1,78 @@
+# Known-red `tsc --noEmit -p tsconfig.tests.json` files under `tests/`, and how
+# many errors each carries.
+#
+# This is the same mechanism as `typecheck-known-red.txt`, pointed at the half
+# of this app the compiler had never seen. `tsconfig.json` includes only
+# `src/**/*`, so no test file was ever typechecked and no workflow ran `tsc`
+# at all — which is how `capabilities: ["health", "config.manage"]`, a genuine
+# type error against `Capability[]`, sat in six test files across three merged
+# PRs while every suite stayed green. The capability was missing from the
+# contract's enum, the compiler would have said so in all six places, and
+# nothing asked it.
+#
+# The 224 errors below are NOT that bug. They are pre-existing strict-null
+# noise — `possibly undefined`, `string | undefined` — and fixing them is a
+# change nobody asked for in a diff about something else, exactly as the `src`
+# file next door argues. What matters is that the count cannot RISE: a new
+# `capabilities: ["health", "not-a-real-capability"]` lands in a file with a
+# recorded number and turns `tests/unit/typecheck-baseline.test.ts` red.
+#
+# Per file, never a single total: one new error hiding behind one fixed error
+# is precisely the move a total cannot see.
+#
+# The `src/` entries are NOT repeated here — this config compiles `src` too, and
+# the baseline test unions this file with `typecheck-known-red.txt` before
+# comparing. One file per area, each owning its own number.
+#
+# Format: <path relative to apps/hub> <TAB> <error count>
+tests/e2e/helpers/docker.ts	2
+tests/helpers/assertions.ts	2
+tests/integration/acp-runs-id-space.test.ts	1
+tests/integration/admin-bridge-agents-route.test.ts	5
+tests/integration/admin-grants-route.test.ts	2
+tests/integration/admin-principals-route.test.ts	5
+tests/integration/bridge-dispatch.test.ts	6
+tests/integration/control-pair-dispatch.test.ts	10
+tests/integration/enrollment-token-reach.test.ts	1
+tests/integration/gateway-runtime-resume.test.ts	3
+tests/integration/gateway.test.ts	1
+tests/integration/harness-config-adopt.test.ts	6
+tests/integration/identity-move.test.ts	2
+tests/integration/jwt-endpoints.test.ts	1
+tests/integration/matrix-adoption-hook.test.ts	4
+tests/integration/matrix-as-queries.test.ts	1
+tests/integration/matrix-missions.test.ts	2
+tests/integration/matrix-node-spaces.test.ts	1
+tests/integration/purpose-routes.test.ts	4
+tests/integration/runtime-enrollment-token.test.ts	1
+tests/integration/skills-node-e2e.ts	1
+tests/integration/speech-settings.test.ts	1
+tests/integration/station-cleanup-reach.test.ts	1
+tests/integration/station-matrix-identity.test.ts	1
+tests/integration/station-matrix-say.test.ts	1
+tests/integration/station-observe.test.ts	9
+tests/integration/station-purpose.test.ts	6
+tests/integration/station-writes-reach.test.ts	1
+tests/integration/stations.test.ts	6
+tests/integration/tenant-isolation.test.ts	2
+tests/mocks/auth.ts	11
+tests/mocks/docker.ts	1
+tests/mocks/git.ts	4
+tests/mocks/opencode-sdk.ts	7
+tests/unit/acp-agent.test.ts	6
+tests/unit/acp-proxy-route.test.ts	1
+tests/unit/acp.schema.test.ts	1
+tests/unit/agent-version.test.ts	6
+tests/unit/broker.test.ts	23
+tests/unit/docs-claims.test.ts	4
+tests/unit/harness-config-compare.test.ts	22
+tests/unit/jwt-issuer.test.ts	1
+tests/unit/loopback-redirect.test.ts	3
+tests/unit/nodes-telemetry-route.test.ts	1
+tests/unit/nodes-update-all-route.test.ts	6
+tests/unit/speech-apply-route.test.ts	5
+tests/unit/speech-routes.test.ts	2
+tests/unit/speech-settings.test.ts	1
+tests/unit/transcription-apply-route.test.ts	4
+tests/unit/transcription-routes.test.ts	3
+tests/unit/utils/workflow-conversion.test.ts	23

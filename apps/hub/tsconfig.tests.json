@@ -1,0 +1,22 @@
+{
+  // The same compiler settings as `tsconfig.json`, with `tests/**/*` added.
+  //
+  // `tsconfig.json` includes only `src/**/*`, so the test suites — a third of
+  // this app's TypeScript — were never typechecked. That is how
+  // `capabilities: ["health", "config.manage"]`, a real type error against
+  // `Capability[]`, sat in six test files across three PRs while every suite
+  // stayed green: the compiler was never pointed at them.
+  //
+  // A SECOND config rather than widening the first, because the first's error
+  // count is a published number (`typecheck-known-red.txt`, 15 errors in
+  // `src`) that CLAUDE.md and a test both read. Widening it would have folded
+  // 224 pre-existing strict-null errors in `tests/` into that number and
+  // destroyed its meaning.
+  //
+  // `tests/unit/typecheck-baseline.test.ts` runs BOTH configs and holds each to
+  // its own per-file baseline, so neither count can rise without a deliberate
+  // edit to a file that says what it is.
+  "extends": "./tsconfig.json",
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules"]
+}
