@@ -195,6 +195,22 @@ export const ConfigRefusal = z.object({
   message: z.string(),
 });
 
+/**
+ * One setting the HUB excluded from a plan before ever asking the node to
+ * derive one — distinct from `ConfigRefusal`, which is the NODE refusing a
+ * whole plan. Mirrors `PlanRefusal` in
+ * `apps/hub/src/services/harness-config-apply.ts`'s `planFor`: a requested
+ * setting an operator has opted out of reconciliation for this station is
+ * excluded from `want` and reported back here, named, rather than being
+ * silently dropped or blocking the rest of the request.
+ */
+export const PlanRefusal = z.object({
+  settingId: z.string().min(1),
+  code: z.literal("OPTED_OUT"),
+  message: z.string(),
+});
+export type PlanRefusal = z.infer<typeof PlanRefusal>;
+
 /** One setting's intended edit. `current` absent means the key is not in the document. */
 export const ConfigPlanEntry = z.object({
   settingId: z.string(),
@@ -228,6 +244,17 @@ export const ConfigPlan = z.object({
   restartRequired: z.boolean(),
   createdAt: z.string(),
   planDigest: z.string(),
+  /**
+   * Settings the HUB excluded from this plan — an operator's per-setting
+   * opt-out — before the node was ever asked to derive anything. OPTIONAL:
+   * `POST /stations/:stationId/config/plan`
+   * (`apps/hub/src/routes/harness-config.ts`) sends this only when at least
+   * one requested setting was opted out, spreading it onto the node's own
+   * `ConfigPlan` unchanged; a plan with nothing excluded parses exactly as
+   * it did before this field existed, so a caller that has never heard of
+   * `refused` is unaffected.
+   */
+  refused: z.array(PlanRefusal).optional(),
 });
 
 export const ConfigWritten = z.object({

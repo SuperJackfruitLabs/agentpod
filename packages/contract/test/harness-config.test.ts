@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import {
   ConfigScope, ConfigPolicy, ConfigSetting, DeclaredSetting, ConfigValue, ConfigObservation,
-  ConfigPlan, ConfigReceipt, ConfigRefusalCode, ConfigWritten,
+  ConfigPlan, ConfigReceipt, ConfigRefusalCode, ConfigWritten, PlanRefusal,
 } from "../src/harness-config";
 
 describe("harness config contract", () => {
@@ -150,6 +150,62 @@ describe("a config plan is reviewable before it is applied", () => {
       expect(ConfigRefusalCode.parse(code)).toBe(code);
     }
     expect(ConfigRefusalCode.safeParse("WHATEVER").success).toBe(false);
+  });
+
+  test("a plan without anything opted out parses exactly as before `refused` existed", () => {
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1,
+      operationId: "op_4",
+      stationKey: "p",
+      entries: [entry],
+      beforeSha256: "a".repeat(64),
+      diff: "-  timeout: 300\n+  timeout: 900\n",
+      diffTruncated: false,
+      noOp: false,
+      restartRequired: true,
+      createdAt: "2026-10-05T00:00:00.000Z",
+      planDigest: "b".repeat(64),
+    });
+    expect(plan.refused).toBeUndefined();
+  });
+
+  test("a plan carrying the hub's per-setting opt-out refusals round-trips with the field intact", () => {
+    // The real shape `planFor` sends (apps/hub/src/services/harness-config-apply.ts):
+    // settingId, code ("OPTED_OUT" today — the only code that route produces),
+    // and a message naming why. The route spreads it onto the node's own
+    // ConfigPlan only when at least one requested setting was opted out
+    // (apps/hub/src/routes/harness-config.ts).
+    const refused = [
+      {
+        settingId: "hermes.plugins.enabled",
+        code: "OPTED_OUT" as const,
+        message: "an operator opted hermes.plugins.enabled out of reconciliation for this station; it will not be planned or written",
+      },
+    ];
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1,
+      operationId: "op_5",
+      stationKey: "p",
+      entries: [entry],
+      beforeSha256: "a".repeat(64),
+      diff: "-  timeout: 300\n+  timeout: 900\n",
+      diffTruncated: false,
+      noOp: false,
+      restartRequired: true,
+      createdAt: "2026-10-05T00:00:00.000Z",
+      planDigest: "b".repeat(64),
+      refused,
+    });
+    expect(plan.refused).toEqual(refused);
+  });
+
+  test("PlanRefusal is a settingId, a code and a message — the exact shape planFor sends", () => {
+    expect(PlanRefusal.parse({
+      settingId: "hermes.plugins.enabled", code: "OPTED_OUT", message: "opted out",
+    }).code).toBe("OPTED_OUT");
+    expect(PlanRefusal.safeParse({
+      settingId: "hermes.plugins.enabled", code: "UNKNOWN_SETTING", message: "x",
+    }).success).toBe(false);
   });
 
   test("a receipt records what was written, per entry, and never claims a restart happened", () => {
