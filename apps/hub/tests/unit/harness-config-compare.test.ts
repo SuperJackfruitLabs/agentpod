@@ -296,3 +296,83 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
     expect(o.state).toBe("matches");
   });
 });
+
+/**
+ * `ConfigObservation.level` carries the resolution level the winning
+ * declaration came from, exactly as `resolveFor`'s `Resolved` names it —
+ * so the console can stop re-deriving station → node → fleet precedence a
+ * second time, client-side, in a different language.
+ */
+describe("level: the resolution level travels on every observation", () => {
+  test("a station-level declaration reports level: station", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("station");
+  });
+
+  test("a node-level declaration reports level: node", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("node");
+  });
+
+  test("a fleet-level declaration reports level: fleet", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "fleet") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("fleet");
+  });
+
+  test("an out-of-scope observation still reports its level — the refusal does not erase it", () => {
+    const userScoped = { ...SETTING, id: "openclaw.hooks.allowConversationAccess", harness: "openclaw", scope: "user" as const };
+    const o = compare({
+      stationId: "station_a",
+      settings: [userScoped],
+      declared: { [userScoped.id]: at(true, "station") },
+      values: [{ settingId: userScoped.id, readable: true, observed: true }],
+    })[0]!;
+    expect(o.state).toBe("out-of-scope");
+    expect(o.level).toBe("station");
+  });
+
+  test("an unreadable observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }],
+    })[0]!;
+    expect(o.state).toBe("unreadable");
+    expect(o.level).toBe("node");
+  });
+
+  test("an opted-out observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "fleet") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.level).toBe("fleet");
+  });
+
+  test("an awaiting-restart observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+    })[0]!;
+    expect(o.state).toBe("awaiting-restart");
+    expect(o.level).toBe("node");
+  });
+});

@@ -179,7 +179,10 @@ export interface AppliedWrite {
  * or round-tripped into a side-channel set, because a second structure
  * carrying the same fact is exactly the split that drifts: an optional
  * parameter a caller forgets to populate loses the out-of-scope refusal with
- * no type error — spec §6's protection disappearing silently.
+ * no type error — spec §6's protection disappearing silently. The same
+ * `level` is also what each produced `ConfigObservation.level` carries
+ * (Phase 3), so the console reads the resolution level that won rather than
+ * re-deriving station → node → fleet precedence a second time, client-side.
  *
  * `compare()` stays a PURE function of its arguments: `appliedWrites` and
  * `optedOut` are rows the CALLER fetched (from `applied_harness_config` and
@@ -232,7 +235,7 @@ export function compare(args: {
     if (!(v.settingId in args.declared)) continue; // undeclared: no opinion, not reported
     const { value: declared, level } = args.declared[v.settingId]!;
     const setting = byId.get(v.settingId);
-    const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
+    const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed, level };
 
     // 1. out-of-scope: a declaration that cannot be honoured is not drift,
     // and calling it "drifted" would invite an apply that must then refuse.

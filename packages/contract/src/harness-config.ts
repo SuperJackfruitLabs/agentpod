@@ -126,12 +126,34 @@ export const ConfigValue = z.object({
 });
 export type ConfigValue = z.infer<typeof ConfigValue>;
 
+/** Which level a winning declaration resolved from: a station, its node, or
+ * (neither) the fleet — exactly as `resolveFor`'s `Resolved.level` names it. */
+export const ConfigLevel = z.enum(["station", "node", "fleet"]);
+export type ConfigLevel = z.infer<typeof ConfigLevel>;
+
 /** What the hub makes of a station, once values are compared with declarations. */
 export const ConfigObservation = z.object({
   settingId: z.string().min(1),
   stationId: z.string().min(1),
   declared: z.unknown().optional(),
   observed: z.unknown().optional(),
+  /**
+   * Which level the winning declaration came from — carried rather than
+   * re-derived, for the same reason `compare()`'s own `declared` parameter
+   * takes a pre-resolved `Resolved` instead of a bare value: a second place
+   * that reimplements station → node → fleet precedence is exactly the kind
+   * of drift this feature keeps producing (see this file's history). The
+   * console used to re-derive it client-side from the declared-rows route;
+   * this field lets it stop.
+   *
+   * REQUIRED, not optional: an observation only exists for a setting that
+   * was declared (`compare()` skips any `v` not present in `args.declared`
+   * before it ever builds a row), and every one of `compare()`'s branches —
+   * `out-of-scope` included — destructures `level` from that same resolved
+   * declaration before deciding a state. There is no code path in `compare()`
+   * that produces an observation without a level already in hand.
+   */
+  level: ConfigLevel,
   state: z.enum([
     "matches",
     "drifted",

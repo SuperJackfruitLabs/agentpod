@@ -78,9 +78,27 @@ describe("harness config contract", () => {
     for (const state of [
       "matches", "drifted", "absent", "opted-out", "awaiting-restart", "unreadable", "out-of-scope",
     ]) {
-      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state }).success).toBe(true);
+      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state, level: "station" }).success)
+        .toBe(true);
     }
-    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "ok" }).success).toBe(false);
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "ok", level: "station" }).success)
+      .toBe(false);
+  });
+
+  test("an observation's level is required — an omitted one must not read as any default", () => {
+    // Every branch in `compare()` has a resolved level in hand before it ever
+    // builds a row (see the field's own doc comment). An observation with no
+    // level is not a real shape this system produces.
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches" }).success).toBe(false);
+  });
+
+  test("level is a closed vocabulary of exactly the three resolution levels", () => {
+    for (const level of ["station", "node", "fleet"]) {
+      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches", level }).success)
+        .toBe(true);
+    }
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches", level: "profile" }).success)
+      .toBe(false);
   });
 });
 
