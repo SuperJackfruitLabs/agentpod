@@ -26,6 +26,16 @@ var hermesConfigRegistry = []ConfigSetting{
 	{ID: "hermes.approvals.timeout", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 	{ID: "hermes.approvals.mode", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 	{ID: "hermes.approvals.command_allowlist", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
+
+	// Folded in (D12): these three are written by delegating to the writers
+	// the `apn hermes-live` and `apn hermes-skills` verbs call, which keep
+	// their own callers. See hermes_config_foldin.go. A restart is needed for
+	// all three and that is not a guess: Hermes reads a profile's plugin and
+	// skill configuration when its gateway starts, which is what `apn
+	// hermes-skills` itself tells the operator after a write.
+	{ID: "hermes.plugins.enabled", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
+	{ID: "hermes.plugins.stream_reasoning_deltas", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
+	{ID: "hermes.skills.external_dirs", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
 }
 
 // hermesConfigPath maps a registered setting id to the YAML section and key it
@@ -35,6 +45,10 @@ var hermesConfigPath = map[string][2]string{
 	"hermes.approvals.timeout":           {"approvals", "timeout"},
 	"hermes.approvals.mode":              {"approvals", "mode"},
 	"hermes.approvals.command_allowlist": {"approvals", "command_allowlist"},
+
+	"hermes.plugins.enabled":                 {"plugins", "enabled"},
+	"hermes.plugins.stream_reasoning_deltas": {"plugins", "stream_reasoning_deltas"},
+	"hermes.skills.external_dirs":            {"skills", "external_dirs"},
 }
 
 func (h *hermesDescriptor) ConfigSettings() []ConfigSetting {
@@ -316,12 +330,27 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 	entries := make([]ConfigPlanEntry, 0, len(want))
 	keyPaths := make([]string, 0, len(want))
 	additive := map[string][]string{}
+	// addKeyPath keeps keyPaths a SET. A duplicate would make
+	// SameOutsideKeys remove an additive key's claimed items twice, which
+	// turns "we added one entry" into "we added two" and would let a write
+	// that dropped an operator's entry pass containment.
+	addKeyPath := func(kp string) {
+		for _, existing := range keyPaths {
+			if existing == kp {
+				return
+			}
+		}
+		keyPaths = append(keyPaths, kp)
+	}
+	// delegation is the bookkeeping the folded-in settings share across this
+	// one derivation: the plugin pair has a single writer that must run once.
+	delegation := &hermesDelegationState{}
 
 	for _, d := range want {
 		setting := byID[d.SettingID]
 		where := hermesConfigPath[d.SettingID]
 		keyPath := where[0] + "." + where[1]
-		keyPaths = append(keyPaths, keyPath)
+		addKeyPath(keyPath)
 
 		current, present, err := configedit.Read(after, keyPath)
 		if err != nil {
@@ -337,6 +366,33 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 		}
 		if present {
 			entry.Current = current
+		}
+
+		// 5a. A FOLDED-IN setting is derived by calling the writer the `apn`
+		// verb calls, not by this function's own policy branches (D12). The
+		// policy still describes it — plugins.enabled and
+		// skills.external_dirs are additive-only, stream_reasoning_deltas is
+		// reconcilable — and is reported in the plan; what differs is who
+		// computes the bytes.
+		if _, delegated := hermesConfigDelegate[d.SettingID]; delegated {
+			res := h.delegatedConfigEdit(delegation, after, d, keyPath)
+			if res.refusalCode != "" {
+				return refuse(res.refusalCode, res.refusalMsg)
+			}
+			for _, kp := range res.keyPaths {
+				addKeyPath(kp)
+			}
+			for kp, added := range res.additive {
+				if _, ok := additive[kp]; !ok {
+					additive[kp] = []string{}
+				}
+				additive[kp] = append(additive[kp], added...)
+			}
+			entry.Action = res.action
+			entry.Intended = res.intended
+			after = res.doc
+			entries = append(entries, entry)
+			continue
 		}
 
 		switch setting.Policy {
@@ -415,11 +471,26 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 	plan.BeforeSHA256 = sha256Hex(before)
 	plan.Diff, plan.DiffTruncated = buildDiff(before, after)
 
-	noOp := true
+	// NoOp is read off the DOCUMENT, not off the entries' actions. A
+	// delegated writer owns more than one key (the plugin pair is one edit),
+	// so a plan can change bytes while the one declared entry's own key did
+	// not move; reporting that as a no-op would tell an operator nothing
+	// would be written and then write. For every non-delegated setting this
+	// says exactly what the per-entry loop said: those branches only ever
+	// change bytes when an action is not "noop".
+	noOp := bytes.Equal(before, after)
 	restart := false
 	for _, e := range entries {
-		if e.Action != "noop" {
-			noOp = false
+		if e.Action != "noop" && e.RestartToTakeEffect {
+			restart = true
+		}
+	}
+	if !noOp && !restart {
+		// The document changed although no declared entry's own key moved —
+		// only a delegated writer can do that. Every setting that could have
+		// caused it is in this plan, so take the restart answer from them
+		// rather than report a change that silently needs one.
+		for _, e := range entries {
 			if e.RestartToTakeEffect {
 				restart = true
 			}
