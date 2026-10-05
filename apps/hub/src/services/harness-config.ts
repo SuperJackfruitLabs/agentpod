@@ -14,6 +14,7 @@ import { eq, isNull, SQL } from "drizzle-orm";
 import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { declaredHarnessConfig } from "../db/schema/harness-config";
+import { harnessConfigOptOut } from "../db/schema/harness-config-ops";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
@@ -157,6 +158,12 @@ export async function resolveFor(
   return out;
 }
 
+/** Evidence of this system's own write, keyed by `settingId` — Task 7's `applied_harness_config`. */
+export interface AppliedWrite {
+  /** The gateway pid observed right after the write. `null` when health could not be read at write time. */
+  gatewayPid: number | null;
+}
+
 /**
  * Compare a station's observed values with what was declared for it.
  *
@@ -173,14 +180,49 @@ export async function resolveFor(
  * carrying the same fact is exactly the split that drifts: an optional
  * parameter a caller forgets to populate loses the out-of-scope refusal with
  * no type error — spec §6's protection disappearing silently.
+ *
+ * `compare()` stays a PURE function of its arguments: `appliedWrites` and
+ * `optedOut` are rows the CALLER fetched (from `applied_harness_config` and
+ * `harness_config_opt_out`), never a query this function runs itself — the
+ * same reason `declared` arrives pre-resolved rather than as a tenant id this
+ * function would look up on its own.
+ *
+ * Precedence, highest first. Written as an ordered list because a state
+ * machine whose ordering is implicit is exactly how `opted-out` silently
+ * becomes `drifted`:
+ *
+ *   1. out-of-scope      (the declaration cannot apply to this station at all)
+ *   2. unreadable         (the document could not be parsed — never "matches")
+ *   3. opted-out          (an explicit operator choice)
+ *   4. awaiting-restart   (written, restart needed, gateway pid unchanged)
+ *   5. absent / drifted / matches   (the ordinary comparison)
  */
 export function compare(args: {
   stationId: string;
   values: ConfigValue[];
   settings: ConfigSetting[];
   declared: Record<string, Resolved>;
+  /** Rows from `applied_harness_config`, keyed by `settingId`. Absent (or no
+   * entry for a settingId) means "this system never recorded a write" — not
+   * the same thing as "no restart is needed". */
+  appliedWrites?: Record<string, AppliedWrite>;
+  /**
+   * The station's CURRENT gateway pid, read from its live health right
+   * before `compare()` is called. `null`/`undefined` means the pid could
+   * not be confirmed (health degraded, harness stopped) — and per spec F4's
+   * asymmetry, an unconfirmed pid must NEVER resolve to `matches`: it stays
+   * `awaiting-restart` instead. Claiming a restart is still needed when it
+   * isn't costs one needless restart; claiming it isn't needed when it is
+   * produces false agreement, the worse of the two.
+   */
+  currentGatewayPid?: number | null;
+  /** `settingId`s an operator explicitly opted out of reconciliation for
+   * this station (`harness_config_opt_out`, keyed by station key). */
+  optedOut?: Set<string>;
 }): ConfigObservation[] {
   const byId = new Map(args.settings.map((s) => [s.id, s]));
+  const appliedWrites = args.appliedWrites ?? {};
+  const optedOut = args.optedOut ?? new Set<string>();
   const out: ConfigObservation[] = [];
 
   for (const v of args.values) {
@@ -189,8 +231,8 @@ export function compare(args: {
     const setting = byId.get(v.settingId);
     const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
 
-    // Scope first: a declaration that cannot be honoured is not drift, and
-    // calling it "drifted" would invite an apply that must then refuse.
+    // 1. out-of-scope: a declaration that cannot be honoured is not drift,
+    // and calling it "drifted" would invite an apply that must then refuse.
     if (setting && setting.scope !== "profile" && level === "station") {
       out.push({
         ...row,
@@ -200,14 +242,45 @@ export function compare(args: {
       continue;
     }
 
-    // `unreadable` must never collapse into `absent`: a document that could
-    // not be read must not look like one whose key is simply missing,
+    // 2. unreadable: must never collapse into `absent`. A document that
+    // could not be read must not look like one whose key is simply missing,
     // because "missing" reads as agreement where "unreadable" does not.
     if (!v.readable) {
       out.push({ ...row, observed: undefined, state: "unreadable", reason: v.reason ?? "the document could not be read" });
       continue;
     }
 
+    // 3. opted-out: an explicit operator choice. It outranks the ordinary
+    // comparison so the state names the operator's decision, not whatever
+    // the document happens to hold — "drifted" would invite exactly the
+    // apply the opt-out exists to prevent.
+    if (optedOut.has(v.settingId)) {
+      out.push({ ...row, state: "opted-out", reason: "an operator opted this setting out of reconciliation" });
+      continue;
+    }
+
+    // 4. awaiting-restart: written, the setting needs a restart to take
+    // effect, and the gateway pid is either unchanged since the write or
+    // could not be confirmed at all. Hermes multiplexes one gateway across
+    // every profile, so that pid IS the process that re-reads config — a pid
+    // change is the only evidence a restart actually happened.
+    if (setting?.restartToTakeEffect) {
+      const applied = appliedWrites[v.settingId];
+      if (applied) {
+        const pidUnavailable = args.currentGatewayPid === null || args.currentGatewayPid === undefined;
+        const pidUnchanged = !pidUnavailable && args.currentGatewayPid === applied.gatewayPid;
+        if (pidUnavailable || pidUnchanged) {
+          out.push({
+            ...row,
+            state: "awaiting-restart",
+            reason: "written, and needs a restart to take effect — the gateway has not restarted since",
+          });
+          continue;
+        }
+      }
+    }
+
+    // 5. the ordinary comparison.
     if (v.observed === undefined) {
       out.push({ ...row, state: "absent", reason: "declared, and the key is not in the document" });
       continue;
@@ -225,6 +298,71 @@ export function compare(args: {
     });
   }
   return out;
+}
+
+/**
+ * Record an operator's explicit choice to exclude one setting from
+ * reconciliation on one station — spec D6, ruling R1. Keyed on the STATION
+ * KEY (not the row id) so it survives unadopt/re-adopt, matching
+ * `harnessConfigOptOut`'s own doc comment.
+ *
+ * Upserts on `(tenantId, stationKey, settingId)`: opting out twice records
+ * the latest reason/author rather than duplicating the row.
+ */
+export async function optOut(input: {
+  stationKey: string;
+  settingId: string;
+  tenantId: string;
+  optedOutBy: string;
+  reason?: string;
+}): Promise<void> {
+  await db
+    .insert(harnessConfigOptOut)
+    .values({
+      id: prefixedId("cfgoo"),
+      tenantId: input.tenantId,
+      stationKey: input.stationKey,
+      settingId: input.settingId,
+      reason: input.reason ?? null,
+      optedOutBy: input.optedOutBy,
+    })
+    .onConflictDoUpdate({
+      target: [harnessConfigOptOut.tenantId, harnessConfigOptOut.stationKey, harnessConfigOptOut.settingId],
+      set: { reason: input.reason ?? null, optedOutBy: input.optedOutBy },
+    });
+}
+
+/** Remove an opt-out. A setting with no opt-out row is a no-op. */
+export async function clearOptOut(input: {
+  stationKey: string;
+  settingId: string;
+  tenantId: string;
+}): Promise<void> {
+  await db
+    .delete(harnessConfigOptOut)
+    .where(
+      tenantScope(
+        harnessConfigOptOut,
+        input.tenantId,
+        eq(harnessConfigOptOut.stationKey, input.stationKey),
+        eq(harnessConfigOptOut.settingId, input.settingId),
+      ),
+    );
+}
+
+/**
+ * Every settingId opted out for one station, as a `Set` ready for
+ * `compare()`'s `optedOut` argument. The one query shape this file and
+ * `services/harness-config-apply.ts`'s `reconcileStation` both need —
+ * written once here so a second, drifting copy never gets written inline
+ * again.
+ */
+export async function getOptOuts(tenantId: string, stationKey: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ settingId: harnessConfigOptOut.settingId })
+    .from(harnessConfigOptOut)
+    .where(tenantScope(harnessConfigOptOut, tenantId, eq(harnessConfigOptOut.stationKey, stationKey)));
+  return new Set(rows.map((r) => r.settingId));
 }
 
 /**

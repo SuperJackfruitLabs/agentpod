@@ -57,3 +57,98 @@ describe("comparing a station against the declaration", () => {
     expect(o.state).toBe("out-of-scope");
   });
 });
+
+describe("awaiting-restart: restart evidence comes from the gateway pid, never a timer", () => {
+  const NO_RESTART_SETTING = { ...SETTING, id: "hermes.approvals.autoApproveList", restartToTakeEffect: false };
+
+  test("a setting written under a gateway pid that is still running is awaiting-restart", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+    });
+    expect(o.state).toBe("awaiting-restart");
+  });
+
+  test("the same setting after the gateway pid changed is matches", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 200,
+    });
+    expect(o.state).toBe("matches");
+  });
+
+  test("a station whose health reports no pid stays awaiting-restart, never matches", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: null,
+    });
+    expect(o.state).toBe("awaiting-restart");
+  });
+
+  test("a setting that needs no restart is `matches` immediately after a write", () => {
+    const [o] = compare({
+      stationId: "station_a",
+      settings: [NO_RESTART_SETTING],
+      declared: { [NO_RESTART_SETTING.id]: at("900", "station") },
+      values: [{ settingId: NO_RESTART_SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [NO_RESTART_SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+    });
+    expect(o.state).toBe("matches");
+  });
+});
+
+describe("opted-out: an explicit operator choice, not a key in the harness's own document", () => {
+  test("an opted-out setting is `opted-out` even when the observed value differs", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    });
+    expect(o.state).toBe("opted-out");
+  });
+
+  test("opted-out beats drifted: the state names the operator's choice, not the diff", () => {
+    // Same inputs as the plain "different values drift" case above — the
+    // only difference is the opt-out. If precedence collapsed (drifted
+    // decided before opted-out), this would report `drifted` instead.
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    });
+    expect(o.state).toBe("opted-out");
+    expect(o.state).not.toBe("drifted");
+  });
+
+  test("clearing an opt-out returns the setting to ordinary comparison", () => {
+    const stillOptedOut = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(stillOptedOut.state).toBe("opted-out");
+
+    // The opt-out row was deleted (`clearOptOut`) — the caller now passes an
+    // empty set, and the same observed/declared pair reads as ordinary drift.
+    const afterClearing = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set(),
+    })[0]!;
+    expect(afterClearing.state).toBe("drifted");
+  });
+});

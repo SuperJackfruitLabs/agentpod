@@ -26,12 +26,12 @@
 import { eq } from "drizzle-orm";
 import { ConfigPlan, ConfigReceipt, VERB_RESULTS, type ConfigRefusalCode, type ConfigSetting, type ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { appliedHarnessConfig, harnessConfigOptOut } from "../db/schema/harness-config-ops";
+import { appliedHarnessConfig } from "../db/schema/harness-config-ops";
 import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
-import { resolveFor, fetchRegistry, compare, type Resolved } from "./harness-config";
+import { resolveFor, fetchRegistry, compare, getOptOuts, type Resolved } from "./harness-config";
 import type { StationRow } from "./station-registry";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
@@ -340,11 +340,7 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
   }
   const registryById = new Map(registry.map((s) => [s.id, s]));
 
-  const optOutRows = await db
-    .select({ settingId: harnessConfigOptOut.settingId })
-    .from(harnessConfigOptOut)
-    .where(tenantScope(harnessConfigOptOut, tenantId, eq(harnessConfigOptOut.stationKey, station.stationKey)));
-  const optedOut = new Set(optOutRows.map((r) => r.settingId));
+  const optedOut = await getOptOuts(tenantId, station.stationKey);
 
   const candidateIds: string[] = [];
   for (const settingId of settingIds) {
