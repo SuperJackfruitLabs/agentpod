@@ -105,6 +105,95 @@ describe("awaiting-restart: restart evidence comes from the gateway pid, never a
     });
     expect(o.state).toBe("matches");
   });
+
+  test("a setting written when health could not be read stays awaiting-restart, never matches", () => {
+    // `applyFor` records `gatewayPid: null` whenever the post-write `health`
+    // round trip times out or does not parse. A null RECORDED pid is no
+    // evidence of a restart, exactly as a null CURRENT pid is not — and with
+    // the ordinary comparison reached, this row reports `matches`: a file
+    // saying 900 and a gateway still enforcing 300, reported as agreement.
+    // That is spec F4's worse error, on the other side of the comparison.
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: null } },
+      currentGatewayPid: 4242,
+    });
+    expect(o.state).toBe("awaiting-restart");
+    expect(o.reason).toContain("could not be confirmed");
+  });
+
+  test("neither pid known is still awaiting-restart", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: null } },
+      currentGatewayPid: null,
+    });
+    expect(o.state).toBe("awaiting-restart");
+  });
+});
+
+/**
+ * Precedence is an ORDERED list in `compare()`'s own doc comment:
+ *
+ *   1. out-of-scope  2. unreadable  3. opted-out  4. awaiting-restart
+ *   5. absent / drifted / matches
+ *
+ * A reordering is a defect, so every ADJACENT pair gets a fixture where both
+ * conditions hold at once and the higher one must win. Without these, moving
+ * `opted-out` above `unreadable`, `awaiting-restart` above `opted-out`, or
+ * `unreadable` above `out-of-scope` fails no test.
+ */
+describe("precedence: every adjacent pair, with both conditions true at once", () => {
+  const USER_SCOPED = { ...SETTING, id: "openclaw.hooks.allowConversationAccess", harness: "openclaw", scope: "user" as const };
+
+  test("out-of-scope beats unreadable", () => {
+    const [o] = compare({
+      stationId: "station_a",
+      settings: [USER_SCOPED],
+      declared: { [USER_SCOPED.id]: at(true, "station") },
+      values: [{ settingId: USER_SCOPED.id, readable: false, reason: "no such file" }],
+    });
+    expect(o.state).toBe("out-of-scope");
+  });
+
+  test("unreadable beats opted-out: a document nobody could read is not an operator's choice", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }],
+      optedOut: new Set([SETTING.id]),
+    });
+    expect(o.state).toBe("unreadable");
+  });
+
+  test("opted-out beats awaiting-restart: the operator's choice outranks our own write", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+      optedOut: new Set([SETTING.id]),
+    });
+    expect(o.state).toBe("opted-out");
+  });
+
+  test("awaiting-restart beats the ordinary comparison, drifted included", () => {
+    const [o] = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      // The document does not even agree yet — and the write is still
+      // unconfirmed, which is what the state has to name.
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+    });
+    expect(o.state).toBe("awaiting-restart");
+  });
 });
 
 describe("opted-out: an explicit operator choice, not a key in the harness's own document", () => {
@@ -129,7 +218,6 @@ describe("opted-out: an explicit operator choice, not a key in the harness's own
       optedOut: new Set([SETTING.id]),
     });
     expect(o.state).toBe("opted-out");
-    expect(o.state).not.toBe("drifted");
   });
 
   test("clearing an opt-out returns the setting to ordinary comparison", () => {

@@ -204,7 +204,9 @@ export function compare(args: {
   declared: Record<string, Resolved>;
   /** Rows from `applied_harness_config`, keyed by `settingId`. Absent (or no
    * entry for a settingId) means "this system never recorded a write" — not
-   * the same thing as "no restart is needed". */
+   * the same thing as "no restart is needed". A row whose `gatewayPid` is
+   * `null` is a write whose own health read failed: no evidence of a restart
+   * on the recorded side, treated exactly as an unconfirmable current pid. */
   appliedWrites?: Record<string, AppliedWrite>;
   /**
    * The station's CURRENT gateway pid, read from its live health right
@@ -267,13 +269,23 @@ export function compare(args: {
     if (setting?.restartToTakeEffect) {
       const applied = appliedWrites[v.settingId];
       if (applied) {
-        const pidUnavailable = args.currentGatewayPid === null || args.currentGatewayPid === undefined;
+        // Unconfirmable on EITHER side. A null `currentGatewayPid` is health
+        // failing now; a null `applied.gatewayPid` is health having failed at
+        // write time (`applyFor` records null whenever the post-write `health`
+        // round trip times out or does not parse). Both mean the same thing —
+        // no evidence any restart happened — and the asymmetry spec F4 names
+        // runs in both directions: comparing `4242 === null` as an ordinary
+        // pid change would fall through to `matches` and report a file saying
+        // 900 with a gateway still enforcing 300 as agreement.
+        const pidUnavailable = args.currentGatewayPid == null || applied.gatewayPid == null;
         const pidUnchanged = !pidUnavailable && args.currentGatewayPid === applied.gatewayPid;
         if (pidUnavailable || pidUnchanged) {
           out.push({
             ...row,
             state: "awaiting-restart",
-            reason: "written, and needs a restart to take effect — the gateway has not restarted since",
+            reason: pidUnavailable
+              ? "written, and needs a restart to take effect — the gateway pid could not be confirmed, so no restart can be shown to have happened"
+              : "written, and needs a restart to take effect — the gateway has not restarted since",
           });
           continue;
         }

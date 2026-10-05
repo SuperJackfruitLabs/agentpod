@@ -290,9 +290,11 @@ one gateway across every profile on a host, so that process's pid is exactly the
 re-reads config. `apply` reads the station's health right after a successful write and
 records that pid. The next comparison reads the station's **current** gateway pid and
 reports `awaiting-restart` whenever that pid is unchanged from the one recorded at write
-time — or when the current pid cannot be confirmed at all (health degraded, harness
-stopped). An unconfirmable pid deliberately stays `awaiting-restart` rather than resolving
-to `matches`: claiming a restart is still needed when it already happened costs one needless
+time — or when either pid cannot be confirmed at all: the current one (health degraded,
+harness stopped) or the one that was supposed to be recorded at write time, which is left
+unset whenever that post-write health read timed out or came back in an unexpected shape.
+An unconfirmable pid on either side deliberately stays `awaiting-restart` rather than
+resolving to `matches`: claiming a restart is still needed when it already happened costs one needless
 restart; claiming a restart already happened when it hasn't produces false agreement, which
 is the worse mistake.
 
