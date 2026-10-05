@@ -319,7 +319,8 @@ func TestConfigApplyRequiresStationAndOperation(t *testing.T) {
 }
 
 // TestConfigUsageListsEveryVerbLine: settings, show twice, set twice (--value
-// and --json), unset, drift, plan, inspect, apply — ten lines inside the
+// and --json), unset, drift, opt-out three times (write, --clear, the bare
+// listing form), opt-in, plan, inspect, apply — fourteen lines inside the
 // `usage:` block, which is the block only, not the worked examples in the
 // prose below it.
 func TestConfigUsageListsEveryVerbLine(t *testing.T) {
@@ -340,10 +341,10 @@ func TestConfigUsageListsEveryVerbLine(t *testing.T) {
 			count++
 		}
 	}
-	if count != 10 {
-		t.Errorf("config usage should list ten verb lines (settings, show x2, set x2, unset, drift, plan, inspect, apply), got %d:\n%s", count, out)
+	if count != 14 {
+		t.Errorf("config usage should list fourteen verb lines (settings, show x2, set x2, unset, drift, opt-out x3, opt-in, plan, inspect, apply), got %d:\n%s", count, out)
 	}
-	for _, verb := range []string{"fleet config plan", "fleet config inspect", "fleet config apply"} {
+	for _, verb := range []string{"fleet config plan", "fleet config inspect", "fleet config apply", "fleet config opt-out", "fleet config opt-in"} {
 		if !strings.Contains(out, verb) {
 			t.Errorf("config usage should mention %q, got:\n%s", verb, out)
 		}
@@ -496,5 +497,330 @@ func TestConfigUsageSaysHowToDeclareAList(t *testing.T) {
 	}
 	if !strings.Contains(out, "repeating --value") {
 		t.Errorf("config usage should say a list is declared by repeating --value, got:\n%s", out)
+	}
+}
+
+// --- opt-out / opt-in / plan --setting (Task 5) ---
+
+// TestConfigOptOutAndOptInRoutes pins the write forms of both verbs to
+// PUT /api/fleet/config/opt-out with {settingId, optedOut, stationKey,
+// nodeId, reason?}. opt-out sends optedOut:true, opt-in sends optedOut:false
+// — that boolean, not which verb was typed, is what the hub actually stores.
+func TestConfigOptOutAndOptInRoutes(t *testing.T) {
+	bin := build(t)
+	for _, tc := range []struct {
+		name           string
+		args           []string
+		wantOptedOut   bool
+		wantStationKey any
+		wantNodeID     any
+		wantReason     any
+	}{
+		{"opt-out --station", []string{"config", "opt-out", "hermes.approvals.mode", "--station", "st_1"}, true, "st_1", nil, nil},
+		{"opt-out --node", []string{"config", "opt-out", "hermes.approvals.mode", "--node", "nod_1"}, true, nil, "nod_1", nil},
+		{"opt-out --reason", []string{"config", "opt-out", "hermes.approvals.mode", "--station", "st_1", "--reason", "pinned by support"}, true, "st_1", nil, "pinned by support"},
+		{"opt-in --station", []string{"config", "opt-in", "hermes.approvals.mode", "--station", "st_1"}, false, "st_1", nil, nil},
+		{"opt-in --node", []string{"config", "opt-in", "hermes.approvals.mode", "--node", "nod_1"}, false, nil, "nod_1", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.Path
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit = %d: %s", code, out)
+			}
+			if gotMethod != "PUT" || gotPath != "/api/fleet/config/opt-out" {
+				t.Errorf("called %s %s, want PUT /api/fleet/config/opt-out", gotMethod, gotPath)
+			}
+			if body["settingId"] != "hermes.approvals.mode" {
+				t.Errorf("settingId = %v", body["settingId"])
+			}
+			if body["optedOut"] != tc.wantOptedOut {
+				t.Errorf("optedOut = %v, want %v", body["optedOut"], tc.wantOptedOut)
+			}
+			if body["stationKey"] != tc.wantStationKey {
+				t.Errorf("stationKey = %v, want %v", body["stationKey"], tc.wantStationKey)
+			}
+			if body["nodeId"] != tc.wantNodeID {
+				t.Errorf("nodeId = %v, want %v", body["nodeId"], tc.wantNodeID)
+			}
+			gotReason, hasReason := body["reason"]
+			if tc.wantReason == nil {
+				if hasReason {
+					t.Errorf("reason = %v, want absent", gotReason)
+				}
+			} else if gotReason != tc.wantReason {
+				t.Errorf("reason = %v, want %v", gotReason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestConfigOptOutClearSendsDelete: `--clear` forgets the exemption row
+// entirely, which is a different request than `opt-in` — DELETE, no
+// `optedOut` field, same one-level {settingId, stationKey, nodeId} shape as
+// the contract's ClearOptOutBody.
+func TestConfigOptOutClearSendsDelete(t *testing.T) {
+	bin := build(t)
+	var gotMethod, gotPath string
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+		"config", "opt-out", "hermes.approvals.mode", "--station", "st_1", "--clear")
+	if code != 0 {
+		t.Fatalf("exit = %d: %s", code, out)
+	}
+	if gotMethod != "DELETE" || gotPath != "/api/fleet/config/opt-out" {
+		t.Errorf("called %s %s, want DELETE /api/fleet/config/opt-out", gotMethod, gotPath)
+	}
+	if body["settingId"] != "hermes.approvals.mode" || body["stationKey"] != "st_1" {
+		t.Errorf("body = %v", body)
+	}
+	if _, has := body["optedOut"]; has {
+		t.Errorf("--clear must not send optedOut, body = %v", body)
+	}
+}
+
+// TestConfigOptOutBareListsWhatIsExempt covers the SETTING_ID-less form:
+// GET /api/fleet/config/opt-out, optionally filtered by ?stationKey= or
+// ?nodeId=.
+func TestConfigOptOutBareListsWhatIsExempt(t *testing.T) {
+	bin := build(t)
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		wantPath string
+	}{
+		{"no filter", []string{"config", "opt-out"}, "/api/fleet/config/opt-out"},
+		{"--station filter", []string{"config", "opt-out", "--station", "st_1"}, "/api/fleet/config/opt-out?stationKey=st_1"},
+		{"--node filter", []string{"config", "opt-out", "--node", "nod_1"}, "/api/fleet/config/opt-out?nodeId=nod_1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotMethod, gotPath string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotMethod, gotPath = r.Method, r.URL.RequestURI()
+				_, _ = w.Write([]byte(`{"exemptions":[]}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit = %d: %s", code, out)
+			}
+			if gotMethod != "GET" || gotPath != tc.wantPath {
+				t.Errorf("called %s %s, want GET %s", gotMethod, gotPath, tc.wantPath)
+			}
+			if !strings.Contains(out, "exemptions") {
+				t.Errorf("should print the hub's response, got:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestConfigOptOutAndOptInRejectBothStationAndNode: the brief's hard usage
+// constraint — naming both levels at once is nonsense, and the CLI must
+// catch it before any request reaches the hub (the easy way to get this
+// wrong is to validate AFTER a request is already in flight).
+func TestConfigOptOutAndOptInRejectBothStationAndNode(t *testing.T) {
+	bin := build(t)
+	for _, verb := range []string{"opt-out", "opt-in"} {
+		t.Run(verb, func(t *testing.T) {
+			called := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+				"config", verb, "hermes.approvals.mode", "--station", "st_1", "--node", "nod_1")
+			if code == 0 || called {
+				t.Errorf("%s with both --station and --node: exit=%d, requestSent=%v — want a refusal, no request", verb, code, called)
+			}
+			if !strings.Contains(out, "not both") {
+				t.Errorf("%s refusal should say --station/--node are mutually exclusive, got:\n%s", verb, out)
+			}
+		})
+	}
+}
+
+// TestConfigOptOutAndOptInRequireAScope is the other half: naming neither
+// level is just as much a usage error as naming both, because an opt-out
+// with nowhere to apply is not a request at all — same contract refine as
+// above (`(stationKey==null) !== (nodeId==null)`), enforced here before the
+// round trip rather than left to the hub's 400.
+func TestConfigOptOutAndOptInRequireAScope(t *testing.T) {
+	bin := build(t)
+	for _, verb := range []string{"opt-out", "opt-in"} {
+		t.Run(verb, func(t *testing.T) {
+			called := false
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+				"config", verb, "hermes.approvals.mode")
+			if code == 0 || called {
+				t.Errorf("%s with neither --station nor --node: exit=%d, requestSent=%v — want a refusal, no request", verb, code, called)
+			}
+			// The exact phrase the real validation emits, not just "mentions --station
+			// somewhere" — config.go's unrecognised-verb fallback already dumps the whole
+			// configUsage block (which mentions --station and --node plenty of times) and
+			// exits 2 with no request, so a looser substring check here would pass against
+			// `opt-out`/`opt-in` not being dispatched at all yet.
+			if !strings.Contains(out, verb+" requires --station KEY or --node ID") {
+				t.Errorf("%s refusal should say it requires --station KEY or --node ID, got:\n%s", verb, out)
+			}
+		})
+	}
+}
+
+// TestConfigOptInHasNoClearFlag: `--clear` is documented only on `opt-out`
+// (see configUsage) — `opt-in` records "not exempt"; forgetting the row
+// outright is still opt-out's job. Passing --clear to opt-in is therefore an
+// unrecognised flag, not a silent no-op.
+func TestConfigOptInHasNoClearFlag(t *testing.T) {
+	bin := build(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+		"config", "opt-in", "hermes.approvals.mode", "--station", "st_1", "--clear")
+	if code == 0 || called {
+		t.Errorf("opt-in --clear: exit=%d, requestSent=%v — want a refusal, no request", code, called)
+	}
+	// Specifically an unrecognised flag from opt-in's own flag.FlagSet, not
+	// config.go's unrecognised-verb fallback (which also exits 2 with no
+	// request today, before opt-in is dispatched at all, and would make this
+	// assertion pass for the wrong reason).
+	if !strings.Contains(out, "flag provided but not defined") || !strings.Contains(out, "-clear") {
+		t.Errorf("opt-in --clear should be an unrecognised-flag error, got:\n%s", out)
+	}
+	if !strings.Contains(out, "fleet config opt-in") {
+		t.Errorf("the flag error should name opt-in's own flag set, got:\n%s", out)
+	}
+}
+
+// TestConfigPlanWithSettingSendsExactlyOneID is Plan 2's residual this task
+// clears: `plan --station ID` used to plan every setting declared for the
+// station with no way to narrow it. With `--setting`, the CLI must send
+// exactly that one settingId and must not GET the station's merged config
+// first — there is nothing to resolve a list from when the list is already
+// one entry.
+func TestConfigPlanWithSettingSendsExactlyOneID(t *testing.T) {
+	bin := build(t)
+	const digest = "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3"
+	var gotPlanBody map[string]any
+	var sawGet, sawPost bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/stations/st_1/config":
+			sawGet = true
+			_, _ = w.Write([]byte(`{"observations":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/stations/st_1/config/plan":
+			sawPost = true
+			_ = json.NewDecoder(r.Body).Decode(&gotPlanBody)
+			_, _ = w.Write([]byte(`{"schemaVersion":1,"operationId":"cfgop_2","stationKey":"k","entries":[],"beforeSha256":"x","diff":"","diffTruncated":false,"noOp":false,"restartRequired":false,"createdAt":"2026-10-05T00:00:00Z","planDigest":"` + digest + `"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+		"config", "plan", "--station", "st_1", "--setting", "hermes.approvals.mode")
+	if code != 0 {
+		t.Fatalf("exit = %d: %s", code, out)
+	}
+	if sawGet {
+		t.Errorf("plan --setting should not GET the station's merged config; nothing to narrow a one-entry list from")
+	}
+	if !sawPost {
+		t.Fatalf("plan --setting should still POST a plan")
+	}
+	settings, _ := gotPlanBody["settings"].([]any)
+	if len(settings) != 1 {
+		t.Fatalf("plan body settings = %v, want exactly the one named setting", gotPlanBody["settings"])
+	}
+	entry, _ := settings[0].(map[string]any)
+	if entry["settingId"] != "hermes.approvals.mode" {
+		t.Errorf("settings[0] = %v", entry)
+	}
+	if !strings.Contains(out, digest) {
+		t.Errorf("plan must still print the digest apply needs, got:\n%s", out)
+	}
+}
+
+// TestConfigOptOutFlagsParse is a flag-parsing floor for every new verb
+// shape, matching the style of the plan/inspect/apply parse checks above:
+// each combination should at least reach a request (or, for the deliberate
+// usage errors, a clean refusal) rather than panicking or mis-parsing.
+func TestConfigOptOutFlagsParse(t *testing.T) {
+	bin := build(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	env := []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"opt-out station+reason", []string{"config", "opt-out", "hermes.approvals.mode", "--station", "st_1", "--reason", "x"}},
+		{"opt-out node", []string{"config", "opt-out", "hermes.approvals.mode", "--node", "nod_1"}},
+		{"opt-out station+clear", []string{"config", "opt-out", "hermes.approvals.mode", "--station", "st_1", "--clear"}},
+		{"opt-out bare", []string{"config", "opt-out"}},
+		{"opt-out bare+station", []string{"config", "opt-out", "--station", "st_1"}},
+		{"opt-in station", []string{"config", "opt-in", "hermes.approvals.mode", "--station", "st_1"}},
+		{"opt-in node", []string{"config", "opt-in", "hermes.approvals.mode", "--node", "nod_1"}},
+		{"plan with setting", []string{"config", "plan", "--station", "st_1", "--setting", "hermes.approvals.mode"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, code := run(t, bin, env, tc.args...)
+			if code != 0 {
+				t.Errorf("exit = %d, want 0 for a well-formed invocation", code)
+			}
+		})
+	}
+}
+
+// TestConfigUsageExplainsOptOutSemantics carries the three sentences the
+// brief says an operator would otherwise have to discover the hard way.
+func TestConfigUsageExplainsOptOutSemantics(t *testing.T) {
+	bin := build(t)
+	out, _ := run(t, bin, nil, "config", "--help")
+
+	if !strings.Contains(out, "does not change what is already in the file") {
+		t.Errorf("config usage should say opt-out does not change what is already written, got:\n%s", out)
+	}
+	if !strings.Contains(out, "not an undo") {
+		t.Errorf("config usage should say an exemption is not an undo, got:\n%s", out)
+	}
+	if !strings.Contains(out, "opt-in") || !strings.Contains(out, "--clear") {
+		t.Errorf("config usage should distinguish opt-in from --clear, got:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "overrides a node-level exemption") {
+		t.Errorf("config usage should say opt-in overrides a node-level exemption, got:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "falls back to") && !strings.Contains(strings.ToLower(out), "fall back to") {
+		t.Errorf("config usage should say --clear falls back to the node level, got:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "station-level") || !strings.Contains(strings.ToLower(out), "node-level") {
+		t.Errorf("config usage should say a station-level row always beats a node-level one, got:\n%s", out)
+	}
+	if !strings.Contains(strings.ToLower(out), "always beats") && !strings.Contains(strings.ToLower(out), "always wins") {
+		t.Errorf("config usage should state the precedence rule plainly, got:\n%s", out)
 	}
 }
