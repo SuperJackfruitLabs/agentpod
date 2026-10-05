@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/rakeshgangwar/agentpod/node-agent/internal/skills"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermesskills"
 )
 
 // Registering the managed directory in a profile's skills.external_dirs is the
@@ -62,12 +62,12 @@ func hermesSkillsCmd(args []string, out, errOut io.Writer) int {
 	switch action {
 	case "status":
 		// Status asks the same question registration would, without writing.
-		plan, _, err := skills.PlanExternalDirs(configPath, entry, "register")
+		_, change, err := hermesskills.Register(configPath, entry)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
-		if plan.Present {
+		if change.Present {
 			fmt.Fprintf(out, "%s: %s is registered in skills.external_dirs\n", profile, entry)
 		} else {
 			fmt.Fprintf(out, "%s: %s is not registered; published skills are inert until it is\n", profile, entry)
@@ -75,25 +75,31 @@ func hermesSkillsCmd(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(out, "config:", configPath)
 		return 0
 	case "register", "unregister":
-		plan, proposed, err := skills.PlanExternalDirs(configPath, entry, action)
+		var edited []byte
+		var change hermesskills.Change
+		if action == "register" {
+			edited, change, err = hermesskills.Register(configPath, entry)
+		} else {
+			edited, change, err = hermesskills.Unregister(configPath, entry)
+		}
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
-		if plan.NoOp {
+		if change.NoOp {
 			fmt.Fprintf(out, "%s: nothing to do, %s is already %s\n", profile, entry,
-				map[bool]string{true: "registered", false: "absent"}[plan.Present])
+				map[bool]string{true: "registered", false: "absent"}[change.Present])
 			return 0
 		}
 		if !apply {
 			// Review before writing: the operator sees the document, not a
 			// description of it.
 			fmt.Fprintf(out, "%s would change %s\n\n", action, configPath)
-			fmt.Fprint(out, diffLines(readOrEmpty(configPath), string(proposed)))
+			fmt.Fprint(out, diffLines(readOrEmpty(configPath), string(edited)))
 			fmt.Fprintf(out, "\nrerun with --apply to write this\n")
 			return 0
 		}
-		if err := skills.ApplyExternalDirs(plan, proposed); err != nil {
+		if err := hermesskills.Apply(configPath, change, edited); err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}

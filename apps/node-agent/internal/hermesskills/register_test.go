@@ -1,6 +1,7 @@
-package skills
+package hermesskills
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +9,10 @@ import (
 
 	"go.yaml.in/yaml/v3"
 )
+
+// Ported from the former internal/skills/hermes_external_dirs_test.go,
+// adapted to Register/Unregister/Apply/Change. These assertions predate the
+// extraction; the extraction must not change what they assert.
 
 func writeConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -31,14 +36,14 @@ skills:
 curator:
   enabled: true
 `)
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "register")
+	edited, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.NoOp || plan.Present || plan.Before == plan.After {
-		t.Fatalf("registration reported no change: %+v", plan)
+	if change.NoOp || change.Present || change.before == change.after {
+		t.Fatalf("registration reported no change: %+v", change)
 	}
-	text := string(proposed)
+	text := string(edited)
 	for _, keep := range []string{"operator's notes", "why this profile keeps template vars on", "model: fixture-model", "inline_shell: false", "curator:"} {
 		if !strings.Contains(text, keep) {
 			t.Fatalf("the edit dropped %q:\n%s", keep, text)
@@ -47,7 +52,7 @@ curator:
 	if !strings.Contains(text, "managed-skills") {
 		t.Fatalf("the entry was not added:\n%s", text)
 	}
-	if err := ApplyExternalDirs(plan, proposed); err != nil {
+	if err := Apply(path, change, edited); err != nil {
 		t.Fatal(err)
 	}
 	var round struct {
@@ -76,28 +81,28 @@ func TestExternalDirsRegistrationIsIdempotentAndReversible(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "register")
+	edited, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyExternalDirs(plan, proposed); err != nil {
+	if err := Apply(path, change, edited); err != nil {
 		t.Fatal(err)
 	}
-	again, _, err := PlanExternalDirs(path, "managed-skills", "register")
+	_, again, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !again.NoOp || !again.Present {
 		t.Fatalf("a second registration proposed a change: %+v", again)
 	}
-	off, offDoc, err := PlanExternalDirs(path, "managed-skills", "unregister")
+	offEdited, off, err := Unregister(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if off.NoOp {
 		t.Fatal("unregister found nothing to remove")
 	}
-	if err := ApplyExternalDirs(off, offDoc); err != nil {
+	if err := Apply(path, off, offEdited); err != nil {
 		t.Fatal(err)
 	}
 	var round struct {
@@ -122,14 +127,14 @@ func TestExternalDirsRegistrationIsIdempotentAndReversible(t *testing.T) {
 // operator or Hermes itself may have changed an unrelated setting.
 func TestExternalDirsApplyRefusesAStaleReview(t *testing.T) {
 	path := writeConfig(t, "skills:\n  external_dirs: []\n")
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "register")
+	edited, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("skills:\n  external_dirs: []\n  inline_shell: true\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyExternalDirs(plan, proposed); err == nil {
+	if err := Apply(path, change, edited); err == nil {
 		t.Fatal("a stale review overwrote a changed profile")
 	}
 }
@@ -137,11 +142,11 @@ func TestExternalDirsApplyRefusesAStaleReview(t *testing.T) {
 // The document handed to apply must be the one that was reviewed.
 func TestExternalDirsApplyRefusesAnUnreviewedDocument(t *testing.T) {
 	path := writeConfig(t, "skills:\n  external_dirs: []\n")
-	plan, _, err := PlanExternalDirs(path, "managed-skills", "register")
+	_, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyExternalDirs(plan, []byte("skills:\n  external_dirs: [something-else]\n")); err == nil {
+	if err := Apply(path, change, []byte("skills:\n  external_dirs: [something-else]\n")); err == nil {
 		t.Fatal("a substituted document was applied")
 	}
 }
@@ -149,17 +154,17 @@ func TestExternalDirsApplyRefusesAnUnreviewedDocument(t *testing.T) {
 // Shapes this node did not write are conflicts, not things to overwrite. And a
 // profile with no configuration file is not given one.
 func TestExternalDirsRefusesShapesItDidNotWrite(t *testing.T) {
-	if _, _, err := PlanExternalDirs(writeConfig(t, "skills: not-a-mapping\n"), "managed-skills", "register"); err == nil {
+	if _, _, err := Register(writeConfig(t, "skills: not-a-mapping\n"), "managed-skills"); err == nil {
 		t.Fatal("a scalar skills key was accepted")
 	}
-	if _, _, err := PlanExternalDirs(writeConfig(t, "skills:\n  external_dirs: 3\n"), "managed-skills", "register"); err == nil {
+	if _, _, err := Register(writeConfig(t, "skills:\n  external_dirs: 3\n"), "managed-skills"); err == nil {
 		t.Fatal("a scalar external_dirs was accepted")
 	}
 	missing := filepath.Join(t.TempDir(), "config.yaml")
-	if _, _, err := PlanExternalDirs(missing, "managed-skills", "register"); err == nil {
+	if _, _, err := Register(missing, "managed-skills"); err == nil {
 		t.Fatal("a profile with no configuration was given one")
 	}
-	if _, _, err := PlanExternalDirs(writeConfig(t, "skills: {}\n"), "/absolute/managed", "register"); err == nil {
+	if _, _, err := Register(writeConfig(t, "skills: {}\n"), "/absolute/managed"); err == nil {
 		t.Fatal("an absolute entry was accepted")
 	}
 }
@@ -167,14 +172,14 @@ func TestExternalDirsRefusesShapesItDidNotWrite(t *testing.T) {
 // An explicit null list is the common way an absent list is written.
 func TestExternalDirsRegistersIntoAnExplicitNullList(t *testing.T) {
 	path := writeConfig(t, "skills:\n  external_dirs:\n")
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "register")
+	edited, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.NoOp {
+	if change.NoOp {
 		t.Fatal("a null list was treated as already registered")
 	}
-	if err := ApplyExternalDirs(plan, proposed); err != nil {
+	if err := Apply(path, change, edited); err != nil {
 		t.Fatal(err)
 	}
 	var round struct {
@@ -211,7 +216,7 @@ tts:
     command: /some/path --input {input_path}
 `
 	path := writeConfig(t, body)
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "register")
+	proposed, change, err := Register(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,18 +245,18 @@ tts:
 	if !strings.Contains(string(proposed), "\n- provider: one\n") {
 		t.Fatalf("an unrelated sequence was re-indented:\n%s", proposed)
 	}
-	_ = plan
+	_ = change
 }
 
 // Removing the only entry leaves the key present and empty rather than a
 // dangling null, so the profile reads the same way it did before registration.
 func TestExternalDirsRemovalOfTheOnlyEntryLeavesAnEmptyList(t *testing.T) {
 	path := writeConfig(t, "skills:\n  external_dirs:\n    - managed-skills\n  template_vars: true\n")
-	plan, proposed, err := PlanExternalDirs(path, "managed-skills", "unregister")
+	edited, change, err := Unregister(path, "managed-skills")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyExternalDirs(plan, proposed); err != nil {
+	if err := Apply(path, change, edited); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(path)
@@ -269,5 +274,16 @@ func TestExternalDirsRemovalOfTheOnlyEntryLeavesAnEmptyList(t *testing.T) {
 	}
 	if len(round.Skills.ExternalDirs) != 0 || !round.Skills.TemplateVars {
 		t.Fatalf("removal disturbed the profile: %+v\n%s", round.Skills, written)
+	}
+}
+
+// Register and Unregister are importable from outside this package (the
+// whole point of the extraction: internal/descriptor can call them without
+// reaching into cmd/). Checked here with the package's own exported error,
+// so a future change that makes ErrConflict unreachable is caught locally.
+func TestErrConflictIsExported(t *testing.T) {
+	_, _, err := Register(writeConfig(t, "skills: not-a-mapping\n"), "managed-skills")
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
 	}
 }

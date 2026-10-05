@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/configedit"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 )
 
 // hermesConfigRegistry is the whole set of Hermes settings this system manages.
@@ -25,6 +26,16 @@ var hermesConfigRegistry = []ConfigSetting{
 	{ID: "hermes.approvals.timeout", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 	{ID: "hermes.approvals.mode", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
 	{ID: "hermes.approvals.command_allowlist", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
+
+	// Folded in (D12): these three are written by delegating to the writers
+	// the `apn hermes-live` and `apn hermes-skills` verbs call, which keep
+	// their own callers. See hermes_config_foldin.go. A restart is needed for
+	// all three and that is not a guess: Hermes reads a profile's plugin and
+	// skill configuration when its gateway starts, which is what `apn
+	// hermes-skills` itself tells the operator after a write.
+	{ID: "hermes.plugins.enabled", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
+	{ID: "hermes.plugins.stream_reasoning_deltas", Harness: "hermes", Scope: "profile", Policy: "reconcilable", RestartToTakeEffect: true},
+	{ID: "hermes.skills.external_dirs", Harness: "hermes", Scope: "profile", Policy: "additive-only", RestartToTakeEffect: true},
 }
 
 // hermesConfigPath maps a registered setting id to the YAML section and key it
@@ -34,6 +45,10 @@ var hermesConfigPath = map[string][2]string{
 	"hermes.approvals.timeout":           {"approvals", "timeout"},
 	"hermes.approvals.mode":              {"approvals", "mode"},
 	"hermes.approvals.command_allowlist": {"approvals", "command_allowlist"},
+
+	"hermes.plugins.enabled":                 {"plugins", "enabled"},
+	"hermes.plugins.stream_reasoning_deltas": {"plugins", "stream_reasoning_deltas"},
+	"hermes.skills.external_dirs":            {"skills", "external_dirs"},
 }
 
 func (h *hermesDescriptor) ConfigSettings() []ConfigSetting {
@@ -72,6 +87,18 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 	path := filepath.Join(dir, "config.yaml")
 	data, readErr := os.ReadFile(path)
 
+	// optedOutByHarness is a DOCUMENT-level fact — the operator disabled the
+	// agentpod-live plugin itself, through Hermes' own plugins.disabled list
+	// (D11) — computed once per read, not re-derived per setting id. Every
+	// setting this registry manages today lives in the same profile document
+	// the plugin's own enablement lives in, so one check serves all of them.
+	// Distinct from the hub's own opt-out register: this is the harness's own
+	// record, and agentpod never writes it.
+	var optedOutByHarness bool
+	if readErr == nil {
+		optedOutByHarness = hermesPluginDisabled(data, hermeslive.Name)
+	}
+
 	out := make([]ConfigValue, 0, len(settings))
 	for _, id := range settings {
 		if readErr != nil {
@@ -81,7 +108,7 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 		}
 		where := hermesConfigPath[id]
 		v, state := yamlValue(data, where[0], where[1])
-		cv := ConfigValue{SettingID: id, Readable: true}
+		cv := ConfigValue{SettingID: id, Readable: true, OptedOutByHarness: optedOutByHarness}
 		switch state {
 		case yamlScalarValue:
 			cv.Observed = v
@@ -155,6 +182,28 @@ func observedList(data []byte, keyPath string) ([]any, error) {
 		return nil, nil
 	}
 	return list, nil
+}
+
+// hermesPluginDisabled reports whether name appears in this document's
+// `plugins.disabled` list — Hermes' own mechanism for an operator to turn a
+// plugin off through the harness's own UI, which ObserveConfig surfaces as
+// `optedOutByHarness` (D11). Reuses observedList (configedit-backed, so a
+// block list, an inline list, or a present-but-empty list are all read
+// structurally) rather than scanning the YAML as text a second way. Both an
+// absent `plugins` section and an absent `disabled` key report `false`, with
+// no error: plugins.disabled naming nothing is the ordinary case, not a
+// shape this reader cannot speak for.
+func hermesPluginDisabled(data []byte, name string) bool {
+	list, err := observedList(data, "plugins.disabled")
+	if err != nil {
+		return false
+	}
+	for _, v := range list {
+		if s, ok := v.(string); ok && s == name {
+			return true
+		}
+	}
+	return false
 }
 
 // isCompositeRootKey reports whether key names the composite root rather
@@ -281,12 +330,27 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 	entries := make([]ConfigPlanEntry, 0, len(want))
 	keyPaths := make([]string, 0, len(want))
 	additive := map[string][]string{}
+	// addKeyPath keeps keyPaths a SET. A duplicate would make
+	// SameOutsideKeys remove an additive key's claimed items twice, which
+	// turns "we added one entry" into "we added two" and would let a write
+	// that dropped an operator's entry pass containment.
+	addKeyPath := func(kp string) {
+		for _, existing := range keyPaths {
+			if existing == kp {
+				return
+			}
+		}
+		keyPaths = append(keyPaths, kp)
+	}
+	// delegation is the bookkeeping the folded-in settings share across this
+	// one derivation: the plugin pair has a single writer that must run once.
+	delegation := &hermesDelegationState{}
 
 	for _, d := range want {
 		setting := byID[d.SettingID]
 		where := hermesConfigPath[d.SettingID]
 		keyPath := where[0] + "." + where[1]
-		keyPaths = append(keyPaths, keyPath)
+		addKeyPath(keyPath)
 
 		current, present, err := configedit.Read(after, keyPath)
 		if err != nil {
@@ -302,6 +366,33 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 		}
 		if present {
 			entry.Current = current
+		}
+
+		// 5a. A FOLDED-IN setting is derived by calling the writer the `apn`
+		// verb calls, not by this function's own policy branches (D12). The
+		// policy still describes it — plugins.enabled and
+		// skills.external_dirs are additive-only, stream_reasoning_deltas is
+		// reconcilable — and is reported in the plan; what differs is who
+		// computes the bytes.
+		if _, delegated := hermesConfigDelegate[d.SettingID]; delegated {
+			res := h.delegatedConfigEdit(delegation, after, d, keyPath)
+			if res.refusalCode != "" {
+				return refuse(res.refusalCode, res.refusalMsg)
+			}
+			for _, kp := range res.keyPaths {
+				addKeyPath(kp)
+			}
+			for kp, added := range res.additive {
+				if _, ok := additive[kp]; !ok {
+					additive[kp] = []string{}
+				}
+				additive[kp] = append(additive[kp], added...)
+			}
+			entry.Action = res.action
+			entry.Intended = res.intended
+			after = res.doc
+			entries = append(entries, entry)
+			continue
 		}
 
 		switch setting.Policy {
@@ -380,11 +471,26 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 	plan.BeforeSHA256 = sha256Hex(before)
 	plan.Diff, plan.DiffTruncated = buildDiff(before, after)
 
-	noOp := true
+	// NoOp is read off the DOCUMENT, not off the entries' actions. A
+	// delegated writer owns more than one key (the plugin pair is one edit),
+	// so a plan can change bytes while the one declared entry's own key did
+	// not move; reporting that as a no-op would tell an operator nothing
+	// would be written and then write. For every non-delegated setting this
+	// says exactly what the per-entry loop said: those branches only ever
+	// change bytes when an action is not "noop".
+	noOp := bytes.Equal(before, after)
 	restart := false
 	for _, e := range entries {
-		if e.Action != "noop" {
-			noOp = false
+		if e.Action != "noop" && e.RestartToTakeEffect {
+			restart = true
+		}
+	}
+	if !noOp && !restart {
+		// The document changed although no declared entry's own key moved —
+		// only a delegated writer can do that. Every setting that could have
+		// caused it is in this plan, so take the restart answer from them
+		// rather than report a change that silently needs one.
+		for _, e := range entries {
 			if e.RestartToTakeEffect {
 				restart = true
 			}
@@ -462,8 +568,15 @@ func conflictReceipt(plan ConfigPlan, code, message string) ConfigReceipt {
 //     and nothing is written.
 //  5. Only now is the edit written, atomically. The bytes actually on disk
 //     afterward are re-checked with configedit.SameOutsideKeys; a violation
-//     here — after step 3 already proved containment — means the filesystem
-//     changed under us, which is exactly a conflict, and is recorded as one.
+//     here — after step 3 already proved containment — means the document
+//     changed under us in the gap between the write and the read-back that
+//     verifies it (D10). That is a lost race, not a corruption: the document
+//     is left exactly as this step found it — reverting to what step 3 read
+//     would discard whatever just landed there, possibly an operator's own
+//     "Allow always" from seconds earlier, which is exactly the loss F2
+//     exists to prevent — and this station's own intended edit is saved
+//     beside it as a sidecar file instead of being thrown away. See
+//     writeAndReadBack and writeRejectedSidecar.
 //  6. The receipt — phase "applied", Written, AfterSHA256 — is recorded.
 func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, planDigest string) (ConfigReceipt, error) {
 	if err := ctx.Err(); err != nil {
@@ -522,28 +635,36 @@ func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, pl
 	// 5. Write, then verify on the bytes actually on disk — not the `after`
 	// this process computed in memory — so a filesystem change concurrent
 	// with the write is caught rather than assumed away.
-	actual := redo.before
-	if !bytes.Equal(redo.before, redo.after) {
-		mode := os.FileMode(0o600)
-		if info, statErr := os.Stat(redo.path); statErr == nil {
-			mode = info.Mode().Perm()
-		}
-		if err := atomicWriteFile(redo.path, redo.after, mode); err != nil {
-			return ConfigReceipt{}, fmt.Errorf("config: writing %s: %w", redo.path, err)
-		}
-		written, err := os.ReadFile(redo.path)
-		if err != nil {
-			return ConfigReceipt{}, fmt.Errorf("config: reading back %s: %w", redo.path, err)
-		}
-		actual = written
+	mode := os.FileMode(0o600)
+	if info, statErr := os.Stat(redo.path); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	actual, err := h.writeAndReadBack(redo.path, redo.before, redo.after, mode)
+	if err != nil {
+		return ConfigReceipt{}, err
 	}
 
 	if err := configedit.SameOutsideKeys(redo.before, actual, redo.keyPaths, redo.additive); err != nil {
+		// D10: `actual` is the document exactly as this race left it on
+		// disk. It is not reverted to redo.before (that would discard
+		// whatever concurrent edit just landed — see the comment on
+		// ApplyConfig above) and it is not forced to redo.after either (that
+		// would discard the concurrent edit in the other direction). It is
+		// left untouched, and this station's own intended edit is saved
+		// beside it instead, so a human can reconcile the two without
+		// either ever having been thrown away.
+		sidecarPath, sidecarErr := writeRejectedSidecar(redo.path, redo.after, mode)
+		msg := fmt.Sprintf(
+			"the write touched more than its plan: %v; %s was left untouched and the intended edit was saved instead to %s — neither edit has been lost, but they must be reconciled by hand",
+			err, redo.path, sidecarPath)
+		if sidecarErr != nil {
+			msg = fmt.Sprintf("%s (and saving the intended edit to %s also failed: %v)", msg, sidecarPath, sidecarErr)
+		}
 		receipt := ConfigReceipt{
 			Plan:      existing.Plan,
 			Phase:     "conflict",
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-			Error:     fmt.Sprintf("the write touched more than its plan: %v", err),
+			Error:     msg,
 		}
 		// A real write already happened; record it rather than let a second
 		// apply attempt believe nothing was ever tried.
@@ -566,6 +687,65 @@ func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, pl
 		return ConfigReceipt{}, fmt.Errorf("config: recording the receipt for %s: %w", operationID, err)
 	}
 	return receipt, nil
+}
+
+// writeAndReadBack is ApplyConfig's step 5: write `after` over `path`, atomically,
+// when it differs from `before`, then read back whatever is actually on disk
+// afterward — not the `after` just written, because that is precisely the
+// assumption D10 exists to not make.
+//
+// It is pulled out of ApplyConfig, rather than left inline, because this is
+// the one gap this algorithm actually has: between the write landing and the
+// read-back that verifies it, nothing holds the document still. A real test
+// of that race should land something in exactly that gap, not fake the
+// timing with a sleep — so h.afterApplyWriteForTest, when set, is called
+// right there. It is nil in production and this function then does exactly
+// what it reads: write, then read back.
+func (h *hermesDescriptor) writeAndReadBack(path string, before, after []byte, mode os.FileMode) ([]byte, error) {
+	if bytes.Equal(before, after) {
+		return before, nil
+	}
+	if err := atomicWriteFile(path, after, mode); err != nil {
+		return nil, fmt.Errorf("config: writing %s: %w", path, err)
+	}
+	if h.afterApplyWriteForTest != nil {
+		h.afterApplyWriteForTest(path)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: reading back %s: %w", path, err)
+	}
+	return written, nil
+}
+
+// rejectedSidecarPath returns where a lost race's intended edit is saved:
+// configPath with ".agentpod-rejected" appended to its full name, so
+// "config.yaml" becomes "config.yaml.agentpod-rejected" sitting right next
+// to it.
+func rejectedSidecarPath(configPath string) string {
+	return configPath + ".agentpod-rejected"
+}
+
+// writeRejectedSidecar saves intended beside configPath, atomically, using
+// the same temp-file-plus-rename writer every other write in this package
+// uses — this is not a second way to write a file, just a second path to
+// write it to.
+//
+// This is the ONE place in the whole declared-configuration design that
+// writes a file the harness itself does not own or ever read: every other
+// write here lands inside a document the harness will itself parse at its
+// next read, but a harness has no notion of ".agentpod-rejected" and never
+// will. It exists purely as bookkeeping for a human to reconcile by hand —
+// nothing in this system reads it back, so it is safe (and correct) for a
+// later rejection of the same document to silently overwrite whatever an
+// earlier one left here; there is no history to preserve, only a latest
+// answer to the question "what did we intend to write."
+func writeRejectedSidecar(configPath string, intended []byte, mode os.FileMode) (string, error) {
+	path := rejectedSidecarPath(configPath)
+	if err := atomicWriteFile(path, intended, mode); err != nil {
+		return path, err
+	}
+	return path, nil
 }
 
 // InspectConfig returns the receipt this station's journal has recorded for

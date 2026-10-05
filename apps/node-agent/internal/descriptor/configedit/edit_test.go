@@ -540,16 +540,18 @@ func TestASettingInAnExistingSectionAndOneInAnAbsentSectionBothLand(t *testing.T
 	}
 }
 
-// Creating a section is ONLY for a section that is genuinely absent. A section
-// that is there in a shape this editor cannot extend keeps refusing exactly as
-// it did before, by name — "make any shape work" is not what this change is.
+// Creating a section is ONLY for a section that is genuinely absent or
+// genuinely bare. A section that is there in some OTHER shape this editor
+// cannot extend keeps refusing exactly as it did before, by name — "make any
+// shape work" is not what this change is. (The bare-key case moved to its own
+// tests below, now that it is no longer refused.)
 func TestASectionPresentInAnUnsupportedShapeIsStillRefusedByName(t *testing.T) {
 	shapes := map[string]string{
-		"a scalar":                "approvals: 300\nmodel: gpt\n",
-		"a bare key holding none": "approvals:\nmodel: gpt\n",
-		"a sequence":              "approvals:\n  - nope\nmodel: gpt\n",
-		"an empty flow mapping":   "approvals: {}\nmodel: gpt\n",
-		"a flow mapping":          "approvals: {mode: ask}\nmodel: gpt\n",
+		"a scalar":                           "approvals: 300\nmodel: gpt\n",
+		"a sequence":                         "approvals:\n  - nope\nmodel: gpt\n",
+		"an empty flow mapping":              "approvals: {}\nmodel: gpt\n",
+		"a flow mapping":                     "approvals: {mode: ask}\nmodel: gpt\n",
+		"a bare key with a trailing comment": "approvals: # nothing configured yet\nmodel: gpt\n",
 	}
 	for name, doc := range shapes {
 		edited, _, err := SetScalar([]byte(doc), "approvals.timeout", 900)
@@ -726,6 +728,125 @@ func TestF2AttackShapesStillRefusedNowThatACreatedSectionIsPruned(t *testing.T) 
 // section: a document that is empty, and one whose last line has no newline
 // after it (where appending blind would glue the section onto that line and
 // destroy it).
+// ---- a bare SECTION, present but holding nothing --------------------------
+
+// bareSectionDoc is a document whose `approvals:` key is present but holds
+// nothing — the same amplification this round exists to fix, arriving
+// through a different door than an absent section: `derivePlanConfig`
+// refuses the WHOLE plan on this one setting's shape today, exactly as it
+// once did for an absent section.
+const bareSectionDoc = "# the operator's own note, which must survive\napprovals:\nmodel: gpt\n"
+
+func TestSetScalarExtendsABareSectionInPlace(t *testing.T) {
+	edited, action, err := SetScalar([]byte(bareSectionDoc), "approvals.timeout", 900)
+	if err != nil {
+		t.Fatalf("a bare section was refused rather than extended: %v", err)
+	}
+	if action != "create" {
+		t.Fatalf("action = %q, want create", action)
+	}
+	out := string(edited)
+	want := "# the operator's own note, which must survive\napprovals:\n  timeout: 900\nmodel: gpt\n"
+	if out != want {
+		t.Fatalf("extended bare section = %q, want %q", out, want)
+	}
+	v, present, err := Read(edited, "approvals.timeout")
+	if err != nil || !present || v != 900 {
+		t.Fatalf("Read after extending the bare section: %#v present=%v err=%v", v, present, err)
+	}
+	if err := SameOutsideKeys([]byte(bareSectionDoc), edited, []string{"approvals.timeout"}, nil); err != nil {
+		t.Fatalf("extending a bare section was rejected as a change outside the plan: %v", err)
+	}
+}
+
+func TestAppendToListExtendsABareSectionInPlace(t *testing.T) {
+	edited, action, added, err := AppendToList([]byte(bareSectionDoc), "approvals.command_allowlist", []string{"git status", "ls"})
+	if err != nil {
+		t.Fatalf("a bare section was refused rather than extended: %v", err)
+	}
+	if action != "append" || len(added) != 2 {
+		t.Fatalf("action = %q, added = %#v, want append of both", action, added)
+	}
+	out := string(edited)
+	want := "# the operator's own note, which must survive\napprovals:\n  command_allowlist:\n    - git status\n    - ls\nmodel: gpt\n"
+	if out != want {
+		t.Fatalf("extended bare section = %q, want %q", out, want)
+	}
+	if err := SameOutsideKeys([]byte(bareSectionDoc), edited,
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": added}); err != nil {
+		t.Fatalf("extending a bare section for an additive-only list was rejected as a change outside the plan: %v", err)
+	}
+}
+
+// The insertion point is the KEY's own line, never wherever a null value
+// node happens to report its line as — which, for an implicit null with
+// nothing after the colon, can be the NEXT sibling's line. A bare header
+// immediately followed by other top-level content is the shape that would
+// expose that bug: inserting at the wrong line would land the new key
+// AFTER the sibling, outside the section entirely, rather than inside it.
+func TestABareHeaderFollowedByOtherContentInsertsInsideItsOwnSection(t *testing.T) {
+	doc := "approvals:\ntimeout: 30\n"
+	edited, action, err := SetScalar([]byte(doc), "approvals.mode", "ask")
+	if err != nil {
+		t.Fatalf("SetScalar: %v", err)
+	}
+	if action != "create" {
+		t.Fatalf("action = %q, want create", action)
+	}
+	want := "approvals:\n  mode: ask\ntimeout: 30\n"
+	if out := string(edited); out != want {
+		t.Fatalf("got %q, want %q — the created key must land inside approvals, before the sibling key", out, want)
+	}
+}
+
+// A multi-setting plan mixing a bare section and a normal one, composed the
+// way derivePlanConfig composes it: both must land and both must pass
+// containment TOGETHER, so one bare section does not block a setting
+// declared alongside it in a different section.
+func TestASettingInABareSectionAndOneInAnExistingSectionBothLand(t *testing.T) {
+	before := "approvals:\nmodel:\n  context_length: 8000\n"
+	keyPaths := []string{"approvals.timeout", "model.context_length"}
+	after, action, err := SetScalar([]byte(before), keyPaths[0], 900)
+	if err != nil {
+		t.Fatalf("%s: %v", keyPaths[0], err)
+	}
+	if action != "create" {
+		t.Fatalf("%s: action = %q, want create", keyPaths[0], action)
+	}
+	after, action, err = SetScalar(after, keyPaths[1], 16000)
+	if err != nil {
+		t.Fatalf("%s: %v", keyPaths[1], err)
+	}
+	if action != "modify" {
+		t.Fatalf("%s: action = %q, want modify", keyPaths[1], action)
+	}
+	if err := SameOutsideKeys([]byte(before), after, keyPaths, nil); err != nil {
+		t.Fatalf("a plan mixing a bare section and an existing one was refused: %v", err)
+	}
+}
+
+// F2 again, on the new widening: pruning a bare section must be asymmetric.
+// Only a section `before` genuinely left bare may be pruned; an edit that
+// quietly dropped operator entries alongside filling the bare section must
+// still be caught.
+func TestF2StillCatchesAChangeElsewhereWhenASectionWasBare(t *testing.T) {
+	before := "approvals:\ntools:\n  - shell\n  - search\n"
+	edited, _, _, err := AppendToList([]byte(before), "approvals.command_allowlist", []string{"git status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered := strings.Replace(string(edited), "tools:\n  - shell\n  - search\n", "tools: []\n", 1)
+	if tampered == string(edited) {
+		t.Fatal("test setup: tools list not found to empty")
+	}
+	if err := SameOutsideKeys([]byte(before), []byte(tampered),
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": {"git status"}}); err == nil {
+		t.Fatal("F2: containment accepted a bare-section fill alongside an unrelated list being emptied")
+	}
+}
+
 func TestCreatingASectionCopesWithAnEmptyOrUnterminatedDocument(t *testing.T) {
 	cases := map[string]string{
 		"an empty document":               "",

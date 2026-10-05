@@ -179,7 +179,10 @@ export interface AppliedWrite {
  * or round-tripped into a side-channel set, because a second structure
  * carrying the same fact is exactly the split that drifts: an optional
  * parameter a caller forgets to populate loses the out-of-scope refusal with
- * no type error — spec §6's protection disappearing silently.
+ * no type error — spec §6's protection disappearing silently. The same
+ * `level` is also what each produced `ConfigObservation.level` carries
+ * (Phase 3), so the console reads the resolution level that won rather than
+ * re-deriving station → node → fleet precedence a second time, client-side.
  *
  * `compare()` stays a PURE function of its arguments: `appliedWrites` and
  * `optedOut` are rows the CALLER fetched (from `applied_harness_config` and
@@ -193,7 +196,8 @@ export interface AppliedWrite {
  *
  *   1. out-of-scope      (the declaration cannot apply to this station at all)
  *   2. unreadable         (the document could not be parsed — never "matches")
- *   3. opted-out          (an explicit operator choice)
+ *   3. opted-out          (an explicit operator choice — the hub's own
+ *                          register, or the harness's own record, D11)
  *   4. awaiting-restart   (written, restart needed, gateway pid unchanged)
  *   5. absent / drifted / matches   (the ordinary comparison)
  */
@@ -231,7 +235,7 @@ export function compare(args: {
     if (!(v.settingId in args.declared)) continue; // undeclared: no opinion, not reported
     const { value: declared, level } = args.declared[v.settingId]!;
     const setting = byId.get(v.settingId);
-    const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed };
+    const row = { settingId: v.settingId, stationId: args.stationId, declared, observed: v.observed, level };
 
     // 1. out-of-scope: a declaration that cannot be honoured is not drift,
     // and calling it "drifted" would invite an apply that must then refuse.
@@ -252,12 +256,27 @@ export function compare(args: {
       continue;
     }
 
-    // 3. opted-out: an explicit operator choice. It outranks the ordinary
-    // comparison so the state names the operator's decision, not whatever
-    // the document happens to hold — "drifted" would invite exactly the
-    // apply the opt-out exists to prevent.
+    // 3. opted-out: an explicit operator choice, from either of two sources.
+    // It outranks the ordinary comparison so the state names the operator's
+    // decision, not whatever the document happens to hold — "drifted" would
+    // invite exactly the apply the opt-out exists to prevent. The two
+    // sources are kept distinguishable in the REASON text (D11): the hub's
+    // own register is agentpod's doing and is visible in this system without
+    // ever looking at the document; the harness's own record
+    // (`ConfigValue.optedOutByHarness` — Hermes' `plugins.disabled`) is the
+    // operator speaking through the harness's own UI, invisible until
+    // someone reads the file. Both refuse a write; only the wording tells
+    // an operator which one fired.
     if (optedOut.has(v.settingId)) {
       out.push({ ...row, state: "opted-out", reason: "an operator opted this setting out of reconciliation" });
+      continue;
+    }
+    if (v.optedOutByHarness) {
+      out.push({
+        ...row,
+        state: "opted-out",
+        reason: `${setting?.harness ?? "the harness"} itself reports this setting disabled (its own plugins.disabled) — not an agentpod exemption`,
+      });
       continue;
     }
 

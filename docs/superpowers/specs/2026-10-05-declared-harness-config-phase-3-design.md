@@ -22,12 +22,19 @@ guarantee nothing can invoke is not a feature.
 
 ## 2. Two facts that shape the fold-in, both found by reading the code
 
-**F5 — the `hermes-skills` writer is in the wrong package to be reused.** `skills.external_dirs`
-is written by `apps/node-agent/cmd/agentpod-node/hermes_skills.go`. Go forbids `internal/...`
-importing `cmd/...`, so `internal/descriptor` cannot call it. Folding in that setting therefore
-requires **extracting the writer into `internal/` first**, as its own change, with its own
-byte-identical proof. It is not a registry entry plus a delegation; it is a refactor and then a
-registry entry.
+**F5 — WITHDRAWN, 2026-10-05. This was wrong.** It claimed the `skills.external_dirs`
+writer lived inline in `hermesSkillsCmd` (`cmd/agentpod-node/hermes_skills.go`) and that Go's
+`internal` rule therefore blocked reuse. It did not: the writer already lived in
+`internal/skills/hermes_external_dirs.go` (shipped in #533) as `PlanExternalDirs` /
+`ApplyExternalDirs`, and `internal/descriptor` already imported `internal/skills`. There was
+never an import blocker.
+
+The error came from reading the CLI command body and not checking whether it delegated. It was
+then written here as a fact "established by reading", which is worse than not stating it — a
+reader had no reason to doubt it. **Plan 3b's extraction task was therefore optional polish, not
+a prerequisite.** It was done anyway (the writer now lives in `internal/hermesskills` with a
+`hermeslive`-shaped API), with the original tests ported assertion-for-assertion, but nothing
+depended on it.
 
 **F6 — OpenClaw's document is JSON, so `configedit` does not serve it.** `configedit` is a YAML
 line editor; `hooks.allowConversationAccess` lives in `~/.openclaw/openclaw.json` and is written by

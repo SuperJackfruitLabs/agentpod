@@ -225,3 +225,54 @@ func TestHermesConfigRegistryStillCarriesTheListSetting(t *testing.T) {
 	}
 	t.Fatal("command_allowlist must stay registered")
 }
+
+// D11: the harness's OWN opt-out — `plugins.disabled` naming the agentpod-live
+// plugin — must reach the hub as `ConfigValue.optedOutByHarness`. This is a
+// document-level fact (every setting this registry manages today lives in
+// the same profile document the plugin's own enablement lives in), computed
+// once per ObserveConfig call, not re-derived per setting id.
+func TestHermesObserveConfigReportsTheHarnesssOwnOptOut(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\nplugins:\n  disabled:\n    - agentpod-live\n")
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 1 {
+		t.Fatalf("got %d values, want 1", len(vals))
+	}
+	if !vals[0].OptedOutByHarness {
+		t.Fatalf("plugins.disabled naming agentpod-live must set OptedOutByHarness, got %+v", vals[0])
+	}
+	// The ordinary observed value is still reported — the harness's opt-out
+	// does not make the document unreadable or the value absent.
+	if vals[0].Observed != "900" {
+		t.Fatalf("observed = %v, want 900", vals[0].Observed)
+	}
+}
+
+// The absence case, proven alongside the presence case so a test that cannot
+// distinguish "false" from "field never set" is not mistaken for coverage.
+func TestHermesObserveConfigWithNoHarnessOptOutReportsFalse(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatalf("no plugins.disabled entry at all must report OptedOutByHarness=false, got %+v", vals[0])
+	}
+}
+
+// A document whose plugins.disabled list names some OTHER plugin must not be
+// mistaken for naming agentpod-live — this is a membership test, not "the key
+// is present".
+func TestHermesObserveConfigOtherPluginDisabledDoesNotOptOut(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\nplugins:\n  disabled:\n    - some-other-plugin\n")
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatalf("a different plugin in plugins.disabled must not opt this out, got %+v", vals[0])
+	}
+}

@@ -25,6 +25,12 @@ type ConfigValue struct {
 	// look like a document whose key is absent.
 	Readable bool   `json:"readable"`
 	Reason   string `json:"reason,omitempty"`
+	// OptedOutByHarness is the HARNESS's own record that an operator disabled
+	// this — Hermes' `plugins.disabled`. Distinct from the hub's opt-out
+	// register: this one is the operator speaking through the harness's own
+	// UI, and agentpod never writes it. The JSON tag mirrors the contract's
+	// `ConfigValue.optedOutByHarness` byte-for-byte.
+	OptedOutByHarness bool `json:"optedOutByHarness,omitempty"`
 }
 
 // DeclaredSetting is one setting the fleet wants, at whatever level the

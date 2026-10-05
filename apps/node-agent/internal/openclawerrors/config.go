@@ -115,6 +115,56 @@ func childObject(members []member, key string) ([]member, error) {
 	return child, nil
 }
 
+// PluginExplicitlyDisabled reports whether this document's
+// plugins.entries.agentpod-errors.enabled is explicitly `false` — OpenClaw's
+// own mechanism for an operator to turn the plugin off through OpenClaw's
+// own UI (install.go's package comment documents this key, and
+// install.go:317's Observe reads it as the plugin's Enabled status).
+//
+// It is exported because internal/descriptor's declared-configuration
+// registry is a second caller: it surfaces this fact as
+// ConfigValue.optedOutByHarness (D11, mirroring hermesPluginDisabled for
+// Hermes' plugins.disabled) and refuses to re-enable the plugin's
+// hooks.allowConversationAccess while it holds. openclawerrors must not
+// import internal/descriptor, so the fact travels the other way, as a
+// function descriptor calls.
+//
+// Three states, deliberately distinguished:
+//   - the key is explicitly `false` → true (an operator decision);
+//   - the key is ABSENT → false — nothing has been decided, and a fresh
+//     install (or one this plugin has never touched) has no entry at all;
+//   - the key is explicitly `true` → false.
+//
+// Conflating "absent" with "false" would report every fresh OpenClaw
+// station opted-out and block the fold-in entirely — the mirror image of
+// the bug this function exists to close, and just as bad. An unparseable
+// document reports false: an unreadable document is ObserveConfig's own
+// concern (Readable: false), not this function's.
+func PluginExplicitlyDisabled(raw []byte) bool {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return false
+	}
+	plugins, _ := doc["plugins"].(map[string]any)
+	if plugins == nil {
+		return false
+	}
+	entries, _ := plugins["entries"].(map[string]any)
+	if entries == nil {
+		return false
+	}
+	entry, ok := entries[Name].(map[string]any)
+	if !ok {
+		return false
+	}
+	v, present := entry["enabled"]
+	if !present {
+		return false
+	}
+	b, ok := v.(bool)
+	return ok && !b
+}
+
 func enableConfig(raw []byte, pluginDir string) ([]byte, error) {
 	root, err := parseObject(raw)
 	if err != nil {
@@ -169,6 +219,37 @@ func enableConfig(raw []byte, pluginDir string) ([]byte, error) {
 	plugins = set(plugins, "entries", encodeObject(entries))
 
 	return splicePlugins(raw, encodeObject(plugins))
+}
+
+// EnableConfig is enableConfig under an exported name, and nothing else: it
+// computes, without writing, the edit that enables agentpod-errors — adding
+// pluginDir to plugins.load.paths, enabling plugins.entries.agentpod-errors,
+// and setting its hooks.allowConversationAccess — against an OpenClaw
+// configuration already in memory.
+//
+// It exists because `apn openclaw-errors enable` is no longer the only
+// caller. `internal/descriptor`'s declared-configuration registry folds in
+// `openclaw.hooks.allowConversationAccess` (spec D12) and must produce
+// BYTE-IDENTICAL output to the verb — not equivalent JSON, identical bytes —
+// so it calls this rather than reimplementing the edit. A wrapper rather
+// than a rename so the function PlanEnable (install.go) has always called
+// stays untouched: one implementation, one set of refusals, and no second
+// place for the two callers' behaviour to drift apart.
+//
+// The verb's own caller (PlanEnable) also checks the installed OpenClaw's
+// version and installs the plugin's files; neither of those is this
+// function's job, or the registry's — only the configuration document is
+// edited here, exactly as hermeslive's own folded-in writers do.
+func EnableConfig(raw []byte, pluginDir string) ([]byte, error) {
+	return enableConfig(raw, pluginDir)
+}
+
+// DisableConfig is disableConfig under an exported name, for the same reason
+// as EnableConfig: one implementation, two callers. The verb keeps its own
+// caller (PlanDisable, install.go), which also removes the plugin's files;
+// this function only ever touches the configuration document.
+func DisableConfig(raw []byte, pluginDir string) ([]byte, error) {
+	return disableConfig(raw, pluginDir)
 }
 
 func disableConfig(raw []byte, pluginDir string) ([]byte, error) {
