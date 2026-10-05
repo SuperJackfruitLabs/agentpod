@@ -65,23 +65,59 @@ export class ConfigApplyError extends Error {
 /**
  * The HTTP status a refusal the NODE named answers with (finding 3).
  *
- * Split by remedy, not by severity: a refusal about what was ASKED FOR is the
- * caller's to fix and answers 400; a refusal about the state of the document
- * or the station is a conflict with something the caller does not control and
- * answers 409. Either way the node's own code and sentence travel to the
- * caller unchanged — a refused plan must never be reported as a plan, and
- * must never be recast as "the node could not be reached", which is what
- * happened before: the node answered promptly and named the problem, and the
- * hub sent the operator to debug connectivity that was fine.
+ * Split by whether RE-SENDING THE SAME REQUEST could ever work:
+ *
+ *   - **400** — it could not. The request names something that cannot be
+ *     planned as written, and nothing that happens on the station will change
+ *     that: an unregistered id, a level with no document, a value that does
+ *     not fit the setting's shape, a setting an operator has opted out, a
+ *     target that is a credential file. The remedy is a different request
+ *     (usually `fleet config set`) or a different declaration.
+ *   - **409** — it could. The request is well-formed and would have been
+ *     honoured; it lost to the state of the document or the station between
+ *     being made and being answered. The remedy is to re-read and re-send:
+ *     re-plan (`PLAN_STALE`), re-read the plan that was reviewed
+ *     (`PLAN_DIGEST_MISMATCH`), or wait for a document that can be parsed
+ *     (`UNREADABLE`).
+ *
+ * This is the earlier rule ("about what was asked for" vs "about the state of
+ * the document or the station") restated so that it decides the two codes it
+ * previously got wrong. `SHAPE_UNEXPECTED` was 409 although its commonest
+ * cause — and the one the docs cite — is a declared value that does not fit
+ * the setting, which is the caller's to fix and never resolves itself; its
+ * other cause, a derived edit that would disturb the document, equally never
+ * succeeds on a retry of the same request. `OPTED_OUT` was 400 when the hub
+ * noticed and 409 when the node did, which made one code two statuses
+ * depending on who got there first.
+ *
+ * Exhaustive on purpose: a refusal code added to the contract without a
+ * status decided here is a type error, not a silent 409.
+ *
+ * Either way the node's own code and sentence travel to the caller unchanged
+ * — a refused plan must never be reported as a plan, and must never be recast
+ * as "the node could not be reached", which is what happened before: the node
+ * answered promptly and named the problem, and the hub sent the operator to
+ * debug connectivity that was fine.
  */
 export function statusForRefusal(code: ConfigRefusalCode): 400 | 409 {
   switch (code) {
     case "UNKNOWN_SETTING":
     case "OUT_OF_SCOPE":
+    case "SHAPE_UNEXPECTED":
+    case "OPTED_OUT":
     case "CREDENTIAL_PATH":
       return 400;
-    default:
+    case "PLAN_STALE":
+    case "PLAN_DIGEST_MISMATCH":
+    case "UNREADABLE":
       return 409;
+    default: {
+      // Unreachable while the switch covers `ConfigRefusalCode`; this line
+      // stops compiling if a code is added without a status.
+      const unhandled: never = code;
+      void unhandled;
+      return 409;
+    }
   }
 }
 

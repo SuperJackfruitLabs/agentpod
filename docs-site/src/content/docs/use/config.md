@@ -380,13 +380,19 @@ because only the hub knows what is declared and only the hub knows it could not 
 answer.
 
 **A refused plan is a refusal, not a plan.** `fleet config plan` exits non-zero on one, and
-the HTTP route answers 400 when the refusal is about what was asked for (`UNKNOWN_SETTING`,
-`NOTHING_DECLARED`, `OUT_OF_SCOPE`, `CREDENTIAL_PATH`) and 409 when it is about the state of
-the document or the station (`SHAPE_UNEXPECTED`, `UNREADABLE`, `PLAN_STALE`,
-`PLAN_DIGEST_MISMATCH`, `OPTED_OUT`) — never 200 with a refusal in the body, which no
-script could tell from a plan. The code and the sentence are the node's own wherever the
-node is the one that refused, and at adopt time they are what gets recorded against the
-station, so a recorded reason names the refusal rather than blaming the connection.
+the HTTP route answers 400 when re-sending the same request could never work
+(`UNKNOWN_SETTING`, `NOTHING_DECLARED`, `OUT_OF_SCOPE`, `SHAPE_UNEXPECTED`, `OPTED_OUT`,
+`CREDENTIAL_PATH` — the remedy is a different request, usually `fleet config set`) and 409
+when the request was well-formed and lost to the state of the document or the station
+(`UNREADABLE`, `PLAN_STALE`, `PLAN_DIGEST_MISMATCH` — the remedy is to re-read and
+re-send) — never 200 with a refusal in the body, which no script could tell from a plan.
+`SHAPE_UNEXPECTED` is a 400 because neither of its causes resolves itself: a declared value
+that does not fit the setting has to be re-declared, and a derived edit that would disturb
+the document never succeeds on a retry of the same request. `OPTED_OUT` is a 400 whether
+the hub or the node is the one that noticed. The code and the sentence are the node's own
+wherever the node is the one that refused, and at adopt time they are what gets recorded
+against the station, so a recorded reason names the refusal rather than blaming the
+connection.
 
 ## A setting that can't be found
 

@@ -667,7 +667,10 @@ test(
       });
 
       // A status a caller can branch on — and specifically not 200.
-      expect(res.status).toBe(409);
+      // 400, not 409: `SHAPE_UNEXPECTED` cannot be satisfied by re-sending
+      // the same request, whatever happens on the station (Minor 4; the
+      // whole mapping is pinned in tests/unit/harness-config-refusal-status).
+      expect(res.status).toBe(400);
       const body = (await res.json()) as { error?: string; code?: string; entries?: unknown; planDigest?: string };
       // The node's own code and sentence, not "the node could not be reached".
       expect(body.code).toBe("SHAPE_UNEXPECTED");
@@ -687,7 +690,7 @@ test(
 );
 
 test(
-  "a refusal about the request itself is a 400, distinguishable from a 409 about the document",
+  "a refusal that no retry could satisfy is a 400, distinguishable from a 409 about the state",
   async () => {
     const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
     const baseUrl = `http://localhost:${server.port}`;
