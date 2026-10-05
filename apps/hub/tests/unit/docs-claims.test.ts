@@ -126,6 +126,157 @@ describe("published docs", () => {
     }
   });
 
+  // ─── Subcommands ────────────────────────────────────────────────────────────
+  //
+  // The test above captures only the FIRST word after `fleet`, so
+  // `fleet config opt-out` has always been read as `config` and no subcommand
+  // was ever checked. A page could claim `fleet config total-nonsense` and the
+  // suite stayed green. There are eleven verbs under `fleet config` alone and
+  // several are documented today, so the published pages carried an unchecked
+  // surface far larger than the one that was checked.
+
+  const FLEET_CMD_DIR = "apps/node-agent/cmd/agentpod-fleet";
+
+  /** Every non-test Go source in the fleet CLI, as text. */
+  const fleetGoSources = () =>
+    readdirSync(join(REPO, FLEET_CMD_DIR))
+      .filter((f) => f.endsWith(".go") && !f.endsWith("_test.go"))
+      .map((f) => read(`${FLEET_CMD_DIR}/${f}`));
+
+  /**
+   * The body of a top-level Go func, from its signature to the next one.
+   *
+   * Function-scoped on purpose. Several of these files hold more than one
+   * switch — `skills.go` has six — and reading a whole file would hand
+   * `fleet skills` the subcommands of `fleet skills station` as well, turning
+   * the check into a superset that cannot tell a real verb from a misplaced
+   * one.
+   */
+  function goFuncBody(name: string): string | null {
+    for (const src of fleetGoSources()) {
+      const start = src.indexOf(`\nfunc ${name}(`);
+      if (start === -1) continue;
+      const end = src.indexOf("\nfunc ", start + 1);
+      return end === -1 ? src.slice(start) : src.slice(start, end);
+    }
+    return null;
+  }
+
+  /** `fleet <verb>` → the Go func that handles it, read from fleetCmd's switch. */
+  function fleetVerbHandlers(): Map<string, string> {
+    const body = goFuncBody("fleetCmd");
+    expect(body, "fleetCmd is where `fleet <verb>` dispatches").not.toBeNull();
+    const out = new Map<string, string>();
+    for (const block of body!.split(/^\tcase /m).slice(1)) {
+      const verb = /^"([a-z][a-z-]*)":/.exec(block)?.[1];
+      // `fleet[A-Z]…` so `fleetcred` and other lowercase package references
+      // cannot be mistaken for a handler.
+      const handler = /\b(fleet[A-Z][A-Za-z]*)\(/.exec(block)?.[1];
+      if (verb && handler) out.set(verb, handler);
+    }
+    return out;
+  }
+
+  /**
+   * The subcommands a verb's handler dispatches, parsed rather than listed, so
+   * the test cannot drift from the CLI.
+   *
+   * Two shapes, because the CLI has two: most handlers switch on `args[0]`,
+   * and `fleet nodes` compares it directly (`args[0] == "telemetry"`,
+   * `args[0] != "update"`). Reading both beats hard-coding the two verbs that
+   * happen to use the second shape.
+   */
+  function subcommandsOf(handler: string): Set<string> {
+    const subs = new Set<string>();
+    const body = goFuncBody(handler);
+    if (!body) return subs;
+    for (const [, labels] of body.matchAll(/^\s*case ((?:"[a-z][a-z-]*"(?:, )?)+):/gm)) {
+      for (const [, label] of labels!.matchAll(/"([a-z][a-z-]*)"/g)) subs.add(label!);
+    }
+    for (const [, label] of body.matchAll(/args\[0\]\s*[!=]=\s*"([a-z][a-z-]*)"/g)) subs.add(label!);
+    return subs;
+  }
+
+  interface Claim {
+    page: string;
+    verb: string;
+    sub: string | undefined;
+  }
+
+  /**
+   * Every `fleet …` command a page claims, from inline code spans AND fenced
+   * code blocks.
+   *
+   * Prose is never scanned: a sentence like "the `fleet config` surface" would
+   * read `surface` as a subcommand. The fenced blocks are where `use/cli.md`
+   * keeps most of its command list, and they were unchecked entirely.
+   */
+  function fleetClaims(): Claim[] {
+    const out: Claim[] = [];
+    for (const page of all()) {
+      const candidates: string[] = [];
+      for (const [, span] of page.text.matchAll(/`([^`\n]+)`/g)) candidates.push(span!);
+      let fenced = false;
+      for (const line of page.text.split("\n")) {
+        if (line.trimStart().startsWith("```")) {
+          fenced = !fenced;
+          continue;
+        }
+        if (fenced) candidates.push(line.trim());
+      }
+      for (const raw of candidates) {
+        const match = /^fleet\s+([a-z][a-z-]*)(?:\s+([a-z][a-z-]*))?/.exec(
+          raw.replace(/^\$\s*/, "").trim(),
+        );
+        if (match) out.push({ page: page.file, verb: match[1]!, sub: match[2] });
+      }
+    }
+    return out;
+  }
+
+  test("every fleet subcommand named is one its verb group dispatches", () => {
+    const handlers = fleetVerbHandlers();
+    expect(handlers.size, "fleetCmd's switch parsed into verb → handler").toBeGreaterThan(15);
+
+    const subs = new Map<string, Set<string>>();
+    for (const [verb, handler] of handlers) subs.set(verb, subcommandsOf(handler));
+
+    // Guards the guard. Each of these is a group whose shape the parse has to
+    // cope with, and an empty set below silently skips its claims — which is
+    // how this check would go vacuous without anyone noticing.
+    expect(subs.get("config")?.size, "fleet config's subcommands were parsed").toBeGreaterThan(9);
+    expect(subs.get("config"), "the verb the incident was about").toContain("opt-out");
+    expect(subs.get("skills")?.size, "fleet skills' subcommands were parsed").toBeGreaterThan(5);
+    expect(subs.get("plugins")?.size, "fleet plugins' subcommands were parsed").toBeGreaterThan(3);
+    expect(subs.get("bridge")?.size, "fleet bridge's subcommands were parsed").toBeGreaterThan(3);
+    // `fleet nodes` has no switch at all; it compares args[0] directly. If the
+    // second pattern stops matching, this is the line that says so.
+    expect(subs.get("nodes"), "fleet nodes dispatches without a switch").toContain("update");
+    expect(subs.get("nodes"), "fleet nodes dispatches without a switch").toContain("telemetry");
+
+    const verbs = new Set([...handlers.keys(), "help", "version"]);
+    let checked = 0;
+    for (const claim of fleetClaims()) {
+      expect(verbs, `${claim.page} names \`fleet ${claim.verb}\``).toContain(claim.verb);
+      if (!claim.sub) continue;
+      const known = subs.get(claim.verb);
+      // A handler that dispatches on flags rather than on args[0] — `fleet
+      // invite`, the bare reads — yields no labels, and an empty set cannot
+      // say a subcommand is wrong. Skipped rather than guessed at.
+      if (!known || known.size === 0) continue;
+      expect(
+        known,
+        `${claim.page} names \`fleet ${claim.verb} ${claim.sub}\``,
+      ).toContain(claim.sub);
+      checked++;
+    }
+
+    // Only the first two words are read, so `fleet skills station plan` is
+    // checked as far as `station`. Third-level verbs stay unchecked; what this
+    // guards is the level that was entirely unguarded.
+    expect(checked, "subcommand claims were actually compared").toBeGreaterThan(40);
+  });
+
   test("every capability named in a gating table is really gated", () => {
     const gated = new Set(
       // Every route file that gates, found by reading the directory rather than by listing
