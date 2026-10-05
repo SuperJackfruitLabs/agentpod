@@ -4,6 +4,7 @@ import { createTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { getGrant, setGrant, deleteGrant, listGrants, grantAllowsPrincipal, NO_GRANT } from "../../src/services/grants";
 import { createPrincipal } from "../../src/services/principals";
+import { buildTokenPayload } from "../../src/auth/jwt-claims";
 
 /**
  * Grants as data — the source of authority replacing `CONTROL_PAIR_GRANTS`.
@@ -137,5 +138,34 @@ describe("scopes", () => {
     await expect(setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:write"] })).rejects.toThrow(
       /unknown scope/,
     );
+  });
+
+  test("runs:write is a scope a grant may hold, alone or beside evidence:read", async () => {
+    const id = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
+    await setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] });
+    expect((await getGrant(id))!.scopes).toEqual(["runs:write"]);
+    await setGrant(id, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read", "runs:write"] });
+    expect((await getGrant(id))!.scopes).toEqual(["evidence:read", "runs:write"]);
+  });
+
+  test("a grant written before runs:write existed keeps exactly its scopes, and mints no runs:write", async () => {
+    const reader = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
+    const bare = await createPrincipal({ kind: "service", handle: `scopes-it-${crypto.randomUUID().slice(0, 8)}` });
+    // Rows as the previous code left them, written by SQL so no writer of this version touches them:
+    // one with evidence:read, one from before migration 0086's column had anything in it.
+    await rawSql`INSERT INTO principal_grants (principal_id, may_dispatch, may_grant_reach, scopes)
+                 VALUES (${reader}, '[]', false, '["evidence:read"]')`;
+    await rawSql`INSERT INTO principal_grants (principal_id, may_dispatch, may_grant_reach)
+                 VALUES (${bare}, '[]', false)`;
+    expect(await getGrant(reader)).toEqual({ mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
+    expect(await getGrant(bare)).toEqual({ mayDispatch: [], mayGrantReach: false, scopes: [] });
+
+    // `fleet grants set` speaks only the control pair; it still leaves the scopes as stored.
+    await setGrant(reader, { mayDispatch: [], mayGrantReach: true });
+    expect((await getGrant(reader))!.scopes).toEqual(["evidence:read"]);
+
+    const tenant = async () => "fleet_0123456789abcdef0123";
+    expect((await buildTokenPayload({ principalId: reader, resolveTenant: tenant })).scope).toBe("evidence:read");
+    expect("scope" in (await buildTokenPayload({ principalId: bare, resolveTenant: tenant }))).toBe(false);
   });
 });
