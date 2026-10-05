@@ -491,8 +491,23 @@ function reasonFor(err: unknown): string {
  * Two bounds, because either alone is insufficient: concurrency keeps one
  * wedged station from holding up the others, and the deadline keeps a wedged
  * NODE (where every station is slow for the same reason, concurrently) from
- * holding up the response. The deadline is one broker timeout plus a little,
- * which is the longest a single round trip can legitimately take.
+ * holding up the response.
+ *
+ * The deadline is one broker timeout plus a little — NOT because a station's
+ * pass is one round trip. It is `2 + 4n` serial round trips for `n` drifted
+ * settings (`fetchRegistry`; then `config.observe` and `health` together;
+ * then, per setting, `planFor`'s own `fetchRegistry`, `config.plan`,
+ * `config.apply` and the post-write `health`) — about ten for two settings.
+ * Sizing the cap to that work would mean a cap measured in minutes, which is
+ * the unbounded adoption this bound exists to prevent, so the cap stays at
+ * one round trip and detaching is an ORDINARY outcome rather than an
+ * exceptional one: a merely slow node, not only a wedged one, reaches it.
+ *
+ * That is why an unfinished station's outcome is `"pending"` and not
+ * `"failed"`. Nothing has failed when the deadline fires — the pass is still
+ * running, will finish, and will record its own `stations.configReason`. An
+ * operator told "failed" about a station that then succeeds has been
+ * misinformed by the label, not by the work.
  *
  * Passing the deadline never fails the adoption and never cancels the work:
  * the remaining stations keep reconciling, detached, and keep recording their
@@ -501,11 +516,19 @@ function reasonFor(err: unknown): string {
 export const RECONCILE_CONCURRENCY = 6;
 export const RECONCILE_DEADLINE_MS = 16_000;
 
-/** What `reconcileOnAdopt` did with one declared setting on one station. */
+/**
+ * What `reconcileOnAdopt` did with one declared setting on one station.
+ *
+ * `"pending"` is not a failure and not a success: the pass was still running
+ * when the adoption stopped waiting for it (`RECONCILE_DEADLINE_MS`), and it
+ * records its own outcome against the station when it finishes. It is a
+ * distinct result because the deadline is reached by a merely SLOW node, not
+ * only a wedged one — see those constants.
+ */
 export interface ReconcileOutcome {
   stationId: string;
   settingId: string;
-  result: "applied" | "skipped" | "failed";
+  result: "applied" | "skipped" | "failed" | "pending";
   reason?: string;
 }
 
@@ -604,7 +627,7 @@ export async function reconcileOnAdopt(
         {
           stationId: station.id,
           settingId: "*",
-          result: "failed",
+          result: "pending",
           reason: `declared settings were still being reconciled after ${deadlineMs}ms; the adoption did not wait, and this station records its own outcome when it finishes`,
         },
       ];

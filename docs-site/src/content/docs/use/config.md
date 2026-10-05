@@ -348,6 +348,12 @@ pays its full timeout instead of failing fast — adopting many stations onto su
 to leave the request running long after the rows were committed, so a client that gave up
 reported a failed adoption of stations that were adopted.
 
+The cap is one round trip's worth of time, while a station's pass makes several of them in
+sequence, so a merely *slow* node reaches the cap too — that is the ordinary case, not the
+exceptional one. A station still in progress when the cap fires is reported as **pending**,
+never as failed: nothing has gone wrong, the pass simply has not finished, and it records
+its own outcome against the station when it does.
+
 This reconcile runs exactly once, at the moment of adoption — never on a timer and never
 swept across already-adopted stations. A station that drifts afterward stays drifted until
 someone asks for it (`fleet config drift`) or declares and applies again; running this on a

@@ -696,7 +696,12 @@ test(
       // wedged `config.observe` is still sitting on.
       expect(elapsed).toBeLessThan(10_000);
       expect(outcomes.length).toBe(1);
-      expect(outcomes[0]!.result).toBe("failed");
+      // "pending", not "failed": nothing failed — the pass is still running
+      // and records its own reason when it finishes. The deadline is one
+      // broker round trip and a station's pass is `2 + 4n` of them, so a
+      // merely slow node reaches it too (Minor 8).
+      expect(outcomes[0]!.result).toBe("pending");
+      expect(outcomes[0]!.result).not.toBe("failed");
       expect(outcomes[0]!.reason).toContain("still being reconciled");
 
       fake.ws.close();
