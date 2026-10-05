@@ -14,15 +14,24 @@
  *
  * `tenantId` is REQUIRED on every exported function here, never optional —
  * same rule as `services/harness-config.ts`.
+ *
+ * `reconcileOnAdopt` (Task 8) is the one caller of `planFor`/`applyFor` that
+ * is not a route — it runs from `adoptStations`, at the one moment the
+ * design calls safe to write a declared setting without racing or fighting
+ * the harness (spec §5; see that function's own doc comment). It is written
+ * so that **no throw, from any setting on any station, can escape** —
+ * adoption must survive it even when a node is offline, refuses a plan or
+ * refuses an apply.
  */
 import { eq } from "drizzle-orm";
-import { ConfigPlan, ConfigReceipt, VERB_RESULTS, type ConfigRefusalCode } from "@agentpod/contract";
+import { ConfigPlan, ConfigReceipt, VERB_RESULTS, type ConfigRefusalCode, type ConfigSetting, type ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
-import { appliedHarnessConfig } from "../db/schema/harness-config-ops";
+import { appliedHarnessConfig, harnessConfigOptOut } from "../db/schema/harness-config-ops";
+import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
-import { resolveFor, fetchRegistry, type Resolved } from "./harness-config";
+import { resolveFor, fetchRegistry, compare, type Resolved } from "./harness-config";
 import type { StationRow } from "./station-registry";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
@@ -240,4 +249,207 @@ export async function getAppliedConfig(
       ),
     );
   return rows[0] ?? null;
+}
+
+// ─── reconcileOnAdopt ──────────────────────────────────────────────────────────
+
+/** What `reconcileOnAdopt` did with one declared setting on one station. */
+export interface ReconcileOutcome {
+  stationId: string;
+  settingId: string;
+  result: "applied" | "skipped" | "failed";
+  reason?: string;
+}
+
+/**
+ * Reconcile every declared harness setting onto a batch of just-adopted
+ * stations — called from `adoptStations` (`station-registry.ts`) AFTER its
+ * rows are written, because a plan needs each station's real, persisted
+ * `id` (the one the upsert's `ON CONFLICT` may have kept from a prior
+ * adoption, not a value minted for this call and discarded).
+ *
+ * Per station, per declared setting: skip `report-only` (never written by
+ * this system, spec D2), skip an explicit opt-out (`harness_config_opt_out`,
+ * keyed by station key so it survives unadopt/re-adopt — ruling R1), skip
+ * one that already matches (no write, no receipt). Otherwise plan, then
+ * apply with the plan's own digest.
+ *
+ * **Every station is isolated.** One station's failure — offline node, a
+ * plan refusal, an apply refusal, an unreadable document — is recorded
+ * against THAT station (`stations.configReason`) and never thrown: the
+ * design's own words are "a station adopted with one setting unwritten is
+ * better than one not adopted." The per-station try/catch here is the outer
+ * guarantee; `reconcileStation` is written to catch its own failures too,
+ * so a bug in either layer still cannot surface as a thrown adoption.
+ *
+ * This runs exactly once, at adopt time. It is not a sweep and must never be
+ * called from a timer: the harness rewrites its own config file and
+ * persists operator decisions into that same file, so a reconciler running
+ * on a tick would race the harness or silently undo what an operator just
+ * changed through it (spec F1, design rejecting continuous reconciliation).
+ */
+export async function reconcileOnAdopt(
+  tenantId: string,
+  adoptedStations: ConfigStation[],
+): Promise<ReconcileOutcome[]> {
+  const outcomes: ReconcileOutcome[] = [];
+  for (const station of adoptedStations) {
+    try {
+      outcomes.push(...(await reconcileStation(tenantId, station)));
+    } catch (err) {
+      // `reconcileStation` is written to swallow every failure itself; this
+      // catch is defense in depth only, so a bug in the line above can never
+      // undo an adoption whose rows are already committed.
+      const reason = err instanceof Error ? err.message : String(err);
+      outcomes.push({ stationId: station.id, settingId: "*", result: "failed", reason });
+      await setConfigReason(station.id, reason);
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Reconcile one station. Never throws — every awaited call below that can
+ * fail (a broker round trip, `planFor`, `applyFor`) is inside its own
+ * try/catch, and the function's own failure-recording write
+ * (`setConfigReason`) swallows its own errors too, so a Postgres hiccup
+ * while recording a reason cannot turn into a second, unrelated failure.
+ */
+async function reconcileStation(tenantId: string, station: ConfigStation): Promise<ReconcileOutcome[]> {
+  const outcomes: ReconcileOutcome[] = [];
+  const failureReasons: string[] = [];
+
+  const declared = await resolveFor(station.id, station.nodeId, tenantId);
+  const settingIds = Object.keys(declared);
+  if (settingIds.length === 0) {
+    await setConfigReason(station.id, null);
+    return outcomes;
+  }
+
+  const registry = await fetchRegistry(station.nodeId, station.stationKey);
+  if (registry === null) {
+    // Offline, timeout, disconnected — nothing could be verified, so nothing
+    // is attempted. Matches `planFor`'s own NODE_UNREACHABLE treatment of a
+    // null registry: "could not verify" is not "nothing to do".
+    const reason = "the node could not be reached to confirm its setting registry";
+    for (const settingId of settingIds) {
+      outcomes.push({ stationId: station.id, settingId, result: "failed", reason });
+    }
+    await setConfigReason(station.id, reason);
+    return outcomes;
+  }
+  const registryById = new Map(registry.map((s) => [s.id, s]));
+
+  const optOutRows = await db
+    .select({ settingId: harnessConfigOptOut.settingId })
+    .from(harnessConfigOptOut)
+    .where(tenantScope(harnessConfigOptOut, tenantId, eq(harnessConfigOptOut.stationKey, station.stationKey)));
+  const optedOut = new Set(optOutRows.map((r) => r.settingId));
+
+  const candidateIds: string[] = [];
+  for (const settingId of settingIds) {
+    const setting = registryById.get(settingId);
+    if (!setting) continue; // not a setting this station's CURRENT harness manages; nothing to reconcile
+    if (setting.policy === "report-only") {
+      outcomes.push({ stationId: station.id, settingId, result: "skipped", reason: "report-only: never written by this system" });
+      continue;
+    }
+    if (optedOut.has(settingId)) {
+      outcomes.push({ stationId: station.id, settingId, result: "skipped", reason: "opted out" });
+      continue;
+    }
+    candidateIds.push(settingId);
+  }
+
+  if (candidateIds.length > 0) {
+    const observeResult = await broker.request(station.nodeId, "config.observe", {
+      stationKey: station.stationKey,
+      settings: candidateIds,
+    });
+    const rawValues = observeResult.ok
+      ? ((observeResult.data as { values?: ConfigValue[] } | undefined)?.values ?? [])
+      : [];
+    const observeFailureReason = observeResult.ok
+      ? "the node did not return a value for every requested setting"
+      : (observeResult.error ?? "the node could not be reached");
+    const valuesById = new Map(rawValues.map((v) => [v.settingId, v]));
+    // Every candidate gets a ConfigValue before `compare()` ever sees it —
+    // the same guarantee `routes/harness-config.ts`'s `observeStation` keeps,
+    // for the same reason: a short list must never read as agreement.
+    const values: ConfigValue[] = candidateIds.map(
+      (id) => valuesById.get(id) ?? { settingId: id, readable: false, reason: observeFailureReason },
+    );
+    const settingsForCompare = candidateIds
+      .map((id) => registryById.get(id))
+      .filter((s): s is ConfigSetting => s !== undefined);
+
+    const observations = compare({ stationId: station.id, declared, values, settings: settingsForCompare });
+
+    for (const obs of observations) {
+      if (obs.state === "matches") {
+        outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "skipped", reason: "already matches" });
+        continue;
+      }
+      if (obs.state === "out-of-scope") {
+        // Declared per-station for a setting that is not per-station — not
+        // honourable by an apply, and not a failure either (D7).
+        outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "skipped", reason: obs.reason });
+        continue;
+      }
+      if (obs.state === "unreadable") {
+        const reason = obs.reason ?? "the document could not be read";
+        outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "failed", reason });
+        failureReasons.push(`${obs.settingId}: ${reason}`);
+        continue;
+      }
+
+      // "drifted" or "absent": plan, then apply with the plan's own digest.
+      try {
+        const plan = await planFor({ tenantId, station, settings: [{ settingId: obs.settingId }] });
+        if (plan.noOp) {
+          outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "skipped", reason: "plan is a no-op" });
+          continue;
+        }
+        const receipt = await applyFor({
+          tenantId,
+          station,
+          operationId: plan.operationId,
+          planDigest: plan.planDigest,
+        });
+        if (receipt.phase === "applied") {
+          outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "applied" });
+        } else {
+          const reason = receipt.error ?? `the node reported "${receipt.phase}" instead of applying it`;
+          outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "failed", reason });
+          failureReasons.push(`${obs.settingId}: ${reason}`);
+        }
+      } catch (err) {
+        // Covers `ConfigApplyError` (a refusal, or the node unreachable
+        // between plan and apply) and anything else planFor/applyFor could
+        // throw — this station's turn ends here, the next setting or the
+        // next station is unaffected.
+        const reason = err instanceof Error ? err.message : String(err);
+        outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "failed", reason });
+        failureReasons.push(`${obs.settingId}: ${reason}`);
+      }
+    }
+  }
+
+  await setConfigReason(station.id, failureReasons.length > 0 ? failureReasons.join("; ") : null);
+  return outcomes;
+}
+
+/**
+ * Record why reconciliation could not finish for a station — the same shape
+ * as `provisionedRuntimes.statusReason` (`services/runtimes.ts`): free text,
+ * null when there is nothing to explain. Swallows its own failure: a
+ * Postgres hiccup while recording a reason must not become a second,
+ * unrelated throw on top of the one it was trying to record.
+ */
+async function setConfigReason(stationId: string, reason: string | null): Promise<void> {
+  try {
+    await db.update(stations).set({ configReason: reason }).where(eq(stations.id, stationId));
+  } catch {
+    // Recording a reconcile failure must never itself fail the adoption.
+  }
 }

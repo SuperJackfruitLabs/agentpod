@@ -18,6 +18,7 @@ import { resolveTenantForUser } from "../auth/tenant";
 import { VERB_RESULTS } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
+import { reconcileOnAdopt } from "./harness-config-apply";
 
 export type StationRow = typeof stations.$inferSelect;
 
@@ -155,6 +156,26 @@ export async function adoptStations(
   // already succeeded and a bridge that could not make a room must not make it
   // look as though the station was not adopted.
   notifyStationsAdopted(adopted.map((r) => r.id));
+
+  // Reconcile declared harness settings onto each (re)adopted station — the
+  // one moment the design calls safe to write one (spec §5): the operator
+  // has customised nothing yet, so there is nothing to race or fight. Must
+  // run AFTER `adopted` is built, never before: a plan needs each station's
+  // real, persisted id, and the upsert's ON CONFLICT may have kept an id
+  // from a prior adoption rather than the one minted above. Never a timer,
+  // never a sweep — this is the only call site.
+  //
+  // `reconcileOnAdopt` is written so that no throw, from any setting on any
+  // station, can escape it; this try/catch is defense in depth only, so
+  // that even a bug there can never undo rows this function already
+  // committed. A station adopted with one setting unwritten is better than
+  // a station not adopted.
+  try {
+    await reconcileOnAdopt(tenantId, adopted);
+  } catch {
+    // Nothing to do: the failure is already recorded per-station
+    // (`stations.configReason`) by `reconcileOnAdopt` itself.
+  }
 
   return adopted;
 }
