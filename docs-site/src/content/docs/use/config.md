@@ -1,12 +1,13 @@
 ---
 title: Declared harness settings
-description: Declaring what a harness setting should be, the three policies that govern how it may be reconciled, and the states a station can report back.
+description: Declaring what a harness setting should be, the three policies that govern how it may be reconciled, writing a declaration to a station through plan/inspect/apply, and the states a station can report back.
 ---
 
 A harness — Hermes, OpenClaw, Claude Code, Codex, OpenCode, Pi — keeps its own
 configuration, in its own file, in its own shape. AgentPod does not own that file. What it
-can do is let the fleet **declare** what a registered setting should be, and then tell you
-where each station's actual value stands against that declaration.
+can do is let the fleet **declare** what a registered setting should be, write that
+declaration to a station through a reviewed operation, and tell you where each station's
+actual value stands against what was declared.
 
 ## A declaration is not a write
 
@@ -16,15 +17,17 @@ fleet config set hermes.approvals.mode --value strict
 
 **This records a declaration. It does not touch a station.** Nothing on disk changes when
 this command returns — the hub remembers that the fleet *wants* `hermes.approvals.mode` to
-be `strict`, at whichever level you declared it. Writing a harness's own config file,
-restarting it, and confirming the write took effect is a separate, reviewed operation, and
-it is not part of this release.
+be `strict`, at whichever level you declared it. Writing a harness's own config file is a
+separate, reviewed operation — `plan`, then `apply` — described below in
+[Writing a declaration](#writing-a-declaration-plan-inspect-apply).
 
 The gap between declaring and applying is deliberate, not a missing feature. A harness
 persists an operator's own decisions into the same file a declaration targets — see
-`additive-only` below — so nothing here should be moving a file unasked. A user who treats
-`set` as something that changed a machine has been misled by it; treat it as writing a line
-into a policy document, not into the harness.
+`additive-only` below — so `set` itself should never move a file unasked, and nothing
+reconciles on a timer either: a sweep running on a tick would race the harness or silently
+undo what an operator just changed through it. A user who treats `set` as something that
+changed a machine has been misled by it; treat it as writing a line into a policy document,
+not into the harness. Only `apply`, naming the exact plan a human reviewed, writes anything.
 
 ```sh
 fleet config unset hermes.approvals.mode
@@ -77,9 +80,9 @@ toward making a station's value match the declaration:
 
 | Policy | Meaning |
 |---|---|
-| `reconcilable` | The value can be fully reconciled to the declaration — whatever is there can be replaced outright — once writing ships. |
-| `additive-only` | The declaration is a floor, never the whole value. Items can be added; nothing already there is ever removed — once writing ships. |
-| `report-only` | The value is only ever compared and reported. Nothing here would ever write it, even once writing ships. |
+| `reconcilable` | The value can be fully reconciled to the declaration — whatever is there can be replaced outright. |
+| `additive-only` | The declaration is a floor, never the whole value. Items can be added; nothing already there is ever removed. |
+| `report-only` | The value is only ever compared and reported. Nothing here writes it. |
 
 `additive-only` exists because a harness persists an operator's own decisions into the same
 file a declaration targets. `hermes.approvals.command_allowlist` is the first example: an
@@ -90,6 +93,12 @@ operator made minutes earlier through a surface this system never watched. A dec
 baseline must never be able to erase an operator's own decision; `additive-only` is the
 policy that guarantees that, by only ever being allowed to add.
 
+`apply` enforces exactly this at write time, not just at comparison time: a `reconcilable`
+write replaces the key outright; an `additive-only` write only appends items that are not
+already present, so re-applying the same declaration twice is always safe; and a
+`report-only` setting is planned as a no-op and is never sent to a node to write — by
+design, not because writing it hasn't shipped yet.
+
 ## Seeing what the fleet can declare
 
 ```sh
@@ -99,6 +108,12 @@ fleet config settings
 lists every setting any reachable node currently manages — the live registry, read from the
 node, never a copy held in the hub. A node that cannot currently be asked contributes
 nothing to this list, and is named separately so its absence isn't silent.
+
+This registry currently covers three Hermes settings — `hermes.approvals.timeout`,
+`hermes.approvals.mode`, `hermes.approvals.command_allowlist` — plus whatever else is live
+on the node you ask. The four settings the existing `apn hermes-live`, `apn hermes-skills`
+and `apn openclaw-errors` verbs already manage are **not** folded into this registry yet;
+those commands keep working exactly as they do today, unrelated to `fleet config`.
 
 ## Seeing where things stand
 
@@ -125,8 +140,8 @@ Each **comparison** — `show --station` and `drift` — reports, per setting, a
 | `matches` | The observed value agrees with what's declared. |
 | `drifted` | Declared and observed disagree. |
 | `absent` | Declared, but the key isn't in the document at all. |
-| `opted-out` | An operator explicitly opted this station out of the declaration — reachable only once writing ships. |
-| `awaiting-restart` | A value was written but the harness hasn't picked it up yet — reachable only once writing ships. |
+| `opted-out` | An operator explicitly opted this station out of the declaration — see [Opting a station out](#opting-a-station-out). |
+| `awaiting-restart` | A value was written but the harness hasn't picked it up yet — see [awaiting-restart](#awaiting-restart-written-but-not-yet-in-effect). |
 | `unreadable` | The document couldn't be read, or the key is there but holds a shape this release can't read — a nested map (see below). Never reported as `matches` — an unreadable value is not evidence of agreement. |
 | `out-of-scope` | A per-station declaration was made for a setting whose registered scope isn't the station's document (see above). |
 
@@ -155,10 +170,169 @@ all", which is a false sentence, or to compare an inline list's raw text and rep
 forever. An honest `unreadable` with a reason is the state that tells you what is actually
 true.
 
+### Opting a station out
+
+`opted-out` names an operator's explicit choice, and it outranks the ordinary comparison —
+an opted-out setting is reported `opted-out` even when the observed value differs from the
+declaration, never `drifted`, because `drifted` would invite the exact `apply` the opt-out
+exists to prevent.
+
+The opt-out lives in a **hub-side register** (`harness_config_opt_out`, keyed by the
+station's stable key, not its row id, so the choice survives an unadopt and re-adopt) —
+**not** as a key inside the harness's own config file. A harness like Hermes rewrites and
+migrates its own config document on its own schedule; a key this system invented there
+would be a key whose survival this system does not control, so the opt-out is kept
+somewhere this system does control instead. Where a harness has its own native opt-out
+key in its document (OpenClaw's `plugins.disabled`, for the settings it governs), that path
+is separate and not yet wired into this comparison.
+
+Both `compare()` and adopt-time reconcile already honor a row in this register the moment
+one exists; there is no `fleet config` verb or console control that writes one yet, so an
+opt-out today is set directly against the hub, not through this CLI.
+
+## Writing a declaration: plan, inspect, apply
+
+```sh
+fleet config plan    --station ID                 the edit that would be made, and its digest
+fleet config inspect --station ID --operation ID  a plan already made, as it was reviewed
+fleet config apply   --station ID --operation ID --plan-digest SHA256
+```
+
+`plan` asks the hub to derive the exact edit against the station's current document and
+returns a `ConfigPlan`: the before/after diff, which action each setting takes
+(`create`/`modify`/`append`/`noop`), whether a restart is needed, and a `planDigest` — a
+SHA-256 over everything in the plan except the timestamp and operation id, so two plans of
+an unchanged document always digest the same and a plan drawn against a changed document
+never does. `inspect` reads back exactly the plan or receipt a station's own node journaled
+for that operation — it never re-derives anything. `apply` is the only verb that writes, and
+it refuses to run without `--plan-digest`: that digest must be the one `plan` printed for
+this operation, so a human reviewed the exact edit being written rather than whatever the
+current plan happens to be by the time `apply` runs.
+
+`fleet config plan --station ID` plans **every** setting currently declared for that
+station, at whatever level resolves to it — there is no flag to narrow the plan to one
+setting.
+
+A worked example, declaring and then writing `hermes.approvals.mode` for one station:
+
+```sh
+$ fleet config set hermes.approvals.mode --value strict --station st_abc
+
+$ fleet config plan --station st_abc
+{
+  "schemaVersion": 1,
+  "operationId": "cfgop_3f9a2c7b1e6d48a09c21",
+  "stationKey": "st_abc",
+  "entries": [
+    {
+      "settingId": "hermes.approvals.mode",
+      "file": "/home/agentpod/.hermes/profiles/st_abc/config.yaml",
+      "keyPath": "approvals.mode",
+      "policy": "reconcilable",
+      "current": "standard",
+      "intended": "strict",
+      "action": "modify",
+      "restartToTakeEffect": true
+    }
+  ],
+  "beforeSha256": "1b80374ee731c363440504e674caf2d26d72ee818a2482571e6beff6de397d5a",
+  "diff": "-  mode: standard\n+  mode: strict\n",
+  "diffTruncated": false,
+  "noOp": false,
+  "restartRequired": true,
+  "createdAt": "2026-10-05T09:12:03Z",
+  "planDigest": "c68e0c65d2a58aa481e8fdf83422dbb4712a8b97e41fb907bdb3109adc503077"
+}
+
+$ fleet config inspect --station st_abc --operation cfgop_3f9a2c7b1e6d48a09c21
+{ "plan": { ... as above ... }, "phase": "planned", "updatedAt": "2026-10-05T09:12:03Z", "written": [] }
+
+$ fleet config apply --station st_abc --operation cfgop_3f9a2c7b1e6d48a09c21 \
+    --plan-digest c68e0c65d2a58aa481e8fdf83422dbb4712a8b97e41fb907bdb3109adc503077
+{ "plan": { ... }, "phase": "applied", "written": [{"settingId": "hermes.approvals.mode", "action": "modify", "wrote": "strict"}],
+  "afterSha256": "318e20b3a675cd8701af3cab0b019abbab63ca2e1183b77fa39a7e538ffb50ab", "updatedAt": "2026-10-05T09:12:41Z" }
+```
+
+(Operation ids and digests above are illustrative, not literal output.) On the node, the
+plan and its receipt are journaled in `.agentpod/config-operations.json` — a sibling
+directory next to the harness's own config, not inside it, because the harness rewrites and
+migrates its own config document and a receipt that must survive that rewrite cannot live
+anywhere under it.
+
+Re-deriving the plan at `apply` time, rather than trusting the one `plan` printed earlier, is
+what catches a document that changed in between — see [refusals](#every-refusal-and-what-distinguishes-it)
+below for `PLAN_STALE` and `PLAN_DIGEST_MISMATCH`.
+
+### `awaiting-restart`: written, but not yet in effect
+
+A setting whose policy requires a restart to take effect (every Hermes `approvals.*` setting
+today, by assumption — see below) is reported `awaiting-restart` right after `apply` writes
+it, until the harness's gateway actually restarts. **AgentPod will not restart the harness
+for you.** Nothing in this system issues a restart; an operator restarts the gateway, from
+wherever they already do that, and the state changes on its own once observed.
+
+The decision is made by comparing a gateway process id, not by a timer. Hermes multiplexes
+one gateway across every profile on a host, so that process's pid is exactly the one that
+re-reads config. `apply` reads the station's health right after a successful write and
+records that pid. The next comparison reads the station's **current** gateway pid and
+reports `awaiting-restart` whenever that pid is unchanged from the one recorded at write
+time — or when the current pid cannot be confirmed at all (health degraded, harness
+stopped). An unconfirmable pid deliberately stays `awaiting-restart` rather than resolving
+to `matches`: claiming a restart is still needed when it already happened costs one needless
+restart; claiming a restart already happened when it hasn't produces false agreement, which
+is the worse mistake.
+
+Whether `hermes.approvals.*` truly needs a restart to take effect is itself unverified —
+Hermes's own documentation lists hot-reloadable settings and settings needing a restart, and
+`approvals.*` is in neither list. The registry assumes `true` deliberately: an unnecessary
+restart is cheaper than a running gateway that silently disagrees with its own config file.
+See `docs/superpowers/notes/2026-10-05-hermes-approvals-restart.md` for what was checked and
+why it stayed inconclusive.
+
+## Adopting a station: one reconcile, not a sweep
+
+When a station is adopted, every setting already declared for it — at station, node, or
+fleet level — is reconciled exactly once, right after the station's row is written. A
+setting is skipped, not written, when its policy is `report-only`, when it's opted out, or
+when it already matches; otherwise it's planned and, if the plan isn't a no-op, applied with
+that plan's own digest — the same `plan`-then-`apply` path described above, run on the
+station's behalf.
+
+**A write failure here never fails the adoption.** Every setting on every station is
+isolated: a plan refusal, an apply refusal, an unreachable node, or an unreadable document
+is recorded against that one station (visible as its config reason) and never thrown. A
+station adopted with one setting unwritten is better than one not adopted at all.
+
+This reconcile runs exactly once, at the moment of adoption — never on a timer and never
+swept across already-adopted stations. A station that drifts afterward stays drifted until
+someone asks for it (`fleet config drift`) or declares and applies again; running this on a
+schedule would race the harness's own rewrites of the same file, or silently undo a change
+an operator just made through it.
+
+## Every refusal, and what distinguishes it
+
+A refusal that cannot be told from a pass is the failure this whole area keeps hitting, so
+every one of these is distinct and carries its own message. There are eight:
+
+| Refusal | What distinguishes it |
+|---|---|
+| `UNKNOWN_SETTING` | The setting id isn't in any reachable registry — or no node could be asked to confirm either way; the message, not the code, tells you which. |
+| `OUT_OF_SCOPE` | The declaration's own target has no document to land in at all (for example, declaring against Hermes's composite root, which has no profile-scoped document of its own) — a plan-time refusal, distinct from the `out-of-scope` *comparison state* reported for a per-station declaration of a non-`profile`-scoped setting. |
+| `SHAPE_UNEXPECTED` | The declared value doesn't fit the setting's registered shape (an `additive-only` value that isn't a list of strings, say), or the derived edit would change something outside the keys this plan claims to touch. |
+| `PLAN_STALE` | The document changed after this plan was reviewed. Remedy: re-plan and re-review. |
+| `PLAN_DIGEST_MISMATCH` | The digest `apply` was given does not match the one this station's journal recorded for that operation. Remedy: re-read the plan that was actually reviewed (`inspect`), not re-plan — the document itself hasn't necessarily changed. |
+| `OPTED_OUT` | Reserved for an explicit operator opt-out. Today the opt-out register is enforced by *skipping* a setting before adopt-time reconcile ever plans it, and by the `opted-out` comparison state — `plan`/`apply` called directly do not yet check the register themselves, so this code is not currently produced by either. |
+| `UNREADABLE` | The document could not be read or parsed at all; nothing about its contents is inferred. |
+| `CREDENTIAL_PATH` | The setting's target resolves to a credential file (`auth.json`, `.env`, or a path under a `credentials` directory) and is refused before it is ever opened, let alone read or edited. |
+
+`PLAN_DIGEST_MISMATCH` was added during implementation, after the seven above were
+specified, because collapsing it into `PLAN_STALE` would make two conditions with different
+remedies indistinguishable from their refusal code alone.
+
 ## A setting that can't be found
 
-Declaring a setting the hub doesn't recognize is refused. The refusal's reason is read
-verbatim from the hub — it may mean the setting genuinely doesn't exist in any reachable
-harness's registry, or it may mean no node was reachable to confirm either way. Those are
-two different problems with the same refusal code, and only the reason text tells you
-which one you have.
+Declaring a setting the hub doesn't recognize is refused with `UNKNOWN_SETTING`. The
+refusal's reason is read verbatim from the hub — it may mean the setting genuinely doesn't
+exist in any reachable harness's registry, or it may mean no node was reachable to confirm
+either way. Those are two different problems with the same refusal code, and only the reason
+text tells you which one you have.
