@@ -2,12 +2,13 @@ import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, within, fireEvent, cleanup } from "@testing-library/svelte";
 import { ConfigObservation, ConfigPlan, ConfigReceipt, ConfigSetting } from "@agentpod/contract";
 import * as api from "$lib/api/harness-config";
-import type { DeclaredConfigRow } from "$lib/api/harness-config";
+import type { ConfigOptOutRow, DeclaredConfigRow } from "$lib/api/harness-config";
 import { ApiError } from "$lib/api/http-error";
 import HarnessConfigPanel from "./HarnessConfigPanel.svelte";
 
 const STATION_ID = "station_1";
 const NODE_ID = "node_1";
+const STATION_KEY = "hermes:fixture";
 
 /** A registry entry, with sane defaults a test can override. */
 function setting(overrides: Partial<ConfigSetting>): ConfigSetting {
@@ -87,12 +88,30 @@ function declaredRow(overrides: Partial<DeclaredConfigRow>): DeclaredConfigRow {
   };
 }
 
-/** Wires the four calls the panel makes on load. Defaults to "nothing declared at station/node level" so a test opts into the level it wants to prove. */
+/** One row of the opt-out register, with sane defaults a test can override. */
+function optOutRow(overrides: Partial<ConfigOptOutRow>): ConfigOptOutRow {
+  return {
+    id: "optout_1",
+    settingId: "hermes.plugins.enabled",
+    stationKey: null,
+    nodeId: null,
+    optedOut: true,
+    reason: null,
+    optedOutBy: "user_1",
+    createdAt: "2026-10-05T00:00:00.000Z",
+    updatedAt: "2026-10-05T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+/** Wires the six calls the panel makes on load. Defaults to "nothing declared, nothing exempted at station/node level" so a test opts into the level it wants to prove. */
 function mockLoad(opts: {
   observations?: ConfigObservation[];
   settings?: ConfigSetting[];
   stationDeclared?: DeclaredConfigRow[];
   nodeDeclared?: DeclaredConfigRow[];
+  stationOptOuts?: ConfigOptOutRow[];
+  nodeOptOuts?: ConfigOptOutRow[];
   configError?: unknown;
 }) {
   const getStationConfig = vi.spyOn(api, "getStationConfig");
@@ -105,6 +124,11 @@ function mockLoad(opts: {
   });
   vi.spyOn(api, "listStationDeclaredConfig").mockResolvedValue(opts.stationDeclared ?? []);
   vi.spyOn(api, "listNodeDeclaredConfig").mockResolvedValue(opts.nodeDeclared ?? []);
+  vi.spyOn(api, "listConfigOptOuts").mockImplementation(async (filter) => {
+    if (filter?.stationKey) return opts.stationOptOuts ?? [];
+    if (filter?.nodeId) return opts.nodeOptOuts ?? [];
+    return [];
+  });
   return getStationConfig;
 }
 
@@ -476,4 +500,152 @@ test("apply sends the digest of the DISPLAYED plan, never a digest fetched or re
   expect(applySpy).toHaveBeenCalledWith(STATION_ID, "cfgop_displayed", "digest-displayed");
   // The apply must not have triggered a second plan call either.
   expect(planSpy).toHaveBeenCalledTimes(1);
+});
+
+// ─── Task 4: exemptions, read-only (spec D13 / D11, D9's station-beats-node) ──
+
+test("opted-out exempted at the station level: shows the station level, who recorded it, and the reason", async () => {
+  mockLoad({
+    observations: [
+      observation({
+        settingId: "hermes.plugins.enabled",
+        state: "opted-out",
+        declared: true,
+        observed: false,
+        reason: "an operator opted this setting out of reconciliation",
+      }),
+    ],
+    settings: [setting({ id: "hermes.plugins.enabled" })],
+    stationOptOuts: [
+      optOutRow({
+        settingId: "hermes.plugins.enabled",
+        stationKey: STATION_KEY,
+        nodeId: null,
+        optedOut: true,
+        reason: "customer asked us not to touch this",
+        optedOutBy: "user_alice",
+      }),
+    ],
+  });
+  const view = render(HarnessConfigPanel, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeTruthy());
+  const row = view.getByRole("row", { name: /hermes\.plugins\.enabled/ });
+  expect(row.textContent).toMatch(/station/i);
+  expect(row.textContent).toMatch(/user_alice/);
+  expect(row.textContent).toMatch(/customer asked us not to touch this/);
+});
+
+test("opted-out exempted at the node level: says it came from the node", async () => {
+  mockLoad({
+    observations: [
+      observation({
+        settingId: "hermes.approvals.max",
+        state: "opted-out",
+        declared: 300,
+        observed: 900,
+      }),
+    ],
+    settings: [setting({ id: "hermes.approvals.max" })],
+    nodeOptOuts: [
+      optOutRow({
+        settingId: "hermes.approvals.max",
+        stationKey: null,
+        nodeId: NODE_ID,
+        optedOut: true,
+        reason: "node-wide exemption while the fleet migrates",
+        optedOutBy: "user_bob",
+      }),
+    ],
+  });
+  const view = render(HarnessConfigPanel, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.approvals\.max/ })).toBeTruthy());
+  const row = view.getByRole("row", { name: /hermes\.approvals\.max/ });
+  expect(row.textContent).toMatch(/node/i);
+  expect(row.textContent).toMatch(/user_bob/);
+  expect(row.textContent).toMatch(/node-wide exemption while the fleet migrates/);
+});
+
+test("opted-out at both station and node level attributes it to the station — precedence", async () => {
+  mockLoad({
+    observations: [observation({ settingId: "hermes.plugins.enabled", state: "opted-out" })],
+    settings: [setting({ id: "hermes.plugins.enabled" })],
+    stationOptOuts: [
+      optOutRow({
+        settingId: "hermes.plugins.enabled",
+        stationKey: STATION_KEY,
+        nodeId: null,
+        optedOut: true,
+        reason: "station reason",
+        optedOutBy: "user_station",
+      }),
+    ],
+    nodeOptOuts: [
+      optOutRow({
+        settingId: "hermes.plugins.enabled",
+        stationKey: null,
+        nodeId: NODE_ID,
+        optedOut: true,
+        reason: "node reason",
+        optedOutBy: "user_node",
+      }),
+    ],
+  });
+  const view = render(HarnessConfigPanel, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeTruthy());
+  const row = view.getByRole("row", { name: /hermes\.plugins\.enabled/ });
+  expect(row.textContent).toMatch(/station/i);
+  expect(row.textContent).toMatch(/user_station/);
+  expect(row.textContent).toMatch(/station reason/);
+  expect(row.textContent).not.toMatch(/user_node/);
+  expect(row.textContent).not.toMatch(/node reason/);
+});
+
+test("the harness's own opt-out reads differently from an agentpod exemption", async () => {
+  mockLoad({
+    observations: [
+      observation({
+        settingId: "hermes.plugins.disabled_list",
+        state: "opted-out",
+        declared: ["x"],
+        observed: ["y"],
+        reason: "Hermes' own plugins.disabled lists this setting — agentpod never wrote this",
+      }),
+    ],
+    settings: [setting({ id: "hermes.plugins.disabled_list" })],
+    // Nothing in agentpod's own register at either level — this exemption
+    // did not come from `fleet config opt-out` or the API.
+    stationOptOuts: [],
+    nodeOptOuts: [],
+  });
+  const view = render(HarnessConfigPanel, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /disabled_list/ })).toBeTruthy());
+  const row = view.getByRole("row", { name: /disabled_list/ });
+  expect(row.textContent).toMatch(/hermes/i);
+  expect(row.textContent).toMatch(/harness's own record/i);
+  // It must not claim this was recorded in agentpod's register, because agentpod never wrote it.
+  expect(row.textContent).not.toMatch(/recorded by/i);
+  expect(row.textContent).not.toMatch(/opt-out register/i);
+});
+
+test("a row with no exemption shows no exemption chrome at all", async () => {
+  mockLoad({
+    observations: [observation({ settingId: "hermes.plugins.enabled", state: "matches" })],
+    settings: [setting({ id: "hermes.plugins.enabled" })],
+  });
+  const view = render(HarnessConfigPanel, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeTruthy());
+  const row = view.getByRole("row", { name: /hermes\.plugins\.enabled/ });
+  expect(row.textContent).not.toMatch(/exempted/i);
+  expect(row.textContent).not.toMatch(/opt-out register/i);
+  expect(row.textContent).not.toMatch(/harness's own record/i);
 });

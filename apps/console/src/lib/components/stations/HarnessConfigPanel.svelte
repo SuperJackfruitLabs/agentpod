@@ -29,9 +29,37 @@
   import { ApiError } from "$lib/api/http-error";
   import { Button } from "$lib/components/ui/button";
 
-  let { stationId, nodeId, onRestart }: { stationId: string; nodeId: string; onRestart?: () => void } = $props();
+  let {
+    stationId,
+    nodeId,
+    stationKey,
+    onRestart,
+  }: { stationId: string; nodeId: string; stationKey?: string; onRestart?: () => void } = $props();
 
   type Level = "station" | "node" | "fleet" | null;
+
+  /**
+   * An `opted-out` row's source, read-only (Task 4, spec D13 / D11; D9 for
+   * station-beats-node). Two things can cause a row to read `opted-out`:
+   *
+   *  - "register": an operator used `fleet config opt-out` or the API —
+   *    agentpod's own `ConfigOptOut` row, at exactly the station or node
+   *    level named by `level` (never fleet — D9 has no fleet-level opt-out).
+   *  - "harness": the harness's own record, e.g. Hermes' `plugins.disabled`
+   *    — agentpod never wrote this, so there is no `recordedBy` and no
+   *    register `level` to show.
+   *
+   * This panel only shows an exemption; it never creates or clears one
+   * (ruled out for this plan — `fleet config opt-out`/`opt-in` already do
+   * that, and a write here would be a second mutation surface with its own
+   * confirmation design).
+   */
+  interface Exemption {
+    source: "register" | "harness";
+    level: "station" | "node" | null;
+    recordedBy: string | null;
+    reason: string | null;
+  }
 
   interface Row {
     settingId: string;
@@ -42,6 +70,7 @@
     observed: unknown;
     state: ConfigObservation["state"];
     reason: string | null;
+    exemption: Exemption | null;
   }
 
   let rows = $state<Row[]>([]);
@@ -83,6 +112,57 @@
     if (stationDeclared.some((r) => r.settingId === settingId)) return "station";
     if (nodeDeclared.some((r) => r.settingId === settingId)) return "node";
     return "fleet";
+  }
+
+  /**
+   * Defensive detection of the harness's OWN opt-out (D11,
+   * `ConfigValue.optedOutByHarness`), as distinct from agentpod's register.
+   *
+   * That field is landing on `ConfigValue`/`ConfigObservation` separately —
+   * it may not exist yet, and this panel must not block on it or declare it
+   * itself (the controller's ruling for this plan). So two signals are
+   * checked, in order:
+   *
+   *  1. An unknown boolean field literally named `optedOutByHarness` on the
+   *     observation, duck-typed — if the contract grows it onto
+   *     `ConfigObservation` directly, this picks it up with no code change.
+   *  2. The observation's own `reason` naming this setting's harness (the
+   *     `<harness>.` prefix of its `settingId`) as the source — the spec's
+   *     planned shape ("a reason naming the harness as the source").
+   *
+   * Absent either signal, this returns false and `exemptionFor` below falls
+   * back to the register — correct for every `opted-out` row the hub can
+   * produce today, because `compare()` currently only reports it from the
+   * resolved opt-out register.
+   */
+  function harnessNamedAsSource(o: ConfigObservation): boolean {
+    if ((o as Record<string, unknown>).optedOutByHarness === true) return true;
+    if (!o.reason) return false;
+    const harness = o.settingId.split(".")[0];
+    if (!harness) return false;
+    const escaped = harness.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(escaped, "i").test(o.reason);
+  }
+
+  /**
+   * Which level — and which source — an `opted-out` row's exemption came
+   * from. Station beats node (D9): a station-level register row decides
+   * outright, so a setting exempted at both levels is attributed to the
+   * station, never the node, and the node entry is not even consulted once
+   * a station entry is found.
+   */
+  function exemptionFor(
+    o: ConfigObservation,
+    stationOptOuts: Map<string, api.ConfigOptOutRow>,
+    nodeOptOuts: Map<string, api.ConfigOptOutRow>,
+  ): Exemption | null {
+    if (o.state !== "opted-out") return null;
+    const station = stationOptOuts.get(o.settingId);
+    if (station) return { source: "register", level: "station", recordedBy: station.optedOutBy, reason: station.reason };
+    const node = nodeOptOuts.get(o.settingId);
+    if (node) return { source: "register", level: "node", recordedBy: node.optedOutBy, reason: node.reason };
+    if (harnessNamedAsSource(o)) return { source: "harness", level: null, recordedBy: null, reason: o.reason ?? null };
+    return { source: "register", level: null, recordedBy: null, reason: o.reason ?? null };
   }
 
   function fmt(value: unknown): string {
@@ -212,6 +292,7 @@
   $effect(() => {
     const sid = stationId;
     const nid = nodeId;
+    const skey = stationKey;
     void reloadTrigger; // re-reading this re-runs the load after a successful apply
     const ticket = ++epoch;
     rows = [];
@@ -219,6 +300,14 @@
     loading = true;
 
     let levelUnavailable = false;
+    // No `stationKey` (e.g. the station page hasn't finished loading it
+    // yet) means there is nothing to filter the register by at the station
+    // level — this must never fall through to an unfiltered query, which
+    // would return every exemption in the tenant and risk attributing a
+    // stranger's exemption to this row by a coincidental settingId match.
+    const stationOptOutsP = skey
+      ? api.listConfigOptOuts({ stationKey: skey }).catch(() => [] as api.ConfigOptOutRow[])
+      : Promise.resolve([] as api.ConfigOptOutRow[]);
     void Promise.all([
       api.getStationConfig(sid),
       api.listConfigSettings().catch(() => ({ settings: [], unreachableNodes: [] })),
@@ -230,10 +319,14 @@
         levelUnavailable = true;
         return [] as api.DeclaredConfigRow[];
       }),
+      stationOptOutsP,
+      api.listConfigOptOuts({ nodeId: nid }).catch(() => [] as api.ConfigOptOutRow[]),
     ])
-      .then(([config, registry, stationDeclared, nodeDeclared]) => {
+      .then(([config, registry, stationDeclared, nodeDeclared, stationOptOuts, nodeOptOuts]) => {
         if (ticket !== epoch) return;
         const settingById = new Map(registry.settings.map((s) => [s.id, s]));
+        const stationOptOutMap = new Map(stationOptOuts.filter((r) => r.optedOut).map((r) => [r.settingId, r]));
+        const nodeOptOutMap = new Map(nodeOptOuts.filter((r) => r.optedOut).map((r) => [r.settingId, r]));
         rows = config.observations.map((o) => {
           const known = settingById.get(o.settingId);
           return {
@@ -245,6 +338,7 @@
             observed: o.observed,
             state: o.state,
             reason: o.reason ?? null,
+            exemption: exemptionFor(o, stationOptOutMap, nodeOptOutMap),
           };
         });
       })
@@ -324,6 +418,22 @@
                 {#if row.reason}<span class="block text-xs text-muted-foreground">{row.reason}</span>{/if}
                 {#if row.state === "awaiting-restart"}
                   <span class="block text-xs text-muted-foreground">agentpod will not restart the harness.</span>
+                {/if}
+                {#if row.exemption}
+                  {#if row.exemption.source === "register"}
+                    <span class="block text-xs text-muted-foreground">
+                      Exempted via agentpod's opt-out register{row.exemption.level
+                        ? `, at the ${row.exemption.level} level`
+                        : ""}{row.exemption.recordedBy ? `, recorded by ${row.exemption.recordedBy}` : ""}.
+                    </span>
+                    {#if row.exemption.reason}
+                      <span class="block text-xs text-muted-foreground">Reason: {row.exemption.reason}</span>
+                    {/if}
+                  {:else}
+                    <span class="block text-xs text-muted-foreground">
+                      Disabled directly in the harness's own record — agentpod did not record this exemption.
+                    </span>
+                  {/if}
                 {/if}
               </td>
             </tr>

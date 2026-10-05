@@ -666,7 +666,12 @@
         />
       </div>
       {#if hasConfigManagement}
-        <HarnessConfigPanel {stationId} {nodeId} onRestart={canLifecycle ? () => askFor("restart") : undefined} />
+        <HarnessConfigPanel
+          {stationId}
+          {nodeId}
+          stationKey={station?.stationKey}
+          onRestart={canLifecycle ? () => askFor("restart") : undefined}
+        />
       {/if}
     </div>
   {/snippet}
