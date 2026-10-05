@@ -41,6 +41,19 @@ export const stations = pgTable("stations", {
    */
   purpose: text("purpose"),
   /**
+   * Why a declared harness setting could not be reconciled onto this station,
+   * the last time reconciliation ran — the same shape as
+   * `provisionedRuntimes.statusReason` (`db/schema/nodes.ts`): free text,
+   * null when there is nothing to explain. Reconciliation runs at adopt time
+   * only, never on a sweep (the design rejects a timer — a harness rewrites
+   * its own config and persists operator decisions into that same file, so
+   * a reconciler on a tick would race or fight it), so this reflects the
+   * outcome of the LAST adopt, not a live status. A setting unwritten here
+   * never fails the adoption itself — see `reconcileOnAdopt` in
+   * `services/harness-config-apply.ts`.
+   */
+  configReason: text("config_reason"),
+  /**
    * The agent that occupies this station, if any.
    *
    * Nullable and it stays nullable: a station nobody has assigned is a machine,

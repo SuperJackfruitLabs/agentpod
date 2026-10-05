@@ -45,6 +45,7 @@ func runCmd() {
 		defer cancel()
 		_ = otelShutdown(c)
 	}()
+	reconcileUnitOnStart()
 	fmt.Println("connecting to", cfg.Hub, "as", cfg.NodeID)
 
 	reg := buildRegistry(cfg)
@@ -255,7 +256,7 @@ func runCmd() {
 	// The daemon's otel.env comes from its own cgroup (otelenv.DaemonPath), not from uid: a
 	// system unit with User= still reads the system file, and a node that is not the
 	// systemd service at all (container, `apn run`) answers unsupported instead of exiting.
-	h = gateway.NewTelemetryHandler(h, otelenv.DaemonPath)
+	h = gateway.NewTelemetryHandler(h, otelenv.DaemonPath, daemonUnitChecker())
 	h = gateway.NewUpdateHandler(h, version)
 	startStationTokens(ctx, cfg)
 	gateway.RunWith(ctx, cfg, h, version, func() []gateway.HealthReport {

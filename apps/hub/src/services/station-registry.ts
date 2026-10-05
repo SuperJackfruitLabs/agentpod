@@ -15,11 +15,59 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import { resolveTenantForUser } from "../auth/tenant";
-import { VERB_RESULTS } from "@agentpod/contract";
+import { VERB_RESULTS, unknownCapabilitiesByStation } from "@agentpod/contract";
 import type { DetectedStation } from "@agentpod/contract";
 import * as broker from "./broker";
+import { reconcileOnAdopt } from "./harness-config-apply";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger("station-registry");
 
 export type StationRow = typeof stations.$inferSelect;
+
+// ─── reportUnknownCapabilities ────────────────────────────────────────────────
+
+/**
+ * Say so when a node advertised a capability this hub's contract does not know.
+ *
+ * `CapabilityList` filters unknown capability strings rather than rejecting the
+ * row, so an old hub survives a newer node. That tolerance is correct and is
+ * not changing. It was also SILENT, and that is what cost: `config.manage` was
+ * missing from the enum, a new hub threw away a new node's capability with no
+ * error at any layer, and three merged PRs of declared harness config could not
+ * activate on a real fleet. Only manual production verification found it.
+ *
+ * The contract cannot do this itself — it is shared by the hub, the console and
+ * the node-agent's fixtures, so it must not import a logger, and it must not
+ * throw, which would break the very tolerance the filter exists for. So the
+ * contract exposes what it dropped and the hub, which has a logger and knows
+ * which node it was talking to, is the one that says it out loud.
+ *
+ * Called on the RAW broker payload beside the parse, because the parse is the
+ * last place those strings exist. Every hub path that parses a `detect` frame
+ * goes through here: both `/nodes/:nodeId/detected` and the adopt route in
+ * routes/stations.ts, and `refreshAdoptedCapabilities` below.
+ *
+ * A hub behind its fleet is worth a warn on its own merits, bug or no bug.
+ * Returns what it reported, so a caller or a test can assert on it directly.
+ */
+export function reportUnknownCapabilities(
+  nodeId: string,
+  rawDetect: unknown
+): Array<{ key: string; dropped: string[] }> {
+  const unknown = unknownCapabilitiesByStation(rawDetect);
+  for (const { key, dropped } of unknown) {
+    log.warn("node advertised capabilities this hub does not know; they were dropped", {
+      nodeId,
+      stationKey: key,
+      // Joined, not nested: the logger only forwards primitives as OTLP
+      // attributes, and the dropped names are the whole payload of this warn.
+      dropped: dropped.join(", "),
+      droppedCount: dropped.length,
+    });
+  }
+  return unknown;
+}
 
 // ─── adoptStations ────────────────────────────────────────────────────────────
 
@@ -156,6 +204,26 @@ export async function adoptStations(
   // look as though the station was not adopted.
   notifyStationsAdopted(adopted.map((r) => r.id));
 
+  // Reconcile declared harness settings onto each (re)adopted station — the
+  // one moment the design calls safe to write one (spec §5): the operator
+  // has customised nothing yet, so there is nothing to race or fight. Must
+  // run AFTER `adopted` is built, never before: a plan needs each station's
+  // real, persisted id, and the upsert's ON CONFLICT may have kept an id
+  // from a prior adoption rather than the one minted above. Never a timer,
+  // never a sweep — this is the only call site.
+  //
+  // `reconcileOnAdopt` is written so that no throw, from any setting on any
+  // station, can escape it; this try/catch is defense in depth only, so
+  // that even a bug there can never undo rows this function already
+  // committed. A station adopted with one setting unwritten is better than
+  // a station not adopted.
+  try {
+    await reconcileOnAdopt(tenantId, adopted);
+  } catch {
+    // Nothing to do: the failure is already recorded per-station
+    // (`stations.configReason`) by `reconcileOnAdopt` itself.
+  }
+
   return adopted;
 }
 
@@ -240,6 +308,8 @@ export async function refreshAdoptedCapabilities(
 
     const parsed = VERB_RESULTS.detect.safeParse(r.data);
     if (!parsed.success) return 0;
+
+    reportUnknownCapabilities(nodeId, r.data);
 
     // Only rows that already exist for this node are eligible.
     const existing = await db

@@ -111,7 +111,12 @@ func (m *systemdManager) renderUnit() ([]byte, error) {
 	if m.userScope {
 		raw = systemdUserUnitTemplate
 	}
+	return renderUnitTemplate(raw, bin)
+}
 
+// renderUnitTemplate executes a unit template against a binary path. It is the one
+// render path shared by Install and the unit reconciler.
+func renderUnitTemplate(raw, bin string) ([]byte, error) {
 	tmpl, err := template.New(systemdUnitName + ".service").Parse(raw)
 	if err != nil {
 		return nil, fmt.Errorf("service: parse unit template: %w", err)

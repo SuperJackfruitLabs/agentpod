@@ -1,0 +1,1 @@
+ALTER TABLE "stations" ADD COLUMN "config_reason" text;

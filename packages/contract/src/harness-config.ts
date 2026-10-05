@@ -72,6 +72,33 @@ export const DeclaredSetting = z
 export type DeclaredSetting = z.infer<typeof DeclaredSetting>;
 
 /**
+ * An operator's explicit exemption, at exactly one level: a station (keyed
+ * on its stable `stationKey`, not its row id, so the exemption survives
+ * unadopt/re-adopt) or a node (exempting every station on it). There is
+ * deliberately no fleet level here (D9) — `fleet config unset` already
+ * covers "nobody wants this setting" at that scope.
+ *
+ * `stationKey`/`nodeId` are `.nullable().optional()` rather than
+ * `DeclaredSetting`'s bare `.nullable()`: the service layer
+ * (`harness-config.ts`'s `assertOneOptOutLevel`) tells "named" from
+ * "absent" by `undefined`, not by `null`, and a route normalises a literal
+ * `null` to `undefined` before calling it — see
+ * `routes/harness-config.ts`.
+ */
+export const ConfigOptOut = z
+  .object({
+    settingId: z.string(),
+    stationKey: z.string().nullable().optional(),
+    nodeId: z.string().nullable().optional(),
+    optedOut: z.boolean(),
+    reason: z.string().optional(),
+  })
+  .refine((v) => (v.stationKey == null) !== (v.nodeId == null), {
+    message: "an opt-out names exactly one of stationKey or nodeId",
+  });
+export type ConfigOptOut = z.infer<typeof ConfigOptOut>;
+
+/**
  * What a station actually has. The NODE produces this and is told nothing about
  * what was declared — comparison is the hub's, because only the hub resolves
  * station → node → fleet precedence.
@@ -112,3 +139,85 @@ export const ConfigObservation = z.object({
   reason: z.string().optional(),
 });
 export type ConfigObservation = z.infer<typeof ConfigObservation>;
+
+/** Every refusal this system can give, each distinct. See spec §9. */
+export const ConfigRefusalCode = z.enum([
+  "UNKNOWN_SETTING",
+  "OUT_OF_SCOPE",
+  "SHAPE_UNEXPECTED",
+  "PLAN_STALE",
+  /**
+   * The caller applied a digest that is not the one this operation's recorded
+   * plan carries. Distinct from PLAN_STALE on purpose: the remedy differs —
+   * a mismatch means re-read the plan, staleness means re-plan against a
+   * document that has changed. Spec §9 enumerates seven codes; this is an
+   * eighth, added because collapsing it into PLAN_STALE would make two
+   * conditions with different answers indistinguishable.
+   */
+  "PLAN_DIGEST_MISMATCH",
+  "OPTED_OUT",
+  "UNREADABLE",
+  "CREDENTIAL_PATH",
+]);
+export type ConfigRefusalCode = z.infer<typeof ConfigRefusalCode>;
+
+export const ConfigRefusal = z.object({
+  code: ConfigRefusalCode,
+  /** A sentence. A refusal that cannot be told from a pass is the failure this area keeps hitting. */
+  message: z.string(),
+});
+
+/** One setting's intended edit. `current` absent means the key is not in the document. */
+export const ConfigPlanEntry = z.object({
+  settingId: z.string(),
+  /** Absolute path of the document this entry edits. */
+  file: z.string(),
+  keyPath: z.string(),
+  policy: ConfigPolicy,
+  current: z.unknown().optional(),
+  intended: z.unknown(),
+  action: z.enum(["create", "modify", "append", "noop"]),
+  restartToTakeEffect: z.boolean(),
+});
+
+/**
+ * A plan is what review sees. Its digest covers everything in it INCLUDING
+ * `beforeSha256`, so a document edited after review yields a different digest
+ * and the apply is refused rather than re-derived (D8).
+ */
+export const ConfigPlan = z.object({
+  schemaVersion: z.literal(1),
+  operationId: z.string(),
+  stationKey: z.string(),
+  entries: z.array(ConfigPlanEntry),
+  /** SHA-256 of the document as it was when planned. */
+  beforeSha256: z.string(),
+  diff: z.string(),
+  diffTruncated: z.boolean(),
+  noOp: z.boolean(),
+  refusal: ConfigRefusal.optional(),
+  /** True when any entry needs a restart. Nothing here performs one (D4). */
+  restartRequired: z.boolean(),
+  createdAt: z.string(),
+  planDigest: z.string(),
+});
+
+export const ConfigWritten = z.object({
+  settingId: z.string(),
+  action: z.enum(["create", "modify", "append", "noop"]),
+  wrote: z.unknown(),
+});
+
+/** The journal entry for one apply. There is deliberately no `restarted` field. */
+export const ConfigReceipt = z.object({
+  plan: ConfigPlan,
+  phase: z.enum(["planned", "applying", "applied", "conflict"]),
+  updatedAt: z.string(),
+  written: z.array(ConfigWritten).default([]),
+  afterSha256: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export type ConfigPlan = z.infer<typeof ConfigPlan>;
+export type ConfigReceipt = z.infer<typeof ConfigReceipt>;
+export type ConfigPlanEntry = z.infer<typeof ConfigPlanEntry>;

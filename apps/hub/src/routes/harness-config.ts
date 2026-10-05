@@ -7,6 +7,9 @@
  *   PUT    /api/fleet/config/declared      → declare one setting at one level
  *   DELETE /api/fleet/config/declared      → undeclare one setting at one level
  *   GET    /api/fleet/config/drift         → { observations, stationsUnreachable }
+ *   PUT    /api/fleet/config/opt-out       → record (or update) an exemption at one level
+ *   DELETE /api/fleet/config/opt-out       → clear an exemption at one level
+ *   GET    /api/fleet/config/opt-out       → every exemption (?stationKey=, ?nodeId=)
  *   GET    /api/stations/:stationId/config → { observations }
  *
  * Shape follows `apps/hub/src/routes/station-acp.ts`: a chained `Hono()`
@@ -53,6 +56,8 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   DeclaredSetting,
+  ConfigOptOut,
+  ConfigReceipt,
   type ConfigObservation,
   type ConfigSetting,
   type ConfigValue,
@@ -64,7 +69,18 @@ import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
 import { getStation, type StationRow } from "../services/station-registry";
-import { declare, undeclare, resolveFor, compare } from "../services/harness-config";
+import {
+  declare,
+  undeclare,
+  resolveFor,
+  compare,
+  fetchRegistry,
+  resolveOptOuts,
+  setOptOut,
+  clearOptOut,
+  listOptOuts,
+} from "../services/harness-config";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
 import { principalForUser } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
 
@@ -72,22 +88,6 @@ import type { AuthUser } from "../auth/middleware";
 const CONFIG_MANAGE = "config.manage";
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Ask one station's node for the registry its harness manages — the
- * `config.settings` broker verb, never cached: a registry read is cheap (it
- * touches no disk on the node, see `ConfigSettings()`) and caching it would
- * reintroduce exactly the "true when written" staleness this file exists to
- * avoid. `null` on ANY failure (offline, timeout, disconnected, or a response
- * that isn't the expected shape) — never a thrown error, so every caller
- * here can treat "could not verify" as one outcome rather than a try/catch.
- */
-async function fetchRegistry(nodeId: string, stationKey: string): Promise<ConfigSetting[] | null> {
-  const result = await broker.request(nodeId, "config.settings", { stationKey });
-  if (!result.ok) return null;
-  const settings = (result.data as { settings?: ConfigSetting[] } | undefined)?.settings;
-  return Array.isArray(settings) ? settings : null;
-}
 
 /** Every tenant station advertising `config.manage`, tenant-scoped. */
 async function manageableStations(tenantId: string): Promise<StationRow[]> {
@@ -114,16 +114,27 @@ async function onlineNodeIds(tenantId: string): Promise<Set<string>> {
  * accepted by default: admitting a setting nobody could verify is the same
  * failure as reporting agreement for a station nobody could reach — the
  * write-side mirror of the read-side `unreadable` rule.
+ *
+ * `hint.stationKey` is the opt-out routes' way in: an exemption names a
+ * station by its stable key (`harness_config_opt_out.station_key`), never
+ * its row id, so it survives unadopt/re-adopt — see
+ * `services/harness-config.ts`'s own doc comment on `setOptOut`. Checked
+ * before `stationId` would be meaningless (a caller never has both), and
+ * a cross-tenant `stationKey` narrows `pool` to nothing for the same
+ * reason an unknown `stationId` does: `manageableStations` is already
+ * tenant-scoped, so a key naming another tenant's station is invisible
+ * here, not merely unreachable.
  */
 async function verifySettingKnown(
   settingId: string,
   tenantId: string,
-  hint: { stationId: string | null; nodeId: string | null },
+  hint: { stationId?: string | null; stationKey?: string | null; nodeId?: string | null },
 ): Promise<{ ok: true; setting: ConfigSetting } | { ok: false; reason: string }> {
   const manageable = await manageableStations(tenantId);
 
   let pool = manageable;
   if (hint.stationId) pool = pool.filter((s) => s.id === hint.stationId);
+  else if (hint.stationKey) pool = pool.filter((s) => s.stationKey === hint.stationKey);
   else if (hint.nodeId) pool = pool.filter((s) => s.nodeId === hint.nodeId);
 
   // Settings are namespaced "<harness>.<path>" (spec D1). Preferring a
@@ -244,6 +255,19 @@ function ensureEveryValue(
  * row falls through to the ordinary matches/drifted/absent/unreadable
  * states — correct in the common case this happens, which is the SAME node
  * failing both calls, where every row is already `unreadable` regardless.
+ *
+ * Also feeds `compare()`'s three Task 9b arguments — `appliedWrites`
+ * (`applied_harness_config`, via `getAppliedWrites`), `currentGatewayPid`
+ * (the station's live health, via `readGatewayPid`) and `optedOut` (via
+ * `resolveOptOuts`, station beating node) — the restart evidence and opt-out an earlier task's
+ * `compare()` could already emit but no caller fed it, so `awaiting-restart`
+ * and `opted-out` could never reach either route that calls this function
+ * (`GET /api/fleet/config/drift` and `GET /api/stations/:stationId/config`).
+ * The health read is a SECOND broker round trip to the same node as
+ * `config.observe` — issued concurrently with it (and the registry fetch,
+ * and the two DB reads) rather than serially after, so `GET
+ * /api/fleet/config/drift`'s fan-out across every station does not double in
+ * wall-clock time for a correctness fix.
  */
 async function observeStation(
   station: Pick<StationRow, "id" | "nodeId" | "stationKey">,
@@ -255,12 +279,15 @@ async function observeStation(
     return { observations: [], unreachable: false };
   }
 
-  const [registry, result] = await Promise.all([
+  const [registry, result, appliedWrites, currentGatewayPid, optedOut] = await Promise.all([
     fetchRegistry(station.nodeId, station.stationKey),
     broker.request(station.nodeId, "config.observe", {
       stationKey: station.stationKey,
       settings: settingIds,
     }),
+    getAppliedWrites(tenantId, station.id),
+    readGatewayPid(station.nodeId, station.stationKey),
+    resolveOptOuts(tenantId, station.stationKey, station.nodeId),
   ]);
 
   const raw = result.ok
@@ -277,7 +304,15 @@ async function observeStation(
     .filter((s): s is ConfigSetting => s !== undefined);
 
   return {
-    observations: compare({ stationId: station.id, declared, values, settings }),
+    observations: compare({
+      stationId: station.id,
+      declared,
+      values,
+      settings,
+      appliedWrites,
+      currentGatewayPid,
+      optedOut,
+    }),
     unreachable: !result.ok,
   };
 }
@@ -293,6 +328,49 @@ const UndeclareBody = z
   .refine((d) => !(d.stationId !== null && d.nodeId !== null), {
     message: "a declaration targets one level: station, node, or fleet (both null)",
   });
+
+/**
+ * Body of `DELETE /api/fleet/config/opt-out`. Mirrors `ConfigOptOut`'s
+ * one-level shape minus `optedOut`/`reason` — clearing a level needs no
+ * decision, only which level.
+ */
+const ClearOptOutBody = z
+  .object({
+    settingId: z.string().min(1),
+    stationKey: z.string().nullable().optional(),
+    nodeId: z.string().nullable().optional(),
+  })
+  .refine((d) => (d.stationKey == null) !== (d.nodeId == null), {
+    message: "an opt-out names exactly one of stationKey or nodeId",
+  });
+
+/**
+ * Body of `POST /stations/:stationId/config/plan`. `value` is optional per
+ * entry — an omitted one resolves from this station's declaration
+ * (`planFor`'s job, not this schema's: zod cannot see what is declared).
+ */
+const PlanBody = z.object({
+  settings: z.array(z.object({ settingId: z.string().min(1), value: z.unknown().optional() })).min(1),
+});
+
+/** Body of `POST /stations/:stationId/config/apply`. */
+const ApplyBody = z.object({
+  operationId: z.string().min(1),
+  planDigest: z.string().min(1),
+});
+
+/**
+ * `ConfigApplyError` → the status/body the route answers with.
+ *
+ * `code` travels verbatim, including a refusal code the NODE produced
+ * (`planFor` throws rather than returning a refused plan as though it were a
+ * plan — finding 3). A caller distinguishes a refusal from a plan by the
+ * status alone, and which refusal it was by `code` alone, without parsing the
+ * sentence.
+ */
+function configApplyErrorResponse(err: ConfigApplyError): { error: string; code?: string } {
+  return { error: err.message, ...(err.code ? { code: err.code } : {}) };
+}
 
 export const harnessConfigRoutes = new Hono()
 
@@ -454,6 +532,111 @@ export const harnessConfigRoutes = new Hono()
   })
 
   /**
+   * PUT /api/fleet/config/opt-out
+   *
+   * Body: `ConfigOptOut` (contract) — `{settingId, optedOut, stationKey?|
+   * nodeId?, reason?}`. The contract's own `.refine()` already rejects a
+   * body naming both levels or neither, surfaced as this route's 400 before
+   * any handler code runs — the same split `PUT /fleet/config/declared`
+   * relies on for its own one-level shape.
+   *
+   * The setting id is checked against the LIVE registry first, exactly as a
+   * declaration is (`verifySettingKnown`, now also accepting a
+   * `stationKey` hint): an exemption recorded for a setting no harness has
+   * would be unrecoverable by any later `compare()`, which only ever asks
+   * "is this id opted out", never whether the id was ever real.
+   *
+   * `stationKey`/`nodeId` arrive from the contract as `string | null |
+   * undefined`; `setOptOut`'s own one-level check (`assertOneOptOutLevel`)
+   * tells "named" from "absent" by `undefined`, so a literal `null` is
+   * normalised to `undefined` here before the service is called.
+   */
+  .put("/fleet/config/opt-out", zValidator("json", ConfigOptOut), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const body = c.req.valid("json");
+    const stationKey = body.stationKey ?? undefined;
+    const nodeId = body.nodeId ?? undefined;
+
+    const verdict = await verifySettingKnown(body.settingId, user.tenantId, { stationKey, nodeId });
+    if (!verdict.ok) {
+      return c.json({ error: "UNKNOWN_SETTING", settingId: body.settingId, reason: verdict.reason }, 400);
+    }
+
+    try {
+      await setOptOut({
+        tenantId: user.tenantId,
+        settingId: body.settingId,
+        optedOut: body.optedOut,
+        stationKey,
+        nodeId,
+        reason: body.reason,
+        optedOutBy: user.id,
+      });
+    } catch (err) {
+      // Defense in depth: the contract's refine already rejected two levels
+      // (or neither), so setOptOut's own assertOneOptOutLevel should never
+      // fire here — but a service-level refusal is still a client error.
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return c.body(null, 204);
+  })
+
+  /**
+   * DELETE /api/fleet/config/opt-out
+   *
+   * Body: `{settingId, stationKey?, nodeId?}` — the same one-level shape as
+   * PUT minus `optedOut`/`reason`. A level with no exemption is a no-op
+   * (`clearOptOut`'s own `{cleared: false}`, returned verbatim rather than
+   * a bare 204, so a caller can tell "removed it" from "nothing was there").
+   */
+  .delete("/fleet/config/opt-out", zValidator("json", ClearOptOutBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const body = c.req.valid("json");
+    try {
+      const result = await clearOptOut({
+        tenantId: user.tenantId,
+        settingId: body.settingId,
+        stationKey: body.stationKey ?? undefined,
+        nodeId: body.nodeId ?? undefined,
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  })
+
+  /**
+   * GET /api/fleet/config/opt-out?stationKey=&nodeId=
+   *
+   * Every exemption for the tenant, optionally narrowed to one station or
+   * one node — the register, unresolved (`listOptOuts`). Tenant-scoped the
+   * same way every other route here is, so a key or node id belonging to
+   * another tenant answers with an empty list, never that tenant's rows.
+   */
+  .get("/fleet/config/opt-out", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationKey = c.req.query("stationKey");
+    const nodeId = c.req.query("nodeId");
+    const rows = await listOptOuts(user.tenantId, {
+      ...(stationKey ? { stationKey } : {}),
+      ...(nodeId ? { nodeId } : {}),
+    });
+    return c.json(rows);
+  })
+
+  /**
    * GET /api/fleet/config/drift
    *
    * Fans `observeStation` across every station in the tenant advertising
@@ -510,4 +693,124 @@ export const harnessConfigRoutes = new Hono()
 
     const { observations } = await observeStation(station, user.tenantId);
     return c.json({ observations });
+  })
+
+  /**
+   * POST /api/stations/:stationId/config/plan
+   *
+   * Body: `{settings: [{settingId, value?}]}`. Resolves a station the same
+   * way every route in this file does (`getStation` + tenant check), then
+   * hands off to `planFor` (`services/harness-config-apply.ts`), which
+   * checks every id against the LIVE registry before the node is ever asked
+   * to plan anything, resolves an omitted `value` from what is declared, and
+   * returns the node's `ConfigPlan` unchanged — never an empty one standing
+   * in for a node this system could not reach (that is a 502, via
+   * `ConfigApplyError`, not a 200 with nothing in it), and never a REFUSED
+   * plan standing in for a plan (that is a 400 or a 409 carrying the node's
+   * own refusal code, for the same reason: a refusal that cannot be told from
+   * a pass by status or exit code is spec §9's whole premise, violated).
+   */
+  .post("/stations/:stationId/config/plan", zValidator("json", PlanBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const body = c.req.valid("json");
+    try {
+      const { plan, refused } = await planFor({ tenantId: user.tenantId, station, settings: body.settings });
+      // `refused` is additive: a plan with nothing opted out answers with
+      // exactly the node's `ConfigPlan`, unchanged, as every caller of this
+      // route already expects. Only a mixed request (some settings opted
+      // out, the rest planned) carries the extra field, naming what was
+      // left out and why.
+      return c.json(refused.length > 0 ? { ...plan, refused } : plan);
+    } catch (err) {
+      if (err instanceof ConfigApplyError) {
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
+      }
+      throw err;
+    }
+  })
+
+  /**
+   * GET /api/stations/:stationId/config/operations/:operationId
+   *
+   * Reads the receipt this station's own node journal has recorded for
+   * `operationId`, exactly as the node reports it — this route never
+   * re-derives or re-plans (`config.inspect`, the sibling of `config.plan`
+   * and `config.apply`).
+   */
+  .get("/stations/:stationId/config/operations/:operationId", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const operationId = c.req.param("operationId");
+    const result = await broker.request(station.nodeId, "config.inspect", {
+      stationKey: station.stationKey,
+      operationId,
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error ?? "the node could not be reached" }, 502);
+    }
+    const parsed = ConfigReceipt.safeParse(result.data);
+    if (!parsed.success) {
+      return c.json({ error: "the node returned an unexpected receipt" }, 502);
+    }
+    return c.json(parsed.data);
+  })
+
+  /**
+   * POST /api/stations/:stationId/config/apply
+   *
+   * Body: `{operationId, planDigest}`. Forwards to `applyFor`, which asks
+   * the node to apply exactly the plan reviewed as `planDigest` for
+   * `operationId`. The node — never this route — decides `applied` vs
+   * `conflict` (a digest that no longer matches its journal is a conflict,
+   * not an error; see `hermes_config.go`'s `ApplyConfig`), so the response
+   * status mirrors that: 200 for `applied`, 409 for anything else. Only on
+   * `applied` does `applyFor` record `applied_harness_config` rows, under
+   * the gateway pid read from this station's health right after the write.
+   */
+  .post("/stations/:stationId/config/apply", zValidator("json", ApplyBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const body = c.req.valid("json");
+    try {
+      const receipt = await applyFor({
+        tenantId: user.tenantId,
+        station,
+        operationId: body.operationId,
+        planDigest: body.planDigest,
+      });
+      return c.json(receipt, receipt.phase === "applied" ? 200 : 409);
+    } catch (err) {
+      if (err instanceof ConfigApplyError) {
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
+      }
+      throw err;
+    }
   });

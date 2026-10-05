@@ -9,22 +9,25 @@ import (
 )
 
 // hermesWithProfile writes a Hermes home with one profile whose config.yaml is
-// `body`, and returns the descriptor and the station key for that profile.
-func hermesWithProfile(t *testing.T, body string) (*hermesDescriptor, string) {
+// `body`, and returns the descriptor, the station key for that profile, and
+// the profile's config.yaml path (plan tests read the file back to prove
+// PlanConfig wrote nothing).
+func hermesWithProfile(t *testing.T, body string) (*hermesDescriptor, string, string) {
 	t.Helper()
 	home := t.TempDir()
 	profile := filepath.Join(home, "profiles", "one")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte(body), 0o644); err != nil {
+	cfg := filepath.Join(profile, "config.yaml")
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return NewHermes(home).(*hermesDescriptor), "hermes:one"
+	return NewHermes(home).(*hermesDescriptor), "hermes:one", cfg
 }
 
 func TestHermesConfigSettingsRegistry(t *testing.T) {
-	h, _ := hermesWithProfile(t, "approvals:\n  timeout: 300\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  timeout: 300\n")
 	byID := map[string]ConfigSetting{}
 	for _, s := range h.ConfigSettings() {
 		byID[s.ID] = s
@@ -53,7 +56,7 @@ func TestHermesConfigSettingsRegistry(t *testing.T) {
 }
 
 func TestHermesObserveConfigReadsAValue(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  mode: ask\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  mode: ask\n  timeout: 900\n")
 	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +67,7 @@ func TestHermesObserveConfigReadsAValue(t *testing.T) {
 }
 
 func TestHermesObserveConfigAbsentKeyIsReadableWithNoValue(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  mode: ask\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  mode: ask\n")
 	vals, _ := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
 	if !vals[0].Readable {
 		t.Fatal("a readable document with the key absent is readable")
@@ -75,7 +78,7 @@ func TestHermesObserveConfigAbsentKeyIsReadableWithNoValue(t *testing.T) {
 }
 
 func TestHermesObserveConfigUnreadableDocumentIsNotAbsent(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	// Remove the file: the document cannot be read at all.
 	if err := os.Remove(filepath.Join(h.home, "profiles", "one", "config.yaml")); err != nil {
 		t.Fatal(err)
@@ -93,7 +96,7 @@ func TestHermesObserveConfigRefusesTheCompositeRoot(t *testing.T) {
 	// `workspaceFor("hermes")` returns the HOME, not a profile. Reading the home's
 	// config.yaml and reporting it as a profile's value would attribute a wrong
 	// readout to the wrong station, so the root is refused by name (spec §6).
-	h, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	_, err := h.ObserveConfig(context.Background(), "hermes", []string{"hermes.approvals.timeout"})
 	if err == nil || !strings.Contains(err.Error(), "composite root") {
 		t.Fatalf("the composite root must be refused, got %v", err)
@@ -101,32 +104,38 @@ func TestHermesObserveConfigRefusesTheCompositeRoot(t *testing.T) {
 }
 
 func TestHermesObserveConfigRefusesAnUnregisteredSetting(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	_, err := h.ObserveConfig(context.Background(), key, []string{"hermes.model.api_key"})
 	if err == nil || !strings.Contains(err.Error(), "hermes.model.api_key") {
 		t.Fatalf("an unregistered setting must be refused by name, got %v", err)
 	}
 }
 
-// A key that IS in the document but holds a list is neither absent nor drifted.
+// A key that IS in the document but holds a list is neither absent nor
+// unreadable — it is readable, with the list as its observed value.
 //
-// `hermes.approvals.command_allowlist` is the setting the originating incident is
-// about, and it is the one registered setting whose value is a list. Reporting it
-// as `absent` ("declared, and the key is not in the document") would be a false
-// sentence about a document that plainly contains the key, and reporting the raw
-// text of an inline list as a scalar would compare as `drifted` forever. Both
-// shapes must come back readable=false with a reason that says why — the same
-// invariant an unreadable document holds: an unreadable or unreadable-shaped
-// value must never collapse into "key absent".
-func TestHermesObserveConfigPresentNonScalarIsUnreadableNotAbsent(t *testing.T) {
+// `hermes.approvals.command_allowlist` is the setting the originating incident
+// is about, and it is the one registered setting whose value is a list in
+// every real document. Reporting it as `absent` ("declared, and the key is
+// not in the document") would be a false sentence about a document that
+// plainly contains the key, and treating an inline list's raw text as a
+// scalar would compare as `drifted` forever — which is why both block and
+// inline lists are read structurally (via configedit) rather than as text.
+//
+// This used to report readable=false for every non-scalar shape, lists
+// included — a false negative on the one setting this whole design exists
+// for. That changed here; a nested map (not a shape any registered setting
+// has today) still reports unreadable, for the same reason an unreadable
+// document does: a shape this reader cannot speak for must never collapse
+// into "key absent" or be guessed at as a scalar.
+func TestHermesObserveConfigPresentListIsReadableWithTheListObserved(t *testing.T) {
 	cases := []struct{ name, body string }{
 		{"a block list", "approvals:\n  mode: ask\n  command_allowlist:\n    - ls\n    - cat\n"},
 		{"an inline list", "approvals:\n  mode: ask\n  command_allowlist: [ls, cat]\n"},
-		{"a nested map", "approvals:\n  command_allowlist:\n    allow: ls\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h, key := hermesWithProfile(t, c.body)
+			h, key, _ := hermesWithProfile(t, c.body)
 			vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
 			if err != nil {
 				t.Fatal(err)
@@ -134,27 +143,85 @@ func TestHermesObserveConfigPresentNonScalarIsUnreadableNotAbsent(t *testing.T) 
 			if len(vals) != 1 {
 				t.Fatalf("got %d values, want 1", len(vals))
 			}
-			if vals[0].Readable {
-				t.Fatalf("a present non-scalar must report readable=false, got %+v", vals[0])
+			if !vals[0].Readable {
+				t.Fatalf("a present list must report readable=true, got %+v", vals[0])
 			}
-			if vals[0].Observed != nil {
-				t.Fatalf("a present non-scalar must carry no observed value, got %v", vals[0].Observed)
+			items, ok := vals[0].Observed.([]any)
+			if !ok || len(items) != 2 {
+				t.Fatalf("want a 2-item observed list, got %#v", vals[0].Observed)
 			}
-			if !strings.Contains(vals[0].Reason, "scalar") {
-				t.Fatalf("the reason must name why it could not be read, got %q", vals[0].Reason)
+			if items[0] != "ls" || items[1] != "cat" {
+				t.Fatalf("observed list = %#v, want [ls cat]", items)
 			}
 		})
 	}
 }
 
-// The limitation is honest, not invisible: the setting stays registered, because a
-// later plan needs it, and the registry is the wire contract either way.
+// An EMPTY block list — `command_allowlist:` with no items under it — is the
+// third list shape, and the one a document carries after an operator deletes
+// the last entry. It holds nothing, which is not the same thing as holding a
+// nested map: calling it unreadable was a false sentence about the document,
+// and `compare()` turns `unreadable` into a recorded failure at adopt time
+// and never plans the write at all.
+//
+// The published page (docs-site/.../use/config.md) already says "a block
+// list, an inline list, and an empty list all come back readable, with the
+// list itself as the observed value". This is that sentence, as a test.
+func TestHermesObserveConfigEmptyListIsReadableAsAnEmptyList(t *testing.T) {
+	for _, c := range []struct{ name, body string }{
+		{"an empty block list", "approvals:\n  mode: ask\n  command_allowlist:\n"},
+		{"an empty inline list", "approvals:\n  mode: ask\n  command_allowlist: []\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, key, _ := hermesWithProfile(t, c.body)
+			vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !vals[0].Readable {
+				t.Fatalf("an empty list must report readable=true, got %+v", vals[0])
+			}
+			items, ok := vals[0].Observed.([]any)
+			if !ok {
+				t.Fatalf("observed = %#v, want an (empty) list", vals[0].Observed)
+			}
+			if len(items) != 0 {
+				t.Fatalf("observed = %#v, want no entries", items)
+			}
+		})
+	}
+}
+
+func TestHermesObserveConfigPresentNestedMapIsUnreadableNotAbsent(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    allow: ls\n")
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 1 {
+		t.Fatalf("got %d values, want 1", len(vals))
+	}
+	if vals[0].Readable {
+		t.Fatalf("a present nested map must report readable=false, got %+v", vals[0])
+	}
+	if vals[0].Observed != nil {
+		t.Fatalf("a present nested map must carry no observed value, got %v", vals[0].Observed)
+	}
+	if !strings.Contains(vals[0].Reason, "map") {
+		t.Fatalf("the reason must name why it could not be read, got %q", vals[0].Reason)
+	}
+}
+
+// The registry carries this setting regardless of what shape its value turns
+// out to be — the registry is the wire contract either way, and a later plan
+// needs the setting to stay declarable even on a shape this reader cannot
+// speak for.
 func TestHermesConfigRegistryStillCarriesTheListSetting(t *testing.T) {
-	h, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    - ls\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    - ls\n")
 	for _, s := range h.ConfigSettings() {
 		if s.ID == "hermes.approvals.command_allowlist" {
 			return
 		}
 	}
-	t.Fatal("command_allowlist must stay registered even while its value cannot be read as a scalar")
+	t.Fatal("command_allowlist must stay registered")
 }

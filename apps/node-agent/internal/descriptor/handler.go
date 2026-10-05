@@ -61,6 +61,15 @@ func NewHandler(reg *Registry) gateway.Handler {
 		case "config.settings":
 			return handleConfigSettings(reg, params)
 
+		case "config.plan":
+			return handleConfigPlan(ctx, reg, params)
+
+		case "config.inspect":
+			return handleConfigInspect(ctx, reg, params)
+
+		case "config.apply":
+			return handleConfigApply(ctx, reg, params)
+
 		default:
 			return nil, false, fmt.Errorf("descriptor: unknown verb %q", verb)
 		}
@@ -356,4 +365,75 @@ func handleConfigSettings(reg *Registry, params json.RawMessage) (any, bool, err
 		return nil, false, fmt.Errorf("config.settings: %s does not manage configuration", d.Harness())
 	}
 	return map[string]any{"settings": cm.ConfigSettings()}, false, nil
+}
+
+func handleConfigPlan(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey  string            `json:"stationKey"`
+		OperationID string            `json:"operationId"`
+		Want        []DeclaredSetting `json:"want"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.plan: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.plan: %s does not manage configuration", d.Harness())
+	}
+	plan, err := cm.PlanConfig(ctx, p.StationKey, p.OperationID, p.Want)
+	if err != nil {
+		return nil, false, err
+	}
+	return plan, false, nil
+}
+
+func handleConfigInspect(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey  string `json:"stationKey"`
+		OperationID string `json:"operationId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.inspect: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.inspect: %s does not manage configuration", d.Harness())
+	}
+	receipt, err := cm.InspectConfig(ctx, p.StationKey, p.OperationID)
+	if err != nil {
+		return nil, false, err
+	}
+	return receipt, false, nil
+}
+
+func handleConfigApply(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
+	var p struct {
+		StationKey  string `json:"stationKey"`
+		OperationID string `json:"operationId"`
+		PlanDigest  string `json:"planDigest"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, false, fmt.Errorf("config.apply: bad params: %w", err)
+	}
+	d, err := reg.For(p.StationKey)
+	if err != nil {
+		return nil, false, err
+	}
+	cm, ok := d.(ConfigManager)
+	if !ok {
+		return nil, false, fmt.Errorf("config.apply: %s does not manage configuration", d.Harness())
+	}
+	receipt, err := cm.ApplyConfig(ctx, p.StationKey, p.OperationID, p.PlanDigest)
+	if err != nil {
+		return nil, false, err
+	}
+	return receipt, false, nil
 }
