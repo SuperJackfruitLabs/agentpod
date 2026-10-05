@@ -72,6 +72,33 @@ export const DeclaredSetting = z
 export type DeclaredSetting = z.infer<typeof DeclaredSetting>;
 
 /**
+ * An operator's explicit exemption, at exactly one level: a station (keyed
+ * on its stable `stationKey`, not its row id, so the exemption survives
+ * unadopt/re-adopt) or a node (exempting every station on it). There is
+ * deliberately no fleet level here (D9) — `fleet config unset` already
+ * covers "nobody wants this setting" at that scope.
+ *
+ * `stationKey`/`nodeId` are `.nullable().optional()` rather than
+ * `DeclaredSetting`'s bare `.nullable()`: the service layer
+ * (`harness-config.ts`'s `assertOneOptOutLevel`) tells "named" from
+ * "absent" by `undefined`, not by `null`, and a route normalises a literal
+ * `null` to `undefined` before calling it — see
+ * `routes/harness-config.ts`.
+ */
+export const ConfigOptOut = z
+  .object({
+    settingId: z.string(),
+    stationKey: z.string().nullable().optional(),
+    nodeId: z.string().nullable().optional(),
+    optedOut: z.boolean(),
+    reason: z.string().optional(),
+  })
+  .refine((v) => (v.stationKey == null) !== (v.nodeId == null), {
+    message: "an opt-out names exactly one of stationKey or nodeId",
+  });
+export type ConfigOptOut = z.infer<typeof ConfigOptOut>;
+
+/**
  * What a station actually has. The NODE produces this and is told nothing about
  * what was declared — comparison is the hub's, because only the hub resolves
  * station → node → fleet precedence.
