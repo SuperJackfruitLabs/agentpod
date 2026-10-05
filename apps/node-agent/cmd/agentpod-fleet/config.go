@@ -12,12 +12,12 @@ import (
 )
 
 const configUsage = `usage:
-  fleet config settings                          every setting the fleet can declare
-  fleet config show   [--node ID]                the declarations themselves, as stored
-  fleet config show   --station ID               one station: declared vs observed, with state
+  fleet config settings                             every setting the fleet can declare
+  fleet config show   [--node ID]                   the declarations themselves, as stored
+  fleet config show   --station ID                  one station: declared vs observed, with state
   fleet config set    SETTING_ID --value V [--station ID | --node ID]
   fleet config unset  SETTING_ID [--station ID | --node ID]
-  fleet config drift                             every station whose value differs
+  fleet config drift                                every station whose value differs
   fleet config plan    --station ID                 the edit that would be made, and its digest
   fleet config inspect --station ID --operation ID  a plan already made, as it was reviewed
   fleet config apply   --station ID --operation ID --plan-digest SHA256
