@@ -1,0 +1,12 @@
+# operator's own notes, which must survive
+model: fixture-model
+fallback_providers:
+  - provider: one
+    model: a/b
+skills:
+  # why this profile keeps template vars on
+  template_vars: true
+  external_dirs:
+    - operator-own-dir
+curator:
+  enabled: true

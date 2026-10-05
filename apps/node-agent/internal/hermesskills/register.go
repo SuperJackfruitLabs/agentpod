@@ -71,11 +71,47 @@ func Register(configPath, dir string) (edited []byte, change Change, err error) 
 	if err != nil {
 		return nil, Change{}, err
 	}
+	return register(current, loc, dir)
+}
+
+// RegisterIn is Register on a document the caller already holds in memory,
+// and the same code: both call register below, so neither can produce a byte
+// the other would not.
+//
+// `apn hermes-skills` is no longer the only caller. `internal/descriptor`'s
+// declared-configuration registry folds in `hermes.skills.external_dirs`
+// (spec D12) and must produce BYTE-IDENTICAL output to the verb, so it
+// delegates here rather than reimplementing the edit. It cannot use Register
+// itself because one plan may compose several settings' edits — and several
+// declared directories — into one document before anything is written, so
+// the document it is editing is not the one on disk yet. Reading the file per
+// directory would also mean reading a document mid-edit, which is how two
+// readers come to disagree about what they are editing.
+//
+// Nothing here writes: see Apply, which is still the only writer in this
+// package. A caller that is its own writer (the registry is — it has a
+// journal, a reviewed digest and its own atomic write) uses the returned
+// bytes and never calls Apply.
+func RegisterIn(current []byte, dir string) (edited []byte, change Change, err error) {
+	if err := validateEntry(dir); err != nil {
+		return nil, Change{}, err
+	}
+	loc, err := locate(current, dir)
+	if err != nil {
+		return nil, Change{}, err
+	}
+	return register(current, loc, dir)
+}
+
+// register is the decision Register and RegisterIn share, so that "the verb's
+// bytes" and "the registry's bytes" are the same sentence rather than two
+// implementations that agree today.
+func register(current []byte, loc location, dir string) ([]byte, Change, error) {
 	before := hashBytes(current)
 	if loc.present {
 		return current, Change{Present: true, NoOp: true, before: before, after: before}, nil
 	}
-	edited, err = insertEntry(current, loc.skillsKey, loc.skillsValue, loc.listKey, loc.listValue, dir)
+	edited, err := insertEntry(current, loc.skillsKey, loc.skillsValue, loc.listKey, loc.listValue, dir)
 	if err != nil {
 		return nil, Change{}, err
 	}
@@ -169,39 +205,58 @@ func readForEdit(configPath, dir string) ([]byte, location, error) {
 	if !filepath.IsAbs(configPath) {
 		return nil, location{}, fmt.Errorf("hermes-skills: external dirs config path must be absolute")
 	}
-	if dir == "" || filepath.IsAbs(dir) || strings.ContainsAny(dir, "\n\"'#:") {
-		return nil, location{}, fmt.Errorf("hermes-skills: external dirs entry must be a plain relative path")
+	if err := validateEntry(dir); err != nil {
+		return nil, location{}, err
 	}
 	current, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, location{}, err
 	}
+	loc, err := locate(current, dir)
+	return current, loc, err
+}
+
+// validateEntry is the shape an external_dirs entry has to have before this
+// package will put it in an operator's document: a plain relative path, with
+// nothing in it that would need quoting or could close the line.
+func validateEntry(dir string) error {
+	if dir == "" || filepath.IsAbs(dir) || strings.ContainsAny(dir, "\n\"'#:") {
+		return fmt.Errorf("hermes-skills: external dirs entry must be a plain relative path")
+	}
+	return nil
+}
+
+// locate finds skills and skills.external_dirs in a document already read,
+// and reports whether dir is already named there. Split out of readForEdit so
+// that a caller holding the document in memory (RegisterIn) asks exactly the
+// same question of it, in the same order, as one reading it off disk.
+func locate(current []byte, dir string) (location, error) {
 	root, err := documentMapping(current)
 	if err != nil {
-		return nil, location{}, err
+		return location{}, err
 	}
 	var loc location
 	loc.skillsKey, loc.skillsValue = childNode(root, "skills")
 	if loc.skillsValue != nil && loc.skillsValue.Kind != yaml.MappingNode && !isNull(loc.skillsValue) {
-		return nil, location{}, fmt.Errorf("%w: skills is not a mapping in the profile configuration", ErrConflict)
+		return location{}, fmt.Errorf("%w: skills is not a mapping in the profile configuration", ErrConflict)
 	}
 	if loc.skillsValue != nil && loc.skillsValue.Kind == yaml.MappingNode {
 		loc.listKey, loc.listValue = childNode(loc.skillsValue, "external_dirs")
 		if loc.listValue != nil && loc.listValue.Kind != yaml.SequenceNode && !isNull(loc.listValue) {
-			return nil, location{}, fmt.Errorf("%w: external_dirs is not a sequence in the profile configuration", ErrConflict)
+			return location{}, fmt.Errorf("%w: external_dirs is not a sequence in the profile configuration", ErrConflict)
 		}
 	}
 	if loc.listValue != nil && loc.listValue.Kind == yaml.SequenceNode {
 		for _, item := range loc.listValue.Content {
 			if item.Kind != yaml.ScalarNode {
-				return nil, location{}, fmt.Errorf("%w: external_dirs holds a non-scalar entry", ErrConflict)
+				return location{}, fmt.Errorf("%w: external_dirs holds a non-scalar entry", ErrConflict)
 			}
 			if item.Value == dir {
 				loc.present = true
 			}
 		}
 	}
-	return current, loc, nil
+	return loc, nil
 }
 
 // insertEntry adds the entry, creating skills or external_dirs textually when

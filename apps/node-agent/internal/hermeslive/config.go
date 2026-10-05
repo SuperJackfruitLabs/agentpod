@@ -36,6 +36,41 @@ type ConfigChange struct {
 	StreamPrevious    string `json:"streamPrevious"` // "absent", "true" or "false"
 }
 
+// PlanEnableConfig is planEnableConfig under an exported name, and nothing
+// else: it computes, without writing, the edit that enables this plugin in a
+// profile configuration already in memory.
+//
+// It exists because `apn hermes-live enable` is no longer the only caller.
+// `internal/descriptor`'s declared-configuration registry folds in
+// `hermes.plugins.enabled` and `hermes.plugins.stream_reasoning_deltas`
+// (spec D12) and must produce BYTE-IDENTICAL output to the verb — not
+// equivalent YAML, identical bytes — so it calls this rather than
+// reimplementing the edit. A wrapper rather than a rename so that the
+// function the verb has always called is untouched: there is one
+// implementation, one set of refusals, and no second place for the two
+// callers' behaviour to drift apart.
+//
+// The verb keeps its own caller (install.go). This does not become the new
+// home of the logic, and the registry entry does not become the new home of
+// the verb.
+func PlanEnableConfig(current []byte) ([]byte, ConfigChange, error) {
+	return planEnableConfig(current)
+}
+
+// PlanDisableConfig is planDisableConfig under an exported name, for the same
+// reason as PlanEnableConfig: one implementation, two callers.
+//
+// Nothing in the registry calls it today — a declared setting only ever
+// enables, and the folded-in `stream_reasoning_deltas` entry refuses a
+// declared `false` precisely because reversing an enable needs the recorded
+// ConfigChange this takes, which only the verb's own state file has. It is
+// exported alongside its pair so that the reversal is reachable from the
+// same place the forward edit is, rather than being the one half a second
+// caller would have to duplicate.
+func PlanDisableConfig(current []byte, change ConfigChange) ([]byte, error) {
+	return planDisableConfig(current, change)
+}
+
 func planEnableConfig(current []byte) ([]byte, ConfigChange, error) {
 	change := ConfigChange{StreamPrevious: "absent"}
 	root, err := mapping(current)
