@@ -182,3 +182,47 @@ func TestPlanRefusesACredentialPath(t *testing.T) {
 		}
 	}
 }
+
+// The end-to-end determinism test above can pass while the digest is BROKEN:
+// CreatedAt is RFC3339, which is second-resolution, so two plans derived in the
+// same wall-clock second carry identical timestamps and agree even if the
+// timestamp is inside the hash. That was verified empirically during Task 4.
+//
+// This test closes that gap without a sleep, by asserting the exclusion
+// directly: a digest must be invariant to the two fields that are not part of
+// what review saw. Task 5 detects a stale plan by re-deriving and comparing
+// digests, so an unstable digest would make every apply look like a changed
+// document.
+func TestDigestIgnoresWhenAndUnderWhichOperationAPlanWasMade(t *testing.T) {
+	base := ConfigPlan{
+		SchemaVersion: 1,
+		OperationID:   "op_1",
+		StationKey:    "hermes:one",
+		Entries: []ConfigPlanEntry{{
+			SettingID: "hermes.approvals.timeout", File: "/x/config.yaml",
+			KeyPath: "approvals.timeout", Policy: "reconcilable",
+			Current: 300, Intended: 900, Action: "modify", RestartToTakeEffect: true,
+		}},
+		BeforeSHA256: "a", Diff: "-300\n+900\n", RestartRequired: true,
+		CreatedAt: "2026-10-05T00:00:00Z",
+	}
+	later := base
+	later.CreatedAt = "2026-11-30T23:59:59Z"
+	later.OperationID = "op_2"
+
+	if configDigestOf(base) != configDigestOf(later) {
+		t.Fatal("the digest changed with CreatedAt/OperationID — PLAN_STALE would fire on every apply")
+	}
+
+	// And the guarantee that makes the digest worth having: a real change to
+	// what review saw MUST change it.
+	changed := base
+	changed.Entries = []ConfigPlanEntry{{
+		SettingID: "hermes.approvals.timeout", File: "/x/config.yaml",
+		KeyPath: "approvals.timeout", Policy: "reconcilable",
+		Current: 300, Intended: 1200, Action: "modify", RestartToTakeEffect: true,
+	}}
+	if configDigestOf(base) == configDigestOf(changed) {
+		t.Fatal("the digest ignored a changed intended value — a stale plan would apply silently")
+	}
+}
