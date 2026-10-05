@@ -369,9 +369,9 @@ func handleConfigSettings(reg *Registry, params json.RawMessage) (any, bool, err
 
 func handleConfigPlan(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
 	var p struct {
-		StationKey  string              `json:"stationKey"`
-		OperationID string              `json:"operationId"`
-		Want        []DeclaredSetting   `json:"want"`
+		StationKey  string            `json:"stationKey"`
+		OperationID string            `json:"operationId"`
+		Want        []DeclaredSetting `json:"want"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, false, fmt.Errorf("config.plan: bad params: %w", err)
@@ -416,9 +416,9 @@ func handleConfigInspect(ctx context.Context, reg *Registry, params json.RawMess
 
 func handleConfigApply(ctx context.Context, reg *Registry, params json.RawMessage) (any, bool, error) {
 	var p struct {
-		StationKey string `json:"stationKey"`
+		StationKey  string `json:"stationKey"`
 		OperationID string `json:"operationId"`
-		PlanDigest string `json:"planDigest"`
+		PlanDigest  string `json:"planDigest"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
 		return nil, false, fmt.Errorf("config.apply: bad params: %w", err)
