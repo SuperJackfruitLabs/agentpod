@@ -273,3 +273,84 @@ func TestApplyCreatesAnAbsentSectionForAnAdditiveOnlyList(t *testing.T) {
 		t.Fatalf("the created section is not the one list at the end:\n%q", string(body))
 	}
 }
+
+// D10's test. The honest seam is the gap ApplyConfig's own algorithm already
+// has: between its atomic write landing and the read-back that verifies
+// containment (step 5 — see writeAndReadBack). h.afterApplyWriteForTest is
+// invoked at exactly that gap, in the real ApplyConfig call, on the real
+// filesystem — it lands a second, later write standing in for a concurrent
+// edit (e.g. the operator pressing "Allow always" through Hermes' own UI),
+// not a sleep-timed guess at when a race might land.
+func TestApplyPreservesBothEditsWhenTheDocumentChangesDuringTheWrite(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, planDoc)
+	p, err := h.PlanConfig(context.Background(), key, "op_1",
+		[]DeclaredSetting{{SettingID: "hermes.approvals.timeout", Value: 900}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// What a concurrent edit lands in the gap between our write and our
+	// read-back — standing in for the operator's own, unrelated change.
+	raced := planDoc + "model:\n  context_length: 8000\n"
+	h.afterApplyWriteForTest = func(path string) {
+		if err := os.WriteFile(path, []byte(raced), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r, err := h.ApplyConfig(context.Background(), key, "op_1", p.PlanDigest)
+	if err != nil {
+		t.Fatalf("a lost race must be an answer, not an error: %v", err)
+	}
+	if r.Phase != "conflict" {
+		t.Fatalf("phase = %q, want conflict (error: %q)", r.Phase, r.Error)
+	}
+
+	// 1. The document is exactly as the race left it: not reverted to the
+	// pre-apply original, and not overwritten with our intended edit either.
+	body, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != raced {
+		t.Fatalf("the document was not left exactly as found:\ngot:  %q\nwant: %q", body, raced)
+	}
+
+	// 2. Our intended edit was not discarded: it was saved beside the
+	// document, byte-identical to what an UNRACED apply of the very same
+	// plan against the very same starting document actually writes — the
+	// oracle, not a guess at what the bytes "should" look like.
+	h2, key2, cfg2 := hermesWithProfile(t, planDoc)
+	p2, err := h2.PlanConfig(context.Background(), key2, "op_1",
+		[]DeclaredSetting{{SettingID: "hermes.approvals.timeout", Value: 900}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h2.ApplyConfig(context.Background(), key2, "op_1", p2.PlanDigest); err != nil {
+		t.Fatal(err)
+	}
+	wantSidecar, err := os.ReadFile(cfg2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sidecarPath := cfg + ".agentpod-rejected"
+	gotSidecar, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		t.Fatalf("no sidecar was written at %s: %v", sidecarPath, err)
+	}
+	if string(gotSidecar) != string(wantSidecar) {
+		t.Fatalf("sidecar = %q, want the unraced apply's bytes %q", gotSidecar, wantSidecar)
+	}
+
+	// 3. The refusal names both paths.
+	if !strings.Contains(r.Error, cfg) {
+		t.Fatalf("refusal does not name the document's path %s: %q", cfg, r.Error)
+	}
+	if !strings.Contains(r.Error, sidecarPath) {
+		t.Fatalf("refusal does not name the sidecar's path %s: %q", sidecarPath, r.Error)
+	}
+	if !strings.Contains(strings.ToLower(r.Error), "lost") {
+		t.Fatalf("refusal does not say plainly that neither edit was lost: %q", r.Error)
+	}
+}

@@ -462,8 +462,15 @@ func conflictReceipt(plan ConfigPlan, code, message string) ConfigReceipt {
 //     and nothing is written.
 //  5. Only now is the edit written, atomically. The bytes actually on disk
 //     afterward are re-checked with configedit.SameOutsideKeys; a violation
-//     here — after step 3 already proved containment — means the filesystem
-//     changed under us, which is exactly a conflict, and is recorded as one.
+//     here — after step 3 already proved containment — means the document
+//     changed under us in the gap between the write and the read-back that
+//     verifies it (D10). That is a lost race, not a corruption: the document
+//     is left exactly as this step found it — reverting to what step 3 read
+//     would discard whatever just landed there, possibly an operator's own
+//     "Allow always" from seconds earlier, which is exactly the loss F2
+//     exists to prevent — and this station's own intended edit is saved
+//     beside it as a sidecar file instead of being thrown away. See
+//     writeAndReadBack and writeRejectedSidecar.
 //  6. The receipt — phase "applied", Written, AfterSHA256 — is recorded.
 func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, planDigest string) (ConfigReceipt, error) {
 	if err := ctx.Err(); err != nil {
@@ -522,28 +529,36 @@ func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, pl
 	// 5. Write, then verify on the bytes actually on disk — not the `after`
 	// this process computed in memory — so a filesystem change concurrent
 	// with the write is caught rather than assumed away.
-	actual := redo.before
-	if !bytes.Equal(redo.before, redo.after) {
-		mode := os.FileMode(0o600)
-		if info, statErr := os.Stat(redo.path); statErr == nil {
-			mode = info.Mode().Perm()
-		}
-		if err := atomicWriteFile(redo.path, redo.after, mode); err != nil {
-			return ConfigReceipt{}, fmt.Errorf("config: writing %s: %w", redo.path, err)
-		}
-		written, err := os.ReadFile(redo.path)
-		if err != nil {
-			return ConfigReceipt{}, fmt.Errorf("config: reading back %s: %w", redo.path, err)
-		}
-		actual = written
+	mode := os.FileMode(0o600)
+	if info, statErr := os.Stat(redo.path); statErr == nil {
+		mode = info.Mode().Perm()
+	}
+	actual, err := h.writeAndReadBack(redo.path, redo.before, redo.after, mode)
+	if err != nil {
+		return ConfigReceipt{}, err
 	}
 
 	if err := configedit.SameOutsideKeys(redo.before, actual, redo.keyPaths, redo.additive); err != nil {
+		// D10: `actual` is the document exactly as this race left it on
+		// disk. It is not reverted to redo.before (that would discard
+		// whatever concurrent edit just landed — see the comment on
+		// ApplyConfig above) and it is not forced to redo.after either (that
+		// would discard the concurrent edit in the other direction). It is
+		// left untouched, and this station's own intended edit is saved
+		// beside it instead, so a human can reconcile the two without
+		// either ever having been thrown away.
+		sidecarPath, sidecarErr := writeRejectedSidecar(redo.path, redo.after, mode)
+		msg := fmt.Sprintf(
+			"the write touched more than its plan: %v; %s was left untouched and the intended edit was saved instead to %s — neither edit has been lost, but they must be reconciled by hand",
+			err, redo.path, sidecarPath)
+		if sidecarErr != nil {
+			msg = fmt.Sprintf("%s (and saving the intended edit to %s also failed: %v)", msg, sidecarPath, sidecarErr)
+		}
 		receipt := ConfigReceipt{
 			Plan:      existing.Plan,
 			Phase:     "conflict",
 			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-			Error:     fmt.Sprintf("the write touched more than its plan: %v", err),
+			Error:     msg,
 		}
 		// A real write already happened; record it rather than let a second
 		// apply attempt believe nothing was ever tried.
@@ -566,6 +581,65 @@ func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, pl
 		return ConfigReceipt{}, fmt.Errorf("config: recording the receipt for %s: %w", operationID, err)
 	}
 	return receipt, nil
+}
+
+// writeAndReadBack is ApplyConfig's step 5: write `after` over `path`, atomically,
+// when it differs from `before`, then read back whatever is actually on disk
+// afterward — not the `after` just written, because that is precisely the
+// assumption D10 exists to not make.
+//
+// It is pulled out of ApplyConfig, rather than left inline, because this is
+// the one gap this algorithm actually has: between the write landing and the
+// read-back that verifies it, nothing holds the document still. A real test
+// of that race should land something in exactly that gap, not fake the
+// timing with a sleep — so h.afterApplyWriteForTest, when set, is called
+// right there. It is nil in production and this function then does exactly
+// what it reads: write, then read back.
+func (h *hermesDescriptor) writeAndReadBack(path string, before, after []byte, mode os.FileMode) ([]byte, error) {
+	if bytes.Equal(before, after) {
+		return before, nil
+	}
+	if err := atomicWriteFile(path, after, mode); err != nil {
+		return nil, fmt.Errorf("config: writing %s: %w", path, err)
+	}
+	if h.afterApplyWriteForTest != nil {
+		h.afterApplyWriteForTest(path)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("config: reading back %s: %w", path, err)
+	}
+	return written, nil
+}
+
+// rejectedSidecarPath returns where a lost race's intended edit is saved:
+// configPath with ".agentpod-rejected" appended to its full name, so
+// "config.yaml" becomes "config.yaml.agentpod-rejected" sitting right next
+// to it.
+func rejectedSidecarPath(configPath string) string {
+	return configPath + ".agentpod-rejected"
+}
+
+// writeRejectedSidecar saves intended beside configPath, atomically, using
+// the same temp-file-plus-rename writer every other write in this package
+// uses — this is not a second way to write a file, just a second path to
+// write it to.
+//
+// This is the ONE place in the whole declared-configuration design that
+// writes a file the harness itself does not own or ever read: every other
+// write here lands inside a document the harness will itself parse at its
+// next read, but a harness has no notion of ".agentpod-rejected" and never
+// will. It exists purely as bookkeeping for a human to reconcile by hand —
+// nothing in this system reads it back, so it is safe (and correct) for a
+// later rejection of the same document to silently overwrite whatever an
+// earlier one left here; there is no history to preserve, only a latest
+// answer to the question "what did we intend to write."
+func writeRejectedSidecar(configPath string, intended []byte, mode os.FileMode) (string, error) {
+	path := rejectedSidecarPath(configPath)
+	if err := atomicWriteFile(path, intended, mode); err != nil {
+		return path, err
+	}
+	return path, nil
 }
 
 // InspectConfig returns the receipt this station's journal has recorded for
