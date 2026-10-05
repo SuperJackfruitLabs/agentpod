@@ -568,8 +568,13 @@ export const harnessConfigRoutes = new Hono()
 
     const body = c.req.valid("json");
     try {
-      const plan = await planFor({ tenantId: user.tenantId, station, settings: body.settings });
-      return c.json(plan);
+      const { plan, refused } = await planFor({ tenantId: user.tenantId, station, settings: body.settings });
+      // `refused` is additive: a plan with nothing opted out answers with
+      // exactly the node's `ConfigPlan`, unchanged, as every caller of this
+      // route already expects. Only a mixed request (some settings opted
+      // out, the rest planned) carries the extra field, naming what was
+      // left out and why.
+      return c.json(refused.length > 0 ? { ...plan, refused } : plan);
     } catch (err) {
       if (err instanceof ConfigApplyError) {
         return c.json(configApplyErrorResponse(err), err.status as 400 | 502);

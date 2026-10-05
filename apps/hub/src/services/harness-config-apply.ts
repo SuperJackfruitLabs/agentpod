@@ -55,6 +55,13 @@ export class ConfigApplyError extends Error {
   }
 }
 
+/** One setting `planFor` refused to include in the plan it sent to the node. */
+export interface PlanRefusal {
+  settingId: string;
+  code: "OPTED_OUT";
+  message: string;
+}
+
 /**
  * Plan an edit for `settings` on one station.
  *
@@ -64,18 +71,28 @@ export class ConfigApplyError extends Error {
  *    timeout, bad response) is NOT the same thing as "no ids match": it
  *    means nothing could be verified, so the whole plan is refused as
  *    unreachable (502) rather than silently answered with an empty plan.
- * 2. Resolves any omitted `value` from what is declared for this station —
+ * 2. Checks each requested id against the opt-out register
+ *    (`harness_config_opt_out`, spec D6). An explicit operator opt-out wins:
+ *    an opted-out id is excluded from `want` — never sent to the node to
+ *    plan — and reported back in `refused`, named, with `OPTED_OUT`. This is
+ *    a PER-SETTING refusal, not a whole-request one: `fleet config plan
+ *    --station ID` plans every setting currently declared for a station
+ *    with no way to narrow it, so refusing the entire request over one
+ *    opted-out setting would let that one opt-out block writing anything
+ *    else to the station. Only when EVERY requested setting is opted out —
+ *    leaving nothing to plan — does this throw instead of returning a plan.
+ * 3. Resolves any omitted `value` from what is declared for this station —
  *    its own declaration, else its node's, else the fleet's (`resolveFor`).
  *    A setting with nothing declared and no value given is refused: an
  *    omitted value is a request to plan against "whatever the fleet
  *    wants", and there is nothing to plan against when nobody has said.
- * 3. Mints this operation's id and asks the node to derive the plan.
+ * 4. Mints this operation's id and asks the node to derive the plan.
  */
 export async function planFor(args: {
   tenantId: string;
   station: ConfigStation;
   settings: Array<{ settingId: string; value?: unknown }>;
-}): Promise<ConfigPlan> {
+}): Promise<{ plan: ConfigPlan; refused: PlanRefusal[] }> {
   const registry = await fetchRegistry(args.station.nodeId, args.station.stationKey);
   if (registry === null) {
     throw new ConfigApplyError(
@@ -85,9 +102,11 @@ export async function planFor(args: {
     );
   }
   const byId = new Map(registry.map((s) => [s.id, s]));
+  const optedOut = await getOptOuts(args.tenantId, args.station.stationKey);
 
   let declared: Record<string, Resolved> | null = null;
   const want: Array<{ settingId: string; value: unknown }> = [];
+  const refused: PlanRefusal[] = [];
   for (const s of args.settings) {
     if (!byId.has(s.settingId)) {
       throw new ConfigApplyError(
@@ -95,6 +114,15 @@ export async function planFor(args: {
         `${s.settingId} is not a setting this station's harness manages`,
         "UNKNOWN_SETTING",
       );
+    }
+
+    if (optedOut.has(s.settingId)) {
+      refused.push({
+        settingId: s.settingId,
+        code: "OPTED_OUT",
+        message: `an operator opted ${s.settingId} out of reconciliation for this station; it will not be planned or written`,
+      });
+      continue;
     }
 
     let value = s.value;
@@ -113,6 +141,19 @@ export async function planFor(args: {
     want.push({ settingId: s.settingId, value });
   }
 
+  if (want.length === 0) {
+    // Every requested setting was opted out — there is nothing left to plan.
+    // Refused wholly, because an empty `want` is not a request the node can
+    // answer, not because the opt-out deserves a different treatment than
+    // the per-setting refusal above.
+    const names = refused.map((r) => r.settingId).join(", ");
+    throw new ConfigApplyError(
+      400,
+      `an operator opted ${names} out of reconciliation for this station; nothing left to plan`,
+      "OPTED_OUT",
+    );
+  }
+
   const operationId = prefixedId("cfgop");
   const result = await broker.request(args.station.nodeId, "config.plan", {
     stationKey: args.station.stationKey,
@@ -127,7 +168,7 @@ export async function planFor(args: {
   if (!parsed.success) {
     throw new ConfigApplyError(502, "the node returned an unexpected plan", "NODE_UNREACHABLE");
   }
-  return parsed.data;
+  return { plan: parsed.data, refused };
 }
 
 /**
@@ -141,6 +182,26 @@ export async function planFor(args: {
  * CURRENT health for the gateway pid/uptime and records one
  * `applied_harness_config` row per setting the node actually wrote — the
  * restart evidence a later task's `awaiting-restart` state needs.
+ *
+ * Before any of that, it re-checks the opt-out register — never trusting
+ * `planFor` alone. An operator can opt a station out of a setting AFTER a
+ * plan naming it was reviewed and BEFORE it is applied; that window is
+ * exactly where the opt-out matters most, because nothing stops a plan from
+ * sitting reviewed for any length of time. The settings a plan actually
+ * covers are read from the node's own journal (`config.inspect`) rather
+ * than trusted from the caller — the same "never re-derive what the node
+ * already decided" posture as the rest of this file, applied to "what does
+ * this operation cover" instead of "what should be written". Any requested
+ * operation naming a setting now opted out is refused WHOLLY: `config.apply`
+ * applies one journaled plan as a single atomic write, so there is no way to
+ * write "everything in this plan except the opted-out entry" — the plan has
+ * already been narrowed once, at `planFor` time, to exclude anything opted
+ * out BEFORE it was created. A race landing here means the opt-out arrived
+ * after that narrowing, and the whole apply must wait for a fresh plan.
+ *
+ * The register is read first and the (more expensive) node round trip for
+ * `config.inspect` only made when it is non-empty — a station nobody has
+ * ever opted anything out on pays nothing extra on its apply path.
  */
 export async function applyFor(args: {
   tenantId: string;
@@ -148,6 +209,31 @@ export async function applyFor(args: {
   operationId: string;
   planDigest: string;
 }): Promise<ConfigReceipt> {
+  const optedOut = await getOptOuts(args.tenantId, args.station.stationKey);
+  if (optedOut.size > 0) {
+    const inspect = await broker.request(args.station.nodeId, "config.inspect", {
+      stationKey: args.station.stationKey,
+      operationId: args.operationId,
+    });
+    if (!inspect.ok) {
+      throw new ConfigApplyError(502, inspect.error ?? "the node could not be reached", "NODE_UNREACHABLE");
+    }
+    const parsedInspect = ConfigReceipt.safeParse(inspect.data);
+    if (!parsedInspect.success) {
+      throw new ConfigApplyError(502, "the node returned an unexpected receipt", "NODE_UNREACHABLE");
+    }
+    const blocked = parsedInspect.data.plan.entries
+      .map((entry) => entry.settingId)
+      .filter((settingId) => optedOut.has(settingId));
+    if (blocked.length > 0) {
+      throw new ConfigApplyError(
+        400,
+        `an operator opted ${blocked.join(", ")} out of reconciliation for this station after this plan was made; refusing to write ${blocked.length === 1 ? "it" : "them"}`,
+        "OPTED_OUT",
+      );
+    }
+  }
+
   const result = await broker.request(args.station.nodeId, "config.apply", {
     stationKey: args.station.stationKey,
     operationId: args.operationId,
@@ -456,7 +542,10 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
 
       // "drifted" or "absent": plan, then apply with the plan's own digest.
       try {
-        const plan = await planFor({ tenantId, station, settings: [{ settingId: obs.settingId }] });
+        // `candidateIds` already excludes an opted-out setting (above), so
+        // `planFor`'s own opt-out check never fires here — this call always
+        // names exactly one setting this station is not opted out of.
+        const { plan } = await planFor({ tenantId, station, settings: [{ settingId: obs.settingId }] });
         if (plan.noOp) {
           outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "skipped", reason: "plan is a no-op" });
           continue;
