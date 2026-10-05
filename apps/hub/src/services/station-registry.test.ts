@@ -18,12 +18,18 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { test, expect, beforeAll, afterAll } from "bun:test";
+import { test, expect, beforeAll, afterAll, describe, spyOn } from "bun:test";
 import { rawSql } from "../db/drizzle";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
-import { adoptStations, listAdopted, getStation, refreshAdoptedCapabilities } from "./station-registry";
+import {
+  adoptStations,
+  listAdopted,
+  getStation,
+  refreshAdoptedCapabilities,
+  reportUnknownCapabilities,
+} from "./station-registry";
 import type { DetectedStation } from "@agentpod/contract";
 
 // ─── Test Constants ────────────────────────────────────────────────────────────
@@ -419,4 +425,104 @@ test("refresh leaves matrixId alone for a harness that reports none", async () =
   const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
     .find((r) => r.stationKey === "refresh-mxid-absent")!.id);
   expect(row!.matrixId).toBeNull();
+});
+
+// ─── A dropped capability is observable ───────────────────────────────────────
+//
+// The incident: `config.manage` was missing from the contract's Capability
+// enum, `CapabilityList` filtered it out as it is designed to, and nothing
+// anywhere said so — so three merged PRs of declared harness config could not
+// activate on a real fleet and only manual production verification found it.
+//
+// The filter's tolerance is correct and is NOT what changed. What changed is
+// that the hub now says which station advertised what it threw away. A node
+// ahead of its hub is worth a warn on its own: it means the hub is behind.
+
+/** The one line the logger writes for a warn, as console.warn receives it. */
+const warnLines = (spy: ReturnType<typeof spyOn<Console, "warn">>) =>
+  spy.mock.calls.map(([line]) => (typeof line === "string" ? line : JSON.stringify(line)));
+
+describe("reportUnknownCapabilities", () => {
+  test("warns at warn level, naming the station and the dropped strings", () => {
+    const spy = spyOn(console, "warn");
+    try {
+      const reported = reportUnknownCapabilities("node_abc", [
+        { key: "hermes:known", capabilities: ["health", "config.manage"] },
+        { key: "hermes:ahead", capabilities: ["health", "capability-from-the-future"] },
+      ]);
+
+      expect(reported).toEqual([
+        { key: "hermes:ahead", dropped: ["capability-from-the-future"] },
+      ]);
+
+      const surfaced = warnLines(spy).filter(
+        (line) =>
+          line.includes('"level":"warn"') &&
+          line.includes("hermes:ahead") &&
+          line.includes("capability-from-the-future") &&
+          line.includes("node_abc"),
+      );
+      expect(surfaced, "the drop reaches the hub log, naming station and capability").toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("is silent when the node advertises nothing the hub does not know", () => {
+    // A warn on every detect would be worse than no warn at all: the signal
+    // only means anything if it fires when the hub is actually behind.
+    const spy = spyOn(console, "warn");
+    try {
+      const reported = reportUnknownCapabilities("node_abc", [
+        { key: "hermes:known", capabilities: ["health", "logs", "config.manage"] },
+      ]);
+      expect(reported).toEqual([]);
+      expect(warnLines(spy).filter((l) => l.includes("hermes:known"))).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+test("refresh surfaces a capability the hub does not know, and still stores the ones it does", async () => {
+  // The real hub path, not the helper: refreshAdoptedCapabilities runs on every
+  // node connect and is one of the three places the dropped capability went
+  // missing without a trace.
+  await adoptStations(TEST_USER, testNodeId, ["caps-ahead-of-hub"], [
+    {
+      key: "caps-ahead-of-hub", harness: "hermes", kind: "leaf", displayName: "ahead",
+      parentKey: null, workspacePath: "/w", capabilities: ["health"], adopted: false,
+    },
+  ]);
+
+  const spy = spyOn(console, "warn");
+  let updated = 0;
+  try {
+    updated = await refreshAdoptedCapabilities(testNodeId, {
+      brokerRequest: detectReturning([
+        {
+          key: "caps-ahead-of-hub", harness: "hermes", kind: "leaf", displayName: "ahead",
+          parentKey: null, workspacePath: "/w",
+          capabilities: ["health", "config.manage", "capability-from-the-future"],
+        },
+      ]),
+    });
+
+    const surfaced = warnLines(spy).some(
+      (line) =>
+        line.includes('"level":"warn"') &&
+        line.includes("caps-ahead-of-hub") &&
+        line.includes("capability-from-the-future"),
+    );
+    expect(surfaced, "the refresh path logs the drop").toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
+
+  // And the tolerance the filter exists for is intact: the row was not
+  // rejected, and every capability the hub DOES know was written.
+  expect(updated).toBeGreaterThanOrEqual(1);
+  const row = await getStation(TEST_USER, (await listAdopted(TEST_USER, testNodeId))
+    .find((r) => r.stationKey === "caps-ahead-of-hub")!.id);
+  expect(row!.capabilities).toEqual(["health", "config.manage"]);
 });

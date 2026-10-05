@@ -13,6 +13,21 @@
  * that the count can only change deliberately. Fixing one turns this red with
  * "fewer errors than the baseline — good news, update the file", which is a far
  * better prompt than a stale paragraph.
+ *
+ * ─── and the same for the tests, which the compiler had never seen ───────────
+ *
+ * `tsconfig.json` includes only `src/**\/*`, and no workflow ran `tsc` at all,
+ * so not one test file in this app was ever typechecked. That is how
+ * `capabilities: ["health", "config.manage"]` — a genuine type error against
+ * `Capability[]`, because the capability was missing from the contract's enum —
+ * sat in six test files across three merged PRs while every suite stayed green.
+ * The compiler would have named all six. Nothing asked it.
+ *
+ * So `tsconfig.tests.json` adds `tests/**\/*` and `typecheck-known-red-tests.txt`
+ * records what that costs today: 224 errors in 51 files, overwhelmingly
+ * strict-null noise that is NOT the bug and is not being fixed here. The
+ * baseline is per file for both configs, never a single total — one new error
+ * hiding behind one fixed error is exactly the move a total cannot see.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -21,6 +36,9 @@ import { join } from "node:path";
 
 const HUB_ROOT = join(import.meta.dir, "..", "..");
 const BASELINE_FILE = join(HUB_ROOT, "typecheck-known-red.txt");
+/** Only the `tests/` entries: `tsconfig.tests.json` compiles `src` too, and the
+ *  two files are unioned below rather than repeating fifteen numbers. */
+const TESTS_BASELINE_FILE = join(HUB_ROOT, "typecheck-known-red-tests.txt");
 
 /** `src/routes/station-acp.ts(320,17): error TS2769: …` → `src/routes/station-acp.ts`. */
 const ERROR_LINE = /^(\S+?)\(\d+,\d+\): error TS\d+:/;
@@ -52,8 +70,8 @@ function parseCompilerOutput(output: string): Counts {
   return counts;
 }
 
-async function runTypecheck(): Promise<string> {
-  const proc = Bun.spawn(["bun", "run", "typecheck"], {
+async function runTypecheck(script = "typecheck"): Promise<string> {
+  const proc = Bun.spawn(["bun", "run", script], {
     cwd: HUB_ROOT,
     stdout: "pipe",
     stderr: "pipe",
@@ -86,5 +104,51 @@ describe("the documented typecheck baseline", () => {
       expect(file, "baseline paths are relative to apps/hub").toStartWith("src/");
       expect(count, `${file} must carry a positive error count`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("the documented typecheck baseline, tests included", () => {
+  test("matches what the compiler actually reports", async () => {
+    const actual = parseCompilerOutput(await runTypecheck("typecheck:tests"));
+
+    // Guards the guard, and the one that matters most here: a `tsconfig.tests.json`
+    // that silently stopped including `tests/**\/*` would leave this comparing
+    // `src` to `src` and pass while checking nothing — which is the failure the
+    // whole file exists to close, reintroduced one level up.
+    expect(
+      Object.keys(actual).filter((f) => f.startsWith("tests/")).length,
+      "the tests config really compiles tests/",
+    ).toBeGreaterThan(10);
+
+    const documented = {
+      ...parseBaseline(readFileSync(BASELINE_FILE, "utf8")),
+      ...parseBaseline(readFileSync(TESTS_BASELINE_FILE, "utf8")),
+    };
+
+    // Whole objects, so a failure names every file that moved in either
+    // direction. Fewer errors than the baseline is good news that still turns
+    // this red: update the file and say so in the diff.
+    expect(actual).toEqual(documented);
+  }, 300_000);
+
+  test("the tests baseline parses, is not empty, and does not restate src", () => {
+    const documented = parseBaseline(readFileSync(TESTS_BASELINE_FILE, "utf8"));
+    expect(Object.keys(documented).length).toBeGreaterThan(10);
+    for (const [file, count] of Object.entries(documented)) {
+      // A `src/` row here would be a second, divergeable copy of a number the
+      // file next door already owns.
+      expect(file, "the tests baseline holds only tests/ paths").toStartWith("tests/");
+      expect(count, `${file} must carry a positive error count`).toBeGreaterThan(0);
+    }
+  });
+
+  test("the src baseline is untouched by the tests config", () => {
+    // `bun run typecheck` and its count of 15 are a published claim that this
+    // work was not allowed to move. Asserted here rather than trusted, because
+    // the tests config extends the src one and a stray `compilerOptions`
+    // override in it would change both at once.
+    const src = parseBaseline(readFileSync(BASELINE_FILE, "utf8"));
+    const total = Object.values(src).reduce((a, b) => a + b, 0);
+    expect(total, "KNOWN-RED for src is 15 errors").toBe(15);
   });
 });

@@ -28,6 +28,7 @@ import {
   listAdopted,
   unadopt,
   getStation,
+  reportUnknownCapabilities,
 } from "../services/station-registry";
 
 /** The most a console file read may ask for: an image preview, not a download. */
@@ -75,6 +76,11 @@ export const stationRoutes = new Hono()
       return c.json({ error: "invalid detect response from node" }, 502);
     }
 
+    // A capability this hub does not know is filtered out of the row above
+    // without an error anywhere. That is deliberate — see
+    // reportUnknownCapabilities — but it must not be silent.
+    reportUnknownCapabilities(nodeId, result.data);
+
     const adoptedRows = await listAdopted(userId, nodeId);
     const adoptedKeys = new Set(adoptedRows.map((s) => s.stationKey));
 
@@ -110,6 +116,10 @@ export const stationRoutes = new Hono()
       if (!parsed.success) {
         return c.json({ error: "invalid detect response from node" }, 502);
       }
+
+      // Adoption is the path the incident ran down: the capability the node
+      // advertised never reached the stations row and nothing said so.
+      reportUnknownCapabilities(nodeId, result.data);
 
       const rows = await adoptStations(userId, nodeId, keys, parsed.data);
       return c.json(rows);
