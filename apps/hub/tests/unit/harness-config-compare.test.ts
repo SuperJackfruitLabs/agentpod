@@ -240,3 +240,59 @@ describe("opted-out: an explicit operator choice, not a key in the harness's own
     expect(afterClearing.state).toBe("drifted");
   });
 });
+
+/**
+ * D11: a harness's own opt-out (ConfigValue.optedOutByHarness — Hermes'
+ * plugins.disabled) must reach `compare()` as `opted-out`, exactly as the
+ * hub's own register does — but the two sources must be distinguishable in
+ * the reason text, which is the whole point of carrying the field at all.
+ */
+describe("a harness's own opt-out (D11) is opted-out, and distinguishable from the hub's register", () => {
+  test("a document reporting optedOutByHarness is opted-out, with a reason naming the harness as the source", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("hermes");
+  });
+
+  test("a hub-register opt-out still reports its own reason, unrelated to the harness", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("operator opted");
+  });
+
+  test("the two reasons are textually distinguishable — an operator can tell which source fired", () => {
+    const harnessReason = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
+    })[0]!.reason!;
+    const registerReason = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!.reason!;
+    expect(harnessReason).not.toBe(registerReason);
+    // Neither reason's distinguishing word appears in the other.
+    expect(registerReason).not.toContain("hermes");
+    expect(harnessReason).not.toContain("operator opted");
+  });
+
+  test("optedOutByHarness: false (the ordinary case) is not opted-out", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900", optedOutByHarness: false }],
+    })[0]!;
+    expect(o.state).toBe("matches");
+  });
+});

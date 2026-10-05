@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/configedit"
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/hermeslive"
 )
 
 // hermesConfigRegistry is the whole set of Hermes settings this system manages.
@@ -72,6 +73,18 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 	path := filepath.Join(dir, "config.yaml")
 	data, readErr := os.ReadFile(path)
 
+	// optedOutByHarness is a DOCUMENT-level fact — the operator disabled the
+	// agentpod-live plugin itself, through Hermes' own plugins.disabled list
+	// (D11) — computed once per read, not re-derived per setting id. Every
+	// setting this registry manages today lives in the same profile document
+	// the plugin's own enablement lives in, so one check serves all of them.
+	// Distinct from the hub's own opt-out register: this is the harness's own
+	// record, and agentpod never writes it.
+	var optedOutByHarness bool
+	if readErr == nil {
+		optedOutByHarness = hermesPluginDisabled(data, hermeslive.Name)
+	}
+
 	out := make([]ConfigValue, 0, len(settings))
 	for _, id := range settings {
 		if readErr != nil {
@@ -81,7 +94,7 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 		}
 		where := hermesConfigPath[id]
 		v, state := yamlValue(data, where[0], where[1])
-		cv := ConfigValue{SettingID: id, Readable: true}
+		cv := ConfigValue{SettingID: id, Readable: true, OptedOutByHarness: optedOutByHarness}
 		switch state {
 		case yamlScalarValue:
 			cv.Observed = v
@@ -155,6 +168,28 @@ func observedList(data []byte, keyPath string) ([]any, error) {
 		return nil, nil
 	}
 	return list, nil
+}
+
+// hermesPluginDisabled reports whether name appears in this document's
+// `plugins.disabled` list — Hermes' own mechanism for an operator to turn a
+// plugin off through the harness's own UI, which ObserveConfig surfaces as
+// `optedOutByHarness` (D11). Reuses observedList (configedit-backed, so a
+// block list, an inline list, or a present-but-empty list are all read
+// structurally) rather than scanning the YAML as text a second way. Both an
+// absent `plugins` section and an absent `disabled` key report `false`, with
+// no error: plugins.disabled naming nothing is the ordinary case, not a
+// shape this reader cannot speak for.
+func hermesPluginDisabled(data []byte, name string) bool {
+	list, err := observedList(data, "plugins.disabled")
+	if err != nil {
+		return false
+	}
+	for _, v := range list {
+		if s, ok := v.(string); ok && s == name {
+			return true
+		}
+	}
+	return false
 }
 
 // isCompositeRootKey reports whether key names the composite root rather

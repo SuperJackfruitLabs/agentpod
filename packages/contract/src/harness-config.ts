@@ -117,6 +117,12 @@ export const ConfigValue = z.object({
    */
   readable: z.boolean(),
   reason: z.string().optional(),
+  /**
+   * The HARNESS's own record that an operator disabled this — Hermes'
+   * `plugins.disabled`. Distinct from the hub's opt-out register: this one is the
+   * operator speaking through the harness's own UI, and agentpod never writes it.
+   */
+  optedOutByHarness: z.boolean().optional(),
 });
 export type ConfigValue = z.infer<typeof ConfigValue>;
 

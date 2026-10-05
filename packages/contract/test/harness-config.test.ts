@@ -50,6 +50,16 @@ describe("harness config contract", () => {
     expect(ConfigValue.safeParse({ settingId: "x" }).success).toBe(false);
   });
 
+  test("optedOutByHarness is optional, and absent is not the same as declaring false", () => {
+    // A value with no opinion at all — the common case, every reader that has
+    // never seen `plugins.disabled` mentioned.
+    expect(ConfigValue.safeParse({ settingId: "x", readable: true, observed: "900" }).success).toBe(true);
+    const seen = ConfigValue.parse({
+      settingId: "x", readable: true, observed: "900", optedOutByHarness: true,
+    });
+    expect(seen.optedOutByHarness).toBe(true);
+  });
+
   test("a declaration's value must be present — omitting it is not a literal null", () => {
     // compare() reads a declared-but-undefined value back as permanently
     // `drifted`, with nothing a station could ever observe able to satisfy

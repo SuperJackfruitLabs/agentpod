@@ -193,7 +193,8 @@ export interface AppliedWrite {
  *
  *   1. out-of-scope      (the declaration cannot apply to this station at all)
  *   2. unreadable         (the document could not be parsed — never "matches")
- *   3. opted-out          (an explicit operator choice)
+ *   3. opted-out          (an explicit operator choice — the hub's own
+ *                          register, or the harness's own record, D11)
  *   4. awaiting-restart   (written, restart needed, gateway pid unchanged)
  *   5. absent / drifted / matches   (the ordinary comparison)
  */
@@ -252,12 +253,27 @@ export function compare(args: {
       continue;
     }
 
-    // 3. opted-out: an explicit operator choice. It outranks the ordinary
-    // comparison so the state names the operator's decision, not whatever
-    // the document happens to hold — "drifted" would invite exactly the
-    // apply the opt-out exists to prevent.
+    // 3. opted-out: an explicit operator choice, from either of two sources.
+    // It outranks the ordinary comparison so the state names the operator's
+    // decision, not whatever the document happens to hold — "drifted" would
+    // invite exactly the apply the opt-out exists to prevent. The two
+    // sources are kept distinguishable in the REASON text (D11): the hub's
+    // own register is agentpod's doing and is visible in this system without
+    // ever looking at the document; the harness's own record
+    // (`ConfigValue.optedOutByHarness` — Hermes' `plugins.disabled`) is the
+    // operator speaking through the harness's own UI, invisible until
+    // someone reads the file. Both refuse a write; only the wording tells
+    // an operator which one fired.
     if (optedOut.has(v.settingId)) {
       out.push({ ...row, state: "opted-out", reason: "an operator opted this setting out of reconciliation" });
+      continue;
+    }
+    if (v.optedOutByHarness) {
+      out.push({
+        ...row,
+        state: "opted-out",
+        reason: `${setting?.harness ?? "the harness"} itself reports this setting disabled (its own plugins.disabled) — not an agentpod exemption`,
+      });
       continue;
     }
 
