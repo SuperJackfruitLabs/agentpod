@@ -631,6 +631,13 @@
       "when": 1791141299736,
       "tag": "0089_declared_harness_config",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1791182986574,
+      "tag": "0090_harness_config_ops",
+      "breakpoints": true
     }
   ]
 }
