@@ -100,39 +100,18 @@
   }
 
   /**
-   * Detects the harness's OWN opt-out (D11 — Hermes' `plugins.disabled`,
-   * OpenClaw's `plugins.entries.agentpod-errors.enabled: false`), as
-   * distinct from agentpod's own opt-out register.
-   *
-   * Verified against the hub rather than assumed: `ConfigValue` (the node's
-   * read of the document) carries a typed `optedOutByHarness` boolean, but
-   * that field is consumed INSIDE `compare()`
-   * (`apps/hub/src/services/harness-config.ts`) and never reaches the
-   * client — `ConfigObservation`, what `GET /api/stations/:stationId/config`
-   * actually serves, has no such field. The only signal that does reach an
-   * observation is `compare()`'s own `reason` text, and only one of its two
-   * `opted-out` branches ends with the fixed marker below:
-   *
-   *  - the hub's own register: "an operator opted this setting out of
-   *    reconciliation" — no harness name, no marker.
-   *  - the harness's own record: "<harness> itself reports this setting
-   *    disabled (its own plugins.disabled) — not an agentpod exemption".
-   *
-   * Matching the literal marker is a precise read of that fixed suffix, not
-   * a guess at wording: it cannot be satisfied by a reason that merely
-   * mentions a harness name for an unrelated cause, the way a bare
-   * harness-name regex could.
-   */
-  function harnessNamedAsSource(o: ConfigObservation): boolean {
-    return (o.reason ?? "").includes("not an agentpod exemption");
-  }
-
-  /**
    * Which level — and which source — an `opted-out` row's exemption came
    * from. Station beats node (D9): a station-level register row decides
    * outright, so a setting exempted at both levels is attributed to the
    * station, never the node, and the node entry is not even consulted once
    * a station entry is found.
+   *
+   * The source itself is read straight off `ConfigObservation.optedOutByHarness`
+   * (D11) — a typed field `compare()` sets in both `opted-out` branches
+   * (`apps/hub/src/services/harness-config.ts`), not re-derived by matching
+   * the `reason` text for a fixed sentence suffix. The register-vs-harness
+   * distinction used to live only in that prose; a reworded sentence would
+   * have silently broken this panel's read of it.
    */
   function exemptionFor(
     o: ConfigObservation,
@@ -140,11 +119,11 @@
     nodeOptOuts: Map<string, api.ConfigOptOutRow>,
   ): Exemption | null {
     if (o.state !== "opted-out") return null;
+    if (o.optedOutByHarness) return { source: "harness", level: null, recordedBy: null, reason: o.reason ?? null };
     const station = stationOptOuts.get(o.settingId);
     if (station) return { source: "register", level: "station", recordedBy: station.optedOutBy, reason: station.reason };
     const node = nodeOptOuts.get(o.settingId);
     if (node) return { source: "register", level: "node", recordedBy: node.optedOutBy, reason: node.reason };
-    if (harnessNamedAsSource(o)) return { source: "harness", level: null, recordedBy: null, reason: o.reason ?? null };
     return { source: "register", level: null, recordedBy: null, reason: o.reason ?? null };
   }
 

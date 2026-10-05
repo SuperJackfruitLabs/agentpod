@@ -321,6 +321,30 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
     expect(o.reason).toContain("openclaw");
     expect(o.reason).not.toContain("hermes");
   });
+
+  // Task 5b: the source must be on the OBSERVATION itself, typed, not just
+  // recoverable from the reason's prose — the console used to match the
+  // literal "not an agentpod exemption" suffix, which breaks the moment
+  // somebody rewords the sentence. `optedOutByHarness` is the field; this
+  // test fails if `compare()` ever reports the same value for both sources.
+  test("ConfigObservation.optedOutByHarness names the source, not just the reason text", () => {
+    const harnessSourced = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
+    })[0]!;
+    expect(harnessSourced.state).toBe("opted-out");
+    expect(harnessSourced.optedOutByHarness).toBe(true);
+
+    const registerSourced = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(registerSourced.state).toBe("opted-out");
+    expect(registerSourced.optedOutByHarness).toBe(false);
+  });
 });
 
 /**

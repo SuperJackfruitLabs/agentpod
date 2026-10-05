@@ -615,10 +615,11 @@ test("the harness's own opt-out reads differently from an agentpod exemption", a
         state: "opted-out",
         declared: ["x"],
         observed: ["y"],
-        // The exact wording compare() produces (apps/hub/src/services/harness-config.ts)
-        // for the harness-sourced branch — the fixed "not an agentpod exemption" suffix
-        // is the one signal the panel actually reads to tell this apart from the hub's
-        // own register (see HarnessConfigPanel's `harnessNamedAsSource`).
+        // The typed field compare() sets (apps/hub/src/services/harness-config.ts)
+        // for the harness-sourced branch — this, not the reason prose, is what
+        // the panel reads to tell this apart from the hub's own register (see
+        // HarnessConfigPanel's `exemptionFor`).
+        optedOutByHarness: true,
         reason: "hermes itself reports this setting disabled (its own plugins.disabled) — not an agentpod exemption",
       }),
     ],

@@ -165,6 +165,26 @@ export const ConfigObservation = z.object({
   ]),
   /** Why, whenever the state is not `matches`. Never a bare boolean. */
   reason: z.string().optional(),
+  /**
+   * Set only when `state` is `"opted-out"`: which of the two sources decided
+   * it. `true` mirrors `ConfigValue.optedOutByHarness` — the HARNESS's own
+   * record (Hermes' `plugins.disabled`, OpenClaw's
+   * `plugins.entries.agentpod-errors.enabled: false`) — `false` is the hub's
+   * own register (`fleet config opt-out` / the API). The two mean different
+   * things to an operator: a register opt-out is agentpod's own doing and
+   * can be undone the same way; a harness opt-out is the operator speaking
+   * through the harness's own UI, and agentpod never writes it. OPTIONAL so
+   * every existing construction site and fixture still parses unchanged;
+   * absent on any state other than `opted-out`.
+   *
+   * This exists because `compare()` already knows the source — it consumes
+   * `ConfigValue.optedOutByHarness` to pick which `reason` text to write —
+   * but used to leave the distinction only in that prose, which a console
+   * had to pattern-match against a fixed sentence suffix to recover. That is
+   * the same class of bug as `level` below: a fact the producer holds that
+   * the contract did not carry, leaving a consumer to re-derive it.
+   */
+  optedOutByHarness: z.boolean().optional(),
 });
 export type ConfigObservation = z.infer<typeof ConfigObservation>;
 
