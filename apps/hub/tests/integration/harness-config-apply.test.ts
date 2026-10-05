@@ -204,6 +204,15 @@ async function connectConfigFakeNode(
   serverPort: number,
   nodeId: string,
   nodeSecret: string,
+  /**
+   * When set, `config.plan` answers ok:true with a REFUSED plan — exactly
+   * what the real node returns for SHAPE_UNEXPECTED, UNREADABLE,
+   * CREDENTIAL_PATH or OUT_OF_SCOPE: a populated digest, `noOp: false`, and
+   * `refusal`. The node also declines to journal it, which is why treating
+   * it as a plan and applying it used to come back as "the node could not be
+   * reached".
+   */
+  opts: { planRefusal?: { code: string; message: string } } = {},
 ): Promise<{ ws: WebSocket; asked: string[]; plans: Map<string, FakePlan> }> {
   const asked: string[] = [];
   const plans = new Map<string, FakePlan>();
@@ -260,6 +269,14 @@ async function connectConfigFakeNode(
         createdAt: new Date().toISOString(),
         planDigest: `digest-${params.operationId}`,
       };
+      if (opts.planRefusal) {
+        // A refused plan is NOT journaled by the real node, so `plans` is
+        // deliberately left without this operation: an apply that followed
+        // would get "operation not found", the path that used to surface as
+        // a 502 blaming connectivity.
+        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { ...plan, refusal: opts.planRefusal } }));
+        return;
+      }
       plans.set(params.operationId, plan);
       ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: plan }));
       return;
@@ -614,6 +631,128 @@ test(
         body: { operationId: "op_whatever", planDigest: "digest_whatever" },
       });
       expect(applyRes.status).toBe(404);
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "a plan the node REFUSED is reported as a refusal, with the node's own code",
+  async () => {
+    // Finding 3. The node answers promptly and names the problem; the hub
+    // used to answer 200 with `{refusal: …}` in the body, so `fleet config
+    // plan` printed it and exited 0 and no programmatic caller could tell a
+    // refusal from a plan.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgapply-refusal-host");
+      const stationKey = "cfgapply-refusal-station";
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor(stationKey));
+      if (!station) throw new Error("station adoption failed");
+
+      const fake = await connectConfigFakeNode(server.port!, nodeId, nodeSecret, {
+        planRefusal: {
+          code: "SHAPE_UNEXPECTED",
+          message: "approvals.timeout: declared value is not a scalar",
+        },
+      });
+
+      const res = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { settings: [{ settingId: SETTING_ID, value: "900" }] },
+      });
+
+      // A status a caller can branch on — and specifically not 200.
+      expect(res.status).toBe(409);
+      const body = (await res.json()) as { error?: string; code?: string; entries?: unknown; planDigest?: string };
+      // The node's own code and sentence, not "the node could not be reached".
+      expect(body.code).toBe("SHAPE_UNEXPECTED");
+      expect(body.error).toContain("not a scalar");
+      expect(body.error).not.toMatch(/could not be reached|unreachable/i);
+      // And never a plan-shaped body a caller might try to apply.
+      expect(body.entries).toBeUndefined();
+      expect(body.planDigest).toBeUndefined();
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "a refusal about the request itself is a 400, distinguishable from a 409 about the document",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgapply-refusal400-host");
+      const stationKey = "cfgapply-refusal400-station";
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor(stationKey));
+      if (!station) throw new Error("station adoption failed");
+
+      const fake = await connectConfigFakeNode(server.port!, nodeId, nodeSecret, {
+        planRefusal: {
+          code: "OUT_OF_SCOPE",
+          message: "hermes is the composite root, which has no profile-scoped document of its own",
+        },
+      });
+
+      const res = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { settings: [{ settingId: SETTING_ID, value: "900" }] },
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code?: string }).code).toBe("OUT_OF_SCOPE");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "planning with no value and nothing declared is NOTHING_DECLARED, not UNKNOWN_SETTING",
+  async () => {
+    // Finding 5. `UNKNOWN_SETTING` is reserved for an id not in the registry
+    // (D1), and this id IS in the registry — the live check just passed. The
+    // remedies are different sentences, so they are different codes.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgapply-nodecl-host");
+      const stationKey = "cfgapply-nodecl-station";
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor(stationKey));
+      if (!station) throw new Error("station adoption failed");
+
+      const fake = await connectConfigFakeNode(server.port!, nodeId, nodeSecret);
+
+      const res = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        // No `value`, and nothing declared at any level for this station.
+        body: { settings: [{ settingId: SETTING_ID }] },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error?: string; code?: string };
+      expect(body.code).toBe("NOTHING_DECLARED");
+      expect(body.code).not.toBe("UNKNOWN_SETTING");
+      expect(body.error).toContain(SETTING_ID);
+      // Nothing was asked of the node to plan — there was nothing to plan.
+      expect(fake.asked).not.toContain("config.plan");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
     } finally {
       server.stop(true);
     }

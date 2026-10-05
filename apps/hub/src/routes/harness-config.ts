@@ -319,7 +319,15 @@ const ApplyBody = z.object({
   planDigest: z.string().min(1),
 });
 
-/** `ConfigApplyError` → the status/body the route answers with. */
+/**
+ * `ConfigApplyError` → the status/body the route answers with.
+ *
+ * `code` travels verbatim, including a refusal code the NODE produced
+ * (`planFor` throws rather than returning a refused plan as though it were a
+ * plan — finding 3). A caller distinguishes a refusal from a plan by the
+ * status alone, and which refusal it was by `code` alone, without parsing the
+ * sentence.
+ */
 function configApplyErrorResponse(err: ConfigApplyError): { error: string; code?: string } {
   return { error: err.message, ...(err.code ? { code: err.code } : {}) };
 }
@@ -552,7 +560,10 @@ export const harnessConfigRoutes = new Hono()
    * to plan anything, resolves an omitted `value` from what is declared, and
    * returns the node's `ConfigPlan` unchanged — never an empty one standing
    * in for a node this system could not reach (that is a 502, via
-   * `ConfigApplyError`, not a 200 with nothing in it).
+   * `ConfigApplyError`, not a 200 with nothing in it), and never a REFUSED
+   * plan standing in for a plan (that is a 400 or a 409 carrying the node's
+   * own refusal code, for the same reason: a refusal that cannot be told from
+   * a pass by status or exit code is spec §9's whole premise, violated).
    */
   .post("/stations/:stationId/config/plan", zValidator("json", PlanBody), async (c) => {
     const user = c.get("user") as AuthUser | undefined;
@@ -577,7 +588,7 @@ export const harnessConfigRoutes = new Hono()
       return c.json(refused.length > 0 ? { ...plan, refused } : plan);
     } catch (err) {
       if (err instanceof ConfigApplyError) {
-        return c.json(configApplyErrorResponse(err), err.status as 400 | 502);
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
       }
       throw err;
     }
@@ -653,7 +664,7 @@ export const harnessConfigRoutes = new Hono()
       return c.json(receipt, receipt.phase === "applied" ? 200 : 409);
     } catch (err) {
       if (err instanceof ConfigApplyError) {
-        return c.json(configApplyErrorResponse(err), err.status as 400 | 502);
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
       }
       throw err;
     }

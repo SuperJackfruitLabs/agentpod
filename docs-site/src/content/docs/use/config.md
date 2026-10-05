@@ -328,11 +328,13 @@ an operator just made through it.
 ## Every refusal, and what distinguishes it
 
 A refusal that cannot be told from a pass is the failure this whole area keeps hitting, so
-every one of these is distinct and carries its own message. There are eight:
+every one of these is distinct and carries its own message. There are ten:
 
 | Refusal | What distinguishes it |
 |---|---|
 | `UNKNOWN_SETTING` | The setting id isn't in any reachable registry — or no node could be asked to confirm either way; the message, not the code, tells you which. |
+| `NOTHING_DECLARED` | The setting id IS in the station's live registry, but nothing is declared for that station at any level and no value was given to plan against. Remedy: `fleet config set`. Distinct from `UNKNOWN_SETTING` because the id is real and the remedy is a different command. |
+| `NODE_UNREACHABLE` | The node could not be asked at all (offline, timed out, disconnected, or answered in an unexpected shape). Remedy: retry once it is back. Never used for a refusal the node itself named — a node that answers with a refusal is a node that was reached. |
 | `OUT_OF_SCOPE` | The declaration's own target has no document to land in at all (for example, declaring against Hermes's composite root, which has no profile-scoped document of its own) — a plan-time refusal, distinct from the `out-of-scope` *comparison state* reported for a per-station declaration of a non-`profile`-scoped setting. |
 | `SHAPE_UNEXPECTED` | The declared value doesn't fit the setting's registered shape (an `additive-only` value that isn't a list of strings, say), or the derived edit would change something outside the keys this plan claims to touch. |
 | `PLAN_STALE` | The document changed after this plan was reviewed. Remedy: re-plan and re-review. |
@@ -343,7 +345,19 @@ every one of these is distinct and carries its own message. There are eight:
 
 `PLAN_DIGEST_MISMATCH` was added during implementation, after the seven above were
 specified, because collapsing it into `PLAN_STALE` would make two conditions with different
-remedies indistinguishable from their refusal code alone.
+remedies indistinguishable from their refusal code alone. `NOTHING_DECLARED` and
+`NODE_UNREACHABLE` are the two the hub produces on its own: no node can produce them,
+because only the hub knows what is declared and only the hub knows it could not get an
+answer.
+
+**A refused plan is a refusal, not a plan.** `fleet config plan` exits non-zero on one, and
+the HTTP route answers 400 when the refusal is about what was asked for (`UNKNOWN_SETTING`,
+`NOTHING_DECLARED`, `OUT_OF_SCOPE`, `CREDENTIAL_PATH`) and 409 when it is about the state of
+the document or the station (`SHAPE_UNEXPECTED`, `UNREADABLE`, `PLAN_STALE`,
+`PLAN_DIGEST_MISMATCH`, `OPTED_OUT`) — never 200 with a refusal in the body, which no
+script could tell from a plan. The code and the sentence are the node's own wherever the
+node is the one that refused, and at adopt time they are what gets recorded against the
+station, so a recorded reason names the refusal rather than blaming the connection.
 
 ## A setting that can't be found
 

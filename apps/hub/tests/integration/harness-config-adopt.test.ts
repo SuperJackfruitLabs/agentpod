@@ -158,6 +158,13 @@ interface FakeNodeOptions {
   observed?: Record<string, Record<string, unknown>>;
   /** config.plan refuses outright (ok:false) for these station keys. */
   planFails?: Set<string>;
+  /**
+   * config.plan answers ok:true with a REFUSED plan for these station keys —
+   * a populated digest, `noOp: false`, `refusal`, and (as the real node does)
+   * nothing journaled, so a following apply would answer "operation not
+   * found".
+   */
+  planRefusal?: { code: string; message: string };
   /** config.apply refuses outright (ok:false) for these station keys. */
   applyFails?: Set<string>;
   /** Called synchronously inside the config.plan handler, before answering. */
@@ -249,6 +256,10 @@ async function connectFakeNode(
         createdAt: new Date().toISOString(),
         planDigest: `digest-${params.operationId}`,
       };
+      if (opts.planRefusal) {
+        ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { ...plan, refusal: opts.planRefusal } }));
+        return;
+      }
       plans.set(params.operationId, plan);
       ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: plan }));
       return;
@@ -542,6 +553,51 @@ test(
 
       expect(fake.planCalls.length).toBeGreaterThan(0);
       expect(rowExistedWhenPlanned).toBe(true);
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "a node that REFUSES the plan records that refusal, not an unreachable node",
+  async () => {
+    // Finding 3, at adopt time: `reconcileStation` checked only `plan.noOp`,
+    // so a refused plan went on to `applyFor`, the node answered
+    // `ErrConfigOperationNotFound`, and the station's `configReason` said the
+    // node could not be reached — sending the operator to debug connectivity
+    // that was fine, forever, on a recorded reason.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      await declareFleet(TIMEOUT_SETTING, 900);
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgadopt-planrefusal-host");
+      const stationKey = "cfgadopt-planrefusal-station";
+      const fake = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        observed: { [stationKey]: { [TIMEOUT_SETTING]: 300 } },
+        planRefusal: {
+          code: "SHAPE_UNEXPECTED",
+          message: "approvals.timeout is not a scalar",
+        },
+      });
+
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor([stationKey]));
+
+      // The adoption still succeeded — the invariant this whole path exists
+      // to keep.
+      expect(station).toBeTruthy();
+      // Nothing was written, and the apply was never even attempted on a plan
+      // that does not exist.
+      expect(await appliedValueOf(station!.id, TIMEOUT_SETTING)).toBeUndefined();
+      expect(fake.applyCalls).toEqual([]);
+
+      const reason = await configReasonOf(station!.id);
+      expect(reason).toContain("SHAPE_UNEXPECTED");
+      expect(reason).toContain("not a scalar");
+      expect(reason).not.toMatch(/could not be reached|unreachable|offline/i);
 
       fake.ws.close();
       await new Promise((r) => setTimeout(r, 100));

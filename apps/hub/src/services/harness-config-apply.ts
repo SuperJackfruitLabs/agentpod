@@ -40,18 +40,48 @@ export type ConfigStation = Pick<StationRow, "id" | "nodeId" | "stationKey">;
 /**
  * Thrown by `planFor`/`applyFor` for any refusal the ROUTE must turn into a
  * status code. `code` is a `ConfigRefusalCode` when the refusal is one the
- * contract names, and `"NODE_UNREACHABLE"` when the node itself could not be
- * asked — distinct, because the remedy differs: re-check the setting id and
- * declaration for the first, retry once the node is back for the second.
+ * contract names — including one the NODE named, carried through verbatim —
+ * and one of two hub-side codes otherwise, each distinct because the remedy
+ * is: `"NODE_UNREACHABLE"` (the node could not be asked at all; retry once it
+ * is back) and `"NOTHING_DECLARED"` (the setting is real and manageable, but
+ * nobody has said what the fleet wants it to be; run `fleet config set`).
+ *
+ * `NOTHING_DECLARED` is deliberately NOT in the contract's
+ * `ConfigRefusalCode`: that enum is the set of refusals a NODE can produce,
+ * and no node can produce this one — only the hub knows what is declared.
+ * `NODE_UNREACHABLE` is outside it for the same reason.
  */
 export class ConfigApplyError extends Error {
   constructor(
     public readonly status: number,
     message: string,
-    public readonly code?: ConfigRefusalCode | "NODE_UNREACHABLE",
+    public readonly code?: ConfigRefusalCode | "NODE_UNREACHABLE" | "NOTHING_DECLARED",
   ) {
     super(message);
     this.name = "ConfigApplyError";
+  }
+}
+
+/**
+ * The HTTP status a refusal the NODE named answers with (finding 3).
+ *
+ * Split by remedy, not by severity: a refusal about what was ASKED FOR is the
+ * caller's to fix and answers 400; a refusal about the state of the document
+ * or the station is a conflict with something the caller does not control and
+ * answers 409. Either way the node's own code and sentence travel to the
+ * caller unchanged — a refused plan must never be reported as a plan, and
+ * must never be recast as "the node could not be reached", which is what
+ * happened before: the node answered promptly and named the problem, and the
+ * hub sent the operator to debug connectivity that was fine.
+ */
+export function statusForRefusal(code: ConfigRefusalCode): 400 | 409 {
+  switch (code) {
+    case "UNKNOWN_SETTING":
+    case "OUT_OF_SCOPE":
+    case "CREDENTIAL_PATH":
+      return 400;
+    default:
+      return 409;
   }
 }
 
@@ -83,10 +113,14 @@ export interface PlanRefusal {
  *    leaving nothing to plan — does this throw instead of returning a plan.
  * 3. Resolves any omitted `value` from what is declared for this station —
  *    its own declaration, else its node's, else the fleet's (`resolveFor`).
- *    A setting with nothing declared and no value given is refused: an
- *    omitted value is a request to plan against "whatever the fleet
- *    wants", and there is nothing to plan against when nobody has said.
+ *    A setting with nothing declared and no value given is refused with
+ *    `NOTHING_DECLARED`: an omitted value is a request to plan against
+ *    "whatever the fleet wants", and there is nothing to plan against when
+ *    nobody has said.
  * 4. Mints this operation's id and asks the node to derive the plan.
+ * 5. A plan the node REFUSED is thrown, never returned: the node's own
+ *    refusal code and sentence reach the caller, with a status that tells a
+ *    programmatic caller it is not a plan.
  */
 export async function planFor(args: {
   tenantId: string;
@@ -130,10 +164,14 @@ export async function planFor(args: {
       declared ??= await resolveFor(args.station.id, args.station.nodeId, args.tenantId);
       const resolved = declared[s.settingId];
       if (!resolved) {
+        // NOT `UNKNOWN_SETTING` (finding 5): that code means "an id not in
+        // the registry" (D1), and `byId.has` just proved this id IS in the
+        // live registry. The remedies are different sentences — declare a
+        // value here, check the id there — so they are different codes.
         throw new ConfigApplyError(
           400,
-          `no value was given for ${s.settingId} and nothing is declared for this station to resolve it from`,
-          "UNKNOWN_SETTING",
+          `nothing is declared for ${s.settingId} on this station, at station, node or fleet level, and no value was given to plan against`,
+          "NOTHING_DECLARED",
         );
       }
       value = resolved.value;
@@ -167,6 +205,17 @@ export async function planFor(args: {
   const parsed = ConfigPlan.safeParse(result.data);
   if (!parsed.success) {
     throw new ConfigApplyError(502, "the node returned an unexpected plan", "NODE_UNREACHABLE");
+  }
+  // 5. A REFUSED plan is not a plan (finding 3). The node carries `refusal`
+  // with a populated digest and `noOp: false`, and deliberately does not
+  // journal it — so handing it back as a 200 let `fleet config plan` exit 0
+  // on a refusal, and let `reconcileStation` go straight on to `applyFor`,
+  // where the node answered `ErrConfigOperationNotFound` and the hub recorded
+  // "the node could not be reached" against the station. The node's own code
+  // and sentence are what the caller gets instead.
+  if (parsed.data.refusal) {
+    const { code, message } = parsed.data.refusal;
+    throw new ConfigApplyError(statusForRefusal(code), message, code);
   }
   return { plan: parsed.data, refused };
 }
@@ -377,6 +426,19 @@ export async function readGatewayPid(nodeId: string, stationKey: string): Promis
 
 // ─── reconcileOnAdopt ──────────────────────────────────────────────────────────
 
+/**
+ * The sentence recorded against a station for one failed setting. A
+ * `ConfigApplyError` prefixes its code, so a recorded reason can be told
+ * apart by a reader who only has the text — the refusal a node named, a node
+ * that could not be reached, and nothing being declared all read differently.
+ */
+function reasonFor(err: unknown): string {
+  if (err instanceof ConfigApplyError) {
+    return err.code ? `${err.code}: ${err.message}` : err.message;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 /** What `reconcileOnAdopt` did with one declared setting on one station. */
 export interface ReconcileOutcome {
   stationId: string;
@@ -568,7 +630,11 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
         // between plan and apply) and anything else planFor/applyFor could
         // throw — this station's turn ends here, the next setting or the
         // next station is unaffected.
-        const reason = err instanceof Error ? err.message : String(err);
+        // A `ConfigApplyError` carries the refusal's own code — the node's,
+        // when the node is the one that refused — and the recorded reason
+        // names it, so `stations.configReason` says what was refused rather
+        // than only how it read.
+        const reason = reasonFor(err);
         outcomes.push({ stationId: station.id, settingId: obs.settingId, result: "failed", reason });
         failureReasons.push(`${obs.settingId}: ${reason}`);
       }
