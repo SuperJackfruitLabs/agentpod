@@ -54,10 +54,30 @@ type ConfigManager interface {
 	ObserveConfig(ctx context.Context, key string, settings []string) ([]ConfigValue, error)
 
 	// PlanConfig derives the edit that would satisfy `want` on the station
-	// `key`, naming operationID so the journal (a later task) can key its
-	// receipt by it. It writes nothing: the returned ConfigPlan carries the
-	// edited document only in its diff, never to disk. A plan that cannot be
-	// offered comes back with Refusal set and a nil error — a refused plan is
-	// still an answer, not a failure of the call.
+	// `key`, naming operationID so this station's own journal can key a
+	// receipt by it (config_journal.go). It writes nothing to the document:
+	// the returned ConfigPlan carries the edited document only in its diff,
+	// never to disk. A plan that cannot be offered comes back with Refusal
+	// set and a nil error — a refused plan is still an answer, not a failure
+	// of the call. A plan that is NOT refused is recorded in the journal
+	// (phase "planned") so ApplyConfig, handed only a digest, can recover
+	// what review saw.
 	PlanConfig(ctx context.Context, key, operationID string, want []DeclaredSetting) (ConfigPlan, error)
+
+	// ApplyConfig applies the plan previously reviewed as planDigest for
+	// operationID: it re-derives the plan from the document as it is now and
+	// refuses (phase "conflict", never an error) rather than write anything
+	// if that no longer matches what planDigest names, or if planDigest does
+	// not match what this station's journal actually has on record. Applying
+	// an operationID already recorded as "applied" returns that receipt
+	// unchanged — ApplyConfig is idempotent per operationID. Nothing here
+	// starts, stops, or restarts the harness; the receipt has no `restarted`
+	// field and never will (D4).
+	ApplyConfig(ctx context.Context, key, operationID, planDigest string) (ConfigReceipt, error)
+
+	// InspectConfig returns the receipt this station's journal has recorded
+	// for operationID, exactly as recorded — it never re-derives or
+	// re-plans. An operationID with no journal entry at all is an error, not
+	// a freshly fabricated plan standing in for a review that never happened.
+	InspectConfig(ctx context.Context, key, operationID string) (ConfigReceipt, error)
 }

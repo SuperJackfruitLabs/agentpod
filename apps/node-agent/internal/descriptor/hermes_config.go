@@ -164,9 +164,29 @@ func (h *hermesDescriptor) isCompositeRootKey(key string) (bool, error) {
 	return false, nil
 }
 
-// PlanConfig derives, in memory only, the edit that would satisfy `want` on
-// the profile named by key. It writes nothing to disk; see config_plan.go
-// for the shapes and configedit for the read/edit primitives this composes.
+// configPlanDerivation is everything deriving a plan computes in memory: the
+// reviewable ConfigPlan itself, plus the raw bytes and bookkeeping ApplyConfig
+// needs to actually perform — and afterwards re-verify — that same edit,
+// without ever being handed `want` again. Entries[].Intended already carries
+// enough to reconstruct `want` (see ApplyConfig), so nothing here is specific
+// to the first derivation; calling derivePlanConfig twice with the same
+// reconstructed `want` is "the same code path" both PlanConfig and ApplyConfig
+// run.
+type configPlanDerivation struct {
+	plan       ConfigPlan
+	profileDir string
+	path       string
+	before     []byte
+	after      []byte
+	keyPaths   []string
+	additive   map[string][]string
+}
+
+// derivePlanConfig derives, in memory only, the edit that would satisfy
+// `want` on the profile named by key, right now. Neither this nor PlanConfig,
+// which is a thin wrapper around it, writes to the document; see
+// config_plan.go for the shapes and configedit for the read/edit primitives
+// this composes.
 //
 // Checks run in this order, each its own refusal:
 //
@@ -178,9 +198,9 @@ func (h *hermesDescriptor) isCompositeRootKey(key string) (bool, error) {
 //     AppendToList; report-only: always a noop).
 //  6. SHAPE_UNEXPECTED — configedit.SameOutsideKeys found a change outside
 //     the keys this plan claims to touch.
-func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID string, want []DeclaredSetting) (ConfigPlan, error) {
+func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationID string, want []DeclaredSetting) (configPlanDerivation, error) {
 	if err := ctx.Err(); err != nil {
-		return ConfigPlan{}, err
+		return configPlanDerivation{}, err
 	}
 
 	plan := ConfigPlan{
@@ -189,11 +209,6 @@ func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID stri
 		StationKey:    key,
 		Entries:       []ConfigPlanEntry{},
 		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-	}
-	refuse := func(code, message string) (ConfigPlan, error) {
-		plan.Refusal = &ConfigRefusal{Code: code, Message: message}
-		plan.PlanDigest = configDigestOf(plan)
-		return plan, nil
 	}
 
 	// 1. Resolve the document this key's settings live in, and refuse a
@@ -204,9 +219,14 @@ func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID stri
 	// resolve elsewhere is never opened even once.
 	dir, err := h.workspaceFor(key)
 	if err != nil {
-		return ConfigPlan{}, err
+		return configPlanDerivation{}, err
 	}
 	path := filepath.Join(dir, "config.yaml")
+	refuse := func(code, message string) (configPlanDerivation, error) {
+		plan.Refusal = &ConfigRefusal{Code: code, Message: message}
+		plan.PlanDigest = configDigestOf(plan)
+		return configPlanDerivation{plan: plan, profileDir: dir, path: path}, nil
+	}
 	if isCredentialPath(path) {
 		return refuse("CREDENTIAL_PATH", fmt.Sprintf("%s names a credential file and will not be read or edited", path))
 	}
@@ -215,7 +235,7 @@ func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID stri
 	// (spec §6) — reuse isCompositeRoot rather than re-deriving the rule.
 	root, err := h.isCompositeRootKey(key)
 	if err != nil {
-		return ConfigPlan{}, err
+		return configPlanDerivation{}, err
 	}
 	if root {
 		return refuse("OUT_OF_SCOPE", fmt.Sprintf(
@@ -311,7 +331,7 @@ func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID stri
 			entry.Intended = entry.Current
 
 		default:
-			return ConfigPlan{}, fmt.Errorf("config: %s has an unrecognized policy %q", d.SettingID, setting.Policy)
+			return configPlanDerivation{}, fmt.Errorf("config: %s has an unrecognized policy %q", d.SettingID, setting.Policy)
 		}
 
 		entries = append(entries, entry)
@@ -341,5 +361,186 @@ func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID stri
 	plan.RestartRequired = restart
 
 	plan.PlanDigest = configDigestOf(plan)
-	return plan, nil
+	return configPlanDerivation{
+		plan: plan, profileDir: dir, path: path,
+		before: before, after: after, keyPaths: keyPaths, additive: additive,
+	}, nil
+}
+
+// PlanConfig derives, in memory only, the edit that would satisfy `want` on
+// the profile named by key, naming operationID so this station's own journal
+// can key a receipt by it. It writes nothing to the document: the returned
+// ConfigPlan carries the edited document only in its diff, never to disk.
+//
+// A plan with no refusal IS recorded — phase "planned" — in the station's own
+// journal (config_journal.go), because ApplyConfig is handed only an
+// operationID and the plan's own digest, never `want` again; without this
+// record it would have no way to recover what review actually saw in order
+// to re-derive and compare. A refused plan has nothing to apply and is never
+// journaled.
+func (h *hermesDescriptor) PlanConfig(ctx context.Context, key, operationID string, want []DeclaredSetting) (ConfigPlan, error) {
+	d, err := h.derivePlanConfig(ctx, key, operationID, want)
+	if err != nil {
+		return ConfigPlan{}, err
+	}
+	if d.plan.Refusal == nil {
+		journal := openConfigJournal(d.profileDir)
+		unlock := journal.lock()
+		err := journal.write(ConfigReceipt{
+			Plan:      d.plan,
+			Phase:     "planned",
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		})
+		unlock()
+		if err != nil {
+			return ConfigPlan{}, fmt.Errorf("config: recording the plan for %s: %w", operationID, err)
+		}
+	}
+	return d.plan, nil
+}
+
+// conflictReceipt is an UNRECORDED answer: it reports why an apply will not
+// proceed without touching the journal, so the reviewed plan already on
+// record (whatever it was) survives for a legitimate retry.
+func conflictReceipt(plan ConfigPlan, code, message string) ConfigReceipt {
+	plan.Refusal = &ConfigRefusal{Code: code, Message: message}
+	return ConfigReceipt{
+		Plan:      plan,
+		Phase:     "conflict",
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+}
+
+// ApplyConfig applies the plan reviewed as planDigest for operationID,
+// writing the document exactly once and never restarting the harness (D4;
+// the receipt has no `restarted` field). The order is the whole point:
+//
+//  1. Load the journal entry for operationID — absent is an error (never a
+//     silent plan); already "applied" is returned unchanged (idempotent).
+//  2. The supplied planDigest must equal the journal entry's own plan digest.
+//  3. The plan is RE-DERIVED from the document as it is right now, via
+//     derivePlanConfig — the same code path PlanConfig uses — reconstructing
+//     `want` from the journaled plan's own Entries[].Intended.
+//  4. A re-derived digest that disagrees with the journaled one means the
+//     document changed after review: phase "conflict", refusal PLAN_STALE,
+//     and nothing is written.
+//  5. Only now is the edit written, atomically. The bytes actually on disk
+//     afterward are re-checked with configedit.SameOutsideKeys; a violation
+//     here — after step 3 already proved containment — means the filesystem
+//     changed under us, which is exactly a conflict, and is recorded as one.
+//  6. The receipt — phase "applied", Written, AfterSHA256 — is recorded.
+func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, planDigest string) (ConfigReceipt, error) {
+	if err := ctx.Err(); err != nil {
+		return ConfigReceipt{}, err
+	}
+	dir, err := h.workspaceFor(key)
+	if err != nil {
+		return ConfigReceipt{}, err
+	}
+
+	journal := openConfigJournal(dir)
+	unlock := journal.lock()
+	defer unlock()
+
+	existing, err := journal.read(operationID)
+	if err != nil {
+		return ConfigReceipt{}, err
+	}
+	if existing.Phase == "applied" {
+		return existing, nil
+	}
+
+	// 2. The caller's proof of review must match what this station actually
+	// has on record for operationID.
+	if planDigest != existing.Plan.PlanDigest {
+		return conflictReceipt(existing.Plan, "PLAN_DIGEST_MISMATCH",
+			fmt.Sprintf("the supplied plan digest does not match the plan reviewed for %s", operationID)), nil
+	}
+
+	// 3. Re-derive, reconstructing `want` from exactly what review saw:
+	// Entries[].Intended is the declared value for a reconcilable setting,
+	// and the full (already-merged) list for an additive-only one — which
+	// re-declaring is safe, since AppendToList only ever adds what is not
+	// already present.
+	want := make([]DeclaredSetting, len(existing.Plan.Entries))
+	for i, e := range existing.Plan.Entries {
+		want[i] = DeclaredSetting{SettingID: e.SettingID, Value: e.Intended}
+	}
+	redo, err := h.derivePlanConfig(ctx, key, operationID, want)
+	if err != nil {
+		return ConfigReceipt{}, err
+	}
+
+	// 4. A document that no longer matches what was reviewed re-derives to a
+	// different digest — most directly because BeforeSHA256 and Diff are
+	// both part of what configDigestOf hashes, and both depend on the
+	// document's actual bytes, not just the value at the keys this plan
+	// touches.
+	if redo.plan.PlanDigest != existing.Plan.PlanDigest {
+		return conflictReceipt(existing.Plan, "PLAN_STALE",
+			fmt.Sprintf("%s changed after this plan was reviewed; re-plan and re-review before applying", redo.path)), nil
+	}
+
+	// 5. Write, then verify on the bytes actually on disk — not the `after`
+	// this process computed in memory — so a filesystem change concurrent
+	// with the write is caught rather than assumed away.
+	actual := redo.before
+	if !bytes.Equal(redo.before, redo.after) {
+		mode := os.FileMode(0o600)
+		if info, statErr := os.Stat(redo.path); statErr == nil {
+			mode = info.Mode().Perm()
+		}
+		if err := atomicWriteFile(redo.path, redo.after, mode); err != nil {
+			return ConfigReceipt{}, fmt.Errorf("config: writing %s: %w", redo.path, err)
+		}
+		written, err := os.ReadFile(redo.path)
+		if err != nil {
+			return ConfigReceipt{}, fmt.Errorf("config: reading back %s: %w", redo.path, err)
+		}
+		actual = written
+	}
+
+	if err := configedit.SameOutsideKeys(redo.before, actual, redo.keyPaths, redo.additive); err != nil {
+		receipt := ConfigReceipt{
+			Plan:      existing.Plan,
+			Phase:     "conflict",
+			UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+			Error:     fmt.Sprintf("the write touched more than its plan: %v", err),
+		}
+		// A real write already happened; record it rather than let a second
+		// apply attempt believe nothing was ever tried.
+		_ = journal.write(receipt)
+		return receipt, nil
+	}
+
+	written := make([]ConfigWritten, len(existing.Plan.Entries))
+	for i, e := range existing.Plan.Entries {
+		written[i] = ConfigWritten{SettingID: e.SettingID, Action: e.Action, Wrote: e.Intended}
+	}
+	receipt := ConfigReceipt{
+		Plan:        existing.Plan,
+		Phase:       "applied",
+		UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+		Written:     written,
+		AfterSHA256: sha256Hex(actual),
+	}
+	if err := journal.write(receipt); err != nil {
+		return ConfigReceipt{}, fmt.Errorf("config: recording the receipt for %s: %w", operationID, err)
+	}
+	return receipt, nil
+}
+
+// InspectConfig returns the receipt this station's journal has recorded for
+// operationID, exactly as recorded — it never re-derives or re-plans, so a
+// document edited after an apply still shows what review actually saw and
+// what was actually written, not a readout of the document as it is now.
+func (h *hermesDescriptor) InspectConfig(ctx context.Context, key, operationID string) (ConfigReceipt, error) {
+	if err := ctx.Err(); err != nil {
+		return ConfigReceipt{}, err
+	}
+	dir, err := h.workspaceFor(key)
+	if err != nil {
+		return ConfigReceipt{}, err
+	}
+	return openConfigJournal(dir).read(operationID)
 }
