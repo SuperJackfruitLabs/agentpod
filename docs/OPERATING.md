@@ -220,6 +220,8 @@ fleet principals add-service superpipeline-run-reporter --client superpipeline-r
 
 (`bin/deliver-service-credential` is in the estate repository.)
 
+Setting up superwitness itself (`evidence:read`):
+
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:
    `superwitness|urn:ietf:wg:oauth:2.0:oob|https://hub.agentpod.dev,https://app.superpipeline.dev`

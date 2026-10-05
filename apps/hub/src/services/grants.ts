@@ -36,7 +36,7 @@ export interface Grant {
   /** Principal ids. Empty means "may dispatch nothing", which is a decision. */
   mayDispatch: string[];
   mayGrantReach: boolean;
-  /** Read permissions beyond the pair. Empty means none. */
+  /** Permissions beyond the pair. Empty means none. */
   scopes: string[];
 }
 
