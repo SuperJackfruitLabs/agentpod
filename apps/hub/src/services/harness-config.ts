@@ -16,6 +16,28 @@ import { db } from "../db/drizzle";
 import { declaredHarnessConfig } from "../db/schema/harness-config";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
+import * as broker from "./broker";
+
+/**
+ * Ask one station's node for the registry its harness manages — the
+ * `config.settings` broker verb, never cached: a registry read is cheap (it
+ * touches no disk on the node, see `ConfigSettings()`) and caching it would
+ * reintroduce exactly the "true when written" staleness this file exists to
+ * avoid. `null` on ANY failure (offline, timeout, disconnected, or a response
+ * that isn't the expected shape) — never a thrown error, so every caller
+ * here can treat "could not verify" as one outcome rather than a try/catch.
+ *
+ * Lives here (not in `routes/harness-config.ts`, where it originated) so
+ * `services/harness-config-apply.ts` can reuse it without importing a route
+ * module — that import would run the other way too (the route imports
+ * `planFor`/`applyFor` from the apply service) and form a cycle.
+ */
+export async function fetchRegistry(nodeId: string, stationKey: string): Promise<ConfigSetting[] | null> {
+  const result = await broker.request(nodeId, "config.settings", { stationKey });
+  if (!result.ok) return null;
+  const settings = (result.data as { settings?: ConfigSetting[] } | undefined)?.settings;
+  return Array.isArray(settings) ? settings : null;
+}
 
 /** A level a declaration can target: a station, a node, or (both null) the fleet. */
 export interface Level {
