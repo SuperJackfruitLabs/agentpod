@@ -119,6 +119,15 @@ export const ConfigRefusalCode = z.enum([
   "OUT_OF_SCOPE",
   "SHAPE_UNEXPECTED",
   "PLAN_STALE",
+  /**
+   * The caller applied a digest that is not the one this operation's recorded
+   * plan carries. Distinct from PLAN_STALE on purpose: the remedy differs —
+   * a mismatch means re-read the plan, staleness means re-plan against a
+   * document that has changed. Spec §9 enumerates seven codes; this is an
+   * eighth, added because collapsing it into PLAN_STALE would make two
+   * conditions with different answers indistinguishable.
+   */
+  "PLAN_DIGEST_MISMATCH",
   "OPTED_OUT",
   "UNREADABLE",
   "CREDENTIAL_PATH",

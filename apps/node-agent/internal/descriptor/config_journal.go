@@ -7,8 +7,15 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
+
+// configOperationLimit bounds the journal, matching internal/hermeslive's own
+// OperationLimit. Without it a station that is planned repeatedly and never
+// applied grows this file without end: PlanConfig records every non-refused
+// plan, and nothing else would ever remove one.
+const configOperationLimit = 256
 
 // configJournalDirName is the node's own, harness-opaque state directory
 // inside a profile — the same ".agentpod" internal/hermeslive's own journal
@@ -102,6 +109,7 @@ func (j configJournal) write(receipt ConfigReceipt) error {
 		return err
 	}
 	entries[receipt.Plan.OperationID] = receipt
+	pruneConfigOperations(entries)
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return err
@@ -110,4 +118,37 @@ func (j configJournal) write(receipt ConfigReceipt) error {
 		return err
 	}
 	return atomicWriteFile(j.path, data, 0o600)
+}
+
+// pruneConfigOperations bounds the journal in place, dropping the oldest
+// FINISHED receipts first and never a plan still awaiting its apply. That
+// asymmetry is the point: a "planned" receipt is the only record of what an
+// operator reviewed, so discarding one would turn a pending apply into
+// PLAN_DIGEST_MISMATCH with nothing to explain why. An "applied" or
+// "conflict" receipt is history, and history is what yields.
+//
+// If the limit is reached and EVERY receipt is still pending, the journal is
+// deliberately allowed to exceed it rather than drop a reviewed plan.
+func pruneConfigOperations(entries map[string]ConfigReceipt) {
+	if len(entries) <= configOperationLimit {
+		return
+	}
+	type aged struct {
+		id string
+		at string
+	}
+	var finished []aged
+	for id, r := range entries {
+		if r.Phase == "applied" || r.Phase == "conflict" {
+			finished = append(finished, aged{id, r.UpdatedAt})
+		}
+	}
+	// UpdatedAt is RFC3339, so lexical order is chronological order.
+	sort.Slice(finished, func(a, b int) bool { return finished[a].at < finished[b].at })
+	for _, e := range finished {
+		if len(entries) <= configOperationLimit {
+			return
+		}
+		delete(entries, e.id)
+	}
 }

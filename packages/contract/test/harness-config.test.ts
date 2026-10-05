@@ -118,7 +118,7 @@ describe("a config plan is reviewable before it is applied", () => {
 
   test("every refusal code in the spec is representable, and nothing else is", () => {
     for (const code of ["UNKNOWN_SETTING", "OUT_OF_SCOPE", "SHAPE_UNEXPECTED",
-      "PLAN_STALE", "OPTED_OUT", "UNREADABLE", "CREDENTIAL_PATH"]) {
+      "PLAN_STALE", "PLAN_DIGEST_MISMATCH", "OPTED_OUT", "UNREADABLE", "CREDENTIAL_PATH"]) {
       expect(ConfigRefusalCode.parse(code)).toBe(code);
     }
     expect(ConfigRefusalCode.safeParse("WHATEVER").success).toBe(false);
