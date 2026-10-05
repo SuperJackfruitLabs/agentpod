@@ -112,3 +112,76 @@ export const ConfigObservation = z.object({
   reason: z.string().optional(),
 });
 export type ConfigObservation = z.infer<typeof ConfigObservation>;
+
+/** Every refusal this system can give, each distinct. See spec §9. */
+export const ConfigRefusalCode = z.enum([
+  "UNKNOWN_SETTING",
+  "OUT_OF_SCOPE",
+  "SHAPE_UNEXPECTED",
+  "PLAN_STALE",
+  "OPTED_OUT",
+  "UNREADABLE",
+  "CREDENTIAL_PATH",
+]);
+export type ConfigRefusalCode = z.infer<typeof ConfigRefusalCode>;
+
+export const ConfigRefusal = z.object({
+  code: ConfigRefusalCode,
+  /** A sentence. A refusal that cannot be told from a pass is the failure this area keeps hitting. */
+  message: z.string(),
+});
+
+/** One setting's intended edit. `current` absent means the key is not in the document. */
+export const ConfigPlanEntry = z.object({
+  settingId: z.string(),
+  /** Absolute path of the document this entry edits. */
+  file: z.string(),
+  keyPath: z.string(),
+  policy: ConfigPolicy,
+  current: z.unknown().optional(),
+  intended: z.unknown(),
+  action: z.enum(["create", "modify", "append", "noop"]),
+  restartToTakeEffect: z.boolean(),
+});
+
+/**
+ * A plan is what review sees. Its digest covers everything in it INCLUDING
+ * `beforeSha256`, so a document edited after review yields a different digest
+ * and the apply is refused rather than re-derived (D8).
+ */
+export const ConfigPlan = z.object({
+  schemaVersion: z.literal(1),
+  operationId: z.string(),
+  stationKey: z.string(),
+  entries: z.array(ConfigPlanEntry),
+  /** SHA-256 of the document as it was when planned. */
+  beforeSha256: z.string(),
+  diff: z.string(),
+  diffTruncated: z.boolean(),
+  noOp: z.boolean(),
+  refusal: ConfigRefusal.optional(),
+  /** True when any entry needs a restart. Nothing here performs one (D4). */
+  restartRequired: z.boolean(),
+  createdAt: z.string(),
+  planDigest: z.string(),
+});
+
+export const ConfigWritten = z.object({
+  settingId: z.string(),
+  action: z.enum(["create", "modify", "append", "noop"]),
+  wrote: z.unknown(),
+});
+
+/** The journal entry for one apply. There is deliberately no `restarted` field. */
+export const ConfigReceipt = z.object({
+  plan: ConfigPlan,
+  phase: z.enum(["planned", "applying", "applied", "conflict"]),
+  updatedAt: z.string(),
+  written: z.array(ConfigWritten).default([]),
+  afterSha256: z.string().optional(),
+  error: z.string().optional(),
+});
+
+export type ConfigPlan = z.infer<typeof ConfigPlan>;
+export type ConfigReceipt = z.infer<typeof ConfigReceipt>;
+export type ConfigPlanEntry = z.infer<typeof ConfigPlanEntry>;

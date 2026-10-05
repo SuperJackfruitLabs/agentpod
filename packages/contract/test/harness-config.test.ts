@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import {
   ConfigScope, ConfigPolicy, ConfigSetting, DeclaredSetting, ConfigValue, ConfigObservation,
+  ConfigPlan, ConfigReceipt, ConfigRefusalCode,
 } from "../src/harness-config";
 
 describe("harness config contract", () => {
@@ -70,5 +71,77 @@ describe("harness config contract", () => {
       expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state }).success).toBe(true);
     }
     expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "ok" }).success).toBe(false);
+  });
+});
+
+describe("a config plan is reviewable before it is applied", () => {
+  const entry = {
+    settingId: "hermes.approvals.timeout",
+    file: "/home/x/.hermes/profiles/p/config.yaml",
+    keyPath: "approvals.timeout",
+    policy: "reconcilable" as const,
+    current: 300,
+    intended: 900,
+    action: "modify" as const,
+    restartToTakeEffect: true,
+  };
+
+  test("a plan carries its digest and the document it was derived from", () => {
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1,
+      operationId: "op_1",
+      stationKey: "p",
+      entries: [entry],
+      beforeSha256: "a".repeat(64),
+      diff: "-  timeout: 300\n+  timeout: 900\n",
+      diffTruncated: false,
+      noOp: false,
+      restartRequired: true,
+      createdAt: "2026-10-05T00:00:00.000Z",
+      planDigest: "b".repeat(64),
+    });
+    expect(plan.entries[0]?.intended).toBe(900);
+    expect(plan.refusal).toBeUndefined();
+  });
+
+  test("a refused plan names a code from the registry of refusals, and writes nothing", () => {
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1, operationId: "op_2", stationKey: "p", entries: [],
+      beforeSha256: "a".repeat(64), diff: "", diffTruncated: false, noOp: true,
+      restartRequired: false, createdAt: "2026-10-05T00:00:00.000Z", planDigest: "c".repeat(64),
+      refusal: { code: "CREDENTIAL_PATH", message: "the target resolves to a credential file" },
+    });
+    expect(plan.refusal?.code).toBe("CREDENTIAL_PATH");
+    // A refusal never carries a restart claim.
+    expect(plan.restartRequired).toBe(false);
+  });
+
+  test("every refusal code in the spec is representable, and nothing else is", () => {
+    for (const code of ["UNKNOWN_SETTING", "OUT_OF_SCOPE", "SHAPE_UNEXPECTED",
+      "PLAN_STALE", "OPTED_OUT", "UNREADABLE", "CREDENTIAL_PATH"]) {
+      expect(ConfigRefusalCode.parse(code)).toBe(code);
+    }
+    expect(ConfigRefusalCode.safeParse("WHATEVER").success).toBe(false);
+  });
+
+  test("a receipt records what was written, per entry, and never claims a restart happened", () => {
+    const receipt = ConfigReceipt.parse({
+      plan: {
+        schemaVersion: 1, operationId: "op_1", stationKey: "p", entries: [entry],
+        beforeSha256: "a".repeat(64), diff: "", diffTruncated: false, noOp: false,
+        restartRequired: true, createdAt: "2026-10-05T00:00:00.000Z", planDigest: "b".repeat(64),
+      },
+      phase: "applied",
+      updatedAt: "2026-10-05T00:00:01.000Z",
+      written: [{ settingId: "hermes.approvals.timeout", action: "modify", wrote: 900 }],
+      afterSha256: "d".repeat(64),
+    });
+    expect(receipt.phase).toBe("applied");
+    expect(receipt.written[0]?.wrote).toBe(900);
+    expect(receipt).not.toHaveProperty("restarted");
+  });
+
+  test("`conflict` is a phase, so a stale plan is an answer rather than a thrown error", () => {
+    expect(ConfigReceipt.shape.phase.safeParse("conflict").success).toBe(true);
   });
 });
