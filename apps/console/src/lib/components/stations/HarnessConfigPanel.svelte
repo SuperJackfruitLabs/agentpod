@@ -11,20 +11,18 @@
    * page's own restart control is reached only through the optional
    * `onRestart` callback, mirroring `PluginManagementPanel`.
    *
-   * `ConfigObservation` (the contract type `getStationConfig` returns) does
-   * not carry which LEVEL won a station's declaration — the hub's
-   * `compare()` uses the level internally (station beats node beats fleet,
-   * `resolveFor` in `apps/hub/src/services/harness-config.ts`) but drops it
-   * before the row reaches the route. Rather than invent a contract field,
-   * this panel derives the level itself from the already-shipped, unchanged
-   * `GET /api/fleet/config/declared` route: a settingId named by a
-   * station-filtered row won at station level; absent that, one named by a
-   * node-filtered row won at node level; absent both, a settingId that still
-   * has an observation must be fleet-level — `compare()` never reports a
-   * setting nobody declared anywhere. See `listStationDeclaredConfig` /
-   * `listNodeDeclaredConfig` in `$lib/api/harness-config.ts`.
+   * `ConfigObservation.level` carries which level won a station's
+   * declaration (station beats node beats fleet, `resolveFor` in
+   * `apps/hub/src/services/harness-config.ts`) straight from the hub — it is
+   * a REQUIRED field on the contract type (phase 3b), so this panel reads it
+   * directly off each observation. It used to derive this itself, by
+   * fetching `GET /api/fleet/config/declared` twice (once filtered to this
+   * station, once to its node) and reasoning by elimination — correct, but a
+   * second implementation of the hub's own precedence rule, in a different
+   * language. That derivation, and the two extra round-trips it needed, are
+   * gone now that the server carries the answer on the observation itself.
    */
-  import type { ConfigObservation, ConfigPlan, ConfigPolicy, ConfigReceipt, ConfigScope } from "@agentpod/contract";
+  import type { ConfigLevel, ConfigObservation, ConfigPlan, ConfigPolicy, ConfigReceipt, ConfigScope } from "@agentpod/contract";
   import * as api from "$lib/api/harness-config";
   import { ApiError } from "$lib/api/http-error";
   import { Button } from "$lib/components/ui/button";
@@ -35,8 +33,6 @@
     stationKey,
     onRestart,
   }: { stationId: string; nodeId: string; stationKey?: string; onRestart?: () => void } = $props();
-
-  type Level = "station" | "node" | "fleet" | null;
 
   /**
    * An `opted-out` row's source, read-only (Task 4, spec D13 / D11; D9 for
@@ -66,7 +62,7 @@
     scope: ConfigScope | null;
     policy: ConfigPolicy | null;
     declared: unknown;
-    level: Level;
+    level: ConfigLevel;
     observed: unknown;
     state: ConfigObservation["state"];
     reason: string | null;
@@ -101,17 +97,6 @@
    */
   function label(state: ConfigObservation["state"]): string {
     return STATE_LABEL[state] ?? `Unrecognised state (${state})`;
-  }
-
-  /** Station-level beats node-level beats fleet-level — `resolveFor`'s own precedence, re-derived client-side. */
-  function levelFor(
-    settingId: string,
-    stationDeclared: api.DeclaredConfigRow[],
-    nodeDeclared: api.DeclaredConfigRow[],
-  ): Level {
-    if (stationDeclared.some((r) => r.settingId === settingId)) return "station";
-    if (nodeDeclared.some((r) => r.settingId === settingId)) return "node";
-    return "fleet";
   }
 
   /**
@@ -299,7 +284,6 @@
     error = null;
     loading = true;
 
-    let levelUnavailable = false;
     // No `stationKey` (e.g. the station page hasn't finished loading it
     // yet) means there is nothing to filter the register by at the station
     // level — this must never fall through to an unfiltered query, which
@@ -311,18 +295,10 @@
     void Promise.all([
       api.getStationConfig(sid),
       api.listConfigSettings().catch(() => ({ settings: [], unreachableNodes: [] })),
-      api.listStationDeclaredConfig(sid).catch(() => {
-        levelUnavailable = true;
-        return [] as api.DeclaredConfigRow[];
-      }),
-      api.listNodeDeclaredConfig(nid).catch(() => {
-        levelUnavailable = true;
-        return [] as api.DeclaredConfigRow[];
-      }),
       stationOptOutsP,
       api.listConfigOptOuts({ nodeId: nid }).catch(() => [] as api.ConfigOptOutRow[]),
     ])
-      .then(([config, registry, stationDeclared, nodeDeclared, stationOptOuts, nodeOptOuts]) => {
+      .then(([config, registry, stationOptOuts, nodeOptOuts]) => {
         if (ticket !== epoch) return;
         const settingById = new Map(registry.settings.map((s) => [s.id, s]));
         const stationOptOutMap = new Map(stationOptOuts.filter((r) => r.optedOut).map((r) => [r.settingId, r]));
@@ -334,7 +310,7 @@
             scope: known?.scope ?? null,
             policy: known?.policy ?? null,
             declared: o.declared,
-            level: levelUnavailable ? null : levelFor(o.settingId, stationDeclared, nodeDeclared),
+            level: o.level,
             observed: o.observed,
             state: o.state,
             reason: o.reason ?? null,
@@ -409,8 +385,7 @@
               </th>
               <td class="p-2">
                 <span class="font-mono text-xs">{fmt(row.declared)}</span>
-                <span class="block text-xs text-muted-foreground">{row.level ? `from the ${row.level} level` : "level unavailable"}</span
-                >
+                <span class="block text-xs text-muted-foreground">from the {row.level} level</span>
               </td>
               <td class="p-2 font-mono text-xs">{observedText(row)}</td>
               <td class="p-2">

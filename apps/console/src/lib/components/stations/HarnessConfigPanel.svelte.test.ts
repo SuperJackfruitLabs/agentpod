@@ -2,7 +2,7 @@ import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, within, fireEvent, cleanup } from "@testing-library/svelte";
 import { ConfigObservation, ConfigPlan, ConfigReceipt, ConfigSetting } from "@agentpod/contract";
 import * as api from "$lib/api/harness-config";
-import type { ConfigOptOutRow, DeclaredConfigRow } from "$lib/api/harness-config";
+import type { ConfigOptOutRow } from "$lib/api/harness-config";
 import { ApiError } from "$lib/api/http-error";
 import HarnessConfigPanel from "./HarnessConfigPanel.svelte";
 
@@ -29,6 +29,7 @@ function observation(overrides: Partial<ConfigObservation>): ConfigObservation {
     stationId: STATION_ID,
     declared: true,
     observed: true,
+    level: "station",
     state: "matches",
     ...overrides,
   });
@@ -74,20 +75,6 @@ function receipt(overrides: Partial<ConfigReceipt>): ConfigReceipt {
   });
 }
 
-function declaredRow(overrides: Partial<DeclaredConfigRow>): DeclaredConfigRow {
-  return {
-    id: "dcfg_1",
-    settingId: "hermes.plugins.enabled",
-    stationId: null,
-    nodeId: null,
-    value: true,
-    declaredBy: "user_1",
-    createdAt: "2026-10-05T00:00:00.000Z",
-    updatedAt: "2026-10-05T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
 /** One row of the opt-out register, with sane defaults a test can override. */
 function optOutRow(overrides: Partial<ConfigOptOutRow>): ConfigOptOutRow {
   return {
@@ -104,12 +91,10 @@ function optOutRow(overrides: Partial<ConfigOptOutRow>): ConfigOptOutRow {
   };
 }
 
-/** Wires the six calls the panel makes on load. Defaults to "nothing declared, nothing exempted at station/node level" so a test opts into the level it wants to prove. */
+/** Wires the four calls the panel makes on load. Defaults to "nothing exempted at station/node level" so a test opts into the register row it wants to prove. */
 function mockLoad(opts: {
   observations?: ConfigObservation[];
   settings?: ConfigSetting[];
-  stationDeclared?: DeclaredConfigRow[];
-  nodeDeclared?: DeclaredConfigRow[];
   stationOptOuts?: ConfigOptOutRow[];
   nodeOptOuts?: ConfigOptOutRow[];
   configError?: unknown;
@@ -122,8 +107,6 @@ function mockLoad(opts: {
     settings: opts.settings ?? [setting({})],
     unreachableNodes: [],
   });
-  vi.spyOn(api, "listStationDeclaredConfig").mockResolvedValue(opts.stationDeclared ?? []);
-  vi.spyOn(api, "listNodeDeclaredConfig").mockResolvedValue(opts.nodeDeclared ?? []);
   vi.spyOn(api, "listConfigOptOuts").mockImplementation(async (filter) => {
     if (filter?.stationKey) return opts.stationOptOuts ?? [];
     if (filter?.nodeId) return opts.nodeOptOuts ?? [];
@@ -137,9 +120,8 @@ afterEach(cleanup);
 
 test("matches: declared and observed agree, declared value traced to the station level", async () => {
   mockLoad({
-    observations: [observation({ state: "matches", declared: true, observed: true })],
+    observations: [observation({ state: "matches", declared: true, observed: true, level: "station" })],
     settings: [setting({ id: "hermes.plugins.enabled" })],
-    stationDeclared: [declaredRow({ settingId: "hermes.plugins.enabled", stationId: STATION_ID })],
   });
   const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
   await waitFor(() => expect(view.getByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeTruthy());
@@ -156,11 +138,11 @@ test("drifted: shows both the declared and observed values, declared value trace
         state: "drifted",
         declared: 300,
         observed: 900,
+        level: "node",
         reason: "declared 300, observed 900",
       }),
     ],
     settings: [setting({ id: "hermes.approvals.max" })],
-    nodeDeclared: [declaredRow({ settingId: "hermes.approvals.max", nodeId: NODE_ID })],
   });
   const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
   await waitFor(() => expect(view.getByRole("row", { name: /hermes\.approvals\.max/ })).toBeTruthy());
@@ -171,7 +153,7 @@ test("drifted: shows both the declared and observed values, declared value trace
   expect(row.textContent).toMatch(/node/);
 });
 
-test("absent: declared, and the key is not in the document — traced to the fleet level by elimination", async () => {
+test("absent: declared, and the key is not in the document — fleet level", async () => {
   mockLoad({
     observations: [
       observation({
@@ -179,15 +161,11 @@ test("absent: declared, and the key is not in the document — traced to the fle
         state: "absent",
         declared: ["/srv/skills"],
         observed: undefined,
+        level: "fleet",
         reason: "declared, and the key is not in the document",
       }),
     ],
     settings: [setting({ id: "hermes.skills.external_dirs", policy: "additive-only" })],
-    // Neither the station nor the node list names this setting, so it can
-    // only be a fleet-level declaration — compare() never reports a setting
-    // nobody declared anywhere.
-    stationDeclared: [],
-    nodeDeclared: [],
   });
   const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
   await waitFor(() => expect(view.getByRole("row", { name: /hermes\.skills\.external_dirs/ })).toBeTruthy());
@@ -233,7 +211,6 @@ test("out-of-scope: names why this declaration cannot apply to this station", as
       }),
     ],
     settings: [setting({ id: "openclaw.hooks.allowConversationAccess", harness: "openclaw", scope: "user", policy: "report-only" })],
-    stationDeclared: [declaredRow({ settingId: "openclaw.hooks.allowConversationAccess", stationId: STATION_ID })],
   });
   const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
   await waitFor(() => expect(view.getByRole("row", { name: /allowConversationAccess/ })).toBeTruthy());
@@ -301,8 +278,6 @@ test("an unreachable station says so, and a later failure does not leave the pre
     settings: [setting({ id: "hermes.plugins.enabled" })],
     unreachableNodes: [],
   });
-  vi.spyOn(api, "listStationDeclaredConfig").mockResolvedValue([]);
-  vi.spyOn(api, "listNodeDeclaredConfig").mockResolvedValue([]);
 
   getStationConfig.mockResolvedValueOnce({
     observations: [observation({ settingId: "hermes.plugins.enabled", state: "matches" })],
@@ -407,8 +382,6 @@ test("restartRequired is surfaced before the apply, and after a successful apply
     settings: [setting({ id: "hermes.approvals.timeout", restartToTakeEffect: true })],
     unreachableNodes: [],
   });
-  vi.spyOn(api, "listStationDeclaredConfig").mockResolvedValue([]);
-  vi.spyOn(api, "listNodeDeclaredConfig").mockResolvedValue([]);
   vi.spyOn(api, "planStationConfig").mockResolvedValue(
     plan({
       restartRequired: true,

@@ -131,39 +131,3 @@ export const listConfigOptOuts = (filter?: { stationKey?: string; nodeId?: strin
   const query = params.toString();
   return http<ConfigOptOutRow[]>(`/api/fleet/config/opt-out${query ? `?${query}` : ""}`);
 };
-
-/**
- * One row of the declared-config store, as `GET /api/fleet/config/declared`
- * serves it — the hub's `DeclaredHarnessConfigRow`, timestamps serialized to
- * ISO strings over JSON, like `ConfigOptOutRow` above.
- *
- * This exists because `ConfigObservation` does not carry which LEVEL won —
- * `resolveFor` (`apps/hub/src/services/harness-config.ts`) computes it
- * (station beats node beats fleet) to decide `out-of-scope`, but `compare()`
- * drops it before the row reaches `GET /api/stations/:stationId/config`. The
- * panel needs to say which level a declared value came from, so it derives
- * that itself from this unfiltered-by-level store, the same way the hub
- * does: `listStationDeclaredConfig` answers only rows declared AT this exact
- * station, `listNodeDeclaredConfig` only rows declared AT this exact node.
- * For a settingId present in neither, but present in the station's
- * observations, the winning declaration is necessarily fleet-level —
- * `compare()` never reports a settingId nobody declared anywhere.
- */
-export interface DeclaredConfigRow {
-  id: string;
-  settingId: string;
-  stationId: string | null;
-  nodeId: string | null;
-  value: unknown;
-  declaredBy: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** GET /api/fleet/config/declared?station=ID — declarations made at exactly this station (never its node or the fleet). */
-export const listStationDeclaredConfig = (stationId: string) =>
-  http<DeclaredConfigRow[]>(`/api/fleet/config/declared?station=${encodeURIComponent(stationId)}`);
-
-/** GET /api/fleet/config/declared?node=ID — declarations made at exactly this node (never one of its stations or the fleet). */
-export const listNodeDeclaredConfig = (nodeId: string) =>
-  http<DeclaredConfigRow[]>(`/api/fleet/config/declared?node=${encodeURIComponent(nodeId)}`);

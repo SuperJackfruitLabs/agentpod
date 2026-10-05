@@ -40,6 +40,7 @@ const observation: ConfigObservation = {
   stationId: "station_1",
   declared: 900,
   observed: 300,
+  level: "station",
   state: "drifted",
 };
 
