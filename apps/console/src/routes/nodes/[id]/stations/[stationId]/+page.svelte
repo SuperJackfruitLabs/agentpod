@@ -27,6 +27,7 @@
   import SkillsPanel from "$lib/components/stations/SkillsPanel.svelte";
   import SkillManagementPanel from "$lib/components/stations/SkillManagementPanel.svelte";
   import PluginManagementPanel from "$lib/components/stations/PluginManagementPanel.svelte";
+  import HarnessConfigPanel from "$lib/components/stations/HarnessConfigPanel.svelte";
   import ChangesetPanel from "$lib/components/stations/ChangesetPanel.svelte";
   import PostureBanner from "$lib/components/stations/PostureBanner.svelte";
   import ActivityPanel from "$lib/components/stations/ActivityPanel.svelte";
@@ -167,6 +168,10 @@
   const hasSkillManagement = $derived(station?.capabilities?.includes("skills.manage") ?? false);
   const hasNativeSkillManagement = $derived(station?.capabilities?.includes("skills.native") ?? false);
   const hasPluginManagement = $derived(station?.capabilities?.includes("plugins.manage") ?? false);
+  // Declared harness configuration (read-only panel, spec D13) — gated the
+  // same way `hasPluginManagement` gates its panel: a station that does not
+  // advertise the capability renders nothing, not an empty panel.
+  const hasConfigManagement = $derived(station?.capabilities?.includes("config.manage") ?? false);
   // A Matrix identity the hub can put a face on: the appservice's own user for
   // a bridge-mode agent, or a harness login the node can use (`matrix.avatar`).
   const canSetAvatar = $derived(
@@ -650,14 +655,19 @@
 
   {@render keepAlivePanel("files", filesContent)}
   {#snippet filesContent()}
-    <div class="min-h-0 flex-1">
-      <FileBrowser
-        bind:this={fileBrowser}
-        {stationId}
-        {canWrite}
-        {canSetAvatar}
-        onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
-      />
+    <div class="flex min-h-0 flex-1 flex-col">
+      <div class="min-h-0 flex-1">
+        <FileBrowser
+          bind:this={fileBrowser}
+          {stationId}
+          {canWrite}
+          {canSetAvatar}
+          onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
+        />
+      </div>
+      {#if hasConfigManagement}
+        <HarnessConfigPanel {stationId} {nodeId} onRestart={canLifecycle ? () => askFor("restart") : undefined} />
+      {/if}
     </div>
   {/snippet}
 
