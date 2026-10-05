@@ -299,3 +299,34 @@ func TestPlanFillsAnEmptyBlockListWithoutRefusing(t *testing.T) {
 		t.Fatalf("entries = %#v, want one append", p.Entries)
 	}
 }
+
+// Important 2. A `reconcilable` setting holds one scalar. Nothing used to say
+// so: `--json '{"a":1}'` reached `fmt.Sprint` and wrote `timeout: map[a:1]`
+// into the operator's own file, and containment could not catch it because
+// `approvals.timeout` is a key the plan declares it touches. Refused by name,
+// and nothing is planned or written.
+func TestPlanRefusesANonScalarForAReconcilableSetting(t *testing.T) {
+	for name, v := range map[string]any{
+		"a map":   map[string]any{"a": 1},
+		"a list":  []any{1, 2},
+		"a null":  nil,
+		"strings": []string{"git status"},
+	} {
+		h, key, cfg := hermesWithProfile(t, planDoc)
+		before, _ := os.ReadFile(cfg)
+		p := planOne(t, h, key, "hermes.approvals.timeout", v)
+		if p.Refusal == nil || p.Refusal.Code != "SHAPE_UNEXPECTED" {
+			t.Fatalf("%s: refusal = %+v, want SHAPE_UNEXPECTED", name, p.Refusal)
+		}
+		if !strings.Contains(p.Refusal.Message, "hermes.approvals.timeout") {
+			t.Fatalf("%s: a refusal must name the setting it refused: %q", name, p.Refusal.Message)
+		}
+		if len(p.Entries) != 0 {
+			t.Fatalf("%s: a refused plan still carried entries: %#v", name, p.Entries)
+		}
+		after, _ := os.ReadFile(cfg)
+		if string(before) != string(after) {
+			t.Fatalf("%s: planning wrote to the document", name)
+		}
+	}
+}

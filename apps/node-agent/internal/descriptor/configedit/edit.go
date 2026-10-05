@@ -69,7 +69,10 @@ func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
 		return nil, "", err
 	}
 	leaf := parts[len(parts)-1]
-	replacement := scalarText(v)
+	replacement, err := scalarText(v)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: %s: %v", ErrShapeUnexpected, keyPath, err)
+	}
 
 	lines := splitLines(doc)
 	parentKey, parentNode := parent.key, parent.node
@@ -424,23 +427,47 @@ func parentIndent(lines []string, parentKey, parentNode *yaml.Node) string {
 
 // ---- value formatting --------------------------------------------------------
 
-// scalarText renders v the way a plain (unquoted) YAML scalar is written.
-// Every value this package writes today is one `SetScalar` caller already
-// validated against a known shape (an int, a bool, or a plain string), so no
-// quoting rules beyond "quote a string that would otherwise parse as
-// something else" are needed.
-func scalarText(v any) string {
+// scalarText renders v the way a plain (unquoted) YAML scalar is written, and
+// REFUSES anything that is not a scalar at all.
+//
+// The refusal lives here, at the point of writing, and not only in the caller
+// that knows the setting's registered shape: this package is the thing that
+// puts bytes in an operator's file, and a `default: fmt.Sprint(v)` arm will
+// cheerfully render a map as `map[a:1]`, a slice as `[1 2]` and a nil as
+// `<nil>`, each of which then parses back as a plain string nobody asked for.
+// A declared value arrives as JSON, so a map, a list and a null are all
+// reachable from one request; a caller that knows the policy can refuse them
+// earlier with a better sentence, but no caller is TRUSTED to.
+func scalarText(v any) (string, error) {
 	switch t := v.(type) {
 	case string:
 		if needsQuoting(t) {
-			return fmt.Sprintf("%q", t)
+			return fmt.Sprintf("%q", t), nil
 		}
-		return t
-	case bool, int, int64, float64:
-		return fmt.Sprint(t)
+		return t, nil
+	case bool:
+		return fmt.Sprint(t), nil
+	case int, int8, int16, int32, int64:
+		return fmt.Sprint(t), nil
+	case uint, uint8, uint16, uint32, uint64:
+		return fmt.Sprint(t), nil
+	case float32, float64:
+		return fmt.Sprint(t), nil
+	case nil:
+		return "", errors.New("a null is not a scalar this editor writes — an explicit null and an absent key read the same way back, so there is no way to say which one was meant")
 	default:
-		return fmt.Sprint(t)
+		return "", fmt.Errorf("a %T is not a scalar — only a string, a number or a boolean can be written as a one-line setting", v)
 	}
+}
+
+// IsWritableScalar reports whether v is something SetScalar can write as a
+// one-line YAML scalar. Exported so a caller that knows a setting's
+// registered policy can refuse a wrongly-shaped declared value BY THE
+// SETTING'S NAME, before a key path or a document shape is mentioned —
+// without keeping a second, drifting list of the types this package accepts.
+func IsWritableScalar(v any) bool {
+	_, err := scalarText(v)
+	return err == nil
 }
 
 func needsQuoting(s string) bool {

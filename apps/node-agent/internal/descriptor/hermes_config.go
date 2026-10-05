@@ -306,6 +306,24 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 
 		switch setting.Policy {
 		case "reconcilable":
+			// A `reconcilable` setting holds ONE scalar, and nothing between
+			// the command line and here has said so until now: the contract
+			// lets a declared value be any JSON type, the hub stores it
+			// verbatim as jsonb, and `--json` can type a map, a list or a
+			// null. Refused by the setting's own name, the way
+			// `additive-only` has always refused a value that is not a list
+			// of strings — the writer refuses these too (configedit), but a
+			// refusal that names the registry's expectation is the one an
+			// operator can act on.
+			if !configedit.IsWritableScalar(d.Value) {
+				shape := fmt.Sprintf("a %T", d.Value)
+				if d.Value == nil {
+					shape = "a null"
+				}
+				return refuse("SHAPE_UNEXPECTED", fmt.Sprintf(
+					"%s: %s holds a single scalar value — a string, a number or a boolean — and %s was declared",
+					keyPath, d.SettingID, shape))
+			}
 			edited, action, err := configedit.SetScalar(after, keyPath, d.Value)
 			if err != nil {
 				return refuse("SHAPE_UNEXPECTED", fmt.Sprintf("%s: %v", keyPath, err))

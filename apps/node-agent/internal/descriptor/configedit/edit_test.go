@@ -387,3 +387,34 @@ func TestCreatingAKeyInAnInlineMappingIsRefusedByName(t *testing.T) {
 		}
 	}
 }
+
+// Important 2. `fmt.Sprint` renders a map as `map[a:1]`, a slice as `[1 2]`
+// and a nil as `<nil>`, each of which parses back as a plain string. None of
+// them is a value an operator or a harness asked for, so the writer refuses
+// them itself — no caller is trusted to have checked.
+func TestSetScalarRefusesAValueThatIsNotAScalar(t *testing.T) {
+	for name, v := range map[string]any{
+		"a map":   map[string]any{"a": 1},
+		"a slice": []any{1, 2},
+		"a null":  nil,
+	} {
+		edited, _, err := SetScalar([]byte(doc), "approvals.timeout", v)
+		if err == nil {
+			t.Fatalf("%s was written as a scalar:\n%s", name, string(edited))
+		}
+		if !contains(err.Error(), "approvals.timeout") {
+			t.Fatalf("%s: a refusal must name the key it refused: %v", name, err)
+		}
+		if edited != nil {
+			t.Fatalf("%s: a refused write still returned a document", name)
+		}
+	}
+	if IsWritableScalar(map[string]any{"a": 1}) || IsWritableScalar(nil) || IsWritableScalar([]any{1}) {
+		t.Fatal("IsWritableScalar accepted a non-scalar")
+	}
+	for _, v := range []any{"ask", 300, int64(300), 1.5, float64(300), true} {
+		if !IsWritableScalar(v) {
+			t.Fatalf("IsWritableScalar refused %#v, which this editor has always written", v)
+		}
+	}
+}
