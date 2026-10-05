@@ -12,12 +12,21 @@ export class ApiError extends Error {
   readonly status: number | null;
   /** Technical request line, e.g. "POST /api/runtimes → 500". */
   readonly detail: string;
+  /**
+   * The hub's own machine-readable reason, when its JSON body carries one —
+   * e.g. a declared-harness-config refusal's `UNKNOWN_SETTING`, `OPTED_OUT`,
+   * `PLAN_STALE`. Undefined when the body has none; a caller that needs to
+   * tell refusals apart reads this, never `message` (prose, for display
+   * only, and not guaranteed stable across releases).
+   */
+  readonly code?: string;
 
-  constructor(message: string, opts: { status: number | null; detail: string }) {
+  constructor(message: string, opts: { status: number | null; detail: string; code?: string }) {
     super(message);
     this.name = "ApiError";
     this.status = opts.status;
     this.detail = opts.detail;
+    this.code = opts.code;
   }
 }
 
@@ -49,6 +58,7 @@ function asSentence(raw: string): string {
 export async function apiError(res: Response, requestLine: string): Promise<ApiError> {
   const detail = `${requestLine} → ${res.status}`;
   let hubMessage: string | undefined;
+  let code: string | undefined;
   try {
     const text = await res.text();
     if (text) {
@@ -56,6 +66,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
         const parsed = JSON.parse(text) as Record<string, unknown>;
         const candidate = parsed.message ?? parsed.error;
         if (typeof candidate === "string" && candidate.trim()) hubMessage = candidate;
+        if (typeof parsed.code === "string" && parsed.code.trim()) code = parsed.code;
       } catch {
         // Non-JSON body (HTML error page, plain text): only trust short plain
         // strings — never dump an HTML document into a toast.
@@ -67,7 +78,7 @@ export async function apiError(res: Response, requestLine: string): Promise<ApiE
   }
 
   const message = hubMessage ? asSentence(hubMessage) : copyForStatus(res.status);
-  return new ApiError(message, { status: res.status, detail });
+  return new ApiError(message, { status: res.status, detail, code });
 }
 
 /** Build an ApiError for a request that never got a response (fetch threw). */

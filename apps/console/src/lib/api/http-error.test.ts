@@ -38,6 +38,27 @@ test("apiError: never surfaces an HTML error page as the message", async () => {
   expect(err.message).toBe("The hub hit an internal error. Try again in a moment.");
 });
 
+test("apiError: carries the hub's own refusal `code` alongside its message", async () => {
+  // A refused declared-harness-config plan answers 400 with {error, code} —
+  // the whole point of the eight distinct codes is that a caller can tell
+  // them apart, which is lost if the client reads only `message`.
+  const res = new Response(JSON.stringify({ error: "nobody has declared this setting", code: "NOTHING_DECLARED" }), {
+    status: 400,
+  });
+  const err = await apiError(res, "POST /api/stations/s1/config/plan");
+
+  expect(err.code).toBe("NOTHING_DECLARED");
+  expect(err.message).toBe("Nobody has declared this setting.");
+  expect(err.status).toBe(400);
+});
+
+test("apiError: no `code` field on the body → code stays undefined, not fabricated", async () => {
+  const res = new Response(JSON.stringify({ error: "station is offline" }), { status: 409 });
+  const err = await apiError(res, "POST /api/stations/s1/lifecycle");
+
+  expect(err.code).toBeUndefined();
+});
+
 test("networkError: fetch failure → reachability copy with cause in detail", () => {
   const err = networkError("GET /api/fleet/agents", new TypeError("Failed to fetch"));
 

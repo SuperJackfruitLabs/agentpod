@@ -260,15 +260,22 @@ export function compare(args: {
     // It outranks the ordinary comparison so the state names the operator's
     // decision, not whatever the document happens to hold — "drifted" would
     // invite exactly the apply the opt-out exists to prevent. The two
-    // sources are kept distinguishable in the REASON text (D11): the hub's
-    // own register is agentpod's doing and is visible in this system without
-    // ever looking at the document; the harness's own record
+    // sources are kept distinguishable on the OBSERVATION itself, via the
+    // typed `optedOutByHarness` field (D11), not just in the reason text:
+    // the hub's own register is agentpod's doing and is visible in this
+    // system without ever looking at the document; the harness's own record
     // (`ConfigValue.optedOutByHarness` — Hermes' `plugins.disabled`) is the
     // operator speaking through the harness's own UI, invisible until
-    // someone reads the file. Both refuse a write; only the wording tells
-    // an operator which one fired.
+    // someone reads the file. Both refuse a write; the reason text is still
+    // worded differently for a human reader, but a consumer should read the
+    // boolean, not the prose.
     if (optedOut.has(v.settingId)) {
-      out.push({ ...row, state: "opted-out", reason: "an operator opted this setting out of reconciliation" });
+      out.push({
+        ...row,
+        state: "opted-out",
+        reason: "an operator opted this setting out of reconciliation",
+        optedOutByHarness: false,
+      });
       continue;
     }
     if (v.optedOutByHarness) {
@@ -276,6 +283,7 @@ export function compare(args: {
         ...row,
         state: "opted-out",
         reason: `${setting?.harness ?? "the harness"} itself reports this setting disabled (its own plugins.disabled) — not an agentpod exemption`,
+        optedOutByHarness: true,
       });
       continue;
     }
