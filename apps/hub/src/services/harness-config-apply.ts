@@ -31,7 +31,7 @@ import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
-import { resolveFor, fetchRegistry, compare, getOptOuts, type Resolved } from "./harness-config";
+import { resolveFor, fetchRegistry, compare, getOptOuts, type Resolved, type AppliedWrite } from "./harness-config";
 import type { StationRow } from "./station-registry";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
@@ -251,6 +251,44 @@ export async function getAppliedConfig(
   return rows[0] ?? null;
 }
 
+/**
+ * Every `applied_harness_config` row for one station, keyed by settingId —
+ * shaped exactly for `compare()`'s `appliedWrites` argument (Task 9b). A
+ * setting this system never wrote is simply absent from the map: `compare()`
+ * already treats "no entry" as "this system never recorded a write", not as
+ * "no restart needed".
+ */
+export async function getAppliedWrites(
+  tenantId: string,
+  stationId: string,
+): Promise<Record<string, AppliedWrite>> {
+  const rows = await db
+    .select()
+    .from(appliedHarnessConfig)
+    .where(tenantScope(appliedHarnessConfig, tenantId, eq(appliedHarnessConfig.stationId, stationId)));
+  const out: Record<string, AppliedWrite> = {};
+  for (const r of rows) out[r.settingId] = { gatewayPid: r.gatewayPid };
+  return out;
+}
+
+/**
+ * Read a station's CURRENT gateway pid from its live health — the same
+ * request/parse shape `applyFor` uses right after a write (`health` verb →
+ * `VERB_RESULTS.health` → `.pid`), but on demand for any caller that needs
+ * `compare()`'s `currentGatewayPid` (Task 9b). Never throws: a failed or
+ * unanswered request (offline node, timeout, disconnected, or a response
+ * that is not the expected shape) yields `null` — never 0, never -1. `null`
+ * is exactly what `currentGatewayPid` means by "could not be confirmed", and
+ * per spec F4's asymmetry `compare()` must keep that `awaiting-restart`,
+ * never resolve it to `matches`.
+ */
+export async function readGatewayPid(nodeId: string, stationKey: string): Promise<number | null> {
+  const health = await broker.request(nodeId, "health", { key: stationKey });
+  if (!health.ok) return null;
+  const parsed = VERB_RESULTS.health.safeParse(health.data);
+  return parsed.success ? parsed.data.pid : null;
+}
+
 // ─── reconcileOnAdopt ──────────────────────────────────────────────────────────
 
 /** What `reconcileOnAdopt` did with one declared setting on one station. */
@@ -358,10 +396,19 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
   }
 
   if (candidateIds.length > 0) {
-    const observeResult = await broker.request(station.nodeId, "config.observe", {
-      stationKey: station.stationKey,
-      settings: candidateIds,
-    });
+    // The health read for restart evidence is a second broker round trip to
+    // the same node as `config.observe` — issued concurrently with it (and
+    // with the `applied_harness_config` read, a DB query) rather than after,
+    // so adding Task 9b's restart evidence does not add a serial round trip
+    // to every reconcile.
+    const [observeResult, appliedWrites, currentGatewayPid] = await Promise.all([
+      broker.request(station.nodeId, "config.observe", {
+        stationKey: station.stationKey,
+        settings: candidateIds,
+      }),
+      getAppliedWrites(tenantId, station.id),
+      readGatewayPid(station.nodeId, station.stationKey),
+    ]);
     const rawValues = observeResult.ok
       ? ((observeResult.data as { values?: ConfigValue[] } | undefined)?.values ?? [])
       : [];
@@ -379,7 +426,15 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
       .map((id) => registryById.get(id))
       .filter((s): s is ConfigSetting => s !== undefined);
 
-    const observations = compare({ stationId: station.id, declared, values, settings: settingsForCompare });
+    const observations = compare({
+      stationId: station.id,
+      declared,
+      values,
+      settings: settingsForCompare,
+      appliedWrites,
+      currentGatewayPid,
+      optedOut,
+    });
 
     for (const obs of observations) {
       if (obs.state === "matches") {

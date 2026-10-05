@@ -65,8 +65,8 @@ import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
 import { getStation, type StationRow } from "../services/station-registry";
-import { declare, undeclare, resolveFor, compare, fetchRegistry } from "../services/harness-config";
-import { planFor, applyFor, ConfigApplyError } from "../services/harness-config-apply";
+import { declare, undeclare, resolveFor, compare, fetchRegistry, getOptOuts } from "../services/harness-config";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
 import { principalForUser } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
 
@@ -230,6 +230,19 @@ function ensureEveryValue(
  * row falls through to the ordinary matches/drifted/absent/unreadable
  * states — correct in the common case this happens, which is the SAME node
  * failing both calls, where every row is already `unreadable` regardless.
+ *
+ * Also feeds `compare()`'s three Task 9b arguments — `appliedWrites`
+ * (`applied_harness_config`, via `getAppliedWrites`), `currentGatewayPid`
+ * (the station's live health, via `readGatewayPid`) and `optedOut` (via
+ * `getOptOuts`) — the restart evidence and opt-out an earlier task's
+ * `compare()` could already emit but no caller fed it, so `awaiting-restart`
+ * and `opted-out` could never reach either route that calls this function
+ * (`GET /api/fleet/config/drift` and `GET /api/stations/:stationId/config`).
+ * The health read is a SECOND broker round trip to the same node as
+ * `config.observe` — issued concurrently with it (and the registry fetch,
+ * and the two DB reads) rather than serially after, so `GET
+ * /api/fleet/config/drift`'s fan-out across every station does not double in
+ * wall-clock time for a correctness fix.
  */
 async function observeStation(
   station: Pick<StationRow, "id" | "nodeId" | "stationKey">,
@@ -241,12 +254,15 @@ async function observeStation(
     return { observations: [], unreachable: false };
   }
 
-  const [registry, result] = await Promise.all([
+  const [registry, result, appliedWrites, currentGatewayPid, optedOut] = await Promise.all([
     fetchRegistry(station.nodeId, station.stationKey),
     broker.request(station.nodeId, "config.observe", {
       stationKey: station.stationKey,
       settings: settingIds,
     }),
+    getAppliedWrites(tenantId, station.id),
+    readGatewayPid(station.nodeId, station.stationKey),
+    getOptOuts(tenantId, station.stationKey),
   ]);
 
   const raw = result.ok
@@ -263,7 +279,15 @@ async function observeStation(
     .filter((s): s is ConfigSetting => s !== undefined);
 
   return {
-    observations: compare({ stationId: station.id, declared, values, settings }),
+    observations: compare({
+      stationId: station.id,
+      declared,
+      values,
+      settings,
+      appliedWrites,
+      currentGatewayPid,
+      optedOut,
+    }),
     unreachable: !result.ok,
   };
 }
