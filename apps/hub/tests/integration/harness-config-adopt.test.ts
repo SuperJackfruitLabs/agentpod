@@ -39,7 +39,7 @@ import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
-import { adoptStations } from "../../src/services/station-registry";
+import { adoptStations, unadopt } from "../../src/services/station-registry";
 import { reconcileOnAdopt } from "../../src/services/harness-config-apply";
 import { declare } from "../../src/services/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
@@ -703,6 +703,65 @@ test(
       expect(outcomes[0]!.result).toBe("pending");
       expect(outcomes[0]!.result).not.toBe("failed");
       expect(outcomes[0]!.reason).toContain("still being reconciled");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000,
+);
+
+test(
+  "a detached pass does not write for a station the operator has since unadopted",
+  async () => {
+    // Minor 6. Past the reconcile deadline the adoption has already answered
+    // "adopted" and the pass keeps going, detached. Nothing cancels it and
+    // `unadopt` hard-deletes the station row, so an operator who unadopts a
+    // second later used to have the declared setting written into that
+    // station's config file anyway, plus an `applied_harness_config` row
+    // keyed on a station id that no longer exists.
+    //
+    // Called directly rather than through `adoptStations` because the
+    // interleaving is what is under test: the row has to disappear between
+    // the adoption and the pass, which is exactly what detaching allows.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgadopt-unadopted-host");
+      const stationKey = "cfgadopt-unadopted-station";
+      const fake = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        // Drifted, so the pass would plan and write if it got that far.
+        observed: { [stationKey]: { [TIMEOUT_SETTING]: 300 } },
+      });
+      await declareFleet(TIMEOUT_SETTING, 900);
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor([stationKey]));
+      if (!station) throw new Error("station adoption failed");
+
+      // The operator unadopts while the (hypothetical) detached pass runs.
+      await unadopt(TEST_USER, station.id);
+      // The adopt-time pass above wrote a legitimate journal row while the
+      // station WAS adopted; it is not what is under test. Cleared so that
+      // any row present afterwards can only be the detached pass's own —
+      // `recordApplied` upserts, so a count delta alone would not show one.
+      await rawSql`DELETE FROM applied_harness_config WHERE station_id = ${station.id}`;
+
+      const plansBefore = fake.planCalls.length;
+      const appliesBefore = fake.applyCalls.length;
+      const outcomes = await reconcileOnAdopt(BOOTSTRAP_TENANT_ID, [station]);
+
+      // Neither verb was dispatched: nothing was written to the harness's
+      // own config file on disk either, which is the real damage.
+      expect(fake.applyCalls.length).toBe(appliesBefore);
+      expect(fake.planCalls.length).toBe(plansBefore);
+      const own = outcomes.filter((o) => o.settingId === TIMEOUT_SETTING);
+      expect(own.length).toBe(1);
+      expect(own[0]!.result).toBe("skipped");
+      expect(own[0]!.reason).toContain("unadopted");
+
+      const rows = await rawSql`
+        SELECT 1 FROM applied_harness_config WHERE station_id = ${station.id}`;
+      expect(rows.length).toBe(0);
 
       fake.ws.close();
       await new Promise((r) => setTimeout(r, 100));

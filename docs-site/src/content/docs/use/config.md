@@ -352,7 +352,9 @@ The cap is one round trip's worth of time, while a station's pass makes several 
 sequence, so a merely *slow* node reaches the cap too — that is the ordinary case, not the
 exceptional one. A station still in progress when the cap fires is reported as **pending**,
 never as failed: nothing has gone wrong, the pass simply has not finished, and it records
-its own outcome against the station when it does.
+its own outcome against the station when it does. Reconcile also re-checks that a station is
+still adopted before it writes anything, so unadopting a station right after the adoption
+answers cannot leave a write landing on it afterwards.
 
 This reconcile runs exactly once, at the moment of adoption — never on a timer and never
 swept across already-adopted stations. A station that drifts afterward stays drifted until

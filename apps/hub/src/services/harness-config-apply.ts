@@ -747,6 +747,24 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
 
       // "drifted" or "absent": plan, then apply with the plan's own digest.
       try {
+        // Past the reconcile deadline this pass is DETACHED — the adoption
+        // has already answered "adopted", so an operator can unadopt before
+        // the loop reaches this setting, and `unadopt` hard-deletes the
+        // station row. Nothing cancels in-flight work, so without this check
+        // the pass would still write the declared setting into the harness's
+        // config file on disk and insert an `applied_harness_config` row
+        // keyed on a station id that no longer exists. Checked per setting
+        // rather than once, because the window is one broker round trip wide
+        // and reopens on every one of them.
+        if (!(await stillAdopted(tenantId, station.id))) {
+          outcomes.push({
+            stationId: station.id,
+            settingId: obs.settingId,
+            result: "skipped",
+            reason: "the station was unadopted while its declared settings were being reconciled; nothing was written",
+          });
+          continue;
+        }
         // `candidateIds` already excludes an opted-out setting (above), so
         // `planFor`'s own opt-out check never fires here — this call always
         // names exactly one setting this station is not opted out of.
@@ -786,6 +804,29 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
 
   await setConfigReason(station.id, failureReasons.length > 0 ? failureReasons.join("; ") : null);
   return outcomes;
+}
+
+/**
+ * Whether a station row is still there, in this tenant — the cheapest
+ * possible "is this station still adopted?", since `unadopt` hard-deletes the
+ * row (`services/station-registry.ts`). Used by the detached half of
+ * `reconcileOnAdopt`, which can outlive the adoption that started it.
+ *
+ * A failure to ask is treated as "still adopted": a Postgres hiccup must not
+ * silently skip a write an operator is waiting for. The write itself fails
+ * loudly on a deleted row's foreign key if it comes to that.
+ */
+async function stillAdopted(tenantId: string, stationId: string): Promise<boolean> {
+  try {
+    const rows = await db
+      .select({ id: stations.id })
+      .from(stations)
+      .where(tenantScope(stations, tenantId, eq(stations.id, stationId)))
+      .limit(1);
+    return rows.length > 0;
+  } catch {
+    return true;
+  }
 }
 
 /**
