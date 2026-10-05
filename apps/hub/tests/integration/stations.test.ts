@@ -23,7 +23,7 @@ process.env.DATABASE_URL =
   "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 process.env.NODE_ENV = "test";
 
-import { test, expect, beforeAll, afterAll } from "bun:test";
+import { test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { Hono } from "hono";
 
 // src/ imports — DB URL is already set
@@ -137,7 +137,11 @@ afterAll(async () => {
 async function connectFakeNode(
   serverPort: number,
   nodeId: string,
-  nodeSecret: string
+  nodeSecret: string,
+  // What this node answers `detect` with. Parameterised so a test can make a
+  // node advertise a capability the hub has never heard of — the shape of the
+  // `config.manage` incident — without changing it for every other test.
+  detectPayload: unknown = fakeDetected
 ): Promise<WebSocket> {
   const ws = new WebSocket(
     `ws://localhost:${serverPort}/public/nodes/gateway`,
@@ -159,7 +163,7 @@ async function connectFakeNode(
           type: "res",
           id: msg.id,
           ok: true,
-          data: fakeDetected,
+          data: detectPayload,
         })
       );
     }
@@ -418,4 +422,111 @@ test(
     }
   },
   10_000
+);
+
+// ─── A capability the hub does not know is logged, not swallowed ─────────────
+
+test(
+  "detect and adopt log a capability this hub does not know, and still accept the row",
+  async () => {
+    // The incident, through the two routes it ran down. `config.manage` was
+    // absent from the contract's Capability enum, `CapabilityList` filtered it
+    // out — which is deliberate, so an old hub survives a newer node — and
+    // nothing at any layer said so, so a feature that had merged three times
+    // could not activate on a real fleet.
+    //
+    // Both halves are asserted here: the drop is now in the hub's log, naming
+    // the station and the string, AND the row still parses rather than being
+    // rejected. A 502 here would be a worse bug than the silence.
+    const AHEAD_KEY = "station-ahead-of-hub";
+    const FUTURE_CAP = "capability-from-the-future";
+    const ahead = [
+      {
+        key: AHEAD_KEY,
+        harness: "hermes",
+        kind: "composite" as const,
+        displayName: "Ahead Of Hub",
+        parentKey: null,
+        workspacePath: "/workspace/ahead",
+        // One the hub knows, one it does not.
+        capabilities: ["health", FUTURE_CAP],
+        adopted: false,
+      },
+    ];
+
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+
+    try {
+      const { token } = await mintEnrollmentToken(TEST_USER_A);
+      const { nodeId, nodeSecret } = await enrollNode(token, {
+        hostname: "station-unknown-capability-host",
+        os: "linux",
+        arch: "amd64",
+        cpuCount: 1,
+      });
+
+      // `server.port!`: Bun types it optional, and this file's older call sites
+      // are four of the 224 strict-null errors the tests baseline records. A new
+      // one in the commit that starts counting them would be a poor start.
+      const ws = await connectFakeNode(server.port!, nodeId, nodeSecret, ahead);
+
+      const lines: string[] = [];
+      const spy = spyOn(console, "warn");
+      try {
+        // ── GET /detected ────────────────────────────────────────────────────
+        const detRes = await fetch(`${baseUrl}/api/nodes/${nodeId}/detected`, {
+          headers: { "X-Test-User-Id": TEST_USER_A },
+        });
+        expect(detRes.status).toBe(200);
+        const detected = (await detRes.json()) as Array<{ key: string; capabilities: string[] }>;
+        expect(detected).toHaveLength(1);
+        expect(detected[0]!.capabilities).toEqual(["health"]);
+
+        // ── POST /stations/adopt ─────────────────────────────────────────────
+        const adoptRes = await fetch(
+          `${baseUrl}/api/nodes/${nodeId}/stations/adopt`,
+          {
+            method: "POST",
+            headers: {
+              "X-Test-User-Id": TEST_USER_A,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ keys: [AHEAD_KEY] }),
+          }
+        );
+        expect(adoptRes.status).toBe(200);
+        const [row] = (await adoptRes.json()) as StationRow[];
+        expect(row!.capabilities).toEqual(["health"]);
+
+        lines.push(
+          ...spy.mock.calls.map(([line]) =>
+            typeof line === "string" ? line : JSON.stringify(line)
+          )
+        );
+      } finally {
+        spy.mockRestore();
+      }
+
+      const surfaced = lines.filter(
+        (line) =>
+          line.includes('"level":"warn"') &&
+          line.includes(AHEAD_KEY) &&
+          line.includes(FUTURE_CAP) &&
+          line.includes(nodeId),
+      );
+      // Two routes parsed the frame, so two warns — the assertion that matters
+      // is that NEITHER path is silent.
+      expect(
+        surfaced.length,
+        "both detect and adopt log the dropped capability, naming station and node",
+      ).toBeGreaterThanOrEqual(2);
+
+      ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000
 );
