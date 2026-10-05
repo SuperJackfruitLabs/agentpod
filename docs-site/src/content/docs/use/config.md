@@ -186,9 +186,21 @@ somewhere this system does control instead. Where a harness has its own native o
 key in its document (OpenClaw's `plugins.disabled`, for the settings it governs), that path
 is separate and not yet wired into this comparison.
 
-Both `compare()` and adopt-time reconcile already honor a row in this register the moment
-one exists; there is no `fleet config` verb or console control that writes one yet, so an
-opt-out today is set directly against the hub, not through this CLI.
+`compare()`, adopt-time reconcile, and `plan`/`apply` all honor a row in this register the
+moment one exists — there is no path left that writes an opted-out setting silently. `plan`
+excludes an opted-out setting from what it asks the node to plan and names it in a `refused`
+list alongside whatever it *did* plan (a mixed request — some settings opted out, the rest
+not — refuses only the opted-out ones, never the whole plan: `fleet config plan --station ID`
+plans every setting currently declared for a station with no way to narrow it, so a
+whole-plan refusal would let one opt-out block writing anything else to that station).
+`apply` re-checks the register too, independently of `plan` — an operator can opt a station
+out *after* a plan was reviewed and before someone applies it, and that window is exactly
+where the check matters most. Because one `apply` call writes one journaled plan as a single
+atomic operation, a setting opted out after its plan was made refuses the **whole** apply,
+naming the setting; nothing in that plan is written, and a fresh plan (which will exclude the
+now-opted-out setting) is the remedy. There is no `fleet config` verb or console control that
+writes an opt-out row yet, so an opt-out today is set directly against the hub, not through
+this CLI.
 
 ## Writing a declaration: plan, inspect, apply
 
@@ -211,7 +223,9 @@ current plan happens to be by the time `apply` runs.
 
 `fleet config plan --station ID` plans **every** setting currently declared for that
 station, at whatever level resolves to it — there is no flag to narrow the plan to one
-setting.
+setting. A setting the station is opted out of is left out of that plan and named in
+`refused` instead (see [Opting a station out](#opting-a-station-out)) — the rest of the
+declared settings still get planned.
 
 A worked example, declaring and then writing `hermes.approvals.mode` for one station:
 
@@ -321,7 +335,7 @@ every one of these is distinct and carries its own message. There are eight:
 | `SHAPE_UNEXPECTED` | The declared value doesn't fit the setting's registered shape (an `additive-only` value that isn't a list of strings, say), or the derived edit would change something outside the keys this plan claims to touch. |
 | `PLAN_STALE` | The document changed after this plan was reviewed. Remedy: re-plan and re-review. |
 | `PLAN_DIGEST_MISMATCH` | The digest `apply` was given does not match the one this station's journal recorded for that operation. Remedy: re-read the plan that was actually reviewed (`inspect`), not re-plan — the document itself hasn't necessarily changed. |
-| `OPTED_OUT` | Reserved for an explicit operator opt-out. Today the opt-out register is enforced by *skipping* a setting before adopt-time reconcile ever plans it, and by the `opted-out` comparison state — `plan`/`apply` called directly do not yet check the register themselves, so this code is not currently produced by either. |
+| `OPTED_OUT` | An explicit operator opt-out (see [Opting a station out](#opting-a-station-out)). `plan` produces it per setting — refusing just the opted-out entries of a mixed request, or the whole request when every setting named was opted out — before `config.plan` is ever dispatched for one of them. `apply` produces it for the whole operation when a setting the plan covers was opted out after the plan was made, before `config.apply` is ever dispatched; nothing in that plan is written. |
 | `UNREADABLE` | The document could not be read or parsed at all; nothing about its contents is inferred. |
 | `CREDENTIAL_PATH` | The setting's target resolves to a credential file (`auth.json`, `.env`, or a path under a `credentials` directory) and is refused before it is ever opened, let alone read or edited. |
 
