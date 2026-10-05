@@ -9,22 +9,25 @@ import (
 )
 
 // hermesWithProfile writes a Hermes home with one profile whose config.yaml is
-// `body`, and returns the descriptor and the station key for that profile.
-func hermesWithProfile(t *testing.T, body string) (*hermesDescriptor, string) {
+// `body`, and returns the descriptor, the station key for that profile, and
+// the profile's config.yaml path (plan tests read the file back to prove
+// PlanConfig wrote nothing).
+func hermesWithProfile(t *testing.T, body string) (*hermesDescriptor, string, string) {
 	t.Helper()
 	home := t.TempDir()
 	profile := filepath.Join(home, "profiles", "one")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte(body), 0o644); err != nil {
+	cfg := filepath.Join(profile, "config.yaml")
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return NewHermes(home).(*hermesDescriptor), "hermes:one"
+	return NewHermes(home).(*hermesDescriptor), "hermes:one", cfg
 }
 
 func TestHermesConfigSettingsRegistry(t *testing.T) {
-	h, _ := hermesWithProfile(t, "approvals:\n  timeout: 300\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  timeout: 300\n")
 	byID := map[string]ConfigSetting{}
 	for _, s := range h.ConfigSettings() {
 		byID[s.ID] = s
@@ -53,7 +56,7 @@ func TestHermesConfigSettingsRegistry(t *testing.T) {
 }
 
 func TestHermesObserveConfigReadsAValue(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  mode: ask\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  mode: ask\n  timeout: 900\n")
 	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +67,7 @@ func TestHermesObserveConfigReadsAValue(t *testing.T) {
 }
 
 func TestHermesObserveConfigAbsentKeyIsReadableWithNoValue(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  mode: ask\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  mode: ask\n")
 	vals, _ := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.timeout"})
 	if !vals[0].Readable {
 		t.Fatal("a readable document with the key absent is readable")
@@ -75,7 +78,7 @@ func TestHermesObserveConfigAbsentKeyIsReadableWithNoValue(t *testing.T) {
 }
 
 func TestHermesObserveConfigUnreadableDocumentIsNotAbsent(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	// Remove the file: the document cannot be read at all.
 	if err := os.Remove(filepath.Join(h.home, "profiles", "one", "config.yaml")); err != nil {
 		t.Fatal(err)
@@ -93,7 +96,7 @@ func TestHermesObserveConfigRefusesTheCompositeRoot(t *testing.T) {
 	// `workspaceFor("hermes")` returns the HOME, not a profile. Reading the home's
 	// config.yaml and reporting it as a profile's value would attribute a wrong
 	// readout to the wrong station, so the root is refused by name (spec §6).
-	h, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	_, err := h.ObserveConfig(context.Background(), "hermes", []string{"hermes.approvals.timeout"})
 	if err == nil || !strings.Contains(err.Error(), "composite root") {
 		t.Fatalf("the composite root must be refused, got %v", err)
@@ -101,7 +104,7 @@ func TestHermesObserveConfigRefusesTheCompositeRoot(t *testing.T) {
 }
 
 func TestHermesObserveConfigRefusesAnUnregisteredSetting(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 900\n")
 	_, err := h.ObserveConfig(context.Background(), key, []string{"hermes.model.api_key"})
 	if err == nil || !strings.Contains(err.Error(), "hermes.model.api_key") {
 		t.Fatalf("an unregistered setting must be refused by name, got %v", err)
@@ -132,7 +135,7 @@ func TestHermesObserveConfigPresentListIsReadableWithTheListObserved(t *testing.
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			h, key := hermesWithProfile(t, c.body)
+			h, key, _ := hermesWithProfile(t, c.body)
 			vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
 			if err != nil {
 				t.Fatal(err)
@@ -155,7 +158,7 @@ func TestHermesObserveConfigPresentListIsReadableWithTheListObserved(t *testing.
 }
 
 func TestHermesObserveConfigPresentNestedMapIsUnreadableNotAbsent(t *testing.T) {
-	h, key := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    allow: ls\n")
+	h, key, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    allow: ls\n")
 	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +182,7 @@ func TestHermesObserveConfigPresentNestedMapIsUnreadableNotAbsent(t *testing.T) 
 // needs the setting to stay declarable even on a shape this reader cannot
 // speak for.
 func TestHermesConfigRegistryStillCarriesTheListSetting(t *testing.T) {
-	h, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    - ls\n")
+	h, _, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    - ls\n")
 	for _, s := range h.ConfigSettings() {
 		if s.ID == "hermes.approvals.command_allowlist" {
 			return
