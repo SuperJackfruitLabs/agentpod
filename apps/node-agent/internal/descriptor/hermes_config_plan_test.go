@@ -330,3 +330,42 @@ func TestPlanRefusesANonScalarForAReconcilableSetting(t *testing.T) {
 		}
 	}
 }
+
+// Minor 5. `derivePlanConfig` registers an `additive-only` key in its
+// `additive` map even when the append added NOTHING, and deliberately: an
+// entry present with no items is what makes `SameOutsideKeys` compare that
+// list strictly on BOTH sides, where the non-additive branch would delete the
+// key from both and compare nothing.
+//
+// Asserted on the derivation's own map — the thing the registration writes —
+// rather than through a document, because no edit `AppendToList` can produce
+// reaches the hole the registration defends against, so no end-to-end
+// fixture can distinguish the two. The comparator test beside this one
+// (`TestAnAdditiveKeyThatAddedNothingStillComparesItsList`) pins what
+// `SameOutsideKeys` does with such an entry; this pins that the entry is
+// made at all. Reverting the registration to `if len(added) > 0 { … }` fails
+// this test and nothing else in the suite.
+func TestAnAdditiveNoopStillRegistersItsKeyForComparison(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, planDoc)
+	// planDoc already holds `- ls`, so declaring exactly that adds nothing.
+	d, err := h.derivePlanConfig(context.Background(), key, "op_noop",
+		[]DeclaredSetting{{SettingID: "hermes.approvals.command_allowlist", Value: []string{"ls"}}})
+	if err != nil {
+		t.Fatalf("derivePlanConfig: %v", err)
+	}
+	if d.plan.Refusal != nil {
+		t.Fatalf("unexpected refusal: %+v", d.plan.Refusal)
+	}
+	if len(d.plan.Entries) != 1 || d.plan.Entries[0].Action != "noop" {
+		t.Fatalf("test setup: wanted one noop append, got %#v", d.plan.Entries)
+	}
+	added, ok := d.additive["approvals.command_allowlist"]
+	if !ok {
+		t.Fatal("an additive-only key that added nothing was left out of the additive map — " +
+			"SameOutsideKeys would then delete it from both documents and compare nothing, " +
+			"so an edit that removed every operator entry could pass containment")
+	}
+	if len(added) != 0 {
+		t.Fatalf("added = %#v, want no items: nothing was appended", added)
+	}
+}
