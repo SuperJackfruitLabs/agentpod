@@ -217,4 +217,19 @@ describe("buildTokenPayload carries the grant's scopes", () => {
     });
     expect("scope" in without).toBe(false);
   });
+
+  test("runs:write is issued only to a grant that holds it", async () => {
+    const base = {
+      principalId: "prn_0123456789abcdef0123",
+      resolvePrincipalById: async () => ({ id: "prn_0123456789abcdef0123", kind: "service" as const }),
+      resolveTenant: async () => "fleet_0123456789abcdef0123",
+    };
+    const grant = (scopes: string[]) => async () => ({ mayDispatch: [], mayGrantReach: false, scopes });
+    expect((await buildTokenPayload({ ...base, loadGrant: grant(["runs:write"]) })).scope).toBe("runs:write");
+    expect((await buildTokenPayload({ ...base, loadGrant: grant(["evidence:read", "runs:write"]) })).scope).toBe(
+      "evidence:read runs:write",
+    );
+    expect((await buildTokenPayload({ ...base, loadGrant: grant(["evidence:read"]) })).scope).toBe("evidence:read");
+    expect("scope" in (await buildTokenPayload({ ...base, loadGrant: async () => null }))).toBe(false);
+  });
 });

@@ -159,6 +159,21 @@ describe("GET /api/evidence/runs/:source/:externalRunId", () => {
     expect(await res.json()).toEqual({ error: "forbidden" });
   });
 
+  test("runs:write is not evidence:read: a run reporter is 403 on every evidence route", async () => {
+    const reporter = await createPrincipal({ kind: "service", handle: `ev-rep-${RUN}` });
+    await setGrant(reporter, { mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] });
+    const t = await serviceToken(reporter);
+    for (const path of [
+      `/api/evidence/runs/superpipeline/${RUN_ID}`,
+      `/api/evidence/attempts/${firstAttempt}`,
+      `/api/evidence/principals/${reader}`,
+    ]) {
+      const res = await get(path, t);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "forbidden" });
+    }
+  });
+
   test("revocation takes effect before the token expires", async () => {
     const t1 = await serviceToken(narrowed);
     expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, t1)).status).toBe(200);

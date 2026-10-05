@@ -257,3 +257,51 @@ describe("the service-token route is mounted where it can be reached", () => {
     expect(mount, "serviceTokenRoutes is behind authMiddleware, which accepts no svc_… credential").toBeLessThan(middleware);
   });
 });
+
+describe("a run reporter (superwitness app spec §3.4)", () => {
+  const REPORTER: OAuthClient[] = [
+    {
+      id: "superpipeline-run-reporter",
+      redirectUris: ["urn:ietf:wg:oauth:2.0:oob"],
+      audiences: ["http://foundry.test:8790", "https://app.superwitness.test"],
+    },
+  ];
+  const reporterAdmin = () => {
+    const a = new Hono();
+    a.use("*", async (c, next) => {
+      c.set("user", { id: "test-admin", role: "admin" } as never);
+      await next();
+    });
+    a.route("/service-principals", createAdminServicePrincipalsRouter({ clients: REPORTER }));
+    return a;
+  };
+
+  test("is created holding runs:write alone, and its token carries that scope and only its client's audiences", async () => {
+    const res = await post(reporterAdmin(), "/service-principals", {
+      handle: `${HANDLE}-rep`, oauthClient: "superpipeline-run-reporter", scopes: ["runs:write"],
+    });
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { principalId: string; credential: { id: string; secret: string } };
+    expect(await getGrant(body.principalId)).toEqual({ mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] });
+
+    const tokens = new Hono().route("/api/auth", createServiceTokenRoutes({ clients: REPORTER }));
+    const t = await tokens.request("/api/auth/service-token", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${body.credential.id}:${body.credential.secret}` },
+    });
+    expect(t.status).toBe(200);
+    const claims = decodeJwt(((await t.json()) as { token: string }).token);
+    expect(claims.principalKind).toBe("service");
+    expect(claims.scope).toBe("runs:write");
+    expect(claims.aud).toEqual(["http://foundry.test:8790", "https://app.superwitness.test"]);
+    expect(claims.mayDispatch).toEqual([]);
+    expect(claims.mayGrantReach).toBe(false);
+  });
+
+  test("a scope outside the vocabulary is still refused before anything is created", async () => {
+    const res = await post(reporterAdmin(), "/service-principals", {
+      handle: `${HANDLE}-rep2`, oauthClient: "superpipeline-run-reporter", scopes: ["runs:read"],
+    });
+    expect(res.status).toBe(400);
+  });
+});
