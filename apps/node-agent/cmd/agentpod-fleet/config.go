@@ -195,7 +195,18 @@ func (l *valueList) Set(v string) error {
 //
 // --json is also the only way to say a ONE-entry list, which is why it exists
 // alongside the repeatable flag rather than instead of it.
+//
+// An EMPTY --value is refused, as it always was: the flag's absence and an
+// explicitly empty entry used to be one condition (`*value == ""`) and both
+// exited 2, and an empty string in a command allowlist, or as an approvals
+// mode, is far more likely a quoting mistake than a declaration. `--json '""'`
+// says it on purpose.
 func declaredValue(values valueList, raw string) (any, error) {
+	for _, v := range values {
+		if v == "" {
+			return nil, fmt.Errorf("--value cannot be empty; use --json '\"\"' to declare the empty string on purpose")
+		}
+	}
 	switch {
 	case len(values) > 0 && raw != "":
 		return nil, fmt.Errorf("set takes --value or --json, not both")

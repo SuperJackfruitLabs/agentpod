@@ -438,6 +438,34 @@ func TestConfigSetRefusesValueAndJSONTogether(t *testing.T) {
 	}
 }
 
+// Minor 3. `declaredValue` detects "flag not given" by `len(values) == 0`,
+// where the old single-flag code used `*value == ""` and so refused both that
+// and an explicitly empty entry. An empty allowlist entry or an empty
+// approvals mode is a quoting mistake, not a declaration, and `--value ""`
+// used to exit 2 — it still does.
+func TestConfigSetRefusesAnEmptyValue(t *testing.T) {
+	bin := build(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	for _, args := range [][]string{
+		{"config", "set", "hermes.approvals.mode", "--value", ""},
+		{"config", "set", "hermes.approvals.command_allowlist", "--value", "ls", "--value", ""},
+	} {
+		called = false
+		out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}, args...)
+		if code == 0 || called {
+			t.Errorf("%v: exit=%d requestSent=%v — want a refusal, no request", args, code, called)
+		}
+		if !strings.Contains(out, "--value cannot be empty") {
+			t.Errorf("%v: the refusal should name the flag, got:\n%s", args, out)
+		}
+	}
+}
+
 func TestConfigSetRefusesJSONItCannotParse(t *testing.T) {
 	bin := build(t)
 	called := false
