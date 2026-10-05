@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import {
   ConfigScope, ConfigPolicy, ConfigSetting, DeclaredSetting, ConfigValue, ConfigObservation,
-  ConfigPlan, ConfigReceipt, ConfigRefusalCode,
+  ConfigPlan, ConfigReceipt, ConfigRefusalCode, ConfigWritten,
 } from "../src/harness-config";
 
 describe("harness config contract", () => {
@@ -138,7 +138,48 @@ describe("a config plan is reviewable before it is applied", () => {
     });
     expect(receipt.phase).toBe("applied");
     expect(receipt.written[0]?.wrote).toBe(900);
-    expect(receipt).not.toHaveProperty("restarted");
+  });
+
+  test("D4: no shape in this contract has a `restarted` field, and one cannot be smuggled in", () => {
+    // `expect(receipt).not.toHaveProperty("restarted")` on a parsed fixture
+    // asserted nothing: zod strips unknown keys, so it held for any
+    // `restarted: z.boolean().optional()` someone added later and only failed
+    // for a REQUIRED one, which nobody would add. The schema itself is what
+    // has to be checked — this fails the moment a `restarted` field is
+    // declared, optional or not.
+    expect(Object.keys(ConfigReceipt.shape)).not.toContain("restarted");
+    expect(Object.keys(ConfigPlan.shape)).not.toContain("restarted");
+    expect(Object.keys(ConfigWritten.shape)).not.toContain("restarted");
+    // And the stripping itself: a node that sent one would have it dropped,
+    // not passed through to a caller who might believe it.
+    const parsed = ConfigReceipt.parse({
+      plan: {
+        schemaVersion: 1, operationId: "op_1", stationKey: "p", entries: [entry],
+        beforeSha256: "a".repeat(64), diff: "", diffTruncated: false, noOp: false,
+        restartRequired: true, createdAt: "2026-10-05T00:00:00.000Z", planDigest: "b".repeat(64),
+      },
+      phase: "applied",
+      updatedAt: "2026-10-05T00:00:01.000Z",
+      written: [],
+      restarted: true,
+    });
+    expect(parsed).not.toHaveProperty("restarted");
+  });
+
+  test("restartRequired is required, not defaulted — F4's asymmetry is not a default", () => {
+    // The old assertion read back the literal the test itself had just passed
+    // into `parse`. What is worth pinning is that the field cannot be OMITTED:
+    // a plan that forgot to say would otherwise claim no restart is needed,
+    // which spec §7 names as the worse of the two errors.
+    const withoutIt = {
+      schemaVersion: 1, operationId: "op_3", stationKey: "p", entries: [],
+      beforeSha256: "a".repeat(64), diff: "", diffTruncated: false, noOp: true,
+      createdAt: "2026-10-05T00:00:00.000Z", planDigest: "c".repeat(64),
+    };
+    expect(ConfigPlan.safeParse(withoutIt).success).toBe(false);
+    expect(ConfigSetting.safeParse({
+      id: "hermes.approvals.timeout", harness: "hermes", scope: "profile", policy: "additive-only",
+    }).success).toBe(false);
   });
 
   test("`conflict` is a phase, so a stale plan is an answer rather than a thrown error", () => {
