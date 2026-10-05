@@ -127,7 +127,7 @@ Each **comparison** — `show --station` and `drift` — reports, per setting, a
 | `absent` | Declared, but the key isn't in the document at all. |
 | `opted-out` | An operator explicitly opted this station out of the declaration — reachable only once writing ships. |
 | `awaiting-restart` | A value was written but the harness hasn't picked it up yet — reachable only once writing ships. |
-| `unreadable` | The document couldn't be read, or the key is there but holds a value this release can't read (see below). Never reported as `matches` — an unreadable value is not evidence of agreement. |
+| `unreadable` | The document couldn't be read, or the key is there but holds a shape this release can't read — a nested map (see below). Never reported as `matches` — an unreadable value is not evidence of agreement. |
 | `out-of-scope` | A per-station declaration was made for a setting whose registered scope isn't the station's document (see above). |
 
 `fleet config drift` only reports states other than `matches`, plus the list of stations it
@@ -141,19 +141,19 @@ and a station that does not advertise `config.manage` at all is not a candidate 
 command. Read the list as "declarations I could not check", not as a fleet health report —
 `fleet nodes` is where you see what is up.
 
-### List-valued settings read as `unreadable`
+### Nested-map settings read as `unreadable`
 
-This release reads **scalar** values only. A registered setting whose key holds a list or a
+This release reads **scalar** and **list** values. A registered setting whose key holds a
 nested map is reported `unreadable`, with a reason saying so — not `absent`, and not
 `drifted`.
 
-`hermes.approvals.command_allowlist` is the one registered setting this affects today, and
-it is a list in every real document. Declaring it is accepted and the declaration is stored,
-but every station will report it `unreadable` until reading lists ships. It stays in the
-registry deliberately: the alternative was to report a key that is plainly in the document
-as "not in the document at all", which is a false sentence, or to compare an inline list's
-raw text and report drift forever. An honest `unreadable` with a reason is the state that
-tells you what is actually true.
+`hermes.approvals.command_allowlist` is a list in every real document, and reads normally:
+a block list, an inline list, and an empty list all come back readable, with the list itself
+as the observed value. It stays in the registry even on the shape it can't read — the
+alternative was to report a key that is plainly in the document as "not in the document at
+all", which is a false sentence, or to compare an inline list's raw text and report drift
+forever. An honest `unreadable` with a reason is the state that tells you what is actually
+true.
 
 ## A setting that can't be found
 

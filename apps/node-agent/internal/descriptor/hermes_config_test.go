@@ -108,21 +108,27 @@ func TestHermesObserveConfigRefusesAnUnregisteredSetting(t *testing.T) {
 	}
 }
 
-// A key that IS in the document but holds a list is neither absent nor drifted.
+// A key that IS in the document but holds a list is neither absent nor
+// unreadable — it is readable, with the list as its observed value.
 //
-// `hermes.approvals.command_allowlist` is the setting the originating incident is
-// about, and it is the one registered setting whose value is a list. Reporting it
-// as `absent` ("declared, and the key is not in the document") would be a false
-// sentence about a document that plainly contains the key, and reporting the raw
-// text of an inline list as a scalar would compare as `drifted` forever. Both
-// shapes must come back readable=false with a reason that says why — the same
-// invariant an unreadable document holds: an unreadable or unreadable-shaped
-// value must never collapse into "key absent".
-func TestHermesObserveConfigPresentNonScalarIsUnreadableNotAbsent(t *testing.T) {
+// `hermes.approvals.command_allowlist` is the setting the originating incident
+// is about, and it is the one registered setting whose value is a list in
+// every real document. Reporting it as `absent` ("declared, and the key is
+// not in the document") would be a false sentence about a document that
+// plainly contains the key, and treating an inline list's raw text as a
+// scalar would compare as `drifted` forever — which is why both block and
+// inline lists are read structurally (via configedit) rather than as text.
+//
+// This used to report readable=false for every non-scalar shape, lists
+// included — a false negative on the one setting this whole design exists
+// for. That changed here; a nested map (not a shape any registered setting
+// has today) still reports unreadable, for the same reason an unreadable
+// document does: a shape this reader cannot speak for must never collapse
+// into "key absent" or be guessed at as a scalar.
+func TestHermesObserveConfigPresentListIsReadableWithTheListObserved(t *testing.T) {
 	cases := []struct{ name, body string }{
 		{"a block list", "approvals:\n  mode: ask\n  command_allowlist:\n    - ls\n    - cat\n"},
 		{"an inline list", "approvals:\n  mode: ask\n  command_allowlist: [ls, cat]\n"},
-		{"a nested map", "approvals:\n  command_allowlist:\n    allow: ls\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -134,21 +140,44 @@ func TestHermesObserveConfigPresentNonScalarIsUnreadableNotAbsent(t *testing.T) 
 			if len(vals) != 1 {
 				t.Fatalf("got %d values, want 1", len(vals))
 			}
-			if vals[0].Readable {
-				t.Fatalf("a present non-scalar must report readable=false, got %+v", vals[0])
+			if !vals[0].Readable {
+				t.Fatalf("a present list must report readable=true, got %+v", vals[0])
 			}
-			if vals[0].Observed != nil {
-				t.Fatalf("a present non-scalar must carry no observed value, got %v", vals[0].Observed)
+			items, ok := vals[0].Observed.([]any)
+			if !ok || len(items) != 2 {
+				t.Fatalf("want a 2-item observed list, got %#v", vals[0].Observed)
 			}
-			if !strings.Contains(vals[0].Reason, "scalar") {
-				t.Fatalf("the reason must name why it could not be read, got %q", vals[0].Reason)
+			if items[0] != "ls" || items[1] != "cat" {
+				t.Fatalf("observed list = %#v, want [ls cat]", items)
 			}
 		})
 	}
 }
 
-// The limitation is honest, not invisible: the setting stays registered, because a
-// later plan needs it, and the registry is the wire contract either way.
+func TestHermesObserveConfigPresentNestedMapIsUnreadableNotAbsent(t *testing.T) {
+	h, key := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    allow: ls\n")
+	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 1 {
+		t.Fatalf("got %d values, want 1", len(vals))
+	}
+	if vals[0].Readable {
+		t.Fatalf("a present nested map must report readable=false, got %+v", vals[0])
+	}
+	if vals[0].Observed != nil {
+		t.Fatalf("a present nested map must carry no observed value, got %v", vals[0].Observed)
+	}
+	if !strings.Contains(vals[0].Reason, "map") {
+		t.Fatalf("the reason must name why it could not be read, got %q", vals[0].Reason)
+	}
+}
+
+// The registry carries this setting regardless of what shape its value turns
+// out to be — the registry is the wire contract either way, and a later plan
+// needs the setting to stay declarable even on a shape this reader cannot
+// speak for.
 func TestHermesConfigRegistryStillCarriesTheListSetting(t *testing.T) {
 	h, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    - ls\n")
 	for _, s := range h.ConfigSettings() {
@@ -156,5 +185,5 @@ func TestHermesConfigRegistryStillCarriesTheListSetting(t *testing.T) {
 			return
 		}
 	}
-	t.Fatal("command_allowlist must stay registered even while its value cannot be read as a scalar")
+	t.Fatal("command_allowlist must stay registered")
 }

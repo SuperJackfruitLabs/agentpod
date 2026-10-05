@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/rakeshgangwar/agentpod/node-agent/internal/descriptor/configedit"
 )
 
 // hermesConfigRegistry is the whole set of Hermes settings this system manages.
@@ -82,25 +84,61 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 		case yamlScalarValue:
 			cv.Observed = v
 		case yamlNotScalar:
-			// PRESENT, and not a shape this reader can speak for — a list or a
-			// nested map. Reported as unreadable, never as absent: "the key is
-			// not in the document" would be a false sentence about a document
-			// that contains it, and handing back an inline list's raw text
-			// would compare as drift forever.
-			//
-			// `approvals.command_allowlist` is the one registered setting this
-			// reaches today. It stays registered — a later plan needs it — and
-			// the limitation is stated here rather than hidden behind a wrong
-			// state.
-			cv.Readable = false
-			cv.Reason = fmt.Sprintf(
-				"%s.%s is present in %s but holds a list or a nested map; this reader reports scalars only",
-				where[0], where[1], path,
-			)
+			// PRESENT, and yamlValue's text scan alone can't say whether it's a
+			// list or a nested map — only that nothing scalar follows the colon.
+			// A list IS a shape this reader can speak for (configedit.Read sees
+			// it structurally), and `approvals.command_allowlist` is exactly
+			// that shape in every real document: reporting it unreadable was a
+			// false negative, making a declared, present key look absent-ish to
+			// every caller that only sees Readable:false. A nested map is not a
+			// registered setting's shape today and stays unreadable.
+			list, listErr := observedList(data, where[0]+"."+where[1])
+			switch {
+			case listErr != nil:
+				cv.Readable = false
+				cv.Reason = fmt.Sprintf(
+					"%s.%s is present in %s but could not be read: %v",
+					where[0], where[1], path, listErr,
+				)
+			case list != nil:
+				cv.Observed = list
+			default:
+				// Present, and a nested map — not a shape this reader can speak
+				// for. Reported as unreadable, never as absent: "the key is not
+				// in the document" would be a false sentence about a document
+				// that plainly contains it.
+				cv.Readable = false
+				cv.Reason = fmt.Sprintf(
+					"%s.%s is present in %s but holds a nested map; this reader reports scalars and lists only",
+					where[0], where[1], path,
+				)
+			}
 		case yamlAbsent:
 			// Readable, with no value: the caller decides what an absent key means.
 		}
 		out = append(out, cv)
 	}
 	return out, nil
+}
+
+// observedList reports what configedit.Read saw at keyPath, but only when it
+// is a list: ([]any, nil) for a present sequence, (nil, nil) for anything
+// else present (a nested map, or absent — callers only reach this from a
+// yamlNotScalar result, so it is always present), or (nil, err) if the
+// document could not be re-parsed. It never returns a scalar: ObserveConfig's
+// own yamlValue path already owns scalars, and this is only consulted when
+// that path found something non-scalar.
+func observedList(data []byte, keyPath string) ([]any, error) {
+	v, present, err := configedit.Read(data, keyPath)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, nil
+	}
+	return list, nil
 }
