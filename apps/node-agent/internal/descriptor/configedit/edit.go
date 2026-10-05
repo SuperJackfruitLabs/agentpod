@@ -60,6 +60,11 @@ func Read(doc []byte, keyPath string) (value any, present bool, err error) {
 // and returns "modify" if the key already held a (different) scalar value, or
 // "create" if the line was inserted under its parent.
 //
+// "create" also covers a whole top-level section that is not in the document
+// yet: it is APPENDED at the end, holding nothing but this one key, so not a
+// line the operator wrote moves. See walkMappingParents for why that is a
+// create and not a refusal, and for the two cases that stay refusals.
+//
 // A parent that exists but is not a mapping, or a key that exists but does
 // not hold a scalar on a line of its own, is ErrShapeUnexpected.
 func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
@@ -72,6 +77,10 @@ func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
 	replacement, err := scalarText(v)
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: %s: %v", ErrShapeUnexpected, keyPath, err)
+	}
+
+	if parent.create != "" {
+		return appendBlock(doc, parent.create+":\n  "+leaf+": "+replacement+"\n"), "create", nil
 	}
 
 	lines := splitLines(doc)
@@ -99,8 +108,10 @@ func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
 // AppendToList adds the items in items that are not already present
 // (compared as strings) to the block list at keyPath, at the list's existing
 // indentation. It never removes or reorders an entry already there. A missing
-// key creates the list holding exactly the new items. A key present but not a
-// sequence is ErrShapeUnexpected.
+// key creates the list holding exactly the new items — and a missing top-level
+// SECTION is appended at the end of the document holding only that list, for
+// the reasons in walkMappingParents. A key present but not a sequence is
+// ErrShapeUnexpected.
 //
 // It returns "append" if anything was written (including creating the key),
 // or "noop" if every item was already present, plus the subset of items that
@@ -112,6 +123,21 @@ func AppendToList(doc []byte, keyPath string, items []string) ([]byte, string, [
 		return nil, "", nil, err
 	}
 	leaf := parts[len(parts)-1]
+
+	if parent.create != "" {
+		added := dedupe(items)
+		if len(added) == 0 {
+			// Nothing to add is nothing to write: an empty section is not
+			// worth putting in an operator's file.
+			return doc, "noop", nil, nil
+		}
+		block := parent.create + ":\n  " + leaf + ":\n"
+		for _, item := range added {
+			block += "    - " + item + "\n"
+		}
+		return appendBlock(doc, block), "append", added, nil
+	}
+
 	lines := splitLines(doc)
 	parentKey, parentNode := parent.key, parent.node
 	key, list := child(parentNode, leaf)
@@ -224,6 +250,24 @@ func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[strin
 	if a == nil {
 		a = map[string]any{}
 	}
+	// Which parent sections `before` did not have at all, read BEFORE anything
+	// is removed below. Those are the sections the editor may have had to
+	// CREATE in order to write the key the caller named, and once that key is
+	// set aside `after` carries an empty section where `before` carries no
+	// section — which a raw DeepEqual calls a change outside the plan,
+	// rejecting the editor's own edit and refusing the whole plan. That is the
+	// exact false whole-plan refusal this check has produced twice already,
+	// once for a created KEY and now for a created SECTION.
+	createdSections := map[string]bool{}
+	for _, kp := range keyPaths {
+		parts := strings.Split(kp, ".")
+		if len(parts) != 2 {
+			continue
+		}
+		if _, present := b[parts[0]]; !present {
+			createdSections[parts[0]] = true
+		}
+	}
 	for _, kp := range keyPaths {
 		if added, ok := additive[kp]; ok {
 			// Remove only the items this apply says it added, from `after`.
@@ -248,6 +292,18 @@ func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[strin
 		}
 		deleteKeyPath(b, kp)
 		deleteKeyPath(a, kp)
+	}
+	// A section `before` never had, holding nothing once this plan's own keys
+	// are set aside, says the same thing `before`'s missing section says: the
+	// operator had nothing here. Only `after` is pruned, and only for a
+	// section `before` genuinely lacked, so this can never hide a section the
+	// operator DID write being emptied — that side is left exactly as it is
+	// and still compared. A created section that came out holding anything
+	// else is likewise left alone, and refused.
+	for section := range createdSections {
+		if m, ok := a[section].(map[string]any); ok && len(m) == 0 {
+			delete(a, section)
+		}
 	}
 	if !reflect.DeepEqual(b, a) {
 		return fmt.Errorf("configedit: the edit changed something outside %v", keyPaths)
@@ -274,21 +330,45 @@ func walk(root *yaml.Node, keyPath string) (key, value *yaml.Node, ok bool) {
 }
 
 // parentRef names where a leaf key should be read or written: either an
-// existing mapping node, or a path of mapping keys that do not exist yet and
-// must be created first (none of ours create intermediate maps today — the
-// registry this serves is one level deep under a top-level section — so an
-// absent parent that is more than one hop missing is refused rather than
-// guessed at).
+// existing mapping node, or the one top-level section that is not in the
+// document yet and has to be written before the leaf can go in it (none of
+// ours create intermediate maps today — the registry this serves is one level
+// deep under a top-level section — so an absent parent that is more than one
+// hop missing is refused rather than guessed at).
 type parentRef struct {
 	key  *yaml.Node // the parent's own key node (nil at the document root)
-	node *yaml.Node // the parent mapping node
+	node *yaml.Node // the parent mapping node (nil when create is set)
+
+	// create is the name of the single absent top-level section the caller
+	// must write, holding nothing but the leaf key, before the leaf exists at
+	// all; "" when the parent is already in the document. key and node are
+	// nil in that case: there is no node to insert into yet.
+	create string
 }
 
-// walkMappingParents resolves the mapping that should hold the leaf key,
-// requiring every named path element to already exist as a mapping.
+// walkMappingParents resolves the mapping that should hold the leaf key.
 // Configedit's registry entries are always "section.key" — one level — so
-// this never needs to synthesize an intermediate map; a caller asking for a
-// deeper, not-yet-existing path gets ErrShapeUnexpected rather than a guess.
+// this never needs to synthesize an intermediate map.
+//
+// A single top-level section that is GENUINELY ABSENT is reported back as one
+// to create, not refused. That is the adopt-time case the whole feature exists
+// for: a freshly adopted station whose operator has customised nothing has no
+// `approvals:` key at all, and refusing it made derivePlanConfig refuse the
+// WHOLE plan — one absent section blocking every other setting declared
+// alongside it. Creating an absent top-level section is already established,
+// reviewed behaviour in this estate: `hermeslive.planEnableConfig` appends the
+// entire `plugins:` block when `plugins` is nil, and appending touches nothing
+// the operator wrote.
+//
+// Two things stay refused, deliberately:
+//
+//   - A parent that EXISTS but is not a block mapping — a scalar (including a
+//     bare `approvals:` holding nothing), a sequence, or an inline `{...}`
+//     mapping. Those are shapes, not absences; this editor cannot extend them
+//     without rewriting what the operator wrote, and it says so by name.
+//   - A deeper absent path (`a.b.c` with `a` missing, or with `a` present and
+//     `b` missing). Only ONE level of parent is ever created; the registry has
+//     no such setting today, so a deeper guess would be exactly that.
 func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 	root, err := mapping(doc)
 	if err != nil {
@@ -296,18 +376,24 @@ func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 	}
 	var key *yaml.Node
 	node := root
-	for _, part := range path {
+	for i, part := range path {
 		if node.Kind != yaml.MappingNode {
 			return parentRef{}, fmt.Errorf("%w: %s is not a mapping", ErrShapeUnexpected, part)
 		}
 		k, v := child(node, part)
 		if v == nil {
+			if len(path) == 1 && i == 0 {
+				return parentRef{create: part}, nil
+			}
 			return parentRef{}, fmt.Errorf("%w: %s does not exist", ErrShapeUnexpected, part)
 		}
 		key, node = k, v
 	}
 	if node.Kind != yaml.MappingNode {
-		return parentRef{}, fmt.Errorf("%w: parent is not a mapping", ErrShapeUnexpected)
+		// PRESENT, in a shape this editor will not extend: a scalar (including
+		// a bare `approvals:` holding nothing), or a sequence. Named, so the
+		// refusal says which section it is about rather than "parent".
+		return parentRef{}, fmt.Errorf("%w: %s is not a mapping", ErrShapeUnexpected, parentName(key))
 	}
 	return parentRef{key: key, node: node}, nil
 }
@@ -643,6 +729,19 @@ func lineAt(lines []string, n int) string {
 }
 
 func leadingSpace(line string) string { return line[:len(line)-len(strings.TrimLeft(line, " \t"))] }
+
+// appendBlock puts block at the END of current, after everything already
+// there, having first made sure the document ends in a newline so the block
+// starts on a line of its own. Lifted from hermeslive/config.go, where it
+// writes the whole `plugins:` section the same way, for the same reason: an
+// append cannot disturb or reorder a single line the operator wrote.
+func appendBlock(current []byte, block string) []byte {
+	text := string(current)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	return []byte(text + block)
+}
 
 func insertAfter(lines []string, after int, added ...string) []byte {
 	out := make([]string, 0, len(lines)+len(added))

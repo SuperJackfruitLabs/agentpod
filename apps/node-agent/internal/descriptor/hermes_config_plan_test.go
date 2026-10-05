@@ -369,3 +369,80 @@ func TestAnAdditiveNoopStillRegistersItsKeyForComparison(t *testing.T) {
 		t.Fatalf("added = %#v, want no items: nothing was appended", added)
 	}
 }
+
+// noSectionDoc is a freshly adopted station whose operator has customised
+// nothing: there is no `approvals:` key in the document AT ALL. `freshDoc`
+// above has the section and not the key; this one has neither, which is the
+// shape the absent-KEY round never looked at.
+//
+// Adopt-time reconcile — writing the fleet's declared values once, right after
+// a station is adopted — is the headline use case for this whole feature, and
+// it runs on exactly this document. Refusing here refused on the stations the
+// feature exists for, and because derivePlanConfig refuses the WHOLE plan, it
+// also blocked every other setting declared alongside.
+const noSectionDoc = `# operator's note
+model:
+  context_length: 8000
+`
+
+func TestPlanCreatesTheSectionWhenTheDocumentHasNoneAtAll(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, noSectionDoc)
+	before, _ := os.ReadFile(cfg)
+	p := planOne(t, h, key, "hermes.approvals.timeout", 900)
+	if p.Refusal != nil {
+		t.Fatalf("refused a document with no approvals section: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 1 || p.Entries[0].Action != "create" {
+		t.Fatalf("entries = %#v, want one create", p.Entries)
+	}
+	if p.Entries[0].Current != nil {
+		t.Fatalf("current = %#v, want nothing (the section is not in the document)", p.Entries[0].Current)
+	}
+	if p.NoOp {
+		t.Fatal("creating a section is not a no-op")
+	}
+	if after, _ := os.ReadFile(cfg); string(before) != string(after) {
+		t.Fatal("PlanConfig wrote to the document — planning must write nothing")
+	}
+}
+
+func TestPlanCreatesTheSectionForAnAdditiveOnlyListToo(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, noSectionDoc)
+	p := planOne(t, h, key, "hermes.approvals.command_allowlist", []string{"git status"})
+	if p.Refusal != nil {
+		t.Fatalf("refused creating the section for an additive-only list: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 1 || p.Entries[0].Action != "append" {
+		t.Fatalf("entries = %#v, want one append", p.Entries)
+	}
+	items, ok := p.Entries[0].Intended.([]any)
+	if !ok || len(items) != 1 || items[0] != "git status" {
+		t.Fatalf("intended = %#v, want [git status]", p.Entries[0].Intended)
+	}
+}
+
+// The whole-plan consequence: with the section absent, a plan covering BOTH a
+// reconcilable scalar and an additive-only list must succeed for both — the
+// first write creates the section and the second lands inside the section the
+// first one just made.
+func TestAnAbsentSectionDoesNotRefuseTheWholePlan(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, noSectionDoc)
+	p, err := h.PlanConfig(context.Background(), key, "op_section", []DeclaredSetting{
+		{SettingID: "hermes.approvals.timeout", Value: 900},
+		{SettingID: "hermes.approvals.command_allowlist", Value: []string{"git status"}},
+	})
+	if err != nil {
+		t.Fatalf("PlanConfig: %v", err)
+	}
+	if p.Refusal != nil {
+		t.Fatalf("one absent section refused the whole plan: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 2 {
+		t.Fatalf("entries = %#v, want both settings", p.Entries)
+	}
+	for _, e := range p.Entries {
+		if e.Action == "noop" {
+			t.Fatalf("%s planned nothing: %#v", e.SettingID, e)
+		}
+	}
+}

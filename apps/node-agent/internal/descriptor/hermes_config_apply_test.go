@@ -239,3 +239,37 @@ func TestApplyChecksTheDigestEvenForAnOperationAlreadyApplied(t *testing.T) {
 		t.Fatal("a refused re-apply wrote to the document")
 	}
 }
+
+// End to end on the document adopt-time reconcile actually meets: no
+// `approvals:` section at all. The section is appended at the END, so the
+// operator's own lines survive unbroken and in order, and the declared value
+// is readable afterwards.
+func TestApplyCreatesAnAbsentSectionAtTheEndOfTheDocument(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, noSectionDoc)
+	_, r := applyPlanned(t, h, key, "hermes.approvals.timeout", 900)
+	if r.Phase != "applied" {
+		t.Fatalf("phase = %q, want applied (error: %q)", r.Phase, r.Error)
+	}
+	body, _ := os.ReadFile(cfg)
+	if string(body) != noSectionDoc+"approvals:\n  timeout: 900\n" {
+		t.Fatalf("the created section is not the one key at the end:\n%q", string(body))
+	}
+	v, present, err := configedit.Read(body, "approvals.timeout")
+	if err != nil || !present || v != 900 {
+		t.Fatalf("approvals.timeout after apply: %#v present=%v err=%v", v, present, err)
+	}
+}
+
+// The same, for an `additive-only` list — the policy F2 protects. Nothing was
+// there to remove, and what lands is exactly what was declared.
+func TestApplyCreatesAnAbsentSectionForAnAdditiveOnlyList(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, noSectionDoc)
+	_, r := applyPlanned(t, h, key, "hermes.approvals.command_allowlist", []string{"git status"})
+	if r.Phase != "applied" {
+		t.Fatalf("phase = %q, want applied (error: %q)", r.Phase, r.Error)
+	}
+	body, _ := os.ReadFile(cfg)
+	if string(body) != noSectionDoc+"approvals:\n  command_allowlist:\n    - git status\n" {
+		t.Fatalf("the created section is not the one list at the end:\n%q", string(body))
+	}
+}

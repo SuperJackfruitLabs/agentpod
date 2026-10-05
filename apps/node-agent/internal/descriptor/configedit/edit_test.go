@@ -418,3 +418,337 @@ func TestSetScalarRefusesAValueThatIsNotAScalar(t *testing.T) {
 		}
 	}
 }
+
+// ---- an absent SECTION, not just an absent key -------------------------------
+
+// noSectionDoc is the document this round exists for: an operator's own file
+// with no `approvals:` key AT ALL. Every other fixture in this file has the
+// section already there, which is exactly why the absent-SECTION case went
+// unnoticed while the absent-KEY case was being fixed.
+//
+// It is the ordinary state of a freshly adopted station whose operator has
+// customised nothing, and adopt-time reconcile — writing the fleet's declared
+// values once, at adoption — is the headline use case for the whole feature.
+// Refusing here refused on exactly the stations the feature exists for, and
+// because derivePlanConfig refuses the WHOLE plan on one setting's shape, it
+// also blocked every other setting declared alongside it.
+const noSectionDoc = `# the operator's own note, which must survive
+model:
+  context_length: 8000   # trailing comment
+  name: small
+tools:
+  - shell
+  - search
+`
+
+func TestSetScalarCreatesAnAbsentSectionAtTheEndOfTheDocument(t *testing.T) {
+	edited, action, err := SetScalar([]byte(noSectionDoc), "approvals.timeout", 900)
+	if err != nil {
+		t.Fatalf("an absent section was refused rather than created: %v", err)
+	}
+	if action != "create" {
+		t.Fatalf("action = %q, want create", action)
+	}
+	// Appended at the END: every line the operator wrote survives, in order,
+	// as a single unbroken prefix of the result.
+	out := string(edited)
+	if !strings.HasPrefix(out, noSectionDoc) {
+		t.Fatalf("the operator's document was disturbed or reordered:\n%s", out)
+	}
+	if out != noSectionDoc+"approvals:\n  timeout: 900\n" {
+		t.Fatalf("created section is not the one key, at the end:\n%q", out)
+	}
+	v, present, err := Read(edited, "approvals.timeout")
+	if err != nil || !present {
+		t.Fatalf("Read after creating the section: present=%v err=%v", present, err)
+	}
+	if v != 900 {
+		t.Fatalf("timeout = %#v, want 900", v)
+	}
+	// And the created section is a change confined to the key the caller
+	// named — the containment check must accept the edit the editor just made.
+	if err := SameOutsideKeys([]byte(noSectionDoc), edited, []string{"approvals.timeout"}, nil); err != nil {
+		t.Fatalf("creating a section was rejected as a change outside the plan: %v", err)
+	}
+}
+
+func TestAppendToListCreatesAnAbsentSectionAtTheEndOfTheDocument(t *testing.T) {
+	edited, action, added, err := AppendToList([]byte(noSectionDoc),
+		"approvals.command_allowlist", []string{"git status", "ls"})
+	if err != nil {
+		t.Fatalf("an absent section was refused rather than created: %v", err)
+	}
+	if action != "append" || len(added) != 2 {
+		t.Fatalf("action = %q, added = %#v, want append of both", action, added)
+	}
+	out := string(edited)
+	if !strings.HasPrefix(out, noSectionDoc) {
+		t.Fatalf("the operator's document was disturbed or reordered:\n%s", out)
+	}
+	if out != noSectionDoc+"approvals:\n  command_allowlist:\n    - git status\n    - ls\n" {
+		t.Fatalf("created section is not the one list, at the end:\n%q", out)
+	}
+	v, present, err := Read(edited, "approvals.command_allowlist")
+	if err != nil || !present {
+		t.Fatalf("Read after creating the section: present=%v err=%v", present, err)
+	}
+	if items, ok := v.([]any); !ok || len(items) != 2 || items[0] != "git status" || items[1] != "ls" {
+		t.Fatalf("created list = %#v, want [git status ls]", v)
+	}
+	if err := SameOutsideKeys([]byte(noSectionDoc), edited,
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": added}); err != nil {
+		t.Fatalf("creating a section for an additive-only list was rejected as a change outside the plan: %v", err)
+	}
+}
+
+// The whole-plan consequence, composed the way derivePlanConfig composes it:
+// one setting in a section that EXISTS and one whose section is absent, edited
+// in sequence against the same document, must both land and must pass
+// containment TOGETHER. One absent section blocking every other setting in the
+// same plan is what made this worth fixing rather than documenting.
+func TestASettingInAnExistingSectionAndOneInAnAbsentSectionBothLand(t *testing.T) {
+	keyPaths := []string{"model.context_length", "approvals.timeout"}
+	after, action, err := SetScalar([]byte(noSectionDoc), keyPaths[0], 16000)
+	if err != nil {
+		t.Fatalf("%s: %v", keyPaths[0], err)
+	}
+	if action != "modify" {
+		t.Fatalf("%s: action = %q, want modify", keyPaths[0], action)
+	}
+	after, action, err = SetScalar(after, keyPaths[1], 900)
+	if err != nil {
+		t.Fatalf("%s: %v", keyPaths[1], err)
+	}
+	if action != "create" {
+		t.Fatalf("%s: action = %q, want create", keyPaths[1], action)
+	}
+	if v, _, _ := Read(after, keyPaths[0]); v != 16000 {
+		t.Fatalf("%s = %#v, want 16000", keyPaths[0], v)
+	}
+	if v, _, _ := Read(after, keyPaths[1]); v != 900 {
+		t.Fatalf("%s = %#v, want 900", keyPaths[1], v)
+	}
+	if err := SameOutsideKeys([]byte(noSectionDoc), after, keyPaths, nil); err != nil {
+		t.Fatalf("a plan mixing an existing and an absent section was refused: %v", err)
+	}
+	// The operator's comment and the key they did not declare are still there.
+	for _, want := range []string{"# the operator's own note, which must survive", "name: small", "  - search"} {
+		if !contains(string(after), want) {
+			t.Fatalf("a mixed plan reflowed the operator's file: %q is gone", want)
+		}
+	}
+}
+
+// Creating a section is ONLY for a section that is genuinely absent. A section
+// that is there in a shape this editor cannot extend keeps refusing exactly as
+// it did before, by name — "make any shape work" is not what this change is.
+func TestASectionPresentInAnUnsupportedShapeIsStillRefusedByName(t *testing.T) {
+	shapes := map[string]string{
+		"a scalar":                "approvals: 300\nmodel: gpt\n",
+		"a bare key holding none": "approvals:\nmodel: gpt\n",
+		"a sequence":              "approvals:\n  - nope\nmodel: gpt\n",
+		"an empty flow mapping":   "approvals: {}\nmodel: gpt\n",
+		"a flow mapping":          "approvals: {mode: ask}\nmodel: gpt\n",
+	}
+	for name, doc := range shapes {
+		edited, _, err := SetScalar([]byte(doc), "approvals.timeout", 900)
+		if err == nil {
+			t.Fatalf("%s: a present section in an unsupported shape was written:\n%s", name, string(edited))
+		}
+		if !contains(err.Error(), "approvals") {
+			t.Fatalf("%s: a refusal must name the section it refused: %v", name, err)
+		}
+		if edited != nil {
+			t.Fatalf("%s: a refused write still returned a document", name)
+		}
+		edited, _, _, err = AppendToList([]byte(doc), "approvals.command_allowlist", []string{"ls"})
+		if err == nil {
+			t.Fatalf("%s: AppendToList wrote into a present section in an unsupported shape:\n%s", name, string(edited))
+		}
+		if !contains(err.Error(), "approvals") {
+			t.Fatalf("%s: AppendToList's refusal must name the section: %v", name, err)
+		}
+	}
+}
+
+// Only ONE level of parent is ever created. A deeper absent path is out of
+// scope — the registry has no such setting — so it is refused by the name of
+// the element that is missing, not guessed at.
+func TestADeeperAbsentPathIsStillRefusedByName(t *testing.T) {
+	cases := map[string]struct{ doc, keyPath, missing string }{
+		"both levels absent":  {"model: gpt\n", "approvals.nested.timeout", "approvals"},
+		"second level absent": {"approvals:\n  mode: ask\n", "approvals.nested.timeout", "nested"},
+	}
+	for name, c := range cases {
+		edited, _, err := SetScalar([]byte(c.doc), c.keyPath, 900)
+		if err == nil {
+			t.Fatalf("%s: a two-level create was guessed at:\n%s", name, string(edited))
+		}
+		if !contains(err.Error(), c.missing) {
+			t.Fatalf("%s: refusal must name %q: %v", name, c.missing, err)
+		}
+		if _, _, _, err := AppendToList([]byte(c.doc), c.keyPath, []string{"ls"}); err == nil {
+			t.Fatalf("%s: AppendToList guessed at a two-level create", name)
+		}
+	}
+}
+
+// Creating a section widens containment — `after` carries a section `before`
+// did not have — and spec §10 says a widened predicate must be mutation
+// tested. These are the F2 attack shapes a previous review ran, re-run now
+// that SameOutsideKeys prunes a section the editor created: every one must
+// still be REFUSED. The honest edits at the end must still pass, so a
+// predicate that simply always errors fails this test too.
+func TestF2AttackShapesStillRefusedNowThatACreatedSectionIsPruned(t *testing.T) {
+	// A section that EXISTS, with entries the operator put there.
+	lived := "# operator's note\n" +
+		"approvals:\n  mode: ask\n  timeout: 300\n  command_allowlist:\n    - git status\n    - ls\n" +
+		"tools:\n  - shell\n" +
+		"model:\n  context_length: 8000\n"
+	livedDup := strings.Replace(lived, "    - ls\n", "    - ls\n    - ls\n", 1)
+	allow := "approvals.command_allowlist"
+
+	type shape struct {
+		before, after string
+		keyPaths      []string
+		additive      map[string][]string
+	}
+	// Every one of these must be refused.
+	refused := map[string]shape{
+		"drop-and-add: the operator's entry replaced by the declared one": {
+			lived, strings.Replace(lived, "    - ls\n", "    - npm test\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"wipe to an empty list": {
+			lived, strings.Replace(lived, "  command_allowlist:\n    - git status\n    - ls\n", "  command_allowlist: []\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"wipe to null": {
+			lived, strings.Replace(lived, "  command_allowlist:\n    - git status\n    - ls\n", "  command_allowlist:\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"the key deleted outright": {
+			lived, strings.Replace(lived, "  command_allowlist:\n    - git status\n    - ls\n", "", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"a duplicate the operator had silently dropped": {
+			livedDup, strings.Replace(livedDup, "    - ls\n    - ls\n", "    - ls\n    - npm test\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"over-claimed added: an operator entry claimed as ours": {
+			lived, strings.Replace(lived, "    - ls\n", "    - ls\n    - npm test\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test", "ls"}},
+		},
+		"an undeclared extra entry smuggled in": {
+			lived, strings.Replace(lived, "    - ls\n", "    - ls\n    - npm test\n    - sudo rm\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"an unrelated list emptied": {
+			lived, strings.Replace(strings.Replace(lived, "    - ls\n", "    - ls\n    - npm test\n", 1), "tools:\n  - shell\n", "tools: []\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"the whole section the operator wrote removed": {
+			lived, strings.Replace(lived, "approvals:\n  mode: ask\n  timeout: 300\n  command_allowlist:\n    - git status\n    - ls\n", "", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		// Pruning must be asymmetric: only a section `before` genuinely
+		// LACKED may be pruned out of `after`. Pruning an empty section on
+		// BOTH sides would let an edit that deleted a whole section the
+		// operator wrote — one holding only the key this plan names — pass as
+		// "nothing outside the plan changed".
+		"a section holding only this plan's key removed outright": {
+			"# operator's note\napprovals:\n  timeout: 300\nmodel:\n  context_length: 8000\n",
+			"# operator's note\nmodel:\n  context_length: 8000\n",
+			[]string{"approvals.timeout"}, nil,
+		},
+		"another key in the same section changed": {
+			lived, strings.Replace(strings.Replace(lived, "    - ls\n", "    - ls\n    - npm test\n", 1), "  mode: ask\n", "  mode: strict\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"an operator entry renamed rather than kept": {
+			lived, strings.Replace(strings.Replace(lived, "    - ls\n", "    - lsx\n", 1), "    - git status\n", "    - git status\n    - npm test\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		// Created-section shapes: `before` has no section at all, so the
+		// pruning this change adds is in play for every one of these.
+		"a created section carrying an undeclared extra key": {
+			noSectionDoc, noSectionDoc + "approvals:\n  command_allowlist:\n    - git status\n  mode: strict\n",
+			[]string{allow}, map[string][]string{allow: {"git status"}},
+		},
+		"a created section's list carrying an undeclared extra entry": {
+			noSectionDoc, noSectionDoc + "approvals:\n  command_allowlist:\n    - git status\n    - sudo rm\n",
+			[]string{allow}, map[string][]string{allow: {"git status"}},
+		},
+		"a created section written while something else was dropped": {
+			noSectionDoc,
+			strings.Replace(noSectionDoc, "  - search\n", "", 1) + "approvals:\n  command_allowlist:\n    - git status\n",
+			[]string{allow}, map[string][]string{allow: {"git status"}},
+		},
+		"a created section holding something other than what was declared": {
+			noSectionDoc, noSectionDoc + "approvals:\n  command_allowlist:\n    - sudo rm\n",
+			[]string{allow}, map[string][]string{allow: {"git status"}},
+		},
+	}
+	for name, s := range refused {
+		if s.after == s.before {
+			t.Fatalf("%s: test setup produced no change to check", name)
+		}
+		if err := SameOutsideKeys([]byte(s.before), []byte(s.after), s.keyPaths, s.additive); err == nil {
+			t.Fatalf("F2: containment accepted %q — the guarantee is not guarding:\n%s", name, s.after)
+		}
+	}
+
+	// And the honest edits still pass, on both an existing and a created
+	// section, so this test cannot be satisfied by refusing everything.
+	honest := map[string]shape{
+		"an append to a section that exists": {
+			lived, strings.Replace(lived, "    - ls\n", "    - ls\n    - npm test\n", 1),
+			[]string{allow}, map[string][]string{allow: {"npm test"}},
+		},
+		"an append that created the section": {
+			noSectionDoc, noSectionDoc + "approvals:\n  command_allowlist:\n    - git status\n",
+			[]string{allow}, map[string][]string{allow: {"git status"}},
+		},
+		"a scalar written into a created section": {
+			noSectionDoc, noSectionDoc + "approvals:\n  timeout: 900\n",
+			[]string{"approvals.timeout"}, nil,
+		},
+	}
+	for name, s := range honest {
+		if err := SameOutsideKeys([]byte(s.before), []byte(s.after), s.keyPaths, s.additive); err != nil {
+			t.Fatalf("containment refused %q, which is the edit the editor itself makes: %v", name, err)
+		}
+	}
+}
+
+// Two document shapes an append has to cope with before it can create a
+// section: a document that is empty, and one whose last line has no newline
+// after it (where appending blind would glue the section onto that line and
+// destroy it).
+func TestCreatingASectionCopesWithAnEmptyOrUnterminatedDocument(t *testing.T) {
+	cases := map[string]string{
+		"an empty document":               "",
+		"no trailing newline":             "model:\n  context_length: 8000",
+		"a trailing comment of their own": "model:\n  context_length: 8000\n# the operator's closing note\n",
+	}
+	for name, before := range cases {
+		edited, action, err := SetScalar([]byte(before), "approvals.timeout", 900)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if action != "create" {
+			t.Fatalf("%s: action = %q, want create", name, action)
+		}
+		if !contains(string(edited), "approvals:\n  timeout: 900\n") {
+			t.Fatalf("%s: the created section is not whole:\n%q", name, string(edited))
+		}
+		v, present, err := Read(edited, "approvals.timeout")
+		if err != nil || !present || v != 900 {
+			t.Fatalf("%s: the result does not read back: %#v present=%v err=%v", name, v, present, err)
+		}
+		if err := SameOutsideKeys([]byte(before), edited, []string{"approvals.timeout"}, nil); err != nil {
+			t.Fatalf("%s: creating the section changed something else: %v", name, err)
+		}
+	}
+}
