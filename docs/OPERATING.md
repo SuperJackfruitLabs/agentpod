@@ -198,9 +198,27 @@ endpoint, not these verbs.
 
 ## 1b. Service principals
 
-A service principal is a program that reads, with no person behind it — today, superwitness. It
-holds a `svc_…:<secret>` credential, exchanges it at `POST /api/auth/service-token` for a
-five-minute token, and its grant holds scopes only (`evidence:read`), never dispatch or reach.
+A service principal is a program with no person behind it. It holds a `svc_…:<secret>`
+credential, exchanges it at `POST /api/auth/service-token` for a five-minute token, and its grant
+holds scopes only, never dispatch or reach. Two scopes exist:
+
+- `evidence:read` — read run evidence from the hub and superpipeline (superwitness reads this way);
+- `runs:write` — report runs to superwitness's run registry. The hub mints it and no hub route
+  honours it; superwitness checks it.
+
+The token's audiences are its client's, from `HUB_OAUTH_CLIENTS` (edit them with estate's
+`bin/hub-audiences`, never by hand). Give a service only the planes it calls: superpipeline's run
+reporter is `superpipeline-run-reporter|urn:ietf:wg:oauth:2.0:oob|https://app.superwitness.dev`,
+with no hub and no superpipeline audience (while superwitness moves to that URL it also lists
+`http://foundry:8790`). Create it and hand its credential to the Worker without printing it:
+
+```sh
+fleet principals add-service superpipeline-run-reporter --client superpipeline-run-reporter --scope runs:write \
+  | bin/deliver-service-credential --expect-scope runs:write --expect-aud https://app.superwitness.dev \
+      -- wrangler secret put SUPERWITNESS_REPORTER_CREDENTIAL --name superpipeline-api
+```
+
+(`bin/deliver-service-credential` is in the estate repository.)
 
 1. Register its client, so its tokens may be spent at the hub and at superpipeline — in
    `/etc/agentpod/hub.env`, append to `HUB_OAUTH_CLIENTS`:

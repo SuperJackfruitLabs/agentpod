@@ -1,7 +1,7 @@
 /**
  * Service principals, over HTTP — admin-guarded at the mount (`routes/admin.ts`).
  *
- * One call creates the principal, its read-only grant and its first credential, because none of
+ * One call creates the principal, its scopes-only grant and its first credential, because none of
  * the three is useful alone and a half-made service is a principal nothing can authenticate as —
  * so the three writes are one transaction, and a failure in any leaves none.
  * The secret is in the 201 body and nowhere else: not stored, not logged.
@@ -47,7 +47,7 @@ export function createAdminServicePrincipalsRouter(deps: { clients?: readonly OA
       const tenantId = resolveTenantId(c);
       const { principalId, credential } = await db.transaction(async (tx) => {
         const principalId = await createPrincipal({ kind: "service", handle: input.handle, displayName: input.displayName }, tx);
-        // Read-only by construction: may dispatch nobody, may grant nothing.
+        // Nothing at the hub by construction: may dispatch nobody, may grant nothing; scopes only.
         await setGrant(principalId, { mayDispatch: [], mayGrantReach: false, scopes: input.scopes }, tx);
         const credential = await mintServiceCredential(
           { tenantId, principalId, oauthClient: input.oauthClient, name: input.handle },
