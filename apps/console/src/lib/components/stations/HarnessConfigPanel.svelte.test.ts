@@ -349,6 +349,34 @@ test("a noOp plan offers no apply — nothing to write means nothing to review",
   expect(view.queryByRole("button", { name: "Apply reviewed plan" })).toBeNull();
 });
 
+test("a partially-opted-out plan names each refused setting beside the plannable entries", async () => {
+  // The plan route spreads `refused` onto the node's own `ConfigPlan` only
+  // when at least one requested setting was opted out before the node was
+  // ever asked to plan anything (apps/hub/src/routes/harness-config.ts) —
+  // the rest of a mixed request still gets planned normally.
+  vi.spyOn(api, "planStationConfig").mockResolvedValue(
+    plan({
+      refused: [
+        {
+          settingId: "hermes.approvals.command_allowlist",
+          code: "OPTED_OUT",
+          message: "an operator opted this setting out of reconciliation",
+        },
+      ],
+    }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByText(/hermes\.approvals\.command_allowlist/)).toBeTruthy());
+  const section = view.getByRole("region", { name: /Review and apply changes/i });
+  expect(section.textContent).toMatch(/OPTED_OUT/);
+  expect(section.textContent).toMatch(/an operator opted this setting out of reconciliation/);
+  // The plannable entry from `plan()`'s own default fixture is still shown —
+  // a refusal for one setting does not hide the rest of the plan.
+  expect(section.textContent).toMatch(/hermes\.command_timeout_ms/);
+  // And apply is still offered, because the refusal did not make this a noOp.
+  expect(view.getByRole("button", { name: "Apply reviewed plan" })).toBeTruthy();
+});
+
 test("a stale apply is the hub's answer, not a crash, and the panel never silently re-plans and applies", async () => {
   const planSpy = vi.spyOn(api, "planStationConfig").mockResolvedValue(plan({}));
   const applySpy = vi.spyOn(api, "applyStationConfig").mockRejectedValue(

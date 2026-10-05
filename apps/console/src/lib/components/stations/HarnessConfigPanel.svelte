@@ -436,6 +436,23 @@
       {#if applyStale}<p role="alert" class="text-destructive">{applyStale}</p>{/if}
       {#if plan}
         <div class="space-y-2">
+          {#if plan.refused && plan.refused.length > 0}
+            <div
+              aria-label="Settings excluded from this plan"
+              class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
+            >
+              <p class="font-medium">
+                {plan.refused.length}
+                {plan.refused.length === 1 ? "setting was" : "settings were"} left out of this plan — opted out before
+                it was ever derived:
+              </p>
+              <ul class="mt-1 space-y-1">
+                {#each plan.refused as r (r.settingId)}
+                  <li><span class="font-mono">{r.settingId}</span> — {r.code}: {r.message}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
           {#if plan.noOp}
             <p>Nothing to change: every planned setting already matches what is declared.</p>
           {:else}
