@@ -57,20 +57,6 @@ func PlanEnableConfig(current []byte) ([]byte, ConfigChange, error) {
 	return planEnableConfig(current)
 }
 
-// PlanDisableConfig is planDisableConfig under an exported name, for the same
-// reason as PlanEnableConfig: one implementation, two callers.
-//
-// Nothing in the registry calls it today — a declared setting only ever
-// enables, and the folded-in `stream_reasoning_deltas` entry refuses a
-// declared `false` precisely because reversing an enable needs the recorded
-// ConfigChange this takes, which only the verb's own state file has. It is
-// exported alongside its pair so that the reversal is reachable from the
-// same place the forward edit is, rather than being the one half a second
-// caller would have to duplicate.
-func PlanDisableConfig(current []byte, change ConfigChange) ([]byte, error) {
-	return planDisableConfig(current, change)
-}
-
 func planEnableConfig(current []byte) ([]byte, ConfigChange, error) {
 	change := ConfigChange{StreamPrevious: "absent"}
 	root, err := mapping(current)
