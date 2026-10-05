@@ -100,33 +100,31 @@
   }
 
   /**
-   * Defensive detection of the harness's OWN opt-out (D11,
-   * `ConfigValue.optedOutByHarness`), as distinct from agentpod's register.
+   * Detects the harness's OWN opt-out (D11 — Hermes' `plugins.disabled`,
+   * OpenClaw's `plugins.entries.agentpod-errors.enabled: false`), as
+   * distinct from agentpod's own opt-out register.
    *
-   * That field is landing on `ConfigValue`/`ConfigObservation` separately —
-   * it may not exist yet, and this panel must not block on it or declare it
-   * itself (the controller's ruling for this plan). So two signals are
-   * checked, in order:
+   * Verified against the hub rather than assumed: `ConfigValue` (the node's
+   * read of the document) carries a typed `optedOutByHarness` boolean, but
+   * that field is consumed INSIDE `compare()`
+   * (`apps/hub/src/services/harness-config.ts`) and never reaches the
+   * client — `ConfigObservation`, what `GET /api/stations/:stationId/config`
+   * actually serves, has no such field. The only signal that does reach an
+   * observation is `compare()`'s own `reason` text, and only one of its two
+   * `opted-out` branches ends with the fixed marker below:
    *
-   *  1. An unknown boolean field literally named `optedOutByHarness` on the
-   *     observation, duck-typed — if the contract grows it onto
-   *     `ConfigObservation` directly, this picks it up with no code change.
-   *  2. The observation's own `reason` naming this setting's harness (the
-   *     `<harness>.` prefix of its `settingId`) as the source — the spec's
-   *     planned shape ("a reason naming the harness as the source").
+   *  - the hub's own register: "an operator opted this setting out of
+   *    reconciliation" — no harness name, no marker.
+   *  - the harness's own record: "<harness> itself reports this setting
+   *    disabled (its own plugins.disabled) — not an agentpod exemption".
    *
-   * Absent either signal, this returns false and `exemptionFor` below falls
-   * back to the register — correct for every `opted-out` row the hub can
-   * produce today, because `compare()` currently only reports it from the
-   * resolved opt-out register.
+   * Matching the literal marker is a precise read of that fixed suffix, not
+   * a guess at wording: it cannot be satisfied by a reason that merely
+   * mentions a harness name for an unrelated cause, the way a bare
+   * harness-name regex could.
    */
   function harnessNamedAsSource(o: ConfigObservation): boolean {
-    if ((o as Record<string, unknown>).optedOutByHarness === true) return true;
-    if (!o.reason) return false;
-    const harness = o.settingId.split(".")[0];
-    if (!harness) return false;
-    const escaped = harness.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(escaped, "i").test(o.reason);
+    return (o.reason ?? "").includes("not an agentpod exemption");
   }
 
   /**
