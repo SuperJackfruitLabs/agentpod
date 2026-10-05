@@ -171,6 +171,37 @@ func enableConfig(raw []byte, pluginDir string) ([]byte, error) {
 	return splicePlugins(raw, encodeObject(plugins))
 }
 
+// EnableConfig is enableConfig under an exported name, and nothing else: it
+// computes, without writing, the edit that enables agentpod-errors — adding
+// pluginDir to plugins.load.paths, enabling plugins.entries.agentpod-errors,
+// and setting its hooks.allowConversationAccess — against an OpenClaw
+// configuration already in memory.
+//
+// It exists because `apn openclaw-errors enable` is no longer the only
+// caller. `internal/descriptor`'s declared-configuration registry folds in
+// `openclaw.hooks.allowConversationAccess` (spec D12) and must produce
+// BYTE-IDENTICAL output to the verb — not equivalent JSON, identical bytes —
+// so it calls this rather than reimplementing the edit. A wrapper rather
+// than a rename so the function PlanEnable (install.go) has always called
+// stays untouched: one implementation, one set of refusals, and no second
+// place for the two callers' behaviour to drift apart.
+//
+// The verb's own caller (PlanEnable) also checks the installed OpenClaw's
+// version and installs the plugin's files; neither of those is this
+// function's job, or the registry's — only the configuration document is
+// edited here, exactly as hermeslive's own folded-in writers do.
+func EnableConfig(raw []byte, pluginDir string) ([]byte, error) {
+	return enableConfig(raw, pluginDir)
+}
+
+// DisableConfig is disableConfig under an exported name, for the same reason
+// as EnableConfig: one implementation, two callers. The verb keeps its own
+// caller (PlanDisable, install.go), which also removes the plugin's files;
+// this function only ever touches the configuration document.
+func DisableConfig(raw []byte, pluginDir string) ([]byte, error) {
+	return disableConfig(raw, pluginDir)
+}
+
 func disableConfig(raw []byte, pluginDir string) ([]byte, error) {
 	root, err := parseObject(raw)
 	if err != nil {
