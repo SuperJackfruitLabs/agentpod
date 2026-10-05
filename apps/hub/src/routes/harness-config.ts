@@ -53,6 +53,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   DeclaredSetting,
+  ConfigReceipt,
   type ConfigObservation,
   type ConfigSetting,
   type ConfigValue,
@@ -64,7 +65,8 @@ import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
 import { getStation, type StationRow } from "../services/station-registry";
-import { declare, undeclare, resolveFor, compare } from "../services/harness-config";
+import { declare, undeclare, resolveFor, compare, fetchRegistry, getOptOuts } from "../services/harness-config";
+import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
 import { principalForUser } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
 
@@ -72,22 +74,6 @@ import type { AuthUser } from "../auth/middleware";
 const CONFIG_MANAGE = "config.manage";
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Ask one station's node for the registry its harness manages — the
- * `config.settings` broker verb, never cached: a registry read is cheap (it
- * touches no disk on the node, see `ConfigSettings()`) and caching it would
- * reintroduce exactly the "true when written" staleness this file exists to
- * avoid. `null` on ANY failure (offline, timeout, disconnected, or a response
- * that isn't the expected shape) — never a thrown error, so every caller
- * here can treat "could not verify" as one outcome rather than a try/catch.
- */
-async function fetchRegistry(nodeId: string, stationKey: string): Promise<ConfigSetting[] | null> {
-  const result = await broker.request(nodeId, "config.settings", { stationKey });
-  if (!result.ok) return null;
-  const settings = (result.data as { settings?: ConfigSetting[] } | undefined)?.settings;
-  return Array.isArray(settings) ? settings : null;
-}
 
 /** Every tenant station advertising `config.manage`, tenant-scoped. */
 async function manageableStations(tenantId: string): Promise<StationRow[]> {
@@ -244,6 +230,19 @@ function ensureEveryValue(
  * row falls through to the ordinary matches/drifted/absent/unreadable
  * states — correct in the common case this happens, which is the SAME node
  * failing both calls, where every row is already `unreadable` regardless.
+ *
+ * Also feeds `compare()`'s three Task 9b arguments — `appliedWrites`
+ * (`applied_harness_config`, via `getAppliedWrites`), `currentGatewayPid`
+ * (the station's live health, via `readGatewayPid`) and `optedOut` (via
+ * `getOptOuts`) — the restart evidence and opt-out an earlier task's
+ * `compare()` could already emit but no caller fed it, so `awaiting-restart`
+ * and `opted-out` could never reach either route that calls this function
+ * (`GET /api/fleet/config/drift` and `GET /api/stations/:stationId/config`).
+ * The health read is a SECOND broker round trip to the same node as
+ * `config.observe` — issued concurrently with it (and the registry fetch,
+ * and the two DB reads) rather than serially after, so `GET
+ * /api/fleet/config/drift`'s fan-out across every station does not double in
+ * wall-clock time for a correctness fix.
  */
 async function observeStation(
   station: Pick<StationRow, "id" | "nodeId" | "stationKey">,
@@ -255,12 +254,15 @@ async function observeStation(
     return { observations: [], unreachable: false };
   }
 
-  const [registry, result] = await Promise.all([
+  const [registry, result, appliedWrites, currentGatewayPid, optedOut] = await Promise.all([
     fetchRegistry(station.nodeId, station.stationKey),
     broker.request(station.nodeId, "config.observe", {
       stationKey: station.stationKey,
       settings: settingIds,
     }),
+    getAppliedWrites(tenantId, station.id),
+    readGatewayPid(station.nodeId, station.stationKey),
+    getOptOuts(tenantId, station.stationKey),
   ]);
 
   const raw = result.ok
@@ -277,7 +279,15 @@ async function observeStation(
     .filter((s): s is ConfigSetting => s !== undefined);
 
   return {
-    observations: compare({ stationId: station.id, declared, values, settings }),
+    observations: compare({
+      stationId: station.id,
+      declared,
+      values,
+      settings,
+      appliedWrites,
+      currentGatewayPid,
+      optedOut,
+    }),
     unreachable: !result.ok,
   };
 }
@@ -293,6 +303,34 @@ const UndeclareBody = z
   .refine((d) => !(d.stationId !== null && d.nodeId !== null), {
     message: "a declaration targets one level: station, node, or fleet (both null)",
   });
+
+/**
+ * Body of `POST /stations/:stationId/config/plan`. `value` is optional per
+ * entry — an omitted one resolves from this station's declaration
+ * (`planFor`'s job, not this schema's: zod cannot see what is declared).
+ */
+const PlanBody = z.object({
+  settings: z.array(z.object({ settingId: z.string().min(1), value: z.unknown().optional() })).min(1),
+});
+
+/** Body of `POST /stations/:stationId/config/apply`. */
+const ApplyBody = z.object({
+  operationId: z.string().min(1),
+  planDigest: z.string().min(1),
+});
+
+/**
+ * `ConfigApplyError` → the status/body the route answers with.
+ *
+ * `code` travels verbatim, including a refusal code the NODE produced
+ * (`planFor` throws rather than returning a refused plan as though it were a
+ * plan — finding 3). A caller distinguishes a refusal from a plan by the
+ * status alone, and which refusal it was by `code` alone, without parsing the
+ * sentence.
+ */
+function configApplyErrorResponse(err: ConfigApplyError): { error: string; code?: string } {
+  return { error: err.message, ...(err.code ? { code: err.code } : {}) };
+}
 
 export const harnessConfigRoutes = new Hono()
 
@@ -510,4 +548,124 @@ export const harnessConfigRoutes = new Hono()
 
     const { observations } = await observeStation(station, user.tenantId);
     return c.json({ observations });
+  })
+
+  /**
+   * POST /api/stations/:stationId/config/plan
+   *
+   * Body: `{settings: [{settingId, value?}]}`. Resolves a station the same
+   * way every route in this file does (`getStation` + tenant check), then
+   * hands off to `planFor` (`services/harness-config-apply.ts`), which
+   * checks every id against the LIVE registry before the node is ever asked
+   * to plan anything, resolves an omitted `value` from what is declared, and
+   * returns the node's `ConfigPlan` unchanged — never an empty one standing
+   * in for a node this system could not reach (that is a 502, via
+   * `ConfigApplyError`, not a 200 with nothing in it), and never a REFUSED
+   * plan standing in for a plan (that is a 400 or a 409 carrying the node's
+   * own refusal code, for the same reason: a refusal that cannot be told from
+   * a pass by status or exit code is spec §9's whole premise, violated).
+   */
+  .post("/stations/:stationId/config/plan", zValidator("json", PlanBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const body = c.req.valid("json");
+    try {
+      const { plan, refused } = await planFor({ tenantId: user.tenantId, station, settings: body.settings });
+      // `refused` is additive: a plan with nothing opted out answers with
+      // exactly the node's `ConfigPlan`, unchanged, as every caller of this
+      // route already expects. Only a mixed request (some settings opted
+      // out, the rest planned) carries the extra field, naming what was
+      // left out and why.
+      return c.json(refused.length > 0 ? { ...plan, refused } : plan);
+    } catch (err) {
+      if (err instanceof ConfigApplyError) {
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
+      }
+      throw err;
+    }
+  })
+
+  /**
+   * GET /api/stations/:stationId/config/operations/:operationId
+   *
+   * Reads the receipt this station's own node journal has recorded for
+   * `operationId`, exactly as the node reports it — this route never
+   * re-derives or re-plans (`config.inspect`, the sibling of `config.plan`
+   * and `config.apply`).
+   */
+  .get("/stations/:stationId/config/operations/:operationId", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const operationId = c.req.param("operationId");
+    const result = await broker.request(station.nodeId, "config.inspect", {
+      stationKey: station.stationKey,
+      operationId,
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error ?? "the node could not be reached" }, 502);
+    }
+    const parsed = ConfigReceipt.safeParse(result.data);
+    if (!parsed.success) {
+      return c.json({ error: "the node returned an unexpected receipt" }, 502);
+    }
+    return c.json(parsed.data);
+  })
+
+  /**
+   * POST /api/stations/:stationId/config/apply
+   *
+   * Body: `{operationId, planDigest}`. Forwards to `applyFor`, which asks
+   * the node to apply exactly the plan reviewed as `planDigest` for
+   * `operationId`. The node — never this route — decides `applied` vs
+   * `conflict` (a digest that no longer matches its journal is a conflict,
+   * not an error; see `hermes_config.go`'s `ApplyConfig`), so the response
+   * status mirrors that: 200 for `applied`, 409 for anything else. Only on
+   * `applied` does `applyFor` record `applied_harness_config` rows, under
+   * the gateway pid read from this station's health right after the write.
+   */
+  .post("/stations/:stationId/config/apply", zValidator("json", ApplyBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationId = c.req.param("stationId");
+    const station = await getStation(user.id, stationId);
+    if (!station || station.tenantId !== user.tenantId) {
+      return c.json({ error: "Not Found" }, 404);
+    }
+
+    const body = c.req.valid("json");
+    try {
+      const receipt = await applyFor({
+        tenantId: user.tenantId,
+        station,
+        operationId: body.operationId,
+        planDigest: body.planDigest,
+      });
+      return c.json(receipt, receipt.phase === "applied" ? 200 : 409);
+    } catch (err) {
+      if (err instanceof ConfigApplyError) {
+        return c.json(configApplyErrorResponse(err), err.status as 400 | 409 | 502);
+      }
+      throw err;
+    }
   });

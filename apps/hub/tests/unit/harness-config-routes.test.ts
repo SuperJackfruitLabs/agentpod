@@ -212,6 +212,32 @@ async function connectFakeNode(
       return;
     }
 
+    // Task 9b: `observeStation` also reads live health for `compare()`'s
+    // `currentGatewayPid` — answered here so that read resolves immediately
+    // instead of running out the broker's 15s timeout on every call. The
+    // pid value is irrelevant to every test using this helper: none of them
+    // has an `applied_harness_config` row, so `compare()` never consults it.
+    if (msg.verb === "health") {
+      ws.send(
+        JSON.stringify({
+          type: "res",
+          id: msg.id,
+          ok: true,
+          data: {
+            running: true,
+            pid: 1,
+            cpuPct: null,
+            memBytes: null,
+            diskBytes: null,
+            uptimeSec: null,
+            lastActivity: null,
+            note: null,
+          },
+        }),
+      );
+      return;
+    }
+
     if (msg.verb !== "config.observe") return;
     const params = msg.params as { settings: string[] };
     ws.send(
@@ -461,6 +487,30 @@ test(
         if (msg.verb === "config.settings") {
           ws.send(
             JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: HERMES_REGISTRY } }),
+          );
+          return;
+        }
+
+        // Task 9b's health read for `currentGatewayPid` — answered so it
+        // resolves immediately rather than timing out; irrelevant to this
+        // test's assertions since neither station has an applied write.
+        if (msg.verb === "health") {
+          ws.send(
+            JSON.stringify({
+              type: "res",
+              id: msg.id,
+              ok: true,
+              data: {
+                running: true,
+                pid: 1,
+                cpuPct: null,
+                memBytes: null,
+                diskBytes: null,
+                uptimeSec: null,
+                lastActivity: null,
+                note: null,
+              },
+            }),
           );
           return;
         }

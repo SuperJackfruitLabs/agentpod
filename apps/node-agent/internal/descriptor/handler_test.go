@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -227,6 +228,203 @@ func TestHandlerConfigSettings_UnsupportedHarnessReturnsError(t *testing.T) {
 	}
 }
 
+func TestHandlerConfigPlan_RoutesToDescriptor(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"hermes:one","operationId":"test-op-1","want":[{"settingId":"hermes.approvals.timeout","value":"600"}]}`)
+	result, streamed, err := h.Handle(context.Background(), "config.plan", params, nil)
+	if err != nil {
+		t.Fatalf("config.plan: %v", err)
+	}
+	if streamed {
+		t.Fatal("config.plan should not be streamed")
+	}
+	plan, ok := result.(ConfigPlan)
+	if !ok {
+		t.Fatalf("expected ConfigPlan, got %T", result)
+	}
+	if plan.OperationID != "test-op-1" {
+		t.Fatalf("expected operationId test-op-1, got %s", plan.OperationID)
+	}
+	if plan.StationKey != "hermes:one" {
+		t.Fatalf("expected stationKey hermes:one, got %s", plan.StationKey)
+	}
+}
+
+func TestHandlerConfigPlan_UnsupportedHarnessReturnsError(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "fake"})
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"fake:s1","operationId":"test-op","want":[{"settingId":"foo","value":"bar"}]}`)
+	_, _, err := h.Handle(context.Background(), "config.plan", params, nil)
+	if err == nil {
+		t.Fatal("expected error: fake descriptor does not implement ConfigManager")
+	}
+	if !contains(err.Error(), "does not manage configuration") {
+		t.Fatalf("expected error about managing configuration, got: %v", err)
+	}
+}
+
+func TestHandlerConfigPlan_BadParamsError(t *testing.T) {
+	reg := NewRegistry()
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"invalid json"}`)
+	_, _, err := h.Handle(context.Background(), "config.plan", params, nil)
+	if err == nil {
+		t.Fatal("expected error for bad params")
+	}
+	if !contains(err.Error(), "bad params") {
+		t.Fatalf("expected 'bad params' error, got: %v", err)
+	}
+}
+
+func TestHandlerConfigInspect_RoutesToDescriptor(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	h := NewHandler(reg)
+	// First plan an operation so it exists in the journal
+	planParams := json.RawMessage(`{"stationKey":"hermes:one","operationId":"test-op-2","want":[{"settingId":"hermes.approvals.timeout","value":"600"}]}`)
+	_, _, err := h.Handle(context.Background(), "config.plan", planParams, nil)
+	if err != nil {
+		t.Fatalf("config.plan setup: %v", err)
+	}
+
+	// Now inspect the operation
+	params := json.RawMessage(`{"stationKey":"hermes:one","operationId":"test-op-2"}`)
+	result, streamed, err := h.Handle(context.Background(), "config.inspect", params, nil)
+	if err != nil {
+		t.Fatalf("config.inspect: %v", err)
+	}
+	if streamed {
+		t.Fatal("config.inspect should not be streamed")
+	}
+	receipt, ok := result.(ConfigReceipt)
+	if !ok {
+		t.Fatalf("expected ConfigReceipt, got %T", result)
+	}
+	if receipt.Plan.OperationID != "test-op-2" {
+		t.Fatalf("expected operationId test-op-2, got %s", receipt.Plan.OperationID)
+	}
+}
+
+func TestHandlerConfigInspect_UnsupportedHarnessReturnsError(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "fake"})
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"fake:s1","operationId":"test-op"}`)
+	_, _, err := h.Handle(context.Background(), "config.inspect", params, nil)
+	if err == nil {
+		t.Fatal("expected error: fake descriptor does not implement ConfigManager")
+	}
+	if !contains(err.Error(), "does not manage configuration") {
+		t.Fatalf("expected error about managing configuration, got: %v", err)
+	}
+}
+
+func TestHandlerConfigInspect_BadParamsError(t *testing.T) {
+	reg := NewRegistry()
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"invalid json"}`)
+	_, _, err := h.Handle(context.Background(), "config.inspect", params, nil)
+	if err == nil {
+		t.Fatal("expected error for bad params")
+	}
+	if !contains(err.Error(), "bad params") {
+		t.Fatalf("expected 'bad params' error, got: %v", err)
+	}
+}
+
+func TestHandlerConfigApply_RoutesToDescriptor(t *testing.T) {
+	home := t.TempDir()
+	profile := filepath.Join(home, "profiles", "one")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profile, "config.yaml"), []byte("approvals:\n  timeout: 300\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := NewRegistry()
+	reg.Register(NewHermes(home, ""))
+
+	h := NewHandler(reg)
+	// First plan an operation
+	planParams := json.RawMessage(`{"stationKey":"hermes:one","operationId":"test-op-3","want":[{"settingId":"hermes.approvals.timeout","value":"600"}]}`)
+	planResult, _, err := h.Handle(context.Background(), "config.plan", planParams, nil)
+	if err != nil {
+		t.Fatalf("config.plan setup: %v", err)
+	}
+	plan, ok := planResult.(ConfigPlan)
+	if !ok {
+		t.Fatalf("expected ConfigPlan, got %T", planResult)
+	}
+
+	// Now apply the plan
+	params := json.RawMessage(`{"stationKey":"hermes:one","operationId":"test-op-3","planDigest":"` + plan.PlanDigest + `"}`)
+	result, streamed, err := h.Handle(context.Background(), "config.apply", params, nil)
+	if err != nil {
+		t.Fatalf("config.apply: %v", err)
+	}
+	if streamed {
+		t.Fatal("config.apply should not be streamed")
+	}
+	receipt, ok := result.(ConfigReceipt)
+	if !ok {
+		t.Fatalf("expected ConfigReceipt, got %T", result)
+	}
+	if receipt.Plan.OperationID != "test-op-3" {
+		t.Fatalf("expected operationId test-op-3, got %s", receipt.Plan.OperationID)
+	}
+}
+
+func TestHandlerConfigApply_UnsupportedHarnessReturnsError(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(&fakeDescriptor{harness: "fake"})
+
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"stationKey":"fake:s1","operationId":"test-op","planDigest":"abc123"}`)
+	_, _, err := h.Handle(context.Background(), "config.apply", params, nil)
+	if err == nil {
+		t.Fatal("expected error: fake descriptor does not implement ConfigManager")
+	}
+	if !contains(err.Error(), "does not manage configuration") {
+		t.Fatalf("expected error about managing configuration, got: %v", err)
+	}
+}
+
+func TestHandlerConfigApply_BadParamsError(t *testing.T) {
+	reg := NewRegistry()
+	h := NewHandler(reg)
+	params := json.RawMessage(`{"invalid json"}`)
+	_, _, err := h.Handle(context.Background(), "config.apply", params, nil)
+	if err == nil {
+		t.Fatal("expected error for bad params")
+	}
+	if !contains(err.Error(), "bad params") {
+		t.Fatalf("expected 'bad params' error, got: %v", err)
+	}
+}
+
 func TestHandlerUnknownVerb_ReturnsError(t *testing.T) {
 	reg := NewRegistry()
 	h := NewHandler(reg)
@@ -234,4 +432,9 @@ func TestHandlerUnknownVerb_ReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unknown verb")
 	}
+}
+
+// contains is a helper to check if a string is in another string.
+func contains(s, substr string) bool {
+	return strings.Contains(s, substr)
 }

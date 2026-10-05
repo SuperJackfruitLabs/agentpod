@@ -83,3 +83,7 @@ export * from "./service-credentials";
 // Never what a station HAS — that is read live from the node (declared
 // harness config, observe arc, task 5).
 export * from "./harness-config";
+
+// What this system has actually written to a station (the journal of
+// successful applies) and an operator's explicit opt-outs (task 7).
+export * from "./harness-config-ops";
