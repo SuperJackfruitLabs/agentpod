@@ -166,7 +166,7 @@ git add -A && git commit -m "node: what the evidence says about approvals and re
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `packages/contract/src/harness-config.test.ts`:
+Add to `packages/contract/test/harness-config.test.ts`:
 
 ```ts
 import { describe, expect, test } from "bun:test";
@@ -248,7 +248,7 @@ describe("a config plan is reviewable before it is applied", () => {
 - [ ] **Step 2: Run them and watch them fail**
 
 ```bash
-cd packages/contract && bun test src/harness-config.test.ts
+cd packages/contract && bun test test/harness-config.test.ts
 ```
 Expected: FAIL — `ConfigPlan` is not exported.
 
