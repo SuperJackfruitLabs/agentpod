@@ -117,8 +117,19 @@ export const ConfigValue = z.object({
    */
   readable: z.boolean(),
   reason: z.string().optional(),
+  /**
+   * The HARNESS's own record that an operator disabled this — Hermes'
+   * `plugins.disabled`. Distinct from the hub's opt-out register: this one is the
+   * operator speaking through the harness's own UI, and agentpod never writes it.
+   */
+  optedOutByHarness: z.boolean().optional(),
 });
 export type ConfigValue = z.infer<typeof ConfigValue>;
+
+/** Which level a winning declaration resolved from: a station, its node, or
+ * (neither) the fleet — exactly as `resolveFor`'s `Resolved.level` names it. */
+export const ConfigLevel = z.enum(["station", "node", "fleet"]);
+export type ConfigLevel = z.infer<typeof ConfigLevel>;
 
 /** What the hub makes of a station, once values are compared with declarations. */
 export const ConfigObservation = z.object({
@@ -126,6 +137,23 @@ export const ConfigObservation = z.object({
   stationId: z.string().min(1),
   declared: z.unknown().optional(),
   observed: z.unknown().optional(),
+  /**
+   * Which level the winning declaration came from — carried rather than
+   * re-derived, for the same reason `compare()`'s own `declared` parameter
+   * takes a pre-resolved `Resolved` instead of a bare value: a second place
+   * that reimplements station → node → fleet precedence is exactly the kind
+   * of drift this feature keeps producing (see this file's history). The
+   * console used to re-derive it client-side from the declared-rows route;
+   * this field lets it stop.
+   *
+   * REQUIRED, not optional: an observation only exists for a setting that
+   * was declared (`compare()` skips any `v` not present in `args.declared`
+   * before it ever builds a row), and every one of `compare()`'s branches —
+   * `out-of-scope` included — destructures `level` from that same resolved
+   * declaration before deciding a state. There is no code path in `compare()`
+   * that produces an observation without a level already in hand.
+   */
+  level: ConfigLevel,
   state: z.enum([
     "matches",
     "drifted",
@@ -167,6 +195,22 @@ export const ConfigRefusal = z.object({
   message: z.string(),
 });
 
+/**
+ * One setting the HUB excluded from a plan before ever asking the node to
+ * derive one — distinct from `ConfigRefusal`, which is the NODE refusing a
+ * whole plan. Mirrors `PlanRefusal` in
+ * `apps/hub/src/services/harness-config-apply.ts`'s `planFor`: a requested
+ * setting an operator has opted out of reconciliation for this station is
+ * excluded from `want` and reported back here, named, rather than being
+ * silently dropped or blocking the rest of the request.
+ */
+export const PlanRefusal = z.object({
+  settingId: z.string().min(1),
+  code: z.literal("OPTED_OUT"),
+  message: z.string(),
+});
+export type PlanRefusal = z.infer<typeof PlanRefusal>;
+
 /** One setting's intended edit. `current` absent means the key is not in the document. */
 export const ConfigPlanEntry = z.object({
   settingId: z.string(),
@@ -200,6 +244,17 @@ export const ConfigPlan = z.object({
   restartRequired: z.boolean(),
   createdAt: z.string(),
   planDigest: z.string(),
+  /**
+   * Settings the HUB excluded from this plan — an operator's per-setting
+   * opt-out — before the node was ever asked to derive anything. OPTIONAL:
+   * `POST /stations/:stationId/config/plan`
+   * (`apps/hub/src/routes/harness-config.ts`) sends this only when at least
+   * one requested setting was opted out, spreading it onto the node's own
+   * `ConfigPlan` unchanged; a plan with nothing excluded parses exactly as
+   * it did before this field existed, so a caller that has never heard of
+   * `refused` is unaffected.
+   */
+  refused: z.array(PlanRefusal).optional(),
 });
 
 export const ConfigWritten = z.object({

@@ -28,6 +28,15 @@ import (
 type hermesDescriptor struct {
 	home     string // absolute path to the .hermes home directory
 	startCmd string // optional; set by NewHermes; used by Start
+
+	// afterApplyWriteForTest, when non-nil, is called with the config path
+	// right after ApplyConfig's own atomic write has landed and BEFORE it
+	// reads the document back to verify containment (D10). Production code
+	// never sets this; it exists so a test can land a second, concurrent
+	// write into that exact gap — the one place this algorithm actually has
+	// a race — rather than faking the race with sleeps and goroutines. See
+	// hermes_config.go's writeAndReadBack.
+	afterApplyWriteForTest func(path string)
 }
 
 // NewHermes returns a Descriptor for the Hermes harness.

@@ -18,17 +18,25 @@ import { eq } from "drizzle-orm";
 import { db, type DbExecutor } from "../db/drizzle";
 import { principalGrants } from "../db/schema/grants";
 
-/** Every scope a grant may hold. A writer refuses anything else; a reader ignores it. */
-export const GRANT_SCOPES = ["evidence:read"] as const;
+/**
+ * Every scope a grant may hold. A writer refuses anything else; a reader ignores it.
+ *
+ * `evidence:read` — read run evidence: attempts, fingerprints, the dispatch ledger (superwitness
+ * contract C5/C6). The hub's evidence routes require it.
+ *
+ * `runs:write` — report runs to superwitness's run registry (`POST /v1/runs`, superwitness app spec
+ * §3.4). Minted into the token's `scope` and honoured by superwitness alone: no hub route reads it,
+ * and the evidence routes refuse a principal that holds only this.
+ */
+export const GRANT_SCOPES = ["evidence:read", "runs:write"] as const;
 export type GrantScope = (typeof GRANT_SCOPES)[number];
-/** Read run evidence: attempts, fingerprints, the dispatch ledger (superwitness contract C5/C6). */
 export const EVIDENCE_READ: GrantScope = "evidence:read";
 
 export interface Grant {
   /** Principal ids. Empty means "may dispatch nothing", which is a decision. */
   mayDispatch: string[];
   mayGrantReach: boolean;
-  /** Read permissions beyond the pair. Empty means none. */
+  /** Permissions beyond the pair. Empty means none. */
   scopes: string[];
 }
 

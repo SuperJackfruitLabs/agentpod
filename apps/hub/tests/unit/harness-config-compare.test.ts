@@ -240,3 +240,165 @@ describe("opted-out: an explicit operator choice, not a key in the harness's own
     expect(afterClearing.state).toBe("drifted");
   });
 });
+
+/**
+ * D11: a harness's own opt-out (ConfigValue.optedOutByHarness — Hermes'
+ * plugins.disabled) must reach `compare()` as `opted-out`, exactly as the
+ * hub's own register does — but the two sources must be distinguishable in
+ * the reason text, which is the whole point of carrying the field at all.
+ */
+describe("a harness's own opt-out (D11) is opted-out, and distinguishable from the hub's register", () => {
+  test("a document reporting optedOutByHarness is opted-out, with a reason naming the harness as the source", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("hermes");
+  });
+
+  test("a hub-register opt-out still reports its own reason, unrelated to the harness", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("operator opted");
+  });
+
+  test("the two reasons are textually distinguishable — an operator can tell which source fired", () => {
+    const harnessReason = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300", optedOutByHarness: true }],
+    })[0]!.reason!;
+    const registerReason = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!.reason!;
+    expect(harnessReason).not.toBe(registerReason);
+    // Neither reason's distinguishing word appears in the other.
+    expect(registerReason).not.toContain("hermes");
+    expect(harnessReason).not.toContain("operator opted");
+  });
+
+  test("optedOutByHarness: false (the ordinary case) is not opted-out", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900", optedOutByHarness: false }],
+    })[0]!;
+    expect(o.state).toBe("matches");
+  });
+
+  // D6/Task 5b gap: the tests above all exercise `harness: "hermes"` via
+  // SETTING, which is generic enough to pass even if OpenClaw's own
+  // descriptor never actually set `optedOutByHarness` — a reason built from
+  // `setting?.harness` is a different code path for a different harness
+  // name, and this is the test that proves it actually fires there too,
+  // not just assumed by analogy to Hermes.
+  test("the same path fires for OpenClaw's own setting, and the reason names openclaw as the source", () => {
+    const openclawSetting = {
+      id: "openclaw.hooks.allowConversationAccess", harness: "openclaw",
+      scope: "user" as const, policy: "reconcilable" as const, restartToTakeEffect: true,
+    };
+    // Declared at node level, not station: this setting is user-scoped, and
+    // a station-scoped declaration of it is refused out-of-scope (step 1)
+    // before opted-out (step 3) is ever reached — a different test already
+    // covers that refusal, above.
+    const o = compare({
+      stationId: "station_a",
+      settings: [openclawSetting],
+      declared: { [openclawSetting.id]: at(true, "node") },
+      values: [{ settingId: openclawSetting.id, readable: true, observed: false, optedOutByHarness: true }],
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("openclaw");
+    expect(o.reason).not.toContain("hermes");
+  });
+});
+
+/**
+ * `ConfigObservation.level` carries the resolution level the winning
+ * declaration came from, exactly as `resolveFor`'s `Resolved` names it —
+ * so the console can stop re-deriving station → node → fleet precedence a
+ * second time, client-side, in a different language.
+ */
+describe("level: the resolution level travels on every observation", () => {
+  test("a station-level declaration reports level: station", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "station") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("station");
+  });
+
+  test("a node-level declaration reports level: node", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("node");
+  });
+
+  test("a fleet-level declaration reports level: fleet", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "fleet") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+    })[0]!;
+    expect(o.level).toBe("fleet");
+  });
+
+  test("an out-of-scope observation still reports its level — the refusal does not erase it", () => {
+    const userScoped = { ...SETTING, id: "openclaw.hooks.allowConversationAccess", harness: "openclaw", scope: "user" as const };
+    const o = compare({
+      stationId: "station_a",
+      settings: [userScoped],
+      declared: { [userScoped.id]: at(true, "station") },
+      values: [{ settingId: userScoped.id, readable: true, observed: true }],
+    })[0]!;
+    expect(o.state).toBe("out-of-scope");
+    expect(o.level).toBe("station");
+  });
+
+  test("an unreadable observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: false, reason: "no such file" }],
+    })[0]!;
+    expect(o.state).toBe("unreadable");
+    expect(o.level).toBe("node");
+  });
+
+  test("an opted-out observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "fleet") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "300" }],
+      optedOut: new Set([SETTING.id]),
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.level).toBe("fleet");
+  });
+
+  test("an awaiting-restart observation still reports its level", () => {
+    const o = compare({
+      ...base,
+      declared: { [SETTING.id]: at("900", "node") },
+      values: [{ settingId: SETTING.id, readable: true, observed: "900" }],
+      appliedWrites: { [SETTING.id]: { gatewayPid: 100 } },
+      currentGatewayPid: 100,
+    })[0]!;
+    expect(o.state).toBe("awaiting-restart");
+    expect(o.level).toBe("node");
+  });
+});

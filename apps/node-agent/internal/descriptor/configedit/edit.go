@@ -82,6 +82,12 @@ func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
 	if parent.create != "" {
 		return appendBlock(doc, parent.create+":\n  "+leaf+": "+replacement+"\n"), "create", nil
 	}
+	if parent.bareKey != nil {
+		lines := splitLines(doc)
+		indent := parentIndent(lines, parent.bareKey, nil)
+		edited := insertAfter(lines, parent.bareKey.Line, indent+leaf+": "+replacement)
+		return edited, "create", nil
+	}
 
 	lines := splitLines(doc)
 	parentKey, parentNode := parent.key, parent.node
@@ -136,6 +142,20 @@ func AppendToList(doc []byte, keyPath string, items []string) ([]byte, string, [
 			block += "    - " + item + "\n"
 		}
 		return appendBlock(doc, block), "append", added, nil
+	}
+	if parent.bareKey != nil {
+		added := dedupe(items)
+		if len(added) == 0 {
+			return doc, "noop", nil, nil
+		}
+		lines := splitLines(doc)
+		indent := parentIndent(lines, parent.bareKey, nil)
+		block := []string{indent + leaf + ":"}
+		for _, item := range added {
+			block = append(block, indent+"  - "+item)
+		}
+		edited := insertAfter(lines, parent.bareKey.Line, block...)
+		return edited, "append", added, nil
 	}
 
 	lines := splitLines(doc)
@@ -250,23 +270,35 @@ func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[strin
 	if a == nil {
 		a = map[string]any{}
 	}
-	// Which parent sections `before` did not have at all, read BEFORE anything
-	// is removed below. Those are the sections the editor may have had to
-	// CREATE in order to write the key the caller named, and once that key is
-	// set aside `after` carries an empty section where `before` carries no
-	// section — which a raw DeepEqual calls a change outside the plan,
-	// rejecting the editor's own edit and refusing the whole plan. That is the
-	// exact false whole-plan refusal this check has produced twice already,
-	// once for a created KEY and now for a created SECTION.
+	// Which parent sections `before` did not have at all, OR had only as a
+	// BARE key holding nothing (`approvals:` with no value — the same "the
+	// operator had nothing here" fact as an absent section, read BEFORE
+	// anything is removed below. Those are the sections the editor may have
+	// had to CREATE or EXTEND IN PLACE in order to write the key the caller
+	// named, and once that key is set aside `after` carries an empty section
+	// where `before` carries no section (or a bare one) — which a raw
+	// DeepEqual calls a change outside the plan, rejecting the editor's own
+	// edit and refusing the whole plan. That is the exact false whole-plan
+	// refusal this check has produced three times now: once for a created
+	// KEY, once for a created SECTION, and now for a BARE section filled in
+	// place.
 	createdSections := map[string]bool{}
 	for _, kp := range keyPaths {
 		parts := strings.Split(kp, ".")
 		if len(parts) != 2 {
 			continue
 		}
-		if _, present := b[parts[0]]; !present {
+		if v, present := b[parts[0]]; !present || v == nil {
 			createdSections[parts[0]] = true
 		}
+	}
+	// A bare section is present in `before` (with a nil value), unlike a
+	// genuinely absent one. Drop it from `before` too so both sides end up
+	// equally without the key once the plan's own addition is pruned from
+	// `after` below — deleting an already-absent key is a no-op, so this is
+	// safe for the absent case as well.
+	for section := range createdSections {
+		delete(b, section)
 	}
 	for _, kp := range keyPaths {
 		if added, ok := additive[kp]; ok {
@@ -293,13 +325,14 @@ func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[strin
 		deleteKeyPath(b, kp)
 		deleteKeyPath(a, kp)
 	}
-	// A section `before` never had, holding nothing once this plan's own keys
-	// are set aside, says the same thing `before`'s missing section says: the
-	// operator had nothing here. Only `after` is pruned, and only for a
-	// section `before` genuinely lacked, so this can never hide a section the
-	// operator DID write being emptied — that side is left exactly as it is
-	// and still compared. A created section that came out holding anything
-	// else is likewise left alone, and refused.
+	// A section `before` never had (or had only bare), holding nothing once
+	// this plan's own keys are set aside, says the same thing `before`'s
+	// missing or bare section says: the operator had nothing here. Only
+	// `after` is pruned here — `before` was already pruned above, and only
+	// for a section `before` genuinely lacked or left bare, so this can never
+	// hide a section the operator DID write being emptied — that side is left
+	// exactly as it is and still compared. A created section that came out
+	// holding anything else is likewise left alone, and refused.
 	for section := range createdSections {
 		if m, ok := a[section].(map[string]any); ok && len(m) == 0 {
 			delete(a, section)
@@ -344,6 +377,15 @@ type parentRef struct {
 	// all; "" when the parent is already in the document. key and node are
 	// nil in that case: there is no node to insert into yet.
 	create string
+
+	// bareKey is set instead of create when the parent section is not absent
+	// but BARE — present in the document as a key holding nothing
+	// (`approvals:` with no value) — so the leaf is inserted in place, right
+	// after this key's own line, rather than appended as a new section at the
+	// end of the document. This mirrors hermeslive.planEnableConfig's
+	// handling of a bare `plugins:` key: extend it where the operator put it,
+	// not wherever the end of the file happens to be.
+	bareKey *yaml.Node
 }
 
 // walkMappingParents resolves the mapping that should hold the leaf key.
@@ -360,12 +402,28 @@ type parentRef struct {
 // entire `plugins:` block when `plugins` is nil, and appending touches nothing
 // the operator wrote.
 //
+// A GENUINELY BARE single top-level section — present as a key holding
+// nothing, `approvals:` with no value and nothing else on its own line — is
+// likewise reported back to extend in place, for the same amplification
+// reason: `derivePlanConfig` refuses the whole plan on one setting's shape,
+// and an operator who has never touched a section leaves it exactly this way
+// as often as they leave it absent. The precedent is
+// `hermeslive.planEnableConfig`'s handling of a bare `plugins:` key, which
+// this mirrors: only a line that reads EXACTLY "key:" is bare enough to
+// extend, and the insertion point is the KEY's own line, never the value
+// node's — a null value's reported line can fall on the NEXT sibling's line
+// when nothing follows the colon, which is exactly the class of bug an
+// earlier round of this feature hit inserting after a node's start line
+// instead of after where its content actually ends.
+//
 // Two things stay refused, deliberately:
 //
-//   - A parent that EXISTS but is not a block mapping — a scalar (including a
-//     bare `approvals:` holding nothing), a sequence, or an inline `{...}`
-//     mapping. Those are shapes, not absences; this editor cannot extend them
-//     without rewriting what the operator wrote, and it says so by name.
+//   - A parent that EXISTS, is not a block mapping, and is not bare — a
+//     scalar holding a value, a sequence, or an inline `{...}` mapping. Those
+//     are shapes, not absences; this editor cannot extend them without
+//     rewriting what the operator wrote, and it says so by name. Creating a
+//     section is only for a parent that is genuinely absent or genuinely
+//     bare — this does not widen into "make any shape work".
 //   - A deeper absent path (`a.b.c` with `a` missing, or with `a` present and
 //     `b` missing). Only ONE level of parent is ever created; the registry has
 //     no such setting today, so a deeper guess would be exactly that.
@@ -390,12 +448,26 @@ func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 		key, node = k, v
 	}
 	if node.Kind != yaml.MappingNode {
-		// PRESENT, in a shape this editor will not extend: a scalar (including
-		// a bare `approvals:` holding nothing), or a sequence. Named, so the
-		// refusal says which section it is about rather than "parent".
+		if len(path) == 1 && isEmptyValue(node) && isBareKeyLine(doc, key) {
+			return parentRef{bareKey: key}, nil
+		}
+		// PRESENT, in a shape this editor will not extend: a scalar holding a
+		// value, or a sequence. Named, so the refusal says which section it
+		// is about rather than "parent".
 		return parentRef{}, fmt.Errorf("%w: %s is not a mapping", ErrShapeUnexpected, parentName(key))
 	}
 	return parentRef{key: key, node: node}, nil
+}
+
+// isBareKeyLine reports whether key's own line, as written, is nothing but
+// "key:" — the strict form hermeslive's planEnableConfig requires before
+// extending a bare key in place. A key followed by a trailing comment is
+// deliberately NOT bare enough: this editor would still write a correct
+// edit, but the stricter check keeps this case identical to the reviewed
+// precedent rather than inventing a second rule for it.
+func isBareKeyLine(doc []byte, key *yaml.Node) bool {
+	lines := splitLines(doc)
+	return strings.TrimSpace(lineAt(lines, key.Line)) == key.Value+":"
 }
 
 // insertionLine is the line to insert a new child after: the last line the

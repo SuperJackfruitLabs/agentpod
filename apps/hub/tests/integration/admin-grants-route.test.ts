@@ -209,6 +209,15 @@ describe("/api/admin/grants", () => {
     });
     expect(res.status).toBe(400);
   });
+  test("PUT accepts runs:write", async () => {
+    const res = await app().request(`/grants/${SUBJECT}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mayDispatch: [], mayGrantReach: false, scopes: ["runs:write"] }),
+    });
+    expect(res.status).toBe(200);
+    expect((await getGrant(SUBJECT))!.scopes).toEqual(["runs:write"]);
+  });
   test("PUT without scopes answers with the STORED grant, which kept them — not an echo of the body", async () => {
     await setGrant(SUBJECT, { mayDispatch: [], mayGrantReach: false, scopes: ["evidence:read"] });
     const res = await app().request(`/grants/${SUBJECT}`, {

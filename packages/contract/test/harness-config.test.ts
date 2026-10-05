@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import {
   ConfigScope, ConfigPolicy, ConfigSetting, DeclaredSetting, ConfigValue, ConfigObservation,
-  ConfigPlan, ConfigReceipt, ConfigRefusalCode, ConfigWritten,
+  ConfigPlan, ConfigReceipt, ConfigRefusalCode, ConfigWritten, PlanRefusal,
 } from "../src/harness-config";
 
 describe("harness config contract", () => {
@@ -50,6 +50,16 @@ describe("harness config contract", () => {
     expect(ConfigValue.safeParse({ settingId: "x" }).success).toBe(false);
   });
 
+  test("optedOutByHarness is optional, and absent is not the same as declaring false", () => {
+    // A value with no opinion at all — the common case, every reader that has
+    // never seen `plugins.disabled` mentioned.
+    expect(ConfigValue.safeParse({ settingId: "x", readable: true, observed: "900" }).success).toBe(true);
+    const seen = ConfigValue.parse({
+      settingId: "x", readable: true, observed: "900", optedOutByHarness: true,
+    });
+    expect(seen.optedOutByHarness).toBe(true);
+  });
+
   test("a declaration's value must be present — omitting it is not a literal null", () => {
     // compare() reads a declared-but-undefined value back as permanently
     // `drifted`, with nothing a station could ever observe able to satisfy
@@ -68,9 +78,27 @@ describe("harness config contract", () => {
     for (const state of [
       "matches", "drifted", "absent", "opted-out", "awaiting-restart", "unreadable", "out-of-scope",
     ]) {
-      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state }).success).toBe(true);
+      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state, level: "station" }).success)
+        .toBe(true);
     }
-    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "ok" }).success).toBe(false);
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "ok", level: "station" }).success)
+      .toBe(false);
+  });
+
+  test("an observation's level is required — an omitted one must not read as any default", () => {
+    // Every branch in `compare()` has a resolved level in hand before it ever
+    // builds a row (see the field's own doc comment). An observation with no
+    // level is not a real shape this system produces.
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches" }).success).toBe(false);
+  });
+
+  test("level is a closed vocabulary of exactly the three resolution levels", () => {
+    for (const level of ["station", "node", "fleet"]) {
+      expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches", level }).success)
+        .toBe(true);
+    }
+    expect(ConfigObservation.safeParse({ settingId: "x", stationId: "s", state: "matches", level: "profile" }).success)
+      .toBe(false);
   });
 });
 
@@ -122,6 +150,62 @@ describe("a config plan is reviewable before it is applied", () => {
       expect(ConfigRefusalCode.parse(code)).toBe(code);
     }
     expect(ConfigRefusalCode.safeParse("WHATEVER").success).toBe(false);
+  });
+
+  test("a plan without anything opted out parses exactly as before `refused` existed", () => {
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1,
+      operationId: "op_4",
+      stationKey: "p",
+      entries: [entry],
+      beforeSha256: "a".repeat(64),
+      diff: "-  timeout: 300\n+  timeout: 900\n",
+      diffTruncated: false,
+      noOp: false,
+      restartRequired: true,
+      createdAt: "2026-10-05T00:00:00.000Z",
+      planDigest: "b".repeat(64),
+    });
+    expect(plan.refused).toBeUndefined();
+  });
+
+  test("a plan carrying the hub's per-setting opt-out refusals round-trips with the field intact", () => {
+    // The real shape `planFor` sends (apps/hub/src/services/harness-config-apply.ts):
+    // settingId, code ("OPTED_OUT" today — the only code that route produces),
+    // and a message naming why. The route spreads it onto the node's own
+    // ConfigPlan only when at least one requested setting was opted out
+    // (apps/hub/src/routes/harness-config.ts).
+    const refused = [
+      {
+        settingId: "hermes.plugins.enabled",
+        code: "OPTED_OUT" as const,
+        message: "an operator opted hermes.plugins.enabled out of reconciliation for this station; it will not be planned or written",
+      },
+    ];
+    const plan = ConfigPlan.parse({
+      schemaVersion: 1,
+      operationId: "op_5",
+      stationKey: "p",
+      entries: [entry],
+      beforeSha256: "a".repeat(64),
+      diff: "-  timeout: 300\n+  timeout: 900\n",
+      diffTruncated: false,
+      noOp: false,
+      restartRequired: true,
+      createdAt: "2026-10-05T00:00:00.000Z",
+      planDigest: "b".repeat(64),
+      refused,
+    });
+    expect(plan.refused).toEqual(refused);
+  });
+
+  test("PlanRefusal is a settingId, a code and a message — the exact shape planFor sends", () => {
+    expect(PlanRefusal.parse({
+      settingId: "hermes.plugins.enabled", code: "OPTED_OUT", message: "opted out",
+    }).code).toBe("OPTED_OUT");
+    expect(PlanRefusal.safeParse({
+      settingId: "hermes.plugins.enabled", code: "UNKNOWN_SETTING", message: "x",
+    }).success).toBe(false);
   });
 
   test("a receipt records what was written, per entry, and never claims a restart happened", () => {

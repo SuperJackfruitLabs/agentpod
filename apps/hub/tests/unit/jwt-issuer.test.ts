@@ -48,6 +48,13 @@ const fixture = JSON.parse(
  * on every CI run.
  */
 describe("the token claim contract (#332)", () => {
+  test("the fixture names every scope the hub can issue", async () => {
+    const { GRANT_SCOPES } = await import("../../src/services/grants");
+    const scope = fixture.conditional.find((c) => c.claim === "scope");
+    expect(scope).toBeDefined();
+    for (const s of GRANT_SCOPES) expect(scope!.meaning).toContain(`\`${s}\``);
+  });
+
   test("the payload builder emits every claim the fixture calls required", async () => {
     const { buildTokenPayload } = await import("../../src/auth/jwt-claims");
 
