@@ -273,3 +273,117 @@ func TestACreatedKeyLandsAfterTheKeysAlreadyThere(t *testing.T) {
 		t.Fatalf("creating a key changed something else: %v", err)
 	}
 }
+
+// Values that take more than one line, each as the LAST key of its section —
+// which is where a created key is inserted. `yaml.Node` reports where a value
+// STARTS and nothing about where it ends, and a multi-line scalar has no
+// Content to walk, so an insertion point computed from the node tree alone
+// lands in the middle of the operator's own text.
+var multiLineSections = map[string]string{
+	"a literal block with a blank line in it": "approvals:\n  timeout: 300\n  note: |\n    line one\n\n    line two\nmodel: gpt\n",
+	"a folded block":                       "approvals:\n  timeout: 300\n  note: >\n    line one\n    line two\nmodel: gpt\n",
+	"a multi-line plain scalar":            "approvals:\n  timeout: 300\n  note: first\n    second\nmodel: gpt\n",
+	"a multi-line quoted scalar":           "approvals:\n  timeout: 300\n  note: \"first\n    second\"\nmodel: gpt\n",
+	"a nested mapping":                     "approvals:\n  timeout: 300\n  nested:\n    deep: 1\n    deeper:\n      deepest: 2\nmodel: gpt\n",
+	"a block sequence at its key's indent": "approvals:\n  timeout: 300\n  flat_list:\n  - git status\n  - ls\nmodel: gpt\n",
+	"an indented block sequence":           "approvals:\n  timeout: 300\n  list:\n    - git status\n    - ls\nmodel: gpt\n",
+}
+
+// Important 1. A created key must land after the END of the last child, not
+// after the line that child begins on. Before the fix the insert landed
+// INSIDE the last value, which either destroyed it (`note: ""` plus
+// `mode: "ask line one line two"`) or produced invalid YAML — and then
+// containment refused the WHOLE plan, which is the amplification the
+// absent-key fix was filed to remove.
+func TestACreatedKeyLandsAfterAMultiLineValueNotInsideIt(t *testing.T) {
+	for name, section := range multiLineSections {
+		edited, action, err := SetScalar([]byte(section), "approvals.mode", "ask")
+		if err != nil {
+			t.Fatalf("%s: SetScalar: %v", name, err)
+		}
+		if action != "create" {
+			t.Fatalf("%s: action = %q, want create", name, action)
+		}
+		out := string(edited)
+		if !contains(out, "  mode: ask\n") {
+			t.Fatalf("%s: created key is not at its parent's indentation:\n%s", name, out)
+		}
+		// Every line the operator wrote survives, in the order they wrote it:
+		// the whole section up to `model:` is unchanged, with one line added.
+		head := section[:strings.Index(section, "model: gpt")]
+		if !contains(out, head) {
+			t.Fatalf("%s: the operator's own lines were split by the insert:\n%s", name, out)
+		}
+		if strings.Index(out, "mode: ask") < strings.Index(out, "timeout: 300") {
+			t.Fatalf("%s: a created key jumped ahead of keys the operator already had:\n%s", name, out)
+		}
+		if strings.Index(out, "mode: ask") > strings.Index(out, "model: gpt") {
+			t.Fatalf("%s: a created key escaped its own section:\n%s", name, out)
+		}
+		// The whole point: containment passes, so one setting's shape does
+		// not refuse every setting planned alongside it.
+		if err := SameOutsideKeys([]byte(section), edited, []string{"approvals.mode"}, nil); err != nil {
+			t.Fatalf("%s: creating a key changed something else: %v", name, err)
+		}
+	}
+}
+
+// The same rule for the list-creating path, which produced outright invalid
+// YAML rather than a silently mangled scalar.
+func TestAppendToListCreatesAKeyAfterAMultiLineValue(t *testing.T) {
+	for name, section := range multiLineSections {
+		edited, action, added, err := AppendToList([]byte(section), "approvals.command_allowlist", []string{"git status"})
+		if err != nil {
+			t.Fatalf("%s: AppendToList: %v", name, err)
+		}
+		if action != "append" || len(added) != 1 {
+			t.Fatalf("%s: action/added = %q/%v", name, action, added)
+		}
+		out := string(edited)
+		if !contains(out, "  command_allowlist:\n    - git status\n") {
+			t.Fatalf("%s: created list is not whole at its parent's indentation:\n%s", name, out)
+		}
+		head := section[:strings.Index(section, "model: gpt")]
+		if !contains(out, head) {
+			t.Fatalf("%s: the operator's own lines were split by the insert:\n%s", name, out)
+		}
+		if strings.Index(out, "command_allowlist") > strings.Index(out, "model: gpt") {
+			t.Fatalf("%s: a created list escaped its own section:\n%s", name, out)
+		}
+		if err := SameOutsideKeys([]byte(section), edited,
+			[]string{"approvals.command_allowlist"},
+			map[string][]string{"approvals.command_allowlist": added}); err != nil {
+			t.Fatalf("%s: creating a list changed something else: %v", name, err)
+		}
+	}
+}
+
+// A blank line trailing the section is the operator's spacing, not part of
+// the last value — the created key belongs above it, inside the section.
+func TestACreatedKeyStopsAtABlankLineTrailingTheSection(t *testing.T) {
+	doc := "approvals:\n  timeout: 300\n\nmodel: gpt\n"
+	edited, _, err := SetScalar([]byte(doc), "approvals.mode", "ask")
+	if err != nil {
+		t.Fatalf("SetScalar: %v", err)
+	}
+	if out := string(edited); out != "approvals:\n  timeout: 300\n  mode: ask\n\nmodel: gpt\n" {
+		t.Fatalf("a trailing blank line was swallowed:\n%q", out)
+	}
+}
+
+// Minor 9. An inline (flow) mapping has no line of its own below it, so a
+// child written on the next line falls outside the braces and the document
+// stops parsing. Refused by name rather than written and then caught by
+// containment as a whole-plan SHAPE_UNEXPECTED about the wrong thing.
+func TestCreatingAKeyInAnInlineMappingIsRefusedByName(t *testing.T) {
+	for _, doc := range []string{"approvals: {}\nmodel: gpt\n", "approvals: {timeout: 300}\n"} {
+		if _, _, err := SetScalar([]byte(doc), "approvals.mode", "ask"); err == nil {
+			t.Fatalf("an inline mapping was extended rather than refused: %q", doc)
+		} else if !contains(err.Error(), "approvals") || !contains(err.Error(), "inline mapping") {
+			t.Fatalf("refusal does not name the shape it refused: %v", err)
+		}
+		if _, _, _, err := AppendToList([]byte(doc), "approvals.command_allowlist", []string{"ls"}); err == nil {
+			t.Fatalf("an inline mapping was extended by AppendToList: %q", doc)
+		}
+	}
+}

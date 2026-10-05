@@ -76,7 +76,11 @@ func SetScalar(doc []byte, keyPath string, v any) ([]byte, string, error) {
 	key, node := child(parentNode, leaf)
 	if node == nil {
 		indent := parentIndent(lines, parentKey, parentNode)
-		edited := insertAfter(lines, insertionLine(parentKey, parentNode), indent+leaf+": "+replacement)
+		at, err := insertionLine(lines, parentKey, parentNode)
+		if err != nil {
+			return nil, "", err
+		}
+		edited := insertAfter(lines, at, indent+leaf+": "+replacement)
 		return edited, "create", nil
 	}
 	if node.Kind != yaml.ScalarNode {
@@ -119,7 +123,11 @@ func AppendToList(doc []byte, keyPath string, items []string) ([]byte, string, [
 		for _, item := range added {
 			block = append(block, indent+"  - "+item)
 		}
-		edited := insertAfter(lines, insertionLine(parentKey, parentNode), block...)
+		at, err := insertionLine(lines, parentKey, parentNode)
+		if err != nil {
+			return nil, "", nil, err
+		}
+		edited := insertAfter(lines, at, block...)
 		return edited, "append", added, nil
 	}
 	if isEmptyValue(list) {
@@ -302,8 +310,9 @@ func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 }
 
 // insertionLine is the line to insert a new child after: the last line the
-// parent's existing children occupy, so a created key lands at the END of its
-// section rather than ahead of keys the operator already had.
+// parent's existing children OCCUPY, so a created key lands at the END of
+// its section — after the keys already there, inside its own section — and
+// never in the middle of a value that takes more than one line.
 //
 // D5 says comments, key order and indentation are the operator's. Inserting
 // immediately after the parent's own key line would satisfy the letter of
@@ -311,21 +320,80 @@ func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 // created key would push itself in front of everything already written. The
 // same rule applies at the document root, which has no key of its own, so
 // this is one rule rather than two.
-func insertionLine(parentKey, parentNode *yaml.Node) int {
-	if len(parentNode.Content) > 0 {
-		last := parentNode.Content[len(parentNode.Content)-1]
-		return lastLineOf(last)
+func insertionLine(lines []string, parentKey, parentNode *yaml.Node) (int, error) {
+	if parentNode.Style&yaml.FlowStyle != 0 {
+		// `approvals: {}` or `approvals: {mode: ask}` — a MappingNode whose
+		// whole text is braces on one line. There is no line below it that is
+		// inside the mapping, so a child written on the next line lands
+		// outside the braces and the document stops parsing. Refused by name
+		// rather than written: a sentence about the shape is a better answer
+		// than a containment failure over a document this editor broke.
+		return 0, fmt.Errorf("%w: %s is an inline mapping this editor cannot extend", ErrShapeUnexpected, parentName(parentKey))
+	}
+	if len(parentNode.Content) >= 2 {
+		lastKey := parentNode.Content[len(parentNode.Content)-2]
+		lastValue := parentNode.Content[len(parentNode.Content)-1]
+		return endLineOf(lines, lastKey, lastValue), nil
 	}
 	if parentKey != nil {
-		// A parent that exists but holds nothing: its own key line is the
-		// only line there is to insert after.
-		return parentKey.Line
+		// Not reachable from any shape this editor accepts: a block mapping
+		// written with no children parses as a null SCALAR, which
+		// walkMappingParents refuses before this is called, and an empty FLOW
+		// mapping is refused above. Kept so that a shape nobody has thought
+		// of yet inserts inside the parent rather than falling through to the
+		// document root.
+		return parentKey.Line, nil
 	}
-	return 0
+	// An empty document: there is nothing for the new line to come after.
+	return 0, nil
 }
 
-// lastLineOf is the deepest line a node's own text occupies, so inserting
-// "after" it lands after any nested block it owns, not in the middle of it.
+// endLineOf is the last line one child of a mapping — its key and its value
+// together — occupies.
+//
+// `yaml.Node` carries a start Line and no end line, and a multi-line SCALAR
+// has no `Content` to walk, so the end has to be read off the document
+// itself. From the deepest line the node tree admits to, keep going while the
+// following lines are blank or indented DEEPER than this child's own key: a
+// literal or folded block (`|`, `>`), a multi-line plain scalar, a multi-line
+// quoted scalar and a nested mapping or sequence are all exactly that shape,
+// so one scan covers every one of them.
+//
+// The scan stops at the first line indented at or outside the child's key,
+// which is both "the next sibling key" and "the end of this section" — so an
+// insert after this line can never escape into a sibling section or the
+// document root.
+//
+// `lastLineOf` still seeds the scan because a block sequence may be written
+// at its KEY's indentation (`allow:` then `- ls` both at two spaces), which
+// the indentation scan alone would stop at immediately; the node tree knows
+// those items belong to the key and the document text does not.
+func endLineOf(lines []string, key, value *yaml.Node) int {
+	end := key.Line
+	if deepest := lastLineOf(value); deepest > end {
+		end = deepest
+	}
+	indent := len(leadingSpace(lineAt(lines, key.Line)))
+	for n := end + 1; n <= len(lines); n++ {
+		line := lines[n-1]
+		if strings.TrimSpace(line) == "" {
+			// A blank line inside a block scalar belongs to the scalar; a
+			// blank line trailing the section belongs to the operator's
+			// spacing. Keep scanning without moving `end` — only a deeper
+			// line after it proves the value carried on.
+			continue
+		}
+		if len(leadingSpace(line)) <= indent {
+			break
+		}
+		end = n
+	}
+	return end
+}
+
+// lastLineOf is the deepest line the node tree reports for a node, which is
+// the last line of a nested mapping or block sequence but only the FIRST line
+// of a multi-line scalar — see endLineOf, which finishes the job.
 func lastLineOf(n *yaml.Node) int {
 	line := n.Line
 	for _, c := range n.Content {
@@ -334,6 +402,15 @@ func lastLineOf(n *yaml.Node) int {
 		}
 	}
 	return line
+}
+
+// parentName names the mapping a child was going to be written into, for a
+// refusal's own sentence.
+func parentName(parentKey *yaml.Node) string {
+	if parentKey == nil {
+		return "the document root"
+	}
+	return parentKey.Value
 }
 
 // parentIndent is the indentation a new child of parentNode should use: the
