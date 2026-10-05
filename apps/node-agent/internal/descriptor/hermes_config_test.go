@@ -157,6 +157,41 @@ func TestHermesObserveConfigPresentListIsReadableWithTheListObserved(t *testing.
 	}
 }
 
+// An EMPTY block list — `command_allowlist:` with no items under it — is the
+// third list shape, and the one a document carries after an operator deletes
+// the last entry. It holds nothing, which is not the same thing as holding a
+// nested map: calling it unreadable was a false sentence about the document,
+// and `compare()` turns `unreadable` into a recorded failure at adopt time
+// and never plans the write at all.
+//
+// The published page (docs-site/.../use/config.md) already says "a block
+// list, an inline list, and an empty list all come back readable, with the
+// list itself as the observed value". This is that sentence, as a test.
+func TestHermesObserveConfigEmptyListIsReadableAsAnEmptyList(t *testing.T) {
+	for _, c := range []struct{ name, body string }{
+		{"an empty block list", "approvals:\n  mode: ask\n  command_allowlist:\n"},
+		{"an empty inline list", "approvals:\n  mode: ask\n  command_allowlist: []\n"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h, key, _ := hermesWithProfile(t, c.body)
+			vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !vals[0].Readable {
+				t.Fatalf("an empty list must report readable=true, got %+v", vals[0])
+			}
+			items, ok := vals[0].Observed.([]any)
+			if !ok {
+				t.Fatalf("observed = %#v, want an (empty) list", vals[0].Observed)
+			}
+			if len(items) != 0 {
+				t.Fatalf("observed = %#v, want no entries", items)
+			}
+		})
+	}
+}
+
 func TestHermesObserveConfigPresentNestedMapIsUnreadableNotAbsent(t *testing.T) {
 	h, key, _ := hermesWithProfile(t, "approvals:\n  command_allowlist:\n    allow: ls\n")
 	vals, err := h.ObserveConfig(context.Background(), key, []string{"hermes.approvals.command_allowlist"})

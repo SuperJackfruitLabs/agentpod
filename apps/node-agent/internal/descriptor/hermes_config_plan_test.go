@@ -226,3 +226,76 @@ func TestDigestIgnoresWhenAndUnderWhichOperationAPlanWasMade(t *testing.T) {
 		t.Fatal("the digest ignored a changed intended value — a stale plan would apply silently")
 	}
 }
+
+// freshDoc is a freshly provisioned profile: `approvals` exists, and
+// `command_allowlist` does NOT — Hermes writes that key only once an operator
+// presses "Allow always". Every other fixture in this file has a populated
+// list, which is why the absent-key case went unnoticed.
+const freshDoc = `# operator's note
+approvals:
+  mode: ask
+  timeout: 300
+`
+
+// The baseline an `additive-only` declaration exists to establish (D2, "the
+// fleet guarantees a baseline is present") must be establishable on the
+// station state D3 calls the one safe time to write.
+func TestPlanCreatesAnAdditiveOnlyKeyThatIsNotInTheDocumentYet(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, freshDoc)
+	p := planOne(t, h, key, "hermes.approvals.command_allowlist", []string{"git status"})
+	if p.Refusal != nil {
+		t.Fatalf("refused creating an absent additive-only key: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 1 || p.Entries[0].Action != "append" {
+		t.Fatalf("entries = %#v, want one append", p.Entries)
+	}
+	if p.Entries[0].Current != nil {
+		t.Fatalf("current = %#v, want nothing (the key is not in the document)", p.Entries[0].Current)
+	}
+	items, ok := p.Entries[0].Intended.([]any)
+	if !ok || len(items) != 1 || items[0] != "git status" {
+		t.Fatalf("intended = %#v, want [git status]", p.Entries[0].Intended)
+	}
+	if p.NoOp {
+		t.Fatal("creating a key is not a no-op")
+	}
+}
+
+// The whole-plan consequence, which is what made this severe: one absent
+// additive-only key refused the ENTIRE plan (`derivePlanConfig` refuses, it
+// does not skip), and `fleet config plan --station ID` plans every declared
+// setting at once with no way to narrow it — so an absent `command_allowlist`
+// blocked writing `approvals.timeout`, the setting the spec was written for.
+func TestAnAbsentAdditiveKeyDoesNotRefuseTheWholePlan(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, freshDoc)
+	p, err := h.PlanConfig(context.Background(), key, "op_both", []DeclaredSetting{
+		{SettingID: "hermes.approvals.timeout", Value: 900},
+		{SettingID: "hermes.approvals.command_allowlist", Value: []string{"git status"}},
+	})
+	if err != nil {
+		t.Fatalf("PlanConfig: %v", err)
+	}
+	if p.Refusal != nil {
+		t.Fatalf("the whole plan was refused: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 2 {
+		t.Fatalf("entries = %#v, want both settings", p.Entries)
+	}
+	for _, e := range p.Entries {
+		if e.Action == "noop" {
+			t.Fatalf("%s planned nothing: %#v", e.SettingID, e)
+		}
+	}
+}
+
+// Same story for the other "the operator has nothing here" notation.
+func TestPlanFillsAnEmptyBlockListWithoutRefusing(t *testing.T) {
+	h, key, _ := hermesWithProfile(t, "approvals:\n  timeout: 300\n  command_allowlist:\n")
+	p := planOne(t, h, key, "hermes.approvals.command_allowlist", []string{"git status"})
+	if p.Refusal != nil {
+		t.Fatalf("refused filling an empty block list: %+v", p.Refusal)
+	}
+	if len(p.Entries) != 1 || p.Entries[0].Action != "append" {
+		t.Fatalf("entries = %#v, want one append", p.Entries)
+	}
+}

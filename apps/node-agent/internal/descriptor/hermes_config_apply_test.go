@@ -173,3 +173,69 @@ func TestInspectReturnsTheRecordedReceiptWithoutReplanning(t *testing.T) {
 		t.Fatal("an unknown operation id returned a receipt instead of an error")
 	}
 }
+
+// The absent-key case, all the way onto disk: a fresh station gets its
+// additive-only baseline created, the reconcilable setting planned alongside
+// it is written too, and the operator's own file is not reflowed.
+func TestApplyCreatesAnAbsentAdditiveOnlyKeyAlongsideAScalar(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, freshDoc)
+	before, _ := os.ReadFile(cfg)
+	p, err := h.PlanConfig(context.Background(), key, "op_1", []DeclaredSetting{
+		{SettingID: "hermes.approvals.timeout", Value: 900},
+		{SettingID: "hermes.approvals.command_allowlist", Value: []string{"git status"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Refusal != nil {
+		t.Fatalf("plan refused: %+v", p.Refusal)
+	}
+	r, err := h.ApplyConfig(context.Background(), key, "op_1", p.PlanDigest)
+	if err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	if r.Phase != "applied" {
+		t.Fatalf("phase = %q, want applied (error: %q)", r.Phase, r.Error)
+	}
+	after, _ := os.ReadFile(cfg)
+	body := string(after)
+	if !strings.Contains(body, "timeout: 900") {
+		t.Fatalf("the scalar was not written:\n%s", body)
+	}
+	if !strings.Contains(body, "- git status") {
+		t.Fatalf("the additive-only key was not created:\n%s", body)
+	}
+	if !strings.Contains(body, "# operator's note") {
+		t.Fatalf("the operator's comment did not survive:\n%s", body)
+	}
+	if err := configedit.SameOutsideKeys(before, after,
+		[]string{"approvals.timeout", "approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": {"git status"}}); err != nil {
+		t.Fatalf("the write touched more than its plan: %v", err)
+	}
+}
+
+// Finding 9: the already-applied early return used to precede the digest
+// check, so ANY digest — empty, fabricated — got that receipt back and the
+// "proof of review" check was unreachable on the idempotent path. Nothing was
+// ever written either way; this is about what the node is willing to say.
+func TestApplyChecksTheDigestEvenForAnOperationAlreadyApplied(t *testing.T) {
+	h, key, cfg := hermesWithProfile(t, planDoc)
+	applyPlanned(t, h, key, "hermes.approvals.timeout", 900)
+	once, _ := os.ReadFile(cfg)
+
+	r, err := h.ApplyConfig(context.Background(), key, "op_1", strings.Repeat("f", 64))
+	if err != nil {
+		t.Fatalf("a wrong digest must be an answer, not an error: %v", err)
+	}
+	if r.Phase == "applied" {
+		t.Fatal("a fabricated digest was answered with the applied receipt")
+	}
+	if r.Plan.Refusal == nil || r.Plan.Refusal.Code != "PLAN_DIGEST_MISMATCH" {
+		t.Fatalf("refusal = %+v, want PLAN_DIGEST_MISMATCH", r.Plan.Refusal)
+	}
+	twice, _ := os.ReadFile(cfg)
+	if string(once) != string(twice) {
+		t.Fatal("a refused re-apply wrote to the document")
+	}
+}

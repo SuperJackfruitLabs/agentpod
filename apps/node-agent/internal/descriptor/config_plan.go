@@ -25,9 +25,19 @@ type ConfigRefusal struct {
 	Message string `json:"message"`
 }
 
-// ConfigPlanEntry is one setting's intended edit. Current is omitted when the
-// key is not in the document — which is NOT the same as a nil value, and the
-// reason this is `any` with omitempty rather than a typed zero.
+// ConfigPlanEntry is one setting's intended edit.
+//
+// Current is `any` so that a setting's real value — a string, an int, a list —
+// is carried as itself rather than flattened into a typed zero, and
+// `omitempty` so a key that is not in the document does not marshal a bare
+// `"current": null` into the plan a human reviews.
+//
+// What omitempty does NOT do is distinguish an absent key from a key holding
+// a YAML null: on an interface field it omits exactly when the interface is
+// nil, so both marshal identically. No registered setting is nullable today,
+// so nothing observable depends on telling those two apart; a setting that
+// ever is would need an explicit `present` flag here rather than leaning on
+// this field's absence.
 type ConfigPlanEntry struct {
 	SettingID           string `json:"settingId"`
 	File                string `json:"file"`

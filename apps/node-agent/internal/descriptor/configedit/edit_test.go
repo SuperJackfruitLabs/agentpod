@@ -155,3 +155,121 @@ func TestSetScalarRefusesAShapeItDoesNotKnow(t *testing.T) {
 		t.Fatal("writing into an unexpected shape must be refused")
 	}
 }
+
+// TestAppendToListCreatesAnAbsentKeyAndSurvivesContainment is the absent-key
+// half of the additive-only story, and the normal state of a freshly
+// provisioned station: Hermes does not write `command_allowlist` until an
+// operator presses "Allow always", so a fleet baseline has to be able to
+// CREATE the key.
+//
+// Before the fix, AppendToList produced a valid edit and SameOutsideKeys then
+// rejected that very edit — `after` carried an empty list once the declared
+// item was taken back out, `before` carried no key at all — so the whole plan
+// refused with SHAPE_UNEXPECTED and nothing could be written for the station,
+// including the reconcilable settings planned alongside it.
+func TestAppendToListCreatesAnAbsentKeyAndSurvivesContainment(t *testing.T) {
+	before := []byte("approvals:\n  timeout: 300\n  mode: ask\n")
+	edited, action, added, err := AppendToList(before, "approvals.command_allowlist", []string{"git status"})
+	if err != nil {
+		t.Fatalf("AppendToList: %v", err)
+	}
+	if action != "append" || len(added) != 1 || added[0] != "git status" {
+		t.Fatalf("action = %q, added = %#v", action, added)
+	}
+	if err := SameOutsideKeys(before, edited,
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": added}); err != nil {
+		t.Fatalf("creating an absent additive-only key was rejected as a change outside the plan: %v", err)
+	}
+	v, present, err := Read(edited, "approvals.command_allowlist")
+	if err != nil || !present {
+		t.Fatalf("Read after create: present=%v err=%v", present, err)
+	}
+	if items, ok := v.([]any); !ok || len(items) != 1 || items[0] != "git status" {
+		t.Fatalf("created list = %#v, want [git status]", v)
+	}
+}
+
+// TestAppendToListFillsAnEmptyBlockListAndSurvivesContainment is the second
+// shape of "the operator has nothing here": the key is written but holds no
+// items, which is what a document looks like after the last entry is deleted.
+func TestAppendToListFillsAnEmptyBlockListAndSurvivesContainment(t *testing.T) {
+	before := []byte("approvals:\n  timeout: 300\n  command_allowlist:\n")
+	edited, _, added, err := AppendToList(before, "approvals.command_allowlist", []string{"git status"})
+	if err != nil {
+		t.Fatalf("AppendToList: %v", err)
+	}
+	if err := SameOutsideKeys(before, edited,
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": added}); err != nil {
+		t.Fatalf("filling an empty block list was rejected as a change outside the plan: %v", err)
+	}
+}
+
+// The three fixes above widen a predicate, and spec §10 says a widened
+// predicate must be mutation-tested — "a check that accepts more is exactly
+// the change that can quietly stop checking". So: with the key absent in
+// `before`, an edit that ALSO changes a key outside the plan must still be
+// caught, and an edit that creates the key while dropping an operator entry
+// from a DIFFERENT additive list must still be caught.
+func TestTreatingAbsentAsEmptyStillCatchesAChangeElsewhere(t *testing.T) {
+	before := []byte("approvals:\n  timeout: 300\n  mode: ask\n")
+	edited, _, added, err := AppendToList(before, "approvals.command_allowlist", []string{"git status"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tampered, _, err := SetScalar(edited, "approvals.timeout", 900)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SameOutsideKeys(before, tampered,
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": added}); err == nil {
+		t.Fatal("a created additive key let an unrelated change through — the guarantee is not guarding")
+	}
+}
+
+// An additive-only key named in `additive` with NO added items is the
+// strictest case, not a skipped one: nothing is removed from `after`, so an
+// edit that dropped every entry the operator had must be caught. Were the key
+// instead deleted from both documents (what a non-additive key gets), this
+// would pass.
+func TestAnAdditiveKeyThatAddedNothingStillComparesItsList(t *testing.T) {
+	stripped := strings.Replace(doc, "    - ls\n", "", 1)
+	if stripped == doc {
+		t.Fatal("test setup: \"ls\" line not found to remove")
+	}
+	if err := SameOutsideKeys([]byte(doc), []byte(stripped),
+		[]string{"approvals.command_allowlist"},
+		map[string][]string{"approvals.command_allowlist": nil}); err == nil {
+		t.Fatal("an additive-only write that removed an operator entry and added nothing passed containment")
+	}
+}
+
+// D5 again: a created key lands at the END of its section, so the keys the
+// operator already wrote keep the order they were written in. Inserting
+// immediately after the section's own line would reorder their document on
+// every create.
+func TestACreatedKeyLandsAfterTheKeysAlreadyThere(t *testing.T) {
+	edited, action, err := SetScalar([]byte(doc), "approvals.new_setting", 1)
+	if err != nil {
+		t.Fatalf("SetScalar: %v", err)
+	}
+	if action != "create" {
+		t.Fatalf("action = %q, want create", action)
+	}
+	out := string(edited)
+	if !contains(out, "  new_setting: 1") {
+		t.Fatalf("created key is not at its parent's indentation:\n%s", out)
+	}
+	if strings.Index(out, "new_setting") < strings.Index(out, "mode: ask") {
+		t.Fatalf("a created key jumped ahead of keys the operator already had:\n%s", out)
+	}
+	// And it must still be INSIDE its own section, not after the next one.
+	if strings.Index(out, "new_setting") > strings.Index(out, "model:") {
+		t.Fatalf("a created key landed outside its own section:\n%s", out)
+	}
+	if err := SameOutsideKeys([]byte(doc), edited, []string{"approvals.new_setting"}, nil); err != nil {
+		t.Fatalf("creating a key changed something else: %v", err)
+	}
+}

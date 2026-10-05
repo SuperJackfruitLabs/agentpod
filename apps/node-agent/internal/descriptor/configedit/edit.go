@@ -192,6 +192,13 @@ func AppendToList(doc []byte, keyPath string, items []string) ([]byte, string, [
 // document — so an operator's own entries in an additive-only list are still
 // compared and must be unchanged, while the exact items an apply declares it
 // added are not held against it.
+//
+// A keyPath present in `additive` with no items is the strictest case, not a
+// skipped one: nothing is taken out of `after`, so the list must be
+// byte-for-byte the same on both sides. For an additive-only key the three
+// notations for "no entries" — absent, an explicit null, and an empty list —
+// are treated as one, because the editor moves between them when it creates
+// the key or fills an empty one (see normalizeNoEntries).
 func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[string][]string) error {
 	var b, a map[string]any
 	if err := yaml.Unmarshal(before, &b); err != nil {
@@ -212,6 +219,20 @@ func SameOutsideKeys(before, after []byte, keyPaths []string, additive map[strin
 			// The key stays in BOTH documents, so the operator's remaining
 			// entries are compared and must still be unchanged.
 			removeListItems(a, kp, added)
+			// An additive write may have had to CREATE the key, or to fill a
+			// key that was present holding nothing (`command_allowlist:` with
+			// no items — the shape AppendToList has its own branch for). Once
+			// the declared items are taken back out, `after` carries an empty
+			// list where `before` carried an absent key or an explicit null,
+			// and a raw DeepEqual calls that "something outside the keys this
+			// plan touches changed" — rejecting the editor's own edit and
+			// refusing the whole plan. For an additive-only key those three
+			// notations say one thing, "the operator had no entries here", so
+			// both sides are reduced to that one form before comparing. An
+			// operator entry that survives keeps the key non-empty on both
+			// sides, so a write that DROPPED one is still caught.
+			normalizeNoEntries(b, kp)
+			normalizeNoEntries(a, kp)
 			continue
 		}
 		deleteKeyPath(b, kp)
@@ -280,19 +301,25 @@ func walkMappingParents(doc []byte, path []string) (parentRef, error) {
 	return parentRef{key: key, node: node}, nil
 }
 
-// insertionLine is the line to insert a new child after: the parent key's own
-// line, or line 0 (the start of the document) when the parent is the
-// document root, which has no key of its own.
+// insertionLine is the line to insert a new child after: the last line the
+// parent's existing children occupy, so a created key lands at the END of its
+// section rather than ahead of keys the operator already had.
+//
+// D5 says comments, key order and indentation are the operator's. Inserting
+// immediately after the parent's own key line would satisfy the letter of
+// that (nothing is rewritten) while still reordering their document — every
+// created key would push itself in front of everything already written. The
+// same rule applies at the document root, which has no key of its own, so
+// this is one rule rather than two.
 func insertionLine(parentKey, parentNode *yaml.Node) int {
-	if parentKey != nil {
-		return parentKey.Line
-	}
 	if len(parentNode.Content) > 0 {
-		// Root mapping with no named key: insert after its last existing
-		// top-level entry's value, so a new section lands at the end of the
-		// document rather than before everything else.
 		last := parentNode.Content[len(parentNode.Content)-1]
 		return lastLineOf(last)
+	}
+	if parentKey != nil {
+		// A parent that exists but holds nothing: its own key line is the
+		// only line there is to insert after.
+		return parentKey.Line
 	}
 	return 0
 }
@@ -396,6 +423,41 @@ func removeListItems(doc map[string]any, keyPath string, items []string) {
 				kept = append(kept, it)
 			}
 			node[part] = kept
+			return
+		}
+		next, ok := node[part].(map[string]any)
+		if !ok {
+			return
+		}
+		node = next
+	}
+}
+
+// normalizeNoEntries deletes the key at keyPath when what is there holds no
+// entries: an absent key, an explicit null, or an empty list. Called on BOTH
+// documents, and only for an additive-only key, where those three notations
+// are one fact — the operator had no entries here — and the editor is free to
+// move between them (creating the key, or filling an empty one) without that
+// counting as a change outside the plan.
+//
+// It never touches a key that holds entries, so it cannot hide an additive
+// write that removed one.
+func normalizeNoEntries(doc map[string]any, keyPath string) {
+	parts := strings.Split(keyPath, ".")
+	node := doc
+	for i, part := range parts {
+		if i == len(parts)-1 {
+			v, present := node[part]
+			if !present {
+				return
+			}
+			if v == nil {
+				delete(node, part)
+				return
+			}
+			if list, ok := v.([]any); ok && len(list) == 0 {
+				delete(node, part)
+			}
 			return
 		}
 		next, ok := node[part].(map[string]any)

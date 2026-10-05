@@ -124,12 +124,13 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 }
 
 // observedList reports what configedit.Read saw at keyPath, but only when it
-// is a list: ([]any, nil) for a present sequence, (nil, nil) for anything
-// else present (a nested map, or absent — callers only reach this from a
-// yamlNotScalar result, so it is always present), or (nil, err) if the
-// document could not be re-parsed. It never returns a scalar: ObserveConfig's
-// own yamlValue path already owns scalars, and this is only consulted when
-// that path found something non-scalar.
+// is a list: ([]any, nil) for a present sequence AND for a key present
+// holding nothing (an empty block list, which is the same fact written
+// differently), (nil, nil) for anything else present (a nested map — callers
+// only reach this from a yamlNotScalar result, so it is always present), or
+// (nil, err) if the document could not be re-parsed. It never returns a
+// scalar: ObserveConfig's own yamlValue path already owns scalars, and this
+// is only consulted when that path found something non-scalar.
 func observedList(data []byte, keyPath string) ([]any, error) {
 	v, present, err := configedit.Read(data, keyPath)
 	if err != nil {
@@ -137,6 +138,17 @@ func observedList(data []byte, keyPath string) ([]any, error) {
 	}
 	if !present {
 		return nil, nil
+	}
+	if v == nil {
+		// Present, holding nothing: `command_allowlist:` with no items under
+		// it. That is an EMPTY LIST in every sense that matters here — it is
+		// the shape AppendToList has a dedicated branch for extending, and it
+		// is what an operator's document looks like after the last entry is
+		// deleted. Reporting it as a nested map (the arm below) was a false
+		// sentence about a document that holds nothing, and it made
+		// `compare()` call the setting `unreadable`, which at adopt time
+		// records a failure and never plans the write at all.
+		return []any{}, nil
 	}
 	list, ok := v.([]any)
 	if !ok {
@@ -315,9 +327,12 @@ func (h *hermesDescriptor) derivePlanConfig(ctx context.Context, key, operationI
 			}
 			entry.Action = action
 			after = edited
-			if len(added) > 0 {
-				additive[keyPath] = append(additive[keyPath], added...)
-			}
+			// Registered even when nothing was added, and deliberately: an
+			// entry present with no items makes SameOutsideKeys compare this
+			// list strictly on both sides, where deleting the key from both
+			// (the non-additive branch) would let an edit that removed every
+			// operator entry and added nothing pass containment.
+			additive[keyPath] = append(additive[keyPath], added...)
 			merged, _, rerr := configedit.Read(after, keyPath)
 			if rerr != nil {
 				return refuse("UNREADABLE", fmt.Sprintf("%s is not valid YAML: %v", path, rerr))
@@ -416,8 +431,11 @@ func conflictReceipt(plan ConfigPlan, code, message string) ConfigReceipt {
 // the receipt has no `restarted` field). The order is the whole point:
 //
 //  1. Load the journal entry for operationID — absent is an error (never a
-//     silent plan); already "applied" is returned unchanged (idempotent).
+//     silent plan).
 //  2. The supplied planDigest must equal the journal entry's own plan digest.
+//     This is checked before the idempotent return, so proof of review is
+//     required even for an operation already applied; only then is an
+//     already-"applied" entry returned unchanged (idempotent).
 //  3. The plan is RE-DERIVED from the document as it is right now, via
 //     derivePlanConfig — the same code path PlanConfig uses — reconstructing
 //     `want` from the journaled plan's own Entries[].Intended.
@@ -446,15 +464,17 @@ func (h *hermesDescriptor) ApplyConfig(ctx context.Context, key, operationID, pl
 	if err != nil {
 		return ConfigReceipt{}, err
 	}
-	if existing.Phase == "applied" {
-		return existing, nil
-	}
-
 	// 2. The caller's proof of review must match what this station actually
-	// has on record for operationID.
+	// has on record for operationID — checked BEFORE the idempotent return
+	// below, or that return would hand the applied receipt back for any
+	// digest at all (an empty one, a fabricated one), making the proof-of-
+	// review check unreachable on the one path a retry actually takes.
 	if planDigest != existing.Plan.PlanDigest {
 		return conflictReceipt(existing.Plan, "PLAN_DIGEST_MISMATCH",
 			fmt.Sprintf("the supplied plan digest does not match the plan reviewed for %s", operationID)), nil
+	}
+	if existing.Phase == "applied" {
+		return existing, nil
 	}
 
 	// 3. Re-derive, reconstructing `want` from exactly what review saw:
