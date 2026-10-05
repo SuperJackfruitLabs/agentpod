@@ -65,7 +65,7 @@ import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
 import { getStation, type StationRow } from "../services/station-registry";
-import { declare, undeclare, resolveFor, compare, fetchRegistry, getOptOuts } from "../services/harness-config";
+import { declare, undeclare, resolveFor, compare, fetchRegistry, resolveOptOuts } from "../services/harness-config";
 import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
 import { principalForUser } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
@@ -234,7 +234,7 @@ function ensureEveryValue(
  * Also feeds `compare()`'s three Task 9b arguments — `appliedWrites`
  * (`applied_harness_config`, via `getAppliedWrites`), `currentGatewayPid`
  * (the station's live health, via `readGatewayPid`) and `optedOut` (via
- * `getOptOuts`) — the restart evidence and opt-out an earlier task's
+ * `resolveOptOuts`, station beating node) — the restart evidence and opt-out an earlier task's
  * `compare()` could already emit but no caller fed it, so `awaiting-restart`
  * and `opted-out` could never reach either route that calls this function
  * (`GET /api/fleet/config/drift` and `GET /api/stations/:stationId/config`).
@@ -262,7 +262,7 @@ async function observeStation(
     }),
     getAppliedWrites(tenantId, station.id),
     readGatewayPid(station.nodeId, station.stationKey),
-    getOptOuts(tenantId, station.stationKey),
+    resolveOptOuts(tenantId, station.stationKey, station.nodeId),
   ]);
 
   const raw = result.ok

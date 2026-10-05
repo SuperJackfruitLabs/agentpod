@@ -31,7 +31,7 @@ import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
-import { resolveFor, fetchRegistry, compare, getOptOuts, type Resolved, type AppliedWrite } from "./harness-config";
+import { resolveFor, fetchRegistry, compare, resolveOptOuts, type Resolved, type AppliedWrite } from "./harness-config";
 import type { StationRow } from "./station-registry";
 
 /** A minimal station shape — everything `planFor`/`applyFor` need to reach a node. */
@@ -172,7 +172,7 @@ export async function planFor(args: {
     );
   }
   const byId = new Map(registry.map((s) => [s.id, s]));
-  const optedOut = await getOptOuts(args.tenantId, args.station.stationKey);
+  const optedOut = await resolveOptOuts(args.tenantId, args.station.stationKey, args.station.nodeId);
 
   let declared: Record<string, Resolved> | null = null;
   const want: Array<{ settingId: string; value: unknown }> = [];
@@ -294,7 +294,7 @@ export async function applyFor(args: {
   operationId: string;
   planDigest: string;
 }): Promise<ConfigReceipt> {
-  const optedOut = await getOptOuts(args.tenantId, args.station.stationKey);
+  const optedOut = await resolveOptOuts(args.tenantId, args.station.stationKey, args.station.nodeId);
   if (optedOut.size > 0) {
     const inspect = await broker.request(args.station.nodeId, "config.inspect", {
       stationKey: args.station.stationKey,
@@ -669,7 +669,7 @@ async function reconcileStation(tenantId: string, station: ConfigStation): Promi
   }
   const registryById = new Map(registry.map((s) => [s.id, s]));
 
-  const optedOut = await getOptOuts(tenantId, station.stationKey);
+  const optedOut = await resolveOptOuts(tenantId, station.stationKey, station.nodeId);
 
   const candidateIds: string[] = [];
   for (const settingId of settingIds) {

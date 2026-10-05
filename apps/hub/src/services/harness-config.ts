@@ -10,11 +10,11 @@
  * Every hub query is tenant-scoped, and an optional tenant on a write is a
  * cross-tenant write — the most expensive defect class in this repo.
  */
-import { eq, isNull, SQL } from "drizzle-orm";
+import { eq, isNull, or, SQL } from "drizzle-orm";
 import type { ConfigObservation, ConfigSetting, ConfigValue } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { declaredHarnessConfig } from "../db/schema/harness-config";
-import { harnessConfigOptOut } from "../db/schema/harness-config-ops";
+import { harnessConfigOptOut, type HarnessConfigOptOutRow } from "../db/schema/harness-config-ops";
 import { tenantScope } from "../db/tenant-scope";
 import { prefixedId } from "../utils/ids";
 import * as broker from "./broker";
@@ -312,74 +312,181 @@ export function compare(args: {
   return out;
 }
 
+/** A level an exemption can target: a station (by its stable key) or a node. */
+export type OptOutLevel = "station" | "node";
+
 /**
- * Record an operator's explicit choice to exclude one setting from
- * reconciliation on one station — spec D6, ruling R1. Keyed on the STATION
- * KEY (not the row id) so it survives unadopt/re-adopt, matching
- * `harnessConfigOptOut`'s own doc comment.
- *
- * Upserts on `(tenantId, stationKey, settingId)`: opting out twice records
- * the latest reason/author rather than duplicating the row.
+ * Exactly one of `stationKey` / `nodeId` must be set — mirrors
+ * `cfg_opt_out_one_level`, the table's own CHECK constraint. Checked here,
+ * like `assertOneLevel` above, because no index can express "caught before
+ * the write" as cleanly as a thrown error.
  */
-export async function optOut(input: {
-  stationKey: string;
-  settingId: string;
-  tenantId: string;
-  optedOutBy: string;
-  reason?: string;
-}): Promise<void> {
-  await db
-    .insert(harnessConfigOptOut)
-    .values({
-      id: prefixedId("cfgoo"),
-      tenantId: input.tenantId,
-      stationKey: input.stationKey,
-      settingId: input.settingId,
-      reason: input.reason ?? null,
-      optedOutBy: input.optedOutBy,
-    })
-    .onConflictDoUpdate({
-      // Matches `cfg_opt_out_station`, the partial unique index that now
-      // carries this constraint — `station_key` is nullable since the node
-      // level exists, so the plain 3-column target below is no longer a
-      // valid conflict inference target without the matching predicate.
-      target: [harnessConfigOptOut.tenantId, harnessConfigOptOut.stationKey, harnessConfigOptOut.settingId],
-      targetWhere: isNull(harnessConfigOptOut.nodeId),
-      set: { reason: input.reason ?? null, optedOutBy: input.optedOutBy, updatedAt: new Date() },
-    });
+function assertOneOptOutLevel(input: { stationKey?: string; nodeId?: string }): void {
+  const hasStation = input.stationKey !== undefined;
+  const hasNode = input.nodeId !== undefined;
+  if (hasStation === hasNode) {
+    throw new Error("an opt-out targets exactly one level: a station or a node");
+  }
 }
 
-/** Remove an opt-out. A setting with no opt-out row is a no-op. */
-export async function clearOptOut(input: {
-  stationKey: string;
+/** The predicate that identifies the single row for one (tenant, setting, level). */
+function optOutLevelWhere(input: {
   settingId: string;
   tenantId: string;
+  stationKey?: string;
+  nodeId?: string;
+}): SQL {
+  return tenantScope(
+    harnessConfigOptOut,
+    input.tenantId,
+    eq(harnessConfigOptOut.settingId, input.settingId),
+    input.stationKey !== undefined
+      ? eq(harnessConfigOptOut.stationKey, input.stationKey)
+      : isNull(harnessConfigOptOut.stationKey),
+    input.nodeId !== undefined
+      ? eq(harnessConfigOptOut.nodeId, input.nodeId)
+      : isNull(harnessConfigOptOut.nodeId),
+  );
+}
+
+/**
+ * Record (or update) an operator's explicit exemption at one level — a
+ * station, keyed on its STABLE KEY (not the row id) so it survives
+ * unadopt/re-adopt, or a node, exempting every station on it. Exactly one
+ * of `stationKey`/`nodeId` is given, matching `cfg_opt_out_one_level`.
+ *
+ * `optedOut` is carried explicitly rather than implied by the row's mere
+ * existence: a `false` station row is how a station opts BACK IN against a
+ * node-wide exemption — see `resolveOptOuts`, and the schema's own doc
+ * comment, and plan ruling R1.
+ *
+ * Delete-then-insert inside one transaction — the same idiom `declare()`
+ * uses above, and for the identical reason: Postgres never treats a NULL
+ * `stationKey`/`nodeId` as a conflict against another NULL, so an
+ * `ON CONFLICT` upsert needs a separate `target`/`targetWhere` per level (it
+ * had exactly one, for the station level only, before this — the partial-
+ * index trap this file now avoids by using one idiom for both tables rather
+ * than fixing the upsert twice).
+ */
+export async function setOptOut(input: {
+  tenantId: string;
+  settingId: string;
+  optedOut: boolean;
+  stationKey?: string;
+  nodeId?: string;
+  reason?: string;
+  optedOutBy: string;
 }): Promise<void> {
-  await db
+  assertOneOptOutLevel(input);
+  await db.transaction(async (tx) => {
+    await tx.delete(harnessConfigOptOut).where(optOutLevelWhere(input));
+    await tx.insert(harnessConfigOptOut).values({
+      id: prefixedId("cfgoo"),
+      tenantId: input.tenantId,
+      stationKey: input.stationKey ?? null,
+      nodeId: input.nodeId ?? null,
+      settingId: input.settingId,
+      optedOut: input.optedOut,
+      reason: input.reason ?? null,
+      optedOutBy: input.optedOutBy,
+    });
+  });
+}
+
+/**
+ * Remove an exemption at one level. A level with no row is a no-op —
+ * `cleared: false` tells the caller nothing was there to clear, as distinct
+ * from "cleared it".
+ */
+export async function clearOptOut(input: {
+  tenantId: string;
+  settingId: string;
+  stationKey?: string;
+  nodeId?: string;
+}): Promise<{ cleared: boolean }> {
+  assertOneOptOutLevel(input);
+  const deleted = await db
     .delete(harnessConfigOptOut)
+    .where(optOutLevelWhere(input))
+    .returning({ id: harnessConfigOptOut.id });
+  return { cleared: deleted.length > 0 };
+}
+
+/**
+ * settingIds this station is exempt from, as a `Set` ready for `compare()`'s
+ * `optedOut` argument — resolved most-specific-first, exactly as
+ * declarations resolve (`resolveFor`): a STATION row decides outright when
+ * present, true or false, and only its ABSENCE falls through to the node
+ * row; a node row with no station row decides; neither row means not
+ * exempt.
+ *
+ * The station/false case is the whole point (plan ruling R1): collapsing
+ * "absent" and "false" would make a station unable to opt back in against a
+ * node-wide exemption, which is the entire reason `optedOut` is a boolean
+ * column rather than mere row existence.
+ *
+ * Reads both levels in one query and resolves in code — never two
+ * round trips a caller could observe half of.
+ */
+export async function resolveOptOuts(
+  tenantId: string,
+  stationKey: string,
+  nodeId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      settingId: harnessConfigOptOut.settingId,
+      stationKey: harnessConfigOptOut.stationKey,
+      nodeId: harnessConfigOptOut.nodeId,
+      optedOut: harnessConfigOptOut.optedOut,
+    })
+    .from(harnessConfigOptOut)
     .where(
       tenantScope(
         harnessConfigOptOut,
-        input.tenantId,
-        eq(harnessConfigOptOut.stationKey, input.stationKey),
-        eq(harnessConfigOptOut.settingId, input.settingId),
+        tenantId,
+        or(eq(harnessConfigOptOut.stationKey, stationKey), eq(harnessConfigOptOut.nodeId, nodeId))!,
       ),
     );
+
+  const station = new Map<string, boolean>();
+  const node = new Map<string, boolean>();
+  for (const r of rows) {
+    if (r.stationKey === stationKey) station.set(r.settingId, r.optedOut);
+    else if (r.nodeId === nodeId) node.set(r.settingId, r.optedOut);
+  }
+
+  const out = new Set<string>();
+  const settingIds = new Set<string>([...station.keys(), ...node.keys()]);
+  for (const settingId of settingIds) {
+    const stationDecision = station.get(settingId);
+    if (stationDecision !== undefined) {
+      // A station row decides outright, true or false — it never falls
+      // through to the node row.
+      if (stationDecision) out.add(settingId);
+      continue;
+    }
+    if (node.get(settingId)) out.add(settingId);
+  }
+  return out;
 }
 
-/**
- * Every settingId opted out for one station, as a `Set` ready for
- * `compare()`'s `optedOut` argument. The one query shape this file and
- * `services/harness-config-apply.ts`'s `reconcileStation` both need —
- * written once here so a second, drifting copy never gets written inline
- * again.
- */
-export async function getOptOuts(tenantId: string, stationKey: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ settingId: harnessConfigOptOut.settingId })
+/** Every opt-out row, optionally narrowed to one station or one node — the register, unresolved. */
+export async function listOptOuts(
+  tenantId: string,
+  filter?: { stationKey?: string; nodeId?: string },
+): Promise<HarnessConfigOptOutRow[]> {
+  return db
+    .select()
     .from(harnessConfigOptOut)
-    .where(tenantScope(harnessConfigOptOut, tenantId, eq(harnessConfigOptOut.stationKey, stationKey)));
-  return new Set(rows.map((r) => r.settingId));
+    .where(
+      tenantScope(
+        harnessConfigOptOut,
+        tenantId,
+        filter?.stationKey !== undefined ? eq(harnessConfigOptOut.stationKey, filter.stationKey) : undefined,
+        filter?.nodeId !== undefined ? eq(harnessConfigOptOut.nodeId, filter.nodeId) : undefined,
+      ),
+    );
 }
 
 /**

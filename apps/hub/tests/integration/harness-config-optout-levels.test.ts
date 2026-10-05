@@ -31,12 +31,16 @@ import { test, expect, describe, beforeAll, afterAll } from "bun:test";
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { setOptOut, clearOptOut, resolveOptOuts, listOptOuts } from "../../src/services/harness-config";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 // A real AgentPod tenant id (`fleet_<20 hex>`) — "tnt_test" fails the
 // `tenants_id_is_agentpod_fleet` CHECK constraint at insert.
 const TENANT_ID = "fleet_c0f9014400000000001a";
+// A second tenant, used only by the cross-tenant isolation test below —
+// never shares a row with TENANT_ID.
+const TENANT_ID_2 = "fleet_c0f9014400000000002b";
 const TEST_USER = "test-user-cfgoptlvl-001";
 const SETTING = "hermes.approvals.timeout";
 
@@ -70,6 +74,10 @@ beforeAll(async () => {
     ON CONFLICT (id) DO NOTHING
   `;
   await rawSql`
+    INSERT INTO tenants (id, name) VALUES (${TENANT_ID_2}, 'Opt-out levels test (other tenant)')
+    ON CONFLICT (id) DO NOTHING
+  `;
+  await rawSql`
     INSERT INTO "user" (id, email, name, email_verified, role, created_at, updated_at)
     VALUES (${TEST_USER}, 'cfgoptlvl-test@example.com', 'Opt-out Levels Test User', true, 'user', now(), now())
     ON CONFLICT (id) DO NOTHING
@@ -78,12 +86,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   try {
-    await rawSql`DELETE FROM applied_harness_config WHERE tenant_id = ${TENANT_ID}`;
-    await rawSql`DELETE FROM harness_config_opt_out  WHERE tenant_id = ${TENANT_ID}`;
+    await rawSql`DELETE FROM applied_harness_config WHERE tenant_id IN (${TENANT_ID}, ${TENANT_ID_2})`;
+    await rawSql`DELETE FROM harness_config_opt_out  WHERE tenant_id IN (${TENANT_ID}, ${TENANT_ID_2})`;
     await rawSql`DELETE FROM stations                WHERE tenant_id = ${TENANT_ID}`;
     await rawSql`DELETE FROM nodes                    WHERE tenant_id = ${TENANT_ID}`;
     await rawSql`DELETE FROM "user"                  WHERE id = ${TEST_USER}`;
-    await rawSql`DELETE FROM tenants                  WHERE id = ${TENANT_ID}`;
+    await rawSql`DELETE FROM tenants                  WHERE id IN (${TENANT_ID}, ${TENANT_ID_2})`;
   } catch {
     // Ignore cleanup errors
   }
@@ -188,5 +196,101 @@ describe("the opt-out register has two levels and no duplicates", () => {
     expect(after.length).toBe(0);
 
     await rawSql`DELETE FROM nodes WHERE id = ${nodeId}`;
+  });
+});
+
+// ─── resolveOptOuts: most-specific-first ──────────────────────────────────────
+
+describe("resolveOptOuts resolves most-specific-first", () => {
+  test("a station row optedOut=true exempts the setting", async () => {
+    const stationKey = "resolve-station-true";
+    const nodeId = "resolve-node-for-station-true";
+
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: true, stationKey, optedOutBy: TEST_USER });
+
+    const out = await resolveOptOuts(TENANT_ID, stationKey, nodeId);
+    expect(out.has(SETTING)).toBe(true);
+  });
+
+  test("a node row optedOut=true exempts every station on that node", async () => {
+    const nodeId = "resolve-node-true";
+
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: true, nodeId, optedOutBy: TEST_USER });
+
+    const stationA = await resolveOptOuts(TENANT_ID, "resolve-station-a-on-node", nodeId);
+    const stationB = await resolveOptOuts(TENANT_ID, "resolve-station-b-on-node", nodeId);
+    expect(stationA.has(SETTING)).toBe(true);
+    expect(stationB.has(SETTING)).toBe(true);
+  });
+
+  test("a station row optedOut=FALSE overrides a node row optedOut=true", async () => {
+    const stationKey = "resolve-station-override";
+    const nodeId = "resolve-node-overridden";
+
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: true, nodeId, optedOutBy: TEST_USER });
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: false, stationKey, optedOutBy: TEST_USER });
+
+    const out = await resolveOptOuts(TENANT_ID, stationKey, nodeId);
+    expect(out.has(SETTING)).toBe(false);
+
+    // A sibling station on the same node, with no station-level row of its
+    // own, is still exempt — the override is specific to THIS station, not
+    // the node's rule itself.
+    const sibling = await resolveOptOuts(TENANT_ID, "resolve-station-sibling", nodeId);
+    expect(sibling.has(SETTING)).toBe(true);
+  });
+
+  test("no row at either level means not exempt", async () => {
+    const out = await resolveOptOuts(TENANT_ID, "resolve-station-none", "resolve-node-none");
+    expect(out.has(SETTING)).toBe(false);
+  });
+
+  test("deleting the station row falls back to the node row (absence is not false)", async () => {
+    const stationKey = "resolve-station-fallback";
+    const nodeId = "resolve-node-fallback";
+
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: true, nodeId, optedOutBy: TEST_USER });
+    await setOptOut({ tenantId: TENANT_ID, settingId: SETTING, optedOut: false, stationKey, optedOutBy: TEST_USER });
+    expect((await resolveOptOuts(TENANT_ID, stationKey, nodeId)).has(SETTING)).toBe(false);
+
+    const cleared = await clearOptOut({ tenantId: TENANT_ID, settingId: SETTING, stationKey });
+    expect(cleared.cleared).toBe(true);
+
+    // The station's "not exempt" was deleted, not flipped to true — the
+    // node's rule is what the station now falls back to.
+    expect((await resolveOptOuts(TENANT_ID, stationKey, nodeId)).has(SETTING)).toBe(true);
+  });
+
+  test("resolveOptOuts returns only ids for THIS station and THIS node, never another tenant's", async () => {
+    const stationKey = "resolve-station-tenant-isolation";
+    const nodeId = "resolve-node-tenant-isolation";
+
+    await setOptOut({ tenantId: TENANT_ID_2, settingId: SETTING, optedOut: true, stationKey, optedOutBy: TEST_USER });
+
+    const out = await resolveOptOuts(TENANT_ID, stationKey, nodeId);
+    expect(out.has(SETTING)).toBe(false);
+  });
+
+  test("setOptOut twice for the same level updates rather than duplicating", async () => {
+    const stationKey = "resolve-station-upsert";
+
+    await setOptOut({
+      tenantId: TENANT_ID, settingId: SETTING, optedOut: true, stationKey, optedOutBy: TEST_USER, reason: "first",
+    });
+    await setOptOut({
+      tenantId: TENANT_ID, settingId: SETTING, optedOut: true, stationKey, optedOutBy: TEST_USER, reason: "second",
+    });
+
+    const rows = await listOptOuts(TENANT_ID, { stationKey });
+    const matching = rows.filter((r) => r.settingId === SETTING);
+    expect(matching.length).toBe(1);
+    expect(matching[0]?.reason).toBe("second");
+  });
+
+  test("clearOptOut reports cleared:false when there was nothing to clear", async () => {
+    const result = await clearOptOut({
+      tenantId: TENANT_ID, settingId: SETTING, stationKey: "resolve-station-nothing-to-clear",
+    });
+    expect(result.cleared).toBe(false);
   });
 });

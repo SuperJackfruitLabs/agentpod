@@ -59,7 +59,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
-import { optOut, clearOptOut } from "../../src/services/harness-config";
+import { setOptOut, clearOptOut } from "../../src/services/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -396,9 +396,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-plan-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -450,9 +451,10 @@ test(
       // THEN the operator opts the station out of this exact setting — the
       // window between a reviewed plan and its apply is exactly where this
       // matters most.
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -498,9 +500,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-mixed-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -568,9 +571,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-cleared-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
