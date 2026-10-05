@@ -339,8 +339,13 @@ export async function optOut(input: {
       optedOutBy: input.optedOutBy,
     })
     .onConflictDoUpdate({
+      // Matches `cfg_opt_out_station`, the partial unique index that now
+      // carries this constraint — `station_key` is nullable since the node
+      // level exists, so the plain 3-column target below is no longer a
+      // valid conflict inference target without the matching predicate.
       target: [harnessConfigOptOut.tenantId, harnessConfigOptOut.stationKey, harnessConfigOptOut.settingId],
-      set: { reason: input.reason ?? null, optedOutBy: input.optedOutBy },
+      targetWhere: isNull(harnessConfigOptOut.nodeId),
+      set: { reason: input.reason ?? null, optedOutBy: input.optedOutBy, updatedAt: new Date() },
     });
 }
 
