@@ -29,7 +29,7 @@
 
 ### Structural facts, established by reading — do not re-derive
 
-- **F5 — the `skills.external_dirs` writer is not reusable as it stands.** It lives inline in `hermesSkillsCmd` (`apps/node-agent/cmd/agentpod-node/hermes_skills.go:22`), a CLI command body in `cmd/`, and Go forbids `internal/...` importing `cmd/...`. Task 2 extracts it.
+- **F5 was WRONG and is withdrawn.** The writer already lived in `internal/skills/hermes_external_dirs.go` (#533), already importable, and `internal/descriptor` already imported that package. Task 2's extraction was optional polish — it happened anyway, so the writer now lives in `internal/hermesskills` with a `hermeslive`-shaped API, but no import blocker ever existed.
 - **F6 — OpenClaw's document is JSON**, written by `internal/openclawerrors/config.go`. `configedit` is a YAML line editor and does not serve it. Delegate; do not teach `configedit` a second format.
 - **Delegation is cycle-free and already proven.** Neither `hermeslive` nor `openclawerrors` imports `descriptor`, and `descriptor` **already imports `hermeslive`** at `config_plan.go:10`. So importing either from `descriptor` is established practice, not a new coupling.
 - **All three target writers are unexported** (`planEnableConfig`, `planDisableConfig`, openclawerrors' writers). Folding in requires exporting them — a deliberate API widening, so each export needs a doc comment saying who the second caller is and why.
