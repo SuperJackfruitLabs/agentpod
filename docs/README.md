@@ -47,7 +47,7 @@ date.** These are proposals and decisions as of the day they were written; where
 code disagree, the code wins.
 
 - [2026-08-13 — Ecosystem identity decisions](./strategy/2026-08-13-ecosystem-identity-decisions.md) — accepted; the model for this kind of document
-- [2026-08-10 — The Suite: five planes, one join key](./strategy/2026-08-10-suite-strategy.md) — strategy, for discussion
+- [2026-08-10 — The Suite: five planes, one join key](https://github.com/SuperJackfruitLabs/sketchbook/tree/main/ideas/2026-08-10-suite-strategy) — strategy, for discussion; moved to the sketchbook
 
 [`superpowers/`](./superpowers/) — the specs and plans the work was built from, by an existing
 convention: `specs/<date>-<slug>-design.md` for the design, `plans/<date>-<slug>.md` for the
@@ -65,7 +65,7 @@ DEPLOYMENT.md).
 
 [`research/`](./research/) — era-independent reference material about the wider world, not
 about this codebase: the [multi-agent ecosystem survey](./research/multi-agent-ecosystem/)
-(protocols, frameworks, governance), sandbox patterns, an autonomy PoC.
+(protocols, frameworks, governance). The sandbox-patterns survey and the autonomy PoC moved to the sketchbook.
 
 ## Archive
 
