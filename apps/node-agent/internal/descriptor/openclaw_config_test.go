@@ -330,6 +330,141 @@ func TestOpenClawAnAlreadySatisfiedSettingIsANoOp(t *testing.T) {
 	}
 }
 
+// ─── D6: the harness's own opt-out wins (Task 5b) ───────────────────────────
+//
+// OpenClaw's own mechanism for an operator to turn the agentpod-errors
+// plugin off, through OpenClaw's own UI, is
+// plugins.entries.agentpod-errors.enabled: false (install.go's package
+// comment documents this key; install.go:317's Observe reads it as the
+// plugin's Enabled status). The delegated writer (openclawerrors.EnableConfig)
+// is indivisible — enabling hooks.allowConversationAccess ALSO sets that key
+// to true — so declaring this setting while an operator has explicitly
+// turned the plugin off must not silently reverse that choice (D6).
+//
+// Three states, each its own test, mirroring
+// TestHermesObserveConfigReportsTheHarnesssOwnOptOut /
+// TestHermesObserveConfigWithNoHarnessOptOutReportsFalse: explicitly false
+// opts out; ABSENT does not (a fresh install has no entry at all — see
+// foldInOpenClawBefore, which has a sibling "telegram" entry but none of
+// ours); explicitly true does not either.
+
+const foldInOpenClawDisabledByOperator = `{
+  "plugins": {
+    "entries": {
+      "telegram": { "enabled": true },
+      "agentpod-errors": { "enabled": false }
+    }
+  }
+}
+`
+
+const foldInOpenClawEnabledByOperator = `{
+  "plugins": {
+    "entries": {
+      "agentpod-errors": { "enabled": true }
+    }
+  }
+}
+`
+
+func TestOpenClawObserveConfigReportsTheHarnesssOwnOptOut(t *testing.T) {
+	o, key, _, _ := openclawWithHome(t, foldInOpenClawDisabledByOperator)
+	vals, err := o.ObserveConfig(context.Background(), key, []string{openclawAllowConversationAccessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 1 || !vals[0].Readable {
+		t.Fatalf("got %+v, want 1 readable value", vals)
+	}
+	if !vals[0].OptedOutByHarness {
+		t.Fatalf("plugins.entries.agentpod-errors.enabled: false must set OptedOutByHarness, got %+v", vals[0])
+	}
+}
+
+// The absence case, proven alongside the presence case so a test that cannot
+// distinguish "false" from "field never set" is not mistaken for coverage —
+// a fresh OpenClaw station (foldInOpenClawBefore has no agentpod-errors
+// entry at all) must NOT read as opted-out, or every fresh station would
+// block the fold-in entirely.
+func TestOpenClawObserveConfigWithNoHarnessOptOutReportsFalse(t *testing.T) {
+	o, key, _, _ := openclawWithHome(t, foldInOpenClawBefore)
+	vals, err := o.ObserveConfig(context.Background(), key, []string{openclawAllowConversationAccessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatalf("no agentpod-errors entry at all must report OptedOutByHarness=false, got %+v", vals[0])
+	}
+}
+
+// The third state: enabled explicitly TRUE is not opted-out either —
+// conflating "present" with "disabled" would be a different bug than
+// conflating "absent" with "disabled", and both are worth their own guard.
+func TestOpenClawObserveConfigEnabledTrueReportsFalse(t *testing.T) {
+	o, key, _, _ := openclawWithHome(t, foldInOpenClawEnabledByOperator)
+	vals, err := o.ObserveConfig(context.Background(), key, []string{openclawAllowConversationAccessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatalf("enabled: true must report OptedOutByHarness=false, got %+v", vals[0])
+	}
+}
+
+// A sibling plugin disabled must not be mistaken for agentpod-errors being
+// disabled — this is a keyed lookup, not "something in entries is false".
+func TestOpenClawObserveConfigOtherPluginDisabledDoesNotOptOut(t *testing.T) {
+	const body = `{"plugins": {"entries": {"telegram": {"enabled": false}}}}`
+	o, key, _, _ := openclawWithHome(t, body)
+	vals, err := o.ObserveConfig(context.Background(), key, []string{openclawAllowConversationAccessID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if vals[0].OptedOutByHarness {
+		t.Fatalf("a different plugin disabled must not opt agentpod-errors out, got %+v", vals[0])
+	}
+}
+
+// The consequence: PlanConfig must REFUSE rather than silently produce an
+// edit that re-enables the plugin — this is the actual D6 violation Task 5
+// left open, not just an observability gap. OPTED_OUT, mirroring the code
+// hermes_config_foldin.go's delegatePlugins uses for the analogous Hermes
+// case (hermeslive.ErrDisabledByOperator).
+func TestOpenClawPlanRefusesToReEnableWhenOperatorDisabledThePlugin(t *testing.T) {
+	o, key, cfg, _ := openclawWithHome(t, foldInOpenClawDisabledByOperator)
+	before, _ := os.ReadFile(cfg)
+
+	p, err := o.PlanConfig(context.Background(), key, "op_optedout", []DeclaredSetting{
+		{SettingID: openclawAllowConversationAccessID, Value: true},
+	})
+	if err != nil {
+		t.Fatalf("an opt-out is a refused plan, not an error: %v", err)
+	}
+	if p.Refusal == nil || p.Refusal.Code != "OPTED_OUT" {
+		t.Fatalf("refusal = %+v, want OPTED_OUT", p.Refusal)
+	}
+	after, _ := os.ReadFile(cfg)
+	if string(before) != string(after) {
+		t.Fatal("a refused plan wrote to the document")
+	}
+}
+
+// Declaring the setting OFF while the plugin is already disabled is
+// consistent with the opt-out, not a reversal of it, and must not be
+// refused: only the direction that would re-enable the plugin is guarded.
+func TestOpenClawPlanAllowsDisablingWhenAlreadyOptedOut(t *testing.T) {
+	o, key, _, _ := openclawWithHome(t, foldInOpenClawDisabledByOperator)
+	p, err := o.PlanConfig(context.Background(), key, "op_optedout_off", []DeclaredSetting{
+		{SettingID: openclawAllowConversationAccessID, Value: false},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Refusal != nil {
+		t.Fatalf("declaring the setting off must not be refused as opted-out: %+v", p.Refusal)
+	}
+}
+
 // ─── The interface-satisfaction trap ────────────────────────────────────────
 //
 // `config.manage` is advertised behind `_, ok := d.(ConfigManager)`

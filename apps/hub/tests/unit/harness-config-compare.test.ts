@@ -295,6 +295,32 @@ describe("a harness's own opt-out (D11) is opted-out, and distinguishable from t
     })[0]!;
     expect(o.state).toBe("matches");
   });
+
+  // D6/Task 5b gap: the tests above all exercise `harness: "hermes"` via
+  // SETTING, which is generic enough to pass even if OpenClaw's own
+  // descriptor never actually set `optedOutByHarness` — a reason built from
+  // `setting?.harness` is a different code path for a different harness
+  // name, and this is the test that proves it actually fires there too,
+  // not just assumed by analogy to Hermes.
+  test("the same path fires for OpenClaw's own setting, and the reason names openclaw as the source", () => {
+    const openclawSetting = {
+      id: "openclaw.hooks.allowConversationAccess", harness: "openclaw",
+      scope: "user" as const, policy: "reconcilable" as const, restartToTakeEffect: true,
+    };
+    // Declared at node level, not station: this setting is user-scoped, and
+    // a station-scoped declaration of it is refused out-of-scope (step 1)
+    // before opted-out (step 3) is ever reached — a different test already
+    // covers that refusal, above.
+    const o = compare({
+      stationId: "station_a",
+      settings: [openclawSetting],
+      declared: { [openclawSetting.id]: at(true, "node") },
+      values: [{ settingId: openclawSetting.id, readable: true, observed: false, optedOutByHarness: true }],
+    })[0]!;
+    expect(o.state).toBe("opted-out");
+    expect(o.reason).toContain("openclaw");
+    expect(o.reason).not.toContain("hermes");
+  });
 });
 
 /**

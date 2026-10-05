@@ -211,6 +211,19 @@ func (o *openclawDescriptor) derivePlanConfig(ctx context.Context, key, operatio
 			entry.Current = current
 		}
 
+		// D6: an explicit operator opt-out wins over a declared value. The
+		// delegated writer (EnableConfig) is indivisible — it ALSO flips
+		// plugins.entries.agentpod-errors.enabled to true, which would
+		// silently reverse an operator's own choice to turn the plugin off
+		// through OpenClaw's own UI. Checked only when actually trying to
+		// enable: declaring the hook off while the plugin is already
+		// disabled is consistent with the opt-out and needs no refusal.
+		if val && openclawerrors.PluginExplicitlyDisabled(after) {
+			return refuse("OPTED_OUT", fmt.Sprintf(
+				"%s: OpenClaw's own plugins.entries.%s.enabled is false, so an operator turned the plugin off through OpenClaw's own UI; agentpod never writes that key and will not override it by enabling hooks.allowConversationAccess",
+				keyPath, openclawerrors.Name))
+		}
+
 		var edited []byte
 		var writeErr error
 		if val {
@@ -404,6 +417,18 @@ func (o *openclawDescriptor) ObserveConfig(ctx context.Context, key string, sett
 	path := o.openclawConfigDocPath()
 	data, readErr := os.ReadFile(path)
 
+	// optedOutByHarness is a DOCUMENT-level fact — the operator disabled the
+	// agentpod-errors plugin itself, through OpenClaw's own
+	// plugins.entries.agentpod-errors.enabled (D11, D6) — computed once per
+	// read, exactly as hermes_config.go's ObserveConfig computes
+	// hermesPluginDisabled once and applies it to every setting in the
+	// call. There is only one registered OpenClaw setting today, but the
+	// shape is kept the same so a second one costs nothing extra here.
+	var optedOutByHarness bool
+	if readErr == nil {
+		optedOutByHarness = openclawerrors.PluginExplicitlyDisabled(data)
+	}
+
 	out := make([]ConfigValue, 0, len(settings))
 	for _, id := range settings {
 		if readErr != nil {
@@ -415,7 +440,7 @@ func (o *openclawDescriptor) ObserveConfig(ctx context.Context, key string, sett
 			out = append(out, ConfigValue{SettingID: id, Readable: false, Reason: fmt.Sprintf("%s is not valid JSON: %v", path, err)})
 			continue
 		}
-		cv := ConfigValue{SettingID: id, Readable: true}
+		cv := ConfigValue{SettingID: id, Readable: true, OptedOutByHarness: optedOutByHarness}
 		if v, present := openclawReadAllowConversationAccess(doc); present {
 			cv.Observed = v
 		}
