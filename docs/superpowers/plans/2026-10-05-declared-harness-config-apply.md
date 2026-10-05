@@ -72,7 +72,7 @@ When the pid is unavailable (health degraded, harness stopped), the state stays 
 
 **Contract**
 - Modify: `packages/contract/src/harness-config.ts` — add `ConfigRefusalCode`, `ConfigPlanEntry`, `ConfigPlan`, `ConfigReceipt`. Existing exports unchanged.
-- Test: `packages/contract/src/harness-config.test.ts` (exists)
+- Test: `packages/contract/test/harness-config.test.ts` (exists — note `test/`, not `src/`, unlike most contract tests)
 
 **Node — the writer**
 - Modify: `apps/node-agent/internal/descriptor/yamlscalar.go` — list-valued reads (fixes the `command_allowlist` false-`absent`)
@@ -158,7 +158,7 @@ git add -A && git commit -m "node: what the evidence says about approvals and re
 
 **Files:**
 - Modify: `packages/contract/src/harness-config.ts`
-- Test: `packages/contract/src/harness-config.test.ts`
+- Test: `packages/contract/test/harness-config.test.ts`
 
 **Interfaces:**
 - Consumes: `ConfigScope`, `ConfigPolicy`, `ConfigSetting`, `ConfigValue`, `ConfigObservation` (Plan 1)
