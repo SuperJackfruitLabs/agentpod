@@ -89,8 +89,8 @@ When the pid is unavailable (health degraded, harness stopped), the state stays 
 - Create: `apps/hub/src/db/schema/harness-config-ops.ts` — applied-write records and the opt-out register
 - Create: `apps/hub/src/db/drizzle-migrations/00NN_harness_config_ops.sql` (number at generate time; see Task 7 step 1)
 - Modify: `apps/hub/src/db/schema/index.ts`, `apps/hub/src/db/tenant-scope.ts` — register both new tables
-- Modify: `apps/hub/src/services/harness-config.ts` — `compare()` gains the two states; `recordApplied`, `optOut`, `clearOptOut`
-- Create: `apps/hub/src/services/harness-config-apply.ts` — plan/inspect/apply orchestration and the adopt-time reconcile
+- Modify: `apps/hub/src/services/harness-config.ts` — `compare()` gains the two states, plus `optOut` / `clearOptOut` (Task 9 only)
+- Create: `apps/hub/src/services/harness-config-apply.ts` — plan/inspect/apply orchestration, `recordApplied` (Task 7), and the adopt-time reconcile (Task 8)
 - Modify: `apps/hub/src/routes/harness-config.ts` — the plan/inspect/apply trio
 - Modify: `apps/hub/src/services/station-registry.ts` — the post-adopt hook
 - Test: `apps/hub/tests/unit/harness-config-compare.test.ts` (exists), `apps/hub/tests/integration/harness-config-apply.test.ts` (create), `apps/hub/tests/integration/harness-config-adopt.test.ts` (create)
@@ -731,11 +731,22 @@ func TestPlanOfAMatchingValueIsANoOp(t *testing.T) {
 	}
 }
 
+// NOTE: this reads the expectation from the registry rather than hardcoding
+// `true`. Task 1 may have replaced the unverified assumption with evidence
+// that approvals.timeout hot-reloads — in which case a hardcoded `true` here
+// would be a test asserting the opposite of the registry it is testing.
 func TestPlanCarriesRestartRequiredOnlyForEntriesThatChangeSomething(t *testing.T) {
 	h, key, _ := hermesWithProfile(t, planDoc)
+	var want bool
+	for _, s := range h.ConfigSettings() {
+		if s.ID == "hermes.approvals.timeout" {
+			want = s.RestartToTakeEffect
+		}
+	}
 	p := planOne(t, h, key, "hermes.approvals.timeout", 900)
-	if !p.RestartRequired {
-		t.Fatal("a changed restart-to-take-effect setting must report restartRequired")
+	if p.RestartRequired != want {
+		t.Fatalf("restartRequired = %v, want %v (the registry's value for this setting)",
+			p.RestartRequired, want)
 	}
 }
 
@@ -1007,11 +1018,21 @@ func TestApplyOfAnAdditiveOnlySettingKeepsTheOperatorsEntries(t *testing.T) {
 	}
 }
 
+// Like the plan-side restart test, this takes its expectation from the
+// registry: Task 1 may have settled that approvals.timeout hot-reloads.
+// The invariant that does NOT depend on Task 1 is the second half — a
+// receipt never claims anything about restarting.
 func TestApplyReportsRestartRequiredAndRestartsNothing(t *testing.T) {
 	h, key, _ := hermesWithProfile(t, planDoc)
+	var want bool
+	for _, s := range h.ConfigSettings() {
+		if s.ID == "hermes.approvals.timeout" {
+			want = s.RestartToTakeEffect
+		}
+	}
 	_, r := applyPlanned(t, h, key, "hermes.approvals.timeout", 900)
-	if !r.Plan.RestartRequired {
-		t.Fatal("a setting that needs a restart reported otherwise")
+	if r.Plan.RestartRequired != want {
+		t.Fatalf("restartRequired = %v, want %v (the registry's value)", r.Plan.RestartRequired, want)
 	}
 	// The receipt describes a WRITE, never an effect. Spec §10.8 / D4.
 	data, _ := json.Marshal(r)
@@ -1305,11 +1326,17 @@ Plan 1's `compare()` emits five of seven states, and both the docs page and its 
 - a setting that needs no restart is `matches` immediately after a write
 - an opted-out setting is `opted-out` even when the observed value differs
 - opted-out beats drifted: the state names the operator's choice, not the diff
-- a native harness opt-out (plugins.disabled) still reports opted-out from the document
 - clearing an opt-out returns the setting to ordinary comparison
 ```
 
-The second and sixth are the load-bearing ones: the first proves the restart evidence works, the second proves D6's precedence.
+The second and fifth are the load-bearing ones: the first proves the restart evidence works, the second proves D6's precedence.
+
+**A native harness opt-out is deliberately NOT in this task.** `compare()` is a pure
+function over declared and observed values, and Plan 1's `ConfigValue` carries no
+opt-out signal — so a `plugins.disabled` entry is invisible to it. The only native
+opt-out any harness has today governs the plugins settings that **Plan 3** folds in,
+so native opt-out detection lands with them, where the `ConfigValue` change it needs
+can be designed against a real case. Do not add a speculative field for it here.
 
 - [ ] **Step 2: Run them and watch them fail**
 
