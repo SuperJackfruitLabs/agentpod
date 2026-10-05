@@ -53,6 +53,27 @@ A setting also carries its own **scope** — `profile`, `project`, or `user` —
 where it actually lives inside the harness's document, independent of which level you
 declared it at.
 
+### Declaring a value that is not a string
+
+A single `--value` is declared as a **string**. The declaration is stored as JSON and the
+node refuses a value whose shape its registry does not expect, so the shape has to be right
+here rather than at write time. For a list-valued setting — every `additive-only` setting is
+one — repeat `--value` once per entry, or use `--json` for the value exactly as JSON:
+
+```sh
+# a list, by repeating --value
+fleet config set hermes.approvals.command_allowlist --value "git status" --value "ls"
+
+# a ONE-entry list, a number, a boolean — the forms repeating cannot express
+fleet config set hermes.approvals.command_allowlist --json '["git status"]'
+fleet config set hermes.approvals.timeout --json 900
+```
+
+`--value` and `--json` are mutually exclusive, and `set` needs one of them. Declaring a
+list-valued setting with a single `--value` stores the string it is, and every later `plan`
+for that station is then refused `SHAPE_UNEXPECTED` — so if a plan says a declared value is
+not a list of strings, this is why.
+
 ### Why a station is not a config scope, except for Hermes
 
 For five of the six harnesses, a station is a *project path*, while the harness's

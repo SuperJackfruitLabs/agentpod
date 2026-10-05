@@ -318,20 +318,30 @@ func TestConfigApplyRequiresStationAndOperation(t *testing.T) {
 	}
 }
 
-// TestConfigUsageListsNineVerbLines: six existing lines (settings, show
-// twice, set, unset, drift) plus the three this task adds (plan, inspect,
-// apply) is nine lines inside the `usage:` block.
-func TestConfigUsageListsNineVerbLines(t *testing.T) {
+// TestConfigUsageListsEveryVerbLine: settings, show twice, set twice (--value
+// and --json), unset, drift, plan, inspect, apply — ten lines inside the
+// `usage:` block, which is the block only, not the worked examples in the
+// prose below it.
+func TestConfigUsageListsEveryVerbLine(t *testing.T) {
 	bin := build(t)
 	out, _ := run(t, bin, nil, "config", "--help")
 	count := 0
+	inBlock := false
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "fleet config ") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "usage:") {
+			inBlock = true
+			continue
+		}
+		if inBlock && trimmed == "" {
+			break // the usage block ends at its first blank line
+		}
+		if inBlock && strings.HasPrefix(trimmed, "fleet config ") {
 			count++
 		}
 	}
-	if count != 9 {
-		t.Errorf("config usage should list nine verb lines (settings, show x2, set, unset, drift, plan, inspect, apply), got %d:\n%s", count, out)
+	if count != 10 {
+		t.Errorf("config usage should list ten verb lines (settings, show x2, set x2, unset, drift, plan, inspect, apply), got %d:\n%s", count, out)
 	}
 	for _, verb := range []string{"fleet config plan", "fleet config inspect", "fleet config apply"} {
 		if !strings.Contains(out, verb) {
@@ -356,5 +366,107 @@ func TestConfigUsageSaysApplyWrites(t *testing.T) {
 	}
 	if !strings.Contains(out, "does not write to a station") {
 		t.Errorf("config usage must keep saying `set` does not write to a station, got:\n%s", out)
+	}
+}
+
+// TestConfigSetDeclaresAListValue is finding 6: `--value` could only ever
+// produce a JSON string, so `hermes.approvals.command_allowlist` — an
+// `additive-only` setting, the policy this whole feature was written for —
+// could not be declared from the CLI at all. The hub stores this field
+// verbatim as jsonb and the node refuses a non-list, so getting the JSON type
+// right is the CLI's job and nobody else's.
+func TestConfigSetDeclaresAListValue(t *testing.T) {
+	bin := build(t)
+	const id = "hermes.approvals.command_allowlist"
+	for _, tc := range []struct {
+		name string
+		args []string
+		want any
+	}{
+		{"one --value is still a string", []string{"config", "set", id, "--value", "git status"}, "git status"},
+		{
+			"repeated --value is a list, in the order given",
+			[]string{"config", "set", id, "--value", "git status", "--value", "ls"},
+			[]any{"git status", "ls"},
+		},
+		{
+			"--json declares a one-entry list, which repeating cannot",
+			[]string{"config", "set", id, "--json", `["git status"]`},
+			[]any{"git status"},
+		},
+		{"--json declares a number as a number", []string{"config", "set", "hermes.approvals.timeout", "--json", "900"}, float64(900)},
+		{"--json declares a bool as a bool", []string{"config", "set", "hermes.approvals.mode", "--json", "true"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer srv.Close()
+			out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")}, tc.args...)
+			if code != 0 {
+				t.Fatalf("exit = %d: %s", code, out)
+			}
+			got, _ := json.Marshal(body["value"])
+			want, _ := json.Marshal(tc.want)
+			if string(got) != string(want) {
+				t.Errorf("value = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// --value and --json answering the same question two ways must not both be
+// accepted — the body can carry one value, and silently preferring one of them
+// is how a declaration ends up being something nobody typed.
+func TestConfigSetRefusesValueAndJSONTogether(t *testing.T) {
+	bin := build(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+		"config", "set", "hermes.approvals.mode", "--value", "strict", "--json", `"strict"`)
+	if code == 0 || called {
+		t.Errorf("exit=%d requestSent=%v — want a refusal, no request", code, called)
+	}
+	if !strings.Contains(out, "not both") {
+		t.Errorf("the refusal should say they are mutually exclusive, got:\n%s", out)
+	}
+}
+
+func TestConfigSetRefusesJSONItCannotParse(t *testing.T) {
+	bin := build(t)
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	out, code := run(t, bin, []string{"AGENTPOD_HUB=" + srv.URL, "AGENTPOD_TOKEN=" + jwtish("prn_operator", "human")},
+		"config", "set", "hermes.approvals.command_allowlist", "--json", "[not json")
+	if code == 0 || called {
+		t.Errorf("exit=%d requestSent=%v — want a refusal, no request", code, called)
+	}
+	if !strings.Contains(out, "--json") {
+		t.Errorf("the refusal should name the flag, got:\n%s", out)
+	}
+}
+
+// The help has to say how a list is declared, or the capability is unreachable
+// for anyone who does not read the source. The docs page made the same
+// overclaim this fixes: it listed `command_allowlist` among the settings the
+// registry covers while `--value` could not express one.
+func TestConfigUsageSaysHowToDeclareAList(t *testing.T) {
+	bin := build(t)
+	out, _ := run(t, bin, nil, "config", "--help")
+	if !strings.Contains(out, "--json") {
+		t.Errorf("config usage should document --json, got:\n%s", out)
+	}
+	if !strings.Contains(out, "repeating --value") {
+		t.Errorf("config usage should say a list is declared by repeating --value, got:\n%s", out)
 	}
 }
