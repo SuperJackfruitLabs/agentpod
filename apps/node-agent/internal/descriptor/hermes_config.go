@@ -87,11 +87,23 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 	path := filepath.Join(dir, "config.yaml")
 	data, readErr := os.ReadFile(path)
 
-	// optedOutByHarness is a DOCUMENT-level fact — the operator disabled the
-	// agentpod-live plugin itself, through Hermes' own plugins.disabled list
-	// (D11) — computed once per read, not re-derived per setting id. Every
-	// setting this registry manages today lives in the same profile document
-	// the plugin's own enablement lives in, so one check serves all of them.
+	// optedOutByHarness is a DOCUMENT-level READ — one check of Hermes' own
+	// plugins.disabled list, through its own plugins.disabled list (D11) —
+	// but NOT a document-level fact: plugins.disabled naming agentpod-live
+	// means the agentpod-live plugin is disabled, and nothing wider than
+	// that. It governs only the settings that plugin actually writes:
+	// `hermes.plugins.enabled` and `hermes.plugins.stream_reasoning_deltas`,
+	// the pair hermeslive.PlanEnableConfig owns as one edit (see
+	// hermes_config_foldin.go's delegatePluginEnablement) and the only
+	// settings for which that writer itself returns ErrDisabledByOperator.
+	// `hermes.skills.external_dirs` is written by a different, unrelated
+	// writer (hermesskills.RegisterIn, which never consults
+	// plugins.disabled) and every `hermes.approvals.*` setting is plain
+	// configedit — disabling the plugin says nothing about either. Read once
+	// per document (one file read, cheap), applied per setting by whether
+	// hermesConfigDelegate says the plugin writer owns it — not pasted onto
+	// every entry this registry happens to return.
+	//
 	// Distinct from the hub's own opt-out register: this is the harness's own
 	// record, and agentpod never writes it.
 	var optedOutByHarness bool
@@ -108,7 +120,10 @@ func (h *hermesDescriptor) ObserveConfig(ctx context.Context, key string, settin
 		}
 		where := hermesConfigPath[id]
 		v, state := yamlValue(data, where[0], where[1])
-		cv := ConfigValue{SettingID: id, Readable: true, OptedOutByHarness: optedOutByHarness}
+		cv := ConfigValue{SettingID: id, Readable: true}
+		if optedOutByHarness && hermesConfigDelegate[id] == delegatePluginEnablement {
+			cv.OptedOutByHarness = true
+		}
 		switch state {
 		case yamlScalarValue:
 			cv.Observed = v
