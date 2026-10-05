@@ -198,14 +198,13 @@ an opted-out setting is reported `opted-out` even when the observed value differ
 declaration, never `drifted`, because `drifted` would invite the exact `apply` the opt-out
 exists to prevent.
 
-The opt-out lives in a **hub-side register** (`harness_config_opt_out`, keyed by the
-station's stable key, not its row id, so the choice survives an unadopt and re-adopt) —
-**not** as a key inside the harness's own config file. A harness like Hermes rewrites and
-migrates its own config document on its own schedule; a key this system invented there
-would be a key whose survival this system does not control, so the opt-out is kept
-somewhere this system does control instead. Where a harness has its own native opt-out
-key in its document (OpenClaw's `plugins.disabled`, for the settings it governs), that path
-is separate and not yet wired into this comparison.
+The opt-out lives in a **hub-side register** (`harness_config_opt_out`) — **not** as a key
+inside the harness's own config file. A harness like Hermes rewrites and migrates its own
+config document on its own schedule; a key this system invented there would be a key whose
+survival this system does not control, so the opt-out is kept somewhere this system does
+control instead. Where a harness has its own native opt-out key in its document (OpenClaw's
+`plugins.disabled`, for the settings it governs), that path is separate and not yet wired
+into this comparison.
 
 `compare()`, adopt-time reconcile, and `plan`/`apply` all honor a row in this register the
 moment one exists — there is no path left that writes an opted-out setting silently. `plan`
@@ -219,9 +218,113 @@ out *after* a plan was reviewed and before someone applies it, and that window i
 where the check matters most. Because one `apply` call writes one journaled plan as a single
 atomic operation, a setting opted out after its plan was made refuses the **whole** apply,
 naming the setting; nothing in that plan is written, and a fresh plan (which will exclude the
-now-opted-out setting) is the remedy. There is no `fleet config` verb or console control that
-writes an opt-out row yet, so an opt-out today is set directly against the hub, not through
-this CLI.
+now-opted-out setting) is the remedy.
+
+**An opt-out stops this system *writing* a setting from here on. It does not revert what is
+already in the file.** A station that was already drifted, or that already carries a value
+written before the exemption existed, stays exactly as it is — opting out changes what
+`compare()` reports and what `plan`/`apply` will do next, never what is already on disk.
+
+#### Two levels, no third
+
+An exemption targets exactly one of two levels — a **station**, or a **node** (every
+station on it, unless a station overrides it; see below). There is deliberately no
+fleet-wide exemption: `fleet config unset` already means "nothing is declared for this
+setting, anywhere" — a fleet-level opt-out row would only ever be a second way to say
+something `unset` already says, and a second way to say one thing is how a refusal becomes
+ambiguous. A row naming neither a station nor a node, or naming both, is refused before it
+is stored: the CLI requires exactly one of `--station`/`--node`, the route validates the
+same rule, and the table's own CHECK constraint keeps it true for any other caller too.
+
+A **station-level row always beats a node-level one**, for the same setting: when the
+station has its own row — whichever way it reads — that row decides outright and the node
+row is never consulted. Only when the station has **no row at all** does the node's row
+apply.
+
+#### `opt-in` versus `--clear`
+
+This is the subtle half of the feature, and the two are not interchangeable:
+
+```sh
+fleet config opt-in hermes.approvals.mode --station st_abc
+```
+
+records a row for `st_abc` with `optedOut: false` — **"this station is explicitly NOT
+exempt."** That row is not the absence of a row, and it stops the search right there: a
+station row decides outright, true or false, without the node row ever being read. So
+`opt-in` at the station overrides `opt-out` at the node — if `nod_123` is opted out of a
+setting and `st_abc` is one of its stations, `fleet config opt-in ... --station st_abc`
+pins `st_abc` back under ordinary reconciliation while every *other* station on `nod_123`
+stays exempt.
+
+```sh
+fleet config opt-out hermes.approvals.mode --station st_abc --clear
+```
+
+does something different: it **forgets the row entirely**, rather than recording a `false`
+one. With no station row left at all, the search falls through to the node — so if
+`nod_123` is still opted out of that setting, `st_abc` becomes exempt again too, the moment
+its own row is gone. `--clear` works at the node level the same way: a cleared node row
+leaves any station with no row of its own under no exemption at all, since there is nothing
+left to fall through to.
+
+Use `opt-in` to pin one station in despite its node. Use `--clear` to stop having an
+opinion at that level and let whatever the other level says take over.
+
+#### `--station` is a stationKey, not a row id
+
+Unlike `set`, `show`, `plan`, `inspect` and `apply` — whose `--station` is the station's
+database row id — `opt-out` and `opt-in` take `--station` as the station's **stationKey**.
+That is deliberate: a stationKey survives unadopt and re-adopt (re-adopting a station gives
+it a new row). An exemption recorded against a stationKey is still there, and still
+honored, after the station it names is unadopted and re-adopted; one recorded against a row
+id would silently stop applying the moment that happened.
+
+#### A worked example
+
+```sh
+# exempt every station on a node while a new default is piloted
+$ fleet config opt-out hermes.approvals.mode --node nod_123 --reason "piloting a new default"
+
+# pin one station on that node back in, despite the node-wide exemption
+$ fleet config opt-in hermes.approvals.mode --station st_abc
+
+# see the register, narrowed to that station
+$ fleet config opt-out --station st_abc
+[
+  {
+    "id": "cfgoo_9f1c3a7b",
+    "stationKey": "st_abc",
+    "nodeId": null,
+    "settingId": "hermes.approvals.mode",
+    "optedOut": false,
+    "reason": null,
+    "optedOutBy": "usr_4b2e",
+    "createdAt": "2026-10-05T09:00:00Z",
+    "updatedAt": "2026-10-05T09:00:00Z"
+  }
+]
+
+# change your mind: let st_abc fall back to following its node again
+$ fleet config opt-out hermes.approvals.mode --station st_abc --clear
+{"cleared": true}
+```
+
+(Illustrative, not literal output; `tenantId` is present on every row but omitted above for
+brevity.) After the final `--clear`, `st_abc` has no row of its own, so it inherits
+`nod_123`'s exemption again — it is now opted out for the same reason `nod_123` is, not
+because of anything recorded against `st_abc` itself.
+
+With no `SETTING_ID`, `fleet config opt-out` lists the whole register, unresolved — every
+row, at either level, with its `reason` and who set it; `--station KEY` or `--node ID`
+(never both) narrows that listing. That is the register **as stored**, the same sense in
+which `fleet config show` with no `--station` returns declaration rows rather than a
+comparison. To see what a specific station is exempt from right now, after
+station-beats-node resolution, read its `opted-out` states from `fleet config show
+--station ID` or `fleet config drift` instead.
+
+There is no console control for this yet — `fleet config opt-out` / `opt-in` is the only
+surface that writes this register.
 
 ## Writing a declaration: plan, inspect, apply
 

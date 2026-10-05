@@ -7,6 +7,9 @@
  *   PUT    /api/fleet/config/declared      → declare one setting at one level
  *   DELETE /api/fleet/config/declared      → undeclare one setting at one level
  *   GET    /api/fleet/config/drift         → { observations, stationsUnreachable }
+ *   PUT    /api/fleet/config/opt-out       → record (or update) an exemption at one level
+ *   DELETE /api/fleet/config/opt-out       → clear an exemption at one level
+ *   GET    /api/fleet/config/opt-out       → every exemption (?stationKey=, ?nodeId=)
  *   GET    /api/stations/:stationId/config → { observations }
  *
  * Shape follows `apps/hub/src/routes/station-acp.ts`: a chained `Hono()`
@@ -53,6 +56,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import {
   DeclaredSetting,
+  ConfigOptOut,
   ConfigReceipt,
   type ConfigObservation,
   type ConfigSetting,
@@ -65,7 +69,17 @@ import { nodes } from "../db/schema/nodes";
 import { tenantScope } from "../db/tenant-scope";
 import * as broker from "../services/broker";
 import { getStation, type StationRow } from "../services/station-registry";
-import { declare, undeclare, resolveFor, compare, fetchRegistry, getOptOuts } from "../services/harness-config";
+import {
+  declare,
+  undeclare,
+  resolveFor,
+  compare,
+  fetchRegistry,
+  resolveOptOuts,
+  setOptOut,
+  clearOptOut,
+  listOptOuts,
+} from "../services/harness-config";
 import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
 import { principalForUser } from "../services/principals";
 import type { AuthUser } from "../auth/middleware";
@@ -100,16 +114,27 @@ async function onlineNodeIds(tenantId: string): Promise<Set<string>> {
  * accepted by default: admitting a setting nobody could verify is the same
  * failure as reporting agreement for a station nobody could reach — the
  * write-side mirror of the read-side `unreadable` rule.
+ *
+ * `hint.stationKey` is the opt-out routes' way in: an exemption names a
+ * station by its stable key (`harness_config_opt_out.station_key`), never
+ * its row id, so it survives unadopt/re-adopt — see
+ * `services/harness-config.ts`'s own doc comment on `setOptOut`. Checked
+ * before `stationId` would be meaningless (a caller never has both), and
+ * a cross-tenant `stationKey` narrows `pool` to nothing for the same
+ * reason an unknown `stationId` does: `manageableStations` is already
+ * tenant-scoped, so a key naming another tenant's station is invisible
+ * here, not merely unreachable.
  */
 async function verifySettingKnown(
   settingId: string,
   tenantId: string,
-  hint: { stationId: string | null; nodeId: string | null },
+  hint: { stationId?: string | null; stationKey?: string | null; nodeId?: string | null },
 ): Promise<{ ok: true; setting: ConfigSetting } | { ok: false; reason: string }> {
   const manageable = await manageableStations(tenantId);
 
   let pool = manageable;
   if (hint.stationId) pool = pool.filter((s) => s.id === hint.stationId);
+  else if (hint.stationKey) pool = pool.filter((s) => s.stationKey === hint.stationKey);
   else if (hint.nodeId) pool = pool.filter((s) => s.nodeId === hint.nodeId);
 
   // Settings are namespaced "<harness>.<path>" (spec D1). Preferring a
@@ -234,7 +259,7 @@ function ensureEveryValue(
  * Also feeds `compare()`'s three Task 9b arguments — `appliedWrites`
  * (`applied_harness_config`, via `getAppliedWrites`), `currentGatewayPid`
  * (the station's live health, via `readGatewayPid`) and `optedOut` (via
- * `getOptOuts`) — the restart evidence and opt-out an earlier task's
+ * `resolveOptOuts`, station beating node) — the restart evidence and opt-out an earlier task's
  * `compare()` could already emit but no caller fed it, so `awaiting-restart`
  * and `opted-out` could never reach either route that calls this function
  * (`GET /api/fleet/config/drift` and `GET /api/stations/:stationId/config`).
@@ -262,7 +287,7 @@ async function observeStation(
     }),
     getAppliedWrites(tenantId, station.id),
     readGatewayPid(station.nodeId, station.stationKey),
-    getOptOuts(tenantId, station.stationKey),
+    resolveOptOuts(tenantId, station.stationKey, station.nodeId),
   ]);
 
   const raw = result.ok
@@ -302,6 +327,21 @@ const UndeclareBody = z
   })
   .refine((d) => !(d.stationId !== null && d.nodeId !== null), {
     message: "a declaration targets one level: station, node, or fleet (both null)",
+  });
+
+/**
+ * Body of `DELETE /api/fleet/config/opt-out`. Mirrors `ConfigOptOut`'s
+ * one-level shape minus `optedOut`/`reason` — clearing a level needs no
+ * decision, only which level.
+ */
+const ClearOptOutBody = z
+  .object({
+    settingId: z.string().min(1),
+    stationKey: z.string().nullable().optional(),
+    nodeId: z.string().nullable().optional(),
+  })
+  .refine((d) => (d.stationKey == null) !== (d.nodeId == null), {
+    message: "an opt-out names exactly one of stationKey or nodeId",
   });
 
 /**
@@ -489,6 +529,111 @@ export const harnessConfigRoutes = new Hono()
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
     return c.body(null, 204);
+  })
+
+  /**
+   * PUT /api/fleet/config/opt-out
+   *
+   * Body: `ConfigOptOut` (contract) — `{settingId, optedOut, stationKey?|
+   * nodeId?, reason?}`. The contract's own `.refine()` already rejects a
+   * body naming both levels or neither, surfaced as this route's 400 before
+   * any handler code runs — the same split `PUT /fleet/config/declared`
+   * relies on for its own one-level shape.
+   *
+   * The setting id is checked against the LIVE registry first, exactly as a
+   * declaration is (`verifySettingKnown`, now also accepting a
+   * `stationKey` hint): an exemption recorded for a setting no harness has
+   * would be unrecoverable by any later `compare()`, which only ever asks
+   * "is this id opted out", never whether the id was ever real.
+   *
+   * `stationKey`/`nodeId` arrive from the contract as `string | null |
+   * undefined`; `setOptOut`'s own one-level check (`assertOneOptOutLevel`)
+   * tells "named" from "absent" by `undefined`, so a literal `null` is
+   * normalised to `undefined` here before the service is called.
+   */
+  .put("/fleet/config/opt-out", zValidator("json", ConfigOptOut), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const body = c.req.valid("json");
+    const stationKey = body.stationKey ?? undefined;
+    const nodeId = body.nodeId ?? undefined;
+
+    const verdict = await verifySettingKnown(body.settingId, user.tenantId, { stationKey, nodeId });
+    if (!verdict.ok) {
+      return c.json({ error: "UNKNOWN_SETTING", settingId: body.settingId, reason: verdict.reason }, 400);
+    }
+
+    try {
+      await setOptOut({
+        tenantId: user.tenantId,
+        settingId: body.settingId,
+        optedOut: body.optedOut,
+        stationKey,
+        nodeId,
+        reason: body.reason,
+        optedOutBy: user.id,
+      });
+    } catch (err) {
+      // Defense in depth: the contract's refine already rejected two levels
+      // (or neither), so setOptOut's own assertOneOptOutLevel should never
+      // fire here — but a service-level refusal is still a client error.
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+    return c.body(null, 204);
+  })
+
+  /**
+   * DELETE /api/fleet/config/opt-out
+   *
+   * Body: `{settingId, stationKey?, nodeId?}` — the same one-level shape as
+   * PUT minus `optedOut`/`reason`. A level with no exemption is a no-op
+   * (`clearOptOut`'s own `{cleared: false}`, returned verbatim rather than
+   * a bare 204, so a caller can tell "removed it" from "nothing was there").
+   */
+  .delete("/fleet/config/opt-out", zValidator("json", ClearOptOutBody), async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const body = c.req.valid("json");
+    try {
+      const result = await clearOptOut({
+        tenantId: user.tenantId,
+        settingId: body.settingId,
+        stationKey: body.stationKey ?? undefined,
+        nodeId: body.nodeId ?? undefined,
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  })
+
+  /**
+   * GET /api/fleet/config/opt-out?stationKey=&nodeId=
+   *
+   * Every exemption for the tenant, optionally narrowed to one station or
+   * one node — the register, unresolved (`listOptOuts`). Tenant-scoped the
+   * same way every other route here is, so a key or node id belonging to
+   * another tenant answers with an empty list, never that tenant's rows.
+   */
+  .get("/fleet/config/opt-out", async (c) => {
+    const user = c.get("user") as AuthUser | undefined;
+    if (!user || user.id === "anonymous") return c.json({ error: "Unauthorized" }, 401);
+    const refusal = await nonHumanRefusal(user);
+    if (refusal) return c.json(refusal, 403);
+
+    const stationKey = c.req.query("stationKey");
+    const nodeId = c.req.query("nodeId");
+    const rows = await listOptOuts(user.tenantId, {
+      ...(stationKey ? { stationKey } : {}),
+      ...(nodeId ? { nodeId } : {}),
+    });
+    return c.json(rows);
   })
 
   /**

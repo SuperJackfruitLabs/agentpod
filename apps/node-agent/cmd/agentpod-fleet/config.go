@@ -13,15 +13,19 @@ import (
 )
 
 const configUsage = `usage:
-  fleet config settings                             every setting the fleet can declare
-  fleet config show   [--node ID]                   the declarations themselves, as stored
-  fleet config show   --station ID                  one station: declared vs observed, with state
+  fleet config settings                                         every setting the fleet can declare
+  fleet config show   [--node ID]                               the declarations themselves, as stored
+  fleet config show   --station ID                              one station: declared vs observed, with state
   fleet config set    SETTING_ID --value V [--value V ...] [--station ID | --node ID]
   fleet config set    SETTING_ID --json  JSON          [--station ID | --node ID]
   fleet config unset  SETTING_ID [--station ID | --node ID]
-  fleet config drift                                every station whose value differs
-  fleet config plan    --station ID                 the edit that would be made, and its digest
-  fleet config inspect --station ID --operation ID  a plan already made, as it was reviewed
+  fleet config drift                                            every station whose value differs
+  fleet config opt-out SETTING_ID [--station KEY | --node ID] [--reason TEXT]
+  fleet config opt-in  SETTING_ID [--station KEY | --node ID]
+  fleet config opt-out SETTING_ID [--station KEY | --node ID] --clear
+  fleet config opt-out                                          what is exempt, and where
+  fleet config plan    --station ID [--setting SETTING_ID]      narrow the plan to one setting
+  fleet config inspect --station ID --operation ID              a plan already made, as it was reviewed
   fleet config apply   --station ID --operation ID --plan-digest SHA256
 
 ` + "`set` records a DECLARATION; it does not write to a station. `apply` is the\n" +
@@ -49,7 +53,22 @@ const configUsage = `usage:
 	"declaration with no value is not a declaration. A list-valued setting given\n" +
 	"a single --value is stored as the string it is, and every later plan for that\n" +
 	"station is refused SHAPE_UNEXPECTED by the node, so the shape matters here\n" +
-	"rather than at write time."
+	"rather than at write time.\n\n" +
+	"`opt-out` stops this system writing a setting; it does not change what is already in the file.\n" +
+	"An exemption is not an undo — a station that was already drifted, or\n" +
+	"already carries a value written before the exemption existed, stays\n" +
+	"exactly as it is.\n\n" +
+	"`opt-in` is not the same as `--clear`. `opt-in` records \"this station is\n" +
+	"NOT exempt\", which overrides a node-level exemption for that one station.\n" +
+	"`--clear` forgets the exemption row entirely, so the station falls back to\n" +
+	"whatever the node says — if the node is exempt, the station is exempt\n" +
+	"again too. Use `opt-in` to pin a station in despite its node; use --clear\n" +
+	"to stop having an opinion at the station level at all.\n\n" +
+	"A station-level row always beats a node-level one — `opt-in` at the\n" +
+	"station overrides `opt-out` at the node, never the other way around.\n\n" +
+	"--station names a station by its stationKey, not its row id: a stationKey\n" +
+	"survives unadopt and re-adopt, so an exemption recorded against it still\n" +
+	"applies after the station is re-adopted, which a row id would not."
 
 // fleetConfig declares what a harness setting should be, and reports what each
 // station actually has.
@@ -119,15 +138,34 @@ func fleetConfig(args []string) {
 			"settingId": id, "stationId": nullable(*station), "nodeId": nullable(*node),
 		})
 		fleetSkillRequest(http.MethodDelete, base+"/declared", bytes.NewReader(body), "application/json")
+	case "opt-out":
+		fleetConfigOptOut(args[1:])
+	case "opt-in":
+		id := needArg(args, 1, "opt-in", configUsage)
+		fs := flag.NewFlagSet("fleet config opt-in", flag.ExitOnError)
+		station := fs.String("station", "", "station key (survives unadopt/re-adopt; not a row id)")
+		node := fs.String("node", "", "node ID")
+		fs.Parse(args[2:])
+		if fs.NArg() != 0 {
+			fmt.Fprintf(os.Stderr, "opt-in takes no extra positional arguments\n\n%s\n", configUsage)
+			os.Exit(2)
+		}
+		requireExactlyOneScope("opt-in", *station, *node)
+		body, _ := json.Marshal(map[string]any{
+			"settingId": id, "optedOut": false,
+			"stationKey": nullable(*station), "nodeId": nullable(*node),
+		})
+		fleetSkillRequest(http.MethodPut, base+"/opt-out", bytes.NewReader(body), "application/json")
 	case "plan":
 		fs := flag.NewFlagSet("fleet config plan", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
+		setting := fs.String("setting", "", "narrow the plan to one setting")
 		fs.Parse(args[1:])
 		if *station == "" || fs.NArg() != 0 {
 			fmt.Fprintf(os.Stderr, "plan requires --station ID\n\n%s\n", configUsage)
 			os.Exit(2)
 		}
-		fleetConfigPlan(*station)
+		fleetConfigPlan(*station, *setting)
 	case "inspect":
 		fs := flag.NewFlagSet("fleet config inspect", flag.ExitOnError)
 		station := fs.String("station", "", "station ID")
@@ -234,40 +272,131 @@ func nullable(s string) any {
 	return s
 }
 
-// fleetConfigPlan resolves every setting currently declared for `station` —
-// at any level, fleet, node or station — and asks the hub to plan writing
-// all of them, each with `value` omitted so the hub resolves it from the
-// declaration (the same resolution `plan --station ID` has no SETTING_ID
-// flag to narrow: this is "the edit that would be made" for the station,
-// not for one setting chosen on the command line).
+// fleetConfigPlan asks the hub to plan writing either one named setting
+// (settingID non-empty — Plan 2's residual this clears: `plan --station ID`
+// used to have no way to narrow to a single setting) or, when settingID is
+// empty, every setting currently declared for `station` at any level —
+// fleet, node or station. Either way `value` is omitted so the hub resolves
+// it from the declaration: this is "the edit that would be made", not an
+// edit chosen on the command line.
 //
-// The GET is the same call `show --station` makes
-// (`/api/stations/:stationId/config`), so a settingId this reports is
-// exactly a settingId `planFor` on the hub will accept.
-func fleetConfigPlan(station string) {
+// With no settingID, the GET is the same call `show --station` makes
+// (`/api/stations/:stationId/config`), so a settingId it reports is exactly
+// a settingId `planFor` on the hub will accept. With a settingID, that GET
+// is skipped entirely — there is nothing to resolve a one-entry list from.
+func fleetConfigPlan(station, settingID string) {
 	base := "/api/stations/" + url.PathEscape(station) + "/config"
-	raw := fleetRequestBytes(http.MethodGet, base, nil, "", 30*time.Second)
-	var parsed struct {
-		Observations []struct {
-			SettingID string `json:"settingId"`
-		} `json:"observations"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		fmt.Fprintln(os.Stderr, "the hub returned an unexpected response for this station's config")
-		os.Exit(1)
-	}
-	seen := map[string]bool{}
-	settings := make([]map[string]string, 0, len(parsed.Observations))
-	for _, o := range parsed.Observations {
-		if o.SettingID == "" || seen[o.SettingID] {
-			continue
+	var settings []map[string]string
+	if settingID != "" {
+		settings = []map[string]string{{"settingId": settingID}}
+	} else {
+		raw := fleetRequestBytes(http.MethodGet, base, nil, "", 30*time.Second)
+		var parsed struct {
+			Observations []struct {
+				SettingID string `json:"settingId"`
+			} `json:"observations"`
 		}
-		seen[o.SettingID] = true
-		settings = append(settings, map[string]string{"settingId": o.SettingID})
-	}
-	if len(settings) == 0 {
-		fmt.Fprintln(os.Stderr, "nothing is declared for this station; there is nothing to plan")
-		os.Exit(1)
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			fmt.Fprintln(os.Stderr, "the hub returned an unexpected response for this station's config")
+			os.Exit(1)
+		}
+		seen := map[string]bool{}
+		settings = make([]map[string]string, 0, len(parsed.Observations))
+		for _, o := range parsed.Observations {
+			if o.SettingID == "" || seen[o.SettingID] {
+				continue
+			}
+			seen[o.SettingID] = true
+			settings = append(settings, map[string]string{"settingId": o.SettingID})
+		}
+		if len(settings) == 0 {
+			fmt.Fprintln(os.Stderr, "nothing is declared for this station; there is nothing to plan")
+			os.Exit(1)
+		}
 	}
 	fleetSkillJSON(http.MethodPost, base+"/plan", map[string]any{"settings": settings})
+}
+
+// fleetConfigOptOut handles every shape of the opt-out verb:
+//
+//   - no SETTING_ID: the listing form ("what is exempt, and where"), a GET
+//     optionally filtered to one station or node.
+//   - SETTING_ID, no --clear: a PUT recording optedOut:true, same shape
+//     `opt-in` sends with optedOut:false.
+//   - SETTING_ID, --clear: a DELETE that forgets the row entirely, distinct
+//     from `opt-in` — see the `--clear` vs `opt-in` note in configUsage.
+func fleetConfigOptOut(rest []string) {
+	const path = "/api/fleet/config/opt-out"
+	if len(rest) == 0 || strings.HasPrefix(rest[0], "-") {
+		fs := flag.NewFlagSet("fleet config opt-out", flag.ExitOnError)
+		station := fs.String("station", "", "station key")
+		node := fs.String("node", "", "node ID")
+		fs.Parse(rest)
+		if fs.NArg() != 0 {
+			fmt.Fprintf(os.Stderr, "opt-out without a SETTING_ID only lists; it takes no positional arguments\n\n%s\n", configUsage)
+			os.Exit(2)
+		}
+		if *station != "" && *node != "" {
+			fmt.Fprintf(os.Stderr, "opt-out takes --station or --node, not both\n\n%s\n", configUsage)
+			os.Exit(2)
+		}
+		q := path
+		params := url.Values{}
+		if *station != "" {
+			params.Set("stationKey", *station)
+		}
+		if *node != "" {
+			params.Set("nodeId", *node)
+		}
+		if enc := params.Encode(); enc != "" {
+			q += "?" + enc
+		}
+		fleetGet(q, nil)
+		return
+	}
+
+	id := rest[0]
+	fs := flag.NewFlagSet("fleet config opt-out", flag.ExitOnError)
+	station := fs.String("station", "", "station key (survives unadopt/re-adopt; not a row id)")
+	node := fs.String("node", "", "node ID")
+	reason := fs.String("reason", "", "why this station or node is exempt")
+	clear := fs.Bool("clear", false, "forget the exemption row instead of recording one; the station then falls back to the node level")
+	fs.Parse(rest[1:])
+	if fs.NArg() != 0 {
+		fmt.Fprintf(os.Stderr, "opt-out takes no extra positional arguments\n\n%s\n", configUsage)
+		os.Exit(2)
+	}
+	requireExactlyOneScope("opt-out", *station, *node)
+
+	if *clear {
+		body, _ := json.Marshal(map[string]any{
+			"settingId": id, "stationKey": nullable(*station), "nodeId": nullable(*node),
+		})
+		fleetSkillRequest(http.MethodDelete, path, bytes.NewReader(body), "application/json")
+		return
+	}
+	payload := map[string]any{
+		"settingId": id, "optedOut": true,
+		"stationKey": nullable(*station), "nodeId": nullable(*node),
+	}
+	if *reason != "" {
+		payload["reason"] = *reason
+	}
+	body, _ := json.Marshal(payload)
+	fleetSkillRequest(http.MethodPut, path, bytes.NewReader(body), "application/json")
+}
+
+// requireExactlyOneScope enforces the contract's own rule for an opt-out
+// write — `(stationKey == null) !== (nodeId == null)` — before a request
+// ever leaves this machine: naming both a station and a node is ambiguous,
+// and naming neither is not an exemption of anything.
+func requireExactlyOneScope(verb, station, node string) {
+	if station != "" && node != "" {
+		fmt.Fprintf(os.Stderr, "%s takes --station or --node, not both\n\n%s\n", verb, configUsage)
+		os.Exit(2)
+	}
+	if station == "" && node == "" {
+		fmt.Fprintf(os.Stderr, "%s requires --station KEY or --node ID\n\n%s\n", verb, configUsage)
+		os.Exit(2)
+	}
 }

@@ -40,7 +40,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
-import { declare, optOut } from "../../src/services/harness-config";
+import { declare, setOptOut } from "../../src/services/harness-config";
 import { recordApplied } from "../../src/services/harness-config-apply";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
@@ -414,9 +414,10 @@ test(
         tenantId: BOOTSTRAP_TENANT_ID,
         declaredBy: TEST_USER,
       });
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_B,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -477,9 +478,10 @@ test(
         tenantId: BOOTSTRAP_TENANT_ID,
         declaredBy: TEST_USER,
       });
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_B,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });

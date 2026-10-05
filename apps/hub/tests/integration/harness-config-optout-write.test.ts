@@ -59,7 +59,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
-import { optOut, clearOptOut } from "../../src/services/harness-config";
+import { declare, setOptOut, clearOptOut } from "../../src/services/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { harnessConfigRoutes } from "../../src/routes/harness-config";
@@ -184,10 +184,13 @@ type FakePlan = {
 };
 
 /**
- * A fake node that answers `config.settings`, `config.plan`, `config.apply`,
- * `config.inspect` and `health`, and tracks a tiny in-memory "document" per
- * setting — mutated ONLY by a successful `config.apply` — so a test can
- * assert a refused apply never wrote anything.
+ * A fake node that answers `config.settings`, `config.observe`,
+ * `config.plan`, `config.apply`, `config.inspect` and `health`, and tracks
+ * a tiny in-memory "document" per setting — mutated ONLY by a successful
+ * `config.apply` — so a test can assert a refused apply never wrote
+ * anything, and `config.observe` always reads the current document back
+ * (needed by `GET /api/stations/:id/config`'s `observeStation`, and by
+ * adopt-time reconcile).
  *
  * `config.plan` accepts a multi-entry `want` (unlike the single-entry fake
  * node in `harness-config-apply.test.ts`), because the mixed opted-out /
@@ -238,6 +241,17 @@ async function connectOptOutFakeNode(
 
     if (verb === "config.settings") {
       ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: REGISTRY } }));
+      return;
+    }
+
+    if (verb === "config.observe") {
+      const params = msg.params as { stationKey: string; settings: string[] };
+      const values = params.settings.map((settingId) => ({
+        settingId,
+        observed: documents.get(settingId),
+        readable: true,
+      }));
+      ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { values } }));
       return;
     }
 
@@ -396,9 +410,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-plan-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -450,9 +465,10 @@ test(
       // THEN the operator opts the station out of this exact setting — the
       // window between a reviewed plan and its apply is exactly where this
       // matters most.
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -498,9 +514,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-mixed-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -568,9 +585,10 @@ test(
       const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-cleared-host", stationKey);
       const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
 
-      await optOut({
+      await setOptOut({
         stationKey,
         settingId: SETTING_A,
+        optedOut: true,
         tenantId: BOOTSTRAP_TENANT_ID,
         optedOutBy: TEST_USER,
       });
@@ -601,6 +619,253 @@ test(
       const receipt = (await applyRes.json()) as { phase: string };
       expect(receipt.phase).toBe("applied");
       expect(fake.documents.get(SETTING_A)).toBe("900");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+// ─── Task 3: the same two callers (plan/apply) honour a NODE-level opt-out,
+// and the station-row `optedOut=false` override reaches them too ─────────────
+//
+// Tasks 1-2 shipped the register's two levels and `resolveOptOuts`'s
+// most-specific-first resolution; the four production call sites were
+// already wired to it (observeStation, reconcileStation, planFor, applyFor)
+// before this file's tests existed. What follows is the integration proof
+// that the wiring holds at both ends of the manual write path AND the
+// read-only observation route — not new production code.
+
+test(
+  "a station row optedOut=false lets plan and apply proceed despite a node row saying exempt",
+  async () => {
+    // THE proof of R1 end-to-end, through the real routes: a station can opt
+    // back IN against a fleet-wide (node-level) exemption. Collapsing
+    // "absent" and "false" in `resolveOptOuts` would make this impossible —
+    // this is the test that would fail first if that collapse crept back in.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const stationKey = "cfgoptout-override-station";
+      const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-override-host", stationKey);
+      const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
+
+      // The whole node is exempt...
+      await setOptOut({
+        nodeId,
+        settingId: SETTING_A,
+        optedOut: true,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+      // ...but THIS station explicitly opts back in.
+      await setOptOut({
+        stationKey,
+        settingId: SETTING_A,
+        optedOut: false,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+
+      const planRes = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { settings: [{ settingId: SETTING_A, value: "900" }] },
+      });
+      expect(planRes.status).toBe(200);
+      const plan = (await planRes.json()) as FakePlan;
+      expect(plan.entries[0]?.settingId).toBe(SETTING_A);
+
+      const applyRes = await appFetch(baseUrl, `/api/stations/${station.id}/config/apply`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { operationId: plan.operationId, planDigest: plan.planDigest },
+      });
+      expect(applyRes.status).toBe(200);
+      const receipt = (await applyRes.json()) as { phase: string };
+      expect(receipt.phase).toBe("applied");
+      expect(fake.documents.get(SETTING_A)).toBe("900");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "GET /api/stations/:id/config reports opted-out for a NODE-level exemption",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const stationKey = "cfgoptout-node-observe-station";
+      const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-node-observe-host", stationKey);
+      const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
+
+      // Declared at fleet level so `observeStation` has something to compare —
+      // without a declaration the setting is simply absent from the report.
+      await declare({
+        settingId: SETTING_A,
+        stationId: null,
+        nodeId: null,
+        value: "900",
+        tenantId: BOOTSTRAP_TENANT_ID,
+        declaredBy: TEST_USER,
+      });
+      await setOptOut({
+        nodeId,
+        settingId: SETTING_A,
+        optedOut: true,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+
+      const res = await appFetch(baseUrl, `/api/stations/${station.id}/config`, { token: TEST_USER });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { observations: Array<{ settingId: string; state: string }> };
+      const obs = body.observations.find((o) => o.settingId === SETTING_A);
+      expect(obs?.state).toBe("opted-out");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "plan refuses a NODE-level exempted setting, naming it",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const stationKey = "cfgoptout-node-plan-station";
+      const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-node-plan-host", stationKey);
+      const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
+
+      await setOptOut({
+        nodeId,
+        settingId: SETTING_A,
+        optedOut: true,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+
+      const res = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { settings: [{ settingId: SETTING_A, value: "900" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string; code?: string };
+      expect(body.code).toBe("OPTED_OUT");
+      expect(body.error).toInclude(SETTING_A);
+      expect(fake.asked).not.toContain("config.plan");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "apply refuses a NODE-level exempted setting even when the plan predates the exemption",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const stationKey = "cfgoptout-node-apply-station";
+      const { station, nodeId, nodeSecret } = await setUpStation("cfgoptout-node-apply-host", stationKey);
+      const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
+
+      // Plan FIRST, while the node is not yet exempt.
+      const planRes = await appFetch(baseUrl, `/api/stations/${station.id}/config/plan`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { settings: [{ settingId: SETTING_A, value: "900" }] },
+      });
+      expect(planRes.status).toBe(200);
+      const plan = (await planRes.json()) as FakePlan;
+
+      // THEN the operator exempts the whole node.
+      await setOptOut({
+        nodeId,
+        settingId: SETTING_A,
+        optedOut: true,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+
+      const applyRes = await appFetch(baseUrl, `/api/stations/${station.id}/config/apply`, {
+        method: "POST",
+        token: TEST_USER,
+        body: { operationId: plan.operationId, planDigest: plan.planDigest },
+      });
+      expect(applyRes.status).toBe(400);
+      const body = (await applyRes.json()) as { error: string; code?: string };
+      expect(body.code).toBe("OPTED_OUT");
+      expect(body.error).toInclude(SETTING_A);
+      expect(fake.asked).not.toContain("config.apply");
+      expect(fake.documents.get(SETTING_A)).toBe("300");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  20_000,
+);
+
+test(
+  "adopt-time reconcile skips a NODE-level exempted setting",
+  async () => {
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgoptout-node-adopt-host");
+      const stationKey = "cfgoptout-node-adopt-station";
+
+      // Declared at fleet level, and the setting's observed value differs —
+      // this would be planned and applied if not for the node-level
+      // exemption set BEFORE the station is even adopted.
+      await declare({
+        settingId: SETTING_A,
+        stationId: null,
+        nodeId: null,
+        value: "900",
+        tenantId: BOOTSTRAP_TENANT_ID,
+        declaredBy: TEST_USER,
+      });
+      await setOptOut({
+        nodeId,
+        settingId: SETTING_A,
+        optedOut: true,
+        tenantId: BOOTSTRAP_TENANT_ID,
+        optedOutBy: TEST_USER,
+      });
+
+      const fake = await connectOptOutFakeNode(server.port!, nodeId, nodeSecret);
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor(stationKey));
+      if (!station) throw new Error("station adoption failed");
+
+      expect(fake.asked).not.toContain("config.plan");
+      expect(fake.documents.get(SETTING_A)).toBe("300");
+
+      const rows = await rawSql`
+        SELECT 1 FROM applied_harness_config
+        WHERE station_id = ${station.id} AND setting_id = ${SETTING_A}`;
+      expect(rows.length).toBe(0);
 
       fake.ws.close();
       await new Promise((r) => setTimeout(r, 100));
