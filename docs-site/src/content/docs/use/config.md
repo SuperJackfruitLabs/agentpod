@@ -386,8 +386,9 @@ comparison. To see what a specific station is exempt from right now, after
 station-beats-node resolution, read its `opted-out` states from `fleet config show
 --station ID` or `fleet config drift` instead.
 
-There is no console control for this yet — `fleet config opt-out` / `opt-in` is the only
-surface that writes this register.
+The register is visible on a station's own page in the console (see
+[Seeing and applying it from the console](#seeing-and-applying-it-from-the-console)) — but
+`fleet config opt-out` / `opt-in` remains the only surface that **writes** it.
 
 ## Writing a declaration: plan, inspect, apply
 
@@ -525,6 +526,48 @@ why it stayed inconclusive. `hermes.plugins.*` and `hermes.skills.external_dirs`
 same kind of guess: Hermes reads a profile's plugin and skill configuration when its gateway
 starts, which is what `apn hermes-skills` itself already tells an operator after writing, so
 `RestartToTakeEffect` for those three is a documented fact rather than an assumed one.
+
+## Seeing and applying it from the console
+
+Everything above has a CLI-free path too, on a station's own page — its **Files** tab, below
+the file browser. A **declared configuration** panel appears there whenever the station
+advertises the `config.manage` capability; a station that does not advertise it shows nothing
+in its place, not an empty panel.
+
+The panel lists one row per registered setting with something declared for that station: the
+declared value and the level it came from (station, node, or fleet), the observed value, and
+the state — all seven: `matches`, `drifted`, `absent`, `unreadable`, `out-of-scope`,
+`opted-out`, `awaiting-restart`, each with its reason shown alongside it. It is read-only for
+exactly as long as there is nothing to review: a "Review changes" button asks the hub for a
+plan over this station's declared settings, the same `plan` a `fleet config plan` call would
+get back — the file, the key path, current → intended, the action, and the diff, plus the
+plan's own digest. Nothing is written at that point. "Apply reviewed plan" sends that
+operation id and **that exact digest**, never a digest re-fetched or re-derived at apply
+time — the console goes through the identical reviewed-plan-then-digest discipline the CLI's
+`plan`/`apply` pair enforces, against the same routes, because the digest is the record that a
+human saw the edit before it was written. A plan that refuses some of the requested settings
+(an `OPTED_OUT` entry mixed in with plannable ones, say) names each refused setting, its code
+and its message, beside whatever the plan did manage to derive — a partial refusal never
+quietly disappears the rest of the plan.
+
+**The console never restarts anything**, here or anywhere else. A row reading
+`awaiting-restart` says so plainly, and if a restart is needed to apply what you are about to
+review, the panel says that too, before the apply button, not after. Use the station's own
+restart control (reached from this same panel when the page wires one up) once you are ready.
+
+**Exemptions are visible here, not editable.** An `opted-out` row shows which level the
+exemption came from, who recorded it and why, when it rode in through agentpod's own
+register — and it reads differently again when the harness's own record is the source (Hermes'
+`plugins.disabled`, OpenClaw's `plugins.entries.agentpod-errors.enabled: false`), never
+conflating the two. Recording or clearing an exemption is still only `fleet config opt-out` /
+`fleet config opt-in` — the console does not write this register, by design: reading it is
+what made the `opted-out` state legible, and giving it its own write surface here was ruled
+out rather than added silently.
+
+None of this replaces the raw config editor reached from the file browser's own "Edit" action
+on an open file. That editor is unchanged, and it is still the only way to touch anything in a
+harness's config file that is not a registered setting — this panel sits beside it, for exactly
+the settings the registry knows about, and absorbs none of its job.
 
 ## Adopting a station: one reconcile, not a sweep
 
