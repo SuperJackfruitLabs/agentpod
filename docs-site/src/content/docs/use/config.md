@@ -319,6 +319,14 @@ isolated: a plan refusal, an apply refusal, an unreachable node, or an unreadabl
 is recorded against that one station (visible as its config reason) and never thrown. A
 station adopted with one setting unwritten is better than one not adopted at all.
 
+**And it never holds the adoption open for long.** Stations are reconciled concurrently
+rather than one after another, and the whole pass is capped: past the cap the adoption
+answers, and the stations still in progress keep going and keep recording their own config
+reason. That matters because a node can be *connected but wedged*, where every round trip
+pays its full timeout instead of failing fast — adopting many stations onto such a node used
+to leave the request running long after the rows were committed, so a client that gave up
+reported a failed adoption of stations that were adopted.
+
 This reconcile runs exactly once, at the moment of adoption — never on a timer and never
 swept across already-adopted stations. A station that drifts afterward stays drifted until
 someone asks for it (`fleet config drift`) or declares and applies again; running this on a

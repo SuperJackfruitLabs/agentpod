@@ -439,6 +439,32 @@ function reasonFor(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * How many stations `reconcileOnAdopt` works on at once, and how long the
+ * adoption is willing to wait for all of them.
+ *
+ * Adoption is a user-facing request (`POST /api/stations/adopt`), and
+ * reconcile runs inside it. Every broker round trip it makes has the broker's
+ * 15s default timeout, and a node that is CONNECTED BUT WEDGED pays that
+ * timeout in full rather than failing fast — so running stations one after
+ * another, each with several round trips of its own, let a 20-station adopt
+ * run for ten minutes. The rows were already committed by then, so the
+ * operator's client gave up long before the response and saw a failed
+ * adoption of stations that were in fact adopted.
+ *
+ * Two bounds, because either alone is insufficient: concurrency keeps one
+ * wedged station from holding up the others, and the deadline keeps a wedged
+ * NODE (where every station is slow for the same reason, concurrently) from
+ * holding up the response. The deadline is one broker timeout plus a little,
+ * which is the longest a single round trip can legitimately take.
+ *
+ * Passing the deadline never fails the adoption and never cancels the work:
+ * the remaining stations keep reconciling, detached, and keep recording their
+ * own `stations.configReason`.
+ */
+export const RECONCILE_CONCURRENCY = 6;
+export const RECONCILE_DEADLINE_MS = 16_000;
+
 /** What `reconcileOnAdopt` did with one declared setting on one station. */
 export interface ReconcileOutcome {
   stationId: string;
@@ -468,6 +494,12 @@ export interface ReconcileOutcome {
  * guarantee; `reconcileStation` is written to catch its own failures too,
  * so a bug in either layer still cannot surface as a thrown adoption.
  *
+ * **Bounded.** Stations run concurrently (`RECONCILE_CONCURRENCY`) and the
+ * whole pass is capped (`RECONCILE_DEADLINE_MS`); past the cap the adoption
+ * returns and the rest keeps going detached, still recording its own reasons.
+ * See those constants for why a serial pass could hold an adoption for
+ * minutes.
+ *
  * This runs exactly once, at adopt time. It is not a sweep and must never be
  * called from a timer: the harness rewrites its own config file and
  * persists operator decisions into that same file, so a reconciler running
@@ -477,21 +509,73 @@ export interface ReconcileOutcome {
 export async function reconcileOnAdopt(
   tenantId: string,
   adoptedStations: ConfigStation[],
+  /**
+   * Overridable only so a test can exercise the deadline without waiting a
+   * real broker timeout for it. `adoptStations` — the one production caller —
+   * passes nothing and gets the constants above.
+   */
+  bounds: { concurrency?: number; deadlineMs?: number } = {},
 ): Promise<ReconcileOutcome[]> {
-  const outcomes: ReconcileOutcome[] = [];
-  for (const station of adoptedStations) {
-    try {
-      outcomes.push(...(await reconcileStation(tenantId, station)));
-    } catch (err) {
-      // `reconcileStation` is written to swallow every failure itself; this
-      // catch is defense in depth only, so a bug in the line above can never
-      // undo an adoption whose rows are already committed.
-      const reason = err instanceof Error ? err.message : String(err);
-      outcomes.push({ stationId: station.id, settingId: "*", result: "failed", reason });
-      await setConfigReason(station.id, reason);
+  const concurrency = bounds.concurrency ?? RECONCILE_CONCURRENCY;
+  const deadlineMs = bounds.deadlineMs ?? RECONCILE_DEADLINE_MS;
+  // Outcomes are collected per index and flattened at the end, so running
+  // stations concurrently does not shuffle the order a caller sees.
+  const perStation: ReconcileOutcome[][] = adoptedStations.map(() => []);
+  const finished = adoptedStations.map(() => false);
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      const station = adoptedStations[i];
+      if (!station) return;
+      try {
+        perStation[i] = await reconcileStation(tenantId, station);
+      } catch (err) {
+        // `reconcileStation` is written to swallow every failure itself; this
+        // catch is defense in depth only, so a bug in the line above can
+        // never undo an adoption whose rows are already committed.
+        const reason = reasonFor(err);
+        perStation[i] = [{ stationId: station.id, settingId: "*", result: "failed", reason }];
+        await setConfigReason(station.id, reason);
+      }
+      finished[i] = true;
+    }
+  };
+
+  const running = Promise.all(
+    Array.from({ length: Math.min(concurrency, adoptedStations.length) }, worker),
+  );
+
+  let onDeadline: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"deadline">((resolve) => {
+    onDeadline = setTimeout(() => resolve("deadline"), deadlineMs);
+  });
+  const raced = await Promise.race([running.then(() => "done" as const), deadline]);
+  if (onDeadline) clearTimeout(onDeadline);
+
+  if (raced === "deadline") {
+    // Detached, not cancelled: each station's work keeps going and keeps
+    // recording its own `stations.configReason`, so nothing is lost — the
+    // adoption simply stops waiting for it. `.catch` is required because
+    // nothing awaits this promise any more and an unhandled rejection here
+    // would be a crash on a path whose whole point is that it cannot fail an
+    // adoption.
+    void running.catch(() => {});
+    for (const [i, station] of adoptedStations.entries()) {
+      if (finished[i]) continue;
+      perStation[i] = [
+        {
+          stationId: station.id,
+          settingId: "*",
+          result: "failed",
+          reason: `declared settings were still being reconciled after ${deadlineMs}ms; the adoption did not wait, and this station records its own outcome when it finishes`,
+        },
+      ];
     }
   }
-  return outcomes;
+
+  return perStation.flat();
 }
 
 /**

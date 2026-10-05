@@ -40,6 +40,7 @@ import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations } from "../../src/services/station-registry";
+import { reconcileOnAdopt } from "../../src/services/harness-config-apply";
 import { declare } from "../../src/services/harness-config";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
 import { gatewayRoutes } from "../../src/routes/gateway";
@@ -169,6 +170,10 @@ interface FakeNodeOptions {
   applyFails?: Set<string>;
   /** Called synchronously inside the config.plan handler, before answering. */
   onPlanDispatched?: (stationKey: string, settingId: string) => void | Promise<void>;
+  /** Hold every `config.observe` this many ms before answering. */
+  observeDelayMs?: number;
+  /** Never answer `config.observe` at all — a node connected but wedged. */
+  observeNeverAnswers?: boolean;
 }
 
 /**
@@ -183,10 +188,18 @@ async function connectFakeNode(
   nodeId: string,
   nodeSecret: string,
   opts: FakeNodeOptions = {},
-): Promise<{ ws: WebSocket; planCalls: Array<{ stationKey: string; settingId: string }>; applyCalls: Array<{ stationKey: string; settingId: string }> }> {
+): Promise<{
+  ws: WebSocket;
+  planCalls: Array<{ stationKey: string; settingId: string }>;
+  applyCalls: Array<{ stationKey: string; settingId: string }>;
+  /** The most `config.observe` requests this node ever held open at once. */
+  peakObserveInFlight: () => number;
+}> {
   const planCalls: Array<{ stationKey: string; settingId: string }> = [];
   const applyCalls: Array<{ stationKey: string; settingId: string }> = [];
   const plans = new Map<string, FakePlan>();
+  let observeInFlight = 0;
+  let maxObserveInFlight = 0;
 
   const ws = new WebSocket(`ws://localhost:${serverPort}/public/nodes/gateway`, {
     headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
@@ -214,12 +227,21 @@ async function connectFakeNode(
 
     if (verb === "config.observe") {
       const params = msg.params as { stationKey: string; settings: string[] };
+      if (opts.observeNeverAnswers) return;
       const forStation = opts.observed?.[params.stationKey] ?? {};
       const values = params.settings.map((settingId) => ({
         settingId,
         observed: forStation[settingId],
         readable: true,
       }));
+      if (opts.observeDelayMs) {
+        // Held open on purpose: `observeInFlight` is what a test reads to see
+        // whether stations are being worked on concurrently or one at a time.
+        observeInFlight += 1;
+        maxObserveInFlight = Math.max(maxObserveInFlight, observeInFlight);
+        await new Promise((r) => setTimeout(r, opts.observeDelayMs));
+        observeInFlight -= 1;
+      }
       ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { values } }));
       return;
     }
@@ -316,7 +338,7 @@ async function connectFakeNode(
   };
 
   await waitForNodeOnline(nodeId);
-  return { ws, planCalls, applyCalls };
+  return { ws, planCalls, applyCalls, peakObserveInFlight: () => maxObserveInFlight };
 }
 
 async function appliedValueOf(stationId: string, settingId: string): Promise<unknown | undefined> {
@@ -606,4 +628,82 @@ test(
     }
   },
   20_000,
+);
+
+test(
+  "stations are reconciled concurrently, not one 15-second round trip after another",
+  async () => {
+    // Finding 7. Reconcile runs inside `POST /api/stations/adopt`, and every
+    // broker round trip it makes carries the broker's 15s default timeout —
+    // which a connected-but-wedged node pays in full. Serially, a 20-station
+    // adopt could run for ten minutes with its rows already committed, so the
+    // operator's client gave up and reported a failed adoption of stations
+    // that were in fact adopted.
+    //
+    // Asserted by overlap rather than by elapsed time: the fake holds each
+    // `config.observe` open, and a serial pass can never have more than one
+    // open at once.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      await declareFleet(TIMEOUT_SETTING, 900);
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgadopt-concurrent-host");
+      const keys = ["cfgadopt-conc-a", "cfgadopt-conc-b", "cfgadopt-conc-c"];
+      const fake = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        observed: Object.fromEntries(keys.map((k) => [k, { [TIMEOUT_SETTING]: 900 }])),
+        observeDelayMs: 150,
+      });
+
+      const adopted = await adoptStations(TEST_USER, nodeId, keys, detectedFor(keys));
+
+      expect(adopted.length).toBe(3);
+      expect(fake.peakObserveInFlight()).toBeGreaterThan(1);
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000,
+);
+
+test(
+  "a wedged node does not hold the adoption past the reconcile deadline",
+  async () => {
+    // The other half of finding 7's bound. Called directly rather than
+    // through `adoptStations` — unlike every other test in this file —
+    // because the deadline this exercises is 16s in production and the point
+    // is to assert the cap exists, not to wait for it.
+    //
+    // A node that is CONNECTED but never answers is the case that matters:
+    // offline fails fast, wedged does not.
+    const server = Bun.serve({ fetch: testApp.fetch, websocket, port: 0 });
+    try {
+      await declareFleet(TIMEOUT_SETTING, 900);
+      const { nodeId, nodeSecret } = await enrollTestNode("cfgadopt-wedged-host");
+      const stationKey = "cfgadopt-wedged-station";
+      const fake = await connectFakeNode(server.port!, nodeId, nodeSecret, {
+        observeNeverAnswers: true,
+      });
+      const [station] = await adoptStations(TEST_USER, nodeId, [stationKey], detectedFor([stationKey]));
+      if (!station) throw new Error("station adoption failed");
+
+      const startedAt = Date.now();
+      const outcomes = await reconcileOnAdopt(BOOTSTRAP_TENANT_ID, [station], { deadlineMs: 250 });
+      const elapsed = Date.now() - startedAt;
+
+      // Returned on the deadline, nowhere near the 15s broker timeout the
+      // wedged `config.observe` is still sitting on.
+      expect(elapsed).toBeLessThan(10_000);
+      expect(outcomes.length).toBe(1);
+      expect(outcomes[0]!.result).toBe("failed");
+      expect(outcomes[0]!.reason).toContain("still being reconciled");
+
+      fake.ws.close();
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      server.stop(true);
+    }
+  },
+  30_000,
 );
