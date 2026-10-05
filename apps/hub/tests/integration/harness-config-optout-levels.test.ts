@@ -27,11 +27,23 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { test, expect, describe, beforeAll, afterAll } from "bun:test";
+import { Hono } from "hono";
+import type { DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
+import { createTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
+import { waitForNodeOnline } from "../helpers/wait";
 import { setOptOut, clearOptOut, resolveOptOuts, listOptOuts } from "../../src/services/harness-config";
+import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
+import { adoptStations } from "../../src/services/station-registry";
+import { createPrincipal } from "../../src/services/principals";
+import { BOOTSTRAP_TENANT_ID } from "../../src/db/tenant-scope";
+import { gatewayRoutes } from "../../src/routes/gateway";
+import { harnessConfigRoutes } from "../../src/routes/harness-config";
+import { websocket } from "../../src/ws";
+import type { AuthUser } from "../../src/auth/middleware";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -292,5 +304,373 @@ describe("resolveOptOuts resolves most-specific-first", () => {
       tenantId: TENANT_ID, settingId: SETTING, stationKey: "resolve-station-nothing-to-clear",
     });
     expect(result.cleared).toBe(false);
+  });
+});
+
+// ─── Task 4: the routes — PUT/DELETE/GET /api/fleet/config/opt-out ───────────
+//
+// `setOptOut`/`clearOptOut`/`listOptOuts` were reachable only from tests
+// before this. These routes are what makes the two-level register usable
+// from outside the hub: `fleet config opt-out` (the CLI, Task 5) and any
+// other operator-facing surface.
+//
+// Enrollment/`adoptStations` always resolve to `BOOTSTRAP_TENANT_ID`
+// (`src/auth/tenant.ts`), never the `TENANT_ID`/`TENANT_ID_2` fixtures
+// above — so this block's fixture app authenticates every caller into
+// `BOOTSTRAP_TENANT_ID`, the same pattern `harness-config-apply.test.ts`
+// and `harness-config-optout-write.test.ts` use.
+
+const ROUTE_SETTING_A = "hermes.approvals.timeout";
+const ROUTE_SETTING_B = "hermes.approvals.mode";
+const ROUTE_REGISTRY = [
+  { id: ROUTE_SETTING_A, harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: false },
+  { id: ROUTE_SETTING_B, harness: "hermes", scope: "profile", policy: "reconcilable", restartToTakeEffect: false },
+];
+
+const ROUTE_USER = "test-user-cfgoptlvl-route-001";
+const ROUTE_AGENT_USER = "test-user-cfgoptlvl-route-agent-001";
+
+const routeTestApp = new Hono()
+  .use("/api/*", async (c, next) => {
+    const userId = c.req.header("X-Test-User-Id");
+    if (userId && userId !== "anonymous") {
+      c.set("user", { id: userId, authType: "api_key", tenantId: BOOTSTRAP_TENANT_ID } satisfies AuthUser);
+    } else {
+      c.set("user", { id: "anonymous", authType: "api_key", tenantId: BOOTSTRAP_TENANT_ID } satisfies AuthUser);
+    }
+    return next();
+  })
+  .route("/public/nodes", gatewayRoutes)
+  .route("/api", harnessConfigRoutes);
+
+async function enrollRouteNode(hostname: string) {
+  const { token } = await mintEnrollmentToken(ROUTE_USER);
+  return enrollNode(token, { hostname, os: "linux", arch: "amd64", cpuCount: 2 });
+}
+
+function routeDetectedFor(stationKey: string): DetectedStation[] {
+  return [
+    {
+      key: stationKey,
+      harness: "hermes",
+      kind: "leaf",
+      displayName: "Opt-out Route Test",
+      parentKey: null,
+      workspacePath: `/workspace/${stationKey}`,
+      capabilities: ["health", "config.manage"],
+      matrixId: null,
+      adopted: false,
+    },
+  ];
+}
+
+/** A fake node that answers only `config.settings` — every opt-out route's write path needs the live registry, nothing else. */
+async function connectRouteFakeNode(
+  serverPort: number,
+  nodeId: string,
+  nodeSecret: string,
+): Promise<{ ws: WebSocket; asked: string[] }> {
+  const asked: string[] = [];
+  const ws = new WebSocket(`ws://localhost:${serverPort}/public/nodes/gateway`, {
+    headers: { Authorization: `Bearer ${nodeId}:${nodeSecret}` },
+  } as RequestInit & { headers: Record<string, string> });
+
+  await new Promise<void>((res, rej) => {
+    ws.onopen = () => res();
+    ws.onerror = () => rej(new Error("Node WS connection error"));
+  });
+
+  ws.onmessage = (e) => {
+    let msg: Record<string, unknown>;
+    try {
+      msg = JSON.parse(String(e.data));
+    } catch {
+      return;
+    }
+    if (msg.type !== "req") return;
+    const verb = msg.verb as string;
+    asked.push(verb);
+    if (verb === "config.settings") {
+      ws.send(JSON.stringify({ type: "res", id: msg.id, ok: true, data: { settings: ROUTE_REGISTRY } }));
+      return;
+    }
+  };
+
+  await waitForNodeOnline(nodeId);
+  return { ws, asked };
+}
+
+function routeAppFetch(
+  baseUrl: string,
+  path: string,
+  opts: { method?: string; token?: string; body?: unknown } = {},
+): Promise<Response> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (opts.token) headers["X-Test-User-Id"] = opts.token;
+  return fetch(`${baseUrl}${path}`, {
+    method: opts.method ?? "GET",
+    headers,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  });
+}
+
+async function setUpRouteStation(hostname: string, stationKey: string) {
+  const { nodeId, nodeSecret } = await enrollRouteNode(hostname);
+  const [station] = await adoptStations(ROUTE_USER, nodeId, [stationKey], routeDetectedFor(stationKey));
+  if (!station) throw new Error("station adoption failed");
+  return { station, nodeId, nodeSecret };
+}
+
+describe("the opt-out routes: PUT/DELETE/GET /api/fleet/config/opt-out", () => {
+  let agentPrincipalId: string;
+
+  beforeAll(async () => {
+    await createTestUser({ id: ROUTE_USER, email: "cfgoptlvl-route@example.com", name: "Opt-out Route Test User" });
+    await createTestUser({
+      id: ROUTE_AGENT_USER,
+      email: "cfgoptlvl-route-agent@example.com",
+      name: "Opt-out Route Agent User",
+    });
+    agentPrincipalId = await createPrincipal({
+      kind: "agent",
+      handle: "cfgoptlvl-route-test-agent",
+      userId: ROUTE_AGENT_USER,
+    });
+  });
+
+  afterAll(async () => {
+    try {
+      await rawSql`DELETE FROM applied_harness_config WHERE station_id IN (SELECT id FROM stations WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER}))`;
+      await rawSql`DELETE FROM harness_config_opt_out  WHERE opted_out_by IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await rawSql`DELETE FROM principal_identities    WHERE principal_id = ${agentPrincipalId}`;
+      await rawSql`DELETE FROM principals              WHERE id = ${agentPrincipalId}`;
+      await rawSql`DELETE FROM station_audit           WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await rawSql`DELETE FROM stations                WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await rawSql`DELETE FROM nodes                   WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await rawSql`DELETE FROM enrollment_tokens        WHERE user_id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+      await rawSql`DELETE FROM "user"                  WHERE id IN (${ROUTE_USER}, ${ROUTE_AGENT_USER})`;
+    } catch {
+      // Ignore cleanup errors
+    }
+  });
+
+  test(
+    "PUT creates a station-level opt-out, GET lists it, DELETE removes it",
+    async () => {
+      const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+      const baseUrl = `http://localhost:${server.port}`;
+      try {
+        const stationKey = "cfgoptlvl-route-verbs-station";
+        const { nodeId, nodeSecret } = await setUpRouteStation("cfgoptlvl-route-verbs-host", stationKey);
+        const fake = await connectRouteFakeNode(server.port!, nodeId, nodeSecret);
+
+        const putRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+          method: "PUT",
+          token: ROUTE_USER,
+          body: { settingId: ROUTE_SETTING_A, optedOut: true, stationKey, reason: "testing" },
+        });
+        expect(putRes.status).toBe(204);
+
+        const getRes = await routeAppFetch(baseUrl, `/api/fleet/config/opt-out?stationKey=${stationKey}`, {
+          token: ROUTE_USER,
+        });
+        expect(getRes.status).toBe(200);
+        const rows = (await getRes.json()) as Array<{ settingId: string; optedOut: boolean; stationKey: string | null }>;
+        expect(rows.length).toBe(1);
+        expect(rows[0]?.settingId).toBe(ROUTE_SETTING_A);
+        expect(rows[0]?.optedOut).toBe(true);
+
+        const delRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+          method: "DELETE",
+          token: ROUTE_USER,
+          body: { settingId: ROUTE_SETTING_A, stationKey },
+        });
+        expect(delRes.status).toBe(200);
+        const delBody = (await delRes.json()) as { cleared: boolean };
+        expect(delBody.cleared).toBe(true);
+
+        const getAfter = await routeAppFetch(baseUrl, `/api/fleet/config/opt-out?stationKey=${stationKey}`, {
+          token: ROUTE_USER,
+        });
+        const afterRows = (await getAfter.json()) as unknown[];
+        expect(afterRows.length).toBe(0);
+
+        fake.ws.close();
+        await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        server.stop(true);
+      }
+    },
+    20_000,
+  );
+
+  test(
+    "PUT works at node level too, filtered by ?nodeId=",
+    async () => {
+      const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+      const baseUrl = `http://localhost:${server.port}`;
+      try {
+        const stationKey = "cfgoptlvl-route-node-station";
+        const { nodeId, nodeSecret } = await setUpRouteStation("cfgoptlvl-route-node-host", stationKey);
+        const fake = await connectRouteFakeNode(server.port!, nodeId, nodeSecret);
+
+        const putRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+          method: "PUT",
+          token: ROUTE_USER,
+          body: { settingId: ROUTE_SETTING_A, optedOut: true, nodeId },
+        });
+        expect(putRes.status).toBe(204);
+
+        const getRes = await routeAppFetch(baseUrl, `/api/fleet/config/opt-out?nodeId=${nodeId}`, {
+          token: ROUTE_USER,
+        });
+        expect(getRes.status).toBe(200);
+        const rows = (await getRes.json()) as Array<{ settingId: string; nodeId: string | null }>;
+        expect(rows.length).toBe(1);
+        expect(rows[0]?.nodeId).toBe(nodeId);
+
+        fake.ws.close();
+        await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        server.stop(true);
+      }
+    },
+    20_000,
+  );
+
+  test("PUT naming both stationKey and nodeId is refused with 400", async () => {
+    const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const res = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "PUT",
+        token: ROUTE_USER,
+        body: { settingId: ROUTE_SETTING_A, optedOut: true, stationKey: "whatever-station", nodeId: "whatever-node" },
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("PUT naming neither stationKey nor nodeId is refused with 400", async () => {
+    const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const res = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "PUT",
+        token: ROUTE_USER,
+        body: { settingId: ROUTE_SETTING_A, optedOut: true },
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("DELETE naming both or neither level is refused with 400", async () => {
+    const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const both = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "DELETE",
+        token: ROUTE_USER,
+        body: { settingId: ROUTE_SETTING_A, stationKey: "a-station", nodeId: "a-node" },
+      });
+      expect(both.status).toBe(400);
+
+      const neither = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "DELETE",
+        token: ROUTE_USER,
+        body: { settingId: ROUTE_SETTING_A },
+      });
+      expect(neither.status).toBe(400);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test(
+    "PUT with an unregistered setting id is refused before any write",
+    async () => {
+      const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+      const baseUrl = `http://localhost:${server.port}`;
+      try {
+        const stationKey = "cfgoptlvl-route-unknown-station";
+        const { nodeId, nodeSecret } = await setUpRouteStation("cfgoptlvl-route-unknown-host", stationKey);
+        const fake = await connectRouteFakeNode(server.port!, nodeId, nodeSecret);
+
+        const res = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+          method: "PUT",
+          token: ROUTE_USER,
+          body: { settingId: "hermes.not_a_real_setting", optedOut: true, stationKey },
+        });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { error: string };
+        expect(body.error).toBe("UNKNOWN_SETTING");
+
+        const rows = await listOptOuts(BOOTSTRAP_TENANT_ID, { stationKey });
+        expect(rows.length).toBe(0);
+
+        fake.ws.close();
+        await new Promise((r) => setTimeout(r, 100));
+      } finally {
+        server.stop(true);
+      }
+    },
+    20_000,
+  );
+
+  test("another tenant's station is invisible to PUT", async () => {
+    const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const foreignNodeId = `node_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+      const foreignStationKey = "cfgoptlvl-route-foreign-station";
+      await rawSql`
+        INSERT INTO nodes (id, tenant_id, user_id, name, hostname, os, arch, secret_hash)
+        VALUES (${foreignNodeId}, ${TENANT_ID_2}, ${ROUTE_USER}, 'cfgoptlvl-foreign-host', 'cfgoptlvl-foreign-host', 'linux', 'amd64', 'unused')`;
+      await rawSql`
+        INSERT INTO stations (id, tenant_id, user_id, node_id, harness, station_key, kind, display_name, workspace_path, capabilities)
+        VALUES (${`station_${crypto.randomUUID()}`}, ${TENANT_ID_2}, ${ROUTE_USER}, ${foreignNodeId}, 'hermes', ${foreignStationKey}, 'leaf',
+                'Opt-out Route Foreign Test', ${"/workspace/" + foreignStationKey}, ${JSON.stringify(["health", "config.manage"])}::jsonb)`;
+
+      const res = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "PUT",
+        token: ROUTE_USER,
+        body: { settingId: ROUTE_SETTING_A, optedOut: true, stationKey: foreignStationKey },
+      });
+      expect(res.status).toBe(400);
+
+      const rows = await listOptOuts(BOOTSTRAP_TENANT_ID, { stationKey: foreignStationKey });
+      expect(rows.length).toBe(0);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a non-human principal is refused on PUT, DELETE and GET", async () => {
+    const server = Bun.serve({ fetch: routeTestApp.fetch, websocket, port: 0 });
+    const baseUrl = `http://localhost:${server.port}`;
+    try {
+      const putRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "PUT",
+        token: ROUTE_AGENT_USER,
+        body: { settingId: ROUTE_SETTING_A, optedOut: true, nodeId: "node_whatever" },
+      });
+      expect(putRes.status).toBe(403);
+
+      const delRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", {
+        method: "DELETE",
+        token: ROUTE_AGENT_USER,
+        body: { settingId: ROUTE_SETTING_A, nodeId: "node_whatever" },
+      });
+      expect(delRes.status).toBe(403);
+
+      const getRes = await routeAppFetch(baseUrl, "/api/fleet/config/opt-out", { token: ROUTE_AGENT_USER });
+      expect(getRes.status).toBe(403);
+    } finally {
+      server.stop(true);
+    }
   });
 });
