@@ -1,8 +1,9 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, within, cleanup } from "@testing-library/svelte";
-import { ConfigObservation, ConfigSetting } from "@agentpod/contract";
+import { render, waitFor, within, fireEvent, cleanup } from "@testing-library/svelte";
+import { ConfigObservation, ConfigPlan, ConfigReceipt, ConfigSetting } from "@agentpod/contract";
 import * as api from "$lib/api/harness-config";
 import type { DeclaredConfigRow } from "$lib/api/harness-config";
+import { ApiError } from "$lib/api/http-error";
 import HarnessConfigPanel from "./HarnessConfigPanel.svelte";
 
 const STATION_ID = "station_1";
@@ -28,6 +29,46 @@ function observation(overrides: Partial<ConfigObservation>): ConfigObservation {
     declared: true,
     observed: true,
     state: "matches",
+    ...overrides,
+  });
+}
+
+/** A reviewed plan, with sane defaults a test can override. */
+function plan(overrides: Partial<ConfigPlan>): ConfigPlan {
+  return ConfigPlan.parse({
+    schemaVersion: 1,
+    operationId: "cfgop_1",
+    stationKey: "hermes:fixture",
+    entries: [
+      {
+        settingId: "hermes.command_timeout_ms",
+        file: "/profiles/fixture/config.yaml",
+        keyPath: "command_timeout_ms",
+        policy: "reconcilable",
+        current: 300,
+        intended: 900,
+        action: "modify",
+        restartToTakeEffect: false,
+      },
+    ],
+    beforeSha256: "a".repeat(64),
+    diff: "-command_timeout_ms: 300\n+command_timeout_ms: 900\n",
+    diffTruncated: false,
+    noOp: false,
+    restartRequired: false,
+    createdAt: "2026-10-05T00:00:00.000Z",
+    planDigest: "digest_1",
+    ...overrides,
+  });
+}
+
+/** An apply receipt, with sane defaults a test can override. */
+function receipt(overrides: Partial<ConfigReceipt>): ConfigReceipt {
+  return ConfigReceipt.parse({
+    plan: plan({}),
+    phase: "applied",
+    updatedAt: "2026-10-05T00:00:01.000Z",
+    written: [{ settingId: "hermes.command_timeout_ms", action: "modify", wrote: 900 }],
     ...overrides,
   });
 }
@@ -250,4 +291,189 @@ test("an unreachable station says so, and a later failure does not leave the pre
   await waitFor(() => expect(view.getByRole("alert")).toBeTruthy());
   expect(view.getByRole("alert").textContent).toMatch(/node could not be reached/);
   expect(view.queryByRole("row", { name: /hermes\.plugins\.enabled/ })).toBeNull();
+});
+
+// ─── Task 3: plan → review → apply, by digest (spec D13) ──────────────────
+
+async function renderWithReview() {
+  mockLoad({
+    observations: [
+      observation({ settingId: "hermes.command_timeout_ms", state: "drifted", declared: 900, observed: 300 }),
+    ],
+    settings: [setting({ id: "hermes.command_timeout_ms" })],
+  });
+  const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID } });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.command_timeout_ms/ })).toBeTruthy());
+  await fireEvent.click(view.getByRole("button", { name: "Review changes" }));
+  return view;
+}
+
+test("a refused plan shows its refusal code and message, and offers no apply button — OPTED_OUT", async () => {
+  vi.spyOn(api, "planStationConfig").mockRejectedValue(
+    new ApiError("An operator exempted this setting for this station.", {
+      status: 400,
+      detail: "POST /plan → 400",
+      code: "OPTED_OUT",
+    }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByRole("alert")).toBeTruthy());
+  const text = view.getByRole("alert").textContent ?? "";
+  expect(text).toMatch(/OPTED_OUT/);
+  expect(text).toMatch(/exempted/);
+  expect(view.queryByRole("button", { name: "Apply reviewed plan" })).toBeNull();
+});
+
+test("a refused plan shows its refusal code and message, and offers no apply button — CREDENTIAL_PATH, reads differently from OPTED_OUT", async () => {
+  vi.spyOn(api, "planStationConfig").mockRejectedValue(
+    new ApiError("This key path is a credential file.", {
+      status: 400,
+      detail: "POST /plan → 400",
+      code: "CREDENTIAL_PATH",
+    }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByRole("alert")).toBeTruthy());
+  const text = view.getByRole("alert").textContent ?? "";
+  expect(text).toMatch(/CREDENTIAL_PATH/);
+  expect(text).not.toMatch(/OPTED_OUT/);
+  expect(text).not.toMatch(/exempted/);
+  expect(view.queryByRole("button", { name: "Apply reviewed plan" })).toBeNull();
+});
+
+test("a noOp plan offers no apply — nothing to write means nothing to review", async () => {
+  vi.spyOn(api, "planStationConfig").mockResolvedValue(
+    plan({ noOp: true, entries: [], diff: "", restartRequired: false }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByText(/Nothing to change/)).toBeTruthy());
+  expect(view.queryByRole("button", { name: "Apply reviewed plan" })).toBeNull();
+});
+
+test("a stale apply is the hub's answer, not a crash, and the panel never silently re-plans and applies", async () => {
+  const planSpy = vi.spyOn(api, "planStationConfig").mockResolvedValue(plan({}));
+  const applySpy = vi.spyOn(api, "applyStationConfig").mockRejectedValue(
+    new ApiError("That conflicts with the hub's current state — refresh and try again.", {
+      status: 409,
+      detail: "POST /apply → 409",
+      code: "PLAN_DIGEST_MISMATCH",
+    }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByRole("button", { name: "Apply reviewed plan" })).toBeTruthy());
+  await fireEvent.click(view.getByRole("button", { name: "Apply reviewed plan" }));
+  await waitFor(() => expect(view.getByRole("alert")).toBeTruthy());
+  expect(view.getByRole("alert").textContent).toMatch(/document changed/i);
+  expect(view.getByRole("alert").textContent).toMatch(/plan again/i);
+  // Exactly one plan call and one apply call: the panel did not quietly ask
+  // for a fresh plan and apply it on its own.
+  expect(planSpy).toHaveBeenCalledTimes(1);
+  expect(applySpy).toHaveBeenCalledTimes(1);
+  // And it must not keep offering apply against the now-refused plan.
+  expect(view.queryByRole("button", { name: "Apply reviewed plan" })).toBeNull();
+});
+
+test("restartRequired is surfaced before the apply, and after a successful apply the row reads awaiting-restart", async () => {
+  const getStationConfig = vi.spyOn(api, "getStationConfig").mockResolvedValue({
+    observations: [
+      observation({ settingId: "hermes.approvals.timeout", state: "drifted", declared: 900, observed: 300 }),
+    ],
+  });
+  vi.spyOn(api, "listConfigSettings").mockResolvedValue({
+    settings: [setting({ id: "hermes.approvals.timeout", restartToTakeEffect: true })],
+    unreachableNodes: [],
+  });
+  vi.spyOn(api, "listStationDeclaredConfig").mockResolvedValue([]);
+  vi.spyOn(api, "listNodeDeclaredConfig").mockResolvedValue([]);
+  vi.spyOn(api, "planStationConfig").mockResolvedValue(
+    plan({
+      restartRequired: true,
+      entries: [
+        {
+          settingId: "hermes.approvals.timeout",
+          file: "/profiles/fixture/config.yaml",
+          keyPath: "approvals.timeout",
+          policy: "reconcilable",
+          current: 300,
+          intended: 900,
+          action: "modify",
+          restartToTakeEffect: true,
+        },
+      ],
+    }),
+  );
+  const applySpy = vi.spyOn(api, "applyStationConfig").mockResolvedValue(receipt({ phase: "applied" }));
+  const onRestart = vi.fn();
+
+  const view = render(HarnessConfigPanel, { props: { stationId: STATION_ID, nodeId: NODE_ID, onRestart } });
+  const declaredTable = () => view.getByRole("table", { name: /Declared harness configuration/ });
+  await waitFor(() => expect(within(declaredTable()).getByRole("row", { name: /approvals\.timeout/ })).toBeTruthy());
+  await fireEvent.click(view.getByRole("button", { name: "Review changes" }));
+  await waitFor(() => expect(view.getByRole("button", { name: "Apply reviewed plan" })).toBeTruthy());
+
+  // Surfaced BEFORE the apply click.
+  expect(view.getAllByText(/agentpod will not restart the harness/).length).toBeGreaterThan(0);
+
+  // The next read (after apply) reports the setting as written but not yet live.
+  getStationConfig.mockResolvedValueOnce({
+    observations: [
+      observation({
+        settingId: "hermes.approvals.timeout",
+        state: "awaiting-restart",
+        declared: 900,
+        observed: 300,
+        reason: "written, and needs a restart to take effect",
+      }),
+    ],
+  });
+
+  await fireEvent.click(view.getByRole("button", { name: "Apply reviewed plan" }));
+  expect(applySpy).toHaveBeenCalledOnce();
+
+  await waitFor(() =>
+    expect(within(declaredTable()).getByRole("row", { name: /approvals\.timeout/ }).textContent).toMatch(
+      /Awaiting restart/,
+    ),
+  );
+  const row = within(declaredTable()).getByRole("row", { name: /approvals\.timeout/ });
+  expect(row.textContent).toMatch(/Awaiting restart/);
+  expect(view.getAllByText(/agentpod will not restart the harness/).length).toBeGreaterThan(0);
+  expect(onRestart).not.toHaveBeenCalled();
+});
+
+test("a double click cannot double-apply: the second click is ignored while the first is in flight", async () => {
+  vi.spyOn(api, "planStationConfig").mockResolvedValue(plan({}));
+  let resolveApply!: (value: ConfigReceipt) => void;
+  const applySpy = vi.spyOn(api, "applyStationConfig").mockReturnValue(
+    new Promise<ConfigReceipt>((resolve) => {
+      resolveApply = resolve;
+    }),
+  );
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByRole("button", { name: "Apply reviewed plan" })).toBeTruthy());
+  const button = view.getByRole("button", { name: "Apply reviewed plan" });
+  await fireEvent.click(button);
+  await fireEvent.click(button);
+  resolveApply(receipt({ phase: "applied" }));
+  await waitFor(() => expect(view.getByText(/Applied\./)).toBeTruthy());
+  expect(applySpy).toHaveBeenCalledTimes(1);
+});
+
+test("apply sends the digest of the DISPLAYED plan, never a digest fetched or re-derived at apply time", async () => {
+  // Two different digests from two successive plan calls. The panel must
+  // show the FIRST one and send exactly that — never ask for a second plan
+  // to apply against, which is the regression Step 4 of the plan exists to
+  // catch (D13).
+  const planSpy = vi
+    .spyOn(api, "planStationConfig")
+    .mockResolvedValueOnce(plan({ planDigest: "digest-displayed", operationId: "cfgop_displayed" }))
+    .mockResolvedValueOnce(plan({ planDigest: "digest-fresh-and-wrong", operationId: "cfgop_fresh" }));
+  const applySpy = vi.spyOn(api, "applyStationConfig").mockResolvedValue(receipt({ phase: "applied" }));
+  const view = await renderWithReview();
+  await waitFor(() => expect(view.getByText("digest-displayed")).toBeTruthy());
+  await fireEvent.click(view.getByRole("button", { name: "Apply reviewed plan" }));
+  await waitFor(() => expect(applySpy).toHaveBeenCalledOnce());
+  expect(applySpy).toHaveBeenCalledWith(STATION_ID, "cfgop_displayed", "digest-displayed");
+  // The apply must not have triggered a second plan call either.
+  expect(planSpy).toHaveBeenCalledTimes(1);
 });
