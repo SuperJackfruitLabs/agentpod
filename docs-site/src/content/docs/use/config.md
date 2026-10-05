@@ -130,11 +130,43 @@ lists every setting any reachable node currently manages — the live registry, 
 node, never a copy held in the hub. A node that cannot currently be asked contributes
 nothing to this list, and is named separately so its absence isn't silent.
 
-This registry currently covers three Hermes settings — `hermes.approvals.timeout`,
-`hermes.approvals.mode`, `hermes.approvals.command_allowlist` — plus whatever else is live
-on the node you ask. The four settings the existing `apn hermes-live`, `apn hermes-skills`
-and `apn openclaw-errors` verbs already manage are **not** folded into this registry yet;
-those commands keep working exactly as they do today, unrelated to `fleet config`.
+This registry currently covers seven settings — plus whatever else is live on the node you
+ask:
+
+| Setting | Scope | Policy |
+|---|---|---|
+| `hermes.approvals.timeout` | `profile` | `reconcilable` |
+| `hermes.approvals.mode` | `profile` | `reconcilable` |
+| `hermes.approvals.command_allowlist` | `profile` | `additive-only` |
+| `hermes.plugins.enabled` | `profile` | `additive-only` |
+| `hermes.plugins.stream_reasoning_deltas` | `profile` | `reconcilable` |
+| `hermes.skills.external_dirs` | `profile` | `additive-only` |
+| `openclaw.hooks.allowConversationAccess` | `user` | `reconcilable` |
+
+The last four are the same four settings the `apn hermes-live`, `apn hermes-skills` and
+`apn openclaw-errors` verbs have always managed. Folding them into this registry did not
+replace those verbs, and does not retire them: **both paths call the exact same writer**, so
+a plan `fleet config` derives for one of these settings and the edit the matching `apn`
+command would make by hand are byte-identical, not merely equivalent. Run `apn hermes-live`,
+`apn hermes-skills`, or `apn openclaw-errors` directly whenever that is more convenient —
+nothing about declaring these through `fleet config` changes what those commands do.
+
+### Two limits on the plugin settings
+
+`hermes.plugins.enabled` and `hermes.plugins.stream_reasoning_deltas` share one writer, and it
+is indivisible: Hermes only reports reasoning deltas from a plugin that also has
+`plugins.enabled` set, so declaring **either** setting enables the agentpod-live plugin as part
+of the same edit. Declaring `hermes.plugins.stream_reasoning_deltas` alone still touches
+`plugins.enabled` — both key paths are named in the plan's entries, and the plan's diff shows
+every line that moves, so this is visible to whoever reviews the plan before `apply` ever
+writes anything. It is not a silent side effect; it is one edit covering two keys, and an
+operator declaring one setting should expect the other key to move too.
+
+Separately, `hermes.plugins.enabled` can only ever **add** that one plugin,
+`agentpod-live`. Declaring any other plugin name is refused by name
+(`SHAPE_UNEXPECTED`) rather than appended — the setting id reads as if it manages
+Hermes' whole plugin list, but the writer behind it only knows how to turn on the one
+plugin this system ships.
 
 ## Seeing where things stand
 
@@ -165,6 +197,13 @@ Each **comparison** — `show --station` and `drift` — reports, per setting, a
 | `awaiting-restart` | A value was written but the harness hasn't picked it up yet — see [awaiting-restart](#awaiting-restart-written-but-not-yet-in-effect). |
 | `unreadable` | The document couldn't be read, or the key is there but holds a shape this release can't read — a nested map (see below). Never reported as `matches` — an unreadable value is not evidence of agreement. |
 | `out-of-scope` | A per-station declaration was made for a setting whose registered scope isn't the station's document (see above). |
+
+Each comparison also names the **level** the winning declaration resolved from — `station`,
+`node`, or `fleet` — the same precedence [Scopes and levels](#scopes-and-levels) describes.
+A station with its own declaration, one inherited from its node, and one inherited from the
+fleet all report differently here even when the declared value happens to be the same, so you
+can tell which declaration is the one actually governing this station without re-deriving
+precedence by hand.
 
 `fleet config drift` only reports states other than `matches`, plus the list of stations it
 could not reach at all — a station it couldn't ask is never silently left out of the total.
@@ -202,9 +241,33 @@ The opt-out lives in a **hub-side register** (`harness_config_opt_out`) — **no
 inside the harness's own config file. A harness like Hermes rewrites and migrates its own
 config document on its own schedule; a key this system invented there would be a key whose
 survival this system does not control, so the opt-out is kept somewhere this system does
-control instead. Where a harness has its own native opt-out key in its document (OpenClaw's
-`plugins.disabled`, for the settings it governs), that path is separate and not yet wired
-into this comparison.
+control instead.
+
+#### A harness's own opt-out is a second, distinct source of `opted-out`
+
+A harness can also carry **its own** record that an operator turned a setting off, made
+through the harness's own UI rather than through agentpod at all:
+
+- **Hermes:** the plugin named in `plugins.disabled`.
+- **OpenClaw:** `plugins.entries.agentpod-errors.enabled` explicitly `false`.
+
+Either one reports `opted-out`, with a reason naming the harness as the source — distinct
+from the hub-register reason, so you can tell "I exempted this through `fleet config`" from
+"I disabled this inside the harness itself" by reading the reason text alone. And either one
+now refuses a **write**, not only a comparison: declaring `hermes.plugins.enabled` while
+`plugins.disabled` names `agentpod-live` is refused `OPTED_OUT`, the same as an operator
+opt-out recorded in the hub's own register.
+
+**One asymmetry, stated plainly rather than papered over.** For Hermes, the check lives
+inside the one writer both `apn hermes-live` and the registry call, so both paths are
+protected — running `apn hermes-live enable` by hand against a profile where the plugin is
+listed in `plugins.disabled` refuses exactly as a `fleet config apply` would. For OpenClaw,
+the check lives only in the registry's own plan derivation, not inside the writer
+`apn openclaw-errors` and the registry share. That means `apn openclaw-errors enable
+--apply`, run by hand, does **not** check OpenClaw's own opt-out and can still re-enable a
+plugin an operator disabled through OpenClaw's own UI. This is pre-existing behaviour, not
+something this feature introduced, and it is a known follow-up rather than something closed
+here.
 
 `compare()`, adopt-time reconcile, and `plan`/`apply` all honor a row in this register the
 moment one exists — there is no path left that writes an opted-out setting silently. `plan`
@@ -409,17 +472,40 @@ Re-deriving the plan at `apply` time, rather than trusting the one `plan` printe
 what catches a document that changed in between — see [refusals](#every-refusal-and-what-distinguishes-it)
 below for `PLAN_STALE` and `PLAN_DIGEST_MISMATCH`.
 
+### A lost race preserves both edits
+
+`PLAN_STALE` catches a document that changed **before** the write. A narrower window remains
+**after** it: the write itself lands, and then, in the moment between that write and the
+read-back that confirms it, something else changes the same file again — an operator's own
+"Allow always" through Hermes' UI, say, landing a heartbeat after `apply` wrote its own edit.
+
+When that happens, this system does not pick a winner. The document on disk is left **exactly
+as the read-back found it** — whatever landed there in that window is not overwritten, and the
+edit `apply` itself intended is not thrown away either. It is written instead to a sidecar file
+beside the original, named by appending `.agentpod-rejected` to the document's own filename —
+`config.yaml` gets `config.yaml.agentpod-rejected`, `openclaw.json` gets
+`openclaw.json.agentpod-rejected`. The operation's receipt (`fleet config inspect`) records
+`"phase": "conflict"` with an `error` naming both paths and stating plainly that neither edit
+was lost.
+
+That sidecar is bookkeeping for a human, not for this system: a later lost race against the
+same document overwrites whatever an earlier one left there, and nothing here ever reads a
+sidecar back — not on a retry, not on the next `plan`. Reconciling the two files, if they need
+reconciling at all, is a manual step. A fresh `fleet config plan` against the document as it now
+stands is the way forward; it has no reason to know the sidecar exists.
+
 ### `awaiting-restart`: written, but not yet in effect
 
-A setting whose policy requires a restart to take effect (every Hermes `approvals.*` setting
-today, by assumption — see below) is reported `awaiting-restart` right after `apply` writes
+A setting whose policy requires a restart to take effect — every registered Hermes and
+OpenClaw setting today — is reported `awaiting-restart` right after `apply` writes
 it, until the harness's gateway actually restarts. **AgentPod will not restart the harness
 for you.** Nothing in this system issues a restart; an operator restarts the gateway, from
 wherever they already do that, and the state changes on its own once observed.
 
-The decision is made by comparing a gateway process id, not by a timer. Hermes multiplexes
-one gateway across every profile on a host, so that process's pid is exactly the one that
-re-reads config. `apply` reads the station's health right after a successful write and
+The decision is made by comparing a gateway process id, not by a timer. Hermes and OpenClaw
+both multiplex one gateway process across every profile or subagent on a host, so that
+process's pid is exactly the one that re-reads config. `apply` reads the station's health
+right after a successful write and
 records that pid. The next comparison reads the station's **current** gateway pid and
 reports `awaiting-restart` whenever that pid is unchanged from the one recorded at write
 time — or when either pid cannot be confirmed at all: the current one (health degraded,
@@ -435,7 +521,10 @@ Hermes's own documentation lists hot-reloadable settings and settings needing a 
 `approvals.*` is in neither list. The registry assumes `true` deliberately: an unnecessary
 restart is cheaper than a running gateway that silently disagrees with its own config file.
 See `docs/superpowers/notes/2026-10-05-hermes-approvals-restart.md` for what was checked and
-why it stayed inconclusive.
+why it stayed inconclusive. `hermes.plugins.*` and `hermes.skills.external_dirs` are not the
+same kind of guess: Hermes reads a profile's plugin and skill configuration when its gateway
+starts, which is what `apn hermes-skills` itself already tells an operator after writing, so
+`RestartToTakeEffect` for those three is a documented fact rather than an assumed one.
 
 ## Adopting a station: one reconcile, not a sweep
 
