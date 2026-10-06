@@ -1,6 +1,6 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, fireEvent } from "@testing-library/svelte";
-import type { ChatItem } from "./transcript";
+import type { ChatItem } from "@agentpod/contract";
 
 // Mock the streamdown-backed renderer — shiki doesn't run reliably in jsdom.
 vi.mock("./Response.svelte", () => import("./response.stub.svelte"));

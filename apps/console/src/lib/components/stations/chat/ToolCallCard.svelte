@@ -16,7 +16,7 @@
   import * as Collapsible from "$lib/components/ui/collapsible";
   import { Status } from "$lib/components/ui/status";
   import DiffBlock from "./DiffBlock.svelte";
-  import type { ChatItem, ToolStatus } from "./transcript";
+  import type { ChatItem, ToolStatus } from "@agentpod/contract";
 
   interface Props {
     item: Extract<ChatItem, { kind: "tool" }>;

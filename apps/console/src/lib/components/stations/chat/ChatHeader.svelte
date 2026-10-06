@@ -50,7 +50,7 @@
   import type { AcpSessionRow } from "$lib/api/acp";
   import ChevronDownIcon from "@lucide/svelte/icons/chevron-down";
   import type { ChatConnection } from "./acp-chat.svelte";
-  import type { SessionPreamble } from "./transcript";
+  import type { SessionPreamble } from "@agentpod/contract";
   import { Button } from "$lib/components/ui/button";
   import * as Collapsible from "$lib/components/ui/collapsible";
   import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";

@@ -27,7 +27,7 @@
   import Reasoning from "./Reasoning.svelte";
   import ToolCallCard from "./ToolCallCard.svelte";
   import PermissionCard from "./PermissionCard.svelte";
-  import type { ChatItem } from "./transcript";
+  import type { ChatItem } from "@agentpod/contract";
 
   interface Props {
     items: ChatItem[];
