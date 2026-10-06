@@ -1862,3 +1862,75 @@ Only hosts with a collector (infra, guild) need an endpoint.
 
 With the collector down, otel-go logs one line per failed export (at most about every 2 s
 while spans are flowing); the node keeps working and the queue drops what it cannot send.
+
+---
+
+## 11. Cutover: rewriting user ids
+
+Moving the hub onto the organization plane (setting `ORG_PLANE_*`) changes who a human *is* to
+the hub: a Better Auth `user.id` before, the human's `prn_` id after. Twenty-three hub columns
+hold that id (`nodes.user_id`, `stations.user_id`, `station_audit.user_id`, … — the full list is
+`USER_ID_COLUMNS` in `apps/hub/scripts/rewrite-user-ids.ts`). They are rewritten by an operator
+script, never by a migration: the hub applies migrations on boot, and a migration would rewrite
+production while every session still carried a Better Auth id, emptying every operator's fleet.
+
+The hub must never run under the plane against un-rewritten columns, or under Better Auth
+against rewritten ones — either way every human's fleet reads as empty. So the order is fixed.
+
+**Cutover (forward):**
+
+1. Stop the hub.
+2. `cd apps/hub && DATABASE_URL=<hub database> bun run scripts/rewrite-user-ids.ts --apply` (with
+   any `--map` the dry run asked for).
+3. Set `ORG_PLANE_*` (all of them; `docs/DEPLOYMENT.md`, "Organization plane").
+4. Start the hub.
+
+**Rollback:**
+
+1. Stop the hub.
+2. Unset `ORG_PLANE_*`.
+3. `DATABASE_URL=<hub database> bun run scripts/rewrite-user-ids.ts --apply --reverse`.
+4. Start the hub.
+
+**Always run the dry run first** (the same command without `--apply`), and read the `UNMAPPED`
+table. Rehearse on a copy first: `pg_dump` the hub database into a scratch database and run the
+dry run and `--apply` against the copy before touching the real one.
+
+What the script does and refuses:
+
+- `DATABASE_URL` must be set explicitly; the script never falls back to a default database.
+  The first line it prints (to stderr) is the host and database it is about to read.
+- **Dry run is the default** and changes nothing. It prints one row per column: `rows` (non-null
+  values), `toRewrite` (values it has a mapping for), `alreadyTarget` (values already in the
+  target form — `prn_…` going forward, anything else going back; a second forward run shows all
+  rows here), and `unmapped`. Then the principals it will seat as hub operators, and whether the
+  bootstrap tenant is mapped to the org. Exit status 2 means `--apply` would refuse; 0 means it
+  would run.
+- The mapping comes from `principal_identities` (`system = 'better-auth'`, human principals) —
+  the same `prn_` the plane gives each migrated human. `--map <from>=<to>` (repeatable) adds or
+  overrides one entry; a forward mapping must name a `prn_` id.
+- **`--apply` refuses, changing nothing,** while any value is unmapped, while a principal has
+  more than one Better Auth id, or (forward) unless the bootstrap tenant
+  `fleet_00000000000000000000` is mapped to `org-plane` / `org_00000000000000000000` (`--org`
+  names a different org if the plane keeps another id). That mapping is what lets the
+  operator's first plane token land on the existing fleet instead of creating an empty one.
+- `DEFAULT_USER_ID` (default `default-user`) is the usual unmapped value: it is not a Better Auth
+  user. Map it to the operator's `prn_` (`--map default-user=prn_…`) and set `DEFAULT_USER_ID` to
+  the same `prn_` before starting the hub under the plane.
+- An admin (`user.role = 'admin'`) with no principal is listed as unmapped too (table `user`):
+  skipping them would leave the hub with no operator under the plane.
+- Everything happens in **one transaction**: a failure part-way leaves the database exactly as
+  it was. The transaction holds `lock_timeout = 10s`; stop the hub first so the script never
+  waits on the hub's own locks.
+- Forward drops the 18 foreign keys from those columns to `"user"` (Better Auth ids no longer
+  live there), drops and re-creates the six composite owner foreign keys around the rewrite, and
+  seeds `legacy_user_principals` (old user id → `prn_`, kept permanently so ids other planes
+  recorded before the cutover still resolve) and `hub_operators` (one row per admin).
+- Reverse maps each `prn_` back to its Better Auth id and re-adds the 18 foreign keys
+  `NOT VALID`, so existing rows are not checked but new writes are. A human who first signed in
+  at the plane during the window has no Better Auth id, and the reverse refuses on their rows
+  until you decide: `--map prn_…=<user id>` to hand them to an existing user, or
+  `--map prn_…=prn_…` to keep the row as it is. `legacy_user_principals` and `hub_operators`
+  are left in place (they are read only under the plane). A value that forward mapped onto
+  someone else's `prn_` (such as `default-user`) comes back as that person's user id.
+- Both directions are safe to repeat: a second run finds everything already in place.
