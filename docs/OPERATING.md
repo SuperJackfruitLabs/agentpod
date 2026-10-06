@@ -251,6 +251,30 @@ Setting up superwitness itself (`evidence:read`):
 `fleet grants set` on a service principal keeps its scopes: a grant write that does not mention
 `scopes` leaves them as stored.
 
+### Transcripts
+
+`GET /api/evidence/sessions/:sessionId/transcript` (and `…/transcript/items/:seqFrom`) return what a
+session said — prompts, messages, reasoning, tool inputs and outputs, permissions — for a principal
+whose grant holds `transcripts:read`. `evidence:read` is not enough, and `transcripts:read` grants
+nothing else. Another tenant's session answers 404.
+
+- **Redaction.** Every string is redacted before it leaves: this hub's own secrets (exact values,
+  12+ characters), common credential formats, the whole value of credential-named JSON keys
+  (`password`, `token`, `api_key`, `authorization`, `cookie`, `session_id`, …) and the operator's
+  rules (`HUB_REDACTION_RULES_FILE`, see `docs/DEPLOYMENT.md`). A hit reads `[redacted:<rule>]`.
+  Stored events are never changed. Pages cut each field at 16 KiB; one item can be read whole up
+  to 1 MiB (`?full=1`), else 413.
+- **Audit.** Every read writes a `station_audit` row with verb `evidence.transcript.read`: the
+  caller's principal, the session, the range, the item and redaction counts, `full`, and
+  `on_behalf_of` when the caller named the person it acts for (`X-On-Behalf-Of: prn_…`). Never content.
+- **Granting it** keeps the grant's other scopes, because `fleet grants set` replaces `scopes` when
+  the document names them:
+
+  ```sh
+  fleet grants show prn_… | jq '.grant | .scopes = ((.scopes + ["transcripts:read"]) | unique)' \
+    | fleet grants set prn_… --file -
+  ```
+
 ## 2. Adopt stations
 
 After a node connects, AgentPod runs its harness descriptors to detect runtimes on the host. Each detected runtime appears as a **station** (what the design calls a cubicle) in the console's station list.
