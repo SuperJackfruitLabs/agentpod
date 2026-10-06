@@ -326,6 +326,29 @@ describe("apply, then reverse", () => {
     expect(await snapshot()).toEqual(before);
     expect(await constraintDefs(OWNER_FKS)).toEqual(ownerDefs);
   });
+
+  test("a service's or agent's prn_ was never a user id: reverse leaves it alone instead of refusing", async () => {
+    // Found rehearsing on a production copy: station_audit holds rows written by a service
+    // principal (superwitness) under its prn_ long before any rewrite. Reverse must not demand a
+    // Better Auth id for it, or the cutover's rollback is blocked.
+    const SVC = "prn_4444444444444444dddd";
+    const AGENT = "prn_5555555555555555eeee";
+    await sql`INSERT INTO principals (id, kind, org_id, handle) VALUES (${SVC}, 'service', 'org_00000000000000000000', 'svc'), (${AGENT}, 'agent', 'org_00000000000000000000', 'agt')`;
+    await sql`INSERT INTO station_audit (id, tenant_id, user_id, node_id, station_key, verb) VALUES ('a_svc', ${T}, ${SVC}, 'node_x', 's', 'v'), ('a_agt', ${T}, ${AGENT}, 'node_x', 's', 'v')`;
+    try {
+      const plan = await planRewrite(sql, { direction: "reverse" });
+      expect(plan.unmapped).toEqual([]);
+      await applyRewrite(sql, { direction: "forward" });
+      await applyRewrite(sql, { direction: "reverse" });
+      expect((await sql`SELECT id, user_id FROM station_audit WHERE id IN ('a_svc', 'a_agt') ORDER BY id`).map((r) => [r.id, r.user_id])).toEqual([
+        ["a_agt", AGENT],
+        ["a_svc", SVC],
+      ]);
+    } finally {
+      await sql`DELETE FROM station_audit WHERE id IN ('a_svc', 'a_agt')`;
+      await sql`DELETE FROM principals WHERE id IN (${SVC}, ${AGENT})`;
+    }
+  });
 });
 
 describe("the CLI", () => {

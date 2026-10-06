@@ -135,7 +135,14 @@ function checkExtra(opts: RewriteOptions): void {
 async function planIn(tx: Tx, opts: RewriteOptions): Promise<RewritePlan> {
   checkExtra(opts);
   const map = await mapping(tx, opts.direction, opts.extra ?? {});
-  const isTarget = (v: string) => (opts.direction === "forward" ? PRN.test(v) : !PRN.test(v));
+  // An agent's or service's prn_ was never a Better Auth user id (services write station_audit
+  // under their own principal), so it is already right in BOTH directions. Only a human prn_
+  // needs mapping back; a plane-only human still has to be named with --map.
+  const nonHuman = new Set(
+    (await tx<{ id: string }[]>`SELECT id FROM principals WHERE kind <> 'human'`).map((r) => r.id),
+  );
+  const isTarget = (v: string) =>
+    nonHuman.has(v) || (opts.direction === "forward" ? PRN.test(v) : !PRN.test(v));
   const counts: RewritePlan["counts"] = [];
   const unmapped: RewritePlan["unmapped"] = [];
 
