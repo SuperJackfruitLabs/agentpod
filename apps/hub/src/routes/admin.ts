@@ -13,6 +13,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { adminMiddleware, getRequestContext } from "../auth/admin-middleware";
 import { authMiddleware } from "../auth/middleware";
+import { retiredUnderPlane } from "../auth/org-plane/retired";
 import { createLogger } from "../utils/logger";
 import { adminGrantsRouter } from "./admin-grants";
 import { adminPrincipalsRouter } from "./admin-principals";
@@ -46,6 +47,10 @@ const log = createLogger("admin-routes");
 // =============================================================================
 
 export const adminRouter = new Hono();
+
+// Under ORG_PLANE_*: 410 managed_by_org_plane for what the plane now owns (decision D3).
+// First, ahead of authMiddleware — a retired route need not authenticate to say it moved.
+adminRouter.use("*", retiredUnderPlane());
 
 // Apply auth middleware to all admin routes
 adminRouter.use("*", authMiddleware);
