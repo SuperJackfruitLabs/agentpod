@@ -8,6 +8,9 @@ import { createPrincipal } from "../../src/services/principals";
 import { handleRoomMessage } from "../../src/services/matrix-as/inbound";
 import { SESSION_BUSY_MESSAGE } from "../../src/services/acp-sessions";
 import { pollUntil } from "../helpers/wait";
+import { setOrgPlaneForTests, TEST_PLANE } from "../../src/auth/org-plane/config";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../../src/services/org-plane/directory";
+import { OrgPlaneError } from "../../src/services/org-plane/client";
 import {
   clearPendingPermission,
   notePendingPermission,
@@ -888,5 +891,79 @@ describe("a message in a board room", () => {
     // `elicitations` absent: the message is dropped as it always was, with nothing
     // thrown. This is the path every deployment without a board takes.
     await handleRoomMessage(message(OWNER_MXID, "hello", BOARD_ROOM), deps());
+  });
+});
+
+describe("an inbound room message under the org plane, while the plane is unreachable", () => {
+  // Design §5.7: resolving the sender (and its grant) is the one plane read on this path. A cold
+  // cache during an outage is refused with a message that says so — never "I do not recognise you".
+  function planeWith(over: Partial<PrincipalDirectory>) {
+    const restores = [
+      setOrgPlaneForTests(TEST_PLANE),
+      setPrincipalDirectoryForTests({
+        principal: async (id) =>
+          id === AGENT_PRINCIPAL
+            ? { id, kind: "agent", handle: "mx-inbound-it-agent", displayName: null, organizationId: null, suspended: false, grant: null }
+            : null,
+        identity: async (_s, ext) => (ext === OWNER_MXID ? { principalId: OWNER_PRINCIPAL, kind: "human", suspended: false } : null),
+        list: async () => [],
+        invalidate: () => {},
+        ...over,
+      }),
+    ];
+    return () => restores.reverse().forEach((r) => r());
+  }
+
+  test("a sender that cannot be resolved is told the account service is unreachable, and nothing is prompted", async () => {
+    const restore = planeWith({
+      identity: async () => {
+        throw new OrgPlaneError(0, "unreachable");
+      },
+    });
+    try {
+      await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
+    } finally {
+      restore();
+    }
+    expect(prompts).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toContain("cannot check who you are");
+    expect(sent[0]!.body).not.toMatch(/do not recognise/i);
+  });
+
+  test("a grant that cannot be read is refused the same way, not read as 'no grant'", async () => {
+    const restore = planeWith({
+      principal: async (id) => {
+        if (id === AGENT_PRINCIPAL) {
+          return { id, kind: "agent", handle: "mx-inbound-it-agent", displayName: null, organizationId: null, suspended: false, grant: null };
+        }
+        throw new OrgPlaneError(503, "error");
+      },
+    });
+    try {
+      await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
+    } finally {
+      restore();
+    }
+    expect(prompts).toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.body).toContain("cannot check who you are");
+  });
+
+  test("a resolved sender with a covering grant still prompts", async () => {
+    const restore = planeWith({
+      principal: async (id) =>
+        id === AGENT_PRINCIPAL
+          ? { id, kind: "agent", handle: "mx-inbound-it-agent", displayName: null, organizationId: null, suspended: false, grant: null }
+          : id === OWNER_PRINCIPAL
+            ? { id, kind: "human", handle: "o", displayName: null, organizationId: null, suspended: false, grant: { mayDispatch: [AGENT_PRINCIPAL], mayGrantReach: false, scopes: [] } }
+            : null,
+    });
+    try {
+      await handleRoomMessage(message(OWNER_MXID, "status?"), deps());
+    } finally {
+      restore();
+    }
+    expect(prompts).toHaveLength(1);
   });
 });

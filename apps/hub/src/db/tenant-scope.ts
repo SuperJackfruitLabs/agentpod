@@ -50,6 +50,7 @@ import {
   matrixSpaces,
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
+import { legacyUserPrincipals } from "./schema/legacy-user-principals";
 import { liveActivityTokens } from "./schema/live-activity";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
@@ -237,6 +238,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "lookup is by principal id or by an external id the caller already holds. A route that " +
       "listed them would leak one tenant's people to another, and that route would need scoping " +
       "this table does not have.",
+  },
+
+  legacy_user_principals: {
+    table: legacyUserPrincipals,
+    reason:
+      "The permanent copy of `principal_identities`' better-auth rows, kept after the org-plane " +
+      "cutover so a pre-cutover hub user id (superpipeline's `decided_by_hub_sub`) still resolves. " +
+      "Exempt for the reason that table is: a person is not inside a fleet, they reach one. Read " +
+      "only by `GET /api/evidence/principals/:id`, by an id the caller already holds; nothing lists it.",
   },
 
   user: {

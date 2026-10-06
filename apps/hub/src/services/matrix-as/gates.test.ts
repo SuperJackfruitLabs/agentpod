@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { OrgPlaneError } from "../org-plane/client";
 
 import {
   GATE_EVENT_TYPE,
@@ -268,6 +269,21 @@ describe("acting on a decision", () => {
     await handleGateDecision({ sender: "@rakesh:id.agentpod.dev", content: decision() }, "!room", deps);
     expect(replies).toHaveLength(1);
     expect(replies[0]).toContain("already");
+  });
+
+  test("a plane outage while resolving the sender is refused as identity-unavailable, not unlinked", async () => {
+    // Design §5.7: the one plane call on an authorization path. Down is not "unlinked".
+    const { deps, resolved, replies } = decisionDeps({
+      principalForMatrixId: async () => {
+        throw new OrgPlaneError(0, "unreachable");
+      },
+    });
+    const r = await handleGateDecision({ sender: "@rakesh:id.agentpod.dev", content: decision() }, "!room", deps);
+    expect(r).toEqual({ status: "refused", reason: "identity-unavailable" });
+    expect(resolved).toHaveLength(0);
+    // Refused AND told: a silent drop reads as a broken button.
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("cannot check who you are");
   });
 
   test("checks attribution before it resolves anything", async () => {

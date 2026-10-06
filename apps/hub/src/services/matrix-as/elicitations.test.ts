@@ -5,6 +5,7 @@ process.env.NODE_ENV = "test";
 
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { OrgPlaneError } from "../org-plane/client";
 
 import { db, rawSql } from "../../db/drizzle";
 import { matrixElicitationEvents } from "../../db/schema/matrix";
@@ -379,6 +380,25 @@ describe("a reply in a board room, read as an answer", () => {
 
     expect(out).toEqual({ status: "refused", code: "UNRESOLVED_SENDER" });
     expect(answered).toHaveLength(0);
+  });
+
+  test("a plane outage while resolving the sender is refused as IDENTITY_UNAVAILABLE and said in the room", async () => {
+    // Design §5.7: the one plane call on an authorization path. Down is not "unresolved".
+    const d = delivery();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
+    const { deps, answered, replies } = answerRig({
+      principalForMatrixId: async () => {
+        throw new OrgPlaneError(0, "unreachable");
+      },
+    });
+
+    const out = await handleElicitationAnswer({ sender: HUMAN, body: "1" }, ROOM, deps);
+
+    expect(out).toEqual({ status: "refused", code: "IDENTITY_UNAVAILABLE" });
+    expect(answered).toHaveLength(0);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("cannot check who you are");
+    expect(await openQuestionInRoom(ROOM)).not.toBeNull();
   });
 
   test("a question already settled on the board says so once", async () => {

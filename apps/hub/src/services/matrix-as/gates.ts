@@ -43,6 +43,7 @@ import { createLogger } from "../../utils/logger";
 import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contract";
 import { noteHubEvent } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
@@ -585,6 +586,11 @@ export async function projectGate(
 export type DecisionRefusal =
   | "not-a-decision"
   | "unlinked-sender"
+  /**
+   * The org plane could not be asked who the sender is, and nothing was cached (design §5.7's
+   * one named online dependency). Not "unlinked": the sender may well be linked.
+   */
+  | "identity-unavailable"
   /** A linked principal that is not a person — an agent or a service. */
   | "not-human"
   | "unknown-gate"
@@ -741,7 +747,19 @@ export async function handleGateDecision(
     return { status: "refused", reason: "reference-mismatch" };
   }
 
-  const principal = await deps.principalForMatrixId(event.sender);
+  let principal: Awaited<ReturnType<GateDecisionDeps["principalForMatrixId"]>>;
+  try {
+    principal = await deps.principalForMatrixId(event.sender);
+  } catch (error) {
+    // The one plane call design §5.7 allows. Down is not "unlinked": say which, in the room,
+    // because a person who tapped Approve and saw nothing would tap again or give up.
+    log.warn("could not resolve a gate decision's sender", {
+      sender: event.sender,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await deps.reply(roomId, IDENTITY_UNAVAILABLE_TEXT);
+    return { status: "refused", reason: "identity-unavailable" };
+  }
   if (!principal) {
     // An unlinked Matrix user in a room is a case this must handle explicitly
     // (charter decisions/2026-08-13-ecosystem-identity.md, Decision 2). It is

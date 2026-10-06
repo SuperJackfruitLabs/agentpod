@@ -33,6 +33,7 @@ import {
   type ElicitationPendingDelivery,
 } from "./elicitation-card";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
 
 const log = createLogger("matrix-elicitations");
 
@@ -408,7 +409,20 @@ export async function handleElicitationAnswer(
     return { status: "unmatched" };
   }
 
-  const identity = await deps.principalForMatrixId(event.sender);
+  let identity: Awaited<ReturnType<ElicitationAnswerDeps["principalForMatrixId"]>>;
+  try {
+    identity = await deps.principalForMatrixId(event.sender);
+  } catch (error) {
+    // The org plane could not say who this is and nothing was cached (design §5.7). Refused,
+    // and said, because "down" is not "unknown" and the question stays open for a retry.
+    log.warn("could not resolve an answer's sender", {
+      roomId,
+      sender: event.sender,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await deps.reply(roomId, IDENTITY_UNAVAILABLE_TEXT);
+    return { status: "refused", code: "IDENTITY_UNAVAILABLE" };
+  }
   if (!identity) {
     // Unknown and ambiguous are refused as firmly as each other: guessing would
     // attribute an answer to somebody who did not give it, and an answer's whole value
