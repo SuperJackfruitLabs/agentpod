@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..");
+// The hub's OWN minting, frozen at v7 (tenant, no org/ent) for as long as the hub mints tokens
+// (ORG_PLANE_* unset). The canonical fixture, fixtures/ecosystem-identity/token_claims.json, is
+// v8 — the organization plane's shape — and is pinned by packages/contract/src/token-claims.test.ts.
 const fixture = JSON.parse(
-  readFileSync(join(REPO_ROOT, "fixtures/ecosystem-identity/token_claims.json"), "utf8")
+  readFileSync(join(import.meta.dir, "..", "..", "src", "auth", "testdata", "token_claims.v7.json"), "utf8")
 ) as {
   algorithm: { alg: string };
   issued: Array<{ claim: string; required: boolean; enum?: string[] }>;

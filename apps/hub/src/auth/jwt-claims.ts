@@ -5,8 +5,11 @@
  * contract the moment a second plane reads them
  * (charter decisions/2026-08-15-one-issuer-and-offline-verification.md), and a
  * contract that only exists inside a plugin's options object cannot be tested
- * against the shared fixture. `fixtures/ecosystem-identity/token_claims.json` is
- * the source of truth; `tests/unit/jwt-issuer.test.ts` holds this to it.
+ * against a fixture. This is the hub's OWN (legacy) minting, used while ORG_PLANE_* is unset:
+ * its shape is frozen at v7 in `src/auth/testdata/token_claims.v7.json`, and
+ * `tests/unit/jwt-issuer.test.ts` holds this to it. The canonical
+ * `fixtures/ecosystem-identity/token_claims.json` is v8 — the organization plane's shape
+ * (`org`/`ent`, no `tenant`) — pinned by `packages/contract/src/token-claims.ts`.
  *
  * A rename here is a silent authorization failure in superpipeline, and it fails in
  * the direction that looks like the caller simply having no permission — which
@@ -59,8 +62,8 @@ export interface TokenPayload extends Record<string, unknown> {
   /**
    * OAuth's space-delimited scope list (RFC 8693 §4.2): the grant's permissions beyond the
    * control pair — `evidence:read`, `runs:write` and `transcripts:read` (`GRANT_SCOPES`). ABSENT when the grant holds none, so a consumer
-   * never reads permission into its absence. `fixtures/ecosystem-identity/token_claims.json`
-   * (version 7) describes it.
+   * never reads permission into its absence. `src/auth/testdata/token_claims.v7.json` (the
+   * frozen v7 copy of the shared fixture) describes it.
    */
   scope?: string;
   /**

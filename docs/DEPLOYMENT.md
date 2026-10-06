@@ -604,6 +604,28 @@ Operator rules apply to every string in an item, including ids, tool names and s
 
 Stored events are never modified; redaction applies to what the evidence routes return.
 
+### Organization plane (P3, off until P4)
+
+These settings switch the hub from its own sign-in and token issuer to the organization plane's
+(the issuer contract, `accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md`). **Leave
+them all unset**: an unset hub behaves exactly as it always has. The cutover (P4) sets them.
+
+| Variable | Meaning |
+|---|---|
+| `ORG_PLANE_ISSUER` | The exact `iss` to accept — compared as one string, never a prefix. |
+| `ORG_PLANE_JWKS_URL` | The plane's key set (EdDSA). |
+| `ORG_PLANE_AUDIENCE` | This hub's resource, which must appear in a token's `aud` — `https://hub.agentpod.dev` for the hosted hub. |
+| `ORG_PLANE_URL` | Base URL of the plane's APIs. A trailing `/` is dropped. |
+| `ORG_PLANE_SERVICE_CREDENTIAL_FILE` | Path to a file holding one line, `svc_<20 hex>:<secret>` — the hub's own service credential, printed once by the plane's `scripts/service.ts create`. Mode `0600`, owned by the hub's user. |
+
+The five are **all-or-none**. A hub with some set and others not, a URL that is not `https`
+(plain `http` is accepted only for a loopback host), or a credential file that is unreadable,
+empty or not `svc_<20 hex>:<secret>` **stops at boot**, naming each variable — never the
+credential's contents. There is no dual mode: set, the hub trusts the plane's tokens only.
+
+`GET /public/org-plane` tells the console and `fleet login` which issuer to use: `{ "issuer": null }`
+while the settings are unset, `{ issuer, url, audience }` once they are.
+
 ## 5. Hub — build + deploy
 
 ```bash
