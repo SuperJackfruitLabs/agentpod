@@ -22,7 +22,7 @@ import { bridgeDispatches } from "../db/schema/bridge";
 import { principalIdentities } from "../db/schema/identities";
 import { principals } from "../db/schema/organization";
 import { tenantScope } from "../db/tenant-scope";
-import { EVIDENCE_READ, getGrant } from "../services/grants";
+import { EVIDENCE_READ, getGrant, type GrantScope } from "../services/grants";
 import { principalById, principalForUser } from "../services/principals";
 
 export interface EvidenceDeps {
@@ -30,9 +30,14 @@ export interface EvidenceDeps {
   now?: () => Date;
 }
 
-type Authorized = { ok: true; tenant: string } | { ok: false; status: 401 | 403 };
+type Authorized = { ok: true; tenant: string; principalId: string } | { ok: false; status: 401 | 403 };
 
-async function authorize(header: string | undefined, jwks: () => Promise<JSONWebKeySet>): Promise<Authorized> {
+/** Each route names the ONE scope it needs; holding another never stands in for it. */
+async function authorize(
+  header: string | undefined,
+  jwks: () => Promise<JSONWebKeySet>,
+  scope: GrantScope,
+): Promise<Authorized> {
   const match = /^Bearer +(\S+)$/i.exec((header ?? "").trim());
   if (!match) return { ok: false, status: 401 };
   const claims = await verifyHubToken(match[1]!, jwks);
@@ -43,8 +48,8 @@ async function authorize(header: string | undefined, jwks: () => Promise<JSONWeb
   const principal = (await principalById(claims.sub)) ?? (await principalForUser(claims.sub));
   if (!principal || principal.suspendedAt) return { ok: false, status: 403 };
   const grant = await getGrant(principal.id);
-  if (!grant || !grant.scopes.includes(EVIDENCE_READ)) return { ok: false, status: 403 };
-  return { ok: true, tenant: claims.tenant };
+  if (!grant || !grant.scopes.includes(scope)) return { ok: false, status: 403 };
+  return { ok: true, tenant: claims.tenant, principalId: principal.id };
 }
 
 const refusal = (status: 401 | 403) => ({ error: status === 401 ? "unauthorized" : "forbidden" });
@@ -92,7 +97,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
 
   return new Hono()
     .get("/api/evidence/runs/:source/:externalRunId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const source = c.req.param("source");
       const runId = c.req.param("externalRunId");
@@ -130,7 +135,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       });
     })
     .get("/api/evidence/attempts/:attemptId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const [row] = await db
         .select({ externalSource: acpRuns.externalSource, externalRunId: acpRuns.externalRunId })
@@ -159,7 +164,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
      * is still answered: a decision made before the suspension is still that principal's.
      */
     .get("/api/evidence/principals/:principalId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
       if (!auth.ok) return c.json(refusal(auth.status), auth.status);
       const id = await principalIdFor(c.req.param("principalId"));
       if (!id) return c.json({ error: "not_found" }, 404);

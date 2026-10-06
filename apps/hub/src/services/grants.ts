@@ -27,10 +27,16 @@ import { principalGrants } from "../db/schema/grants";
  * `runs:write` — report runs to superwitness's run registry (`POST /v1/runs`, superwitness app spec
  * §3.4). Minted into the token's `scope` and honoured by superwitness alone: no hub route reads it,
  * and the evidence routes refuse a principal that holds only this.
+ *
+ * `transcripts:read` — read what a session SAID: prompts, messages, tool inputs and outputs,
+ * redacted (`GET /api/evidence/sessions/:sessionId/transcript…`, superwitness transcripts spec
+ * §3.2). Separate from `evidence:read` on purpose, in both directions: knowing that a run failed
+ * is not permission to read its content, and reading content is not permission to the ledger.
  */
-export const GRANT_SCOPES = ["evidence:read", "runs:write"] as const;
+export const GRANT_SCOPES = ["evidence:read", "runs:write", "transcripts:read"] as const;
 export type GrantScope = (typeof GRANT_SCOPES)[number];
 export const EVIDENCE_READ: GrantScope = "evidence:read";
+export const TRANSCRIPTS_READ: GrantScope = "transcripts:read";
 
 export interface Grant {
   /** Principal ids. Empty means "may dispatch nothing", which is a decision. */

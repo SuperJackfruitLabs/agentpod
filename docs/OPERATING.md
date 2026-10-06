@@ -200,11 +200,14 @@ endpoint, not these verbs.
 
 A service principal is a program with no person behind it. It holds a `svc_…:<secret>`
 credential, exchanges it at `POST /api/auth/service-token` for a five-minute token, and its grant
-holds scopes only, never dispatch or reach. Two scopes exist:
+holds scopes only, never dispatch or reach. Three scopes exist:
 
 - `evidence:read` — read run evidence from the hub and superpipeline (superwitness reads this way);
 - `runs:write` — report runs to superwitness's run registry. The hub mints it and no hub route
   honours it; superwitness checks it.
+- `transcripts:read` — read a session's transcript (prompts, messages, tool inputs and outputs,
+  redacted) from the hub's evidence routes. It does not include `evidence:read`, and
+  `evidence:read` does not include it.
 
 The token's audiences are its client's, from `HUB_OAUTH_CLIENTS` (edit them with estate's
 `bin/hub-audiences`, never by hand). Give a service only the planes it calls: superpipeline's run
