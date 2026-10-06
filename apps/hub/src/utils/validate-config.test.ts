@@ -703,3 +703,17 @@ describe("validateConfig — docker daemon", () => {
     );
   });
 });
+
+describe("validateConfig — ORG_PLANE_*", () => {
+  it("org-plane errors are fatal configuration errors", () => {
+    const errors = collectConfigErrors(config, quiet, undefined, [
+      { field: "ORG_PLANE_URL", message: "missing" },
+    ]);
+    expect(errors).toContainEqual({ field: "ORG_PLANE_URL", message: "missing" });
+  });
+
+  it("legacy mode (no org-plane settings) adds no org-plane errors", () => {
+    const errors = collectConfigErrors(config, quiet, undefined, []);
+    expect(errors.filter((e) => e.field.startsWith("ORG_PLANE_"))).toEqual([]);
+  });
+});
