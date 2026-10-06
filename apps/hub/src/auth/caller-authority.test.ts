@@ -95,6 +95,7 @@ describe("under the plane, after a long outage (security review finding 7c)", ()
           return { id, kind: "agent" as const, handle: "a", displayName: "A", organizationId: "org_00000000000000000000", suspended: false, grant };
         },
         lookupIdentity: async () => null,
+        identitiesOf: async () => null,
         listPrincipals: async () => [],
       }),
     });
