@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -263,6 +265,96 @@ func TestLogoutForgetsTheToken(t *testing.T) {
 	}
 	if out, code := runLogin(t, bin, srv.URL, home, "logout"); code != 0 {
 		t.Fatalf("logout failed:\n%s", out)
+	}
+	if _, code := runLogin(t, bin, srv.URL, home, "whoami"); code == 0 {
+		t.Fatal("whoami should fail after logout")
+	}
+}
+
+// A hub that names an org plane: login runs the device flow there, prints the code, and the next
+// command works from the stored device credential. The fake approves after one pending poll.
+func TestLoginUsesThePlaneDeviceFlowWhenTheHubNamesOne(t *testing.T) {
+	bin := build(t)
+	home := t.TempDir()
+	var srv *httptest.Server
+	polls := 0
+	tok := jwtish("prn_plane_login", "human")
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/public/org-plane":
+			fmt.Fprintf(w, `{"issuer":%q,"url":%q,"audience":"https://hub.test"}`, srv.URL, srv.URL)
+		case "/api/auth/device/code":
+			fmt.Fprintf(w, `{"device_code":"dc","user_code":"WXYZ-1234","verification_uri":"%s/device","verification_uri_complete":"%s/device?user_code=WXYZ-1234","expires_in":600,"interval":1}`, srv.URL, srv.URL)
+		case "/api/auth/device/token":
+			polls++
+			if polls == 1 {
+				w.WriteHeader(400)
+				_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"device_credential":"dev_0123456789abcdef0123:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"}`))
+		case "/api/token/device":
+			fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":300}`, tok)
+		default:
+			http.Error(w, `{"error":"issuer_moved"}`, http.StatusGone)
+		}
+	}))
+	// Started only after srv is assigned: the handler reads srv.URL.
+	srv.Start()
+	defer srv.Close()
+
+	out, code := runLogin(t, bin, srv.URL, home, "login")
+	if code != 0 {
+		t.Fatalf("login failed (%d):\n%s", code, out)
+	}
+	if !strings.Contains(out, "WXYZ-1234") || !strings.Contains(out, "prn_plane_login") {
+		t.Fatalf("login must show the user code and who signed in:\n%s", out)
+	}
+	if strings.Contains(out, "/api/auth/authorize") {
+		t.Fatalf("the loopback flow must not run against a plane hub:\n%s", out)
+	}
+}
+
+// Signing out of a plane credential must not send it to the hub's revoke route (gone under the
+// plane); it says where the credential is revoked instead, and still removes it locally.
+func TestLogoutOfAPlaneDeviceDoesNotAskTheHub(t *testing.T) {
+	bin := build(t)
+	home := t.TempDir()
+	var srv *httptest.Server
+	var hubDeviceCalls atomic.Int32
+	tok := jwtish("prn_plane_bye", "human")
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/public/org-plane":
+			fmt.Fprintf(w, `{"issuer":%q,"url":%q,"audience":"https://hub.test"}`, srv.URL, srv.URL)
+		case "/api/auth/device/code":
+			fmt.Fprintf(w, `{"device_code":"dc","user_code":"BYE0-0000","verification_uri":"%s/device","verification_uri_complete":"%s/device?user_code=BYE0-0000","expires_in":600,"interval":1}`, srv.URL, srv.URL)
+		case "/api/auth/device/token":
+			_, _ = w.Write([]byte(`{"device_credential":"dev_0123456789abcdef0123:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"}`))
+		case "/api/token/device":
+			fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":300}`, tok)
+		default:
+			if strings.HasPrefix(r.URL.Path, "/api/auth/devices") {
+				hubDeviceCalls.Add(1)
+			}
+			http.Error(w, `{"error":"managed_by_org_plane"}`, http.StatusGone)
+		}
+	}))
+	// Started only after srv is assigned: the handler reads srv.URL.
+	srv.Start()
+	defer srv.Close()
+
+	if out, code := runLogin(t, bin, srv.URL, home, "login"); code != 0 {
+		t.Fatalf("login failed (%d):\n%s", code, out)
+	}
+	out, code := runLogin(t, bin, srv.URL, home, "logout")
+	if code != 0 || !strings.Contains(out, "signed out") || !strings.Contains(out, "Devices") {
+		t.Fatalf("logout (%d):\n%s", code, out)
+	}
+	if n := hubDeviceCalls.Load(); n != 0 {
+		t.Fatalf("logout sent the plane credential to the hub's device routes %d times", n)
 	}
 	if _, code := runLogin(t, bin, srv.URL, home, "whoami"); code == 0 {
 		t.Fatal("whoami should fail after logout")

@@ -189,7 +189,11 @@ func fleetLogout() {
 		if hub == "" {
 			hub = hubBase()
 		}
-		if err := fleetcred.RevokeDevice(hub, d); err != nil {
+		if d.PlaneURL != "" {
+			// The plane owns this credential, and the hub's revoke route is gone under the plane
+			// (410). Sending the secret there would hand it to a host that never issued it.
+			fmt.Printf("Signed out on this machine. To revoke %s everywhere, remove it under Devices at %s\n", d.ID, d.PlaneURL)
+		} else if err := fleetcred.RevokeDevice(hub, d); err != nil {
 			fmt.Fprintf(os.Stderr,
 				"Signed out on this machine, but the hub did not confirm revoking %s: %v\n\n"+
 					"  fleet devices revoke %s   from another machine\n"+
