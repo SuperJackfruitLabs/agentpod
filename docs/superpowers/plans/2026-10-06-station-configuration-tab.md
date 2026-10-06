@@ -17,6 +17,7 @@
 - **Never re-fetch or re-derive a plan digest at apply time.** Apply sends the digest of exactly the plan on screen; re-reading it would turn "apply what I reviewed" into "apply whatever is current" (`HarnessConfigPanel.svelte:155-162`, spec D6).
 - **Local host or agent names never appear in shipped code, tests or docs.** The product word is **workspace**.
 - **Verification command:** `cd apps/console && pnpm check && pnpm test && pnpm build`. `pnpm check` runs `svelte-kit sync` first — it is SvelteKit.
+- **In a fresh worktree, run `pnpm install` then `pnpm exec svelte-kit sync` before `pnpm test`.** Without the sync there is no `.svelte-kit/tsconfig.json`, and vitest dies in `vite:esbuild` resolving `tsconfig.json`'s `extends` — a failure that looks nothing like its cause.
 - Required CI checks are `contract`, `hub`, `node-agent`, `console`, `worker`, and branch protection is `strict`: the branch must be up to date with `main` before it merges.
 - Console production builds need `PUBLIC_HUB_URL=https://hub.agentpod.dev` at build time.
 
@@ -526,3 +527,33 @@ Spec "Verification". On a live workspace station advertising `config.manage`:
 - [ ] switching to `Logs` mid-review and back leaves the reviewed plan and its digest on screen
 - [ ] an old `?tab=skills` link lands on `Configuration`
 - [ ] the `Files` tab shows the browser and no configuration panel
+
+---
+
+## Executed with these corrections (2026-10-06)
+
+Three things the plan got wrong, found by running it. Recorded here because the
+task steps above were written before any of them was known.
+
+**1. `rerender` cannot drive the `active` flip.** Measured: one render plus two
+rerenders with *identical* props calls `getStationConfig` three times, because
+rerender replaces the prop set and re-runs the load effect regardless. A test
+built on it could not tell "refreshed because the tab was re-entered" from
+"refreshed because rerender happened". Task 1 therefore adds
+`apps/console/src/lib/components/stations/harness-config-panel-test-host.svelte`
+— a `*-test-host.svelte` wrapper in the existing convention, owning `active` as
+its own `$state` and exposing a toggle button. A parent flipping one prop is
+exactly what a tab switch is.
+
+**2. The review section had to come out of the loading chain.** It sat inside
+the `{:else}` of `{#if loading}`, so the refresh that D6 introduces would take a
+reviewed plan **and its apply button** off the screen while the rows reloaded —
+and leave them off if the reload errored, though the plan was still good. It now
+renders on its own condition,
+`{#if plan || planRefusal || (!loading && !error && rows.length > 0)}`.
+Waiting for the refresh in the test would have hidden this; the test asserts
+without waiting, so it fails if the review is ever re-gated on loading.
+
+**3. Both new guards were revert-proofed.** Stubbing the refresh effect to
+`if (false)` turns "becoming active again re-reads the observations" red;
+re-gating the review on `!loading` turns the plan-survival test red.
