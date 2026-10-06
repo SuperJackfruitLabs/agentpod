@@ -11,6 +11,11 @@
  *   an unknown kid refetches at once, but only the first time that kid is seen and at most
  *   once per `kidRefetchMs` across all kids.
  * - `client_id`, `azp`, `sid` pass through and are ignored (contract §2); `amr` is never required.
+ * - Every fetch is bounded by `fetchTimeoutMs` (3 s), and a stale set is revalidated in the
+ *   background: once any set has been fetched, a request never waits on a routine refresh —
+ *   it verifies against the cached set (even an expired one) while the refresh runs. Only an
+ *   unknown kid, or having no set at all, waits, and then for at most the timeout. A plane that
+ *   accepts TCP and never answers cannot stall plane-mode requests (security review finding 2).
  */
 import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet, type JWK } from "jose";
 import { OrgPlaneTokenClaims } from "@agentpod/contract";
@@ -27,7 +32,7 @@ export interface PlaneVerifierOptions {
   issuer: string;
   audience: string;
   jwksUrl: string;
-  fetch?: (url: string) => Promise<Response>;
+  fetch?: (url: string, init?: { signal?: AbortSignal }) => Promise<Response>;
   now?: () => number;
   /** Capped at ten minutes whatever is passed. */
   maxAgeMs?: number;
@@ -35,6 +40,8 @@ export interface PlaneVerifierOptions {
   retryAfterMs?: number;
   /** Minimum gap between refetches triggered by unknown kids, whichever kids they are. */
   kidRefetchMs?: number;
+  /** Upper bound on one JWKS fetch, body included. Default 3 s. */
+  fetchTimeoutMs?: number;
 }
 
 export interface PlaneVerifier {
@@ -42,11 +49,15 @@ export interface PlaneVerifier {
 }
 
 export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
-  const fetchFn = o.fetch ?? ((url: string) => fetch(url, { headers: { accept: "application/json" } }));
+  const fetchFn =
+    o.fetch ??
+    ((url: string, init?: { signal?: AbortSignal }) =>
+      fetch(url, { headers: { accept: "application/json" }, signal: init?.signal }));
   const now = o.now ?? Date.now;
   const maxAge = Math.min(o.maxAgeMs ?? TEN_MINUTES, TEN_MINUTES);
   const retryAfter = o.retryAfterMs ?? 30_000;
   const kidRefetch = o.kidRefetchMs ?? 5_000;
+  const fetchTimeout = o.fetchTimeoutMs ?? 3_000;
 
   let good: { keys: JWK[]; at: number } | null = null;
   let lastAttempt = Number.NEGATIVE_INFINITY;
@@ -59,10 +70,21 @@ export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
     if (!force && now() - lastAttempt < retryAfter) return Promise.resolve();
     lastAttempt = now();
     inflight = (async () => {
+      const signal = AbortSignal.timeout(fetchTimeout);
+      // An injected fetch may ignore the signal, so the abort also settles the race itself.
+      const aborted = new Promise<never>((_, reject) =>
+        signal.addEventListener("abort", () => reject(new Error(`JWKS fetch exceeded ${fetchTimeout}ms`)), { once: true }),
+      );
+      aborted.catch(() => {});
       try {
-        const res = await fetchFn(o.jwksUrl);
-        if (!res.ok) throw new Error(`JWKS answered ${res.status}`);
-        const body = (await res.json()) as { keys?: unknown };
+        const body = (await Promise.race([
+          (async () => {
+            const res = await fetchFn(o.jwksUrl, { signal });
+            if (!res.ok) throw new Error(`JWKS answered ${res.status}`);
+            return res.json();
+          })(),
+          aborted,
+        ])) as { keys?: unknown };
         if (!Array.isArray(body.keys)) throw new Error("JWKS has no keys array");
         const keys = (body.keys as JWK[]).filter((k) => k && k.kty === "OKP" && k.crv === "Ed25519");
         good = { keys, at: now() };
@@ -89,7 +111,8 @@ export function createPlaneVerifier(o: PlaneVerifierOptions): PlaneVerifier {
         return null;
       }
 
-      if (!good || now() - good.at >= maxAge) await refresh();
+      if (!good) await refresh();
+      else if (now() - good.at >= maxAge) void refresh(); // stale-while-revalidate: never wait on it
       if (
         good &&
         kid &&

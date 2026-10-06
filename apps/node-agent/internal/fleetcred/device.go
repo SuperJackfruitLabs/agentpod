@@ -69,14 +69,60 @@ func SaveDevice(d Device) error {
 	if p == "" {
 		return errors.New("cannot determine a config directory to store the device credential in")
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o600)
+	return writePrivate(p, b)
+}
+
+// writePrivate replaces p with b atomically and privately: a temp file created 0600 in the same
+// directory, synced, then renamed over p — so a crash leaves the old file or the new one, never a
+// truncated one. The directory is chmod'ed 0700 even when it already existed (MkdirAll sets the
+// mode only on create), and the file ends 0600 whatever the old one was (security review finding 5).
+func writePrivate(p string, b []byte) error {
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "."+filepath.Base(p)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil { // CreateTemp already uses 0600; explicit, not assumed
+		f.Close()
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		return err
+	}
+	ok = true
+	if d, err := os.Open(dir); err == nil { // make the rename itself durable; best effort
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 // LoadDevice reads the stored credential, or ErrNoDevice.

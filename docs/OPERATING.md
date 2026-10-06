@@ -1922,6 +1922,13 @@ What the script does and refuses:
 - Everything happens in **one transaction**: a failure part-way leaves the database exactly as
   it was. The transaction holds `lock_timeout = 10s`; stop the hub first so the script never
   waits on the hub's own locks.
+- **`--apply` refuses while a hub is running against the database** (exit 2, "the hub is running
+  against this database"). Every hub holds a session-level advisory lock, shared, from boot until
+  it exits — key `(1095782212, 1)` (`0x41504F44`, "APOD"), visible in `pg_locks` as
+  `locktype = 'advisory' AND classid = 1095782212 AND objid = 1`; `apps/hub/src/db/hub-running-lock.ts`.
+  The script takes the same key exclusively for the length of the apply, so a hub started
+  meanwhile refuses to boot until it finishes. A dry run checks the lock and lets go at once; it
+  still reads, and exits 2 with the same reason when a hub holds the lock.
 - Forward drops the 18 foreign keys from those columns to `"user"` (Better Auth ids no longer
   live there), drops and re-creates the six composite owner foreign keys around the rewrite, and
   seeds `legacy_user_principals` (old user id → `prn_`, kept permanently so ids other planes
@@ -1931,6 +1938,10 @@ What the script does and refuses:
   at the plane during the window has no Better Auth id, and the reverse refuses on their rows
   until you decide: `--map prn_…=<user id>` to hand them to an existing user, or
   `--map prn_…=prn_…` to keep the row as it is. `legacy_user_principals` and `hub_operators`
-  are left in place (they are read only under the plane). A value that forward mapped onto
-  someone else's `prn_` (such as `default-user`) comes back as that person's user id.
+  are left in place (they are read only under the plane).
+- Forward records every value it rewrote, per row, in `user_id_rewrites` (table, column, the
+  row's key, old value, new value — `--map` pairs included). Reverse restores those rows from
+  that record first and then empties it, so a `--map default-user=prn_…` comes back as
+  `default-user` exactly, not as the user id that shares its `prn_`. Rows written after the
+  forward (and so not in the record) go back through the mapping above.
 - Both directions are safe to repeat: a second run finds everything already in place.

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
-import { beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOutLocal, wasSignedIn } from "./org-plane";
+import { beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOut, signOutLocal, wasSignedIn } from "./org-plane";
 
 const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
 const ORIGIN = "https://console.test";
@@ -154,5 +154,89 @@ describe("reauthorizeIfSignedIn (the layout's guard, after a reload)", () => {
     sessionStorage.setItem("agentpod.planeSignedIn", "1");
     expect(reauthorizeIfSignedIn(null, "/", { origin: ORIGIN, navigate })).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+// Security review finding 6: the plane URL the hub names is where the browser is sent to sign in.
+// https only, plain http only for a loopback host — the hub's own rule for ORG_PLANE_URL.
+describe("the plane URL must be https", () => {
+  test("discoverPlane treats a non-https plane URL as no plane at all", async () => {
+    for (const url of ["http://accounts.test", "javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "accounts.test"]) {
+      expect(await discoverPlane("https://hub.test", async () => json(200, { ...PLANE, url }))).toBeNull();
+    }
+    for (const url of ["https://accounts.test", "http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787"]) {
+      expect(await discoverPlane("https://hub.test", async () => json(200, { ...PLANE, url }))).not.toBeNull();
+    }
+  });
+
+  test("beginSignIn refuses to navigate anywhere but an https plane", async () => {
+    const navigate = vi.fn();
+    for (const url of ["javascript:alert(1)", "http://accounts.test", ""]) {
+      await expect(beginSignIn({ ...PLANE, url }, { returnTo: "/", origin: ORIGIN, navigate })).rejects.toThrow(/https/);
+    }
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+// Security review finding 7a: logging out revokes the refresh token at the plane (RFC 7009, at
+// the revocation endpoint the plane's discovery names), and memory is cleared whatever happens.
+describe("signOut", () => {
+  async function signedIn() {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+      origin: ORIGIN, now: () => 0,
+      fetchFn: (async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" })) as never,
+    });
+  }
+
+  test("revokes the refresh token at the discovered revocation endpoint and forgets everything", async () => {
+    await signedIn();
+    const calls: Array<{ url: string; body: string | null }> = [];
+    const fetchFn = vi.fn(async (u: string, init?: RequestInit) => {
+      calls.push({ url: String(u), body: init?.body ? String(init.body) : null });
+      if (String(u) === "https://accounts.test/.well-known/oauth-authorization-server") {
+        return json(200, { issuer: "https://accounts.test", revocation_endpoint: "https://accounts.test/api/auth/oauth2/revoke" });
+      }
+      return new Response(null, { status: 200 });
+    });
+    await signOut(PLANE, { fetchFn: fetchFn as never });
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://accounts.test/.well-known/oauth-authorization-server",
+      "https://accounts.test/api/auth/oauth2/revoke",
+    ]);
+    const body = new URLSearchParams(calls[1]!.body!);
+    expect(Object.fromEntries(body)).toEqual({ token: "rt1", token_type_hint: "refresh_token", client_id: "agentpod-console" });
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
+    expect(wasSignedIn()).toBe(false);
+  });
+
+  test("memory is cleared even when the plane is unreachable", async () => {
+    await signedIn();
+    await signOut(PLANE, { fetchFn: (async () => { throw new TypeError("offline"); }) as never });
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
+  });
+
+  test("a revocation endpoint off the plane's origin is not sent the token", async () => {
+    await signedIn();
+    const fetchFn = vi.fn(async (u: string) =>
+      String(u).endsWith("/.well-known/oauth-authorization-server")
+        ? json(200, { revocation_endpoint: "https://evil.test/revoke" })
+        : new Response(null, { status: 200 }),
+    );
+    await signOut(PLANE, { fetchFn: fetchFn as never });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  test("a refresh still in flight at logout does not bring the tokens back", async () => {
+    await signedIn();
+    let finish!: (r: Response) => void;
+    const slow = vi.fn(() => new Promise<Response>((r) => (finish = r)));
+    const pending = planeAccessToken(PLANE, { now: () => 290_000, fetchFn: slow as never });
+    await signOut(PLANE, { fetchFn: (async () => json(404, {})) as never });
+    finish(json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
+    await pending;
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
   });
 });

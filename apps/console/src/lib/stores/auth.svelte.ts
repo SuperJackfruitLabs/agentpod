@@ -8,7 +8,7 @@
  */
 
 import { createAuthClient } from "better-auth/svelte";
-import { planeAccessToken, signOutLocal, type PlaneDiscovery } from "$lib/auth/org-plane";
+import { planeAccessToken, signOut, signOutLocal, type PlaneDiscovery } from "$lib/auth/org-plane";
 import { forgetMyReach } from "$lib/api/my-grant";
 
 // =============================================================================
@@ -356,8 +356,9 @@ export async function logout(): Promise<void> {
   forgetMyReach();
   try {
     if (plane) {
-      // Tokens are memory-only: forgetting them is the sign-out. The plane's session is its own.
-      signOutLocal();
+      // Forget the memory-only tokens, then revoke the refresh token at the plane (best effort,
+      // bounded). The plane's browser session is its own.
+      await signOut(plane);
       sessionData = null;
       return;
     }

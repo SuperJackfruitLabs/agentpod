@@ -51,6 +51,7 @@ import {
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { legacyUserPrincipals } from "./schema/legacy-user-principals";
+import { userIdRewrites } from "./schema/user-id-rewrites";
 import { hubOperators } from "./schema/operators";
 import { liveActivityTokens } from "./schema/live-activity";
 import { principalGrants } from "./schema/grants";
@@ -248,6 +249,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "cutover so a pre-cutover hub user id (superpipeline's `decided_by_hub_sub`) still resolves. " +
       "Exempt for the reason that table is: a person is not inside a fleet, they reach one. Read " +
       "only by `GET /api/evidence/principals/:id`, by an id the caller already holds; nothing lists it.",
+  },
+
+  user_id_rewrites: {
+    table: userIdRewrites,
+    reason:
+      "The cutover script's per-row record of which user id it rewrote to which prn_, so " +
+      "`--reverse` restores the exact value. Written and read only by `scripts/rewrite-user-ids.ts` " +
+      "against a stopped hub; no route reads it. Its rows name rows of tenant-scoped tables, but " +
+      "the script rewrites the whole hub at once, never one fleet.",
   },
 
   hub_operators: {

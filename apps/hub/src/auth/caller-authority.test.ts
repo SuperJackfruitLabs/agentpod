@@ -4,7 +4,7 @@ import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { createTestUser } from "../../tests/helpers/database";
 import { rawSql } from "../db/drizzle";
 import { setOrgPlaneForTests, TEST_PLANE } from "./org-plane/config";
-import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
+import { createPrincipalDirectory, setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
 import { OrgPlaneError } from "../services/org-plane/client";
 import { createPrincipal } from "../services/principals";
 import { setGrant } from "../services/grants";
@@ -79,6 +79,36 @@ describe("under the plane, with the plane unreachable and nothing cached", () =>
     restores.push(setOrgPlaneForTests(TEST_PLANE), setPrincipalDirectoryForTests(dir));
     await expect(callerGrant({ id: ME, authority: AUTH }, AGENT)).rejects.toBeInstanceOf(OrgPlaneUnavailable);
     expect(reads).toEqual([`principal:${AGENT}`]);
+  });
+});
+
+describe("under the plane, after a long outage (security review finding 7c)", () => {
+  test("a dispatch-path grant read serves the last good grant for 15 minutes, then fails closed as org_plane_unavailable", async () => {
+    let now = 1_900_000_000_000;
+    let down = false;
+    const grant = { mayDispatch: [ME], mayGrantReach: false, scopes: [] };
+    const dir = createPrincipalDirectory({
+      now: () => now,
+      client: () => ({
+        getPrincipal: async (id: string) => {
+          if (down) throw new OrgPlaneError(0, "unreachable");
+          return { id, kind: "agent" as const, handle: "a", displayName: "A", organizationId: "org_00000000000000000000", suspended: false, grant };
+        },
+        lookupIdentity: async () => null,
+        identitiesOf: async () => null,
+        listPrincipals: async () => [],
+      }),
+    });
+    restores.push(setOrgPlaneForTests(TEST_PLANE), setPrincipalDirectoryForTests(dir));
+    const caller = { id: ME, authority: AUTH };
+    expect(await callerGrant(caller, AGENT)).toEqual(grant);
+    down = true;
+    now += 10 * 60_000;
+    expect(await callerGrant(caller, AGENT)).toEqual(grant); // inside the cap: the outage is ridden out
+    now += 6 * 60_000;
+    const err = await callerGrant(caller, AGENT).catch((e) => e);
+    expect(err).toBeInstanceOf(OrgPlaneUnavailable);
+    expect(orgPlaneOutageBody(err)?.error).toBe("org_plane_unavailable");
   });
 });
 

@@ -442,3 +442,18 @@ func TestDevicesWithAHubDeviceCredentialStillAskTheHub(t *testing.T) {
 		t.Fatalf("hub saw %s, want %s", got, want)
 	}
 }
+
+// Security review finding 6, last line of defence: whatever reaches openBrowser, only an http(s)
+// URL is handed to `open`/`xdg-open` — never a file:, a custom scheme, or a flag-shaped string.
+func TestOnlyWebURLsAreOpened(t *testing.T) {
+	for _, u := range []string{"file:///Applications/Calculator.app", "javascript:alert(1)", "smb://x/y", "-a Calculator", "", "https://"} {
+		if browsable(u) {
+			t.Errorf("%q must not be opened", u)
+		}
+	}
+	for _, u := range []string{"https://accounts.test/device?user_code=AB", "http://127.0.0.1:3001/authorize"} {
+		if !browsable(u) {
+			t.Errorf("%q must be opened", u)
+		}
+	}
+}
