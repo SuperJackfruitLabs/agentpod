@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -321,29 +323,7 @@ func TestLoginUsesThePlaneDeviceFlowWhenTheHubNamesOne(t *testing.T) {
 func TestLogoutOfAPlaneDeviceDoesNotAskTheHub(t *testing.T) {
 	bin := build(t)
 	home := t.TempDir()
-	var srv *httptest.Server
-	var hubDeviceCalls atomic.Int32
-	tok := jwtish("prn_plane_bye", "human")
-	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Path {
-		case "/public/org-plane":
-			fmt.Fprintf(w, `{"issuer":%q,"url":%q,"audience":"https://hub.test"}`, srv.URL, srv.URL)
-		case "/api/auth/device/code":
-			fmt.Fprintf(w, `{"device_code":"dc","user_code":"BYE0-0000","verification_uri":"%s/device","verification_uri_complete":"%s/device?user_code=BYE0-0000","expires_in":600,"interval":1}`, srv.URL, srv.URL)
-		case "/api/auth/device/token":
-			_, _ = w.Write([]byte(`{"device_credential":"dev_0123456789abcdef0123:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"}`))
-		case "/api/token/device":
-			fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":300}`, tok)
-		default:
-			if strings.HasPrefix(r.URL.Path, "/api/auth/devices") {
-				hubDeviceCalls.Add(1)
-			}
-			http.Error(w, `{"error":"managed_by_org_plane"}`, http.StatusGone)
-		}
-	}))
-	// Started only after srv is assigned: the handler reads srv.URL.
-	srv.Start()
+	srv, hubDeviceCalls := planeHub(t, "prn_plane_bye")
 	defer srv.Close()
 
 	if out, code := runLogin(t, bin, srv.URL, home, "login"); code != 0 {
@@ -358,5 +338,107 @@ func TestLogoutOfAPlaneDeviceDoesNotAskTheHub(t *testing.T) {
 	}
 	if _, code := runLogin(t, bin, srv.URL, home, "whoami"); code == 0 {
 		t.Fatal("whoami should fail after logout")
+	}
+}
+
+// planeHub is a hub that names an org plane and serves the plane too; it counts every request
+// that reaches the hub's own device routes, which are retired (410) under the plane.
+func planeHub(t *testing.T, sub string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hubDeviceCalls atomic.Int32
+	var srv *httptest.Server
+	tok := jwtish(sub, "human")
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/public/org-plane":
+			fmt.Fprintf(w, `{"issuer":%q,"url":%q,"audience":"https://hub.test"}`, srv.URL, srv.URL)
+		case "/api/auth/device/code":
+			fmt.Fprintf(w, `{"device_code":"dc","user_code":"DEV0-0000","verification_uri":"%s/device","expires_in":600,"interval":1}`, srv.URL)
+		case "/api/auth/device/token":
+			_, _ = w.Write([]byte(`{"device_credential":"dev_0123456789abcdef0123:AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"}`))
+		case "/api/token/device":
+			fmt.Fprintf(w, `{"access_token":%q,"token_type":"Bearer","expires_in":300}`, tok)
+		default:
+			if strings.HasPrefix(r.URL.Path, "/api/auth/devices") {
+				hubDeviceCalls.Add(1)
+			}
+			http.Error(w, `{"error":"managed_by_org_plane"}`, http.StatusGone)
+		}
+	}))
+	srv.Start()
+	return srv, &hubDeviceCalls
+}
+
+// Under the plane the device inventory lives at the plane: `fleet devices` points there (exit 0,
+// nothing failed) and `fleet devices revoke` refuses (non-zero, nothing was revoked). Neither
+// reaches the hub's retired device routes.
+func TestDevicesWithAPlaneCredentialPointAtThePlane(t *testing.T) {
+	bin := build(t)
+	home := t.TempDir()
+	srv, hubDeviceCalls := planeHub(t, "prn_plane_devices")
+	defer srv.Close()
+
+	if out, code := runLogin(t, bin, srv.URL, home, "login"); code != 0 {
+		t.Fatalf("login failed (%d):\n%s", code, out)
+	}
+	want := "Devices at " + srv.URL
+	out, code := runLogin(t, bin, srv.URL, home, "devices")
+	if code != 0 || !strings.Contains(out, want) {
+		t.Fatalf("devices (%d), want %q:\n%s", code, want, out)
+	}
+	out, code = runLogin(t, bin, srv.URL, home, "devices", "revoke", "dev_0123456789abcdef0123")
+	if code == 0 || !strings.Contains(out, want) {
+		t.Fatalf("devices revoke (%d) must fail and say %q:\n%s", code, want, out)
+	}
+	if n := hubDeviceCalls.Load(); n != 0 {
+		t.Fatalf("the hub's retired device routes were called %d times", n)
+	}
+}
+
+// Legacy: a hub-issued device credential (no plane URL) still lists and revokes at the hub.
+func TestDevicesWithAHubDeviceCredentialStillAskTheHub(t *testing.T) {
+	bin := build(t)
+	home := t.TempDir()
+	var seen []string
+	var mu sync.Mutex
+	tok := jwtish("prn_legacy", "human")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/auth/devices/token" {
+			fmt.Fprintf(w, `{"token":%q}`, tok)
+			return
+		}
+		_, _ = w.Write([]byte(`{"devices":[]}`))
+	}))
+	defer srv.Close()
+
+	// Where os.UserConfigDir puts it for this HOME / XDG_CONFIG_HOME.
+	dir := filepath.Join(home, "agentpod")
+	if runtime.GOOS == "darwin" {
+		dir = filepath.Join(home, "Library", "Application Support", "agentpod")
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	dev := fmt.Sprintf(`{"id":"dev_0123456789abcdef0123","secret":"s3cret","hub":%q}`, srv.URL)
+	if err := os.WriteFile(filepath.Join(dir, "device.json"), []byte(dev), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, code := runLogin(t, bin, srv.URL, home, "devices"); code != 0 {
+		t.Fatalf("devices (%d):\n%s", code, out)
+	}
+	if out, code := runLogin(t, bin, srv.URL, home, "devices", "revoke", "dev_x"); code != 0 || !strings.Contains(out, "revoked dev_x") {
+		t.Fatalf("devices revoke (%d):\n%s", code, out)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := "POST /api/auth/devices/token,GET /api/auth/devices,DELETE /api/auth/devices/dev_x"
+	if got := strings.Join(seen, ","); got != want {
+		t.Fatalf("hub saw %s, want %s", got, want)
 	}
 }

@@ -192,7 +192,7 @@ func fleetLogout() {
 		if d.PlaneURL != "" {
 			// The plane owns this credential, and the hub's revoke route is gone under the plane
 			// (410). Sending the secret there would hand it to a host that never issued it.
-			fmt.Printf("Signed out on this machine. To revoke %s everywhere, remove it under Devices at %s\n", d.ID, d.PlaneURL)
+			fmt.Printf("Signed out on this machine. To revoke %s everywhere, remove it under %s\n", d.ID, planeDevicesPage(d))
 		} else if err := fleetcred.RevokeDevice(hub, d); err != nil {
 			fmt.Fprintf(os.Stderr,
 				"Signed out on this machine, but the hub did not confirm revoking %s: %v\n\n"+
@@ -212,12 +212,28 @@ func fleetLogout() {
 	fmt.Println("signed out")
 }
 
+// planeDevicesPage names where a plane-issued device credential is listed and revoked.
+func planeDevicesPage(d fleetcred.Device) string {
+	return "Devices at " + d.PlaneURL
+}
+
 // fleetDevices lists the devices that may act as this principal, or revokes one.
 //
 // The record this implements asks for devices to be "a thing an operator can see and name in a
 // list". This is that list; the console carries the same one for the person whose laptop was
 // stolen and who is, by then, not at that laptop.
 func fleetDevices(args []string) {
+	// A plane credential's inventory lives at the plane; the hub's device routes are retired
+	// under it (410). Point there instead of sending the credential to the hub.
+	if d, err := fleetcred.LoadDevice(); err == nil && d.PlaneURL != "" {
+		if len(args) > 0 && args[0] == "revoke" {
+			// Non-zero: nothing was revoked, and a script must not read this as success.
+			fmt.Fprintf(os.Stderr, "Device credentials are managed by your account service. Revoke one under %s\n", planeDevicesPage(d))
+			os.Exit(1)
+		}
+		fmt.Printf("Device credentials are managed by your account service. They are listed under %s\n", planeDevicesPage(d))
+		return
+	}
 	if len(args) > 0 && args[0] == "revoke" {
 		if len(args) < 2 {
 			fmt.Fprintln(os.Stderr, "usage: fleet devices revoke <deviceId>")
