@@ -320,6 +320,7 @@ const app = new Hono()
   .all('/mcp', async (c) => {
     const caller = await resolveMcpCaller(c.req.raw);
     if (!caller) return mcpUnauthorized();
+    if ('refusal' in caller) return c.json(caller.refusal, 403);
     return handleMcpRequest(c.req.raw, caller);
   })
 

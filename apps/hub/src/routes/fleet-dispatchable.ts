@@ -30,7 +30,8 @@
 import { Hono } from "hono";
 import { createLocalJWKSet, jwtVerify, type JSONWebKeySet } from "jose";
 
-import { ALG, publishedJwks } from "../auth/hub-token";
+import { ALG, publishedJwks, verifyPlaneBearer } from "../auth/hub-token";
+import { orgPlane } from "../auth/org-plane/config";
 import { config } from "../config";
 import { listPrincipals as defaultListPrincipals } from "../services/principals";
 
@@ -82,6 +83,8 @@ export interface DispatchableDeps {
   jwks?: () => Promise<JSONWebKeySet>;
   /** Every principal, for resolving ids to handles. Defaults to the real one. */
   listPrincipals?: typeof defaultListPrincipals;
+  /** The org-plane door, used only while ORG_PLANE_* is set. */
+  verifyPlane?: typeof verifyPlaneBearer;
 }
 
 /** A refusal that says nothing about which check failed. */
@@ -95,6 +98,7 @@ function refuse(description: string) {
 export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
   const jwks = deps.jwks ?? publishedJwks;
   const listPrincipals = deps.listPrincipals ?? defaultListPrincipals;
+  const verifyPlane = deps.verifyPlane ?? verifyPlaneBearer;
 
   return new Hono().get("/api/fleet/dispatchable", async (c) => {
     // `Bearer <token>`, case-insensitively on the scheme, as RFC 6750 has it.
@@ -110,25 +114,42 @@ export function createDispatchableRoutes(deps: DispatchableDeps = {}) {
     }
 
     let claims: Record<string, unknown>;
-    try {
-      const verified = await jwtVerify(match[1]!, createLocalJWKSet(await jwks()), {
-        issuer: config.publicUrl,
-        audience: config.publicUrl,
-        algorithms: [ALG],
-      });
-      claims = verified.payload as Record<string, unknown>;
-    } catch {
-      // One sentence for all of: an unknown key, a foreign signature, an
-      // expired token, a wrong issuer or audience, a mangled token. A caller
-      // holding none of them learns nothing about which; the legitimate caller
-      // does not need to be told, because its next move is the same either way
-      // — go back through the authorize flow and get a live one.
-      return c.json(
-        refuse(
-          "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
-        ),
-        401
-      );
+    if (orgPlane()) {
+      // Under the plane, its tokens only. Any first-party client's human token for this hub's
+      // audience is accepted — superpipeline-web asks for one for its picker (contract §3.1).
+      const r = await verifyPlane(match[1]!);
+      if (!r.ok) {
+        return r.status === 403
+          ? c.json(r.body, 403)
+          : c.json(
+              refuse(
+                "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
+              ),
+              401
+            );
+      }
+      claims = r.caller.claims as Record<string, unknown>;
+    } else {
+      try {
+        const verified = await jwtVerify(match[1]!, createLocalJWKSet(await jwks()), {
+          issuer: config.publicUrl,
+          audience: config.publicUrl,
+          algorithms: [ALG],
+        });
+        claims = verified.payload as Record<string, unknown>;
+      } catch {
+        // One sentence for all of: an unknown key, a foreign signature, an
+        // expired token, a wrong issuer or audience, a mangled token. A caller
+        // holding none of them learns nothing about which; the legitimate caller
+        // does not need to be told, because its next move is the same either way
+        // — go back through the authorize flow and get a live one.
+        return c.json(
+          refuse(
+            "That token is not one this hub will accept: it is unknown, expired, signed by somebody else, or was not issued for this hub."
+          ),
+          401
+        );
+      }
     }
 
     // An agent's token must not be able to read the fleet. `mayDispatch` is

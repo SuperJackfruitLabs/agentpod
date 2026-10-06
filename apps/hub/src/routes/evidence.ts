@@ -15,7 +15,8 @@ import { and, asc, eq } from "drizzle-orm";
 import type { JSONWebKeySet } from "jose";
 import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, itemFirstSeq, type EvidenceFingerprint } from "@agentpod/contract";
 
-import { publishedJwks, verifyHubToken } from "../auth/hub-token";
+import { publishedJwks, verifyHubToken, verifyPlaneBearer } from "../auth/hub-token";
+import { orgPlane } from "../auth/org-plane/config";
 import { db } from "../db/drizzle";
 import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
@@ -47,18 +48,35 @@ import { contentRedactor } from "../services/redact-content";
 export interface EvidenceDeps {
   jwks?: () => Promise<JSONWebKeySet>;
   now?: () => Date;
+  /** The org-plane door, used only while ORG_PLANE_* is set. */
+  verifyPlane?: typeof verifyPlaneBearer;
 }
 
-type Authorized = { ok: true; tenant: string; principalId: string } | { ok: false; status: 401 | 403 };
+type Authorized =
+  | { ok: true; tenant: string; principalId: string }
+  | { ok: false; status: 401 | 403; body?: { error: "product_not_enabled"; org: string } };
 
 /** Each route names the ONE scope it needs; holding another never stands in for it. */
 async function authorize(
   header: string | undefined,
   jwks: () => Promise<JSONWebKeySet>,
   scope: GrantScope,
+  verifyPlane: typeof verifyPlaneBearer = verifyPlaneBearer,
 ): Promise<Authorized> {
   const match = /^Bearer +(\S+)$/i.exec((header ?? "").trim());
   if (!match) return { ok: false, status: 401 };
+
+  if (orgPlane()) {
+    const r = await verifyPlane(match[1]!);
+    if (!r.ok) return r.status === 403 ? { ok: false, status: 403, body: r.body } : { ok: false, status: 401 };
+    // Contract §2: grant scopes are read only from agent or service tokens. A human's `scope` is
+    // an OAuth scope string and is never a grant. Under the plane the token is the grant: the
+    // plane does not mint for a suspended principal, and no plane call is made here (design §5.7).
+    if (r.caller.principalKind === "human") return { ok: false, status: 403 };
+    const scopes = (r.caller.claims.scope ?? "").split(" ").filter(Boolean);
+    if (!scopes.includes(scope)) return { ok: false, status: 403 };
+    return { ok: true, tenant: r.caller.tenantId, principalId: r.caller.sub };
+  }
   const claims = await verifyHubToken(match[1]!, jwks);
   if (!claims || typeof claims.tenant !== "string" || !/^fleet_[0-9a-f]{20}$/.test(claims.tenant)) {
     return { ok: false, status: 401 };
@@ -71,7 +89,8 @@ async function authorize(
   return { ok: true, tenant: claims.tenant, principalId: principal.id };
 }
 
-const refusal = (status: 401 | 403) => ({ error: status === 401 ? "unauthorized" : "forbidden" });
+const refusal = (status: 401 | 403, body?: { error: "product_not_enabled"; org: string }) =>
+  body ?? { error: status === 401 ? "unauthorized" : "forbidden" };
 
 function fingerprintView(row: typeof acpRuns.$inferSelect): EvidenceFingerprint {
   if (!row.fingerprintDigest || !row.fingerprint) return UNKNOWN_FINGERPRINT_VIEW;
@@ -160,12 +179,13 @@ async function auditTranscriptRead(args: {
 
 export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
   const jwks = deps.jwks ?? publishedJwks;
+  const verifyPlane = deps.verifyPlane ?? verifyPlaneBearer;
   const now = deps.now ?? (() => new Date());
 
   return new Hono()
     .get("/api/evidence/runs/:source/:externalRunId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
-      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ, verifyPlane);
+      if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const source = c.req.param("source");
       const runId = c.req.param("externalRunId");
 
@@ -202,8 +222,8 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       });
     })
     .get("/api/evidence/attempts/:attemptId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
-      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ, verifyPlane);
+      if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const [row] = await db
         .select({ externalSource: acpRuns.externalSource, externalRunId: acpRuns.externalRunId })
         .from(acpRuns)
@@ -231,8 +251,8 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
      * is still answered: a decision made before the suspension is still that principal's.
      */
     .get("/api/evidence/principals/:principalId", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ);
-      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const auth = await authorize(c.req.header("authorization"), jwks, EVIDENCE_READ, verifyPlane);
+      if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const id = await principalIdFor(c.req.param("principalId"));
       if (!id) return c.json({ error: "not_found" }, 404);
       const [p] = await db
@@ -249,8 +269,8 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
      * confirm it exists.
      */
     .get("/api/evidence/sessions/:sessionId/transcript", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
-      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ, verifyPlane);
+      if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const session = await findSession(auth.tenant, c.req.param("sessionId"));
       if (!session) return c.json({ error: "not_found" }, 404);
 
@@ -306,8 +326,8 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
      * serialised, else 413; without it, the item is cut exactly as its page cut it.
      */
     .get("/api/evidence/sessions/:sessionId/transcript/items/:seqFrom", async (c) => {
-      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
-      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ, verifyPlane);
+      if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const session = await findSession(auth.tenant, c.req.param("sessionId"));
       if (!session) return c.json({ error: "not_found" }, 404);
       const range = parseRange(
