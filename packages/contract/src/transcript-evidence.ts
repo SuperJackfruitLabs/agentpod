@@ -246,7 +246,8 @@ function outcomeOf(p: Record<string, unknown>): EvidencePermissionOutcome {
 function foldAnswer(f: EvidenceFold, ev: Ev): boolean {
   if (!isRecord(ev.payload)) return false;
   const requestSeq = ev.payload.requestSeq;
-  if (typeof requestSeq !== "number") return false;
+  // A seq is a positive integer; anything else names no request and folds to `other`.
+  if (typeof requestSeq !== "number" || !Number.isInteger(requestSeq) || requestSeq < 1) return false;
   const idx = f.items.findLastIndex((it) => it.kind === "permission" && it.seq === requestSeq);
   if (idx === -1) {
     // The request lies before the range: what the answer says, and nothing it does not.
@@ -262,7 +263,10 @@ function foldAnswer(f: EvidenceFold, ev: Ev): boolean {
     return true;
   }
   const prev = f.items[idx] as Extract<EvidenceItem, { kind: "permission" }>;
-  f.items[idx] = { ...prev, answer_seq: ev.seq, outcome: outcomeOf(ev.payload) };
+  // A partial permission STARTS at its answer (`itemFirstSeq`), so a second answer may update
+  // the outcome but must not move it: that would put it after items folded since, and a pager
+  // whose cursor names it would loop.
+  f.items[idx] = { ...prev, answer_seq: prev.partial ? prev.answer_seq : ev.seq, outcome: outcomeOf(ev.payload) };
   return true;
 }
 

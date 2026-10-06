@@ -82,6 +82,29 @@ test("an answer whose request lies before the range is a partial permission, sta
   expect(itemFirstSeq(items[0]!)).toBe(11);
 });
 
+test("a partial permission answered twice keeps its first answer's seq, so first seqs stay ascending", () => {
+  // Request 10 lies before the range. A second answer must not move the item past the prompt.
+  const items = fold([
+    ev(11, "permission-answer", { requestSeq: 10, optionId: "allow" }),
+    ev(12, "user-prompt", { text: "go on" }),
+    ev(13, "permission-answer", { requestSeq: 10, optionId: "deny" }),
+  ]);
+  expect(items.map(itemFirstSeq)).toEqual([11, 12]);
+  expect(items[0]).toMatchObject({ seq: 10, answer_seq: 11, outcome: "selected:deny", partial: true });
+});
+
+test("an answer whose requestSeq is not a seq (0, 1.5, a string) is `other`", () => {
+  expect(fold([
+    ev(5, "permission-answer", { requestSeq: 0, optionId: "allow" }),
+    ev(6, "permission-answer", { requestSeq: 1.5, optionId: "allow" }),
+    ev(7, "permission-answer", { requestSeq: "4", optionId: "allow" }),
+  ])).toEqual([
+    { kind: "other", seq: 5, type: "permission-answer" },
+    { kind: "other", seq: 6, type: "permission-answer" },
+    { kind: "other", seq: 7, type: "permission-answer" },
+  ]);
+});
+
 test("permission outcomes: cancelled, auto, pending", () => {
   const req = (seq: number) => ev(seq, "permission-request", { toolCall: { title: "edit" }, options: [] });
   const items = fold([
