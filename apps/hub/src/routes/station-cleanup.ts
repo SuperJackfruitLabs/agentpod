@@ -138,7 +138,7 @@ export const stationCleanupRoutes = new Hono()
       // files is not. So the split is on the route's effect, not the capability
       // word — guarding the word would refuse someone permission to find out
       // what a cleanup would remove.
-      const denial = await refuseWithoutReach(c, user.id, station, "cleanup");
+      const denial = await refuseWithoutReach(c, user, station, "cleanup");
       if (denial) return denial;
 
       const { paths } = c.req.valid("json");

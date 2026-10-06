@@ -42,7 +42,11 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { matrixRooms } from "../db/schema/matrix";
 import { stations } from "../db/schema/stations";
-import { provisionStationNow } from "../services/matrix-as/hooks";
+import { provisionStationNow, stationSetupMatrixDomain } from "../services/matrix-as/hooks";
+import { orgPlane } from "../auth/org-plane/config";
+import { OrgPlaneError } from "../services/org-plane/client";
+import { principalDirectory } from "../services/org-plane/directory";
+import { createPlaneAgent, mirrorPlacedAgent } from "../services/org-plane/agent-placement";
 import { unboundRoomsForStation } from "../services/matrix-as/station-room";
 import { createPrincipal, principalById } from "../services/principals";
 import { createLogger } from "../utils/logger";
@@ -109,8 +113,17 @@ export const agentsAdminRouter = new Hono()
 
     let id: string;
     try {
-      id = await createPrincipal({ kind: "agent", handle, displayName });
+      // Under the plane: created there and its Matrix id linked (decision D3), so the plane's
+      // identity lookup can tell this sender is an agent.
+      id = orgPlane()
+        ? await createPlaneAgent({ handle, displayName: displayName ?? handle, matrixDomain: stationSetupMatrixDomain() })
+        : await createPrincipal({ kind: "agent", handle, displayName });
     } catch (err) {
+      if (err instanceof OrgPlaneError) {
+        log.warn("org plane refused to create an agent", { handle, status: err.status, code: err.code });
+        if (err.status === 409) return c.json({ error: "handle already taken" }, 409);
+        return c.json({ error: "the organization plane could not create this agent" }, 502);
+      }
       if (isHandleTaken(err)) {
         return c.json({ error: "handle already taken" }, 409);
       }
@@ -163,6 +176,13 @@ export const agentsAdminRouter = new Hono()
     if (principal.suspendedAt) {
       return c.json({ error: "principal is suspended" }, 403);
     }
+    // Under the plane an agent may exist only there (made at its pages, or by POST /agents
+    // above); the station's foreign key into `principals` needs the mirror row placement writes.
+    const plane = orgPlane();
+    const planeAgent = plane ? await principalDirectory().principal(principalId) : null;
+    if (plane && planeAgent?.kind !== "agent") {
+      return c.json({ error: "only an agent can occupy a station" }, 400);
+    }
 
     // Read BEFORE the transaction overwrites it — fix round 2: assigning a
     // NEW principal to a station that already holds a DIFFERENT one evicts
@@ -180,6 +200,8 @@ export const agentsAdminRouter = new Hono()
     const candidates = await unboundRoomsForStation(stationId);
 
     await db.transaction(async (tx) => {
+      if (planeAgent) await mirrorPlacedAgent(tx, planeAgent);
+
       // Vacate wherever this principal already is — including this same
       // station, harmlessly — BEFORE placing it here. Done first and in the
       // same transaction so a crash between the two steps cannot leave the

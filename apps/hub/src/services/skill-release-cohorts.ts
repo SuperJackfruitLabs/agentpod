@@ -5,6 +5,7 @@ import { skillReleaseCohorts } from "../db/schema/skills";
 import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import { requireGrantReach } from "./grant-reach";
+import type { CallerRef } from "../auth/caller-authority";
 import { SkillRequestError, type SkillOwner } from "./skill-artifacts";
 import { getTrustedSkillRelease } from "./trusted-skill-catalog";
 
@@ -13,8 +14,12 @@ const metadata = (row: typeof skillReleaseCohorts.$inferSelect) => SkillReleaseC
   stationIds: row.stationIds, createdAt: row.createdAt.toISOString(),
 });
 
-/** Creates one immutable audience only after every requested station is eligible. */
-export async function createSkillReleaseCohort(owner: SkillOwner, raw: unknown) {
+/**
+ * Creates one immutable audience only after every requested station is eligible.
+ * `caller` is who is asking (the console's `AuthUser`, whose org-plane token answers the reach
+ * check — design §5.7); it defaults to the owner's bare id.
+ */
+export async function createSkillReleaseCohort(owner: SkillOwner, raw: unknown, caller: CallerRef = owner.userId) {
   const parsed = SkillReleaseCohortCreateRequest.safeParse(raw);
   if (!parsed.success) throw new SkillRequestError(400, "Invalid skill release cohort");
   const request = parsed.data;
@@ -28,7 +33,7 @@ export async function createSkillReleaseCohort(owner: SkillOwner, raw: unknown) 
   for (const station of rows) {
     if (!record.artifacts.some((artifact) => artifact.harness === station.harness))
       throw new SkillRequestError(409, "A cohort station does not match a trusted release harness");
-    await requireGrantReach(owner.userId, station, "skills.manage", "mutate");
+    await requireGrantReach(caller, station, "skills.manage", "mutate");
   }
   const [created] = await db.insert(skillReleaseCohorts).values({ id: crypto.randomUUID(), ...owner, ...request }).returning();
   return metadata(created!);

@@ -21,6 +21,9 @@ import { db } from "../db/drizzle";
 import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
 import { principalIdentities } from "../db/schema/identities";
+import { legacyUserPrincipals } from "../db/schema/legacy-user-principals";
+import { principalDirectory } from "../services/org-plane/directory";
+import { OrgPlaneError, type PlanePrincipal } from "../services/org-plane/client";
 import { principals } from "../db/schema/organization";
 import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
@@ -121,6 +124,16 @@ function attemptView(row: typeof acpRuns.$inferSelect) {
 async function principalIdFor(segment: string): Promise<string | null> {
   if (PrincipalId.safeParse(segment).success) return segment;
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(segment)) return null;
+  if (orgPlane()) {
+    // Under the plane `principal_identities` is frozen and goes in Task 17; the permanent
+    // user → principal map is `legacy_user_principals`, filled at cutover by the rewrite script.
+    const [row] = await db
+      .select({ principalId: legacyUserPrincipals.principalId })
+      .from(legacyUserPrincipals)
+      .where(eq(legacyUserPrincipals.userId, segment))
+      .limit(1);
+    return row?.principalId ?? null;
+  }
   const [row] = await db
     .select({ principalId: principalIdentities.principalId })
     .from(principalIdentities)
@@ -255,6 +268,21 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       if (!auth.ok) return c.json(refusal(auth.status, auth.body), auth.status);
       const id = await principalIdFor(c.req.param("principalId"));
       if (!id) return c.json({ error: "not_found" }, 404);
+      if (orgPlane()) {
+        // The hub's principals table is a frozen copy under the plane (Task 17 drops it), so the
+        // answer comes from the plane, cached 60 s with last-good. Same shape and statuses as
+        // before, so superwitness changes nothing.
+        let p: PlanePrincipal | null;
+        try {
+          p = await principalDirectory().principal(id);
+        } catch (e) {
+          if (!(e instanceof OrgPlaneError)) throw e;
+          // Down is not "nobody": a 404 here would be recorded as an unknown judge.
+          return c.json({ error: "identity_unavailable" }, 503);
+        }
+        if (!p) return c.json({ error: "not_found" }, 404);
+        return c.json({ id: p.id, kind: p.kind, handle: p.handle, suspended: p.suspended });
+      }
       const [p] = await db
         .select({ id: principals.id, kind: principals.kind, handle: principals.handle, suspendedAt: principals.suspendedAt })
         .from(principals)

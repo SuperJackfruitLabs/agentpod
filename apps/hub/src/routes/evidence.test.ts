@@ -26,6 +26,8 @@ import { createPrincipal, suspendPrincipal } from "../services/principals";
 import { createEvidenceRoutes } from "./evidence";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import type { PlaneBearerResult } from "../auth/hub-token";
+import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
+import { OrgPlaneError } from "../services/org-plane/client";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
 const STATION = `station_${crypto.randomUUID()}`;
@@ -370,10 +372,11 @@ describe("the evidence door under the org plane", () => {
   });
 
   test("under the plane, a hub-issued service token is 401 (no dual-accept)", async () => {
+    // Minted before the switch: under the plane the hub's own minting reads principals from the plane.
+    const token = await serviceToken(reader);
     const restore = setOrgPlaneForTests(TEST_PLANE);
     try {
       const { app: a, seen } = plane({ ok: false, status: 401 });
-      const token = await serviceToken(reader);
       const res = await a.request(`/api/evidence/attempts/${firstAttempt}`, { headers: { Authorization: `Bearer ${token}` } });
       expect(res.status).toBe(401);
       expect(seen).toEqual([token]);
@@ -390,5 +393,89 @@ describe("the evidence door under the org plane", () => {
     expect(seen).toEqual([]);
     expect((await req(a, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(401);
     expect(seen).toEqual([]);
+  });
+});
+
+describe("GET /api/evidence/principals/:id under the plane (superwitness's run join)", () => {
+  const AGENT_ID = "prn_aaaaaaaaaaaaaaaaaaaa";
+  const HUMAN_ID = "prn_cccccccccccccccccccc";
+  const LEGACY_USER = `legacyUser${RUN}`;
+  const planeApp = (directory: Partial<PrincipalDirectory> = {}) => {
+    const restores = [
+      setOrgPlaneForTests(TEST_PLANE),
+      setPrincipalDirectoryForTests({
+        principal: async (id) =>
+          id === AGENT_ID
+            ? { id, kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000", suspended: true, grant: null }
+            : id === HUMAN_ID
+              ? { id, kind: "human", handle: "op", displayName: "Op", organizationId: null, suspended: false, grant: null }
+              : null,
+        identity: async () => null,
+        list: async () => [],
+        invalidate: () => {},
+        ...directory,
+      }),
+    ];
+    const app = createEvidenceRoutes({
+      verifyPlane: async () => ({
+        ok: true,
+        caller: { sub: "prn_dddddddddddddddddddd", principalKind: "service", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "evidence:read" } as never },
+      }),
+    });
+    return { app, restore: () => restores.reverse().forEach((r) => r()) };
+  };
+  const ask = (app: ReturnType<typeof createEvidenceRoutes>, id: string) =>
+    app.request(`/api/evidence/principals/${encodeURIComponent(id)}`, { headers: { Authorization: "Bearer t" } });
+
+  afterAll(async () => {
+    await rawSql`DELETE FROM legacy_user_principals WHERE user_id = ${LEGACY_USER}`;
+  });
+
+  test("answers from the plane's principal, same shape as before", async () => {
+    const { app, restore } = planeApp();
+    try {
+      const ok = await ask(app, AGENT_ID);
+      expect(ok.status).toBe(200);
+      const body = await ok.json();
+      expect(EvidencePrincipalResponse.safeParse(body).error).toBeUndefined();
+      expect(body).toEqual({ id: AGENT_ID, kind: "agent", handle: "cody", suspended: true });
+      const missing = await ask(app, "prn_bbbbbbbbbbbbbbbbbbbb");
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ error: "not_found" });
+    } finally {
+      restore();
+    }
+  });
+
+  test("a pre-cutover hub user id resolves through legacy_user_principals, not the frozen identity table", async () => {
+    await rawSql`INSERT INTO legacy_user_principals (user_id, principal_id) VALUES (${LEGACY_USER}, ${HUMAN_ID}) ON CONFLICT DO NOTHING`;
+    // Linked only in the hub's own principal_identities (written before the plane is switched on).
+    const linkedLocally = `baLocalOnly${RUN}`;
+    await createPrincipal({ kind: "human", handle: `ev-local-only-${RUN}`, userId: linkedLocally });
+    const { app, restore } = planeApp();
+    try {
+      const res = await ask(app, LEGACY_USER);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ id: HUMAN_ID, kind: "human", handle: "op", suspended: false });
+      // A user id linked only in the hub's own (frozen) principal_identities is not read under the plane.
+      expect((await ask(app, linkedLocally)).status).toBe(404);
+    } finally {
+      restore();
+    }
+  });
+
+  test("a plane outage with nothing cached is 503 identity_unavailable, not a 404 that reads as 'nobody'", async () => {
+    const { app, restore } = planeApp({
+      principal: async () => {
+        throw new OrgPlaneError(0, "unreachable");
+      },
+    });
+    try {
+      const res = await ask(app, AGENT_ID);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "identity_unavailable" });
+    } finally {
+      restore();
+    }
   });
 });

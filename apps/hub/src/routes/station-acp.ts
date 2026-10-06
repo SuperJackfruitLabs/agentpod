@@ -49,6 +49,7 @@ import { getStation } from "../services/station-registry";
 import * as acp from "../services/acp-sessions";
 import { isControlPairDenied } from "../services/control-pair";
 import type { AuthUser } from "../auth/middleware";
+import { isOrgPlaneUnavailable, ORG_PLANE_UNAVAILABLE_BODY } from "../auth/caller-authority";
 
 // ─── Error-to-status helper ───────────────────────────────────────────────────
 
@@ -122,9 +123,11 @@ export const stationAcpRoutes = new Hono()
       const { mode } = c.req.valid("json");
 
       try {
-        const row = await acp.createSession({ stationId, userId: user.id, mode });
+        const row = await acp.createSession({ stationId, userId: user.id, mode, authority: user.authority });
         return c.json(row, 201);
       } catch (err) {
+        // The plane was needed (a caller with no token authority, under ORG_PLANE_*) and is down.
+        if (isOrgPlaneUnavailable(err)) return c.json(ORG_PLANE_UNAVAILABLE_BODY, 503);
         // A refusal by the control pair is 403, not the 502 the generic mapper
         // gives it. 502 says the node failed, which is a different thing to a
         // caller: it invites a retry that can never succeed, and it hides an

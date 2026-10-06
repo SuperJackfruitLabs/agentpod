@@ -199,7 +199,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       try {
-        await requireIssueCredentials(user.id, {
+        await requireIssueCredentials(user, {
           nodeId: station.nodeId,
           stationKey: station.stationKey,
         });
@@ -313,7 +313,7 @@ export function createStationMatrixRoutes(deps: StationMatrixDeps) {
       if (!station) return c.json({ error: "Not Found" }, 404);
 
       try {
-        await requireIssueCredentials(user.id, {
+        await requireIssueCredentials(user, {
           nodeId: station.nodeId,
           stationKey: station.stationKey,
         });

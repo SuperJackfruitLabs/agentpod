@@ -5,6 +5,22 @@ import { user } from "../db/schema/auth";
 import { principalIdentities } from "../db/schema/identities";
 import { BOOTSTRAP_ORG_ID, principals, type PrincipalKind } from "../db/schema/organization";
 import { prefixedId } from "../utils/ids";
+import { PrincipalId } from "@agentpod/contract";
+import { orgPlane } from "../auth/org-plane/config";
+import { principalDirectory } from "./org-plane/directory";
+import { orgPlaneClient, type PlanePrincipal } from "./org-plane/client";
+
+/**
+ * What `suspendedAt` reads as for a principal the org plane reports suspended. The plane gives a
+ * boolean, not a time; every caller tests `suspendedAt` for truthiness, so the epoch is enough and
+ * says plainly that the moment is unknown.
+ */
+export const SUSPENDED_AT_UNKNOWN = new Date(0);
+
+/** The plane's principal in this module's shape. No email: nothing under the plane needs it. */
+function fromPlane(p: PlanePrincipal): ResolvedPrincipal {
+  return { id: p.id, kind: p.kind, suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null, email: null, emailVerified: null };
+}
 
 /**
  * The shape `principalForUser` and `principalById` both resolve to: a
@@ -33,6 +49,14 @@ export async function createPrincipal(input: {
   /** When present, links the Better Auth user as this principal's login identity. */
   userId?: string;
 }, exec: DbExecutor = db): Promise<string> {
+  if (orgPlane()) {
+    // The plane creates agents only (contract §3.5); humans are created by signing up there,
+    // services by the operator's `scripts/service.ts`.
+    if (input.kind !== "agent") throw new Error(`the org plane creates ${input.kind} principals itself`);
+    const { id } = await orgPlaneClient().createAgent({ handle: input.handle, displayName: input.displayName ?? input.handle });
+    principalDirectory().invalidate();
+    return id;
+  }
   const id = prefixedId("prn");
   await exec.insert(principals).values({
     id,
@@ -70,6 +94,11 @@ export async function createPrincipal(input: {
  * principal" case, which never inserts one).
  */
 export async function principalForUser(userId: string): Promise<ResolvedPrincipal | null> {
+  if (orgPlane()) {
+    // Under the plane an AuthUser.id IS the human's prn_ (contract §2, "Migrated humans").
+    const p = await principalDirectory().principal(userId);
+    return p && p.kind === "human" ? fromPlane(p) : null;
+  }
   const [row] = await db
     .select({
       id: principals.id,
@@ -116,6 +145,10 @@ export async function principalForUser(userId: string): Promise<ResolvedPrincipa
  * no match for an agent or a service, which has neither.
  */
 export async function principalById(id: string): Promise<ResolvedPrincipal | null> {
+  if (orgPlane()) {
+    const p = await principalDirectory().principal(id);
+    return p ? fromPlane(p) : null;
+  }
   const [row] = await db
     .select({
       id: principals.id,
@@ -163,6 +196,7 @@ export async function principalById(id: string): Promise<ResolvedPrincipal | nul
  * re-suspend still succeeds, it just leaves the original timestamp alone.
  */
 export async function suspendPrincipal(id: string): Promise<void> {
+  if (orgPlane()) throw new Error("principal suspension is managed by the org plane");
   await db
     .update(principals)
     .set({ suspendedAt: new Date() })
@@ -171,6 +205,7 @@ export async function suspendPrincipal(id: string): Promise<void> {
 
 /** Lift a suspension. The principal can be minted for again. */
 export async function restorePrincipal(id: string): Promise<void> {
+  if (orgPlane()) throw new Error("principal suspension is managed by the org plane");
   await db.update(principals).set({ suspendedAt: null }).where(eq(principals.id, id));
 }
 
@@ -189,6 +224,7 @@ export async function restorePrincipal(id: string): Promise<void> {
  * cases a caller must treat alike: fail closed, never invent an address.
  */
 export async function principalHandle(id: string): Promise<string | null> {
+  if (orgPlane()) return (await principalDirectory().principal(id))?.handle ?? null;
   const [row] = await db
     .select({ handle: principals.handle })
     .from(principals)
@@ -234,6 +270,17 @@ export async function listPrincipals(): Promise<
     suspendedAt: Date | null;
   }>
 > {
+  if (orgPlane()) {
+    return (await principalDirectory().list()).map((p) => ({
+      id: p.id,
+      kind: p.kind,
+      handle: p.handle,
+      displayName: p.displayName,
+      // Under the plane a human's account id is its prn_ (contract §2).
+      userId: p.kind === "human" ? p.id : null,
+      suspendedAt: p.suspended ? SUSPENDED_AT_UNKNOWN : null,
+    }));
+  }
   const rows = await db
     .select({
       id: principals.id,
@@ -260,6 +307,15 @@ export async function listPrincipals(): Promise<
     userId: r.externalId ?? null,
     suspendedAt: r.suspendedAt,
   }));
+}
+
+/**
+ * The human principal behind an `AuthUser.id`, or null. Under the plane they are the same string
+ * (contract §2), so no read is needed; in legacy mode it is `principalForUser`'s answer.
+ */
+export async function humanPrincipalIdForUser(userId: string): Promise<string | null> {
+  if (orgPlane()) return PrincipalId.safeParse(userId).success ? userId : null;
+  return (await principalForUser(userId))?.id ?? null;
 }
 
 /**

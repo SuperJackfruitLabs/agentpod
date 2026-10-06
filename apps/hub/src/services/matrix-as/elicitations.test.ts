@@ -5,6 +5,8 @@ process.env.NODE_ENV = "test";
 
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { OrgPlaneError } from "../org-plane/client";
+import { AssertionMismatch } from "../../auth/service-signing";
 
 import { db, rawSql } from "../../db/drizzle";
 import { matrixElicitationEvents } from "../../db/schema/matrix";
@@ -290,7 +292,7 @@ describe("saying the answer landed, exactly once", () => {
 
 function answerRig(over: Partial<ElicitationAnswerDeps> = {}) {
   const replies: string[] = [];
-  const answered: Array<{ elicitationId: string; option: string; principalId: string }> = [];
+  const answered: Array<{ elicitationId: string; option: string; principalId: string; senderMxid: string }> = [];
   const deps: ElicitationAnswerDeps = {
     principalForMatrixId: async () => ({ id: "prn_human", kind: "user" }),
     answer: async (input) => {
@@ -298,6 +300,7 @@ function answerRig(over: Partial<ElicitationAnswerDeps> = {}) {
         elicitationId: input.elicitationId,
         option: input.option,
         principalId: input.principalId,
+        senderMxid: input.senderMxid,
       });
       return { ok: true };
     },
@@ -320,6 +323,8 @@ describe("a reply in a board room, read as an answer", () => {
     expect(out).toEqual({ status: "answered", elicitationId: d.elicitationId });
     expect(answered[0]!.option).toBe("skip");
     expect(answered[0]!.principalId).toBe("prn_human");
+    // The sender's mxid travels with the answer: under the plane it, not the prn_, is asserted.
+    expect(answered[0]!.senderMxid).toBe(HUMAN);
     expect(replies[0]).toContain("Skip them");
   });
 
@@ -381,6 +386,25 @@ describe("a reply in a board room, read as an answer", () => {
     expect(answered).toHaveLength(0);
   });
 
+  test("a plane outage while resolving the sender is refused as IDENTITY_UNAVAILABLE and said in the room", async () => {
+    // Design §5.7: the one plane call on an authorization path. Down is not "unresolved".
+    const d = delivery();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
+    const { deps, answered, replies } = answerRig({
+      principalForMatrixId: async () => {
+        throw new OrgPlaneError(0, "unreachable");
+      },
+    });
+
+    const out = await handleElicitationAnswer({ sender: HUMAN, body: "1" }, ROOM, deps);
+
+    expect(out).toEqual({ status: "refused", code: "IDENTITY_UNAVAILABLE" });
+    expect(answered).toHaveLength(0);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("cannot check who you are");
+    expect(await openQuestionInRoom(ROOM)).not.toBeNull();
+  });
+
   test("a question already settled on the board says so once", async () => {
     const d = delivery();
     await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
@@ -430,13 +454,46 @@ describe("a reply in a board room, read as an answer", () => {
 });
 
 describe("handing the answer to the board", () => {
+  test.each([
+    ["plane unreachable", new OrgPlaneError(0, "unreachable"), "IDENTITY_UNAVAILABLE"],
+    ["plane 409 not_human", new OrgPlaneError(409, "not_human"), "ASSERTION_REFUSED"],
+    ["a different sub", new AssertionMismatch("prn_0000000000000000000a", "prn_0000000000000000000f"), "ASSERTION_MISMATCH"],
+  ])("a mint that fails with %s is %s, and the board is not called", async (_label, error, code) => {
+    let called = 0;
+    const result = await answerElicitationAtSuperpipeline(
+      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h", senderMxid: "@h:id.test" },
+      {
+        baseUrl: "https://board.test",
+        mint: async () => {
+          throw error;
+        },
+        fetch: (async () => (called++, new Response("{}", { status: 200 }))) as unknown as typeof fetch,
+      },
+    );
+    expect(result).toEqual({ ok: false, code });
+    expect(called).toBe(0);
+  });
+
+  test("an assertion the plane could not give is a failed receipt, and the question stays open", async () => {
+    const d = delivery();
+    await projectElicitation(BOOTSTRAP_TENANT_ID, d, rig().deps);
+    const { deps, replies } = answerRig({ answer: async () => ({ ok: false, code: "IDENTITY_UNAVAILABLE" }) });
+
+    const out = await handleElicitationAnswer({ sender: HUMAN, body: "1" }, ROOM, deps);
+
+    expect(out).toEqual({ status: "refused", code: "IDENTITY_UNAVAILABLE" });
+    expect(replies[0]).toContain("cannot check who you are");
+    expect(await openQuestionInRoom(ROOM)).not.toBeNull();
+  });
+
   test("posts the option to the board's answer route, as the person", async () => {
     const calls: Array<{ url: string; auth: string | null; body: unknown }> = [];
+    const minted: unknown[] = [];
     const result = await answerElicitationAtSuperpipeline(
-      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h" },
+      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h", senderMxid: "@h:id.test" },
       {
         baseUrl: "https://board.test/",
-        mint: async (p) => `assertion-for-${p}`,
+        mint: async (s) => (minted.push(s), `assertion-for-${s.principalId}`),
         fetch: (async (url: string, init: RequestInit) => {
           calls.push({
             url,
@@ -452,6 +509,8 @@ describe("handing the answer to the board", () => {
     expect(calls[0]!.url).toBe("https://board.test/v1/boards/brd_x/elicitations/elc_y/answer");
     // As the person who answered, never as the hub or the agent.
     expect(calls[0]!.auth).toBe("Bearer assertion-for-prn_h");
+    // mint is handed both the principal and the sender (contract §3.4b).
+    expect(minted).toEqual([{ principalId: "prn_h", senderMxid: "@h:id.test" }]);
     expect(calls[0]!.body).toEqual({ option: "skip" });
   });
 
@@ -459,7 +518,7 @@ describe("handing the answer to the board", () => {
     // A question that is gone, one already answered, and an option never offered are
     // three different situations with the same shape.
     const result = await answerElicitationAtSuperpipeline(
-      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h" },
+      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h", senderMxid: "@h:id.test" },
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
@@ -475,7 +534,7 @@ describe("handing the answer to the board", () => {
   test("distinguishes the network from a refusal", async () => {
     // A refusal is final; this is not, so the reader should be able to answer again.
     const result = await answerElicitationAtSuperpipeline(
-      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h" },
+      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h", senderMxid: "@h:id.test" },
       {
         baseUrl: "https://board.test",
         mint: async () => "t",
@@ -489,7 +548,7 @@ describe("handing the answer to the board", () => {
 
   test("falls back to the status when the board sends no code", async () => {
     const result = await answerElicitationAtSuperpipeline(
-      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h" },
+      { boardId: "brd_x", elicitationId: "elc_y", option: "skip", principalId: "prn_h", senderMxid: "@h:id.test" },
       {
         baseUrl: "https://board.test",
         mint: async () => "t",

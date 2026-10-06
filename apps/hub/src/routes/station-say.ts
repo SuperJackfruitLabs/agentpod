@@ -23,8 +23,9 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
-import { getGrant, grantAllowsPrincipal } from "../services/grants";
-import { principalForUser, principalHandle } from "../services/principals";
+import { grantAllowsPrincipal } from "../services/grants";
+import { principalHandle } from "../services/principals";
+import { callerGrant, callerPrincipal } from "../auth/caller-authority";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { roomForStation } from "../services/matrix-as/station-room";
@@ -67,15 +68,16 @@ export function createStationSayRoutes(deps: StationSayDeps) {
     // The same question dispatching asks. Speaking as an agent is speaking AS
     // it, and a grant that does not cover this station does not cover this.
     if (isControlPairEnforced()) {
-      // `getGrant` is keyed by principal id now, not the Better Auth user id a
+      // The grant is keyed by principal id now, not the Better Auth user id a
       // session carries — a caller with no principal has no grant to hold and
-      // must be refused, not treated as unrestricted.
-      const principal = await principalForUser(user.id);
+      // must be refused, not treated as unrestricted. Under the org plane the
+      // caller's token answers (`auth/caller-authority.ts`, design §5.7).
+      const principal = await callerPrincipal(user);
       if (!principal) {
         log.warn("unprompted message refused: no principal for this caller", { userId: user.id });
         return c.json({ error: "You are not permitted to speak as this agent." }, 403);
       }
-      const grant = await getGrant(principal.id);
+      const grant = await callerGrant(user, principal.id);
       const allowed = grantAllowsPrincipal(grant, station.principalId);
       if (!allowed) {
         log.warn("unprompted message refused by the control pair", {

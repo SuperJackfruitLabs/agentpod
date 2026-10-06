@@ -8,6 +8,7 @@ import { db } from "../db/drizzle";
 import { stations, trustedSkillReleaseArtifacts } from "../db/schema";
 import { tenantScope } from "../db/tenant-scope";
 import { requireGrantReach } from "./grant-reach";
+import type { CallerRef } from "../auth/caller-authority";
 import { createSkillOperation, getSkillOperation } from "./skill-operations";
 import { getSkillReleaseCohort } from "./skill-release-cohorts";
 import { getTrustedSkillRelease } from "./trusted-skill-catalog";
@@ -22,6 +23,8 @@ export async function createSkillReleaseCanaryOperation(
   owner: SkillOwner,
   cohortId: string,
   raw: unknown,
+  /** Who is asking; under the org plane their token answers the reach check (design §5.7). */
+  caller: CallerRef = owner.userId,
 ) {
   const parsed = SkillReleaseCanaryPlanRequest.safeParse(raw);
   if (!parsed.success) throw new SkillRequestError(400, "Invalid skill release canary request");
@@ -40,7 +43,7 @@ export async function createSkillReleaseCanaryOperation(
   if (!station) throw new SkillRequestError(409, "Canary station is no longer available to this owner");
   if (!station.capabilities?.includes("skills.manage"))
     throw new SkillRequestError(409, "Canary station does not advertise skill management");
-  await requireGrantReach(owner.userId, station, "skills.manage", "mutate");
+  await requireGrantReach(caller, station, "skills.manage", "mutate");
   const [pin] = await db.select().from(trustedSkillReleaseArtifacts).where(
     tenantScope(
       trustedSkillReleaseArtifacts,

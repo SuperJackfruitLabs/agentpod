@@ -17,9 +17,10 @@ import { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema";
 import { principalIdentities } from "../db/schema/identities";
-import { getGrant, grantAllowsPrincipal } from "./grants";
-import { principalForUser } from "./principals";
+import { grantAllowsPrincipal } from "./grants";
+import { callerGrant, callerPrincipal, type CallerRef } from "../auth/caller-authority";
 import { isUserAdmin } from "../models/admin-users";
+import { orgPlane } from "../auth/org-plane/config";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
 
@@ -71,13 +72,15 @@ export function isReachBearing(cap: Capability): boolean {
  * the two can never disagree about what a grant means — `grantAllowsPrincipal`
  * is the same function `acp.createSession` calls.
  *
- * `userId` is a Better Auth user id — every caller reaches this through a
- * console route holding a session, never a principal id obtained elsewhere —
- * and is resolved to a principal before either `getGrant` or the station scope
- * check, both of which are keyed by principal id now.
+ * `caller` is the console caller (`AuthUser`) — or, on a path with no token to
+ * read, a bare user id. Legacy: a Better Auth user id, resolved to a principal
+ * before either the grant or the station scope check, both of which are keyed
+ * by principal id. Under the org plane the caller's token answers both
+ * (`auth/caller-authority.ts`, design §5.7); a bare id must read the directory
+ * and fails closed with `OrgPlaneUnavailable` when the plane is down.
  */
 export async function requireGrantReach(
-  userId: string,
+  caller: CallerRef,
   station: { nodeId: string; stationKey: string },
   cap: Capability,
   effect: "read" | "mutate"
@@ -85,7 +88,8 @@ export async function requireGrantReach(
   if (!isControlPairEnforced()) return;
   if (effect === "read" || !isReachBearing(cap)) return;
 
-  const principal = await principalForUser(userId);
+  const userId = typeof caller === "string" ? caller : caller.id;
+  const principal = await callerPrincipal(caller);
   if (!principal) {
     log.warn("reach refused by the control pair: no principal for this caller", {
       userId,
@@ -95,7 +99,7 @@ export async function requireGrantReach(
     throw new GrantReachDenied(userId, station.stationKey, cap);
   }
 
-  const grant = await getGrant(principal.id);
+  const grant = await callerGrant(caller, principal.id);
   if (!grant?.mayGrantReach) {
     log.warn("reach refused by the control pair: principal may not change agents", {
       principalId: principal.id,
@@ -136,12 +140,13 @@ export async function requireGrantReach(
  * your dispatch grant already covers.
  */
 export async function requireIssueCredentials(
-  userId: string,
+  caller: CallerRef,
   station: { nodeId: string; stationKey: string }
 ): Promise<void> {
   if (!isControlPairEnforced()) return;
 
-  const principal = await principalForUser(userId);
+  const userId = typeof caller === "string" ? caller : caller.id;
+  const principal = await callerPrincipal(caller);
   if (!principal) {
     log.warn("credential issue refused: no principal for this caller", {
       userId,
@@ -150,7 +155,7 @@ export async function requireIssueCredentials(
     throw new GrantReachDenied(userId, station.stationKey, "credentials");
   }
 
-  const grant = await getGrant(principal.id);
+  const grant = await callerGrant(caller, principal.id);
   if (!grant?.mayGrantReach) {
     log.warn("credential issue refused: principal may not change agents", {
       principalId: principal.id,
@@ -187,6 +192,9 @@ export async function requireIssueCredentials(
  * a service) is simply not an admin.
  */
 async function isAdminPrincipal(principalId: string): Promise<boolean> {
+  // Under the plane a human's principal id IS their account id (contract §2), so the seat is
+  // asked about the principal directly; there is no Better Auth identity to go through.
+  if (orgPlane()) return isUserAdmin(principalId);
   const [identity] = await db
     .select({ externalId: principalIdentities.externalId })
     .from(principalIdentities)

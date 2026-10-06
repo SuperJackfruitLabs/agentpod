@@ -22,7 +22,8 @@ import { matrixRooms } from "../../db/schema/matrix";
 import { acpSessions } from "../../db/schema/acp";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
-import { resolveMatrixId } from "../matrix-identity";
+import { IDENTITY_UNAVAILABLE_TEXT, resolveMatrixId } from "../matrix-identity";
+import { OrgPlaneError } from "../org-plane/client";
 import { getGrant, grantAllowsPrincipal } from "../grants";
 import { isControlPairEnforced } from "../control-pair";
 import { bridgeUserId } from "./names";
@@ -465,7 +466,23 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
   const say = (body: string) => notice(deps, agentUser, room.roomId, body);
 
   // ── Who is this? ──────────────────────────────────────────────────────────
-  const identity = await resolveMatrixId(event.sender);
+  //
+  // Under the org plane this, and the grant below, are the reads design §5.7 allows on this path,
+  // served from a 60 s cache with last-good. A plane that cannot be reached with nothing cached is
+  // said as such — "I do not recognise you" would be a lie that sends somebody to relink.
+  let identity: Awaited<ReturnType<typeof resolveMatrixId>>;
+  try {
+    identity = await resolveMatrixId(event.sender);
+  } catch (err) {
+    if (!(err instanceof OrgPlaneError)) throw err;
+    log.warn("matrix sender could not be resolved: the org plane is unreachable", {
+      sender: event.sender,
+      room: room.roomId,
+      status: err.status,
+    });
+    await say(IDENTITY_UNAVAILABLE_TEXT);
+    return;
+  }
   if (identity?.kind !== "principal") {
     // Ambiguous is refused as firmly as unknown: `resolveMatrixId` fails closed
     // when one mxid is claimed by both a station and a principal, and guessing
@@ -485,7 +502,19 @@ export async function handleRoomMessage(rawEvent: InboundEvent, deps: InboundDep
 
   // ── May they dispatch THIS agent? ─────────────────────────────────────────
   if (isControlPairEnforced()) {
-    const grant = await getGrant(principalId);
+    let grant: Awaited<ReturnType<typeof getGrant>>;
+    try {
+      grant = await getGrant(principalId);
+    } catch (err) {
+      if (!(err instanceof OrgPlaneError)) throw err;
+      log.warn("matrix sender's grant could not be read: the org plane is unreachable", {
+        principalId,
+        room: room.roomId,
+        status: err.status,
+      });
+      await say(IDENTITY_UNAVAILABLE_TEXT);
+      return;
+    }
     const allowed = grantAllowsPrincipal(grant, room.principalId);
 
     if (!allowed) {

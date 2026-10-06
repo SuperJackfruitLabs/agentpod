@@ -652,6 +652,20 @@
       "when": 1791202179729,
       "tag": "0092_zippy_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791308404108,
+      "tag": "0093_legacy_user_principals",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791309542081,
+      "tag": "0094_hub_operators",
+      "breakpoints": true
     }
   ]
 }

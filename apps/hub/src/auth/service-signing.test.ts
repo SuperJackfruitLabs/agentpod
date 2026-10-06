@@ -21,12 +21,15 @@ process.env.DATABASE_URL =
 process.env.NODE_ENV = "test";
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
-import { decodeJwt, decodeProtectedHeader } from "jose";
+import { SignJWT, decodeJwt, decodeProtectedHeader } from "jose";
 import { config } from "../config";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { rawSql } from "../db/drizzle";
+import { db, rawSql } from "../db/drizzle";
+import { serviceSigningKeys } from "../db/schema/service-keys";
+import { setOrgPlaneForTests, TEST_PLANE } from "./org-plane/config";
+import { OrgPlaneError } from "../services/org-plane/client";
 import { createPrincipal } from "../services/principals";
-import { BRIDGE_ACTOR, mintPrincipalAssertion, servicePublicJwks } from "./service-signing";
+import { AssertionMismatch, BRIDGE_ACTOR, assertPrincipal, mintPrincipalAssertion, servicePublicJwks } from "./service-signing";
 
 // Fixed handle, cleaned up on both ends: running this suite twice against the
 // same database (no reset between runs, unlike CI) must not hit
@@ -136,5 +139,98 @@ describe("an assertion for another plane", () => {
       audiences: ["https://app.superpipeline.dev"],
     });
     expect(decodeJwt(token).sub).toBe(principalId);
+  });
+});
+
+/**
+ * Contract §3.4b: under the org plane the hub signs nothing. A human's approval from chat is the
+ * plane's assertion, asked for by the sender's Matrix identity — never by a prn_ the hub names.
+ */
+describe("assertPrincipal under the plane (contract §3.4b)", () => {
+  const SUBJECT = { principalId: "prn_0000000000000000000a", senderMxid: "@op:id.test" };
+  /** Unsigned-enough: assertPrincipal only decodes `sub`; the receiving plane verifies the signature. */
+  const tokenFor = (sub: string) =>
+    new SignJWT({ sub }).setProtectedHeader({ alg: "HS256" }).sign(new TextEncoder().encode("k".repeat(32)));
+
+  test("sends the sender's Matrix identity, returns the plane's token, touches no hub key", async () => {
+    const before = (await db.select().from(serviceSigningKeys)).length;
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const asked: unknown[] = [];
+      const plane = await tokenFor(SUBJECT.principalId);
+      const token = await assertPrincipal(
+        { ...SUBJECT, audience: "https://app.superpipeline.test" },
+        {
+          client: () => ({
+            assertionToken: async (identity, audience) => (asked.push({ identity, audience }), { accessToken: plane, expiresIn: 120 }),
+          }),
+        },
+      );
+      expect(token).toBe(plane);
+      expect(asked).toEqual([{ identity: { system: "matrix", externalId: "@op:id.test" }, audience: "https://app.superpipeline.test" }]);
+    } finally {
+      restore();
+    }
+    expect((await db.select().from(serviceSigningKeys)).length).toBe(before);
+  });
+
+  test("a plane token naming a different principal is refused", async () => {
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const other = await tokenFor("prn_0000000000000000000f");
+      const err = await assertPrincipal(
+        { ...SUBJECT, audience: "https://a" },
+        { client: () => ({ assertionToken: async () => ({ accessToken: other, expiresIn: 120 }) }) },
+      ).catch((e) => e);
+      expect(err).toBeInstanceOf(AssertionMismatch);
+    } finally {
+      restore();
+    }
+  });
+
+  test.each([
+    [403, "not_permitted"],
+    [404, "unknown_identity"],
+    [409, "not_human"],
+    [423, "suspended"],
+    [0, "unreachable"],
+  ])("a plane refusal %i %s propagates as OrgPlaneError, never a hub-signed fallback", async (status, code) => {
+    const before = (await db.select().from(serviceSigningKeys)).length;
+    const restore = setOrgPlaneForTests(TEST_PLANE);
+    try {
+      const err = await assertPrincipal(
+        { ...SUBJECT, audience: "https://a" },
+        {
+          client: () => ({
+            assertionToken: async () => {
+              throw new OrgPlaneError(status, code);
+            },
+          }),
+        },
+      ).catch((e) => e);
+      expect(err).toBeInstanceOf(OrgPlaneError);
+      expect(err.code).toBe(code);
+    } finally {
+      restore();
+    }
+    expect((await db.select().from(serviceSigningKeys)).length).toBe(before);
+  });
+
+  test("legacy mode still signs with the hub's key, as today, and never asks the plane", async () => {
+    await rawSql`DELETE FROM principals WHERE handle = 'assert-legacy-target'`;
+    const human = await createPrincipal({ kind: "human", handle: "assert-legacy-target" });
+    try {
+      let asked = 0;
+      const token = await assertPrincipal(
+        { principalId: human, senderMxid: "@x:id.test", audience: "https://a" },
+        { client: () => ({ assertionToken: async () => (asked++, { accessToken: "x", expiresIn: 1 }) }) },
+      );
+      expect(asked).toBe(0);
+      expect(decodeJwt(token).sub).toBe(human);
+      expect(decodeJwt(token).act).toEqual({ sub: BRIDGE_ACTOR });
+      expect(decodeJwt(token).aud).toEqual(["https://a"]);
+    } finally {
+      await rawSql`DELETE FROM principals WHERE handle = 'assert-legacy-target'`;
+    }
   });
 });

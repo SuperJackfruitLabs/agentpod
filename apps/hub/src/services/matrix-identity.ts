@@ -25,6 +25,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema/stations";
 import { principalIdentities } from "../db/schema/identities";
+import { orgPlane } from "../auth/org-plane/config";
+import { principalDirectory } from "./org-plane/directory";
 
 export type MatrixIdentity =
   | { kind: "principal"; principalId: string }
@@ -41,11 +43,36 @@ export type MatrixIdentity =
   | { kind: "ambiguous"; stationId: string; principalId: string }
   | null;
 
+/** What a person is told when the org plane cannot say who they are (design §5.7). */
+export const IDENTITY_UNAVAILABLE_TEXT =
+  "I cannot check who you are right now — the account service is unreachable. Nothing has changed; try again in a minute.";
+
 /** `@localpart:domain`, checked only well enough to skip an obviously pointless query. */
 const MXID = /^@[^:]+:.+$/;
 
+/**
+ * Under the org plane the person half is the plane's `GET /api/identities/matrix/:mxid` — the one
+ * plane call design §5.7 allows on an authorization path — through the directory's 60 s cache with
+ * last-good. A plane that cannot be reached with nothing cached throws `OrgPlaneError` out of here:
+ * "down" must never read as "unlinked". The station half stays local; stations are the hub's.
+ */
 export async function resolveMatrixId(mxid: string): Promise<MatrixIdentity> {
   if (!mxid || !MXID.test(mxid)) return null;
+
+  const principalLookup: Promise<Array<{ principalId: string }>> = orgPlane()
+    ? principalDirectory()
+        .identity("matrix", mxid)
+        .then((r) => (r ? [{ principalId: r.principalId }] : []))
+    : db
+        .select({ principalId: principalIdentities.principalId })
+        .from(principalIdentities)
+        .where(
+          and(
+            eq(principalIdentities.system, "matrix"),
+            eq(principalIdentities.externalId, mxid)
+          )
+        )
+        .limit(2);
 
   const [stationRows, principalRows] = await Promise.all([
     db
@@ -57,16 +84,7 @@ export async function resolveMatrixId(mxid: string): Promise<MatrixIdentity> {
       .from(stations)
       .where(eq(stations.matrixId, mxid))
       .limit(2),
-    db
-      .select({ principalId: principalIdentities.principalId })
-      .from(principalIdentities)
-      .where(
-        and(
-          eq(principalIdentities.system, "matrix"),
-          eq(principalIdentities.externalId, mxid)
-        )
-      )
-      .limit(2),
+    principalLookup,
   ]);
 
   // Filtered to `system = 'matrix'` above, deliberately. An external id is

@@ -43,6 +43,8 @@ import { createLogger } from "../../utils/logger";
 import { GATE_REQUEST_CONTENT_KEY, type GateRequestCard } from "@agentpod/contract";
 import { noteHubEvent } from "../push/hub-events";
 import { legacyRequestEvents } from "./legacy-events";
+import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
+import { assertionFailureCode, type AssertionSubject } from "../../auth/service-signing";
 import { stationSpeaker } from "./names";
 import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
@@ -585,6 +587,13 @@ export async function projectGate(
 export type DecisionRefusal =
   | "not-a-decision"
   | "unlinked-sender"
+  /**
+   * The org plane could not be asked who the sender is, and nothing was cached (design §5.7's
+   * one named online dependency). Not "unlinked": the sender may well be linked.
+   */
+  | "identity-unavailable"
+  /** The org plane refused to assert the sender (contract §3.4b), or asserted somebody else. */
+  | "assertion-refused"
   /** A linked principal that is not a person — an agent or a service. */
   | "not-human"
   | "unknown-gate"
@@ -683,6 +692,11 @@ export interface GateDecisionDeps {
     decision: GateOptionId;
     comment: string | null;
     principalId: string;
+    /**
+     * The Matrix sender. Under the org plane the plane asserts this identity and resolves the
+     * human itself (contract §3.4b); `principalId` is what the hub resolved, checked against it.
+     */
+    senderMxid: string;
   }): Promise<{ ok: true } | { ok: false; code: string }>;
   /** Say something back in the room. Used when a gate was already resolved. */
   reply(roomId: string, body: string): Promise<unknown>;
@@ -741,7 +755,19 @@ export async function handleGateDecision(
     return { status: "refused", reason: "reference-mismatch" };
   }
 
-  const principal = await deps.principalForMatrixId(event.sender);
+  let principal: Awaited<ReturnType<GateDecisionDeps["principalForMatrixId"]>>;
+  try {
+    principal = await deps.principalForMatrixId(event.sender);
+  } catch (error) {
+    // The one plane call design §5.7 allows. Down is not "unlinked": say which, in the room,
+    // because a person who tapped Approve and saw nothing would tap again or give up.
+    log.warn("could not resolve a gate decision's sender", {
+      sender: event.sender,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await deps.reply(roomId, IDENTITY_UNAVAILABLE_TEXT);
+    return { status: "refused", reason: "identity-unavailable" };
+  }
   if (!principal) {
     // An unlinked Matrix user in a room is a case this must handle explicitly
     // (charter decisions/2026-08-13-ecosystem-identity.md, Decision 2). It is
@@ -788,6 +814,7 @@ export async function handleGateDecision(
     decision: parsed.optionId,
     comment: parsed.comment,
     principalId: principal.id,
+    senderMxid: event.sender,
   });
 
   if (result.ok) {
@@ -800,6 +827,26 @@ export async function handleGateDecision(
     // swallowed: the person who tapped is owed the reason nothing happened.
     await deps.reply(roomId, "That was already decided — the board has it.");
     return { status: "refused", reason: "unknown-gate" };
+  }
+
+  // The assertion could not be had (only under the org plane): a failed receipt, said in the room,
+  // because the person who tapped is owed the reason nothing happened and can tap again.
+  if (result.code === "IDENTITY_UNAVAILABLE") {
+    log.warn("gate decision not carried: the org plane is unreachable", { gateId: parsed.gateId });
+    await deps.reply(roomId, IDENTITY_UNAVAILABLE_TEXT);
+    return { status: "refused", reason: "identity-unavailable" };
+  }
+  if (result.code === "ASSERTION_REFUSED" || result.code === "ASSERTION_MISMATCH") {
+    log.warn("gate decision not carried: the org plane would not assert the sender", {
+      gateId: parsed.gateId,
+      sender: event.sender,
+      code: result.code,
+    });
+    await deps.reply(
+      roomId,
+      `That did not go through (${result.code}): the account service would not vouch for you. Nothing has changed.`,
+    );
+    return { status: "refused", reason: "assertion-refused" };
   }
 
   log.warn("superpipeline refused a decision", { gateId: parsed.gateId, code: result.code });
@@ -849,14 +896,30 @@ export async function resolveGateAtSuperpipeline(
     decision: GateOptionId;
     comment: string | null;
     principalId: string;
+    senderMxid: string;
   },
   deps: {
     baseUrl: string;
-    mint(principalId: string): Promise<string>;
+    mint(subject: AssertionSubject): Promise<string>;
     fetch?: typeof fetch;
   }
 ): Promise<{ ok: true } | { ok: false; code: string }> {
-  const token = await deps.mint(input.principalId);
+  let token: string;
+  try {
+    token = await deps.mint({ principalId: input.principalId, senderMxid: input.senderMxid });
+  } catch (err) {
+    // Under the org plane the assertion is the plane's to give (contract §3.4b). Refused or
+    // unreachable is a failed outcome the caller reports, never a token-less call to the board.
+    // Anything else throws, as it always has.
+    const code = assertionFailureCode(err);
+    if (!code) throw err;
+    log.warn("no assertion for a gate decision", {
+      gateId: input.gateId,
+      code,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, code };
+  }
   const doFetch = deps.fetch ?? fetch;
   const base = deps.baseUrl.replace(/\/+$/, "");
 

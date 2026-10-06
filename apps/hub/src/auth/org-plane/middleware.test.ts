@@ -11,7 +11,14 @@ const human: PlaneBearerResult = {
     sub: "prn_aaaaaaaaaaaaaaaaaaaa",
     principalKind: "human",
     tenantId: "fleet_11111111111111111111",
-    claims: { email: "op@example.com" } as never,
+    claims: {
+      email: "op@example.com",
+      principalKind: "human",
+      mayDispatch: ["prn_bbbbbbbbbbbbbbbbbbbb"],
+      mayGrantReach: true,
+      // A human's `scope` is the OAuth scope string; it must never read as a grant (contract §2).
+      scope: "openid evidence:read",
+    } as never,
   },
 };
 
@@ -36,7 +43,26 @@ describe("authMiddleware with ORG_PLANE_* set", () => {
       email: "op@example.com",
       authType: "org_plane",
       tenantId: "fleet_11111111111111111111",
+      authority: { principalKind: "human", mayDispatch: ["prn_bbbbbbbbbbbbbbbbbbbb"], mayGrantReach: true, scopes: [] },
     });
+  });
+
+  test("the token's authority rides on AuthUser, so authorization never reads the plane (design §5.7)", async () => {
+    const res = await app(human).request("/api/whoami", { headers: { Authorization: "Bearer t" } });
+    const u = (await res.json()) as { authority?: unknown };
+    expect(u.authority).toEqual({
+      principalKind: "human",
+      mayDispatch: ["prn_bbbbbbbbbbbbbbbbbbbb"],
+      mayGrantReach: true,
+      scopes: [],
+    });
+  });
+
+  test("the static API_TOKEN carries no token authority", async () => {
+    const res = await app({ ok: false, status: 401 }).request("/api/whoami", {
+      headers: { Authorization: `Bearer ${config.auth.token}` },
+    });
+    expect(((await res.json()) as { authority?: unknown }).authority).toBeUndefined();
   });
 
   test("?token= is still read, for the browser's WebSocket and EventSource", async () => {
