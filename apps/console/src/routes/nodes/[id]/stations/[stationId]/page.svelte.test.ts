@@ -17,6 +17,8 @@
 import { test, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, waitFor, fireEvent } from "@testing-library/svelte";
 import * as api from "$lib/api/client";
+import * as harnessConfigApi from "$lib/api/harness-config";
+import * as pluginsApi from "$lib/api/plugins";
 import type { StationRow } from "$lib/api/client";
 import type { StationHealth } from "@agentpod/contract";
 
@@ -511,7 +513,9 @@ test("a reply about the agent we have just navigated away from is dropped", asyn
   expect(getByTestId("station-handle").textContent).toContain("scribe");
 });
 
-test("skill inventory tab is capability gated and fetches only the selected station", async () => {
+// The skill inventory lives on the Configuration tab now, reached here through
+// the retired `?tab=skills` id — so this also covers the alias.
+test("skill inventory is capability gated and fetches only the selected station", async () => {
   vi.spyOn(api,"listStations").mockResolvedValue([station(["health","skills.inventory"])]);
   const inventory=vi.spyOn(api,"skillsInventory").mockResolvedValue({
     stationKey:"codex:fixture",harness:"codex",observedAt:"2026-09-20T10:00:00Z",
@@ -519,16 +523,132 @@ test("skill inventory tab is capability gated and fetches only the selected stat
   });
   setUrl("?tab=skills");
   const {getAllByRole}=render(StationPage);
-  await waitFor(()=>expect(tabNames(getAllByRole("tab"))).toContain("Skills"));
+  await waitFor(()=>expect(tabNames(getAllByRole("tab"))).toContain("Configuration"));
   await waitFor(()=>expect(inventory).toHaveBeenCalledWith("station_1"));
 });
 
-test("older stations have no skill inventory tab or request",async()=>{
+test("older stations have no configuration tab or skill inventory request",async()=>{
   vi.spyOn(api,"listStations").mockResolvedValue([station(["health"])]);
   const inventory=vi.spyOn(api,"skillsInventory");
   setUrl("?tab=skills");
   const {getAllByRole}=render(StationPage);
   await waitFor(()=>expect(tabNames(getAllByRole("tab"))).toContain("Health"));
-  expect(tabNames(getAllByRole("tab"))).not.toContain("Skills");
+  // Named for what the tab is called now: asserting the absence of "Skills"
+  // would pass for the wrong reason, since no tab carries that label at all.
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Configuration");
   expect(inventory).not.toHaveBeenCalled();
+});
+
+// ─── the Configuration tab ──────────────────────────────────────────────────
+//
+// One tab holds declared configuration, plugins and skills, because on a
+// Hermes station all three write the same configuration document. The panels
+// fetch on mount, so each test quiets their own calls: this file is about where
+// panels are mounted, not what they show.
+
+function stubConfigPanels() {
+  vi.spyOn(harnessConfigApi, "getStationConfig").mockResolvedValue({ observations: [] });
+  vi.spyOn(harnessConfigApi, "listConfigSettings").mockResolvedValue({ settings: [], unreachableNodes: [] });
+  vi.spyOn(harnessConfigApi, "listConfigOptOuts").mockResolvedValue([]);
+  vi.spyOn(pluginsApi, "listPluginOperations").mockResolvedValue([]);
+  // The real shape, with no cast. The first version of this stub returned
+  // `{ skills: [], sources: [] } as never` — SkillsPanel reads
+  // `coverage.limitations`, so it threw on render, and the cast is what hid
+  // that from the typechecker. Vitest reported the tests as PASSED and exited
+  // 1 on the unhandled error, which is a disagreement worth remembering.
+  vi.spyOn(api, "skillsInventory").mockResolvedValue({
+    stationKey: "hermes:fixture",
+    harness: "hermes",
+    observedAt: "2026-10-06T00:00:00Z",
+    skills: [],
+    plugins: [],
+    issues: [],
+    coverage: { complete: false, roots: [], limitations: [] },
+  });
+}
+
+test("plugins, skills and declared configuration share one Configuration tab", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([
+    station(["health", "skills.inventory", "plugins.manage", "config.manage"]),
+  ]);
+  setUrl("?tab=config");
+
+  const { getAllByRole, getByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+
+  expect(getByRole("region", { name: "Harness configuration" })).toBeTruthy();
+  expect(getByRole("region", { name: "Plugin management" })).toBeTruthy();
+  expect(getByRole("region", { name: "Skill inventory" })).toBeTruthy();
+  // The retired label is gone.
+  expect(tabNames(getAllByRole("tab"))).not.toContain("Skills");
+});
+
+test("a station with only config.manage still gets the tab", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "config.manage"])]);
+  setUrl("?tab=config");
+
+  const { getAllByRole, getByRole } = render(StationPage);
+  await waitFor(() => expect(tabNames(getAllByRole("tab"))).toContain("Configuration"));
+  expect(getByRole("region", { name: "Harness configuration" })).toBeTruthy();
+});
+
+test("an old ?tab=skills link lands on Configuration", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "skills.inventory"])]);
+  setUrl("?tab=skills");
+
+  const { getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+});
+
+test("choosing the tab writes ?tab=config, never the alias", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "config.manage"])]);
+
+  const { getByRole } = render(StationPage);
+  await waitFor(() => expect(getByRole("tab", { name: "Configuration" })).toBeTruthy());
+  await fireEvent.click(getByRole("tab", { name: "Configuration" }));
+
+  expect(String(goto.mock.calls[0][0])).toContain("tab=config");
+  expect(String(goto.mock.calls[0][0])).not.toContain("tab=skills");
+});
+
+test("the Files tab holds files only — no declared configuration", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "fs.read", "config.manage"])]);
+  setUrl("?tab=files");
+
+  const { getAllByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Files"));
+
+  // Wait for the Files panel ITSELF before asserting what is not in it. The
+  // panel is keep-alive, so it mounts an effect-tick after the tab becomes
+  // active — asserting absence before that passes while the whole page is
+  // still empty, which is an assertion about nothing.
+  const filesPanel = await waitFor(() => {
+    const el = document.getElementById("page-tabs-panel-files");
+    expect(el).toBeTruthy();
+    return el!;
+  });
+  expect(filesPanel.querySelector('[aria-label="Harness configuration"]')).toBeNull();
+});
+
+test("a reviewed plan survives a switch to Logs and back", async () => {
+  stubConfigPanels();
+  vi.spyOn(api, "listStations").mockResolvedValue([station(["health", "logs", "config.manage"])]);
+  setUrl("?tab=config");
+
+  const { getAllByRole, getByRole } = render(StationPage);
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Configuration"));
+  const region = getByRole("region", { name: "Harness configuration" });
+
+  await fireEvent.click(getByRole("tab", { name: "Logs" }));
+  setUrl("?tab=logs");
+  await waitFor(() => expect(selected(getAllByRole("tab"))).toBe("Logs"));
+
+  // Kept alive, not torn down: the same element is still in the document.
+  expect(region.isConnected).toBe(true);
+  expect(region.closest('[role="tabpanel"]')!.className).toContain("hidden");
 });

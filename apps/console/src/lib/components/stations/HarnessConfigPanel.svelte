@@ -32,7 +32,17 @@
     nodeId,
     stationKey,
     onRestart,
-  }: { stationId: string; nodeId: string; stationKey?: string; onRestart?: () => void } = $props();
+    active = true,
+  }: {
+    stationId: string;
+    nodeId: string;
+    stationKey?: string;
+    onRestart?: () => void;
+    /** False while the panel is mounted but hidden — the keep-alive tab it
+     *  lives in keeps it alive across tab switches (spec D6). Becoming true
+     *  again re-reads the observations; it never clears a plan under review. */
+    active?: boolean;
+  } = $props();
 
   /**
    * An `opted-out` row's source, read-only (Task 4, spec D13 / D11; D9 for
@@ -162,16 +172,40 @@
   // the digest exists to prevent.
   let writeBusy = $state<string | null>(null);
   let plan = $state<ConfigPlan | null>(null);
+  /** When `plan` was captured — a kept-alive plan can now outlive the glance
+   *  that produced it, so the panel says how old the thing under review is. */
+  let planCapturedAt = $state<Date | null>(null);
   let planRefusal = $state<{ code?: string; message: string } | null>(null);
   let receipt = $state<ConfigReceipt | null>(null);
   let applyStale = $state<string | null>(null);
   let applyError = $state<string | null>(null);
   let reloadTrigger = $state(0);
 
+  /**
+   * Re-entering the tab re-reads the observations, because a kept-alive panel
+   * would otherwise show whatever was true when the operator last looked.
+   *
+   * It deliberately does NOT clear `plan` (spec D6). Apply sends the digest of
+   * the plan on screen, and a document that moved underneath is refused with
+   * PLAN_DIGEST_MISMATCH / PLAN_STALE — so a kept plan can only ever produce a
+   * visible refusal, never a silent wrong write. Dropping it instead would
+   * destroy a review every time the operator checked Logs mid-review.
+   *
+   * `wasActive` starts null so the first run only records the initial value:
+   * mounting while active must not double-load.
+   */
+  let wasActive: boolean | null = null;
+  $effect(() => {
+    const isActive = active;
+    if (wasActive !== null && isActive && !wasActive) reloadTrigger++;
+    wasActive = isActive;
+  });
+
   const canApply = $derived(plan !== null && !plan.noOp && receipt?.phase !== "applied");
 
   function clearReview() {
     plan = null;
+    planCapturedAt = null;
     planRefusal = null;
     receipt = null;
     applyStale = null;
@@ -201,6 +235,7 @@
       () => api.planStationConfig(id),
       (result) => {
         plan = result;
+        planCapturedAt = new Date();
       },
       (e) => {
         planRefusal =
@@ -393,106 +428,122 @@
         </tbody>
       </table>
     </div>
+  {/if}
 
-    <section aria-label="Review and apply changes" class="space-y-3 rounded-md border p-3 text-sm">
-      <div class="flex items-center justify-between gap-2">
-        <h3 class="font-semibold">Review and apply</h3>
-        <Button size="sm" disabled={writeBusy !== null} onclick={reviewChanges}>
-          {plan || planRefusal ? "Plan again" : "Review changes"}
-        </Button>
-      </div>
-      <p class="text-xs text-muted-foreground">
-        Asks the hub for a plan over every setting declared for this station. Nothing is written until the plan
-        below is applied, and apply always sends the digest of exactly the plan shown here.
+  <!--
+    Outside the loading chain on purpose.
+
+    A captured plan and its digest are what apply sends, and the tab this panel
+    lives in is keep-alive: re-entering it re-reads the observations (spec D6).
+    While that read is in flight the chain above renders its loading branch, and
+    if it fails it renders the error branch — either would take a reviewed plan,
+    and its apply button, off the screen while the plan is still perfectly good.
+    A row refresh must not be able to do that, so the review stands on its own
+    condition.
+  -->
+  {#if plan || planRefusal || (!loading && !error && rows.length > 0)}
+  <section aria-label="Review and apply changes" class="space-y-3 rounded-md border p-3 text-sm">
+    <div class="flex items-center justify-between gap-2">
+      <h3 class="font-semibold">Review and apply</h3>
+      {#if planCapturedAt}
+        <p class="text-xs text-muted-foreground">Planned at {planCapturedAt.toLocaleTimeString()}</p>
+      {/if}
+      <Button size="sm" disabled={writeBusy !== null} onclick={reviewChanges}>
+        {plan || planRefusal ? "Plan again" : "Review changes"}
+      </Button>
+    </div>
+    <p class="text-xs text-muted-foreground">
+      Asks the hub for a plan over every setting declared for this station. Nothing is written until the plan
+      below is applied, and apply always sends the digest of exactly the plan shown here.
+    </p>
+    {#if writeBusy}<p role="status">{writeBusy}…</p>{/if}
+    {#if planRefusal}
+      <p role="alert" class="text-destructive">
+        Refused ({planRefusal.code ?? "unrecognised code"}): {planRefusal.message}
       </p>
-      {#if writeBusy}<p role="status">{writeBusy}…</p>{/if}
-      {#if planRefusal}
-        <p role="alert" class="text-destructive">
-          Refused ({planRefusal.code ?? "unrecognised code"}): {planRefusal.message}
-        </p>
-      {/if}
-      {#if applyError}<p role="alert" class="text-destructive">{applyError}</p>{/if}
-      {#if applyStale}<p role="alert" class="text-destructive">{applyStale}</p>{/if}
-      {#if plan}
-        <div class="space-y-2">
-          {#if plan.refused && plan.refused.length > 0}
-            <div
-              aria-label="Settings excluded from this plan"
-              class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
-            >
-              <p class="font-medium">
-                {plan.refused.length}
-                {plan.refused.length === 1 ? "setting was" : "settings were"} left out of this plan — opted out before
-                it was ever derived:
-              </p>
-              <ul class="mt-1 space-y-1">
-                {#each plan.refused as r (r.settingId)}
-                  <li><span class="font-mono">{r.settingId}</span> — {r.code}: {r.message}</li>
-                {/each}
-              </ul>
-            </div>
-          {/if}
-          {#if plan.noOp}
-            <p>Nothing to change: every planned setting already matches what is declared.</p>
-          {:else}
-            {#if plan.restartRequired && receipt?.phase !== "applied"}
-              <p class="text-amber-700">
-                Applying this plan will need a restart to take effect. <strong
-                  >agentpod will not restart the harness.</strong
-                >
-              </p>
-            {/if}
-            <div class="overflow-x-auto">
-              <table class="w-full text-left text-xs">
-                <caption class="sr-only">Planned changes for this station's configuration</caption>
-                <thead class="border-b text-muted-foreground">
-                  <tr>
-                    <th class="p-1">Setting</th>
-                    <th class="p-1">File</th>
-                    <th class="p-1">Current → intended</th>
-                    <th class="p-1">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each plan.entries as entry (entry.settingId)}
-                    <tr class="border-b align-top">
-                      <td class="p-1 font-mono">{entry.settingId}</td>
-                      <td class="p-1 font-mono">{entry.file}:{entry.keyPath}</td>
-                      <td class="p-1 font-mono">{fmt(entry.current)} → {fmt(entry.intended)}</td>
-                      <td class="p-1">{entry.action}{entry.restartToTakeEffect ? " (needs a restart)" : ""}</td>
-                    </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-            <pre
-              aria-label="Planned configuration change"
-              class="max-h-64 overflow-auto rounded bg-muted p-2 font-mono text-xs">{plan.diff}</pre>
-            {#if plan.diffTruncated}<p class="text-xs text-muted-foreground">The change is longer than shown.</p>{/if}
-          {/if}
-          <details>
-            <summary class="cursor-pointer">Review identifiers</summary>
-            <dl class="mt-2 space-y-1 break-all font-mono text-xs">
-              <div><dt>Operation</dt><dd>{plan.operationId}</dd></div>
-              <div><dt>Reviewed plan digest</dt><dd>{plan.planDigest}</dd></div>
-            </dl>
-          </details>
-        </div>
-        {#if receipt?.phase === "applied"}
-          <p>
-            Applied.
-            {#if plan.restartRequired}
-              This is written but not yet in effect. <strong>agentpod will not restart the harness</strong> — the row
-              above now reads awaiting-restart.
-            {/if}
-          </p>
-          {#if plan.restartRequired && onRestart}
-            <Button size="sm" variant="outline" onclick={onRestart}>Restart station…</Button>
-          {/if}
-        {:else if canApply && !applyStale}
-          <Button size="sm" disabled={writeBusy !== null} onclick={applyPlan}>Apply reviewed plan</Button>
+    {/if}
+    {#if applyError}<p role="alert" class="text-destructive">{applyError}</p>{/if}
+    {#if applyStale}<p role="alert" class="text-destructive">{applyStale}</p>{/if}
+    {#if plan}
+      <div class="space-y-2">
+        {#if plan.refused && plan.refused.length > 0}
+          <div
+            aria-label="Settings excluded from this plan"
+            class="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
+          >
+            <p class="font-medium">
+              {plan.refused.length}
+              {plan.refused.length === 1 ? "setting was" : "settings were"} left out of this plan — opted out before
+              it was ever derived:
+            </p>
+            <ul class="mt-1 space-y-1">
+              {#each plan.refused as r (r.settingId)}
+                <li><span class="font-mono">{r.settingId}</span> — {r.code}: {r.message}</li>
+              {/each}
+            </ul>
+          </div>
         {/if}
+        {#if plan.noOp}
+          <p>Nothing to change: every planned setting already matches what is declared.</p>
+        {:else}
+          {#if plan.restartRequired && receipt?.phase !== "applied"}
+            <p class="text-amber-700">
+              Applying this plan will need a restart to take effect. <strong
+                >agentpod will not restart the harness.</strong
+              >
+            </p>
+          {/if}
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <caption class="sr-only">Planned changes for this station's configuration</caption>
+              <thead class="border-b text-muted-foreground">
+                <tr>
+                  <th class="p-1">Setting</th>
+                  <th class="p-1">File</th>
+                  <th class="p-1">Current → intended</th>
+                  <th class="p-1">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each plan.entries as entry (entry.settingId)}
+                  <tr class="border-b align-top">
+                    <td class="p-1 font-mono">{entry.settingId}</td>
+                    <td class="p-1 font-mono">{entry.file}:{entry.keyPath}</td>
+                    <td class="p-1 font-mono">{fmt(entry.current)} → {fmt(entry.intended)}</td>
+                    <td class="p-1">{entry.action}{entry.restartToTakeEffect ? " (needs a restart)" : ""}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+          <pre
+            aria-label="Planned configuration change"
+            class="max-h-64 overflow-auto rounded bg-muted p-2 font-mono text-xs">{plan.diff}</pre>
+          {#if plan.diffTruncated}<p class="text-xs text-muted-foreground">The change is longer than shown.</p>{/if}
+        {/if}
+        <details>
+          <summary class="cursor-pointer">Review identifiers</summary>
+          <dl class="mt-2 space-y-1 break-all font-mono text-xs">
+            <div><dt>Operation</dt><dd>{plan.operationId}</dd></div>
+            <div><dt>Reviewed plan digest</dt><dd>{plan.planDigest}</dd></div>
+          </dl>
+        </details>
+      </div>
+      {#if receipt?.phase === "applied"}
+        <p>
+          Applied.
+          {#if plan.restartRequired}
+            This is written but not yet in effect. <strong>agentpod will not restart the harness</strong> — the row
+            above now reads awaiting-restart.
+          {/if}
+        </p>
+        {#if plan.restartRequired && onRestart}
+          <Button size="sm" variant="outline" onclick={onRestart}>Restart station…</Button>
+        {/if}
+      {:else if canApply && !applyStale}
+        <Button size="sm" disabled={writeBusy !== null} onclick={applyPlan}>Apply reviewed plan</Button>
       {/if}
-    </section>
+    {/if}
+  </section>
   {/if}
 </section>

@@ -5,6 +5,7 @@ import * as api from "$lib/api/harness-config";
 import type { ConfigOptOutRow } from "$lib/api/harness-config";
 import { ApiError } from "$lib/api/http-error";
 import HarnessConfigPanel from "./HarnessConfigPanel.svelte";
+import HarnessConfigPanelTestHost from "./harness-config-panel-test-host.svelte";
 
 const STATION_ID = "station_1";
 const NODE_ID = "node_1";
@@ -654,4 +655,63 @@ test("a row with no exemption shows no exemption chrome at all", async () => {
   expect(row.textContent).not.toMatch(/exempted/i);
   expect(row.textContent).not.toMatch(/opt-out register/i);
   expect(row.textContent).not.toMatch(/harness's own record/i);
+});
+
+// ─── keep-alive: hidden, then shown again (spec D6) ─────────────────────────
+//
+// The flip comes from HarnessConfigPanelTestHost's own `$state`, not from
+// `rerender`: rerender replaces the prop set and re-runs the load effect even
+// when every value is identical (one render plus two identical rerenders =
+// three getStationConfig calls), which would hide what these tests measure.
+
+test("becoming active again re-reads the observations", async () => {
+  const getStationConfig = mockLoad({
+    observations: [observation({ state: "matches", declared: true, observed: true, level: "station" })],
+    settings: [setting({ id: "hermes.plugins.enabled" })],
+  });
+  const view = render(HarnessConfigPanelTestHost, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(getStationConfig).toHaveBeenCalledTimes(1));
+
+  const toggle = view.getByTestId("toggle-active");
+  await fireEvent.click(toggle); // the operator switched tabs
+  await fireEvent.click(toggle); // and came back
+
+  await waitFor(() => expect(getStationConfig).toHaveBeenCalledTimes(2));
+});
+
+test("a plan under review survives being hidden and shown again, and apply still sends the reviewed digest", async () => {
+  mockLoad({
+    observations: [
+      observation({ settingId: "hermes.command_timeout_ms", state: "drifted", declared: 900, observed: 300 }),
+    ],
+    settings: [setting({ id: "hermes.command_timeout_ms" })],
+  });
+  const planSpy = vi
+    .spyOn(api, "planStationConfig")
+    .mockResolvedValue(plan({ planDigest: "digest-reviewed", operationId: "cfgop_reviewed" }));
+  const applySpy = vi.spyOn(api, "applyStationConfig").mockResolvedValue(receipt({ phase: "applied" }));
+
+  const view = render(HarnessConfigPanelTestHost, {
+    props: { stationId: STATION_ID, nodeId: NODE_ID, stationKey: STATION_KEY },
+  });
+  await waitFor(() => expect(view.getByRole("row", { name: /hermes\.command_timeout_ms/ })).toBeTruthy());
+  await fireEvent.click(view.getByRole("button", { name: "Review changes" }));
+  await waitFor(() => expect(view.getByText("digest-reviewed")).toBeTruthy());
+  expect(view.getByText(/Planned at /)).toBeTruthy();
+
+  const toggle = view.getByTestId("toggle-active");
+  await fireEvent.click(toggle);
+  await fireEvent.click(toggle);
+
+  // The plan on screen is still the reviewed one...
+  expect(view.getByText("digest-reviewed")).toBeTruthy();
+  // ...and it is exactly what apply sends. This is the invariant that makes
+  // keep-alive safe: never "apply whatever is current" (spec D6).
+  await fireEvent.click(view.getByRole("button", { name: "Apply reviewed plan" }));
+  await waitFor(() => expect(applySpy).toHaveBeenCalledOnce());
+  expect(applySpy).toHaveBeenCalledWith(STATION_ID, "cfgop_reviewed", "digest-reviewed");
+  // Re-entry refreshed the rows; it must NOT have re-planned.
+  expect(planSpy).toHaveBeenCalledTimes(1);
 });

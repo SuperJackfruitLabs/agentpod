@@ -47,6 +47,7 @@
   import { cn } from "$lib/utils";
   import HeartPulseIcon from "@lucide/svelte/icons/heart-pulse";
   import ScrollTextIcon from "@lucide/svelte/icons/scroll-text";
+  import SlidersHorizontalIcon from "@lucide/svelte/icons/sliders-horizontal";
   import FolderIcon from "@lucide/svelte/icons/folder";
   import TerminalIcon from "@lucide/svelte/icons/terminal";
   import GitCompareIcon from "@lucide/svelte/icons/git-compare";
@@ -65,7 +66,7 @@
     | "logs"
     | "files"
     | "terminal"
-    | "skills"
+    | "config"
     | "changes"
     | "cleanup"
     | "activity"
@@ -76,12 +77,24 @@
     "logs",
     "files",
     "terminal",
-    "skills",
+    "config",
     "changes",
     "cleanup",
     "activity",
     "identity",
   ];
+
+  /**
+   * Retired tab ids, mapped to what replaced them.
+   *
+   * Tab ids live in the URL, so links to them sit in bookmarks, in chat history
+   * and in docs. An unknown ?tab= value falls back to the default tab SILENTLY
+   * (below), which would land a two-week-old link on Health with no
+   * explanation — so a retired id is aliased, never dropped. `skills` became
+   * `config` when plugins, skills and declared configuration were gathered into
+   * one tab, because on a Hermes station all three write the same file.
+   */
+  const TAB_ALIASES: Readonly<Record<string, Tab>> = { skills: "config" };
 
   // The active tab lives in the URL (?tab=logs) so station views are
   // deep-linkable, survive refresh, and participate in back/forward.
@@ -89,7 +102,8 @@
   // to the agent is the point of an ACP-capable station, so chat leads there and
   // health leads everywhere else.
   const activeTab = $derived.by<Tab>(() => {
-    const t = $page.url.searchParams?.get("tab");
+    const raw = $page.url.searchParams?.get("tab");
+    const t = raw === null || raw === undefined ? raw : (TAB_ALIASES[raw] ?? raw);
     const wanted = VALID_TABS.includes(t as Tab) ? (t as Tab) : defaultTab;
     // The active tab must be one the tab bar actually renders. The tablist has
     // a roving tabindex keyed on it, so a tab that isn't there (a ?tab=chat
@@ -114,7 +128,11 @@
       (activeTab === "chat" ||
         activeTab === "logs" ||
         activeTab === "files" ||
-        activeTab === "terminal") &&
+        activeTab === "terminal" ||
+        // Declared configuration captures a plan and its digest once and never
+        // re-fetches them: remounting would destroy a review in progress, so
+        // this tab is kept alive and refreshes its rows on re-entry.
+        activeTab === "config") &&
       !visitedHeavyTabs.has(activeTab)
     ) {
       visitedHeavyTabs = new Set(visitedHeavyTabs).add(activeTab);
@@ -179,6 +197,10 @@
       (station?.capabilities?.includes("matrix.avatar") ?? false)
   );
   const hasSkills = $derived(hasSkillInventory || hasSkillManagement || hasNativeSkillManagement || hasPluginManagement);
+  /** The Configuration tab's gate. Declared configuration is reason enough for
+   *  the tab on its own: a station can advertise `config.manage` with no skills
+   *  capability at all, and before this it had no home but the Files tab. */
+  const hasConfiguration = $derived(hasSkills || hasConfigManagement);
 
   const hasChangeset = $derived(
     Array.isArray(station?.capabilities) && station!.capabilities.includes("changeset")
@@ -353,7 +375,9 @@
           },
         ]
       : []),
-    ...(hasSkills ? [{ id: "skills" as const, label: "Skills", icon: ScrollTextIcon }] : []),
+    ...(hasConfiguration
+      ? [{ id: "config" as const, label: "Configuration", icon: SlidersHorizontalIcon }]
+      : []),
     ...(hasChangeset ? [{ id: "changes" as const, label: "Changes", icon: GitCompareIcon }] : []),
     ...(hasCleanup ? [{ id: "cleanup" as const, label: "Cleanup", icon: Trash2Icon }] : []),
     { id: "activity" as const, label: "Activity", icon: ActivityIcon },
@@ -665,14 +689,6 @@
           onOpenConfigEditor={canWrite ? (p) => (configEditorPath = p) : undefined}
         />
       </div>
-      {#if hasConfigManagement}
-        <HarnessConfigPanel
-          {stationId}
-          {nodeId}
-          stationKey={station?.stationKey}
-          onRestart={canLifecycle ? () => askFor("restart") : undefined}
-        />
-      {/if}
     </div>
   {/snippet}
 
@@ -685,12 +701,48 @@
     {/snippet}
   {/if}
 
-  {#if hasSkills}
-    {@render mountedPanel("skills", skillsContent)}
-    {#snippet skillsContent()}
+  {#if hasConfiguration}
+    <!--
+      One tab for how this agent is configured.
+
+      Declared configuration, plugin enablement and skill registration are not
+      three unrelated things: on a Hermes station they all write the SAME
+      configuration document, and declared configuration reaches the other two
+      by calling the very writers their own verbs call. Splitting them across a
+      "Skills" tab and the "Files" tab told the operator a story the node does
+      not tell. Order is how often a setting is touched, not alphabetical.
+
+      keepAlivePanel, not mountedPanel: the declared-configuration panel
+      captures a plan and its digest once and never re-fetches them, so
+      remounting it would throw away a review in progress.
+    -->
+    {@render keepAlivePanel("config", configContent)}
+    {#snippet configContent()}
+      {#if hasConfigManagement}
+        <HarnessConfigPanel
+          {stationId}
+          {nodeId}
+          stationKey={station?.stationKey}
+          active={activeTab === "config"}
+          onRestart={canLifecycle ? () => askFor("restart") : undefined}
+        />
+      {/if}
+      {#if hasPluginManagement}
+        <PluginManagementPanel
+          {stationId}
+          canManage={mayGrantReach}
+          onRestart={canLifecycle ? () => askFor("restart") : undefined}
+        />
+      {/if}
       {#if hasSkillInventory}<SkillsPanel {stationId} />{/if}
-      {#if hasSkillManagement || hasNativeSkillManagement}<SkillManagementPanel {stationId} harness={station?.harness ?? ""} canManage={hasSkillManagement && mayGrantReach} canNative={hasNativeSkillManagement && mayGrantReach} />{/if}
-      {#if hasPluginManagement}<PluginManagementPanel {stationId} canManage={mayGrantReach} onRestart={canLifecycle ? () => askFor("restart") : undefined} />{/if}
+      {#if hasSkillManagement || hasNativeSkillManagement}
+        <SkillManagementPanel
+          {stationId}
+          harness={station?.harness ?? ""}
+          canManage={hasSkillManagement && mayGrantReach}
+          canNative={hasNativeSkillManagement && mayGrantReach}
+        />
+      {/if}
     {/snippet}
   {/if}
 
