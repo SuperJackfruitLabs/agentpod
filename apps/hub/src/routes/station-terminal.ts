@@ -33,6 +33,7 @@ import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
 import { gateCapability } from "./station-writes";
 import { requireGrantReach } from "../services/grant-reach";
+import { isOrgPlaneUnavailable } from "../auth/caller-authority";
 import { isGrantReachDenied } from "../services/control-pair";
 import { connectionManager } from "../services/connection-manager";
 import { recordAudit } from "../services/audit";
@@ -106,8 +107,13 @@ export const stationTerminalRoutes = new Hono().get(
         // (charter Decision 4). Refused here rather than at the PTY, so no
         // process is ever started.
         try {
-          await requireGrantReach(user.id, station, "terminal", "mutate");
+          await requireGrantReach(user, station, "terminal", "mutate");
         } catch (e) {
+          if (isOrgPlaneUnavailable(e)) {
+            ws.send(JSON.stringify({ t: "exit" }));
+            ws.close(1011, "the organization plane could not be reached");
+            return;
+          }
           if (!isGrantReachDenied(e)) throw e;
           const denied = await recordAudit(db, {
             userId: user.id,

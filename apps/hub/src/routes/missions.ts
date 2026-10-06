@@ -18,8 +18,9 @@ import { stations } from "../db/schema/stations";
 import { nodes } from "../db/schema/nodes";
 import { matrixMissions, matrixMissionMembers } from "../db/schema/matrix";
 import { principalIdentities } from "../db/schema/identities";
-import { getGrant, grantAllowsPrincipal } from "../services/grants";
-import { principalForUser, principalHandle } from "../services/principals";
+import { grantAllowsPrincipal } from "../services/grants";
+import { principalHandle } from "../services/principals";
+import { callerGrant, callerPrincipal } from "../auth/caller-authority";
 import { isControlPairEnforced } from "../services/control-pair";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { missionAlias } from "../services/matrix-as/missions";
@@ -110,13 +111,14 @@ export function createMissionRoutes(deps: MissionDeps) {
     // different day — and the room's creator is visible to everyone in it.
     members.sort((a, b) => stationIds.indexOf(a.id) - stationIds.indexOf(b.id));
 
-    // `getGrant` and `principal_identities` are both keyed by principal id now,
+    // The grant and `principal_identities` are both keyed by principal id now,
     // never by the Better Auth user id a session carries — resolved once, up
     // front, for the control-pair check below and the Matrix invite further
     // down. A caller with no principal has no grant to hold and no identity to
     // invite, so both must fail closed on it rather than querying a table with
-    // an id shaped like the wrong plane's.
-    const principal = await principalForUser(user.id);
+    // an id shaped like the wrong plane's. Under the org plane the caller's
+    // token answers (`auth/caller-authority.ts`, design §5.7).
+    const principal = await callerPrincipal(user);
 
     // Putting an agent in a room is putting it to work, so the grant that
     // governs dispatching it governs this too — checked for EVERY member before
@@ -129,7 +131,7 @@ export function createMissionRoutes(deps: MissionDeps) {
           403
         );
       }
-      const grant = await getGrant(principal.id);
+      const grant = await callerGrant(user, principal.id);
       const refused = members.filter((m) => !grantAllowsPrincipal(grant, m.principalId));
       if (refused.length > 0) {
         log.warn("mission refused by the control pair", {

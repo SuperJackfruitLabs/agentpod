@@ -81,7 +81,7 @@ import {
   listOptOuts,
 } from "../services/harness-config";
 import { planFor, applyFor, ConfigApplyError, getAppliedWrites, readGatewayPid } from "../services/harness-config-apply";
-import { principalForUser } from "../services/principals";
+import { callerPrincipal } from "../auth/caller-authority";
 import type { AuthUser } from "../auth/middleware";
 
 /** The capability a station must advertise to be a candidate for this feature. */
@@ -214,7 +214,8 @@ async function verifySettingKnown(
  * default was closed.
  */
 async function nonHumanRefusal(user: AuthUser): Promise<{ error: string } | null> {
-  const principal = await principalForUser(user.id);
+  // Under the org plane the kind is the token's `principalKind` — no plane read (design §5.7).
+  const principal = await callerPrincipal(user);
   if (principal && principal.kind !== "human") {
     return {
       error:

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { mintEnrollmentToken } from "../services/enrollment";
 import { requireFleetGrantReach } from "../services/grant-reach";
 import { isControlPairEnforced, isGrantReachDenied, GrantReachDenied } from "../services/control-pair";
-import { principalForUser } from "../services/principals";
+import { callerPrincipal } from "../auth/caller-authority";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("enrollment-tokens");
@@ -31,8 +31,9 @@ const log = createLogger("enrollment-tokens");
  * on a token being made.
  *
  * `requireFleetGrantReach` takes a principal id, not a Better Auth user id, so
- * the caller is resolved to one here via `principalForUser` — the same lookup
- * Task 4's default resolver uses — before the guard runs. Gated behind
+ * the caller is resolved to one here via `callerPrincipal` — `principalForUser`
+ * in legacy mode, the token's own `sub` under the org plane (design §5.7) —
+ * before the guard runs. Gated behind
  * `isControlPairEnforced()` up front, not just inside the guard: resolving
  * a principal and refusing an unmapped one must stay exactly as inert as the
  * guard itself when the pair is off, or a deployment that never enabled the
@@ -46,7 +47,7 @@ export const enrollmentTokenRoutes = new Hono().post("/", async (c) => {
 
   try {
     if (isControlPairEnforced()) {
-      const principal = await principalForUser(user.id);
+      const principal = await callerPrincipal(user);
       if (!principal) {
         log.warn("fleet-level reach refused: no principal for this caller", { principalId: user.id });
         throw new GrantReachDenied(user.id, "fleet", null);

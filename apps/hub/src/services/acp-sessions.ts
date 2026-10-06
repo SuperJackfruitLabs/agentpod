@@ -53,8 +53,8 @@ import type {
 import { db } from "../db/drizzle";
 import { resolveTenantForUser } from "../auth/tenant";
 import { ControlPairDenied, isControlPairEnforced } from "./control-pair";
-import { getGrant, grantAllowsPrincipal } from "./grants";
-import { principalForUser } from "./principals";
+import { grantAllowsPrincipal } from "./grants";
+import { callerGrant, callerPrincipal, type TokenAuthority } from "../auth/caller-authority";
 import { acpSessions, acpEvents } from "../db/schema/acp";
 import { stations } from "../db/schema/stations";
 import { createLogger } from "../utils/logger";
@@ -204,6 +204,14 @@ export interface CreateSessionInput {
    * HTTP only.
    */
   mcpServers?: McpServer[];
+  /**
+   * The caller's org-plane token authority, when the caller is the one asking (the console route).
+   * Under ORG_PLANE_* the control pair is decided from it, never from a plane read (design §5.7).
+   * Absent on the paths that act for the station's owner (the superpipeline bridge, Matrix
+   * inbound): those read the directory, and a plane outage fails them closed with
+   * `OrgPlaneUnavailable`. Ignored in legacy mode.
+   */
+  authority?: TokenAuthority;
 }
 
 interface LiveSession {
@@ -924,13 +932,15 @@ export async function createSession(
   // to someone who was never permitted leaks which stations exist.
   const station = await getStation(userId, stationId);
   if (station && isControlPairEnforced()) {
-    // `getGrant` is keyed by principal id now, not the Better Auth user id
+    // The grant is keyed by principal id, not the Better Auth user id
     // `userId` is here — `getStation` above requires it to equal
     // `stations.userId`, so this is always a session id, never one obtained
-    // elsewhere. A caller with no principal has no grant to hold.
-    const principal = await principalForUser(userId);
+    // elsewhere. A caller with no principal has no grant to hold. Under the
+    // org plane a caller's token answers both (`auth/caller-authority.ts`).
+    const caller = { id: userId, authority: input.authority };
+    const principal = await callerPrincipal(caller);
     const allowed =
-      principal !== null && grantAllowsPrincipal(await getGrant(principal.id), station.principalId);
+      principal !== null && grantAllowsPrincipal(await callerGrant(caller, principal.id), station.principalId);
 
     if (!allowed) {
       log.warn("dispatch refused by the control pair", {

@@ -27,6 +27,7 @@ import { stations } from "../db/schema/stations";
 import { user as users } from "../db/schema/auth";
 import { verifyNodeCredential } from "../services/enrollment";
 import { requireGrantReach } from "../services/grant-reach";
+import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";
 import { getStation } from "../services/station-registry";
 import { gateCapability, refuseWithoutReach } from "./station-writes";
 import {
@@ -56,6 +57,12 @@ import {
 import * as broker from "../services/broker";
 import { canaryOperationIdentity } from "./canary-operation";
 
+/** The console caller with its org-plane token authority, for the reach checks (design §5.7). */
+function callerOf(c: Context): AuthUser {
+  owner(c);
+  return c.get("user") as AuthUser;
+}
+
 function owner(c: Context): SkillOwner {
   const user = c.get("user") as AuthUser | undefined;
   if (!user || user.id === "anonymous")
@@ -80,7 +87,7 @@ async function stationContext(c: Context, mutate = false, capability = "skills.m
   if (mutate) {
     const refusal = await refuseWithoutReach(
       c,
-      caller.userId,
+      callerOf(c),
       station,
       capability as "skills.manage" | "skills.native" | "plugins.manage",
     );
@@ -162,6 +169,8 @@ function routesBase() {
     c.header("Cache-Control", "no-store");
     if (error instanceof SkillRequestError)
       return c.json({ error: error.message }, error.status);
+    const outage = orgPlaneOutageBody(error);
+    if (outage) return c.json(outage, 503);
     // Database exceptions may contain bound binary parameters. Do not log them.
     console.error("[skill-management] request failed", error.name);
     return c.json({ error: "Skill management request failed" }, 500);
@@ -196,7 +205,7 @@ export function createSkillManagementRoutes(
     })
     .get("/skills/catalog/cohorts", async (c) => c.json(await listSkillReleaseCohorts(owner(c))))
     .post("/skills/catalog/cohorts", async (c) =>
-      c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest)), 201),
+      c.json(await createSkillReleaseCohort(owner(c), await body(c, SkillReleaseCohortCreateRequest), callerOf(c)), 201),
     )
     .post("/skills/catalog/cohorts/:cohortId/canary/plan", async (c) => {
       const caller = owner(c);
@@ -204,6 +213,7 @@ export function createSkillManagementRoutes(
         caller,
         c.req.param("cohortId"),
         await body(c, SkillReleaseCanaryPlanRequest),
+        callerOf(c),
       );
       const station = await getStation(caller.userId, binding.stationId);
       if (!station || station.tenantId !== caller.tenantId)
@@ -227,7 +237,7 @@ export function createSkillManagementRoutes(
       );
       if (!station.capabilities?.includes("skills.manage"))
         throw new SkillRequestError(409, "Canary station does not advertise skill management");
-      await requireGrantReach(caller.userId, station, "skills.manage", "mutate");
+      await requireGrantReach(callerOf(c), station, "skills.manage", "mutate");
       const result = await executeSkillOperation(caller, station, operation.id, "apply", request.planDigest, timeoutMs);
       return c.json(result, result.inFlight || result.state === "unknown" ? 202 : 200);
     })
@@ -566,13 +576,16 @@ export const skillArtifactDownloadRoutes = routesBase().post(
         "No artifact authorization for this station operation",
       );
     try {
+      // The operation's owner, not a token caller (a node asks here): under the org plane this
+      // reads the directory, and an outage is a 503, not a misleading refusal.
       await requireGrantReach(
         record.operation.userId,
         record.station,
         "skills.manage",
         "mutate",
       );
-    } catch {
+    } catch (e) {
+      if (isOrgPlaneUnavailable(e)) throw e;
       throw new SkillRequestError(
         403,
         "No artifact authorization for this station operation",
