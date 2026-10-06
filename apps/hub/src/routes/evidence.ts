@@ -130,6 +130,8 @@ async function auditTranscriptRead(args: {
   items: number;
   redactions: number;
   full: boolean;
+  /** The item route's `:seqFrom`: which item was read. Absent on a page read. */
+  itemSeq?: number;
   error?: string;
 }): Promise<void> {
   const [station] = await db
@@ -149,6 +151,7 @@ async function auditTranscriptRead(args: {
       items: args.items,
       redactions: args.redactions,
       full: args.full,
+      ...(args.itemSeq !== undefined ? { item_seq: args.itemSeq } : {}),
       ...(args.onBehalfOf ? { on_behalf_of: args.onBehalfOf } : {}),
     },
   });
@@ -332,6 +335,7 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
         items: 1,
         redactions: redacted.redactions,
         full,
+        itemSeq: Number(at),
       };
       if (byteLength(JSON.stringify(item)) > ITEM_LIMIT_BYTES) {
         await auditTranscriptRead({ ...audit, items: 0, error: "item_too_large" });

@@ -268,7 +268,8 @@ nothing else. Another tenant's session answers 404.
   Stored events are never changed. Pages cut each field at 16 KiB; one item can be read whole up
   to 1 MiB (`?full=1`), else 413.
 - **Audit.** Every read writes a `station_audit` row with verb `evidence.transcript.read`: the
-  caller's principal, the session, the range, the item and redaction counts, `full`, and
+  caller's principal, the session, the range, the item and redaction counts, `full`, the item's
+  seq (`item_seq`) on an item read, and
   `on_behalf_of` when the caller named the person it acts for (`X-On-Behalf-Of: prn_…`). Never content.
 - **Granting it** keeps the grant's other scopes, because `fleet grants set` replaces `scopes` when
   the document names them:

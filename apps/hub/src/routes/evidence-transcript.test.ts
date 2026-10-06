@@ -315,12 +315,23 @@ describe("audit", () => {
     expect(rows[0]!.params_summary.on_behalf_of).toBeUndefined();
   });
 
-  test("a 413 is audited as an error, still without content", async () => {
-    expect((await get(item(9, "?full=1"), await token(both))).status).toBe(413);
+  test("an item read names the item it read", async () => {
+    const onBehalf = await createPrincipal({ kind: "human", handle: `tx-item-${RUN}` });
+    expect((await get(item(6, "?full=1"), await token(both), { "X-On-Behalf-Of": onBehalf })).status).toBe(200);
+    const rows = await rawSql`SELECT params_summary FROM station_audit
+                              WHERE station_key = ${STATION} AND params_summary->>'on_behalf_of' = ${onBehalf}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.params_summary).toMatchObject({ item_seq: 6, items: 1, full: true });
+  });
+
+  test("a 413 is audited as an error, naming the item, still without content", async () => {
+    const onBehalf = await createPrincipal({ kind: "human", handle: `tx-413-${RUN}` });
+    expect((await get(item(9, "?full=1"), await token(both), { "X-On-Behalf-Of": onBehalf })).status).toBe(413);
     const rows = await rawSql`SELECT result, error, params_summary FROM station_audit
-                              WHERE station_key = ${STATION} AND result = 'error'`;
-    expect(rows.length).toBeGreaterThanOrEqual(1);
-    expect(rows[0]).toMatchObject({ error: "item_too_large" });
+                              WHERE station_key = ${STATION} AND params_summary->>'on_behalf_of' = ${onBehalf}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ result: "error", error: "item_too_large" });
+    expect(rows[0]!.params_summary).toMatchObject({ item_seq: 9, items: 0, full: true });
     expect(JSON.stringify(rows)).not.toContain("yyyy");
   });
 });

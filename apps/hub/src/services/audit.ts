@@ -67,6 +67,7 @@ const SAFE_PARAM_KEYS = new Set<string>([
   "items",
   "redactions",
   "full",
+  "item_seq",
   "on_behalf_of",
 ]);
 
