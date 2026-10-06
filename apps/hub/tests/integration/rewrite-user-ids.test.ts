@@ -270,6 +270,11 @@ describe("apply, then reverse", () => {
     expect(await constraintDefs(OWNER_FKS)).toEqual(ownerDefs);
     expect((await sql`SELECT principal_id FROM hub_operators`).map((r) => r.principal_id)).toEqual([P2]);
     expect((await sql`SELECT user_id, principal_id FROM legacy_user_principals ORDER BY user_id`).map((r) => [r.user_id, r.principal_id])).toEqual([[U1, P1], [U2, P2]]);
+    // Every applied pair is recorded per row, the --map one included, so --reverse can undo it
+    // exactly even though default-user and U2 both became P2 (security review finding 3).
+    expect(
+      (await sql`SELECT old_value, new_value FROM user_id_rewrites WHERE table_name = 'station_audit' ORDER BY row_key::text`).map((r) => [r.old_value, r.new_value]),
+    ).toEqual([[U1, P1], [U1, P1], [ORPHAN, P2]]);
     // every rewritten column now holds only prn_ ids
     for (const c of USER_ID_COLUMNS) {
       const bad = await sql.unsafe(`SELECT "${c.column}" AS v FROM "${c.table}" WHERE "${c.column}" IS NOT NULL AND "${c.column}" !~ '^prn_[0-9a-f]{20}$'`);
@@ -298,6 +303,13 @@ describe("apply, then reverse", () => {
     // P3 keeps its prn_ (it has no user row): a VALIDATED FK could not be re-added over it.
     await applyRewrite(sql, { direction: "reverse", extra: { [P2]: U2, [P3]: P3 } });
     expect((await sql`SELECT updated_by FROM system_settings ORDER BY key`).map((r) => r.updated_by)).toEqual([U1, U2, P3]);
+    // the --map value comes back exactly, not as the Better Auth id that shares its prn_
+    expect((await sql`SELECT id, user_id FROM station_audit ORDER BY id`).map((r) => [r.id, r.user_id])).toEqual([
+      ["a1", U1],
+      ["a2", U1],
+      ["a3", ORPHAN],
+    ]);
+    expect(await sql`SELECT 1 FROM user_id_rewrites`).toHaveLength(0); // the record is spent
     const fk = await sql<{ convalidated: boolean }[]>`SELECT convalidated FROM pg_constraint WHERE conname = 'system_settings_updated_by_user_id_fk'`;
     expect([...fk]).toEqual([{ convalidated: false }]);
     const all = await sql<{ conname: string; convalidated: boolean; def: string }[]>`
@@ -320,9 +332,9 @@ describe("apply, then reverse", () => {
 
   test("forward then reverse round-trips to identical data", async () => {
     const before = await snapshot();
-    await applyRewrite(sql, { direction: "forward" });
+    await applyRewrite(sql, { direction: "forward", extra: { [ORPHAN]: P2 } });
     expect(await snapshot()).not.toEqual(before);
-    await applyRewrite(sql, { direction: "reverse" });
+    await applyRewrite(sql, { direction: "reverse" }); // no --map: the forward's record suffices
     expect(await snapshot()).toEqual(before);
     expect(await constraintDefs(OWNER_FKS)).toEqual(ownerDefs);
   });
@@ -338,7 +350,7 @@ describe("apply, then reverse", () => {
     try {
       const plan = await planRewrite(sql, { direction: "reverse" });
       expect(plan.unmapped).toEqual([]);
-      await applyRewrite(sql, { direction: "forward" });
+      await applyRewrite(sql, { direction: "forward", extra: { [ORPHAN]: P2 } });
       await applyRewrite(sql, { direction: "reverse" });
       expect((await sql`SELECT id, user_id FROM station_audit WHERE id IN ('a_svc', 'a_agt') ORDER BY id`).map((r) => [r.id, r.user_id])).toEqual([
         ["a_agt", AGENT],
@@ -379,7 +391,7 @@ describe("the CLI", () => {
       expect(r.code).toBe(2);
       expect(await snapshot()).toEqual(before);
 
-      const j = run(["--json", "--map", `u-cli-orphan=${P1}`], { DATABASE_URL: SCRATCH_URL });
+      const j = run(["--json", "--map", `u-cli-orphan=${P1}`, "--map", `${ORPHAN}=${P2}`], { DATABASE_URL: SCRATCH_URL });
       expect(j.code).toBe(0);
       const plan = JSON.parse(j.out.slice(j.out.indexOf("{"), j.out.lastIndexOf("}") + 1));
       expect(plan.unmapped).toEqual([]);

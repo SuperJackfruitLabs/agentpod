@@ -1931,6 +1931,10 @@ What the script does and refuses:
   at the plane during the window has no Better Auth id, and the reverse refuses on their rows
   until you decide: `--map prn_…=<user id>` to hand them to an existing user, or
   `--map prn_…=prn_…` to keep the row as it is. `legacy_user_principals` and `hub_operators`
-  are left in place (they are read only under the plane). A value that forward mapped onto
-  someone else's `prn_` (such as `default-user`) comes back as that person's user id.
+  are left in place (they are read only under the plane).
+- Forward records every value it rewrote, per row, in `user_id_rewrites` (table, column, the
+  row's key, old value, new value — `--map` pairs included). Reverse restores those rows from
+  that record first and then empties it, so a `--map default-user=prn_…` comes back as
+  `default-user` exactly, not as the user id that shares its `prn_`. Rows written after the
+  forward (and so not in the record) go back through the mapping above.
 - Both directions are safe to repeat: a second run finds everything already in place.

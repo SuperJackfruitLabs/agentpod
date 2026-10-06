@@ -8,10 +8,12 @@
  *
  * Never a migration (plan decision D1): the hub applies migrations on boot, and this would then
  * rewrite production while every session still carries a Better Auth id. Reversible (D2):
- * `--reverse` maps prn_ ids back and re-adds the user FKs NOT VALID.
+ * `--reverse` maps prn_ ids back and re-adds the user FKs NOT VALID. Forward records every value it
+ * rewrote, per row, in `user_id_rewrites` (`--map` pairs included); `--reverse` restores those rows
+ * from that record first, so an operator's `--map default-user=prn_…` comes back as `default-user`.
  *
  * The inventory below was enumerated from pg_constraint and information_schema on a freshly
- * migrated database (migrations through 0094), and tests/integration/rewrite-user-ids.test.ts
+ * migrated database (migrations through 0095), and tests/integration/rewrite-user-ids.test.ts
  * fails if a migration adds an FK to "user", or a `*user_id` / `*_by` column, that is not listed
  * here.
  */
@@ -125,6 +127,38 @@ async function mapping(tx: Tx, direction: Direction, extra: Record<string, strin
   return m;
 }
 
+/**
+ * How to name one row of each rewritten table in `user_id_rewrites`: its primary key, or — for a
+ * table without one — its first unique index, less the columns this script rewrites (those change).
+ */
+async function rowKeys(tx: Tx): Promise<Map<string, string[]>> {
+  const rows = await tx<{ tbl: string; primary: boolean; cols: string[] }[]>`
+    SELECT c.relname AS tbl, i.indisprimary AS primary,
+           array_agg(a.attname::text ORDER BY array_position(i.indkey::int2[], a.attnum)) AS cols
+    FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = current_schema()
+    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ANY(i.indkey)
+    WHERE (i.indisprimary OR i.indisunique) AND c.relname = ANY(${[...new Set(USER_ID_COLUMNS.map((x) => x.table))]})
+    GROUP BY c.relname, i.indexrelid, i.indisprimary
+    ORDER BY c.relname, i.indisprimary DESC, i.indexrelid`;
+  const out = new Map<string, string[]>();
+  for (const r of rows) {
+    if (out.has(r.tbl)) continue;
+    const rewritten = new Set(USER_ID_COLUMNS.filter((x) => x.table === r.tbl).map((x) => x.column));
+    const cols = r.cols.filter((col) => !rewritten.has(col));
+    if (cols.length) out.set(r.tbl, cols);
+  }
+  for (const t of new Set(USER_ID_COLUMNS.map((x) => x.table))) {
+    if (!out.has(t)) throw new Error(`${t} has no primary or unique key to record its rewritten rows by`);
+  }
+  return out;
+}
+
+const keyExpr = (cols: string[]) => `jsonb_build_object(${cols.map((k) => `'${k}', t.${q(k)}`).join(", ")})`;
+const ledgerMatch = (c: UserIdColumn, cols: string[]) =>
+  `l.table_name = '${c.table}' AND l.column_name = '${c.column}' AND l.row_key = ${keyExpr(cols)} AND l.new_value = t.${q(c.column)}`;
+
 function checkExtra(opts: RewriteOptions): void {
   if (opts.direction !== "forward") return;
   for (const [from, to] of Object.entries(opts.extra ?? {})) {
@@ -146,14 +180,20 @@ async function planIn(tx: Tx, opts: RewriteOptions): Promise<RewritePlan> {
   const counts: RewritePlan["counts"] = [];
   const unmapped: RewritePlan["unmapped"] = [];
 
+  const keys = await rowKeys(tx);
   for (const c of USER_ID_COLUMNS) {
-    const groups = await tx.unsafe<{ v: string; n: number }[]>(
-      `SELECT ${q(c.column)} AS v, count(*)::int AS n FROM ${q(c.table)} WHERE ${q(c.column)} IS NOT NULL GROUP BY 1 ORDER BY 1`,
+    // Reverse: a row the forward recorded is restored from that record, whatever its value.
+    const logged =
+      opts.direction === "reverse"
+        ? `EXISTS (SELECT 1 FROM user_id_rewrites l WHERE ${ledgerMatch(c, keys.get(c.table)!)})`
+        : "false";
+    const groups = await tx.unsafe<{ v: string; logged: boolean; n: number }[]>(
+      `SELECT t.${q(c.column)} AS v, ${logged} AS logged, count(*)::int AS n FROM ${q(c.table)} t WHERE t.${q(c.column)} IS NOT NULL GROUP BY 1, 2 ORDER BY 1`,
     );
     const row = { table: c.table, column: c.column, rows: 0, toRewrite: 0, alreadyTarget: 0, unmapped: 0 };
     for (const g of groups) {
       row.rows += g.n;
-      if (map.has(g.v)) row.toRewrite += g.n;
+      if (g.logged || map.has(g.v)) row.toRewrite += g.n;
       else if (isTarget(g.v)) row.alreadyTarget += g.n;
       else {
         row.unmapped += g.n;
@@ -243,11 +283,34 @@ export async function applyRewrite(sql: Sql, opts: RewriteOptions): Promise<Rewr
     for (let i = 0; i < pairs.length; i += 1000) {
       await tx`INSERT INTO _uid_map ${tx(pairs.slice(i, i + 1000), "src", "dst")}`;
     }
+    const keys = await rowKeys(tx);
     for (const c of USER_ID_COLUMNS) {
-      await tx.unsafe(
-        `UPDATE ${q(c.table)} t SET ${q(c.column)} = m.dst FROM _uid_map m WHERE t.${q(c.column)} = m.src AND m.src <> m.dst`,
-      );
+      const key = keys.get(c.table)!;
+      if (opts.direction === "forward") {
+        // Record every applied pair, per row, --map pairs included: reverse reads this first.
+        await tx.unsafe(
+          `WITH u AS (
+             UPDATE ${q(c.table)} t SET ${q(c.column)} = m.dst FROM _uid_map m
+             WHERE t.${q(c.column)} = m.src AND m.src <> m.dst
+             RETURNING ${keyExpr(key)} AS row_key, m.src, m.dst)
+           INSERT INTO user_id_rewrites (table_name, column_name, row_key, old_value, new_value)
+           SELECT '${c.table}', '${c.column}', row_key, src, dst FROM u
+           ON CONFLICT (table_name, column_name, row_key) DO UPDATE
+             SET old_value = EXCLUDED.old_value, new_value = EXCLUDED.new_value`,
+        );
+      } else {
+        // Rows the forward recorded go back to exactly what they held; the rest by the map.
+        await tx.unsafe(
+          `UPDATE ${q(c.table)} t SET ${q(c.column)} = m.dst FROM _uid_map m
+           WHERE t.${q(c.column)} = m.src AND m.src <> m.dst
+             AND NOT EXISTS (SELECT 1 FROM user_id_rewrites l WHERE ${ledgerMatch(c, key)})`,
+        );
+        await tx.unsafe(
+          `UPDATE ${q(c.table)} t SET ${q(c.column)} = l.old_value FROM user_id_rewrites l WHERE ${ledgerMatch(c, key)}`,
+        );
+      }
     }
+    if (opts.direction === "reverse") await tx`DELETE FROM user_id_rewrites`; // spent: the forward is undone
 
     for (const o of owners) await tx.unsafe(`ALTER TABLE ${o.tbl} ADD CONSTRAINT ${q(o.conname)} ${o.def}`);
 
