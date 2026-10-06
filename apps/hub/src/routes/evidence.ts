@@ -21,6 +21,7 @@ import { acpRuns } from "../db/schema/acp";
 import { bridgeDispatches } from "../db/schema/bridge";
 import { principalIdentities } from "../db/schema/identities";
 import { principals } from "../db/schema/organization";
+import { stations } from "../db/schema/stations";
 import { tenantScope } from "../db/tenant-scope";
 import {
   ITEM_LIMIT_BYTES,
@@ -35,8 +36,10 @@ import {
   selectPage,
   sessionBounds,
   truncateItem,
+  type SessionRef,
   type WireItem,
 } from "../services/evidence/transcript";
+import { recordAudit } from "../services/audit";
 import { EVIDENCE_READ, TRANSCRIPTS_READ, getGrant, type GrantScope } from "../services/grants";
 import { principalById, principalForUser } from "../services/principals";
 import { contentRedactor } from "../services/redact-content";
@@ -105,6 +108,51 @@ async function principalIdFor(segment: string): Promise<string | null> {
     .where(and(eq(principalIdentities.system, "better-auth"), eq(principalIdentities.externalId, segment)))
     .limit(1);
   return row?.principalId ?? null;
+}
+
+/** `X-On-Behalf-Of`, kept only when it is a principal id. Recorded, never used to authorise. */
+function onBehalfOf(header: string | undefined): string | null {
+  const v = header?.trim() ?? "";
+  return PrincipalId.safeParse(v).success ? v : null;
+}
+
+/**
+ * One `station_audit` row per transcript read. Ids and counts only — `sanitizeParams` in
+ * `services/audit.ts` drops any key it does not list, so content cannot ride along by accident.
+ * A session outlives its station, so a deleted station's row names the session's station id.
+ */
+async function auditTranscriptRead(args: {
+  principalId: string;
+  onBehalfOf: string | null;
+  session: SessionRef;
+  seqFrom: number;
+  seqTo: number;
+  items: number;
+  redactions: number;
+  full: boolean;
+  error?: string;
+}): Promise<void> {
+  const [station] = await db
+    .select({ nodeId: stations.nodeId, stationKey: stations.stationKey })
+    .from(stations)
+    .where(eq(stations.id, args.session.stationId))
+    .limit(1);
+  const audit = await recordAudit(db, {
+    userId: args.principalId,
+    nodeId: station?.nodeId ?? "unknown",
+    stationKey: station?.stationKey ?? args.session.stationId,
+    verb: "evidence.transcript.read",
+    params: {
+      sessionId: args.session.id,
+      seq_from: args.seqFrom,
+      seq_to: args.seqTo,
+      items: args.items,
+      redactions: args.redactions,
+      full: args.full,
+      ...(args.onBehalfOf ? { on_behalf_of: args.onBehalfOf } : {}),
+    },
+  });
+  await audit.done(args.error ? "error" : "ok", args.error);
 }
 
 export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
@@ -229,6 +277,16 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
         return item;
       });
 
+      await auditTranscriptRead({
+        principalId: auth.principalId,
+        onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
+        session,
+        seqFrom: range.from,
+        seqTo: range.to,
+        items: items.length,
+        redactions,
+        full: false,
+      });
       return c.json({
         session_id: session.id,
         seq_from: range.from,
@@ -265,9 +323,21 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
       const full = c.req.query("full") === "1";
       const redacted = redactItem(found, contentRedactor());
       const item = full ? redacted : truncateItem(redacted).item;
+      const audit = {
+        principalId: auth.principalId,
+        onBehalfOf: onBehalfOf(c.req.header("x-on-behalf-of")),
+        session,
+        seqFrom: range.from,
+        seqTo: range.to,
+        items: 1,
+        redactions: redacted.redactions,
+        full,
+      };
       if (byteLength(JSON.stringify(item)) > ITEM_LIMIT_BYTES) {
+        await auditTranscriptRead({ ...audit, items: 0, error: "item_too_large" });
         return c.json({ error: "item_too_large" }, 413);
       }
+      await auditTranscriptRead(audit);
       return c.json({ session_id: session.id, item });
     });
 }

@@ -61,6 +61,13 @@ const SAFE_PARAM_KEYS = new Set<string>([
   "totalBytes",
   "chars",
   "pathCount",
+  // evidence.transcript.read (routes/evidence.ts): what was read and by whom, never the content.
+  "seq_from",
+  "seq_to",
+  "items",
+  "redactions",
+  "full",
+  "on_behalf_of",
 ]);
 
 /**

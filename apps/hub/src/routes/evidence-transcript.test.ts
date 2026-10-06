@@ -291,3 +291,36 @@ describe("GET /api/evidence/sessions/:sessionId/transcript/items/:seqFrom", () =
     expect(((await res.json()) as any).item).toMatchObject({ id: "t1", partial: true });
   });
 });
+
+describe("audit", () => {
+  test("each read writes one row naming the caller and on_behalf_of, and no content", async () => {
+    const onBehalf = await createPrincipal({ kind: "human", handle: `tx-human-${RUN}` });
+    await get(page("?seq_from=2&seq_to=5"), await token(both), { "X-On-Behalf-Of": onBehalf });
+    const rows = await rawSql`SELECT user_id, verb, params_summary, result FROM station_audit
+                              WHERE station_key = ${STATION} AND params_summary->>'on_behalf_of' = ${onBehalf}`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ user_id: both, verb: "evidence.transcript.read", result: "ok" });
+    expect(rows[0]!.params_summary).toEqual({
+      sessionId: SESSION, seq_from: 2, seq_to: 5, items: 3, redactions: 2, full: false, on_behalf_of: onBehalf,
+    });
+    const text = JSON.stringify(rows);
+    for (const content of ["The key is", "Use ", SECRET_HEAD, "redacted"]) expect(text).not.toContain(content);
+  });
+
+  test("an X-On-Behalf-Of that is not a principal id is not recorded", async () => {
+    await get(page("?seq_from=12"), await token(both), { "X-On-Behalf-Of": "someone; DROP TABLE" });
+    const rows = await rawSql`SELECT params_summary FROM station_audit
+                              WHERE station_key = ${STATION} AND params_summary->>'seq_from' = '12'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.params_summary.on_behalf_of).toBeUndefined();
+  });
+
+  test("a 413 is audited as an error, still without content", async () => {
+    expect((await get(item(9, "?full=1"), await token(both))).status).toBe(413);
+    const rows = await rawSql`SELECT result, error, params_summary FROM station_audit
+                              WHERE station_key = ${STATION} AND result = 'error'`;
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows[0]).toMatchObject({ error: "item_too_large" });
+    expect(JSON.stringify(rows)).not.toContain("yyyy");
+  });
+});
