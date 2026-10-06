@@ -163,4 +163,72 @@ describe("createPlaneVerifier", () => {
     expect(claims?.sub).toBe("prn_0123456789abcdef0123");
     expect(claims?.amr).toBeUndefined();
   });
+  describe("a plane that accepts the connection and never answers (review finding 2)", () => {
+    /** A real HTTP server that serves the key set until `stall` is set, then never responds. */
+    function stallingPlane(keys: JWK[]) {
+      const state = { stall: false, requests: 0 };
+      const server = Bun.serve({
+        port: 0,
+        hostname: "127.0.0.1",
+        fetch() {
+          state.requests++;
+          if (state.stall) return new Promise<Response>(() => {});
+          return Response.json({ keys });
+        },
+      });
+      return { state, url: `http://127.0.0.1:${server.port}/api/auth/jwks`, stop: () => server.stop(true) };
+    }
+
+    test("a stale cached set verifies at once while the refresh hangs", async () => {
+      const k = await keypair("k1");
+      const p = stallingPlane([k.pub]);
+      try {
+        let now = Date.now();
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, now: () => now, fetchTimeoutMs: 3_000 });
+        expect(await v.verify(await sign(k, {}, Math.floor(now / 1000)))).not.toBeNull();
+        p.state.stall = true;
+        now += 11 * 60 * 1000; // stale
+        const started = performance.now();
+        expect(await v.verify(await sign(k, {}, Math.floor(now / 1000)))).not.toBeNull();
+        expect(performance.now() - started).toBeLessThan(500);
+        expect(p.state.requests).toBe(2); // the refresh was attempted, just not awaited
+      } finally {
+        p.stop();
+      }
+    });
+
+    test("an unknown kid's refetch against a hung plane is bounded by the timeout and falls back to the cached set", async () => {
+      const k = await keypair("k1");
+      const rogue = await keypair("rogue");
+      const p = stallingPlane([k.pub]);
+      try {
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, fetchTimeoutMs: 200 });
+        expect(await v.verify(await sign(k))).not.toBeNull();
+        p.state.stall = true;
+        const started = performance.now();
+        expect(await v.verify(await sign(rogue))).toBeNull();
+        const took = performance.now() - started;
+        expect(took).toBeGreaterThanOrEqual(150);
+        expect(took).toBeLessThan(1_500);
+        // and the known key still verifies against the cached set afterwards
+        expect(await v.verify(await sign(k))).not.toBeNull();
+      } finally {
+        p.stop();
+      }
+    });
+
+    test("with no cached set, a hung plane fails the request within the timeout instead of stalling it", async () => {
+      const k = await keypair("k1");
+      const p = stallingPlane([k.pub]);
+      p.state.stall = true;
+      try {
+        const v = createPlaneVerifier({ issuer: ISS, audience: AUD, jwksUrl: p.url, fetchTimeoutMs: 200 });
+        const started = performance.now();
+        expect(await v.verify(await sign(k))).toBeNull();
+        expect(performance.now() - started).toBeLessThan(1_500);
+      } finally {
+        p.stop();
+      }
+    });
+  });
 });
