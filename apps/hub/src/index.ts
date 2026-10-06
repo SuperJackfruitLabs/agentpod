@@ -38,6 +38,7 @@ import { banCheckMiddleware, signupCheckMiddleware } from './auth/admin-middlewa
 import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
 // Node fleet enrollment & registry
 import { nodeEnrollRoutes, nodeRoutes } from './routes/nodes.ts';
+import { createOrgPlaneDiscoveryRoutes } from './routes/org-plane-discovery.ts';
 // Fleet aggregate read (Overview home — control-plane P1)
 import { fleetRoutes } from './routes/fleet.ts';
 // GET /api/fleet/dispatchable — the agents a hub token may dispatch (see below)
@@ -165,6 +166,8 @@ const app = new Hono()
   .route('/public/nodes', nodeEnrollRoutes)  // POST /public/nodes/enroll
   // Public node gateway (no session — node authenticates with long-term credentials)
   .route('/public/nodes', gatewayRoutes)     // GET /public/nodes/gateway (WSS)
+  // Which issuer the console and `fleet login` should use (`{ issuer: null }` until ORG_PLANE_* is set)
+  .route('/public', createOrgPlaneDiscoveryRoutes())  // GET /public/org-plane
   // Signup check middleware - block signup if disabled (runs before auth handler)
   .use('/api/auth/*', signupCheckMiddleware)
   /**

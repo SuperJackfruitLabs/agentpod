@@ -27,3 +27,4 @@ export * from "./fleet-report";
 export * from "./evidence";
 export * from "./transcript";
 export * from "./transcript-evidence";
+export * from "./token-claims";

@@ -297,7 +297,7 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "key would mean a verifier had to know which tenant a token belonged to before it could " +
       "check the signature that tells it, which is backwards. The tenant a token names travels " +
       "INSIDE it, as the `tenant` claim " +
-      "(fixtures/ecosystem-identity/token_claims.json).",
+      "(src/auth/testdata/token_claims.v7.json; the organization plane's tokens carry `org` instead).",
   },
 
   oauth_codes: {

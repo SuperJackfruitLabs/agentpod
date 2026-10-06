@@ -169,3 +169,20 @@ func TestInspectRefusesNonJWT(t *testing.T) {
 		}
 	}
 }
+
+// A v8 (org-plane) access token: aud is an array, org/ent/jti are present, tenant is gone.
+// Inspect must read sub/principalKind/exp from it exactly as from a hub token.
+func TestInspectReadsAnOrgPlaneShapedToken(t *testing.T) {
+	payload := `{"iss":"https://accounts.superjackfruit.com","sub":"prn_0123456789abcdef0123",` +
+		`"aud":["https://hub.agentpod.dev","https://app.superpipeline.dev"],"exp":1900000300,"iat":1900000000,` +
+		`"jti":"j1","principalKind":"human","org":"org_00000000000000000000","ent":["agentpod"],` +
+		`"mayDispatch":[],"mayGrantReach":false}`
+	tok := "h." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".s"
+	c, err := Inspect(tok)
+	if err != nil {
+		t.Fatalf("Inspect: %v", err)
+	}
+	if c.Subject != "prn_0123456789abcdef0123" || c.PrincipalKind != "human" || c.Expiry.Unix() != 1900000300 {
+		t.Fatalf("got %+v", c)
+	}
+}

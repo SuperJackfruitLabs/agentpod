@@ -9,6 +9,7 @@ import {
 import { resolveDockerDaemon } from "../services/provisioner/docker-daemon";
 import { loadBridgeConfig } from "../services/bridge/config";
 import { loadOperatorRules } from "../services/redact-content";
+import { orgPlaneConfigErrors, type OrgPlaneConfigError } from "../auth/org-plane/config";
 
 export interface ValidationError {
   field: string;
@@ -159,7 +160,10 @@ function hasMinimumEntropy(value: string, minLength: number = 32): boolean {
 export function collectConfigErrors(
   cfg: typeof config = config,
   warn: Warn = console.warn,
-  resolveImage: ResolveImage = imageForHarness
+  resolveImage: ResolveImage = imageForHarness,
+  // ORG_PLANE_* is all-or-none (auth/org-plane/config.ts). Read once at module load; injectable
+  // so a test can hand in errors without touching the process environment.
+  planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors()
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   const isProduction = cfg.nodeEnv === "production";
@@ -462,6 +466,8 @@ export function collectConfigErrors(
       message: err instanceof Error ? err.message : String(err),
     });
   }
+
+  errors.push(...planeErrors);
 
   return errors;
 }
