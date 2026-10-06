@@ -286,6 +286,38 @@ describe("acting on a decision", () => {
     expect(replies[0]).toContain("cannot check who you are");
   });
 
+  test("the sender's mxid reaches resolveGate, so the plane can resolve the human itself", async () => {
+    const { deps, resolved } = decisionDeps();
+    await handleGateDecision({ sender: "@rakesh:id.agentpod.dev", content: decision() }, "!room", deps);
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0]).toMatchObject({
+      principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+      senderMxid: "@rakesh:id.agentpod.dev",
+    });
+  });
+
+  test("an assertion the plane could not give is a failed receipt in the room, refused as identity-unavailable", async () => {
+    const { deps, replies } = decisionDeps({
+      resolveGate: async () => ({ ok: false, code: "IDENTITY_UNAVAILABLE" }),
+    });
+    const r = await handleGateDecision({ sender: "@rakesh:id.agentpod.dev", content: decision() }, "!room", deps);
+    expect(r).toEqual({ status: "refused", reason: "identity-unavailable" });
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("cannot check who you are");
+  });
+
+  test.each(["ASSERTION_REFUSED", "ASSERTION_MISMATCH"])(
+    "an assertion the plane refused (%s) is a failed receipt in the room, and nothing is resolved",
+    async (code) => {
+      const { deps, replies } = decisionDeps({ resolveGate: async () => ({ ok: false, code }) });
+      const r = await handleGateDecision({ sender: "@rakesh:id.agentpod.dev", content: decision() }, "!room", deps);
+      expect(r).toEqual({ status: "refused", reason: "assertion-refused" });
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toContain("Nothing has changed");
+      expect(replies[0]).toContain(code);
+    },
+  );
+
   test("checks attribution before it resolves anything", async () => {
     // Order matters: an unlinked sender must not reach superpipeline even once.
     const calls: string[] = [];
@@ -299,6 +331,7 @@ describe("acting on a decision", () => {
 });
 
 import { resolveGateAtSuperpipeline } from "./gates";
+import { AssertionMismatch } from "../../auth/service-signing";
 
 /**
  * Calling superpipeline as the person, not as this service.
@@ -327,17 +360,20 @@ describe("resolving at the board", () => {
     decision: "approve" as const,
     comment: null,
     principalId: "68jYD9VOCmXlPhIYGFOgoZVE6vDUVHPA",
+    senderMxid: "@rakesh:id.agentpod.dev",
   };
 
   test("carries a freshly minted assertion for that principal", async () => {
-    const minted: string[] = [];
+    const minted: unknown[] = [];
     const { calls, f } = capture();
     await resolveGateAtSuperpipeline(input, {
       baseUrl: "https://superpipeline.dev/",
       mint: async (p) => { minted.push(p); return "the.jwt.here"; },
       fetch: f,
     });
-    expect(minted, "one token, for the person who tapped").toEqual([input.principalId]);
+    expect(minted, "one token, for the person who tapped").toEqual([
+      { principalId: input.principalId, senderMxid: input.senderMxid },
+    ]);
     expect((calls[0]!.init.headers as Record<string, string>).Authorization)
       .toBe("Bearer the.jwt.here");
   });
@@ -392,6 +428,37 @@ describe("resolving at the board", () => {
       baseUrl: "https://k.dev", mint: async () => "t", fetch: f,
     });
     expect(r).toEqual({ ok: false, code: "UNREACHABLE" });
+  });
+
+  // Contract §3.4b, under the org plane: the assertion is the plane's, and it can be refused or
+  // unreachable. Either is a failed receipt the room is told about, never an exception that drops
+  // the answer on the floor — and the board is never called without the person's token.
+  test.each([
+    ["plane unreachable", new OrgPlaneError(0, "unreachable"), "IDENTITY_UNAVAILABLE"],
+    ["plane 503", new OrgPlaneError(503, "error"), "IDENTITY_UNAVAILABLE"],
+    ["plane 404 unknown_identity", new OrgPlaneError(404, "unknown_identity"), "ASSERTION_REFUSED"],
+    ["plane 423 suspended", new OrgPlaneError(423, "suspended"), "ASSERTION_REFUSED"],
+    ["a different sub", new AssertionMismatch("prn_0000000000000000000a", "prn_0000000000000000000f"), "ASSERTION_MISMATCH"],
+  ])("a mint that fails with %s is %s, and the board is not called", async (_label, error, code) => {
+    const { calls, f } = capture();
+    const r = await resolveGateAtSuperpipeline(input, {
+      baseUrl: "https://k.dev",
+      mint: async () => { throw error; },
+      fetch: f,
+    });
+    expect(r).toEqual({ ok: false, code });
+    expect(calls).toHaveLength(0);
+  });
+
+  test("any other mint failure still throws, as it always has (legacy unchanged)", async () => {
+    const { f } = capture();
+    await expect(
+      resolveGateAtSuperpipeline(input, {
+        baseUrl: "https://k.dev",
+        mint: async () => { throw new Error("no tenant resolves"); },
+        fetch: f,
+      }),
+    ).rejects.toThrow("no tenant resolves");
   });
 
   test("does not mint a second token for a retry it never makes", async () => {

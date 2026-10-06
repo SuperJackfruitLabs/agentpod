@@ -33,7 +33,7 @@ import {
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
 } from "./gates";
-import { mintPrincipalAssertion } from "../../auth/service-signing";
+import { assertPrincipal } from "../../auth/service-signing";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
@@ -410,8 +410,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
                  * travelled the whole way and came back `HTTP_401` for exactly
                  * this.
                  */
-                mint: (principalId) =>
-                  mintPrincipalAssertion({ principalId, audiences: [superpipelineBaseUrl] }),
+                mint: (subject) => assertPrincipal({ ...subject, audience: superpipelineBaseUrl }),
               }),
             /**
              * The structured half of a receipt, spoken by whoever owns the room —
@@ -485,8 +484,7 @@ export function createMatrixBridge(cfg = matrixBridgeConfig()): MatrixBridge | n
                 // Named for the plane that will verify it, for the reason the gate
                 // path spells out: an assertion with no audience carries the hub's
                 // own URL, which is not an audience check at all.
-                mint: (principalId) =>
-                  mintPrincipalAssertion({ principalId, audiences: [superpipelineBaseUrl] }),
+                mint: (subject) => assertPrincipal({ ...subject, audience: superpipelineBaseUrl }),
               }),
             reply: async (room: string, body: string) => {
               const speaker = await roomSpeakerFor(room, cfg.domain);

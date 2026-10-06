@@ -31,13 +31,15 @@
  * console. See migration 0054 for why it is not simply another `jwks` row.
  */
 
-import { SignJWT, exportJWK, generateKeyPair, importJWK, type JWK } from "jose";
+import { SignJWT, decodeJwt, exportJWK, generateKeyPair, importJWK, type JWK } from "jose";
 import { and, desc, eq, isNull } from "drizzle-orm";
 
 import { config } from "../config";
 import { db } from "../db/drizzle";
 import { serviceSigningKeys } from "../db/schema/service-keys";
 import { buildTokenPayload, type TokenPayload } from "./jwt-claims";
+import { orgPlane } from "./org-plane/config";
+import { OrgPlaneError, orgPlaneClient, type OrgPlaneClient } from "../services/org-plane/client";
 import { createLogger } from "../utils/logger";
 
 const log = createLogger("service-signing");
@@ -247,4 +249,70 @@ export async function mintPrincipalAssertion(input: AssertionInput): Promise<str
     ...(input.audiences && input.audiences.length > 0 ? { audiences: input.audiences } : {}),
     extraClaims: { act: { sub: input.actor ?? BRIDGE_ACTOR } },
   });
+}
+
+/**
+ * Who a human's approval from chat is asserted as: the principal the hub resolved from the
+ * sender, and the sender itself.
+ */
+export interface AssertionSubject {
+  /** Resolved by the hub from the sender; signed as in legacy mode, checked against under the plane. */
+  principalId: string;
+  /** The Matrix sender. Under the org plane this, not the prn_, is what is asserted (contract §3.4b). */
+  senderMxid: string;
+}
+
+/** The plane asserted somebody other than the principal this hub resolved the sender to. */
+export class AssertionMismatch extends Error {
+  constructor(expected: string, got: unknown) {
+    super(`the org plane asserted ${String(got)} for a sender this hub resolved to ${expected}`);
+    this.name = "AssertionMismatch";
+  }
+}
+
+/**
+ * A human's approval, carried to another plane as that human.
+ *
+ * Legacy: the hub signs it (`mintPrincipalAssertion`; the mxid is unused). Under the org plane only
+ * the plane signs: `POST /api/token/assertion` with the sender's Matrix identity, and the plane
+ * resolves the human itself, so no caller can name whom to assert. A refusal or an unreachable
+ * plane propagates as `OrgPlaneError` — there is no hub-signed fallback.
+ *
+ * Defence in depth: the plane's `sub` must be the principal this hub resolved the same sender to.
+ * A mismatch means the identity link changed between the two reads, and the answer is refused
+ * rather than recorded under somebody else.
+ */
+export async function assertPrincipal(
+  input: AssertionSubject & { audience: string },
+  deps: { client?: () => Pick<OrgPlaneClient, "assertionToken"> } = {},
+): Promise<string> {
+  if (!orgPlane()) return mintPrincipalAssertion({ principalId: input.principalId, audiences: [input.audience] });
+  const { accessToken } = await (deps.client ?? orgPlaneClient)().assertionToken(
+    { system: "matrix", externalId: input.senderMxid },
+    input.audience,
+  );
+  let sub: unknown;
+  try {
+    sub = decodeJwt(accessToken).sub;
+  } catch {
+    sub = undefined;
+  }
+  if (sub !== input.principalId) throw new AssertionMismatch(input.principalId, sub);
+  return accessToken;
+}
+
+/**
+ * The receipt code for an assertion that could not be had, or null for any other error (which the
+ * caller rethrows, as it always has). Only `assertPrincipal` under the plane produces these.
+ *
+ * - `IDENTITY_UNAVAILABLE`: the plane could not be reached (or answered 5xx) — try again.
+ * - `ASSERTION_REFUSED`: the plane answered and refused (403/404/409/423).
+ * - `ASSERTION_MISMATCH`: the plane asserted somebody else.
+ */
+export function assertionFailureCode(error: unknown): "IDENTITY_UNAVAILABLE" | "ASSERTION_REFUSED" | "ASSERTION_MISMATCH" | null {
+  if (error instanceof AssertionMismatch) return "ASSERTION_MISMATCH";
+  if (error instanceof OrgPlaneError) {
+    return error.status === 0 || error.status >= 500 ? "IDENTITY_UNAVAILABLE" : "ASSERTION_REFUSED";
+  }
+  return null;
 }

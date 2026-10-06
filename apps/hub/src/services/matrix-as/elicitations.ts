@@ -34,6 +34,7 @@ import {
 } from "./elicitation-card";
 import { matchPermissionAnswer, unmatchedAnswerText } from "./permissions";
 import { IDENTITY_UNAVAILABLE_TEXT } from "../matrix-identity";
+import { assertionFailureCode, type AssertionSubject } from "../../auth/service-signing";
 
 const log = createLogger("matrix-elicitations");
 
@@ -277,14 +278,30 @@ export async function answerElicitationAtSuperpipeline(
     elicitationId: string;
     option: string;
     principalId: string;
+    /** The Matrix sender, asserted by the org plane under it (contract §3.4b). */
+    senderMxid: string;
   },
   deps: {
     baseUrl: string;
-    mint(principalId: string): Promise<string>;
+    mint(subject: AssertionSubject): Promise<string>;
     fetch?: typeof fetch;
   },
 ): Promise<{ ok: true } | { ok: false; code: string }> {
-  const token = await deps.mint(input.principalId);
+  let token: string;
+  try {
+    token = await deps.mint({ principalId: input.principalId, senderMxid: input.senderMxid });
+  } catch (err) {
+    // Refused or unreachable at the org plane: a failed outcome the room is told about, never a
+    // token-less call to the board. Anything else throws, as it always has.
+    const code = assertionFailureCode(err);
+    if (!code) throw err;
+    log.warn("no assertion for an answer", {
+      elicitationId: input.elicitationId,
+      code,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, code };
+  }
   const doFetch = deps.fetch ?? fetch;
   const base = deps.baseUrl.replace(/\/+$/, "");
 
@@ -367,6 +384,7 @@ export interface ElicitationAnswerDeps {
     elicitationId: string;
     option: string;
     principalId: string;
+    senderMxid: string;
   }): Promise<{ ok: true } | { ok: false; code: string }>;
   /** Say something back in the room. */
   reply(roomId: string, body: string): Promise<unknown>;
@@ -436,6 +454,7 @@ export async function handleElicitationAnswer(
     elicitationId: open.elicitationId,
     option: matched,
     principalId: identity.id,
+    senderMxid: event.sender,
   });
 
   if (!result.ok) {
@@ -447,7 +466,12 @@ export async function handleElicitationAnswer(
       }
       return { status: "refused", code: result.code };
     }
-    await deps.reply(roomId, `That did not go through (${result.code}). Nothing has changed.`);
+    await deps.reply(
+      roomId,
+      result.code === "IDENTITY_UNAVAILABLE"
+        ? IDENTITY_UNAVAILABLE_TEXT
+        : `That did not go through (${result.code}). Nothing has changed.`,
+    );
     return { status: "refused", code: result.code };
   }
 
