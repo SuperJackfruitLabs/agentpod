@@ -8,6 +8,16 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let refresh = $state(0);
+  /**
+   * The table arrives folded.
+   *
+   * Measured on a live station: 59 skills rendered 4960px — 80% of the whole
+   * Configuration tab — and four of the five columns read "Unknown" on nearly
+   * every row, because a station-local scan cannot see registries, eligibility
+   * or session loading. The count and the coverage are the answer most visits
+   * want; the rows are one click away for the visit that doesn't.
+   */
+  let showSkills = $state(false);
   const states = ["catalogued", "present", "eligible", "loaded", "exercised"] as const;
   const labels = { catalogued: "Catalogued", present: "Present", eligible: "Eligible", loaded: "Loaded", exercised: "Used" };
   const value = (observation: SkillObservation) => observation.value === null ? "Unknown" : observation.value ? "Yes" : "No";
@@ -19,6 +29,7 @@
     report = null;
     error = null;
     loading = true;
+    showSkills = false;
     void skillsInventory(id).then((result) => {
       if (!cancelled) report = result;
     }).catch((e) => {
@@ -53,6 +64,20 @@
     {#if report.skills.length === 0}
       <p class="text-sm text-muted-foreground">No skills observed in the scanned roots.</p>
     {:else}
+      <div class="flex items-center justify-between gap-4 rounded-md border p-3 text-sm">
+        <p>
+          <span class="font-medium">{report.skills.length} skills catalogued</span>
+          <span class="text-muted-foreground">
+            · {report.skills.filter((s) => s.evidence.present.value === true).length} present
+            · {report.skills.filter((s) => s.evidence.loaded.value === true).length} loaded
+          </span>
+        </p>
+        <Button variant="outline" size="sm" onclick={() => (showSkills = !showSkills)}>
+          {showSkills ? "Hide skills" : "Show skills"}
+        </Button>
+      </div>
+    {/if}
+    {#if report.skills.length > 0 && showSkills}
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
           <caption class="sr-only">Skill observations; unknown means no evidence was reported</caption>
