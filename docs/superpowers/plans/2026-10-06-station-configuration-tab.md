@@ -563,3 +563,12 @@ re-gating the review on `!loading` turns the plan-survival test red.
 **4. `docs-site` is npm, not pnpm.** It is outside the pnpm workspace by design
 (`ci.yml:280`), so Task 3's build step is `npm ci && npm run build`. `pnpm build`
 in that directory fails with `astro: command not found`.
+
+**5. A green summary is not a green suite.** `pnpm test` printed
+`Tests 1196 passed` **and exited 1**: a stub typed `as never` returned the wrong
+shape, `SkillsPanel` threw on render, and vitest reported that under
+"Unhandled Errors" while still counting every test as passed. It was missed
+locally because the run's output was filtered to the summary lines, which
+discards both the error block and the exit code. **Check `$?`, never the
+summary** — and never cast a test fixture to `never`, which is exactly where
+the typechecker would have caught the wrong shape.

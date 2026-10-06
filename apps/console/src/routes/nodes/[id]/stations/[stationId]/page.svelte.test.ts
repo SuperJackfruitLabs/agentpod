@@ -551,7 +551,20 @@ function stubConfigPanels() {
   vi.spyOn(harnessConfigApi, "listConfigSettings").mockResolvedValue({ settings: [], unreachableNodes: [] });
   vi.spyOn(harnessConfigApi, "listConfigOptOuts").mockResolvedValue([]);
   vi.spyOn(pluginsApi, "listPluginOperations").mockResolvedValue([]);
-  vi.spyOn(api, "skillsInventory").mockResolvedValue({ skills: [], sources: [] } as never);
+  // The real shape, with no cast. The first version of this stub returned
+  // `{ skills: [], sources: [] } as never` — SkillsPanel reads
+  // `coverage.limitations`, so it threw on render, and the cast is what hid
+  // that from the typechecker. Vitest reported the tests as PASSED and exited
+  // 1 on the unhandled error, which is a disagreement worth remembering.
+  vi.spyOn(api, "skillsInventory").mockResolvedValue({
+    stationKey: "hermes:fixture",
+    harness: "hermes",
+    observedAt: "2026-10-06T00:00:00Z",
+    skills: [],
+    plugins: [],
+    issues: [],
+    coverage: { complete: false, roots: [], limitations: [] },
+  });
 }
 
 test("plugins, skills and declared configuration share one Configuration tab", async () => {
