@@ -33,6 +33,9 @@ vi.mock("$app/navigation", () => ({
 
 vi.mock("$lib/stores/auth.svelte", () => ({
   clearAuthSession: mockClearAuthSession,
+  // Legacy mode: no plane token, so http() sends the cookie as it always did.
+  getToken: vi.fn(async () => null),
+  currentPlane: () => null,
 }));
 
 // ─── Module under test (imported after mocks are registered) ─────────────────

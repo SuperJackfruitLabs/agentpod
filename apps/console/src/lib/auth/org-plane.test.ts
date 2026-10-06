@@ -1,0 +1,158 @@
+import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beginSignIn, completeSignIn, discoverPlane, planeAccessToken, reauthorizeIfSignedIn, signOutLocal, wasSignedIn } from "./org-plane";
+
+const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
+const ORIGIN = "https://console.test";
+const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+beforeEach(() => {
+  sessionStorage.clear();
+  signOutLocal();
+});
+
+describe("discoverPlane", () => {
+  test("null issuer and a 404 (older hub) both mean legacy", async () => {
+    expect(await discoverPlane("https://hub.test", async () => json(200, { issuer: null }))).toBeNull();
+    expect(await discoverPlane("https://hub.test", async () => json(404, {}))).toBeNull();
+  });
+  test("an unreachable hub, or a body that is not JSON, means legacy", async () => {
+    expect(await discoverPlane("https://hub.test", async () => { throw new TypeError("offline"); })).toBeNull();
+    expect(await discoverPlane("https://hub.test", async () => new Response("<html>", { status: 200 }))).toBeNull();
+  });
+  test("a configured hub names the plane", async () => {
+    const seen: string[] = [];
+    const out = await discoverPlane("https://hub.test/", async (u) => { seen.push(String(u)); return json(200, PLANE); });
+    expect(out).toEqual(PLANE);
+    expect(seen).toEqual(["https://hub.test/public/org-plane"]);
+  });
+});
+
+describe("authorization code + PKCE", () => {
+  test("beginSignIn sends client, redirect, S256 challenge, state and resource", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/nodes", origin: ORIGIN, navigate: (u) => (went = u) });
+    const u = new URL(went);
+    expect(u.origin + u.pathname).toBe("https://accounts.test/api/auth/oauth2/authorize");
+    expect(Object.fromEntries(u.searchParams)).toMatchObject({
+      response_type: "code",
+      client_id: "agentpod-console",
+      redirect_uri: "https://console.test/auth/callback",
+      code_challenge_method: "S256",
+      resource: "https://hub.test",
+    });
+    expect(u.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(u.searchParams.get("state")).toBeTruthy();
+  });
+
+  test("completeSignIn checks state, posts the verifier with resource, and holds the token in memory", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/nodes", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    const fetchFn = vi.fn(async (u: string, init?: RequestInit) => {
+      expect(u).toBe("https://accounts.test/api/auth/oauth2/token");
+      const body = new URLSearchParams(String(init!.body));
+      expect(body.get("grant_type")).toBe("authorization_code");
+      expect(body.get("client_id")).toBe("agentpod-console");
+      expect(body.get("resource")).toBe("https://hub.test");
+      expect(body.get("redirect_uri")).toBe("https://console.test/auth/callback");
+      expect(body.get("code_verifier")).toMatch(/^[A-Za-z0-9_-]{43,}$/);
+      return json(200, { access_token: "at1", token_type: "Bearer", expires_in: 300, refresh_token: "rt1" });
+    });
+    const out = await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, { origin: ORIGIN, fetchFn: fetchFn as never, now: () => 0 });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(out).toEqual({ returnTo: "/nodes" });
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBe("at1");
+    expect(wasSignedIn()).toBe(true);
+    expect(JSON.stringify(sessionStorage)).not.toContain("rt1"); // the refresh token never leaves memory
+    expect(Object.keys(sessionStorage).map((k) => sessionStorage.getItem(k)).join()).not.toMatch(/rt1|at1/);
+    expect(Object.keys(localStorage).map((k) => localStorage.getItem(k)).join()).not.toMatch(/rt1|at1/);
+  });
+
+  test("a state mismatch is refused and no token request is made", async () => {
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: () => {} });
+    const fetchFn = vi.fn();
+    sessionStorage.setItem("agentpod.planeSignedIn", "1");
+    await expect(completeSignIn(new URLSearchParams({ code: "c", state: "forged" }), PLANE, { fetchFn: fetchFn as never })).rejects.toThrow(/state/);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(wasSignedIn()).toBe(false); // so the layout goes to /login, not into another authorize
+  });
+
+  test("a callback with no sign-in pending is refused", async () => {
+    const fetchFn = vi.fn();
+    await expect(completeSignIn(new URLSearchParams({ code: "c", state: "s" }), PLANE, { fetchFn: fetchFn as never })).rejects.toThrow(/state/);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test("an access token about to expire is refreshed with the rotating refresh token", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+      origin: ORIGIN, now: () => 0,
+      fetchFn: (async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" })) as never,
+    });
+    const refresh = vi.fn(async (_u: string, init?: RequestInit) => {
+      const body = new URLSearchParams(String(init!.body));
+      expect([body.get("grant_type"), body.get("refresh_token"), body.get("resource")]).toEqual(["refresh_token", "rt1", "https://hub.test"]);
+      return json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" });
+    });
+    expect(await planeAccessToken(PLANE, { now: () => 280_000, fetchFn: refresh as never })).toBe("at2");
+    // The rotated refresh token is the one used next time.
+    const again = vi.fn(async (_u: string, init?: RequestInit) => {
+      expect(new URLSearchParams(String(init!.body)).get("refresh_token")).toBe("rt2");
+      return json(200, { access_token: "at3", expires_in: 300, refresh_token: "rt3" });
+    });
+    expect(await planeAccessToken(PLANE, { now: () => 560_000, fetchFn: again as never })).toBe("at3");
+  });
+
+  test("concurrent callers near expiry share one refresh, so a rotating token is spent once", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+      origin: ORIGIN, now: () => 0,
+      fetchFn: (async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" })) as never,
+    });
+    const refresh = vi.fn(async () => json(200, { access_token: "at2", expires_in: 300, refresh_token: "rt2" }));
+    const opts = { now: () => 290_000, fetchFn: refresh as never };
+    const got = await Promise.all([planeAccessToken(PLANE, opts), planeAccessToken(PLANE, opts), planeAccessToken(PLANE, opts)]);
+    expect(got).toEqual(["at2", "at2", "at2"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  test("a refused refresh signs out instead of returning a stale token", async () => {
+    let went = "";
+    await beginSignIn(PLANE, { returnTo: "/", origin: ORIGIN, navigate: (u) => (went = u) });
+    const state = new URL(went).searchParams.get("state")!;
+    await completeSignIn(new URLSearchParams({ code: "c", state }), PLANE, {
+      origin: ORIGIN, now: () => 0,
+      fetchFn: (async () => json(200, { access_token: "at1", expires_in: 300, refresh_token: "rt1" })) as never,
+    });
+    expect(await planeAccessToken(PLANE, { now: () => 290_000, fetchFn: (async () => json(400, { error: "invalid_grant" })) as never })).toBeNull();
+    expect(await planeAccessToken(PLANE, { now: () => 0 })).toBeNull();
+  });
+
+  test("signOutLocal forgets tokens and the signed-in flag", async () => {
+    signOutLocal();
+    expect(await planeAccessToken(PLANE)).toBeNull();
+    expect(wasSignedIn()).toBe(false);
+  });
+});
+
+describe("reauthorizeIfSignedIn (the layout's guard, after a reload)", () => {
+  test("a tab that had signed in goes back to authorize, silently, keeping where it was", async () => {
+    sessionStorage.setItem("agentpod.planeSignedIn", "1");
+    let went = "";
+    expect(reauthorizeIfSignedIn(PLANE, "/nodes/n1", { origin: ORIGIN, navigate: (u) => (went = u) })).toBe(true);
+    await vi.waitFor(() => expect(went).toContain("https://accounts.test/api/auth/oauth2/authorize?"));
+    expect(JSON.parse(sessionStorage.getItem("agentpod.pkce")!).returnTo).toBe("/nodes/n1");
+  });
+
+  test("a tab that never signed in, or legacy mode, goes to /login instead", () => {
+    const navigate = vi.fn();
+    expect(reauthorizeIfSignedIn(PLANE, "/", { origin: ORIGIN, navigate })).toBe(false);
+    sessionStorage.setItem("agentpod.planeSignedIn", "1");
+    expect(reauthorizeIfSignedIn(null, "/", { origin: ORIGIN, navigate })).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});

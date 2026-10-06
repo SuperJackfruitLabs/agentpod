@@ -28,6 +28,8 @@
    * to put an email against a person.
    */
   import { onMount } from "svelte";
+  import { managedByPlaneUrl } from "$lib/api/http-error";
+  import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import { toast } from "svelte-sonner";
   import { listUsers } from "$lib/api/admin";
   import {
@@ -119,6 +121,8 @@
 
   let isLoading = $state(true);
   let error = $state<string | null>(null);
+  // Under the org plane the hub answers 410 managed_by_org_plane here: where they live now.
+  let managedAt = $state<string | null>(null);
   let enforced = $state(false);
   let rows = $state<Row[]>([]);
   let agentOptions = $state<Array<{ id: string; label: string }>>([]);
@@ -148,6 +152,7 @@
   async function loadData() {
     isLoading = true;
     error = null;
+    managedAt = null;
     try {
       // `listGrants` is the only blocking call. The directory and the user list
       // are what put a readable name on a row; without them the page still has
@@ -217,6 +222,7 @@
 
       rows = [...known, ...orphans];
     } catch (e) {
+      managedAt = managedByPlaneUrl(e);
       error = (e as Error).message || "Couldn’t load grants.";
     } finally {
       isLoading = false;
@@ -357,6 +363,8 @@
         <Skeleton class="h-16 rounded-sm" />
       {/each}
     </div>
+  {:else if managedAt}
+    <ManagedByPlane what="Grants" href={managedAt} />
   {:else if error}
     <div
       class="flex items-start justify-between gap-3 rounded-lg border border-status-error/50 bg-status-error/5 p-4"

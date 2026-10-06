@@ -4,7 +4,10 @@
  * TDD tests for the web-based auth store (Better Auth cookie session, no Tauri).
  */
 
-import { vi, test, expect, beforeEach } from "vitest";
+import { vi, test, expect, beforeEach, afterEach, describe } from "vitest";
+import * as plane from "$lib/auth/org-plane";
+import * as staticAuth from "./auth.svelte";
+import * as myGrant from "$lib/api/my-grant";
 
 // ---------------------------------------------------------------------------
 // Hoist mock objects so they are available inside vi.mock factory closures
@@ -421,4 +424,116 @@ test("clearAuthSession → unauthenticated and isInitialized reset to false", as
   expect(auth.isAuthenticated).toBe(false);
   // isInitialized reset so a fresh setAuthApiUrl + initAuth restores cleanly
   expect(auth.isInitialized).toBe(false);
+});
+
+// ---------------------------------------------------------------------------
+// Under the org plane (P3 Task 14): /api/me with the plane token, never Better Auth
+// ---------------------------------------------------------------------------
+
+describe("under the org plane", () => {
+  const P = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
+  const { setPlane, initAuth, auth, logout, getToken, clearAuthSession, setAuthApiUrl, resetAuthInit } = staticAuth;
+
+  beforeEach(() => {
+    clearAuthSession();
+    setAuthApiUrl("https://hub.test");
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearAuthSession();
+  });
+
+  test("initAuth restores the user from /api/me with the plane token, never Better Auth", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ id: "prn_hhhhhhhhhhhhhhhhhhhh", email: "op@example.com", isAdmin: true, issuer: "org-plane" }), { status: 200 }),
+    );
+    await initAuth();
+    expect(fetchSpy).toHaveBeenCalledWith("https://hub.test/api/me", expect.objectContaining({ headers: { Authorization: "Bearer at1" } }));
+    expect(auth.user?.role).toBe("admin");
+    expect(auth.user?.id).toBe("prn_hhhhhhhhhhhhhhhhhhhh");
+    expect(auth.isInitialized).toBe(true);
+    expect(mockAuthClient.getSession).not.toHaveBeenCalled();
+  });
+
+  test("no token in memory (a reload) leaves the user signed out and asks nobody", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    await initAuth();
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.isInitialized).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockAuthClient.getSession).not.toHaveBeenCalled();
+  });
+
+  test("a hub that refuses the token signs out locally, so the guard cannot loop on a silent re-authorize", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    const out = vi.spyOn(plane, "signOutLocal");
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "product_not_enabled", org: "org_x" }), { status: 403 }),
+    );
+    await initAuth();
+    expect(auth.isAuthenticated).toBe(false);
+    expect(auth.error).toMatch(/403/);
+    expect(out).toHaveBeenCalled();
+  });
+
+  test("resetAuthInit lets initAuth run again after the callback", async () => {
+    setPlane(P);
+    const tok = vi.spyOn(plane, "planeAccessToken").mockResolvedValue(null);
+    await initAuth();
+    await initAuth();
+    expect(tok).toHaveBeenCalledTimes(1);
+    resetAuthInit();
+    await initAuth();
+    expect(tok).toHaveBeenCalledTimes(2);
+  });
+
+  test("getToken returns the plane token; logout signs out locally", async () => {
+    setPlane(P);
+    vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    const out = vi.spyOn(plane, "signOutLocal");
+    expect(await getToken()).toBe("at1");
+    await logout();
+    expect(out).toHaveBeenCalled();
+    expect(mockAuthClient.signOut).not.toHaveBeenCalled();
+  });
+
+  test("clearAuthSession (switching hubs) forgets the plane and its tokens", async () => {
+    setPlane(P);
+    const out = vi.spyOn(plane, "signOutLocal");
+    clearAuthSession();
+    expect(staticAuth.currentPlane()).toBeNull();
+    expect(out).toHaveBeenCalled();
+  });
+
+  test("getToken(minValiditySec) passes the floor to the plane", async () => {
+    setPlane({ issuer: "i", url: "u", audience: "a" });
+    const spy = vi.spyOn(plane, "planeAccessToken").mockResolvedValue("at1");
+    await getToken(60);
+    expect(spy).toHaveBeenCalledWith({ issuer: "i", url: "u", audience: "a" }, { minValiditySec: 60 });
+  });
+
+  test("logout forgets the cached reach answer (it belonged to the user who left)", async () => {
+    setPlane(P);
+    const forget = vi.spyOn(myGrant, "forgetMyReach");
+    await logout();
+    expect(forget).toHaveBeenCalled();
+  });
+
+  test("legacy logout forgets the cached reach answer too", async () => {
+    setPlane(null);
+    mockAuthClient.signOut.mockResolvedValue({});
+    const forget = vi.spyOn(myGrant, "forgetMyReach");
+    await logout();
+    expect(forget).toHaveBeenCalled();
+  });
+
+  test("legacy mode: getToken is still null", async () => {
+    setPlane(null);
+    expect(await getToken()).toBeNull();
+  });
 });

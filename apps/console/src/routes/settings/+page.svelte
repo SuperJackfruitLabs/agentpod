@@ -1,12 +1,17 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
-  import { auth, logout } from "$lib/stores/auth.svelte";
+  import { auth, logout, currentPlane } from "$lib/stores/auth.svelte";
+  import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import { connection, disconnect } from "$lib/stores/connection.svelte";
   import ThemeSettings from "$lib/components/theme-settings.svelte";
   import PageHeader from "$lib/components/page-header.svelte";
   import DeviceList from "$lib/components/device-list.svelte";
   import { Button } from "$lib/components/ui/button";
   import { Badge } from "$lib/components/ui/badge";
+
+  // Under the org plane a terminal's device credential is the plane's (the hub's device routes
+  // answer 410), so the list moves there.
+  let plane = $derived(currentPlane());
 
   async function handleDisconnect() {
     await disconnect();
@@ -49,7 +54,12 @@
 
   <!-- Devices — the revocation surface the device-credential record asks for -->
   <div class="rounded-lg border bg-card p-6">
-    <DeviceList />
+    {#if plane}
+      <h2 class="t-section mb-4">Devices</h2>
+      <ManagedByPlane what="Devices" href={plane.url} />
+    {:else}
+      <DeviceList />
+    {/if}
   </div>
 
   <!-- Account -->

@@ -4,7 +4,8 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { connection, initConnection, startReachabilityProbe } from "$lib/stores/connection.svelte";
-  import { auth, initAuth } from "$lib/stores/auth.svelte";
+  import { auth, currentPlane, initAuth } from "$lib/stores/auth.svelte";
+  import { reauthorizeIfSignedIn } from "$lib/auth/org-plane";
   import { themeStore } from "$lib/themes/store.svelte";
   import { commandPalette } from "$lib/stores/command-palette.svelte";
   import { Toaster } from "$lib/components/ui/sonner";
@@ -22,7 +23,8 @@
   let currentPath = $derived(page.url.pathname);
 
   // Public routes that don't require authentication (no AppShell/BottomNav)
-  const publicRoutes = ["/login"];
+  // (/auth/callback is where the organization plane sends the browser back after sign-in.)
+  const publicRoutes = ["/login", "/auth/callback"];
 
   // Derived: check if current route is public
   let isPublicRoute = $derived(publicRoutes.some(route => currentPath.startsWith(route)));
@@ -82,6 +84,9 @@
       : !connection.isConnected;
 
     if (definitelyNotAuthenticated) {
+      // Under the plane, tokens are memory-only, so a reload signs the tab out. If it had signed
+      // in, go back through authorize (silent while the plane's session is alive) instead.
+      if (reauthorizeIfSignedIn(currentPlane(), `${page.url.pathname}${page.url.search}`)) return;
       goto("/login");
     }
   });

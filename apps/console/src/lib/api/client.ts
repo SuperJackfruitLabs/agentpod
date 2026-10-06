@@ -1,6 +1,6 @@
 import type { NodeSummary, DetectedStation, StationHealth, FsEntry, ProvisionedRuntime, RuntimeProviderManifest, FleetAgent, FleetStats, SkillInventory } from "@agentpod/contract";
 import { goto } from "$app/navigation";
-import { clearAuthSession } from "$lib/stores/auth.svelte";
+import { clearAuthSession, currentPlane, getToken } from "$lib/stores/auth.svelte";
 import { apiError, networkError } from "./http-error";
 
 /** Resolves the hub base URL at call time so it reflects the runtime connection. */
@@ -26,11 +26,50 @@ export function handleUnauthorized(): void {
   }
 }
 
+/**
+ * How long a token handed to a WebSocket or EventSource must still have to live. The hub
+ * authenticates the upgrade only, so the token just has to survive the dial — with margin for a
+ * slow network — but the 30 s floor ordinary fetches use is too thin for that.
+ */
+export const SOCKET_MIN_VALIDITY_SEC = 60;
+
+/**
+ * Every hub request goes through here. Under the org plane the console holds a bearer token and
+ * sends it, with no cookie; in legacy mode (no token) it is today's `credentials: "include"` on the
+ * Better Auth session cookie, unchanged.
+ */
+export async function authFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = await getToken();
+  if (!token) return fetch(url, { credentials: "include", ...init });
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${token}`);
+  return fetch(url, { ...init, headers, credentials: "omit" });
+}
+
+/**
+ * WebSocket and EventSource cannot send headers; the hub's auth middleware reads `?token=` for
+ * them. Appends it (URL-encoded) only when there is a token.
+ */
+export function withToken(url: string, token: string | null): string {
+  if (!token) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(token)}`;
+}
+
+/**
+ * The token for a socket or stream about to be opened. Legacy mode answers `null` at once — not a
+ * promise — so legacy sockets open synchronously exactly as before. Under the plane it is a token
+ * refreshed if it has under `SOCKET_MIN_VALIDITY_SEC` left: a tab left open past the token's
+ * five-minute life still dials with a live one.
+ */
+export function socketToken(): Promise<string | null> | null {
+  return currentPlane() ? getToken(SOCKET_MIN_VALIDITY_SEC) : null;
+}
+
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const requestLine = `${init?.method ?? "GET"} ${path}`;
   let res: Response;
   try {
-    res = await fetch(`${hubUrl()}${path}`, { credentials: "include", ...init });
+    res = await authFetch(`${hubUrl()}${path}`, init);
   } catch (err) {
     throw networkError(requestLine, err);
   }
@@ -319,9 +358,8 @@ export async function readFile(
   const requestLine = `GET /api/stations/${stationId}/file`;
   let res: Response;
   try {
-    res = await fetch(
-      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}`,
-      { credentials: "include" }
+    res = await authFetch(
+      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}`
     );
   } catch (err) {
     throw networkError(requestLine, err);
@@ -347,9 +385,8 @@ export async function readImage(
   const requestLine = `GET /api/stations/${stationId}/file`;
   let res: Response;
   try {
-    res = await fetch(
-      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}&maxBytes=${IMAGE_PREVIEW_MAX_BYTES}`,
-      { credentials: "include" }
+    res = await authFetch(
+      `${hubUrl()}/api/stations/${stationId}/file?path=${encodeURIComponent(path)}&maxBytes=${IMAGE_PREVIEW_MAX_BYTES}`
     );
   } catch (err) {
     throw networkError(requestLine, err);

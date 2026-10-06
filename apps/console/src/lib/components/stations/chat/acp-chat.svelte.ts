@@ -70,6 +70,7 @@ import {
   type AcpSessionRow,
   type AcpSocket,
 } from "$lib/api/acp";
+import { socketToken } from "$lib/api/client";
 import {
   addPendingPrompt,
   dropPendingPrompt,
@@ -581,7 +582,9 @@ export class AcpChat {
     if (!session) return;
     this.#connection = this.attempt === 0 ? "connecting" : "reconnecting";
 
-    const s = createAcpSocket(session.id);
+    // Every dial (first or reconnect) asks for its own token: the hub authenticates the upgrade
+    // only, so an open socket outlives its token, but a redial needs a live one. Legacy: null.
+    const s = createAcpSocket(session.id, socketToken());
     this.socket = s;
     s.onMessage((msg) => this.handleMessage(s, msg));
     s.onClose(() => this.handleClose(s));
