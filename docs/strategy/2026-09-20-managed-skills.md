@@ -336,7 +336,7 @@ Migration `0069_managed_skills` adds the two tables and ownership indexes. Refer
 unique indexes precede their composite foreign keys. Test it against the prior
 schema, not only a database where the feature tables already exist.
 
-The station Skills tab exposes management only when `skills.manage` is advertised.
+The station Configuration tab exposes skill management only when `skills.manage` is advertised.
 An operator can upload an exported archive with its declared profile, select an
 artifact for the station harness, review added/changed/removed paths and the bound
 workspace, then apply the exact displayed plan digest. Rollback requires its own

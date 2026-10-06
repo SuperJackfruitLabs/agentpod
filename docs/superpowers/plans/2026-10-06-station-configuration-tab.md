@@ -505,7 +505,9 @@ Expected: only `docs/OPERATING.md:1671`, which refers to the Files tab for *brow
 
 - [ ] **Step 4: Build the docs site**
 
-Run: `cd docs-site && pnpm install --frozen-lockfile && pnpm build`
+Run: `cd docs-site && npm ci && npm run build`
+
+`docs-site` sits **outside** the pnpm workspace (which is `apps/*` and `packages/*` only) and is deliberately npm, with its own `package-lock.json` — `pnpm build` there fails with `astro: command not found`.
 
 Expected: a clean build. The `landing` check is not a required check for merge, but a broken docs build blocks the deploy job.
 
@@ -557,3 +559,7 @@ without waiting, so it fails if the review is ever re-gated on loading.
 **3. Both new guards were revert-proofed.** Stubbing the refresh effect to
 `if (false)` turns "becoming active again re-reads the observations" red;
 re-gating the review on `!loading` turns the plan-survival test red.
+
+**4. `docs-site` is npm, not pnpm.** It is outside the pnpm workspace by design
+(`ci.yml:280`), so Task 3's build step is `npm ci && npm run build`. `pnpm build`
+in that directory fails with `astro: command not found`.

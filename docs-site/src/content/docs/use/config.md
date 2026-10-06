@@ -529,10 +529,14 @@ starts, which is what `apn hermes-skills` itself already tells an operator after
 
 ## Seeing and applying it from the console
 
-Everything above has a CLI-free path too, on a station's own page — its **Files** tab, below
-the file browser. A **declared configuration** panel appears there whenever the station
-advertises the `config.manage` capability; a station that does not advertise it shows nothing
-in its place, not an empty panel.
+Everything above has a CLI-free path too, on a station's own page — its **Configuration**
+tab, which also holds that station's plugins and its skills, because on a Hermes station all
+three write the same configuration document. A **declared configuration** panel sits at the
+top of that tab whenever the station advertises the `config.manage` capability; a station
+that does not advertise it shows nothing in its place, not an empty panel, and a station with
+nothing configurable at all has no Configuration tab.
+
+A link to the older `?tab=skills` still works — it lands on the Configuration tab.
 
 The panel lists one row per registered setting with something declared for that station: the
 declared value and the level it came from (station, node, or fleet), the observed value, and
