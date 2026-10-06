@@ -98,4 +98,25 @@ describe("PrincipalDirectory", () => {
     expect(await dir.list()).toEqual([P]);
     expect(await dir.list("human")).toEqual([]);
   });
+  // Security review finding 7c: a last-good grant was served for as long as the outage lasted, so
+  // a grant revoked at the plane kept authorizing dispatch indefinitely. Stale use is capped.
+  test("a stale entry is served for at most 15 minutes of outage, then the read fails closed", async () => {
+    const { state, dir, advance } = setup();
+    await dir.principal(P.id);
+    state.down = true;
+    advance(14 * 60_000 + 59_000);
+    expect(await dir.principal(P.id)).toEqual(P); // fetched 14m59s ago
+    advance(2_000);
+    await expect(dir.principal(P.id)).rejects.toBeInstanceOf(OrgPlaneError); // 15m01s
+  });
+
+  test("the 15 minutes count from the last good answer, not from the start of the outage", async () => {
+    const { state, dir, advance } = setup();
+    await dir.principal(P.id);
+    advance(10 * 60_000);
+    await dir.principal(P.id); // refreshed (TTL passed, plane up)
+    state.down = true;
+    advance(14 * 60_000);
+    expect(await dir.principal(P.id)).toEqual(P);
+  });
 });
