@@ -47,27 +47,6 @@ export {
 } from './git';
 export type { MockRepoData, MockCommitData } from './git';
 
-// Auth Middleware Mock
-export {
-  mockAuthMiddleware,
-  mockSessionMiddleware,
-  mockOptionalAuthMiddleware,
-  resetAuthMock,
-  setMockUser,
-  setDefaultTestUser,
-  setApiKeyUser,
-  clearMockUser,
-  setAuthEnabled,
-  getMockUser,
-  getMockSession as getAuthMockSession,
-  createAuthHeaders,
-  createApiKeyHeaders,
-  withAuth,
-  withoutAuth,
-  testUsers,
-  mockAuthCalls,
-} from './auth';
-export type { MockUser, MockSession } from './auth';
 
 /**
  * Reset all mocks - call this in beforeEach to ensure clean state
@@ -76,10 +55,8 @@ export function resetAllMocks(): void {
   const { resetDockerMock } = require('./docker');
   const { resetOpencodeMock } = require('./opencode-sdk');
   const { resetGitMock } = require('./git');
-  const { resetAuthMock } = require('./auth');
 
   resetDockerMock();
   resetOpencodeMock();
   resetGitMock();
-  resetAuthMock();
 }

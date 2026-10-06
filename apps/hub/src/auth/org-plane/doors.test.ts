@@ -1,10 +1,9 @@
 process.env.DATABASE_URL =
   process.env.DATABASE_URL || "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
-import { SignJWT, exportJWK, generateKeyPair, type JSONWebKeySet } from "jose";
+import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { signServiceToken } from "../service-signing";
-import { config } from "../../config";
+import { signPlaneToken } from "../../../tests/helpers/fake-plane";
 import type { PlaneBearerResult } from "../hub-token";
 import { createPlaneVerifier } from "./verify";
 import { db } from "../../db/drizzle";
@@ -78,7 +77,7 @@ describe("dispatchable under the plane", () => {
 
 const notEnabled = { ok: false, status: 403, body: { error: "product_not_enabled", org: claims.org } } as const;
 
-/** A verifyPlane that records every call: in legacy mode it must never be reached. */
+/** A verifyPlane that records every call. */
 function spy(result: PlaneBearerResult = { ok: false, status: 401 }) {
   const seen: string[] = [];
   return { seen, verifyPlane: async (t: string) => (seen.push(t), result) };
@@ -97,28 +96,17 @@ describe("verifyPlaneBearer refusals", () => {
 describe("MCP door", () => {
   beforeAll(ensurePgMigrations);
 
-  test("legacy mode is unchanged: a hub token resolves and the plane is never asked", async () => {
-    const s = spy();
-    const token = await signServiceToken({
-      payload: { principalKind: "agent", mayDispatch: [], mayGrantReach: false } as never,
-      subject: claims.sub,
-      ttl: "5m",
-    });
-    const caller = await resolveMcpCaller(
-      new Request("http://hub/mcp", { headers: { Authorization: `Bearer ${token}` } }),
-      { verifyPlane: s.verifyPlane },
-    );
+  test("a token the plane signed resolves through the one shared verifier", async () => {
+    const token = await signPlaneToken({ sub: claims.sub, principalKind: "agent" });
+    const caller = await resolveMcpCaller(new Request("http://hub/mcp", { headers: { Authorization: `Bearer ${token}` } }));
     expect(caller).toEqual({ principalId: claims.sub, kind: "agent" });
-    expect(s.seen).toEqual([]);
   });
 
-  test("under the plane, a hub-issued token is not accepted (no dual-accept)", async () => {
-    restore = setOrgPlaneForTests(TEST_PLANE);
-    const token = await signServiceToken({
-      payload: { principalKind: "agent", mayDispatch: [], mayGrantReach: false } as never,
-      subject: claims.sub,
-      ttl: "5m",
-    });
+  test("a token signed by anybody else — the hub's old keys included — is not accepted", async () => {
+    const { privateKey } = await generateKeyPair("EdDSA", { extractable: true });
+    const token = await new SignJWT({ ...claims, jti: crypto.randomUUID() })
+      .setProtectedHeader({ alg: "EdDSA", kid: "not-the-plane" })
+      .sign(privateKey);
     const s = spy();
     const caller = await resolveMcpCaller(
       new Request("http://hub/mcp", { headers: { Authorization: `Bearer ${token}` } }),
@@ -126,6 +114,7 @@ describe("MCP door", () => {
     );
     expect(caller).toBeNull();
     expect(s.seen).toEqual([token]);
+    expect(await resolveMcpCaller(new Request("http://hub/mcp", { headers: { Authorization: `Bearer ${token}` } }))).toBeNull();
   });
 });
 
@@ -176,27 +165,6 @@ describe("dispatchable door", () => {
     const res = await get(createDispatchableRoutes({ verifyPlane: async () => ({ ok: false, status: 401 }), listPrincipals }));
     expect(res.status).toBe(401);
     expect(((await res.json()) as { error: string }).error).toBe("invalid_token");
-  });
-
-  test("legacy mode is unchanged: a hub token is verified locally and the plane is never asked", async () => {
-    const { publicKey, privateKey } = await generateKeyPair("EdDSA", { extractable: true });
-    const jwks = async () => ({ keys: [{ ...(await exportJWK(publicKey)), kid: "k", alg: "EdDSA" }] }) as JSONWebKeySet;
-    const token = await new SignJWT({ principalKind: "human", mayDispatch: ["prn_aaaaaaaaaaaaaaaaaaaa"] })
-      .setProtectedHeader({ alg: "EdDSA", kid: "k" })
-      .setIssuer(config.publicUrl)
-      .setAudience(config.publicUrl)
-      .setSubject("u")
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .sign(privateKey);
-    const s = spy(human());
-    const res = await get(createDispatchableRoutes({ jwks, verifyPlane: s.verifyPlane, listPrincipals }), token);
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ agents: [{ id: "prn_aaaaaaaaaaaaaaaaaaaa", handle: "a", displayName: "A" }] });
-    expect(s.seen).toEqual([]);
-    // …and a plane-shaped bearer is just an unknown token to it.
-    expect((await get(createDispatchableRoutes({ jwks, verifyPlane: s.verifyPlane, listPrincipals }), "plane-token")).status).toBe(401);
-    expect(s.seen).toEqual([]);
   });
 });
 

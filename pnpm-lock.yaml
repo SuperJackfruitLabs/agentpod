@@ -213,9 +213,6 @@ importers:
       '@types/dockerode':
         specifier: ^4.0.1
         version: 4.0.1
-      better-auth:
-        specifier: ^1.7.7
-        version: 1.7.7(@opentelemetry/api@1.9.1)(@sveltejs/kit@2.70.3(@opentelemetry/api@1.9.1)(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(svelte@5.57.0(@typescript-eslint/types@8.70.0))(typescript@5.9.3)(vite@6.4.3(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.12)(yaml@2.9.1)))(drizzle-kit@0.31.10)(drizzle-orm@0.45.2(@opentelemetry/api@1.9.1)(@types/pg@8.23.1)(bun-types@1.4.2)(kysely@0.29.5)(postgres@3.4.9))(react-dom@19.2.1(react@19.2.1))(react@19.2.1)(svelte@5.57.0(@typescript-eslint/types@8.70.0))(vitest@2.1.9(@types/node@26.6.1)(jsdom@25.0.1)(lightningcss@1.32.0))
       dockerode:
         specifier: ^4.0.12
         version: 4.0.12

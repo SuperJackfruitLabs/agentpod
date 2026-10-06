@@ -17,14 +17,14 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { GATE_REQUEST_CONTENT_KEY, GateRequestCard } from "@agentpod/contract";
 
 import { ensurePgMigrations } from "../../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../../tests/helpers/database";
 import { db, rawSql } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixRooms } from "../../db/schema/matrix";
 import { bridgeDispatches } from "../../db/schema/bridge";
 import { BOOTSTRAP_TENANT_ID } from "../../db/schema/tenants";
 import { mintEnrollmentToken, enrollNode } from "../enrollment";
-import { createPrincipal } from "../principals";
+import { createPrincipal } from "../../../tests/helpers/principals";
 import { _resetHubEventsForTest, hubEventKind } from "../push/hub-events";
 import {
   GATE_DECISION_SUITE_TYPE,
@@ -34,6 +34,7 @@ import {
   projectionForGate,
   type GatePendingDelivery,
 } from "./gates";
+import { forgetPrincipals } from "../../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const ACTOR = `test-gates-embedded-${RUN}`;
@@ -84,8 +85,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM nodes WHERE user_id = ${ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ACTOR}`;
-    await rawSql`DELETE FROM principals WHERE handle = ${"gates-embedded-" + RUN}`;
-    await rawSql`DELETE FROM "user" WHERE id = ${ACTOR}`;
+    await forgetPrincipals({ handles: ["gates-embedded-" + RUN] });
+    await deleteTestUser(ACTOR);
   } catch {
     // cleanup only
   }

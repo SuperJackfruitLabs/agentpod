@@ -27,7 +27,7 @@ import { and, eq } from "drizzle-orm";
 import { db, rawSql } from "../db/drizzle";
 import { nodes } from "../db/schema/nodes";
 import { stationAudit } from "../db/schema/audit";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { waitForNodeOnline } from "../../tests/helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../services/enrollment";
@@ -88,7 +88,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM station_audit     WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes             WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"            WHERE id = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // ignore
   }

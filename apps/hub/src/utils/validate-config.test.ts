@@ -15,6 +15,8 @@ import { describe, it, expect } from "bun:test";
 import { collectConfigErrors } from "./validate-config";
 import { config } from "../config";
 import { join } from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 /** Swallow the dev-secret warnings the default config legitimately emits. */
 const quiet = () => {};
@@ -220,6 +222,17 @@ describe("validateConfig — modal", () => {
       delete env[key];
     }
     env.NODE_ENV = "development";
+    // ORG_PLANE_* is required (P3 plan, Task 17): a complete, valid set, so these tests see
+    // only the provisioner rules they are about.
+    const credentialDir = mkdtempSync(join(tmpdir(), "hub-plane-"));
+    writeFileSync(join(credentialDir, "svc"), "svc_0123456789abcdef0123:test-secret\n");
+    Object.assign(env, {
+      ORG_PLANE_ISSUER: "https://accounts.test",
+      ORG_PLANE_JWKS_URL: "https://accounts.test/api/auth/jwks",
+      ORG_PLANE_AUDIENCE: "https://hub.test",
+      ORG_PLANE_URL: "https://accounts.test",
+      ORG_PLANE_SERVICE_CREDENTIAL_FILE: join(credentialDir, "svc"),
+    });
     // Set because the built-in default is 33 characters and therefore always an
     // error — a pre-existing quirk unrelated to Modal, and the only thing
     // standing between these hubs and a clean boot.
@@ -712,8 +725,31 @@ describe("validateConfig — ORG_PLANE_*", () => {
     expect(errors).toContainEqual({ field: "ORG_PLANE_URL", message: "missing" });
   });
 
-  it("legacy mode (no org-plane settings) adds no org-plane errors", () => {
+  it("a complete, valid set of org-plane settings adds no org-plane errors", () => {
     const errors = collectConfigErrors(config, quiet, undefined, []);
     expect(errors.filter((e) => e.field.startsWith("ORG_PLANE_"))).toEqual([]);
+  });
+
+  it("an environment with none of them set refuses to boot, naming all five (P3 Task 17)", () => {
+    const hubRoot = join(import.meta.dir, "..", "..");
+    const env: Record<string, string> = { PATH: process.env.PATH ?? "", NODE_ENV: "development" };
+    const proc = Bun.spawnSync(
+      [
+        "bun",
+        "--env-file=/dev/null",
+        "-e",
+        `const { orgPlaneConfigErrors } = await import(${JSON.stringify(join(hubRoot, "src", "auth", "org-plane", "config.ts"))});` +
+          `console.log(JSON.stringify(orgPlaneConfigErrors().map((e) => e.field)));`,
+      ],
+      { cwd: hubRoot, env, stdout: "pipe", stderr: "pipe" },
+    );
+    expect(proc.exitCode, proc.stderr.toString()).toBe(0);
+    expect(JSON.parse(proc.stdout.toString())).toEqual([
+      "ORG_PLANE_ISSUER",
+      "ORG_PLANE_JWKS_URL",
+      "ORG_PLANE_AUDIENCE",
+      "ORG_PLANE_URL",
+      "ORG_PLANE_SERVICE_CREDENTIAL_FILE",
+    ]);
   });
 });

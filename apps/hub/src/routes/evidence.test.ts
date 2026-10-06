@@ -13,21 +13,21 @@ import { EvidenceAttemptResponse, EvidencePrincipalResponse, EvidenceRunResponse
 import { SignJWT, generateKeyPair } from "jose";
 
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { auth } from "../auth/drizzle-auth";
-import { buildTokenPayload } from "../auth/jwt-claims";
-import { signServiceToken } from "../auth/service-signing";
+import { fakePlane, signPlaneToken } from "../../tests/helpers/fake-plane";
 import { db, rawSql } from "../db/drizzle";
 import { acpSessions } from "../db/schema/acp";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { endAttempt, openDispatch, startAttempt } from "../services/bridge/ledger";
 import { makeFingerprint } from "../services/evidence/fingerprint";
 import { setGrant } from "../services/grants";
-import { createPrincipal, suspendPrincipal } from "../services/principals";
+
+import { createPrincipal, forgetPrincipals } from "../../tests/helpers/principals";
 import { createEvidenceRoutes } from "./evidence";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import type { PlaneBearerResult } from "../auth/hub-token";
 import { setPrincipalDirectoryForTests, type PrincipalDirectory } from "../services/org-plane/directory";
 import { OrgPlaneError } from "../services/org-plane/client";
+import { suspendPrincipal } from "../../tests/helpers/principals";
 
 const RUN = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
 const STATION = `station_${crypto.randomUUID()}`;
@@ -48,8 +48,16 @@ let suspended = "";
 let firstAttempt = "";
 let legacyAttempt = "";
 
-const serviceToken = async (principalId: string) =>
-  signServiceToken({ payload: await buildTokenPayload({ principalId }), subject: principalId, ttl: "5m" });
+/**
+ * What the plane mints for a principal right now: its kind, and — for an agent or a service — its
+ * grant's scopes in `scope` (contract §2). The plane mints nothing for a suspended principal.
+ */
+const serviceToken = async (principalId: string) => {
+  const p = fakePlane.principals.get(principalId);
+  if (!p) throw new Error(`no such principal ${principalId}`);
+  if (p.suspended) throw new Error("the plane mints nothing for a suspended principal");
+  return signPlaneToken({ sub: p.id, principalKind: p.kind, scope: (p.grant?.scopes ?? []).join(" ") });
+};
 const get = (path: string, token?: string) =>
   app.request(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
 
@@ -96,7 +104,7 @@ afterAll(async () => {
   await rawSql`DELETE FROM bridge_dispatches WHERE station_id = ${STATION}`;
   await rawSql`DELETE FROM acp_runs WHERE station_id = ${STATION}`;
   await rawSql`DELETE FROM acp_sessions WHERE station_id = ${STATION}`;
-  await rawSql`DELETE FROM principals WHERE handle LIKE ${`ev-%-${RUN}`}`;
+  await forgetPrincipals({ handleLike: `ev-%-${RUN}` });
 });
 
 describe("GET /api/evidence/runs/:source/:externalRunId", () => {
@@ -141,10 +149,13 @@ describe("GET /api/evidence/runs/:source/:externalRunId", () => {
   });
 
   test("no token, a foreign token or garbage is 401", async () => {
-    // A well-formed hub token for a granted principal, signed by a key the hub never published.
+    // A well-formed token for a granted principal, signed by a key the plane never published.
     const { privateKey } = await generateKeyPair("EdDSA");
-    const foreign = await new SignJWT({ ...(await buildTokenPayload({ principalId: reader })) })
-      .setProtectedHeader({ alg: "EdDSA", kid: "not-a-hub-key" })
+    const foreign = await new SignJWT({ principalKind: "service", org: "org_00000000000000000000", ent: ["agentpod"], mayDispatch: [], mayGrantReach: false, scope: "evidence:read" })
+      .setProtectedHeader({ alg: "EdDSA", kid: "not-the-plane" })
+      .setIssuer(TEST_PLANE.issuer)
+      .setAudience(TEST_PLANE.audience)
+      .setJti(crypto.randomUUID())
       .setSubject(reader)
       .setIssuedAt()
       .setExpirationTime("5m")
@@ -193,27 +204,25 @@ describe("GET /api/evidence/runs/:source/:externalRunId", () => {
     }
   });
 
-  test("revocation takes effect before the token expires", async () => {
+  test("the token is the grant: a narrowed grant or a suspension shows at the next token (≤ 300 s), never by asking the plane", async () => {
+    // Design §5.7: no authorization path calls the plane. The revocation SLA is the token's life.
     const t1 = await serviceToken(narrowed);
     expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, t1)).status).toBe(200);
     await setGrant(narrowed, { mayDispatch: [], mayGrantReach: false, scopes: [] });
-    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, t1)).status).toBe(403);
+    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, await serviceToken(narrowed))).status).toBe(403);
 
-    const t2 = await serviceToken(suspended);
     await suspendPrincipal(suspended);
-    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, t2)).status).toBe(403);
+    await expect(serviceToken(suspended)).rejects.toThrow(/suspended/);
   });
 
-  test("rows are scoped to the token's tenant", async () => {
-    const { token } = await auth.api.signJWT({
-      body: {
-        payload: {
-          iat: Math.floor(Date.now() / 1000), sub: reader, principalKind: "service",
-          tenant: "fleet_ffffffffffffffffffff", mayDispatch: [], mayGrantReach: false,
-        },
-      },
-    });
-    expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, token)).status).toBe(404);
+  test("rows are scoped to the tenant the token's org maps to", async () => {
+    const otherOrg = `org_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
+    try {
+      const token = await signPlaneToken({ sub: reader, principalKind: "service", org: otherOrg, scope: "evidence:read" });
+      expect((await get(`/api/evidence/runs/superpipeline/${RUN_ID}`, token)).status).toBe(404);
+    } finally {
+      await rawSql`DELETE FROM tenants WHERE external_source = 'org-plane' AND external_id = ${otherOrg}`;
+    }
   });
 });
 
@@ -287,15 +296,17 @@ describe("who ran it, and who a principal is", () => {
     }
   });
 
-  test("a hub auth user id resolves to the principal it is linked to, in the same shape", async () => {
+  test("a pre-cutover hub user id resolves to the principal it is linked to, in the same shape", async () => {
     const authUserId = `baUser${RUN}`;
-    const human = await createPrincipal({ kind: "human", handle: `ev-human-${RUN}`, userId: authUserId });
+    const human = await createPrincipal({ kind: "human", handle: `ev-human-${RUN}` });
+    await rawSql`INSERT INTO legacy_user_principals (user_id, principal_id) VALUES (${authUserId}, ${human})`;
     const res = await get(`/api/evidence/principals/${authUserId}`, await serviceToken(reader));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(EvidencePrincipalResponse.safeParse(body).error).toBeUndefined();
     // `id` is the principal, never the auth user id that was asked for.
     expect(body).toEqual({ id: human, kind: "human", handle: `ev-human-${RUN}`, suspended: false });
+    await rawSql`DELETE FROM legacy_user_principals WHERE user_id = ${authUserId}`;
   });
 
   test("an unknown principal id, an unlinked auth user id or a malformed segment is 404 not_found", async () => {
@@ -318,7 +329,7 @@ describe("who ran it, and who a principal is", () => {
   });
 });
 
-describe("the evidence door under the org plane", () => {
+describe("the evidence door, with the verifier injected", () => {
   const agentPrincipalId = "prn_aaaaaaaaaaaaaaaaaaaa";
   const plane = (result: PlaneBearerResult) => {
     const seen: string[] = [];
@@ -371,28 +382,19 @@ describe("the evidence door under the org plane", () => {
     }
   });
 
-  test("under the plane, a hub-issued service token is 401 (no dual-accept)", async () => {
-    // Minted before the switch: under the plane the hub's own minting reads principals from the plane.
-    const token = await serviceToken(reader);
-    const restore = setOrgPlaneForTests(TEST_PLANE);
-    try {
-      const { app: a, seen } = plane({ ok: false, status: 401 });
-      const res = await a.request(`/api/evidence/attempts/${firstAttempt}`, { headers: { Authorization: `Bearer ${token}` } });
-      expect(res.status).toBe(401);
-      expect(seen).toEqual([token]);
-    } finally {
-      restore();
-    }
-  });
-
-  test("legacy mode is unchanged: the hub token is read and the plane is never asked", async () => {
-    const { app: a, seen } = plane({ ok: true, caller: { sub: agentPrincipalId, principalKind: "agent", tenantId: BOOTSTRAP_TENANT_ID, claims: { scope: "evidence:read" } as never } });
-    const token = await serviceToken(reader);
+  test("a token the plane did not sign is 401, through the injected door too", async () => {
+    const { privateKey } = await generateKeyPair("EdDSA");
+    const token = await new SignJWT({ principalKind: "service", scope: "evidence:read" })
+      .setProtectedHeader({ alg: "EdDSA", kid: "old-hub-key" })
+      .setSubject(agentPrincipalId)
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    const { app: a, seen } = plane({ ok: false, status: 401 });
     const res = await a.request(`/api/evidence/attempts/${firstAttempt}`, { headers: { Authorization: `Bearer ${token}` } });
-    expect(res.status).toBe(200);
-    expect(seen).toEqual([]);
-    expect((await req(a, `/api/evidence/attempts/${firstAttempt}`)).status).toBe(401);
-    expect(seen).toEqual([]);
+    expect(res.status).toBe(401);
+    expect(seen).toEqual([token]);
+    expect((await get(`/api/evidence/attempts/${firstAttempt}`, token)).status).toBe(401);
   });
 });
 
@@ -447,18 +449,16 @@ describe("GET /api/evidence/principals/:id under the plane (superwitness's run j
     }
   });
 
-  test("a pre-cutover hub user id resolves through legacy_user_principals, not the frozen identity table", async () => {
+  test("a pre-cutover hub user id resolves through legacy_user_principals", async () => {
     await rawSql`INSERT INTO legacy_user_principals (user_id, principal_id) VALUES (${LEGACY_USER}, ${HUMAN_ID}) ON CONFLICT DO NOTHING`;
-    // Linked only in the hub's own principal_identities (written before the plane is switched on).
-    const linkedLocally = `baLocalOnly${RUN}`;
-    await createPrincipal({ kind: "human", handle: `ev-local-only-${RUN}`, userId: linkedLocally });
+    const unmapped = `baUnmapped${RUN}`;
     const { app, restore } = planeApp();
     try {
       const res = await ask(app, LEGACY_USER);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ id: HUMAN_ID, kind: "human", handle: "op", suspended: false });
-      // A user id linked only in the hub's own (frozen) principal_identities is not read under the plane.
-      expect((await ask(app, linkedLocally)).status).toBe(404);
+      // A user id the cutover never mapped names nobody.
+      expect((await ask(app, unmapped)).status).toBe(404);
     } finally {
       restore();
     }

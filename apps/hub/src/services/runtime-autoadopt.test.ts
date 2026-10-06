@@ -29,7 +29,7 @@ import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
 import { db, rawSql } from "../db/drizzle";
 import { provisionedRuntimes } from "../db/schema/nodes";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { mintEnrollmentToken, enrollNode } from "./enrollment";
 import { listAdopted } from "./station-registry";
 import { autoAdoptProvisionedHarness } from "./runtime-autoadopt";
@@ -151,7 +151,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes               WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens   WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"              WHERE id      = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }

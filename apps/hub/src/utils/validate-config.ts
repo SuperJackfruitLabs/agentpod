@@ -161,7 +161,7 @@ export function collectConfigErrors(
   cfg: typeof config = config,
   warn: Warn = console.warn,
   resolveImage: ResolveImage = imageForHarness,
-  // ORG_PLANE_* is all-or-none (auth/org-plane/config.ts). Read once at module load; injectable
+  // ORG_PLANE_* is required, all five (auth/org-plane/config.ts). Read once at module load; injectable
   // so a test can hand in errors without touching the process environment.
   planeErrors: OrgPlaneConfigError[] = orgPlaneConfigErrors()
 ): ValidationError[] {
@@ -177,17 +177,6 @@ export function collectConfigErrors(
       });
     } else {
       warn("⚠️  WARNING: Using development API token. Change before production!");
-    }
-  }
-
-  if (devTokenPattern.test(cfg.betterAuth.session.secret)) {
-    if (isProduction) {
-      errors.push({
-        field: "BETTER_AUTH_SECRET",
-        message: "Production session secret cannot contain dev/test patterns. Generate with: openssl rand -base64 32",
-      });
-    } else {
-      warn("⚠️  WARNING: Using development session secret. Change before production!");
     }
   }
 
@@ -245,15 +234,8 @@ export function collectConfigErrors(
     // gap between that belief and the truth is an authorization gap.
     if (process.env.CONTROL_PAIR_GRANTS) {
       warn(
-        "⚠️  WARNING: CONTROL_PAIR_GRANTS is set and is NO LONGER READ — grants now live in the principal_grants table. Remove it."
+        "⚠️  WARNING: CONTROL_PAIR_GRANTS is set and is NO LONGER READ — grants live at the organization plane. Remove it."
       );
-    }
-
-    if (!hasMinimumEntropy(cfg.betterAuth.session.secret, 32)) {
-      errors.push({
-        field: "BETTER_AUTH_SECRET",
-        message: "Session secret has insufficient entropy. Generate with: openssl rand -base64 32",
-      });
     }
   }
 

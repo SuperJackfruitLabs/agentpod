@@ -68,7 +68,6 @@ import { createLogger } from "../../utils/logger";
 import { bridgeUserId } from "./names";
 import { roomForStation, unboundRoomsForStation } from "./station-room";
 import { principalHandle } from "../principals";
-import { linkIdentity } from "../principal-identities";
 import { onStationMatrixIdReported } from "./hooks";
 
 const log = createLogger("identity-move");
@@ -344,6 +343,10 @@ export type RetireOutcome =
       roomId: string | null;
       /** Each step's own truth: a failure here is logged, never fatal. */
       left: boolean;
+      /**
+       * Always false since the org plane owns identities (P3 plan, Task 17): it holds one Matrix
+       * id per principal, the live one. The retirement is in the hub's log instead.
+       */
       recorded: boolean;
       credentialsRevoked: boolean;
       /**
@@ -355,14 +358,15 @@ export type RetireOutcome =
     };
 
 /**
- * Take the old identity out of the room, record who it was, and stop its
+ * Take the old identity out of the room, log who it was, and stop its
  * credential being a live login.
  *
  * §5: a retired account's messages stay in its room — Matrix keeps history
- * from departed members — but the account need not. Recording it against the
- * same principal is what keeps that history attributable afterwards; the fleet
- * has exactly one `matrix` principal identity today, so before this ran
- * nothing could resolve any station's old address at all.
+ * from departed members — but the account need not. The hub used to record the
+ * old address against the same principal in its own `principal_identities`;
+ * that table went with the org-plane cutover (P3 plan, Task 17), and the plane
+ * holds one Matrix id per principal — the live one — so the retirement is
+ * recorded in the hub's log, naming the principal and the old address.
  *
  * **Two guards, and they are not the same guard.** The identity a station
  * currently answers as is never retired — checked against the database rather
@@ -375,10 +379,9 @@ export type RetireOutcome =
  * ran would take the old identity out of a room the new one had never been
  * invited to — the 2026-08-31 outage, reachable again.
  *
- * Each of the three steps is attempted even if an earlier one failed, and each
- * reports its own outcome. Aborting on the first failure would leave the old
- * mxid unrecorded — and `stations.matrix_id` has already moved on by the time
- * this runs, so nothing else remembers it.
+ * Each step is attempted even if an earlier one failed, and each reports its
+ * own outcome. Aborting on the first failure would leave a live credential on
+ * a node for an account nothing is watching.
  */
 export async function retireOldIdentity(
   stationId: string,
@@ -470,24 +473,19 @@ export async function retireOldIdentity(
     );
   }
 
-  let recorded = false;
+  // Not recorded against the principal any more. The hub's `principal_identities` held a retired
+  // address beside the live one; the org plane holds ONE Matrix id per principal and system
+  // (`PUT /api/principals/:id/identities/matrix` replaces), and that one is the agent's live,
+  // handle-derived address, linked when the agent was made. Writing the retired one there would
+  // un-link the live one. The retirement is attributable through the log line below, which names
+  // the principal and the old address together.
+  const recorded = false;
   if (station.principalId) {
-    try {
-      await linkIdentity(station.principalId, "matrix", oldMxid);
-      recorded = true;
-    } catch (err) {
-      // Both unique indexes are load-bearing and both can legitimately be hit
-      // here: an agent that has already retired one identity has a `matrix`
-      // row, and a re-run has this exact row. Neither is a reason to fail the
-      // retirement — but neither may pass silently, because the whole point of
-      // the record is that the history stays attributable.
-      log.warn("could not record a retired Matrix identity against its principal", {
-        stationId,
-        principalId: station.principalId,
-        oldMxid,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    log.info("retired Matrix identity, for the record", {
+      stationId,
+      principalId: station.principalId,
+      oldMxid,
+    });
   }
 
   let credentialsRevoked = false;

@@ -13,7 +13,7 @@
  * outright, so it can both encrypt for and decrypt for it. That is the whole
  * requirement, and it is what selects every choice below.
  */
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
@@ -265,8 +265,8 @@ export async function boardRoomFor(roomId: string) {
  * superpipeline exposes membership to a service credential, the bridge roster is
  * the only place that names a board's human at all.
  *
- * Resolved the long way round on purpose: roster `hubUserId` → principal →
- * `principal_identities`. A Matrix id is never guessed from a localpart or a
+ * Resolved the long way round on purpose: roster `hubUserId` (a `prn_`) →
+ * `human_matrix_ids`. A Matrix id is never guessed from a localpart or a
  * matching email (charter `2026-08-13-ecosystem-identity` Decision 2), so a board
  * whose human has never linked an account yields nobody rather than somebody wrong.
  */
@@ -290,22 +290,12 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
     return [];
   }
 
-  const { principalForUser } = await import("../principals");
-  const { principalIdentities } = await import("../../db/schema/identities");
+  // A hub user id IS the person's prn_ (contract §2).
+  const { matrixIdForHuman } = await import("../human-matrix-ids");
   const mxids: string[] = [];
   for (const userId of hubUserIds) {
-    const principal = await principalForUser(userId);
-    if (!principal) continue;
-    const [identity] = await db
-      .select({ externalId: principalIdentities.externalId })
-      .from(principalIdentities)
-      .where(
-        and(
-          eq(principalIdentities.principalId, principal.id),
-          eq(principalIdentities.system, "matrix"),
-        ),
-      );
-    if (identity?.externalId) mxids.push(identity.externalId);
+    const mxid = await matrixIdForHuman(userId);
+    if (mxid) mxids.push(mxid);
   }
   return mxids;
 }

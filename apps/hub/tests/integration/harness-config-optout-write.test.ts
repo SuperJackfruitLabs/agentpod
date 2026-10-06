@@ -54,7 +54,7 @@ import type { DetectedStation } from "@agentpod/contract";
 
 // src/ imports — DB URL is already set above
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { waitForNodeOnline } from "../helpers/wait";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
@@ -124,7 +124,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations                WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM nodes                   WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM enrollment_tokens        WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"                  WHERE id = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }

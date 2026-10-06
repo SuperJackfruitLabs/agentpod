@@ -1,5 +1,4 @@
 import { pgTable, text, timestamp, index, pgEnum, jsonb } from "drizzle-orm/pg-core";
-import { user } from "./auth";
 import { tenants } from "./tenants";
 
 export const agentTaskStatusEnum = pgEnum("agent_task_status", [
@@ -31,8 +30,7 @@ export const agentTasks = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .notNull(),
     sandboxId: text("sandbox_id").notNull(),
     provider: sandboxProviderEnum("provider").notNull().default("cloudflare"),
     status: agentTaskStatusEnum("status").notNull().default("pending"),
@@ -64,8 +62,7 @@ export const cloudflareSandboxes = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .notNull(),
     status: cloudflareSandboxStatusEnum("status").notNull().default("sleeping"),
     workerUrl: text("worker_url").notNull(),
     configHash: text("config_hash"),

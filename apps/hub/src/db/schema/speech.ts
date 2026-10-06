@@ -14,7 +14,6 @@
 
 import { pgTable, text, timestamp, foreignKey } from "drizzle-orm/pg-core";
 import { stations } from "./stations";
-import { user } from "./auth";
 import { tenants } from "./tenants";
 
 export const stationSpeech = pgTable("station_speech", {
@@ -35,7 +34,7 @@ export const stationSpeech = pgTable("station_speech", {
   /** AES-256-GCM (`utils/encryption.ts`). Never returned to a client. */
   apiKeyEncrypted: text("api_key_encrypted"),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  updatedBy: text("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedBy: text("updated_by"),
 }, (t) => [
   // The tenant is the station's, copied — held honest by a composite FK onto
   // `stations_id_tenant_idx`, as `station_transcription` is.

@@ -13,11 +13,11 @@ process.env.NODE_ENV = "test";
 
 import { describe, expect, test, beforeAll, afterAll } from "bun:test";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
-import { rawSql } from "../db/drizzle";
-import { createPrincipal } from "./principals";
+import { createTestUser, deleteTestUsers } from "../../tests/helpers/database";
+import { createPrincipal } from "../../tests/helpers/principals";
 import { requireFleetGrantReach } from "./grant-reach";
 import { GrantReachDenied, isControlPairEnforced } from "./control-pair";
+import { forgetPrincipals } from "../../tests/helpers/principals";
 
 const NON_ADMIN_USER = "test-user-grant-reach-nonadmin";
 const ADMIN_USER = "test-user-grant-reach-admin";
@@ -59,9 +59,8 @@ beforeAll(async () => {
 afterAll(async () => {
   delete process.env.ENFORCE_CONTROL_PAIR;
   try {
-    await rawSql`DELETE FROM principal_identities WHERE external_id IN (${NON_ADMIN_USER}, ${ADMIN_USER})`;
-    await rawSql`DELETE FROM principals WHERE handle IN ('grant-reach-nonadmin', 'grant-reach-admin')`;
-    await rawSql`DELETE FROM "user" WHERE id IN (${NON_ADMIN_USER}, ${ADMIN_USER})`;
+    await forgetPrincipals({ handles: ["grant-reach-nonadmin", "grant-reach-admin"] });
+    await deleteTestUsers([NON_ADMIN_USER, ADMIN_USER]);
   } catch {
     // cleanup only
   }

@@ -1,7 +1,6 @@
 import { pgTable, text, timestamp, foreignKey } from "drizzle-orm/pg-core";
 import { stations } from "./stations";
 import { tenants } from "./tenants";
-import { user } from "./auth";
 
 /** Durable receipts for setup retries. Replaying a receipt never reapplies grants. */
 export const stationSetups = pgTable(
@@ -15,8 +14,7 @@ export const stationSetups = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "restrict" }),
     userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+      .notNull(),
     input: text("input").notNull(),
     principalId: text("principal_id").notNull(),
     matrixStatus: text("matrix_status"),

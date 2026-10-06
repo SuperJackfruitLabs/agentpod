@@ -11,16 +11,16 @@
  * the failure the mode exists to prevent.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
-import { principalIdentities } from "../../db/schema/identities";
+import { matrixIdForHuman } from "../human-matrix-ids";
 import { bridgeLocalpart, roomAliasFor, stationSpeaker } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
-import { principalHandle, principalForUser } from "../principals";
+import { principalHandle } from "../principals";
 import { roomForStation } from "./station-room";
 import { stationForAlias } from "./stations";
 import { createLogger } from "../../utils/logger";
@@ -112,35 +112,14 @@ async function context(stationId: string) {
 }
 
 /**
- * The owner's Matrix id, so the room is not a locked door.
+ * The owner's Matrix id, so the room is not a locked door. `stations.userId` is the owner's `prn_`
+ * (contract §2), and `human_matrix_ids` is where the hub keeps a person's Matrix id.
  *
- * Two lookups rather than one, and for the same reason `readerForRoom` in
- * `index.ts` does it this way: `stations.userId` is a Better Auth id and
- * `principal_identities.principal_id` holds `prn_…` values now, so handing
- * this a user id and querying that column directly answers null for every
- * station in the fleet. It did — the parameter was already named
- * `principalId` while both call sites passed `s.userId`, and the only visible
- * symptom was that `ensureRoom` quietly dropped `invite` and `isDirect`, so
- * every room this created at boot was a room nobody was in but the agent.
- *
- * `null` — an owner with no principal, or a principal with no Matrix identity
- * mapped — is an ordinary answer: the room is still made, so the agent has
- * somewhere to be, and somebody can be invited later.
+ * `null` — an owner with no Matrix identity known — is an ordinary answer: the room is still made,
+ * so the agent has somewhere to be, and somebody can be invited later.
  */
 async function ownerMxid(userId: string): Promise<string | null> {
-  const principal = await principalForUser(userId);
-  if (!principal) return null;
-
-  const [row] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principal.id),
-        eq(principalIdentities.system, "matrix")
-      )
-    );
-  return row?.externalId ?? null;
+  return matrixIdForHuman(userId);
 }
 
 export async function provisionStation(stationId: string, deps: ProvisionDeps): Promise<void> {

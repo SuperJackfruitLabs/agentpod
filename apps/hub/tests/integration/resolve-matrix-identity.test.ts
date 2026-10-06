@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { adoptStations, listAdopted } from "../../src/services/station-registry";
-import { linkIdentity } from "../../src/services/principal-identities";
-import { createPrincipal } from "../../src/services/principals";
+import { fakePlane } from "../helpers/fake-plane";
+
+/** An identity linked at the organization plane (contract §3.5), which owns people's identities. */
+const linkIdentity = (id: string, system: string, externalId: string) => fakePlane.linkIdentity(id, system, externalId);
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
 import { resolveMatrixId } from "../../src/services/matrix-identity";
 
 /**
@@ -13,8 +16,8 @@ import { resolveMatrixId } from "../../src/services/matrix-identity";
  *
  * The question an Application Service bridge asks on every inbound event, and
  * the last piece of Phase 2 in the Organization layer plan. Both halves now
- * exist: `stations.matrix_id` for agents (populated 2026-08-15) and
- * `principal_identities` for people (#335).
+ * exist: `stations.matrix_id` for agents (populated 2026-08-15) and the org
+ * plane's identity lookup for people (`GET /api/identities/matrix/:mxid`).
  *
  * The answer has to distinguish them, because the two are treated differently
  * everywhere downstream: a human's approval must carry its sender or superpipeline's
@@ -29,10 +32,8 @@ const AGENT_MXID = "@onboarding-olivia:id.agentpod.dev";
 /**
  * The principals behind the two humans here.
  *
- * `resolveMatrixId` answers with a PRINCIPAL id, and `principal_identities` is
- * keyed by one — a Better Auth id in that column is a foreign-key violation,
- * not an older spelling of the same thing. `USER` stays a Better Auth id
- * because that is what enrolment and adoption take.
+ * `resolveMatrixId` answers with a PRINCIPAL id. Under the plane `USER` — the
+ * account id enrolment and adoption take — IS that principal (contract §2).
  */
 const USER_HANDLE = "mxresolve-it-user";
 const CLASH_HANDLE = "mxresolve-it-clash";
@@ -44,7 +45,7 @@ let stationId = "";
 beforeAll(async () => {
   await ensurePgMigrations();
   await createTestUser({ id: USER, email: "mxresolve@example.com", name: "MX" });
-  await rawSql`DELETE FROM principals WHERE handle IN (${USER_HANDLE}, ${CLASH_HANDLE})`;
+  await forgetPrincipals({ handles: [USER_HANDLE, CLASH_HANDLE] });
   USER_PRINCIPAL = await createPrincipal({ kind: "human", handle: USER_HANDLE, userId: USER });
 
   // Enrolled and adopted through the real services rather than hand-written
@@ -82,8 +83,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM stations WHERE node_id = ${nodeId}`;
     await rawSql`DELETE FROM nodes WHERE id = ${nodeId}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${USER}`;
-    await rawSql`DELETE FROM principals WHERE handle IN (${USER_HANDLE}, ${CLASH_HANDLE})`;
-    await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+    await forgetPrincipals({ handles: [USER_HANDLE, CLASH_HANDLE] });
+    await deleteTestUser(USER);
   } catch {
     // cleanup only
   }
@@ -143,7 +144,7 @@ describe("resolveMatrixId", () => {
     expect(found.stationId).toBe(stationId);
     expect(found.principalId).toBe(CLASHER);
 
-    await rawSql`DELETE FROM principals WHERE id = ${CLASHER}`;
+    await forgetPrincipals({ ids: [CLASHER] });
 
     // And with the clash removed it resolves cleanly again.
     expect((await resolveMatrixId(AGENT_MXID))?.kind).toBe("station");

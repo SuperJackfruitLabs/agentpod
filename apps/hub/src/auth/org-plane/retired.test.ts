@@ -9,10 +9,10 @@ import { retiredIssuerRoutes, retiredUnderPlane } from "./retired";
 import { setOrgPlaneForTests, TEST_PLANE } from "./config";
 import { adminRouter } from "../../routes/admin";
 
-const app = (plane: typeof TEST_PLANE | null) =>
+const app = (plane: typeof TEST_PLANE) =>
   new Hono()
     .use("/api/auth/*", retiredIssuerRoutes(() => plane))
-    .all("/api/auth/*", (c) => c.text("legacy"));
+    .all("/api/auth/*", (c) => c.text("not retired"));
 
 describe("retiredIssuerRoutes", () => {
   test.each([
@@ -25,6 +25,7 @@ describe("retiredIssuerRoutes", () => {
     ["POST", "/api/auth/sign-up/email"],
     ["GET", "/api/auth/get-session"],
     ["GET", "/api/auth/token"],
+    ["GET", "/api/auth/signup-status"],
   ])("%s %s is 410 issuer_moved under the plane", async (method, path) => {
     const res = await app(TEST_PLANE).request(path, { method });
     expect(res.status).toBe(410);
@@ -43,37 +44,19 @@ describe("retiredIssuerRoutes", () => {
     expect(await res.json()).toEqual({ error: "managed_by_org_plane", url: TEST_PLANE.url });
   });
 
-  test.each([
-    ["GET", "/api/auth/jwks"],
-    ["POST", "/api/auth/devices/token"],
-    ["GET", "/api/auth/devices"],
-    ["DELETE", "/api/auth/devices/dev_0123456789abcdef0123"],
-    ["POST", "/api/auth/sign-in/email"],
-  ])("legacy mode passes %s %s through", async (method, path) => {
-    const res = await app(null).request(path, { method });
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe("legacy");
-  });
-
-  test("index.ts registers it before every /api/auth route", () => {
+  // P3 plan Task 17: the hub's issuer routes were deleted; the 410 is all that is left of them.
+  test("index.ts mounts it, and nothing else under /api/auth", () => {
     const src = readFileSync(join(import.meta.dir, "..", "..", "index.ts"), "utf8");
-    const at = src.indexOf(".use('/api/auth/*', retiredIssuerRoutes())");
-    expect(at).toBeGreaterThan(-1);
-    for (const later of [
-      ".use('/api/auth/*', signupCheckMiddleware)",
-      ".get('/api/auth/jwks'",
-      ".route('/', authorizeRoutes)",
-      ".route('/api/auth', deviceRoutes)",
-      ".route('/api/auth', serviceTokenRoutes)",
-      ".on(['GET', 'POST'], '/api/auth/*'",
-    ]) {
-      expect(src.indexOf(later), later).toBeGreaterThan(at);
+    expect(src).toContain(".use('/api/auth/*', retiredIssuerRoutes())");
+    expect(src.match(/'\/api\/auth/g)).toHaveLength(1);
+    for (const gone of ["signupCheckMiddleware", "authorizeRoutes", "deviceRoutes", "serviceTokenRoutes", "auth.handler"]) {
+      expect(src, gone).not.toContain(gone);
     }
   });
 });
 
 describe("retiredUnderPlane (admin routes the plane owns, decision D3)", () => {
-  const mw = (plane: typeof TEST_PLANE | null) =>
+  const mw = (plane: typeof TEST_PLANE) =>
     new Hono().use("/api/admin/*", retiredUnderPlane(() => plane)).all("/api/admin/*", (c) => c.text("hub"));
 
   test.each([
@@ -110,11 +93,6 @@ describe("retiredUnderPlane (admin routes the plane owns, decision D3)", () => {
     const res = await mw(TEST_PLANE).request(path, { method });
     expect(await res.text()).toBe("hub");
   });
-
-  test("legacy mode passes every admin route through", async () => {
-    expect(await (await mw(null).request("/api/admin/users")).text()).toBe("hub");
-    expect(await (await mw(null).request("/api/admin/grants/x", { method: "PUT" })).text()).toBe("hub");
-  });
 });
 
 describe("adminRouter answers 410 before it authenticates", () => {
@@ -134,8 +112,4 @@ describe("adminRouter answers 410 before it authenticates", () => {
     expect((await admin.request("/api/admin/principals")).status).toBe(401);
   });
 
-  test("legacy mode: unchanged, the same route needs a session", async () => {
-    restore = setOrgPlaneForTests(null);
-    expect((await admin.request("/api/admin/users")).status).toBe(401);
-  });
 });

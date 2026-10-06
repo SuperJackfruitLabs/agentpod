@@ -2,29 +2,25 @@
  * The caller's own authority, for an authorization decision.
  *
  * Design §5.7: "No authorization path calls the plane. The one named exception is resolving an
- * inbound Matrix sender to a principal for gate approvals." Under ORG_PLANE_* a caller's token
+ * inbound Matrix sender to a principal for gate approvals." A caller's token
  * already says who they are and what they may do (contract §2: `sub`, `principalKind`,
  * `mayDispatch`, `mayGrantReach`, and `scope` for agents and services). The auth middleware
  * carries that on `AuthUser.authority`, and every console/API authorization check asks this
- * module rather than `principalForUser`/`getGrant`, so a request carrying a valid token is
+ * module rather than reading the directory, so a request carrying a valid token is
  * answered from the token even while the plane is down.
  *
- * A caller with no token authority under the plane (the static API_TOKEN, or a background path
- * that acts for a station's owner, who is not the one asking) has nothing to read but the
- * directory. Those reads fail closed as `OrgPlaneUnavailable` — a 503 that says the plane could
- * not be reached — never as an unexplained 500 and never as "you are not permitted".
- *
- * With ORG_PLANE_* unset nothing here differs from calling `principalForUser` and `getGrant`
- * directly: the same functions, the same order, the same answers.
+ * A caller with no token authority (the static API_TOKEN, or a background path that acts for a
+ * station's owner, who is not the one asking) has nothing to read but the directory. Those reads
+ * fail closed as `OrgPlaneUnavailable` — a 503 that says the plane could not be reached — never
+ * as an unexplained 500 and never as "you are not permitted".
  */
 import type { OrgPlaneTokenClaims } from "@agentpod/contract";
 import type { PrincipalKind } from "../db/schema/organization";
-import { orgPlane } from "./org-plane/config";
 import { OrgPlaneError } from "../services/org-plane/client";
 import { getGrant, type Grant } from "../services/grants";
-import { principalForUser } from "../services/principals";
+import { principalById } from "../services/principals";
 
-/** What a plane token says its bearer may do. Set only by the plane branch of the auth middleware. */
+/** What a plane token says its bearer may do. Set by the auth middleware for a plane token. */
 export interface TokenAuthority {
   principalKind: PrincipalKind;
   /** Bare `prn_` ids (contract §2). */
@@ -94,23 +90,22 @@ async function directoryRead<T>(read: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The caller's principal, or null. Under the plane with a token: the token's `sub` (which is
- * `AuthUser.id`) and `principalKind` — no read. Legacy: `principalForUser`, unchanged.
+ * The caller's principal, or null. With a token: the token's `sub` (which is `AuthUser.id`) and
+ * `principalKind` — no read. Without one: the directory.
  */
 export async function callerPrincipal(caller: CallerRef): Promise<{ id: string; kind: PrincipalKind } | null> {
-  if (!orgPlane()) return principalForUser(idOf(caller));
   const authority = authorityOf(caller);
   if (authority) return { id: idOf(caller), kind: authority.principalKind };
-  return directoryRead(() => principalForUser(idOf(caller)));
+  // An account id IS the principal id (contract §2), whatever its kind: a route that refuses a
+  // non-human caller must be able to see one here, not a null that reads as "no principal".
+  return directoryRead(() => principalById(idOf(caller)));
 }
 
 /**
- * The grant held by `principalId`, which the caller resolved with `callerPrincipal`. Under the
- * plane with a token naming that principal: the token's claims — no read. Legacy: `getGrant`,
- * unchanged.
+ * The grant held by `principalId`, which the caller resolved with `callerPrincipal`. With a token
+ * naming that principal: the token's claims — no read. Otherwise: the directory.
  */
 export async function callerGrant(caller: CallerRef, principalId: string): Promise<Grant | null> {
-  if (!orgPlane()) return getGrant(principalId);
   const authority = authorityOf(caller);
   if (authority && principalId === idOf(caller)) {
     return {

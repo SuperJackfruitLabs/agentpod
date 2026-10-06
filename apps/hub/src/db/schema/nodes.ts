@@ -1,5 +1,4 @@
 import { pgTable, text, integer, timestamp, index, uniqueIndex, pgEnum, jsonb } from "drizzle-orm/pg-core";
-import { user } from "./auth";
 import { tenants } from "./tenants";
 
 export const nodeStatusEnum = pgEnum("node_status", ["online", "offline"]);
@@ -7,7 +6,7 @@ export const nodeStatusEnum = pgEnum("node_status", ["online", "offline"]);
 export const nodes = pgTable("nodes", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
   name: text("name").notNull(),
   hostname: text("hostname").notNull(),
   /**
@@ -40,7 +39,7 @@ export const runtimeStatusEnum = pgEnum("runtime_status", ["provisioning", "star
 export const provisionedRuntimes = pgTable("provisioned_runtimes", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
   provider: text("provider").notNull(),
   externalId: text("external_id"),
   status: runtimeStatusEnum("status").notNull().default("provisioning"),
@@ -77,7 +76,7 @@ export const provisionedRuntimes = pgTable("provisioned_runtimes", {
 export const enrollmentTokens = pgTable("enrollment_tokens", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "restrict" }),
-  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull(),
   tokenHash: text("token_hash").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),

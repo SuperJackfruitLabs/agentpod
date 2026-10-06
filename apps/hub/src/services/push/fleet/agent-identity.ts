@@ -19,10 +19,9 @@
 import { and, asc, eq } from "drizzle-orm";
 
 import { db } from "../../../db/drizzle";
-import { principalIdentities } from "../../../db/schema/identities";
 import { matrixRooms } from "../../../db/schema/matrix";
 import { stations } from "../../../db/schema/stations";
-import { principalForUser } from "../../principals";
+import { matrixIdForHuman } from "../../human-matrix-ids";
 import type { ReportingAgent } from "./agent-reports";
 import { cardName } from "./names";
 
@@ -50,14 +49,9 @@ export async function reportingAgentFor(nodeId: string, agent: string, roomId: s
     if (!ours) return null;
   }
 
-  const owner = await principalForUser(station.userId);
-  if (!owner) return null;
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(and(eq(principalIdentities.principalId, owner.id), eq(principalIdentities.system, "matrix")))
-    .limit(1);
-  if (!identity) return null;
+  // The owner's user id IS their prn_ (contract §2).
+  const reader = await matrixIdForHuman(station.userId);
+  if (!reader) return null;
 
-  return { reader: identity.externalId, name: cardName(station.displayName, agent) };
+  return { reader, name: cardName(station.displayName, agent) };
 }

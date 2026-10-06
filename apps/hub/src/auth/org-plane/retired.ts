@@ -1,7 +1,8 @@
 /**
- * What the hub stops doing when `ORG_PLANE_*` is set: 410, not 404 — each route existed and
- * moved, and the body says where. In legacy mode every middleware here calls `next()` and
- * nothing changes.
+ * What the hub no longer does: 410, not 404 — each route existed and moved, and the body says
+ * where. The routes themselves were deleted after the rollback window (P3 plan, Task 17); these
+ * answers stay so an old console, `fleet` binary or script is told where to go instead of
+ * getting a bare 404 or, worse, the console's SPA fallback.
  *
  * Two bodies, because two different things moved:
  *
@@ -25,10 +26,9 @@ export function managedByOrgPlane(c: Context, plane: OrgPlaneConfig) {
 /** The device inventory, not its token exchange (`/api/auth/devices/token` is issuing). */
 const DEVICE_INVENTORY = /^\/api\/auth\/devices(\/(?!token$)[^/]+)?\/?$/;
 
-export function retiredIssuerRoutes(plane: () => OrgPlaneConfig | null = orgPlane) {
-  return createMiddleware(async (c, next) => {
+export function retiredIssuerRoutes(plane: () => OrgPlaneConfig = orgPlane) {
+  return createMiddleware(async (c): Promise<Response> => {
     const p = plane();
-    if (!p) return next();
     if (DEVICE_INVENTORY.test(c.req.path)) return managedByOrgPlane(c, p);
     return c.json({ error: "issuer_moved", issuer: p.issuer }, 410);
   });
@@ -47,10 +47,9 @@ const RETIRED_ADMIN: Array<[method: string | null, pattern: RegExp]> = [
  * Registered first in `adminRouter`, ahead of its `authMiddleware`: a retired route need not
  * authenticate to say it moved.
  */
-export function retiredUnderPlane(plane: () => OrgPlaneConfig | null = orgPlane) {
+export function retiredUnderPlane(plane: () => OrgPlaneConfig = orgPlane) {
   return createMiddleware(async (c, next) => {
     const p = plane();
-    if (!p) return next();
     const hit = RETIRED_ADMIN.some(([m, re]) => (m === null || m === c.req.method) && re.test(c.req.path));
     return hit ? managedByOrgPlane(c, p) : next();
   });

@@ -9,12 +9,8 @@
 // First, because everything below references it.
 export * from "./tenants";
 
-// Organization plane — organizations and principals, living in the hub until
-// the plane is extracted (see the module doc in ./organization).
+// Principal kinds (the principals themselves live at the organization plane).
 export * from "./organization";
-
-// Authentication (Better Auth tables)
-export * from "./auth";
 
 // Admin (system settings, audit log)
 export * from "./admin";
@@ -24,9 +20,6 @@ export * from "./cloudflare";
 
 // Node registry (fleet console)
 export * from "./nodes";
-
-// Device credentials — what a human at a terminal exchanges for a token
-export * from "./devices";
 
 // Station registry (adopted stations, fleet console)
 export * from "./stations";
@@ -41,25 +34,11 @@ export * from "./acp";
 // Work claimed from an external orchestrator (the superpipeline bridge)
 export * from "./bridge";
 
-export * from "./identities";
-
-export * from "./grants";
-
 // Matrix Application Service bookkeeping (#351)
 export * from "./matrix";
 
-// The key this deployment signs service assertions with — kept apart from
-// Better Auth's own `jwks` so the two authorities can be revoked separately
-// (migration 0054).
-export * from "./service-keys";
-
 // A human's authorisation for a station to redeem its own Matrix credential.
 export * from "./matrix-credentials";
-
-// One-time authorization codes for the cross-domain token handoff — the only
-// way a plane on its own domain can reach an issuer behind a SameSite=Lax
-// cookie (docs/superpowers/specs/2026-09-02-cross-domain-token-handoff-design.md).
-export * from "./oauth";
 
 export * from "./station-setup";
 
@@ -77,7 +56,6 @@ export * from "./board-rooms";
 // Where the fleet Live Activity is pushed: a device's push-to-start token and
 // each running activity's update token (supermessage spec 2026-09-29, A1).
 export * from "./live-activity";
-export * from "./service-credentials";
 
 // What the fleet wants a harness setting to be, per station/node/fleet level.
 // Never what a station HAS — that is read live from the node (declared
@@ -93,3 +71,6 @@ export * from "./legacy-user-principals";
 
 // Who may operate this hub under the org plane, by principal id (P3 plan, Task 12; decision D4).
 export * from "./operators";
+
+// A person's Matrix id by principal, which the plane cannot answer in that direction (P3 plan, Task 17).
+export * from "./human-matrix-ids";

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { rawSql } from "../../src/db/drizzle";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
+import { createPrincipal, forgetPrincipals, linkMatrixId, unlinkMatrixId } from "../helpers/principals";
 import { provisionStation, provisionAll } from "../../src/services/matrix-as/provision";
 
 /**
@@ -164,14 +164,9 @@ beforeAll(async () => {
     VALUES (${HERMES}, ${tenant}, ${OWNER}, ${NODE}, 'hermes', 'hermes:analyst-echo', 'leaf', 'analyst-echo',
             '["acp"]'::jsonb, ${ECHO_PRINCIPAL}, now(), now())`;
 
-  // The owner's Matrix identity hangs off the owner's PRINCIPAL, which is what
-  // `principal_identities.principal_id` is a foreign key to. Keyed by the
-  // Better Auth id — as this fixture used to be — it is an FK violation, and
-  // before the FK existed it was a row nothing could ever find.
-  await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'matrix'`;
-  await rawSql`
-    INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-    VALUES ('pid_mx_provision', ${OWNER_PRINCIPAL}, 'matrix', ${OWNER_MXID}, now())`;
+  // The owner's Matrix identity, by the owner's principal — which IS the station's user id
+  // (contract §2). `human_matrix_ids` is where the hub keeps it.
+  await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
 });
 
 beforeEach(async () => {
@@ -195,10 +190,8 @@ afterAll(async () => {
     await rawSql`DELETE FROM matrix_rooms WHERE station_id IN (${OPENCLAW}, ${HERMES})`;
     await rawSql`DELETE FROM stations WHERE id IN (${OPENCLAW}, ${HERMES})`;
     await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-    await rawSql`
-      DELETE FROM principals
-      WHERE handle IN ('mx-provision-owner', ${KRISHNA_HANDLE}, ${ECHO_HANDLE})`;
-    await rawSql`DELETE FROM "user" WHERE id = ${OWNER}`;
+    await forgetPrincipals({ handles: ["mx-provision-owner", KRISHNA_HANDLE, ECHO_HANDLE] });
+    await deleteTestUser(OWNER);
   } catch {
     // cleanup only
   }
@@ -267,34 +260,29 @@ describe("provisioning a station", () => {
   test("a station whose owner has no Matrix identity gets a room, not a DM", async () => {
     // Nobody to be direct WITH. The room still exists so the agent has somewhere
     // to be, and somebody can be invited later.
-    await rawSql`DELETE FROM principal_identities WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'matrix'`;
+    await unlinkMatrixId(OWNER_PRINCIPAL);
 
     await provisionStation(OPENCLAW, deps());
 
     expect(rooms[0]!.isDirect).toBeFalsy();
     expect(rooms[0]!.invite).toBeUndefined();
 
-    await rawSql`
-      INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-      VALUES ('pid_mx_provision', ${OWNER_PRINCIPAL}, 'matrix', ${OWNER_MXID}, now())`;
+    await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
   });
 
   test("a station whose owner has no principal at all gets a room, not a DM", async () => {
     // The other half of "no owner to be direct with": an owner who was never
     // mapped to a principal. Fails the same way and must not fail louder — the
     // agent still needs somewhere to be.
-    await rawSql`
-      DELETE FROM principal_identities
-      WHERE principal_id = ${OWNER_PRINCIPAL} AND system = 'better-auth'`;
+    await forgetPrincipals({ ids: [OWNER_PRINCIPAL] });
 
     await provisionStation(OPENCLAW, deps());
 
     expect(rooms[0]!.isDirect).toBeFalsy();
     expect(rooms[0]!.invite).toBeUndefined();
 
-    await rawSql`
-      INSERT INTO principal_identities (id, principal_id, system, external_id, created_at)
-      VALUES ('pid_mx_prov_ba', ${OWNER_PRINCIPAL}, 'better-auth', ${OWNER}, now())`;
+    await createPrincipal({ kind: "human", handle: "mx-provision-owner", userId: OWNER });
+    await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
   });
 
   test("provisions a hermes station exactly like every other", async () => {
@@ -508,7 +496,7 @@ describe("occupancy changes — a new occupant must actually get a room", () => 
 
   afterAll(async () => {
     try {
-      await rawSql`DELETE FROM principals WHERE handle = 'mx-provision-successor'`;
+      await forgetPrincipals({ handles: ["mx-provision-successor"] });
     } catch {
       // cleanup only
     }

@@ -20,7 +20,7 @@ process.env.NODE_ENV = "test";
 import { test, expect, beforeAll, afterAll } from "bun:test";
 import { db, rawSql } from "../db/drizzle";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { recordAudit } from "./audit";
 
 const TEST_USER = "test-user-audit-svc-001";
@@ -37,7 +37,7 @@ beforeAll(async () => {
 afterAll(async () => {
   try {
     await rawSql`DELETE FROM station_audit WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"          WHERE id      = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }

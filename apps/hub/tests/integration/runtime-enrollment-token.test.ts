@@ -24,7 +24,7 @@ process.env.ENABLE_DOCKER_PROVISIONING = "true";
 import { test, expect, beforeAll, afterAll } from "bun:test";
 
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import {
   registerProvisioner,
@@ -58,7 +58,7 @@ afterAll(async () => {
   try {
     await rawSql`DELETE FROM enrollment_tokens    WHERE user_id = ${TEST_USER}`;
     await rawSql`DELETE FROM provisioned_runtimes WHERE user_id = ${TEST_USER}`;
-    await rawSql`DELETE FROM "user"               WHERE id      = ${TEST_USER}`;
+    await deleteTestUser(TEST_USER);
   } catch {
     // Ignore cleanup errors
   }

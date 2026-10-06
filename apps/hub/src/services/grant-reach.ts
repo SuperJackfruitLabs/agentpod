@@ -16,11 +16,9 @@ import { and, eq } from "drizzle-orm";
 import { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { stations } from "../db/schema";
-import { principalIdentities } from "../db/schema/identities";
 import { grantAllowsPrincipal } from "./grants";
 import { callerGrant, callerPrincipal, type CallerRef } from "../auth/caller-authority";
 import { isUserAdmin } from "../models/admin-users";
-import { orgPlane } from "../auth/org-plane/config";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
 
@@ -73,11 +71,10 @@ export function isReachBearing(cap: Capability): boolean {
  * is the same function `acp.createSession` calls.
  *
  * `caller` is the console caller (`AuthUser`) — or, on a path with no token to
- * read, a bare user id. Legacy: a Better Auth user id, resolved to a principal
- * before either the grant or the station scope check, both of which are keyed
- * by principal id. Under the org plane the caller's token answers both
- * (`auth/caller-authority.ts`, design §5.7); a bare id must read the directory
- * and fails closed with `OrgPlaneUnavailable` when the plane is down.
+ * read, a bare user id (which IS a principal id, contract §2). The caller's
+ * token answers both the grant and the principal (`auth/caller-authority.ts`,
+ * design §5.7); a bare id must read the directory and fails closed with
+ * `OrgPlaneUnavailable` when the plane is down.
  */
 export async function requireGrantReach(
   caller: CallerRef,
@@ -182,32 +179,12 @@ export async function requireIssueCredentials(
 }
 
 /**
- * Is this principal an admin?
- *
- * Resolves through the same identity the login session came from —
- * `principal_identities` where `system = "better-auth"` — and asks the
- * question the Better Auth admin plugin already answers for `/api/admin/*`:
- * is `role` on that `user` row `"admin"`. No second notion of admin is
- * introduced here; a principal with no linked Better Auth identity (an agent,
- * a service) is simply not an admin.
+ * Is this principal an admin? A human's principal id IS their account id (contract §2), so the
+ * hub's operator seat (`hub_operators`, decision D4) is asked about the principal directly. A
+ * principal with no seat (an agent, a service) is simply not an admin.
  */
 async function isAdminPrincipal(principalId: string): Promise<boolean> {
-  // Under the plane a human's principal id IS their account id (contract §2), so the seat is
-  // asked about the principal directly; there is no Better Auth identity to go through.
-  if (orgPlane()) return isUserAdmin(principalId);
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principalId),
-        eq(principalIdentities.system, "better-auth")
-      )
-    )
-    .limit(1);
-
-  if (!identity) return false;
-  return isUserAdmin(identity.externalId);
+  return isUserAdmin(principalId);
 }
 
 /**

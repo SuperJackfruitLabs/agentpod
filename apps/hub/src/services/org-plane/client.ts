@@ -157,11 +157,10 @@ export function createOrgPlaneClient(o: {
 let singleton: { plane: OrgPlaneConfig; client: OrgPlaneClient } | null = null;
 let testOverride: OrgPlaneClient | null = null;
 
-/** The client for the configured plane. Throws in legacy mode: no legacy path may reach the plane. */
+/** The client for the configured plane, rebuilt if the configured plane changes. */
 export function orgPlaneClient(): OrgPlaneClient {
   if (testOverride) return testOverride;
   const plane = orgPlane();
-  if (!plane) throw new Error("orgPlaneClient() called with ORG_PLANE_* unset");
   if (singleton?.plane !== plane) {
     singleton = { plane, client: createOrgPlaneClient({ url: plane.url, credential: plane.serviceCredential }) };
   }

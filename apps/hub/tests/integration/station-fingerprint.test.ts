@@ -14,8 +14,8 @@ import { stations } from "../../src/db/schema/stations";
 import { BOOTSTRAP_TENANT_ID } from "../../src/db/schema/tenants";
 import { appliedSkillRelease, resolveStationFingerprint, resolveStationOccupant } from "../../src/services/evidence/station-fingerprint";
 import { fingerprintDigest } from "../../src/services/evidence/fingerprint";
-import { createPrincipal } from "../../src/services/principals";
-import { createTestUser } from "../helpers/database";
+import { createPrincipal, forgetPrincipals } from "../helpers/principals";
+import { createTestUser, deleteTestUser } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 
 const USER = `station-fp-${crypto.randomUUID()}`;
@@ -62,7 +62,7 @@ afterAll(async () => {
   await rawSql`DELETE FROM trusted_skill_releases WHERE user_id = ${USER}`;
   await rawSql`DELETE FROM skill_artifacts WHERE user_id = ${USER}`;
   await rawSql`DELETE FROM nodes WHERE id = ${NODE}`;
-  await rawSql`DELETE FROM "user" WHERE id = ${USER}`;
+  await deleteTestUser(USER);
 });
 
 describe("resolveStationFingerprint", () => {
@@ -113,20 +113,18 @@ describe("resolveStationOccupant", () => {
     expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBe(prn);
     await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
     expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBeNull();
-    await rawSql`DELETE FROM principals WHERE id = ${prn}`;
+    await forgetPrincipals({ ids: [prn] });
   });
 
   test("an occupant id that is not a well-formed principal id is none, not a value the attempt insert would reject", async () => {
-    // principals.id is only CHECKed LIKE 'prn\\_%'; acp_runs.agent_principal_id is CHECKed ^prn_[0-9a-f]{20}$.
-    const prn = await createPrincipal({ kind: "agent", handle: `station-fp-bad-${crypto.randomUUID().slice(0, 8)}` });
+    // stations.principal_id is plain text since the hub's principals table went (P3 Task 17);
+    // acp_runs.agent_principal_id is CHECKed ^prn_[0-9a-f]{20}$.
     const bad = "prn_NOT-HEX";
-    await rawSql`UPDATE principals SET id = ${bad} WHERE id = ${prn}`;
     await rawSql`UPDATE stations SET principal_id = ${bad} WHERE id = ${STATION}`;
     try {
       expect(await resolveStationOccupant(BOOTSTRAP_TENANT_ID, STATION)).toBeNull();
     } finally {
       await rawSql`UPDATE stations SET principal_id = NULL WHERE id = ${STATION}`;
-      await rawSql`DELETE FROM principals WHERE id = ${bad}`;
     }
   });
 

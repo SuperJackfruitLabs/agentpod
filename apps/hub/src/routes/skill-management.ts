@@ -24,7 +24,7 @@ import type { AuthUser } from "../auth/middleware";
 import { db } from "../db/drizzle";
 import { skillOperations } from "../db/schema/skills";
 import { stations } from "../db/schema/stations";
-import { user as users } from "../db/schema/auth";
+import { principalForUser } from "../services/principals";
 import { verifyNodeCredential } from "../services/enrollment";
 import { requireGrantReach } from "../services/grant-reach";
 import { isOrgPlaneUnavailable, orgPlaneOutageBody } from "../auth/caller-authority";
@@ -553,7 +553,6 @@ export const skillArtifactDownloadRoutes = routesBase().post(
           eq(stations.tenantId, skillOperations.tenantId),
         ),
       )
-      .innerJoin(users, eq(users.id, skillOperations.userId))
       .where(
         and(
           eq(skillOperations.id, operationId!),
@@ -563,7 +562,6 @@ export const skillArtifactDownloadRoutes = routesBase().post(
           eq(stations.stationKey, c.req.header("X-AgentPod-Station-Key") ?? ""),
           eq(skillOperations.stationKey, stations.stationKey),
           eq(skillOperations.harness, stations.harness),
-          eq(users.banned, false),
           eq(skillOperations.action, "install"),
           inArray(skillOperations.state, ["planning", "applying"]),
           gt(skillOperations.downloadUntil, new Date()),
@@ -571,6 +569,15 @@ export const skillArtifactDownloadRoutes = routesBase().post(
         ),
       );
     if (!record?.operation.artifactId)
+      throw new SkillRequestError(
+        403,
+        "No artifact authorization for this station operation",
+      );
+    // The owner must still be a person the plane knows and has not suspended — what the join on
+    // Better Auth's `user.banned` answered before the hub's user table was dropped. A plane outage
+    // propagates as the app's 503, not as a refusal.
+    const owner = await principalForUser(record.operation.userId);
+    if (!owner || owner.suspendedAt)
       throw new SkillRequestError(
         403,
         "No artifact authorization for this station operation",

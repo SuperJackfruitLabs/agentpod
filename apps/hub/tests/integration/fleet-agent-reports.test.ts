@@ -15,12 +15,11 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 
 import { rawSql } from "../../src/db/drizzle";
-import { createTestUser } from "../helpers/database";
+import { createTestUser, deleteTestUsers } from "../helpers/database";
 import { ensurePgMigrations } from "../helpers/pg-migrations";
 import { pollUntil, waitForNodeOnline } from "../helpers/wait";
 import { resolveTenantForUser } from "../../src/auth/tenant";
-import { createPrincipal } from "../../src/services/principals";
-import { linkIdentity } from "../../src/services/principal-identities";
+import { createPrincipal, forgetPrincipals, linkMatrixId } from "../helpers/principals";
 import { mintEnrollmentToken, enrollNode } from "../../src/services/enrollment";
 import { gatewayRoutes } from "../../src/routes/gateway";
 import { websocket } from "../../src/ws";
@@ -49,7 +48,7 @@ beforeAll(async () => {
   await createTestUser({ id: OTHER_OWNER, email: `fleet-reports-other-${RUN}@example.com`, name: "Other" });
   const owner = await createPrincipal({ kind: "human", handle: `fleet-reports-owner-${RUN}`, userId: OWNER });
   principals.push(owner);
-  await linkIdentity(owner, "matrix", READER);
+  await linkMatrixId(owner, READER);
   principals.push(await createPrincipal({ kind: "human", handle: `fleet-reports-other-${RUN}`, userId: OTHER_OWNER }));
 
   const { token } = await mintEnrollmentToken(OWNER);
@@ -92,10 +91,9 @@ afterAll(async () => {
     await rawSql`DELETE FROM nodes WHERE id IN (${NODE}, ${OTHER_NODE})`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id IN (${OWNER}, ${OTHER_OWNER})`;
     for (const p of principals) {
-      await rawSql`DELETE FROM principal_identities WHERE principal_id = ${p}`;
-      await rawSql`DELETE FROM principals WHERE id = ${p}`;
+      await forgetPrincipals({ ids: [p] });
     }
-    await rawSql`DELETE FROM "user" WHERE id IN (${OWNER}, ${OTHER_OWNER})`;
+    await deleteTestUsers([OWNER, OTHER_OWNER]);
   } catch {
     // cleanup only
   }

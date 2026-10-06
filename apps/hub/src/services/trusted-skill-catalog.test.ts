@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { rawSql } from "../db/drizzle";
 import { BOOTSTRAP_TENANT_ID } from "../db/schema/tenants";
-import { createTestUser } from "../../tests/helpers/database";
+import { createTestUser, deleteTestUser } from "../../tests/helpers/database";
 import { ensurePgMigrations } from "../../tests/helpers/pg-migrations";
 import { storeSkillArtifact } from "./skill-artifacts";
 import { importTrustedSkillRelease, listTrustedSkillReleases } from "./trusted-skill-catalog";
@@ -34,7 +34,7 @@ afterAll(async () => {
   // migration with a restrictive artifact FK.  Production migration 0072
   // cascades this mapping; explicit test cleanup keeps the fixture portable.
   await rawSql`DELETE FROM trusted_skill_release_artifacts WHERE user_id=${owner.userId}`;
-  await rawSql`DELETE FROM "user" WHERE id=${owner.userId}`;
+  await deleteTestUser(owner.userId);
 });
 
 test("a trusted release atomically binds every canonical harness archive", async () => {

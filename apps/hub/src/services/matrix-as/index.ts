@@ -16,7 +16,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
-import { principalIdentities } from "../../db/schema/identities";
+import { matrixIdForHuman } from "../human-matrix-ids";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { withQuietNotes } from "./push-quiet";
@@ -33,11 +33,11 @@ import {
   GATE_OUTCOME_TYPE,
   settleGateOutcome,
 } from "./gates";
-import { assertPrincipal } from "../../auth/service-signing";
+import { assertPrincipal } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
-import { principalById, principalForUser, principalHandle } from "../principals";
+import { principalById, principalHandle } from "../principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
@@ -97,11 +97,8 @@ export interface MatrixBridgeConfig {
  * whose owner has no principal, or a principal with no Matrix identity mapped —
  * simply means no live view; the room still gets its message.
  *
- * Two lookups rather than one join, because `stations.userId` is a Better Auth
- * id and `principal_identities.principal_id` is a `prn_…` value now — joining
- * them directly would silently match nothing for every station. Still looked
- * up once per attachment rather than per chunk: an agent can emit hundreds of
- * chunks in a turn.
+ * Looked up once per attachment rather than per chunk: an agent can emit
+ * hundreds of chunks in a turn.
  */
 async function readerForRoom(roomId: string): Promise<string | null> {
   const [row] = await db
@@ -111,19 +108,8 @@ async function readerForRoom(roomId: string): Promise<string | null> {
     .where(eq(matrixRooms.roomId, roomId));
   if (!row) return null;
 
-  const principal = await principalForUser(row.userId);
-  if (!principal) return null;
-
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principal.id),
-        eq(principalIdentities.system, "matrix")
-      )
-    );
-  return identity?.externalId ?? null;
+  // The owner's user id IS their prn_ (contract §2).
+  return matrixIdForHuman(row.userId);
 }
 
 /**
