@@ -13,7 +13,7 @@
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
 import type { JSONWebKeySet } from "jose";
-import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, type EvidenceFingerprint } from "@agentpod/contract";
+import { PrincipalId, UNKNOWN_FINGERPRINT_VIEW, itemFirstSeq, type EvidenceFingerprint } from "@agentpod/contract";
 
 import { publishedJwks, verifyHubToken } from "../auth/hub-token";
 import { db } from "../db/drizzle";
@@ -22,8 +22,24 @@ import { bridgeDispatches } from "../db/schema/bridge";
 import { principalIdentities } from "../db/schema/identities";
 import { principals } from "../db/schema/organization";
 import { tenantScope } from "../db/tenant-scope";
-import { EVIDENCE_READ, getGrant, type GrantScope } from "../services/grants";
+import {
+  ITEM_LIMIT_BYTES,
+  byteLength,
+  decodeCursor,
+  encodeCursor,
+  findSession,
+  foldRange,
+  parseLimit,
+  parseRange,
+  redactItem,
+  selectPage,
+  sessionBounds,
+  truncateItem,
+  type WireItem,
+} from "../services/evidence/transcript";
+import { EVIDENCE_READ, TRANSCRIPTS_READ, getGrant, type GrantScope } from "../services/grants";
 import { principalById, principalForUser } from "../services/principals";
+import { contentRedactor } from "../services/redact-content";
 
 export interface EvidenceDeps {
   jwks?: () => Promise<JSONWebKeySet>;
@@ -175,6 +191,84 @@ export function createEvidenceRoutes(deps: EvidenceDeps = {}) {
         .limit(1);
       if (!p) return c.json({ error: "not_found" }, 404);
       return c.json({ id: p.id, kind: p.kind, handle: p.handle, suspended: p.suspendedAt !== null });
+    })
+    /**
+     * A session's transcript, one page of items (superwitness transcripts spec §3.3). Needs
+     * `transcripts:read`. Another tenant's session, or none, is 404 — never 403, which would
+     * confirm it exists.
+     */
+    .get("/api/evidence/sessions/:sessionId/transcript", async (c) => {
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
+      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const session = await findSession(auth.tenant, c.req.param("sessionId"));
+      if (!session) return c.json({ error: "not_found" }, 404);
+
+      const range = parseRange(
+        { seq_from: c.req.query("seq_from"), seq_to: c.req.query("seq_to") },
+        await sessionBounds(auth.tenant, session.id),
+      );
+      if (!range) return c.json({ error: "bad_range" }, 400);
+      let start = range.from;
+      const cursor = c.req.query("cursor");
+      if (cursor !== undefined) {
+        const seq = decodeCursor(cursor);
+        if (seq === null || seq < range.from || seq > range.to) return c.json({ error: "bad_range" }, 400);
+        start = seq;
+      }
+
+      const folded = await foldRange(auth.tenant, session.id, range.from, range.to);
+      const { page, nextSeq } = selectPage(folded, start, parseLimit(c.req.query("limit")));
+      const redactor = contentRedactor();
+      let redactions = 0;
+      let truncatedFields = 0;
+      const items: WireItem[] = page.map((it) => {
+        const redacted = redactItem(it, redactor);
+        const { item, truncated } = truncateItem(redacted);
+        redactions += redacted.redactions;
+        truncatedFields += truncated;
+        return item;
+      });
+
+      return c.json({
+        session_id: session.id,
+        seq_from: range.from,
+        seq_to: range.to,
+        items,
+        next_cursor: nextSeq === null ? null : encodeCursor(nextSeq),
+        redactions,
+        truncated_fields: truncatedFields,
+      });
+    })
+    /**
+     * One item, by the seq it starts at within the range (`seq_from`/`seq_to`, the same as the
+     * page it came from; default the whole session). `full=1` returns it uncut up to 1 MiB
+     * serialised, else 413; without it, the item is cut exactly as its page cut it.
+     */
+    .get("/api/evidence/sessions/:sessionId/transcript/items/:seqFrom", async (c) => {
+      const auth = await authorize(c.req.header("authorization"), jwks, TRANSCRIPTS_READ);
+      if (!auth.ok) return c.json(refusal(auth.status), auth.status);
+      const session = await findSession(auth.tenant, c.req.param("sessionId"));
+      if (!session) return c.json({ error: "not_found" }, 404);
+      const range = parseRange(
+        { seq_from: c.req.query("seq_from"), seq_to: c.req.query("seq_to") },
+        await sessionBounds(auth.tenant, session.id),
+      );
+      if (!range) return c.json({ error: "bad_range" }, 400);
+      const at = c.req.param("seqFrom");
+      if (!/^\d{1,9}$/.test(at)) return c.json({ error: "not_found" }, 404);
+
+      const found = (await foldRange(auth.tenant, session.id, range.from, range.to)).find(
+        (it) => itemFirstSeq(it) === Number(at),
+      );
+      if (!found) return c.json({ error: "not_found" }, 404);
+
+      const full = c.req.query("full") === "1";
+      const redacted = redactItem(found, contentRedactor());
+      const item = full ? redacted : truncateItem(redacted).item;
+      if (byteLength(JSON.stringify(item)) > ITEM_LIMIT_BYTES) {
+        return c.json({ error: "item_too_large" }, 413);
+      }
+      return c.json({ session_id: session.id, item });
     });
 }
 
