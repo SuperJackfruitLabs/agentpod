@@ -113,6 +113,8 @@ describe("cost: no rule is quadratic", () => {
     ["a JWT prefix", "eyJ" + "a".repeat(1024 * 1024)],
     ["a scheme prefix", "https://" + "u".repeat(1024 * 1024) + ":p@x"],
     ["a label", "Bearer " + "a".repeat(1024 * 1024)],
+    ["repeated JWT prefixes", "eyJ-".repeat(512 * 1024)],
+    ["repeated key headers with no end", j("-----BEGIN ", "PRIVATE KEY-----").repeat(Math.ceil((2 * 1024 * 1024) / 27))],
   ] as const) {
     test(`2 MiB of ${label} redacts in well under a second`, () => {
       const t = performance.now();

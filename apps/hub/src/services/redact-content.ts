@@ -92,10 +92,10 @@ export const PATTERN_RULES: readonly RedactionRule[] = [
   { name: "slack-token", pattern: /\bxox[abpr]-[A-Za-z0-9-]{10,}/g },
   { name: "stripe-key", pattern: /\b(?:sk|rk)_live_[A-Za-z0-9]{16,}/g },
   { name: "google-api-key", pattern: /\bAIza[0-9A-Za-z_-]{35}/g },
-  { name: "jwt", pattern: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
+  { name: "jwt", pattern: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g },
   {
     name: "private-key",
-    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+    pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:(?!-----BEGIN )[\s\S])*?-----END [A-Z ]*PRIVATE KEY-----/g,
   },
   { name: "authorization", pattern: /(authorization:[ \t]*)[^\r\n"]+/gi, keepPrefix: true },
   { name: "authorization", pattern: /(\b(?:bearer|basic)[ \t]+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi, keepPrefix: true },
