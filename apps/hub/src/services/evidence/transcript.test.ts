@@ -49,6 +49,16 @@ describe("selectPage", () => {
     expect(selectPage(items, 2, 2)).toEqual({ page: [items[1]!, items[2]!], nextSeq: 10 });
     expect(selectPage(items, 10, 2)).toEqual({ page: [items[3]!], nextSeq: null });
   });
+
+  test("never points back at its own start, so a pager cannot loop on out-of-order items", () => {
+    // The fold keeps first seqs ascending; if that ever breaks, the page ends rather than
+    // handing back a cursor that serves the same page forever.
+    const outOfOrder: EvidenceItem[] = [
+      { kind: "other", seq: 8, type: "x" },
+      { kind: "other", seq: 7, type: "y" },
+    ];
+    expect(selectPage(outOfOrder, 7, 1)).toEqual({ page: [outOfOrder[0]!], nextSeq: null });
+  });
 });
 
 describe("cutField", () => {

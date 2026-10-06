@@ -10,7 +10,7 @@
  * what "a page boundary never splits an item" requires; the cursor only says which already-
  * folded items to skip.
  */
-import { and, asc, eq, gt, lte, max, min } from "drizzle-orm";
+import { asc, eq, gt, lte, max, min } from "drizzle-orm";
 import { foldEvidenceEvent, emptyEvidenceFold, itemFirstSeq, type EvidenceItem } from "@agentpod/contract";
 
 import { db } from "../../db/drizzle";
@@ -112,7 +112,9 @@ export function selectPage(items: EvidenceItem[], start: number, limit: number):
   const rest = items.filter((it) => itemFirstSeq(it) >= start);
   const page = rest.slice(0, limit);
   const next = rest[limit];
-  return { page, nextSeq: next ? itemFirstSeq(next) : null };
+  // A cursor at or before this page's start would serve this page again, forever.
+  const nextSeq = next ? itemFirstSeq(next) : null;
+  return { page, nextSeq: nextSeq !== null && nextSeq > start ? nextSeq : null };
 }
 
 export function redactItem(item: EvidenceItem, redactor: Redactor): WireItem {
