@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { config } from "../config";
+import { collectConfigErrors } from "../utils/validate-config";
 import {
   HUB_SECRET_ENV,
   RedactionRulesError,
@@ -154,4 +156,15 @@ describe("operator rules (HUB_REDACTION_RULES_FILE)", () => {
       expect(() => loadOperatorRules(file(`${why.replaceAll(" ", "-")}.json`, body))).toThrow(RedactionRulesError);
     });
   }
+});
+
+describe("boot", () => {
+  test("a bad rules file stops the start: boot validation names the variable", () => {
+    const bad = join(mkdtempSync(join(tmpdir(), "redaction-boot-")), "rules.json");
+    writeFileSync(bad, JSON.stringify([{ name: "bad", pattern: "([" }]));
+    const errors = collectConfigErrors({ ...config, redaction: { rulesFile: bad } } as typeof config, () => {});
+    expect(errors.map((e) => e.field)).toContain("HUB_REDACTION_RULES_FILE");
+    expect(collectConfigErrors({ ...config, redaction: { rulesFile: "" } } as typeof config, () => {}).map((e) => e.field))
+      .not.toContain("HUB_REDACTION_RULES_FILE");
+  });
 });
