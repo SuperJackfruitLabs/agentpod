@@ -1,8 +1,8 @@
 {
   "corpus": "ecosystem-identity/token-claims",
-  "version": 8,
-  "authoredAt": "2026-10-06",
-  "authoredFrom": "v8 (2026-10-06): the issuer moves to the organization plane (accounts/docs/superpowers/specs/2026-10-06-issuer-contract.md). Removed: tenant. Added: org, ent (issued), jti (standard), amr (conditional). aud may be a string or an array. AgentPod's hub keeps minting the v7 shape while ORG_PLANE_* is unset; that legacy shape is pinned by apps/hub/src/auth/testdata/token_claims.v7.json until the hub's issuer is removed. code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3); `email`/`email_verified` added 2026-09-20 (agentpod `apps/hub/src/auth/jwt-claims.ts`, `buildTokenPayload`'s conditional spread, and the join it reads from in `apps/hub/src/services/principals.ts`) so superpipeline can resolve or create a local user from a hub token instead of only verifying it carries a real, unnamed principal — part of the suite sign-in programme, task 1 of 2026-09-20-suite-sign-in; `scope` added 2026-10-04 as a conditional claim carrying a grant's read permissions (only `evidence:read`), so superwitness can read evidence from the hub and superpipeline as a service principal (superwitness contract C6); `runs:write` joined the scope vocabulary 2026-10-06 (superwitness app spec §3.4) for the service principal that reports superpipeline's runs to superwitness; `transcripts:read` joined it the same day (superwitness transcripts spec §3.2) for reading session content as evidence; no claim was added or renamed, so the corpus version is unchanged",
+  "version": 7,
+  "authoredAt": "2026-09-20",
+  "authoredFrom": "code and two runs: the claim shape was observed in a token issued by better-auth 1.6.26 and verified from a Cloudflare Worker (agentpod#331), and the control pair moved from reserved to issued when grants became data the issuer can read (principal_grants); `act` added 2026-08-30 when the Application Service gained the ability to assert a human it had never met, on the strength of a Matrix message and a principal_identities row; `mayDispatch` became bare `prn_…` ids matched by equality on 2026-08-30, when an agent became a principal and the two namespaced, pattern-matched forms were deleted rather than deprecated (charter decisions/2026-08-30-an-agent-is-a-principal.md §3); `email`/`email_verified` added 2026-09-20 (agentpod `apps/hub/src/auth/jwt-claims.ts`, `buildTokenPayload`'s conditional spread, and the join it reads from in `apps/hub/src/services/principals.ts`) so superpipeline can resolve or create a local user from a hub token instead of only verifying it carries a real, unnamed principal — part of the suite sign-in programme, task 1 of 2026-09-20-suite-sign-in; `scope` added 2026-10-04 as a conditional claim carrying a grant's read permissions (only `evidence:read`), so superwitness can read evidence from the hub and superpipeline as a service principal (superwitness contract C6); `runs:write` joined the scope vocabulary 2026-10-06 (superwitness app spec §3.4) for the service principal that reports superpipeline's runs to superwitness; `transcripts:read` joined it the same day (superwitness transcripts spec §3.2) for reading session content as evidence; no claim was added or renamed, so the corpus version is unchanged",
   "purpose": "One issuer, and every other plane verifies offline against a JWKS (charter decisions/2026-08-15-one-issuer-and-offline-verification.md). The moment a second plane reads a claim, the claim's NAME is a contract: a rename in the hub is a silent authorization failure in superpipeline, which fails in the direction that looks like the caller having no permission. This corpus is what makes that a failing test instead.",
   "howToRead": {
     "issued": "Claims the issuer MUST put in every token, and consumers may rely on. A missing one is a malformed token. NOTE the difference between a claim that is ABSENT and one that is EMPTY: absent means this issuer does not speak the control pair, empty (`[]` / `false`) means this principal is permitted nothing. Reading the first as the second would let an old issuer silently authorise everything.",
@@ -21,9 +21,8 @@
     {
       "claim": "sub",
       "type": "string",
-      "meaning": "The prn_ id of the principal acting. For a human this is also their account id.",
-      "required": true,
-      "grammar": "^prn_[0-9a-f]{20}$"
+      "meaning": "The principal acting. Today this is the Better Auth user id in AgentPod's hub; when the Organization plane mints principals it becomes that id, and this corpus changes with it.",
+      "required": true
     },
     {
       "claim": "principalKind",
@@ -37,24 +36,12 @@
       "required": true
     },
     {
-      "claim": "org",
+      "claim": "tenant",
       "type": "string",
-      "grammar": "^org_[0-9a-f]{20}$",
-      "meaning": "The workspace: the active one for a human, the owning one for an agent or service. Products map it to their own tenant through external_source = 'org-plane', external_id = <org>.",
+      "grammar": "^fleet_[0-9a-f]{20}$",
+      "meaning": "AgentPod's local isolation boundary for this principal. NOT the organisation: the organisation is owned by the Organization plane and recorded on each product's tenant as an optional external mapping (agentpod migration 0036, superpipeline migration 0002).",
       "required": true,
-      "crossRef": "id_grammar.json → agentpod.organization"
-    },
-    {
-      "claim": "ent",
-      "type": "string[]",
-      "enum": [
-        "agentpod",
-        "superpipeline",
-        "supermessage",
-        "superwitness"
-      ],
-      "meaning": "The products enabled for org. A product not listed answers 403 { error: 'product_not_enabled', org }. A consumer ignores values it does not recognise.",
-      "required": true
+      "crossRef": "id_grammar.json → agentpod.tenant"
     },
     {
       "claim": "mayDispatch",
@@ -87,8 +74,7 @@
     },
     {
       "claim": "aud",
-      "type": "string | string[]",
-      "meaning": "Audience. A string or an array; accept if it equals, or contains, your own audience. Consumers MUST validate it.",
+      "meaning": "Audience. Consumers MUST validate it.",
       "required": true
     },
     {
@@ -99,12 +85,6 @@
     {
       "claim": "iat",
       "meaning": "Issued at.",
-      "required": true
-    },
-    {
-      "claim": "jti",
-      "type": "string",
-      "meaning": "Unique token id.",
       "required": true
     }
   ],
@@ -131,12 +111,8 @@
       "why": "Signed by a key not in the JWKS — including a key that WAS in it and has been retired. agentpod#331 found retirement propagates only as fast as each consumer's JWKS cache, so this case is reachable in normal operation, not only under attack."
     },
     {
-      "case": "missing-org",
-      "why": "A token that verifies but names no workspace cannot be mapped to a tenant. Refuse it rather than falling back to a default boundary."
-    },
-    {
-      "case": "product-not-enabled",
-      "why": "ent does not contain the consumer's product. Answer 403 { error: 'product_not_enabled', org } — never a bare 403."
+      "case": "missing-tenant",
+      "why": "A token that verifies but names no tenant is not a weaker caller, it is an unresolvable one. Refuse it rather than falling back to a default boundary."
     },
     {
       "case": "mayDispatch-absent",
@@ -184,16 +160,8 @@
       "required": false,
       "meaning": "OAuth's space-delimited scope list (RFC 8693 §4.2, RFC 9068 §2.2.3): permissions this principal's grant holds beyond the control pair. The values issued today are `evidence:read` (read run evidence from the hub and superpipeline), `runs:write` (report runs to superwitness's run registry; no hub route honours it) and `transcripts:read` (read a session's redacted transcript from the hub's evidence routes; neither implies `evidence:read` nor is implied by it).",
       "whyItExists": "charter decisions/2026-10-04-superwitness-owns-observability-and-evaluation.md decision 3: superwitness reads other planes' evidence through their APIs and holds no human token. A plane that verifies offline needs the permission inside the token.",
-      "consumerObligation": "Split on single spaces. IGNORE a value you do not recognise; never deny because of one. Grant nothing because the claim is absent — absent means this principal holds no scope. A consumer MUST still check `principalKind` and `org` as it would for any token. A plane that verifies tokens offline can only trust this claim as minted, so narrowing a grant reaches that plane only once tokens minted before the change expire (TOKEN_TTL, five minutes); the hub itself re-reads the grant on every request. Read grant scopes only from tokens whose principalKind is agent or service; on an OAuth authorization-code token, scope is the OAuth scope string.",
+      "consumerObligation": "Split on single spaces. IGNORE a value you do not recognise; never deny because of one. Grant nothing because the claim is absent — absent means this principal holds no scope. A consumer MUST still check `principalKind` and `tenant` as it would for any token. A plane that verifies tokens offline can only trust this claim as minted, so narrowing a grant reaches that plane only once tokens minted before the change expire (TOKEN_TTL, five minutes); the hub itself re-reads the grant on every request.",
       "source": "agentpod apps/hub/src/auth/jwt-claims.ts buildTokenPayload; apps/hub/src/services/grants.ts GRANT_SCOPES"
-    },
-    {
-      "claim": "amr",
-      "type": "string[]",
-      "required": false,
-      "meaning": "How the subject authenticated: [\"device\"], [\"exchange\"], [\"service\"] or [\"assertion\"] (a service asserting a human who acted from chat, contract §3.4b).",
-      "whyItExists": "A consumer may refuse to turn a device-exchanged token into a session.",
-      "consumerObligation": "Never require it: it is absent on OAuth authorization-code tokens, where the provider reserves the claim."
     }
   ]
 }
