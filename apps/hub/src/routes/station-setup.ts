@@ -17,6 +17,20 @@ import {
 } from "../services/matrix-as/hooks";
 import { bridgeUserId } from "../services/matrix-as/names";
 import { roomForStation } from "../services/matrix-as/station-room";
+import { orgPlane } from "../auth/org-plane/config";
+import { OrgPlaneError } from "../services/org-plane/client";
+import { principalDirectory } from "../services/org-plane/directory";
+import {
+  abandonPlaneAgent,
+  checkPlaneAgent,
+  createPlaneAgent,
+  grantDispatchTo,
+  mirrorPlacedAgent,
+} from "../services/org-plane/agent-placement";
+import { humanPrincipalIdForUser, principalHandle } from "../services/principals";
+import { createLogger } from "../utils/logger";
+
+const log = createLogger("station-setup");
 
 const inputSchema = z.object({
   requestId: z.string().uuid(),
@@ -58,12 +72,11 @@ async function matrixStatus(stationId: string) {
     .select()
     .from(stations)
     .where(eq(stations.id, stationId));
-  const [agent] = occupancy.principalId
-    ? await db
-        .select()
-        .from(principals)
-        .where(eq(principals.id, occupancy.principalId))
-    : [];
+  // Through `principalHandle`, which reads the plane's directory under ORG_PLANE_* (a plane-made
+  // agent's local row is only a placement mirror) and the local table otherwise.
+  const handle = occupancy.principalId
+    ? await principalHandle(occupancy.principalId)
+    : null;
   const domain = stationSetupMatrixDomain();
   const [receipt] = await db
     .select()
@@ -85,7 +98,7 @@ async function matrixStatus(stationId: string) {
           ? "provisioned"
           : "pending",
     error: receipt?.matrixStatus === "failed" ? receipt.matrixError : null,
-    address: agent && domain ? bridgeUserId(agent.handle, domain) : null,
+    address: handle && domain ? bridgeUserId(handle, domain) : null,
     roomId: occupancy.room?.roomId ?? null,
     mode: station?.matrixIdentityMode ?? "bridge",
   };
@@ -120,6 +133,28 @@ function conflict(e: unknown): boolean {
 
 export const stationSetupRouter = new Hono()
   .get("/station-setup/options", async (c) => {
+    if (orgPlane()) {
+      // The plane's list carries each principal's grant, so this is the directory's cached list
+      // and no call per human.
+      const all = await principalDirectory().list();
+      const placed = new Set(
+        (await db.select({ id: stations.principalId }).from(stations)).map((r) => r.id),
+      );
+      const humans = all.filter((p) => p.kind === "human");
+      return c.json({
+        agents: all
+          .filter((p) => p.kind === "agent" && !p.suspended && !placed.has(p.id))
+          .map((a) => ({
+            id: a.id,
+            handle: a.handle,
+            displayName: a.displayName,
+            dispatchers: humans
+              .filter((h) => h.grant?.mayDispatch.includes(a.id))
+              .map((h) => h.handle),
+          })),
+        matrixDomain: stationSetupMatrixDomain(),
+      });
+    }
     const agents = await db
       .select({
         id: principals.id,
@@ -179,6 +214,74 @@ export const stationSetupRouter = new Hono()
         userId = c.get("user").id,
         stationId = c.req.param("stationId");
       const serialized = JSON.stringify(input);
+      // Under the plane the agent is made (or checked) at the plane BEFORE the transaction: a
+      // remote call cannot join it. What the transaction would refuse anyway is checked first,
+      // so an ordinary refusal mints nothing; a race past these checks is caught below and the
+      // agent made for it is suspended.
+      const plane = orgPlane();
+      let planeAgent: string | null = null;
+      let placedAgent: { id: string; handle: string; displayName: string | null } | null = null;
+      let me: string | null = null;
+      let fresh = false;
+      if (plane) {
+        const [receipt] = await db
+          .select({ requestId: stationSetups.requestId })
+          .from(stationSetups)
+          .where(eq(stationSetups.requestId, input.requestId));
+        if (!receipt) {
+          const [station] = await db
+            .select({ principalId: stations.principalId })
+            .from(stations)
+            .where(owned(stationId, userId, c.get("user").tenantId));
+          if (!station) return c.json({ error: "Station not found" }, 404);
+          if (station.principalId)
+            return c.json(
+              { error: "This station already has an agent. Refresh to see its identity." },
+              409,
+            );
+          if (input.dispatch === "me") {
+            me = await humanPrincipalIdForUser(userId);
+            if (!me)
+              return c.json(
+                { error: "Your active operator identity is required to grant dispatch access" },
+                403,
+              );
+          }
+          try {
+            if (input.agent.kind === "new") {
+              planeAgent = await createPlaneAgent({
+                handle: input.agent.handle,
+                displayName: input.agent.displayName,
+                matrixDomain: stationSetupMatrixDomain(),
+              });
+              placedAgent = {
+                id: planeAgent,
+                handle: input.agent.handle,
+                displayName: input.agent.displayName,
+              };
+            } else {
+              const state = await checkPlaneAgent(input.agent.principalId);
+              if (state === "not-found") return c.json({ error: "Agent not found" }, 404);
+              if (state === "suspended")
+                return c.json({ error: "This agent is suspended" }, 403);
+              const agent = (await principalDirectory().principal(input.agent.principalId))!;
+              placedAgent = { id: agent.id, handle: agent.handle, displayName: agent.displayName };
+            }
+          } catch (e) {
+            if (!(e instanceof OrgPlaneError)) throw e;
+            log.warn("org plane refused an agent placement", { stationId, status: e.status, code: e.code });
+            if (e.status === 409)
+              return c.json(
+                {
+                  error:
+                    "The handle or assignment is already taken. Refresh and choose an unassigned agent or a different handle.",
+                },
+                409,
+              );
+            return c.json({ error: "The organization plane could not create or check this agent" }, 502);
+          }
+        }
+      }
       try {
         const principalId = await db.transaction(async (tx) => {
           // Serializes setup at this station; a stale UI cannot evict its new occupant.
@@ -215,7 +318,28 @@ export const stationSetupRouter = new Hono()
               "This station already has an agent. Refresh to see its identity.",
             );
           let id: string;
-          if (input.agent.kind === "new") {
+          if (plane) {
+            // Checked at the plane above. A receipt written since (a concurrent retry) was
+            // answered before this point; anything else this request did not pre-check lands here.
+            if (!placedAgent)
+              throw new SetupError(
+                409,
+                "Station assignment changed after setup; refresh before continuing",
+              );
+            id = placedAgent.id;
+            await mirrorPlacedAgent(tx, placedAgent);
+            if (input.agent.kind === "existing") {
+              const [placement] = await tx
+                .select({ id: stations.id })
+                .from(stations)
+                .where(eq(stations.principalId, id));
+              if (placement)
+                throw new SetupError(
+                  409,
+                  "This agent is already assigned elsewhere. Setup will not move it.",
+                );
+            }
+          } else if (input.agent.kind === "new") {
             id = prefixedId("prn");
             await tx
               .insert(principals)
@@ -251,7 +375,8 @@ export const stationSetupRouter = new Hono()
                 "This agent is already assigned elsewhere. Setup will not move it.",
               );
           }
-          if (input.dispatch === "me") {
+          // Under the plane the grant is written at the plane after commit (below).
+          if (input.dispatch === "me" && !plane) {
             const [person] = await tx
               .select({
                 id: principals.id,
@@ -308,10 +433,38 @@ export const stationSetupRouter = new Hono()
               input: serialized,
               principalId: id,
             });
+          fresh = true;
           return id;
         });
+        // A concurrent retry's receipt answered this request: the agent made for it is unused.
+        if (planeAgent && planeAgent !== principalId) await abandonPlaneAgent(planeAgent);
+        planeAgent = null; // settled: placed, or abandoned just now. Nothing below may suspend it.
+        if (plane && fresh && me) {
+          // Only on the request that placed the agent, like the legacy grant inside the
+          // transaction: a retry answered from the receipt never regrants.
+          try {
+            await grantDispatchTo(me, principalId);
+          } catch (e) {
+            if (!(e instanceof OrgPlaneError)) throw e;
+            log.warn("agent placed but the org plane did not record the dispatch grant", {
+              stationId,
+              principalId,
+              status: e.status,
+              code: e.code,
+            });
+            return c.json(
+              {
+                error:
+                  "The agent is placed, but the organization plane did not record your dispatch access. Grant it at the organization plane.",
+                principalId,
+              },
+              502,
+            );
+          }
+        }
         return c.json({ principalId, matrix: await provision(stationId) });
       } catch (e) {
+        if (planeAgent) await abandonPlaneAgent(planeAgent);
         if (e instanceof SetupError)
           return c.json({ error: e.message }, e.status);
         if (conflict(e))
