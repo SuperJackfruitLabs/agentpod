@@ -21,7 +21,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "../../../db/drizzle";
 import { matrixRooms } from "../../../db/schema/matrix";
 import { stations } from "../../../db/schema/stations";
-import { matrixIdForHuman } from "../../human-matrix-ids";
+import { principalForUser } from "../../principals";
+import { matrixIdForPrincipal } from "../../principal-matrix-id";
 import type { ReportingAgent } from "./agent-reports";
 import { cardName } from "./names";
 
@@ -49,8 +50,9 @@ export async function reportingAgentFor(nodeId: string, agent: string, roomId: s
     if (!ours) return null;
   }
 
-  // The owner's user id IS their prn_ (contract §2).
-  const reader = await matrixIdForHuman(station.userId);
+  const owner = await principalForUser(station.userId);
+  if (!owner) return null;
+  const reader = await matrixIdForPrincipal(owner.id);
   if (!reader) return null;
 
   return { reader, name: cardName(station.displayName, agent) };

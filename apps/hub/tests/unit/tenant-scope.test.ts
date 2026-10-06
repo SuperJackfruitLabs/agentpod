@@ -107,7 +107,7 @@ describe("tenant guard — unscoped tables are legitimate, and stay refusable", 
       expect(allSchemaTables(), `${t} must not be in the schema`).not.toContain(t);
       expect(TENANT_EXEMPT_TABLES[t], `${t} must not keep an exemption`).toBeUndefined();
     }
-    for (const t of ["hub_operators", "legacy_user_principals", "human_matrix_ids"]) {
+    for (const t of ["hub_operators", "legacy_user_principals"]) {
       expect(TENANT_EXEMPT_TABLES[t], `${t} must be an explicit exemption`).toBeDefined();
     }
   });

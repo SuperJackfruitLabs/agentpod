@@ -16,7 +16,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
-import { matrixIdForHuman } from "../human-matrix-ids";
+import { matrixIdForPrincipal } from "../principal-matrix-id";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { withQuietNotes } from "./push-quiet";
@@ -37,7 +37,7 @@ import { assertPrincipal } from "../../auth/org-plane/assertion";
 import { resolveMatrixId } from "../matrix-identity";
 import { boardRoomFor } from "./board-room";
 import { answerElicitationAtSuperpipeline, claimElicitationOutcome, handleElicitationAnswer } from "./elicitations";
-import { principalById, principalHandle } from "../principals";
+import { principalById, principalForUser, principalHandle } from "../principals";
 import { attachRoomToSession, forgetTurnTrigger, noteTurnTrigger } from "./outbound";
 import { createSession, promptSession,
   answerPermission, sessionIsBusy, whenIdle } from "../acp-sessions";
@@ -108,8 +108,10 @@ async function readerForRoom(roomId: string): Promise<string | null> {
     .where(eq(matrixRooms.roomId, roomId));
   if (!row) return null;
 
-  // The owner's user id IS their prn_ (contract §2).
-  return matrixIdForHuman(row.userId);
+  const principal = await principalForUser(row.userId);
+  if (!principal) return null;
+
+  return matrixIdForPrincipal(principal.id);
 }
 
 /**

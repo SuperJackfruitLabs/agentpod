@@ -16,11 +16,11 @@ import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
-import { matrixIdForHuman } from "../human-matrix-ids";
+import { matrixIdForPrincipal } from "../principal-matrix-id";
 import { bridgeLocalpart, roomAliasFor, stationSpeaker } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
-import { principalHandle } from "../principals";
+import { principalHandle, principalForUser } from "../principals";
 import { roomForStation } from "./station-room";
 import { stationForAlias } from "./stations";
 import { createLogger } from "../../utils/logger";
@@ -113,13 +113,16 @@ async function context(stationId: string) {
 
 /**
  * The owner's Matrix id, so the room is not a locked door. `stations.userId` is the owner's `prn_`
- * (contract §2), and `human_matrix_ids` is where the hub keeps a person's Matrix id.
+ * (contract §2), and the plane holds a person's Matrix id (`matrixIdForPrincipal`).
  *
  * `null` — an owner with no Matrix identity known — is an ordinary answer: the room is still made,
  * so the agent has somewhere to be, and somebody can be invited later.
  */
 async function ownerMxid(userId: string): Promise<string | null> {
-  return matrixIdForHuman(userId);
+  const principal = await principalForUser(userId);
+  if (!principal) return null;
+
+  return matrixIdForPrincipal(principal.id);
 }
 
 export async function provisionStation(stationId: string, deps: ProvisionDeps): Promise<void> {

@@ -413,6 +413,7 @@ describe("GET /api/evidence/principals/:id under the plane (superwitness's run j
               ? { id, kind: "human", handle: "op", displayName: "Op", organizationId: null, suspended: false, grant: null }
               : null,
         identity: async () => null,
+        identitiesOf: async () => null,
         list: async () => [],
         invalidate: () => {},
         ...directory,

@@ -15,7 +15,7 @@ import {
 } from "../principals";
 import { getGrant, setGrant } from "../grants";
 import { resolveMatrixId } from "../matrix-identity";
-import { matrixIdForHuman } from "../human-matrix-ids";
+import { matrixIdForPrincipal } from "../principal-matrix-id";
 import { rawSql } from "../../db/drizzle";
 
 const HUMAN: PlanePrincipal = {
@@ -35,6 +35,8 @@ function dir(over: Partial<PrincipalDirectory> = {}): PrincipalDirectory {
     principal: async (id) => all.get(id) ?? null,
     identity: async (system, ext) =>
       system === "matrix" && ext === "@op:id.test" ? { principalId: HUMAN.id, kind: "human", suspended: false } : null,
+    identitiesOf: async (id, system) =>
+      id === HUMAN.id && system === "matrix" ? [{ system: "matrix", externalId: "@op:id.test" }] : all.has(id) ? [] : null,
     list: async () => [...all.values()],
     invalidate: () => {},
     ...over,
@@ -109,20 +111,14 @@ describe("principal reads from the plane", () => {
 });
 
 describe("Matrix sender, resolved at the plane", () => {
-  test("a linked sender resolves through GET /api/identities/matrix/:mxid, and a person's Matrix id is remembered", async () => {
+  test("a linked sender resolves through GET /api/identities/matrix/:mxid", async () => {
     plane();
-    await rawSql`DELETE FROM human_matrix_ids WHERE principal_id = ${HUMAN.id}`;
     expect(await resolveMatrixId("@op:id.test")).toEqual({ kind: "principal", principalId: HUMAN.id });
-    // The hub keeps the other direction itself (the plane has no read for it): whom to invite.
-    expect(await matrixIdForHuman(HUMAN.id)).toBe("@op:id.test");
-    await rawSql`DELETE FROM human_matrix_ids WHERE principal_id = ${HUMAN.id}`;
   });
 
-  test("an agent sender is not remembered as a person", async () => {
+  test("an agent sender resolves too", async () => {
     plane(dir({ identity: async () => ({ principalId: AGENT.id, kind: "agent", suspended: false }) }));
-    await rawSql`DELETE FROM human_matrix_ids WHERE principal_id = ${AGENT.id}`;
     expect(await resolveMatrixId("@agent_cody:id.test")).toEqual({ kind: "principal", principalId: AGENT.id });
-    expect(await matrixIdForHuman(AGENT.id)).toBeNull();
   });
 
   test("an unlinked sender is null", async () => {
@@ -133,5 +129,19 @@ describe("Matrix sender, resolved at the plane", () => {
   test("a plane outage with nothing cached throws OrgPlaneError rather than reading as 'unlinked'", async () => {
     plane(dir({ identity: async () => { throw new OrgPlaneError(0, "unreachable"); } }));
     await expect(resolveMatrixId("@op:id.test")).rejects.toBeInstanceOf(OrgPlaneError);
+  });
+});
+
+describe("a person's Matrix id under the plane", () => {
+  test("a principal with no Matrix id, or one the plane does not know, is null", async () => {
+    plane();
+    expect(await matrixIdForPrincipal(HUMAN.id)).toBe("@op:id.test");
+    expect(await matrixIdForPrincipal(AGENT.id)).toBeNull();
+    expect(await matrixIdForPrincipal("prn_00000000000000000fff")).toBeNull();
+  });
+
+  test("a plane outage with nothing cached throws rather than reading as 'no Matrix id'", async () => {
+    plane(dir({ identitiesOf: async () => { throw new OrgPlaneError(0, "unreachable"); } }));
+    await expect(matrixIdForPrincipal(HUMAN.id)).rejects.toBeInstanceOf(OrgPlaneError);
   });
 });

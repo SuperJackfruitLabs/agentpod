@@ -8,14 +8,16 @@
  * plane answered, and the answer was a refusal.
  *
  * Used only on the paths that have no token to read from: a Matrix sender (design §5.7's one named
- * exception) and its grant, and the display reads (handles, the admin list, superwitness's
+ * exception) and its grant, a person's Matrix id for room invites and the Live Activity, and the display reads (handles, the admin list, superwitness's
  * principal lookup). Every token-bearing door authorizes from the token and never calls this.
  */
-import { OrgPlaneError, orgPlaneClient, type OrgPlaneClient, type PlaneIdentity, type PlaneKind, type PlanePrincipal } from "./client";
+import { OrgPlaneError, orgPlaneClient, type OrgPlaneClient, type PlaneIdentity, type PlaneKind, type PlaneLinkedIdentity, type PlanePrincipal } from "./client";
 
 export interface PrincipalDirectory {
   principal(id: string): Promise<PlanePrincipal | null>;
   identity(system: string, externalId: string): Promise<PlaneIdentity | null>;
+  /** The reverse of `identity`: a principal's ids in one system (null for an unknown principal). */
+  identitiesOf(id: string, system: string): Promise<PlaneLinkedIdentity[] | null>;
   list(kind?: PlaneKind): Promise<PlanePrincipal[]>;
   invalidate(id?: string): void;
 }
@@ -23,7 +25,7 @@ export interface PrincipalDirectory {
 const transient = (e: unknown) => e instanceof OrgPlaneError && (e.status === 0 || e.status >= 500);
 
 export function createPrincipalDirectory(o: {
-  client: () => Pick<OrgPlaneClient, "getPrincipal" | "lookupIdentity" | "listPrincipals">;
+  client: () => Pick<OrgPlaneClient, "getPrincipal" | "lookupIdentity" | "identitiesOf" | "listPrincipals">;
   ttlMs?: number;
   now?: () => number;
 }): PrincipalDirectory {
@@ -47,6 +49,7 @@ export function createPrincipalDirectory(o: {
   return {
     principal: (id) => cached(`p:${id}`, () => o.client().getPrincipal(id)),
     identity: (system, ext) => cached(`i:${system}:${ext}`, () => o.client().lookupIdentity(system, ext)),
+    identitiesOf: (id, system) => cached(`ids:${id}:${system}`, () => o.client().identitiesOf(id, system)),
     // The plane lists one kind per call (contract §3.5); "all" is three calls, cached as one.
     list: (kind) =>
       cached(`l:${kind ?? "*"}`, async () =>
@@ -57,6 +60,7 @@ export function createPrincipalDirectory(o: {
     invalidate: (id) => {
       if (!id) return cache.clear();
       cache.delete(`p:${id}`);
+      for (const k of cache.keys()) if (k.startsWith(`ids:${id}:`)) cache.delete(k);
       for (const k of cache.keys()) if (k.startsWith("l:")) cache.delete(k);
     },
   };

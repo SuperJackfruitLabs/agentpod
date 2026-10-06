@@ -49,7 +49,6 @@ import {
 } from "./schema/matrix";
 import { legacyUserPrincipals } from "./schema/legacy-user-principals";
 import { hubOperators } from "./schema/operators";
-import { humanMatrixIds } from "./schema/human-matrix-ids";
 import { liveActivityTokens } from "./schema/live-activity";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
 import { stationGitIdentities } from "./schema/git-identities";
@@ -188,13 +187,6 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "only by `isUserAdmin` for an id the caller already holds; nothing lists it.",
   },
 
-  human_matrix_ids: {
-    table: humanMatrixIds,
-    reason:
-      "A PERSON's Matrix id, by their principal — whom to invite to their agents' rooms. A person " +
-      "is not inside a fleet, they reach one, and the same person is invited to rooms in every fleet " +
-      "they own. Read only by `matrixIdForHuman` for an id the caller already holds; nothing lists it.",
-  },
 
   matrix_as_transactions: {
     table: matrixAsTransactions,

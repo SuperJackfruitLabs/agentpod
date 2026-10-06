@@ -1899,10 +1899,8 @@ What this means for an operator:
   `410 { error: "issuer_moved", issuer }` (the device inventory: `managed_by_org_plane`).
 - **Who operates the hub** is the hub's own seat, `hub_operators`. To add an operator:
   `INSERT INTO hub_operators (principal_id) VALUES ('prn_…');` — their next request is admin.
-- **Whom the hub invites to a person's rooms** is `human_matrix_ids` (principal → Matrix id).
-  The plane answers only the other direction, so the hub keeps this itself: 0095 seeded it from
-  the humans' `matrix` identities, and it learns a person's Matrix id whenever a message from
-  them resolves through the plane. A person linked at the plane who has never written to an
-  agent is not invited to their agent's room until they do, or until a row is added by hand.
+- **Whom the hub invites to a person's rooms** is the plane's answer: the hub reads a person's
+  Matrix id with `GET /api/principals/:id/identities?system=matrix` (contract §3.5), cached
+  60 s. A person whose Matrix id is not linked at the plane is not invited until it is.
 - `legacy_user_principals` (pre-cutover user id → `prn_`) is permanent: other planes recorded
   hub user ids before the cutover, and `GET /api/evidence/principals/:id` still resolves them.

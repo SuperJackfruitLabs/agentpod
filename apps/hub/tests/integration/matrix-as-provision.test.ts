@@ -165,7 +165,7 @@ beforeAll(async () => {
             '["acp"]'::jsonb, ${ECHO_PRINCIPAL}, now(), now())`;
 
   // The owner's Matrix identity, by the owner's principal — which IS the station's user id
-  // (contract §2). `human_matrix_ids` is where the hub keeps it.
+  // (contract §2). The plane holds it.
   await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
 });
 

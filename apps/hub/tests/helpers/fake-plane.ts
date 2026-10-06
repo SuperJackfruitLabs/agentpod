@@ -7,7 +7,7 @@
  * real `orgPlaneClient()` / `principalDirectory()` seams:
  *
  * - `createPrincipal`, `setGrant`, `createPlaneAgent` write here;
- * - `principalById`, `getGrant`, `resolveMatrixId`, `listPrincipals` read here (no cache: the
+ * - `principalById`, `getGrant`, `resolveMatrixId`, `matrixIdForPrincipal`, `listPrincipals` read here (no cache: the
  *   directory over it has a zero TTL, so a test sees its own writes at once);
  * - `signPlaneToken` mints a real EdDSA token the hub's verifier accepts (its key set is this
  *   module's), for the tests that go through `authMiddleware` or a self-authenticating door.
@@ -130,6 +130,15 @@ export function createFakePlane(): FakePlane {
       const id = identities.get(key(system, externalId));
       const p = id ? principals.get(id) : undefined;
       return p ? { principalId: p.id, kind: p.kind, suspended: p.suspended } : null;
+    },
+    async identitiesOf(id, system) {
+      if (!principals.has(id)) return null;
+      const out: Array<{ system: string; externalId: string }> = [];
+      for (const [k, v] of identities) {
+        const [sys, externalId] = k.split("\u0000") as [string, string];
+        if (v === id && sys === system) out.push({ system: sys, externalId });
+      }
+      return out;
     },
     async getPrincipal(id) {
       const p = principals.get(id);

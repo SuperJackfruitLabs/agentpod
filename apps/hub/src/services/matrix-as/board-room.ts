@@ -265,8 +265,8 @@ export async function boardRoomFor(roomId: string) {
  * superpipeline exposes membership to a service credential, the bridge roster is
  * the only place that names a board's human at all.
  *
- * Resolved the long way round on purpose: roster `hubUserId` (a `prn_`) →
- * `human_matrix_ids`. A Matrix id is never guessed from a localpart or a
+ * Resolved the long way round on purpose: roster `hubUserId` (a `prn_`) → the
+ * plane's `GET /api/principals/:id/identities?system=matrix`. A Matrix id is never guessed from a localpart or a
  * matching email (charter `2026-08-13-ecosystem-identity` Decision 2), so a board
  * whose human has never linked an account yields nobody rather than somebody wrong.
  */
@@ -290,11 +290,13 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
     return [];
   }
 
-  // A hub user id IS the person's prn_ (contract §2).
-  const { matrixIdForHuman } = await import("../human-matrix-ids");
+  const { principalForUser } = await import("../principals");
+  const { matrixIdForPrincipal } = await import("../principal-matrix-id");
   const mxids: string[] = [];
   for (const userId of hubUserIds) {
-    const mxid = await matrixIdForHuman(userId);
+    const principal = await principalForUser(userId);
+    if (!principal) continue;
+    const mxid = await matrixIdForPrincipal(principal.id);
     if (mxid) mxids.push(mxid);
   }
   return mxids;

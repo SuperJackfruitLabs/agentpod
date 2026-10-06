@@ -104,5 +104,4 @@ export async function deleteTestUsers(userIds: string[]): Promise<void> {
   await rawSql`UPDATE station_transcription SET updated_by = NULL WHERE updated_by = ANY(${userIds})`;
   await rawSql`UPDATE system_settings SET updated_by = NULL WHERE updated_by = ANY(${userIds})`;
   await rawSql`DELETE FROM hub_operators WHERE principal_id = ANY(${userIds})`;
-  await rawSql`DELETE FROM human_matrix_ids WHERE principal_id = ANY(${userIds})`;
 }

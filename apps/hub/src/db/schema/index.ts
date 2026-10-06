@@ -73,4 +73,3 @@ export * from "./legacy-user-principals";
 export * from "./operators";
 
 // A person's Matrix id by principal, which the plane cannot answer in that direction (P3 plan, Task 17).
-export * from "./human-matrix-ids";

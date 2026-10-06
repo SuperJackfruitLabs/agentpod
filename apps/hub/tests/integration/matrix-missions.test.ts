@@ -89,7 +89,7 @@ beforeAll(async () => {
               '["acp"]'::jsonb, ${agent}, now(), now())`;
   }
   // The person's Matrix id, which this route reads to invite them back into
-  // their own mission (`human_matrix_ids`, keyed by the principal).
+  // their own mission (linked at the plane, keyed by the principal).
   await linkMatrixId(OWNER_PRINCIPAL, OWNER_MXID);
   process.env.ENFORCE_CONTROL_PAIR = "true";
 });
