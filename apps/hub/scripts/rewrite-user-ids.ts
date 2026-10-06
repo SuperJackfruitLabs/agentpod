@@ -18,6 +18,7 @@
  * here.
  */
 import postgres, { type Sql, type TransactionSql } from "postgres";
+import { HUB_RUNNING_REFUSAL, releaseExclusiveHubLock, tryExclusiveHubLock } from "../src/db/hub-running-lock";
 
 export interface UserIdColumn {
   table: string;
@@ -398,16 +399,27 @@ if (import.meta.main) {
   const { apply, json, opts } = parsed;
   const url = new URL(process.env.DATABASE_URL!);
   console.error(`database: ${url.hostname}:${url.port || "5432"}${url.pathname} (${apply ? "APPLY" : "dry run"}, ${opts.direction})`);
+  // ONE connection: the hub-running lock taken below sits on the session the rewrite then uses.
   const sql = postgres(process.env.DATABASE_URL!, { max: 1, onnotice: () => {} });
   try {
-    const plan = apply ? await applyRewrite(sql, opts) : await planRewrite(sql, opts);
-    if (json) console.log(JSON.stringify(plan, null, 2));
-    else printPlan(plan);
-    const refusal = refusalOf(plan);
-    if (apply) console.error("APPLIED.");
-    else if (refusal) console.error(`Dry run — nothing changed. --apply would refuse: ${refusal}.`);
-    else console.error("Dry run — nothing changed. Re-run with --apply.");
-    process.exitCode = refusal ? 2 : 0;
+    // A live hub holds the hub-running lock shared (src/db/hub-running-lock.ts); taking it
+    // exclusively both proves no hub is up and keeps one from booting until this exits.
+    const hubUp = !(await tryExclusiveHubLock(sql));
+    // A dry run only reads: let go at once, so it can never stop a hub from booting.
+    if (!hubUp && !apply) await releaseExclusiveHubLock(sql);
+    if (hubUp && apply) {
+      console.error(`refusing to apply: ${HUB_RUNNING_REFUSAL}. Stop the hub first. Nothing changed.`);
+      process.exitCode = 2;
+    } else {
+      const plan = apply ? await applyRewrite(sql, opts) : await planRewrite(sql, opts);
+      if (json) console.log(JSON.stringify(plan, null, 2));
+      else printPlan(plan);
+      const refusal = hubUp ? `${HUB_RUNNING_REFUSAL}; stop the hub first` : refusalOf(plan);
+      if (apply) console.error("APPLIED.");
+      else if (refusal) console.error(`Dry run — nothing changed. --apply would refuse: ${refusal}.`);
+      else console.error("Dry run — nothing changed. Re-run with --apply.");
+      process.exitCode = refusal ? 2 : 0;
+    }
   } catch (e) {
     if (e instanceof RewriteRefused) {
       if (json) console.log(JSON.stringify(e.plan, null, 2));

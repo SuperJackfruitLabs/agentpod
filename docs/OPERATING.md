@@ -1922,6 +1922,13 @@ What the script does and refuses:
 - Everything happens in **one transaction**: a failure part-way leaves the database exactly as
   it was. The transaction holds `lock_timeout = 10s`; stop the hub first so the script never
   waits on the hub's own locks.
+- **`--apply` refuses while a hub is running against the database** (exit 2, "the hub is running
+  against this database"). Every hub holds a session-level advisory lock, shared, from boot until
+  it exits — key `(1095782212, 1)` (`0x41504F44`, "APOD"), visible in `pg_locks` as
+  `locktype = 'advisory' AND classid = 1095782212 AND objid = 1`; `apps/hub/src/db/hub-running-lock.ts`.
+  The script takes the same key exclusively for the length of the apply, so a hub started
+  meanwhile refuses to boot until it finishes. A dry run checks the lock and lets go at once; it
+  still reads, and exits 2 with the same reason when a hub holds the lock.
 - Forward drops the 18 foreign keys from those columns to `"user"` (Better Auth ids no longer
   live there), drops and re-creates the six composite owner foreign keys around the rewrite, and
   seeds `legacy_user_principals` (old user id → `prn_`, kept permanently so ids other planes

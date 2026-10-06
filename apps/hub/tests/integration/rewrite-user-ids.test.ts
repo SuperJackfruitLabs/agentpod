@@ -21,6 +21,7 @@ import {
   RewriteRefused,
   USER_ID_COLUMNS,
 } from "../../scripts/rewrite-user-ids";
+import { HUB_RUNNING_LOCK, holdHubRunningLock } from "../../src/db/hub-running-lock";
 
 const BASE = process.env.DATABASE_URL ?? "postgres://agentpod:agentpod-dev-password@localhost:5434/agentpod";
 const SCRATCH = `agentpod_rewrite_scratch_${Date.now()}`;
@@ -400,6 +401,34 @@ describe("the CLI", () => {
     } finally {
       await sql`DELETE FROM station_audit WHERE id = 'a9'`;
     }
+  });
+
+  test("refuses to run while a hub holds this database (exit 2), and changes nothing", async () => {
+    await sql`INSERT INTO station_audit (id, tenant_id, user_id, node_id, station_key, verb) VALUES ('a8', ${T}, ${U1}, 'node_x', 's', 'v')`;
+    const hub = await holdHubRunningLock(SCRATCH_URL);
+    try {
+      const before = await snapshot();
+      const r = run(["--apply", "--map", `${ORPHAN}=${P2}`], { DATABASE_URL: SCRATCH_URL });
+      expect(r.code).toBe(2);
+      expect(r.out).toContain("the hub is running against this database");
+      expect(r.out).not.toContain("APPLIED");
+      expect(await snapshot()).toEqual(before);
+
+      const dry = run(["--map", `${ORPHAN}=${P2}`], { DATABASE_URL: SCRATCH_URL });
+      expect(dry.code).toBe(2); // --apply would refuse
+      expect(dry.out).toContain("the hub is running against this database");
+    } finally {
+      await hub.release();
+    }
+    // with the hub stopped, the same command applies (and its lock is gone when it exits)
+    const ok = run(["--apply", "--map", `${ORPHAN}=${P2}`], { DATABASE_URL: SCRATCH_URL });
+    expect(ok.code).toBe(0);
+    const one = postgres(SCRATCH_URL, { max: 1, ...quiet });
+    const [free] = await one<{ ok: boolean }[]>`SELECT pg_try_advisory_lock(${HUB_RUNNING_LOCK.classid}, ${HUB_RUNNING_LOCK.objid}) AS ok`;
+    await one.end();
+    expect(free!.ok).toBe(true);
+    expect(run(["--apply", "--reverse"], { DATABASE_URL: SCRATCH_URL }).code).toBe(0);
+    await sql`DELETE FROM station_audit WHERE id = 'a8'`;
   });
 
   test("an unknown flag is refused rather than ignored", () => {
