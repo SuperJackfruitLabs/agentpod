@@ -1887,6 +1887,12 @@ That window is closed. Migration `0096_drop_hub_auth` dropped the hub's Better A
 went with them: its `--reverse` needed `"user"` and `principal_identities`, so **there is no
 rollback to the hub's own issuer any more.**
 
+The migration refuses to run, dropping nothing, unless the rewrite ran: it raises if any of the
+23 rewritten columns still holds a non-`prn_` value, or if `legacy_user_principals` is empty
+while `principal_identities` holds Better Auth identities. A hub that boots against a
+database the rewrite missed fails at migration time with the table and column named.
+`user_id_rewrites` (the rewrite's per-row record) stays, frozen.
+
 What this means for an operator:
 
 - **`ORG_PLANE_*` is required.** All five (`ORG_PLANE_ISSUER`, `ORG_PLANE_JWKS_URL`,
