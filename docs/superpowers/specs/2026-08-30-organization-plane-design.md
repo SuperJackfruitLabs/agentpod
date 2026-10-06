@@ -1,5 +1,13 @@
 # The Organization plane — implementation design
 
+> **Section 4 ("C — the plane") is superseded, 2026-10-06. Nothing below is edited.**
+> The plane is being built as its own service in `SuperJackfruitLabs/accounts`, at
+> `accounts.superjackfruit.com`. Better Auth's organization plugin is the workspace model,
+> reversing "not `organization`" below. See
+> `charter → decisions/2026-10-06-the-organization-plane-is-its-own-service.md` and
+> `accounts → docs/superpowers/specs/2026-10-06-organization-plane-design.md`. Slices A and B
+> are built and stand.
+
 **Date:** 2026-08-30
 **Status:** Designed, unbuilt.
 **The agreements this implements** are
