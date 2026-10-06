@@ -1,0 +1,232 @@
+{
+  "corpus": "evidence/hub-transcript",
+  "version": 1,
+  "authoredAt": "2026-10-06",
+  "authoredFrom": "agentpod apps/hub/src/routes/evidence.ts; packages/contract/src/transcript-evidence.ts; superwitness transcripts spec §3.3",
+  "purpose": "One page of a session's transcript: every item kind, a partial tool call, a partial permission, a redaction and a truncated field. Content is redacted by the hub before it leaves; a reader never sees a credential the rules know.",
+  "examples": [
+    {
+      "name": "every kind",
+      "response": {
+        "session_id": "acps_3f1c2b7e-5d4a-4c9b-8e2f-1a6b7c8d9e0f",
+        "seq_from": 2,
+        "seq_to": 20,
+        "items": [
+          {
+            "kind": "tool_call",
+            "id": "call_0",
+            "seq_from": 2,
+            "seq_to": 2,
+            "title": "call_0",
+            "tool_kind": null,
+            "status": "completed",
+            "input": null,
+            "output": {
+              "content": null,
+              "raw": {
+                "exit": 0
+              }
+            },
+            "partial": true,
+            "redactions": 0
+          },
+          {
+            "kind": "permission",
+            "seq": 1,
+            "answer_seq": 3,
+            "title": "Permission request",
+            "options": [],
+            "outcome": "selected:allow",
+            "partial": true,
+            "redactions": 0
+          },
+          {
+            "kind": "state",
+            "seq": 4,
+            "status": "idle",
+            "redactions": 0
+          },
+          {
+            "kind": "prompt",
+            "seq": 5,
+            "text": "Use Authorization: [redacted:authorization] to call the API",
+            "images": [
+              {
+                "name": "screenshot.png",
+                "mimeType": "image/png"
+              }
+            ],
+            "redactions": 1
+          },
+          {
+            "kind": "reasoning",
+            "seq_from": 6,
+            "seq_to": 7,
+            "text": "Check the test first.",
+            "redactions": 0
+          },
+          {
+            "kind": "message",
+            "seq_from": 8,
+            "seq_to": 9,
+            "text": "The key is [redacted:anthropic-key], done.",
+            "redactions": 1
+          },
+          {
+            "kind": "tool_call",
+            "id": "call_1",
+            "seq_from": 10,
+            "seq_to": 12,
+            "title": "bun test",
+            "tool_kind": "execute",
+            "status": "failed",
+            "input": {
+              "command": "bun test"
+            },
+            "output": {
+              "content": [
+                {
+                  "type": "content",
+                  "content": {
+                    "type": "text",
+                    "text": "1 failing"
+                  }
+                }
+              ],
+              "raw": {
+                "truncated": true,
+                "bytes": 20491,
+                "head": "{\"stdout\":\"....\""
+              }
+            },
+            "redactions": 0
+          },
+          {
+            "kind": "permission",
+            "seq": 11,
+            "answer_seq": 13,
+            "tool_call_id": "call_1",
+            "title": "bun test",
+            "options": [
+              {
+                "optionId": "allow",
+                "name": "Allow",
+                "kind": "allow_once"
+              },
+              {
+                "optionId": "reject",
+                "name": "Reject",
+                "kind": "reject_once"
+              }
+            ],
+            "outcome": "selected:allow",
+            "redactions": 0
+          },
+          {
+            "kind": "other",
+            "seq": 14,
+            "type": "agent-update:usage_update",
+            "redactions": 0
+          },
+          {
+            "kind": "error",
+            "seq": 15,
+            "error_kind": "quota",
+            "message": "You have exceeded your quota.",
+            "redactions": 0
+          }
+        ],
+        "next_cursor": "czoxNg",
+        "redactions": 2,
+        "truncated_fields": 1
+      }
+    },
+    {
+      "name": "an empty session",
+      "response": {
+        "session_id": "acps_3f1c2b7e-5d4a-4c9b-8e2f-1a6b7c8d9e0f",
+        "seq_from": 0,
+        "seq_to": 0,
+        "items": [],
+        "next_cursor": null,
+        "redactions": 0,
+        "truncated_fields": 0
+      }
+    }
+  ],
+  "reject": [
+    {
+      "reason": "an item without its redaction count",
+      "patch": {
+        "items": [
+          {
+            "redactions": null
+          }
+        ]
+      }
+    },
+    {
+      "reason": "an unknown item kind",
+      "patch": {
+        "items": [
+          {
+            "kind": "note"
+          }
+        ]
+      }
+    },
+    {
+      "reason": "a permission outcome outside the four",
+      "patch": {
+        "items": [
+          {},
+          {
+            "outcome": "approved"
+          }
+        ]
+      }
+    },
+    {
+      "reason": "a truncation marker without its size",
+      "patch": {
+        "items": [
+          {},
+          {},
+          {},
+          {
+            "text": {
+              "truncated": true,
+              "head": "Use"
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "errors": [
+    {
+      "status": 400,
+      "body": {
+        "error": "bad_range"
+      }
+    },
+    {
+      "status": 401,
+      "body": {
+        "error": "unauthorized"
+      }
+    },
+    {
+      "status": 403,
+      "body": {
+        "error": "forbidden"
+      }
+    },
+    {
+      "status": 404,
+      "body": {
+        "error": "not_found"
+      }
+    }
+  ]
+}

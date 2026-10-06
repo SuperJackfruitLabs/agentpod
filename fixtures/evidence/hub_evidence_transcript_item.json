@@ -1,0 +1,20 @@
+{
+  "corpus": "evidence/hub-transcript-item",
+  "version": 1,
+  "authoredAt": "2026-10-06",
+  "authoredFrom": "agentpod apps/hub/src/routes/evidence.ts; superwitness transcripts spec §3.3",
+  "purpose": "One item by the seq it starts at. With full=1 it is whole (redacted) up to 1 MiB serialised; without, it is cut exactly as its page cut it. Over 1 MiB is 413.",
+  "examples": [
+    {
+      "name": "full=1",
+      "response": {
+        "session_id": "acps_3f1c2b7e-5d4a-4c9b-8e2f-1a6b7c8d9e0f",
+        "item": { "kind": "tool_call", "id": "call_1", "seq_from": 10, "seq_to": 12, "title": "bun test", "tool_kind": "execute", "status": "failed", "input": { "command": "bun test" }, "output": { "content": [{ "type": "content", "content": { "type": "text", "text": "1 failing" } }], "raw": { "stdout": "....", "token": "[redacted:key-name]" } }, "redactions": 1 }
+      }
+    }
+  ],
+  "errors": [
+    { "status": 413, "body": { "error": "item_too_large" } },
+    { "status": 404, "body": { "error": "not_found" } }
+  ]
+}
