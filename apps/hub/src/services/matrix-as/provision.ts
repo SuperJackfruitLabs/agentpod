@@ -11,12 +11,12 @@
  * the failure the mode exists to prevent.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { nodes } from "../../db/schema/nodes";
 import { matrixRooms } from "../../db/schema/matrix";
-import { principalIdentities } from "../../db/schema/identities";
+import { matrixIdForPrincipal } from "../principal-matrix-id";
 import { bridgeLocalpart, roomAliasFor, stationSpeaker } from "./names";
 import { ensureNodeSpace, fileRoomUnderSpace } from "./spaces";
 import { pickAvatar } from "./avatar";
@@ -131,16 +131,7 @@ async function ownerMxid(userId: string): Promise<string | null> {
   const principal = await principalForUser(userId);
   if (!principal) return null;
 
-  const [row] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principal.id),
-        eq(principalIdentities.system, "matrix")
-      )
-    );
-  return row?.externalId ?? null;
+  return matrixIdForPrincipal(principal.id);
 }
 
 export async function provisionStation(stationId: string, deps: ProvisionDeps): Promise<void> {

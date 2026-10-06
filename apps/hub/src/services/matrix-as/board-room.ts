@@ -13,7 +13,7 @@
  * outright, so it can both encrypt for and decrypt for it. That is the whole
  * requirement, and it is what selects every choice below.
  */
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { db } from "../../db/drizzle";
 import { matrixBoardRooms } from "../../db/schema/board-rooms";
@@ -291,21 +291,13 @@ export async function matrixIdsForBoardHumans(boardId: string): Promise<string[]
   }
 
   const { principalForUser } = await import("../principals");
-  const { principalIdentities } = await import("../../db/schema/identities");
+  const { matrixIdForPrincipal } = await import("../principal-matrix-id");
   const mxids: string[] = [];
   for (const userId of hubUserIds) {
     const principal = await principalForUser(userId);
     if (!principal) continue;
-    const [identity] = await db
-      .select({ externalId: principalIdentities.externalId })
-      .from(principalIdentities)
-      .where(
-        and(
-          eq(principalIdentities.principalId, principal.id),
-          eq(principalIdentities.system, "matrix"),
-        ),
-      );
-    if (identity?.externalId) mxids.push(identity.externalId);
+    const mxid = await matrixIdForPrincipal(principal.id);
+    if (mxid) mxids.push(mxid);
   }
   return mxids;
 }

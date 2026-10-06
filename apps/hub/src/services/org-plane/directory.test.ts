@@ -26,6 +26,11 @@ function setup() {
       if (state.down) throw new OrgPlaneError(state.status, "unreachable");
       return { principalId: P.id, kind: "agent" as const, suspended: false };
     },
+    identitiesOf: async (id: string, system: string) => {
+      state.calls++;
+      if (state.down) throw new OrgPlaneError(state.status, "unreachable");
+      return id === P.id ? [{ system, externalId: "@agent_cody:id.test" }] : null;
+    },
     listPrincipals: async (kind: string) => {
       state.calls++;
       return kind === P.kind ? [P] : [];
@@ -118,5 +123,20 @@ describe("PrincipalDirectory", () => {
     state.down = true;
     advance(14 * 60_000);
     expect(await dir.principal(P.id)).toEqual(P);
+  });
+
+  test("identitiesOf is cached for the TTL, stale while down, and dropped by invalidate(id)", async () => {
+    const { state, dir, advance } = setup();
+    expect(await dir.identitiesOf(P.id, "matrix")).toEqual([{ system: "matrix", externalId: "@agent_cody:id.test" }]);
+    expect(await dir.identitiesOf(P.id, "matrix")).toEqual([{ system: "matrix", externalId: "@agent_cody:id.test" }]);
+    expect(state.calls).toBe(1);
+    advance(61_000);
+    state.down = true;
+    expect(await dir.identitiesOf(P.id, "matrix")).toEqual([{ system: "matrix", externalId: "@agent_cody:id.test" }]);
+    state.down = false;
+    dir.invalidate(P.id);
+    await dir.identitiesOf(P.id, "matrix");
+    expect(state.calls).toBe(3);
+    expect(await dir.identitiesOf("prn_unknown", "matrix")).toBeNull();
   });
 });

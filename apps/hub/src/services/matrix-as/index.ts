@@ -16,7 +16,7 @@ import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../../db/drizzle";
 import { stations } from "../../db/schema/stations";
 import { matrixGateEvents, matrixRooms } from "../../db/schema/matrix";
-import { principalIdentities } from "../../db/schema/identities";
+import { matrixIdForPrincipal } from "../principal-matrix-id";
 import * as broker from "../broker";
 import { createMatrixClient, type MatrixClient } from "./client";
 import { withQuietNotes } from "./push-quiet";
@@ -114,16 +114,7 @@ async function readerForRoom(roomId: string): Promise<string | null> {
   const principal = await principalForUser(row.userId);
   if (!principal) return null;
 
-  const [identity] = await db
-    .select({ externalId: principalIdentities.externalId })
-    .from(principalIdentities)
-    .where(
-      and(
-        eq(principalIdentities.principalId, principal.id),
-        eq(principalIdentities.system, "matrix")
-      )
-    );
-  return identity?.externalId ?? null;
+  return matrixIdForPrincipal(principal.id);
 }
 
 /**

@@ -61,6 +61,9 @@ function downForCaller() {
     identity: async () => {
       throw new OrgPlaneError(0, "unreachable");
     },
+    identitiesOf: async () => {
+      throw new OrgPlaneError(0, "unreachable");
+    },
     list: async () => {
       throw new OrgPlaneError(0, "unreachable");
     },

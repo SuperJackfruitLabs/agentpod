@@ -105,6 +105,17 @@ describe("OrgPlaneClient", () => {
     expect(await client.lookupIdentity("matrix", "@op:id.test")).toEqual(body as never);
   });
 
+  test("identitiesOf reads a principal's linked ids, filtered by system, null on 404 (contract §3.5)", async () => {
+    const ids = [{ system: "matrix", externalId: "@op:id.test" }];
+    const { seen, client } = fake(() => json(200, ids));
+    expect(await client.identitiesOf("prn_aaaaaaaaaaaaaaaaaaaa", "matrix")).toEqual(ids);
+    expect(seen[0]!.url).toBe("https://accounts.test/api/principals/prn_aaaaaaaaaaaaaaaaaaaa/identities?system=matrix");
+    expect(seen[0]!.method).toBe("GET");
+    expect(await fake(() => json(404, { error: "unknown_principal" })).client.identitiesOf("prn_x", "matrix")).toBeNull();
+    const err = await fake(() => json(403, { error: "insufficient_scope" })).client.identitiesOf("prn_x", "matrix").catch((e) => e);
+    expect([err.status, err.code]).toEqual([403, "insufficient_scope"]);
+  });
+
   test("getPrincipal returns the principal and its grant", async () => {
     const p = {
       id: "prn_aaaaaaaaaaaaaaaaaaaa", kind: "agent", handle: "cody", displayName: "Cody", organizationId: "org_00000000000000000000",
