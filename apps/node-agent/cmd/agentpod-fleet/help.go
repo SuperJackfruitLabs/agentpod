@@ -51,6 +51,8 @@ Hub tokens last five minutes. `+"`fleet login`"+` also registers this machine as
 and every later command exchanges that credential for a fresh token — so the browser
 opens once, not once per lapse. The device credential lasts 90 days and renews itself
 whenever it is used. `+"`fleet devices`"+` lists them; `+"`fleet logout`"+` revokes this one.
+When your hub has an account service, `+"`fleet login`"+` signs in through it instead: it
+prints a code to confirm in the browser, and the device is listed and revoked there.
 
 What is NOT here, deliberately: anything that acts as THIS MACHINE rather than as you
 (that is apn), and the interactive surfaces — a terminal, an ACP session — which are a

@@ -42,6 +42,11 @@ type Device struct {
 	Secret string `json:"secret"`
 	Hub    string `json:"hub,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Set when the credential was issued by the organization plane rather than the hub. A
+	// credential with a PlaneURL is exchanged at the plane, never at the hub (see plane.go).
+	PlaneURL string `json:"plane_url,omitempty"`
+	Issuer   string `json:"issuer,omitempty"`
+	Audience string `json:"audience,omitempty"`
 }
 
 // DevicePath is where `fleet login` stores the device credential.
@@ -242,7 +247,14 @@ func Resolve(hub string) (Credential, error) {
 		return Credential{}, ErrNoCredential
 	}
 
-	token, err := ExchangeDevice(hub, d)
+	// A plane-issued credential is exchanged at the plane that issued it, for the hub's audience.
+	// Sending it to the hub's own exchange would hand a secret to a host that never issued it.
+	var token string
+	if d.PlaneURL != "" {
+		token, err = ExchangeAtPlane(d)
+	} else {
+		token, err = ExchangeDevice(hub, d)
+	}
 	if err != nil {
 		return Credential{}, ErrNoCredential
 	}

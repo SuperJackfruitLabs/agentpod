@@ -78,6 +78,19 @@ func fleetLogin(args []string) {
 	}
 	hub := hubBase()
 
+	// A hub that defers to an organization plane has no sign-in of its own: its authorize,
+	// exchange and device routes answer 410. It names the plane, and the plane's device flow
+	// replaces everything below. An older hub (404) or `{ "issuer": null }` keeps this flow.
+	plane, err := fleetcred.DiscoverPlane(hub)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if plane != nil {
+		fleetLoginPlane(hub, *plane)
+		return
+	}
+
 	// 1. Listen first. The redirect URI has to name a port that is already accepting.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
