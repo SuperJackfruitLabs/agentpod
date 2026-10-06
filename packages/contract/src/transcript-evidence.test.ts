@@ -129,9 +129,10 @@ test("items are in ascending first-seq order, and no two share one", () => {
  * `foldEvent` changes, this goes red until the evidence fold follows (or the change is
  * recorded as a deliberate difference).
  */
-test("parity: the evidence fold and the console's foldEvent agree about the conversation", () => {
-  const chat = TURN.reduce((t, e) => foldEvent(t, { ...e, sessionId: "s", createdAt: "2026-10-06T00:00:00Z" } as never), emptyTranscript());
-  const fromConsole = chat.items.flatMap((it: ChatItem) =>
+/** Both folds of one log, projected to what both show: who spoke, from which seq, and what. */
+function consoleView(events: Ev[]) {
+  const chat = events.reduce((t, e) => foldEvent(t, { ...e, sessionId: "s", createdAt: "2026-10-06T00:00:00Z" } as never), emptyTranscript());
+  return chat.items.flatMap((it: ChatItem) =>
     it.kind === "user" ? [["prompt", it.seq, it.text]]
     : it.kind === "assistant" ? [["message", it.seq, it.text]]
     : it.kind === "reasoning" ? [["reasoning", it.seq, it.text]]
@@ -140,7 +141,9 @@ test("parity: the evidence fold and the console's foldEvent agree about the conv
     : it.level === "error" ? [["error", it.seq, it.text]]
     : [],
   );
-  const fromEvidence = fold(TURN).flatMap((it) =>
+}
+function evidenceView(events: Ev[]) {
+  return fold(events).flatMap((it) =>
     it.kind === "prompt" ? [["prompt", it.seq, it.text]]
     : it.kind === "message" || it.kind === "reasoning" ? [[it.kind, it.seq_from, it.text]]
     : it.kind === "tool_call" ? [["tool_call", it.seq_from, `${it.title}/${it.status}`]]
@@ -148,5 +151,47 @@ test("parity: the evidence fold and the console's foldEvent agree about the conv
     : it.kind === "error" ? [["error", it.seq, it.message]]
     : [],
   );
-  expect(fromEvidence).toEqual(fromConsole);
+}
+
+/**
+ * The console and the evidence agree about the conversation. Projected to what both show,
+ * the two folds of one log must match. If a rule in `foldEvent` changes, this goes red until
+ * the evidence fold follows (or the change is recorded as a deliberate difference).
+ */
+test("parity: the evidence fold and the console's foldEvent agree about the conversation", () => {
+  expect(evidenceView(TURN)).toEqual(consoleView(TURN));
+});
+
+const usage = (seq: number) => ev(seq, "agent-update", { sessionUpdate: "usage_update", used: 1, size: 2 });
+const state = (seq: number, status: string) => ev(seq, "state", { status });
+const KEY_A = "a sk-ant-api03-AAAAAAAAAA";
+const KEY_B = "BBBBBBBBBBBBBBBBBBBB z";
+
+test("an event the console does not render does not split a streaming message", () => {
+  expect(fold([chunk(1, KEY_A), usage(2), chunk(3, KEY_B)])).toEqual([
+    { kind: "message", seq_from: 1, seq_to: 3, text: `${KEY_A}${KEY_B}` },
+    { kind: "other", seq: 2, type: "agent-update:usage_update" },
+  ]);
+});
+
+test("a state other than idle/ended does not split a streaming message either", () => {
+  expect(fold([chunk(1, KEY_A), state(2, "working"), chunk(3, KEY_B)])).toEqual([
+    { kind: "message", seq_from: 1, seq_to: 3, text: `${KEY_A}${KEY_B}` },
+    { kind: "state", seq: 2, status: "working" },
+  ]);
+});
+
+test("a state idle still splits it into two messages", () => {
+  expect(fold([chunk(1, "one"), state(2, "idle"), chunk(3, "two")])).toEqual([
+    { kind: "message", seq_from: 1, seq_to: 1, text: "one" },
+    { kind: "state", seq: 2, status: "idle" },
+    { kind: "message", seq_from: 3, seq_to: 3, text: "two" },
+  ]);
+});
+
+test("parity across events the console ignores: chunk, usage, chunk and chunk, working, chunk", () => {
+  for (const events of [[chunk(1, "a"), usage(2), chunk(3, "b")], [chunk(1, "a"), state(2, "working"), chunk(3, "b")]]) {
+    expect(evidenceView(events)).toEqual(consoleView(events));
+    expect(evidenceView(events)).toHaveLength(1);
+  }
 });

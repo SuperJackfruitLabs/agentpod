@@ -5,7 +5,9 @@
  * "what happened". Same three rules, so the two never disagree about the conversation:
  *
  *   - streaming chunks coalesce into one message (or reasoning) item until something else
- *     happens;
+ *     happens. What the console does not render does not interrupt a stream: an `other` item,
+ *     or a `state` other than idle/ended, is pushed after the open item and a later chunk of
+ *     the same kind still extends it (so a secret split across such an event stays whole);
  *   - tool calls upsert by `toolCallId` — a repeat or an update merges, later fields win;
  *   - a permission answer pairs with its request by `requestSeq`.
  *
@@ -112,16 +114,17 @@ export function foldEvidenceEvent(f: EvidenceFold, ev: EvidenceEvent): EvidenceF
     : false;
   if (!handled) {
     const sub = ev.type === "agent-update" && isRecord(ev.payload) ? str(ev.payload.sessionUpdate) : undefined;
-    push(f, { kind: "other", seq: ev.seq, type: sub ? `agent-update:${sub}` : ev.type });
+    push(f, { kind: "other", seq: ev.seq, type: sub ? `agent-update:${sub}` : ev.type }, true);
   }
   return f;
 }
 
 type Ev = EvidenceEvent;
 
-function push(f: EvidenceFold, item: EvidenceItem): void {
+/** Append an item. It closes the open message/reasoning item unless `keepOpen` (see the header). */
+function push(f: EvidenceFold, item: EvidenceItem, keepOpen = false): void {
   f.items.push(item);
-  f.open = null;
+  if (!keepOpen) f.open = null;
 }
 
 function foldPrompt(f: EvidenceFold, ev: Ev): boolean {
@@ -268,7 +271,8 @@ function foldState(f: EvidenceFold, ev: Ev): boolean {
   const status = str(ev.payload.status);
   if (status === undefined) return false;
   const reason = str(ev.payload.reason);
-  push(f, { kind: "state", seq: ev.seq, status, ...(reason !== undefined ? { reason } : {}) });
+  // Only idle and ended end a turn; any other status leaves a streaming message open.
+  push(f, { kind: "state", seq: ev.seq, status, ...(reason !== undefined ? { reason } : {}) }, status !== "idle" && status !== "ended");
   return true;
 }
 
