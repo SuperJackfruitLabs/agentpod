@@ -44,6 +44,7 @@ import { createPrincipal, suspendPrincipal } from "../services/principals";
 import { adminMiddleware } from "../auth/admin-middleware";
 import { agentsAdminRouter } from "./agents-admin";
 import { principals } from "../db/schema/organization";
+import { hubOperators } from "../db/schema/operators";
 import { onProvisionStation } from "../services/matrix-as/hooks";
 import { setOrgPlaneForTests, TEST_PLANE } from "../auth/org-plane/config";
 import { OrgPlaneError, setOrgPlaneClientForTests, type OrgPlaneClient, type PlanePrincipal } from "../services/org-plane/client";
@@ -105,6 +106,9 @@ beforeAll(async () => {
     cpuCount: 1,
   });
 
+  // Under the plane admin is a seat in hub_operators (decision D4), not user.role.
+  await db.insert(hubOperators).values({ principalId: ADMIN_ACTOR });
+
   stationId = `st_agtadm_${RUN}`;
   await db.insert(stations).values({
     id: stationId,
@@ -128,6 +132,7 @@ afterAll(async () => {
     await rawSql`DELETE FROM nodes WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM enrollment_tokens WHERE user_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM principals WHERE handle LIKE ${HANDLE_PREFIX + "%"}`;
+    await rawSql`DELETE FROM hub_operators WHERE principal_id = ${ADMIN_ACTOR}`;
     await rawSql`DELETE FROM "user" WHERE id IN (${ADMIN_ACTOR}, ${NON_ADMIN_ACTOR})`;
   } catch {
     // cleanup only

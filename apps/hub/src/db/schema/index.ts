@@ -90,3 +90,6 @@ export * from "./harness-config-ops";
 
 // Better Auth user id → prn_, frozen at the org-plane cutover; permanent (P3 plan, Task 9).
 export * from "./legacy-user-principals";
+
+// Who may operate this hub under the org plane, by principal id (P3 plan, Task 12; decision D4).
+export * from "./operators";

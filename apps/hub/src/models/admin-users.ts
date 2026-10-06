@@ -10,6 +10,8 @@
 
 import { db } from "../db/drizzle";
 import { user, session, type User, type UserRole } from "../db/schema/auth";
+import { hubOperators } from "../db/schema/operators";
+import { orgPlane } from "../auth/org-plane/config";
 import { eq, sql, like, or, and, count } from "drizzle-orm";
 import { createLogger } from "../utils/logger";
 
@@ -340,6 +342,16 @@ export async function getAdminStats(): Promise<AdminStats> {
  * Check if user is admin
  */
 export async function isUserAdmin(userId: string): Promise<boolean> {
+  if (orgPlane()) {
+    // Under the plane the caller's id is their prn_ and the token carries no role: admin is a seat
+    // in hub_operators (decision D4). `user.role` is not consulted; it is the legacy answer only.
+    const [seat] = await db
+      .select({ id: hubOperators.principalId })
+      .from(hubOperators)
+      .where(eq(hubOperators.principalId, userId))
+      .limit(1);
+    return !!seat;
+  }
   const [row] = await db
     .select({ role: user.role })
     .from(user)

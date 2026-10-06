@@ -20,6 +20,7 @@ import { principalIdentities } from "../db/schema/identities";
 import { getGrant, grantAllowsPrincipal } from "./grants";
 import { principalForUser } from "./principals";
 import { isUserAdmin } from "../models/admin-users";
+import { orgPlane } from "../auth/org-plane/config";
 import { isControlPairEnforced, GrantReachDenied } from "./control-pair";
 import { createLogger } from "../utils/logger";
 
@@ -187,6 +188,9 @@ export async function requireIssueCredentials(
  * a service) is simply not an admin.
  */
 async function isAdminPrincipal(principalId: string): Promise<boolean> {
+  // Under the plane a human's principal id IS their account id (contract §2), so the seat is
+  // asked about the principal directly; there is no Better Auth identity to go through.
+  if (orgPlane()) return isUserAdmin(principalId);
   const [identity] = await db
     .select({ externalId: principalIdentities.externalId })
     .from(principalIdentities)

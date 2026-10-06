@@ -33,6 +33,7 @@ import { gatewayRoutes } from './routes/gateway.ts';
 import { websocket } from './ws.ts';
 // Admin routes
 import { adminRouter } from './routes/admin.ts';
+import { meRoutes } from './routes/me.ts';
 import { banCheckMiddleware, signupCheckMiddleware } from './auth/admin-middleware.ts';
 // Cloudflare webhook integration
 import { cloudflareWebhookRoutes } from './routes/cloudflare-webhook.ts';
@@ -334,6 +335,7 @@ const app = new Hono()
   .use('/api/*', activityLoggerMiddleware)
   // Admin endpoints (require admin role)
   .route('/api/admin', adminRouter)
+  .route('/api', meRoutes)                                 // GET /api/me — who the caller is; isAdmin from the operator seat under the plane
   // Cloudflare webhook integration
   .route('/api/v2/cloudflare', cloudflareWebhookRoutes)
   // Node fleet management (authenticated)

@@ -659,6 +659,13 @@
       "when": 1791308404108,
       "tag": "0093_legacy_user_principals",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791309542081,
+      "tag": "0094_hub_operators",
+      "breakpoints": true
     }
   ]
 }

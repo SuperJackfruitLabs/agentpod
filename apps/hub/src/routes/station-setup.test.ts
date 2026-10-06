@@ -30,6 +30,7 @@ import {
   type PrincipalDirectory,
 } from "../services/org-plane/directory";
 import { stationSetups } from "../db/schema/station-setup";
+import { hubOperators } from "../db/schema/operators";
 const run = crypto.randomUUID().slice(0, 8);
 const actor = `setup-admin-${run}`;
 /** Under the plane an AuthUser.id is the human's prn_ (contract §2). */
@@ -84,6 +85,8 @@ beforeAll(async () => {
   await createTestUser({ id: actor, role: "admin" });
   await createTestUser({ id: `setup-user-${run}` });
   await createTestUser({ id: planeActor, role: "admin" });
+  // Under the plane admin is a seat in hub_operators (decision D4), not user.role.
+  await db.insert(hubOperators).values([{ principalId: planeActor }, { principalId: actor }]);
   operatorId = await createPrincipal({
     kind: "human",
     handle: `setup-${run}-operator`,
@@ -106,6 +109,7 @@ afterAll(async () => {
   onProvisionStation(null);
   await rawSql`DELETE FROM nodes WHERE id=${nodeId}`;
   await rawSql`DELETE FROM principals WHERE handle LIKE ${`setup-${run}-%`}`;
+  await rawSql`DELETE FROM hub_operators WHERE principal_id IN (${actor},${planeActor})`;
   await rawSql`DELETE FROM "user" WHERE id IN (${actor},${`setup-user-${run}`},${planeActor})`;
 });
 test("setup creates and assigns once; response-loss retry never regrants revoked access", async () => {
@@ -582,6 +586,9 @@ test("under the plane, dispatch me needs the caller to be a principal, and is re
     // `actor` is a legacy user id, not a prn_: under the plane it names no human principal.
     const res = await request(await station(), input());
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      "Your active operator identity is required to grant dispatch access",
+    );
     expect(plane.created).toHaveLength(0);
   } finally {
     plane.restore();

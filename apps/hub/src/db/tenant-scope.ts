@@ -51,6 +51,7 @@ import {
 } from "./schema/matrix";
 import { principalIdentities } from "./schema/identities";
 import { legacyUserPrincipals } from "./schema/legacy-user-principals";
+import { hubOperators } from "./schema/operators";
 import { liveActivityTokens } from "./schema/live-activity";
 import { principalGrants } from "./schema/grants";
 import { matrixCredentialAuthorizations } from "./schema/matrix-credentials";
@@ -247,6 +248,15 @@ export const TENANT_EXEMPT_TABLES: Record<string, { table: Table; reason: string
       "cutover so a pre-cutover hub user id (superpipeline's `decided_by_hub_sub`) still resolves. " +
       "Exempt for the reason that table is: a person is not inside a fleet, they reach one. Read " +
       "only by `GET /api/evidence/principals/:id`, by an id the caller already holds; nothing lists it.",
+  },
+
+  hub_operators: {
+    table: hubOperators,
+    reason:
+      "Who may operate this hub, by principal id (decision D4) — the hub's own seat, what " +
+      "`user.role = 'admin'` was before the org plane. Exempt for the reason `user` is: an " +
+      "operator operates the hub, not one fleet inside it, and admin was never tenant-scoped. Read " +
+      "only by `isUserAdmin` for an id the caller already holds; nothing lists it.",
   },
 
   user: {
