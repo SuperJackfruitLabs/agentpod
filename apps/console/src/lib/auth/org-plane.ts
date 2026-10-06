@@ -33,9 +33,27 @@ let tokens: { access: string; expiresAt: number; refresh: string | null } | null
  */
 let refreshing: Promise<string | null> | null = null;
 
+/** Bumped by every sign-out, so a token request that started before one cannot write tokens after it. */
+let generation = 0;
+
 const store = (s?: Storage) => s ?? sessionStorage;
 const redirectUri = (origin: string) => `${origin}/auth/callback`;
 const base = (url: string) => url.replace(/\/+$/, "");
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * The plane URL as a URL, or null unless it is https — plain http only for a loopback host, the
+ * hub's own rule for ORG_PLANE_URL. The browser is sent there to sign in (security review finding 6).
+ */
+export function planeOrigin(url: string): URL | null {
+  try {
+    const u = new URL(url);
+    if (u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK.has(u.hostname))) return u;
+  } catch {
+    // not a URL
+  }
+  return null;
+}
 
 /** Ask the hub which plane it trusts. `null` is legacy: no plane, an older hub, or no answer at all. */
 export async function discoverPlane(hub: string, fetchFn: typeof fetch = fetch): Promise<PlaneDiscovery | null> {
@@ -47,6 +65,7 @@ export async function discoverPlane(hub: string, fetchFn: typeof fetch = fetch):
       return null;
     }
     if (!body.issuer || !body.url || !body.audience) return null;
+    if (!planeOrigin(body.url)) return null; // a hub naming a non-https plane is not followed
     return { issuer: body.issuer, url: base(body.url), audience: body.audience };
   } catch {
     return null;
@@ -58,6 +77,7 @@ export async function beginSignIn(
   plane: PlaneDiscovery,
   opts: { returnTo: string; origin?: string; storage?: Storage; navigate?: (url: string) => void },
 ): Promise<void> {
+  if (!planeOrigin(plane.url)) throw new Error("The account service URL must be https.");
   const origin = opts.origin ?? window.location.origin;
   const verifier = randomUrlSafe(48);
   const state = randomUrlSafe(24);
@@ -81,6 +101,7 @@ async function tokenRequest(
   fetchFn: typeof fetch,
   now: () => number,
 ): Promise<void> {
+  const gen = generation;
   const res = await fetchFn(`${base(plane.url)}/api/auth/oauth2/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -93,6 +114,7 @@ async function tokenRequest(
     throw new Error("The account service answered without an access token.");
   }
   const expiresIn = typeof j.expires_in === "number" ? j.expires_in : 300;
+  if (gen !== generation) return; // signed out meanwhile: the answer belongs to nobody now
   tokens = {
     access: j.access_token,
     expiresAt: now() + expiresIn * 1000,
@@ -152,17 +174,20 @@ export async function planeAccessToken(
   if (!tokens.refresh) return null;
   if (!refreshing) {
     const refreshToken = tokens.refresh;
-    refreshing = (async () => {
+    const gen = generation;
+    let p: Promise<string | null> | undefined = undefined;
+    p = (async () => {
       try {
         await tokenRequest(plane, { grant_type: "refresh_token", refresh_token: refreshToken }, opts.fetchFn ?? fetch, now);
-        return tokens?.access ?? null;
+        return gen === generation ? (tokens?.access ?? null) : null;
       } catch {
-        tokens = null;
+        if (gen === generation) tokens = null;
         return null;
       } finally {
-        refreshing = null;
+        if (refreshing === p) refreshing = null;
       }
     })();
+    refreshing = p;
   }
   return refreshing;
 }
@@ -183,8 +208,9 @@ export function reauthorizeIfSignedIn(
   return true;
 }
 
-/** Forget the tokens and the signed-in flag. The plane's own session is the plane's to end. */
+/** Forget the tokens and the signed-in flag, here only. `signOut` also revokes at the plane. */
 export function signOutLocal(storage?: Storage): void {
+  generation++;
   tokens = null;
   refreshing = null;
   try {
@@ -201,5 +227,42 @@ export function wasSignedIn(storage?: Storage): boolean {
     return store(storage).getItem(SIGNED_IN) === "1";
   } catch {
     return false;
+  }
+}
+
+/**
+ * Log out: forget everything here first (so nothing below can leave a token behind), then revoke
+ * the refresh token at the plane (RFC 7009) — at the `revocation_endpoint` its discovery
+ * (`/.well-known/oauth-authorization-server`, RFC 8414) names, and only when that endpoint is on
+ * the plane's own origin. Best effort and bounded: an unreachable plane still leaves this tab
+ * signed out, and the token then dies by expiry (security review finding 7a). The plane's own
+ * browser session is the plane's to end.
+ */
+export async function signOut(
+  plane: PlaneDiscovery | null,
+  opts: { storage?: Storage; fetchFn?: typeof fetch; timeoutMs?: number } = {},
+): Promise<void> {
+  const refresh = tokens?.refresh ?? null;
+  signOutLocal(opts.storage);
+  if (!plane || !refresh) return;
+  const origin = planeOrigin(plane.url);
+  if (!origin) return;
+  const fetchFn = opts.fetchFn ?? fetch;
+  const signal = AbortSignal.timeout(opts.timeoutMs ?? 5_000);
+  try {
+    const meta = await fetchFn(`${base(plane.url)}/.well-known/oauth-authorization-server`, { signal });
+    if (!meta.ok) return;
+    const { revocation_endpoint: endpoint } = (await meta.json()) as { revocation_endpoint?: unknown };
+    if (typeof endpoint !== "string") return;
+    const target = new URL(endpoint, origin);
+    if (target.origin !== origin.origin) return; // never hand the token to another host
+    await fetchFn(target.toString(), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token: refresh, token_type_hint: "refresh_token", client_id: CLIENT_ID }).toString(),
+      signal,
+    });
+  } catch {
+    // unreachable or refused: this tab is signed out regardless
   }
 }

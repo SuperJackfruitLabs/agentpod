@@ -3,6 +3,7 @@ package fleetcred
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -229,3 +230,74 @@ func TestLegacyDeviceStillExchangesAtTheHub(t *testing.T) {
 		t.Fatalf("legacy exchange went to %v", seen)
 	}
 }
+
+// Security review finding 6: the plane URL the hub names receives this machine's device secret,
+// and the verification page is opened in a browser. Plain http (outside loopback) or any other
+// scheme is refused, matching the hub's own rule for ORG_PLANE_URL.
+func TestDiscoverPlaneRefusesAPlaneURLThatIsNotHTTPS(t *testing.T) {
+	for _, u := range []string{"http://accounts.test", "file:///etc/passwd", "ftp://accounts.test", "javascript:alert(1)", "accounts.test"} {
+		body := `{"issuer":"https://accounts.test","url":"` + u + `","audience":"https://hub.test"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+		p, err := DiscoverPlane(srv.URL)
+		srv.Close()
+		if err == nil || p != nil {
+			t.Fatalf("url %q: want an error, got %+v %v", u, p, err)
+		}
+	}
+	for _, u := range []string{"https://accounts.test", "http://127.0.0.1:8787", "http://localhost:8787", "http://[::1]:8787"} {
+		body := `{"issuer":"https://accounts.test","url":"` + u + `","audience":"https://hub.test"}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) }))
+		p, err := DiscoverPlane(srv.URL)
+		srv.Close()
+		if err != nil || p == nil {
+			t.Fatalf("url %q: want accepted, got %+v %v", u, p, err)
+		}
+	}
+}
+
+func TestStartDeviceFlowRefusesAVerificationPageOffThePlane(t *testing.T) {
+	var srv *httptest.Server
+	page := ""
+	srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"device_code": "dc1", "user_code": "ABCD", "verification_uri": srv.URL + "/device",
+			"verification_uri_complete": page, "expires_in": 600, "interval": 5,
+		})
+	}))
+	srv.Start()
+	defer srv.Close()
+	p := Plane{Issuer: srv.URL, URL: srv.URL, Audience: "https://hub.test"}
+	for _, bad := range []string{"https://evil.test/device?user_code=ABCD", "file:///Applications/Calculator.app", "http://127.0.0.1:1/device"} {
+		page = bad
+		if _, err := StartDeviceFlow(p); err == nil {
+			t.Fatalf("verification_uri_complete %q: want refused", bad)
+		}
+	}
+	page = srv.URL + "/device?user_code=ABCD"
+	if _, err := StartDeviceFlow(p); err != nil {
+		t.Fatalf("same-origin page refused: %v", err)
+	}
+}
+
+func TestExchangeRefusesAStoredPlaneURLThatIsNotHTTPS(t *testing.T) {
+	// Every request is answered by this transport whatever its host, so nothing but the URL check
+	// stands between the stored secret and the wire.
+	hit := false
+	saved := planeHTTP
+	planeHTTP = &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+		hit = true
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"access_token":"t"}`)), Header: http.Header{}}, nil
+	})}
+	defer func() { planeHTTP = saved }()
+	d := Device{ID: "dev_0123456789abcdef0123", Secret: "s", PlaneURL: "http://accounts.test", Audience: "https://hub.test"}
+	if _, err := ExchangeAtPlane(d); err == nil {
+		t.Fatal("want refused")
+	}
+	if hit {
+		t.Fatal("the secret was sent")
+	}
+}
+
+type roundTrip func(*http.Request) (*http.Response, error)
+
+func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
