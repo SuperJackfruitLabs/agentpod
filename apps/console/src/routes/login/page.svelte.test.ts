@@ -34,7 +34,8 @@ vi.mock("$lib/utils/return-to", async (importOriginal) => ({
 // other module code, including these const declarations) can reference them.
 // ---------------------------------------------------------------------------
 
-const { authState, connectionState } = vi.hoisted(() => ({
+const { authState, connectionState, planeState } = vi.hoisted(() => ({
+  planeState: { value: null as { issuer: string; url: string; audience: string } | null },
   authState: {
     user: null as { id: string; email: string; name?: string | null } | null,
     isAuthenticated: false,
@@ -57,7 +58,10 @@ vi.mock("$lib/stores/auth.svelte", () => ({
   signUp: vi.fn(),
   clearError: vi.fn(),
   initAuth: vi.fn(),
+  currentPlane: () => planeState.value,
 }));
+
+vi.mock("$lib/auth/org-plane", () => ({ beginSignIn: vi.fn() }));
 
 vi.mock("$lib/stores/connection.svelte", () => ({
   connection: connectionState,
@@ -81,6 +85,7 @@ import LoginPage from "./+page.svelte";
 import { goto } from "$app/navigation";
 import { loginWithEmail } from "$lib/stores/auth.svelte";
 import { hardNavigate } from "$lib/utils/return-to";
+import { beginSignIn } from "$lib/auth/org-plane";
 
 beforeEach(() => {
   authState.user = null;
@@ -101,6 +106,8 @@ beforeEach(() => {
   vi.mocked(goto).mockClear();
   vi.mocked(hardNavigate).mockClear();
   vi.mocked(loginWithEmail).mockReset();
+  vi.mocked(beginSignIn).mockReset();
+  planeState.value = null;
   window.history.replaceState({}, "", "/login");
 });
 
@@ -192,4 +199,41 @@ test("an off-origin return goes home, never to the attacker", async () => {
 
   await waitFor(() => expect(vi.mocked(goto)).toHaveBeenCalledWith("/"));
   expect(vi.mocked(hardNavigate)).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// Under the organization plane (P3 Task 14): one button, no password form
+// ---------------------------------------------------------------------------
+
+const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.x" };
+
+test("a hub that names a plane gets one continue button, no password form, no sign-up probe", async () => {
+  connectionState.isConnected = true;
+  connectionState.apiUrl = "https://hub.x";
+  planeState.value = PLANE;
+  const { getByRole, queryByLabelText, queryByText } = render(LoginPage);
+  expect(getByRole("button", { name: "Continue with your Super Jackfruit account" })).toBeTruthy();
+  expect(queryByLabelText("Email")).toBeNull();
+  expect(queryByLabelText("Password")).toBeNull();
+  expect(queryByText("Create one")).toBeNull();
+  await Promise.resolve();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+test("continue starts authorize at the plane, carrying where the sign-in was for", async () => {
+  window.history.replaceState({}, "", "/login?redirect=%2Fnodes%2Fn1");
+  connectionState.isConnected = true;
+  connectionState.apiUrl = "https://hub.x";
+  planeState.value = PLANE;
+  const { getByRole } = render(LoginPage);
+  await fireEvent.click(getByRole("button", { name: "Continue with your Super Jackfruit account" }));
+  expect(beginSignIn).toHaveBeenCalledWith(PLANE, { returnTo: "/nodes/n1" });
+});
+
+test("legacy mode (no plane) keeps the password form", () => {
+  connectionState.isConnected = true;
+  connectionState.apiUrl = "https://hub.x";
+  const { getByLabelText, queryByRole } = render(LoginPage);
+  expect(getByLabelText("Email")).toBeTruthy();
+  expect(queryByRole("button", { name: "Continue with your Super Jackfruit account" })).toBeNull();
 });

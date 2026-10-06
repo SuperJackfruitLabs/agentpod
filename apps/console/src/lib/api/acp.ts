@@ -17,7 +17,7 @@
 
 import { AcpServerMsg as AcpServerMsgSchema } from "@agentpod/contract";
 import type { AcpSessionMode } from "@agentpod/contract";
-import { http } from "./client";
+import { http, withToken } from "./client";
 
 export type AcpSessionRow = import("@agentpod/contract").AcpSessionRow;
 export type AcpServerMsg = import("@agentpod/contract").AcpServerMsg;
@@ -110,9 +110,21 @@ export interface AcpSocket {
   close(): void;
 }
 
-export function createAcpSocket(sessionId: string): AcpSocket {
-  const wsUrl = `${hubUrl().replace(/^http/, "ws")}/api/acp/sessions/${sessionId}/ws`;
-  const ws = new WebSocket(wsUrl);
+/**
+ * Open a session's socket.
+ *
+ * `token` is the console's plane token, sent as `?token=` (a browser WebSocket cannot carry an
+ * Authorization header). Pass `socketToken()` from client.ts: `null` in legacy mode (dialled at
+ * once on the cookie, as always), or a promise under the plane — the socket object is returned at
+ * once so callers can `send` immediately (frames queue, `isOpen` is false), and it dials when the
+ * fresh token arrives. Closed before then, it never dials.
+ */
+export function createAcpSocket(
+  sessionId: string,
+  token: string | null | Promise<string | null> = null,
+): AcpSocket {
+  const baseUrl = `${hubUrl().replace(/^http/, "ws")}/api/acp/sessions/${sessionId}/ws`;
+  let ws: WebSocket | null = null;
 
   let messageCallback: ((msg: AcpServerMsg) => void) | null = null;
   let closeCallback: ((reason: AcpCloseReason) => void) | null = null;
@@ -131,46 +143,61 @@ export function createAcpSocket(sessionId: string): AcpSocket {
     closeCallback?.(reason);
   }
 
-  ws.onopen = () => {
-    // Flush any messages that were sent before the socket opened
-    for (const payload of sendQueue) {
-      ws.send(payload);
-    }
-    sendQueue.length = 0;
-  };
+  function dial(t: string | null) {
+    const socket = new WebSocket(withToken(baseUrl, t));
+    ws = socket;
 
-  ws.onmessage = (event: MessageEvent) => {
-    let raw: unknown;
-    try {
-      raw = JSON.parse(event.data as string);
-    } catch {
-      return;
-    }
-    const parsed = AcpServerMsgSchema.safeParse(raw);
-    if (!parsed.success) return;
-    messageCallback?.(parsed.data);
-  };
+    socket.onopen = () => {
+      // Flush any messages that were sent before the socket opened
+      for (const payload of sendQueue) {
+        socket.send(payload);
+      }
+      sendQueue.length = 0;
+    };
 
-  ws.onerror = () => {
-    emitClose("error");
-  };
+    socket.onmessage = (event: MessageEvent) => {
+      let raw: unknown;
+      try {
+        raw = JSON.parse(event.data as string);
+      } catch {
+        return;
+      }
+      const parsed = AcpServerMsgSchema.safeParse(raw);
+      if (!parsed.success) return;
+      messageCallback?.(parsed.data);
+    };
 
-  ws.onclose = () => {
-    // Any close not already accounted for above (server/network drop) is a
-    // "closed" event, unless it was the direct result of us calling close().
-    emitClose("closed");
-  };
+    socket.onerror = () => {
+      emitClose("error");
+    };
+
+    socket.onclose = () => {
+      // Any close not already accounted for above (server/network drop) is a
+      // "closed" event, unless it was the direct result of us calling close().
+      emitClose("closed");
+    };
+  }
+
+  if (token instanceof Promise) {
+    void token
+      .catch(() => null)
+      .then((t) => {
+        if (!manualClose) dial(t);
+      });
+  } else {
+    dial(token);
+  }
 
   return {
     // 1 = WebSocket.OPEN; literal so the mock in tests needs no statics.
     get isOpen() {
-      return ws.readyState === 1;
+      return ws !== null && ws.readyState === 1;
     },
 
     send(msg) {
       const payload = JSON.stringify(msg);
       // 1 = WebSocket.OPEN; use literal so the mock in tests doesn't need the static
-      if (ws.readyState === 1) {
+      if (ws && ws.readyState === 1) {
         ws.send(payload);
       } else {
         sendQueue.push(payload);
@@ -187,7 +214,7 @@ export function createAcpSocket(sessionId: string): AcpSocket {
 
     close() {
       manualClose = true;
-      ws.close();
+      ws?.close();
     },
   };
 }

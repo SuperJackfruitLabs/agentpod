@@ -5,7 +5,8 @@
  * Uses fetch + localStorage (no Tauri) so it works in the browser/SPA build.
  */
 
-import { setAuthApiUrl, clearAuthSession } from "./auth.svelte";
+import { setAuthApiUrl, clearAuthSession, setPlane } from "./auth.svelte";
+import { discoverPlane } from "$lib/auth/org-plane";
 import { probeHealth, getStoredApiUrl, setStoredApiUrl, clearStoredApiUrl } from "$lib/api/connection-web";
 import { startPolling } from "$lib/utils/poll";
 
@@ -75,6 +76,10 @@ export async function connect(apiUrl: string, _apiKey?: string): Promise<boolean
 
     if (ok) {
       const normalised = apiUrl.replace(/\/$/, "");
+      // Which issuer to sign in through: the hub says (`GET /public/org-plane`). A hub without a
+      // plane, an older hub that 404s, or no answer all mean legacy — Better Auth, as before.
+      // Asked before `connected` flips, so the login page never shows the wrong form first.
+      const plane = await discoverPlane(normalised);
       connectionStatus = {
         connected: true,
         apiUrl: normalised,
@@ -83,6 +88,7 @@ export async function connect(apiUrl: string, _apiKey?: string): Promise<boolean
       };
       setStoredApiUrl(normalised);
       setAuthApiUrl(normalised);
+      setPlane(plane);
       reachable = true;
       return true;
     } else {
@@ -134,6 +140,7 @@ export async function initConnection(): Promise<void> {
 
     if (ok) {
       const normalised = storedUrl.replace(/\/$/, "");
+      const plane = await discoverPlane(normalised);
       connectionStatus = {
         connected: true,
         apiUrl: normalised,
@@ -141,6 +148,7 @@ export async function initConnection(): Promise<void> {
         error: null,
       };
       setAuthApiUrl(normalised);
+      setPlane(plane);
     } else {
       // Disconnected, but NAME the hub we failed to reach. The top bar's hub
       // pill exists to end the case where a console pointed at nothing looks

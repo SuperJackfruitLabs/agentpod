@@ -15,13 +15,15 @@ class MockEventSource {
   // *new* EventSource was opened after backoff, not just that one exists.
   static instances: MockEventSource[] = [];
   url: string;
+  init: EventSourceInit | undefined;
   onmessage: ((e: MessageEvent) => void) | null = null;
   onerror: ((e: Event) => void) | null = null;
   onopen: ((e: Event) => void) | null = null;
   readyState = 0; // CONNECTING
 
-  constructor(url: string) {
+  constructor(url: string, init?: EventSourceInit) {
     this.url = url;
+    this.init = init;
     MockEventSource.instance = this;
     MockEventSource.instances.push(this);
     // Simulate open after construction so onopen fires asynchronously
@@ -222,4 +224,40 @@ test("reconnects after error with backoff", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+// ─── Under the organization plane (P3 Task 15) ───────────────────────────────
+
+test("legacy mode: the log stream sends the cookie and no token", async () => {
+  vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
+  vi.spyOn(api, "socketToken").mockReturnValue(null);
+  (globalThis as unknown as Record<string, unknown>).EventSource = MockEventSource;
+  render(LogTail, { props: { stationId: "s1" } });
+  await waitFor(() => expect(MockEventSource.instance).toBeTruthy());
+  expect(MockEventSource.instance!.url).toBe("http://hub/api/stations/s1/logs");
+  expect(MockEventSource.instance!.init).toEqual({ withCredentials: true });
+});
+
+test("under the plane the log stream carries ?token= and no cookie", async () => {
+  vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
+  vi.spyOn(api, "socketToken").mockReturnValue(Promise.resolve("at1"));
+  (globalThis as unknown as Record<string, unknown>).EventSource = MockEventSource;
+  render(LogTail, { props: { stationId: "s1" } });
+  await waitFor(() => expect(MockEventSource.instance).toBeTruthy());
+  expect(MockEventSource.instance!.url).toBe("http://hub/api/stations/s1/logs?token=at1");
+  expect(MockEventSource.instance!.init).toEqual({ withCredentials: false });
+});
+
+test("unmounted before the token arrives, the log stream is never opened", async () => {
+  vi.spyOn(api, "logsUrl").mockReturnValue("http://hub/api/stations/s1/logs");
+  let resolve!: (t: string | null) => void;
+  const pending = new Promise<string | null>((r) => (resolve = r));
+  vi.spyOn(api, "socketToken").mockReturnValue(pending);
+  (globalThis as unknown as Record<string, unknown>).EventSource = MockEventSource;
+  const { unmount } = render(LogTail, { props: { stationId: "s1" } });
+  unmount();
+  resolve("at1");
+  await pending;
+  await new Promise((r) => setTimeout(r, 0));
+  expect(MockEventSource.instances).toHaveLength(0);
 });

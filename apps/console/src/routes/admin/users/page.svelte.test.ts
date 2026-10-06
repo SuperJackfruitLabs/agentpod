@@ -345,3 +345,15 @@ test("role-select change auto-applies: triggers a listUsers refetch with the rol
   const secondCallOptions = vi.mocked(adminApi.listUsers).mock.calls[1][0];
   expect(secondCallOptions).toMatchObject({ role: "admin", offset: 0 });
 });
+
+test("under the plane the hub answers 410 and the page links to where users are managed", async () => {
+  const { ApiError } = await import("$lib/api/http-error");
+  vi.mocked(adminApi.listUsers).mockRejectedValue(
+    new ApiError("This is managed in your Super Jackfruit account.", {
+      status: 410, detail: "GET /api/admin/users → 410", code: "managed_by_org_plane", url: "https://accounts.test/members",
+    }),
+  );
+  const { findByRole } = render(UsersPage);
+  const link = await findByRole("link", { name: /Super Jackfruit account/ });
+  expect(link.getAttribute("href")).toBe("https://accounts.test/members");
+});

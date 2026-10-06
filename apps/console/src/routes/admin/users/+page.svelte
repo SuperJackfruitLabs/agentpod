@@ -2,6 +2,8 @@
   // Orchestrator only — composes the shared admin/* components on top of
   // DataTable's manualPagination mode; server owns search/filter/paging.
   import { onMount } from "svelte";
+  import { managedByPlaneUrl } from "$lib/api/http-error";
+  import ManagedByPlane from "$lib/components/org-plane/ManagedByPlane.svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { toast } from "svelte-sonner";
@@ -42,6 +44,8 @@
   let total = $state(0);
   let stats = $state<AdminStatsType | null>(null);
   let error = $state<string | null>(null);
+  // Under the org plane the hub answers 410 managed_by_org_plane here: where they live now.
+  let managedAt = $state<string | null>(null);
   let signupEnabled = $state(true);
   let signupLoading = $state(false);
 
@@ -98,6 +102,7 @@
   async function loadData() {
     isLoading = true;
     error = null;
+    managedAt = null;
     try {
       const options: ListUsersOptions = { limit: PAGE_SIZE, offset: pageIndex * PAGE_SIZE };
       if (searchQuery.trim()) options.search = searchQuery.trim();
@@ -115,6 +120,7 @@
       stats = statsResponse;
       signupEnabled = signupResponse.enabled;
     } catch (e) {
+      managedAt = managedByPlaneUrl(e);
       error = (e as Error).message || "Couldn’t load users.";
     } finally {
       isLoading = false;
@@ -258,6 +264,8 @@
         <Skeleton class="h-12 rounded-sm" />
       {/each}
     </div>
+  {:else if managedAt}
+    <ManagedByPlane what="Users" href={managedAt} />
   {:else if error}
     <div class="flex items-start justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4" role="alert">
       <p class="text-sm text-destructive">{error}</p>

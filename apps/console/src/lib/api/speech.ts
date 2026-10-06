@@ -11,7 +11,7 @@
  * write an omitted `apiKey` keeps, `null` clears, a string replaces.
  */
 
-import { http, hubUrl } from "./client";
+import { authFetch, http, hubUrl } from "./client";
 import type { ApiKeyWrite } from "./transcription";
 
 export type { ApiKeyWrite };
@@ -147,13 +147,11 @@ export const applyStationSpeech = (stationId: string) =>
 export const listVoices = () => http<VoiceList>("/api/speech/voices");
 
 /**
- * A voice's sample as a blob. Fetched with the session cookie rather than
- * pointed at from an `<audio src>`, which would not carry it cross-site.
+ * A voice's sample as a blob. Fetched with the console's credential (the session cookie, or the
+ * plane's bearer token) rather than pointed at from an `<audio src>`, which would carry neither.
  */
 export async function fetchVoicePreview(voiceId: string): Promise<Blob> {
-  const res = await fetch(`${hubUrl()}/api/speech/voices/${encodeURIComponent(voiceId)}/preview`, {
-    credentials: "include",
-  });
+  const res = await authFetch(`${hubUrl()}/api/speech/voices/${encodeURIComponent(voiceId)}/preview`);
   if (!res.ok) throw new Error(`The preview could not be loaded (HTTP ${res.status}).`);
   return res.blob();
 }
