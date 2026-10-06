@@ -8,6 +8,7 @@
  */
 
 import { createAuthClient } from "better-auth/svelte";
+import { planeAccessToken, signOutLocal, type PlaneDiscovery } from "$lib/auth/org-plane";
 
 // =============================================================================
 // Dynamic Auth Client
@@ -40,6 +41,24 @@ export function setAuthApiUrl(apiUrl: string) {
  */
 export function getAuthApiUrl(): string | null {
   return currentApiUrl;
+}
+
+// =============================================================================
+// Organization plane
+// =============================================================================
+
+// The plane the connected hub trusts (`GET /public/org-plane`), or null: legacy, Better Auth's
+// cookie session exactly as before. Reactive so the login page switches forms when it is learned.
+let plane = $state.raw<PlaneDiscovery | null>(null);
+
+/** Set by the connection store after it discovers the hub's plane; null means legacy. */
+export function setPlane(p: PlaneDiscovery | null): void {
+  plane = p;
+}
+
+/** The plane this console signs in through, or null in legacy mode. */
+export function currentPlane(): PlaneDiscovery | null {
+  return plane;
 }
 
 // =============================================================================
@@ -132,6 +151,38 @@ export const auth = {
  */
 export async function initAuth(): Promise<void> {
   if (isInitialized) return;
+
+  // Under the plane the console holds a bearer token in memory and asks the hub who it is. Better
+  // Auth is never consulted. No token (a fresh tab or a reload) is simply signed out; the layout
+  // re-runs authorize, silently when the plane's session is alive.
+  if (plane && currentApiUrl) {
+    isLoading = true;
+    error = null;
+    try {
+      const token = await planeAccessToken(plane);
+      if (token) {
+        const res = await fetch(`${currentApiUrl}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok) {
+          const me = (await res.json()) as { id: string; email: string | null; isAdmin: boolean };
+          sessionData = {
+            user: { id: me.id, email: me.email ?? "", name: null, image: null, role: me.isAdmin ? "admin" : null },
+          };
+        } else {
+          // The hub will not have this token (e.g. 403 product_not_enabled). Forget it, so the
+          // layout sends the user to /login with this message rather than straight back to the
+          // plane, which would hand over another token the hub refuses, in a loop.
+          signOutLocal();
+          error = `The hub refused your sign-in (HTTP ${res.status}).`;
+        }
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : "Couldn’t restore your session.";
+    } finally {
+      isLoading = false;
+      isInitialized = true;
+    }
+    return;
+  }
 
   const client = getAuthClient();
 
@@ -301,6 +352,12 @@ export async function logout(): Promise<void> {
   error = null;
 
   try {
+    if (plane) {
+      // Tokens are memory-only: forgetting them is the sign-out. The plane's session is its own.
+      signOutLocal();
+      sessionData = null;
+      return;
+    }
     const client = getAuthClient();
     if (client) {
       await client.signOut();
@@ -325,14 +382,13 @@ export async function refreshToken(): Promise<boolean> {
 }
 
 /**
- * Get the current access token (for API calls)
- * With Better Auth, we use cookies, so this returns null
- * API calls should be made with credentials: 'include'
+ * Get the current access token (for API calls).
+ *
+ * Under the org plane: the plane's access token, refreshed first when it is about to expire.
+ * Legacy: null — Better Auth uses an HTTP-only cookie and API calls send `credentials: "include"`.
  */
 export async function getToken(): Promise<string | null> {
-  // Better Auth uses HTTP-only cookies, not bearer tokens
-  // For API calls, use credentials: 'include' instead
-  return null;
+  return plane ? planeAccessToken(plane) : null;
 }
 
 /**
@@ -340,6 +396,14 @@ export async function getToken(): Promise<string | null> {
  */
 export async function checkAuth(): Promise<boolean> {
   return auth.isAuthenticated;
+}
+
+/**
+ * Let `initAuth` run again. The `/auth/callback` page calls it after a plane sign-in completes,
+ * because the layout's `initAuth` already ran (signed out) before the redirect came back.
+ */
+export function resetAuthInit(): void {
+  isInitialized = false;
 }
 
 /**
@@ -357,6 +421,8 @@ export function clearError(): void {
  * isInitialized so a subsequent setAuthApiUrl() + initAuth() restores fresh.
  */
 export function clearAuthSession(): void {
+  if (plane) signOutLocal();
+  plane = null;
   sessionData = null;
   currentAuthClient = null;
   currentApiUrl = null;

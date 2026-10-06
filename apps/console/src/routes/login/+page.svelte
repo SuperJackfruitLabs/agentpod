@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { auth, loginWithEmail, signUp, clearError, initAuth } from "$lib/stores/auth.svelte";
+  import { auth, loginWithEmail, signUp, clearError, initAuth, currentPlane } from "$lib/stores/auth.svelte";
+  import { beginSignIn } from "$lib/auth/org-plane";
   import { connection, connect, disconnect } from "$lib/stores/connection.svelte";
   import { goto } from "$app/navigation";
   import { resolveReturnTo, hardNavigate, RETURN_PARAM } from "$lib/utils/return-to";
@@ -25,6 +26,10 @@
   // Signup status
   let signupEnabled = $state(true);
   let signupMessage = $state<string | null>(null);
+
+  // The organization plane this hub trusts, if any. Under it, sign-in is the plane's: one button,
+  // no password form, no sign-up (the hub's own sign-up routes are retired there).
+  let plane = $derived(currentPlane());
 
   // Determine current step - wait for connection to be initialized
   let step = $derived<"setup" | "login">(
@@ -55,6 +60,7 @@
   // once per apiUrl rather than on every unrelated connection state tick.
   let lastCheckedApiUrl: string | null = null;
   $effect(() => {
+    if (plane) return;
     if (connection.isConnected && connection.apiUrl && connection.apiUrl !== lastCheckedApiUrl) {
       lastCheckedApiUrl = connection.apiUrl;
       checkSignupStatus(connection.apiUrl);
@@ -92,14 +98,23 @@
    * `resolveReturnTo` allows only this origin and the connected hub's; a path comes back for the
    * first and an absolute URL for the second, because `goto` refuses to leave the origin.
    */
-  function goAfterSignIn() {
-    const target = resolveReturnTo(
+  function returnTarget(): string {
+    return resolveReturnTo(
       new URL(window.location.href).searchParams.get(RETURN_PARAM),
       connection.apiUrl,
       window.location.origin
     );
+  }
+
+  function goAfterSignIn() {
+    const target = returnTarget();
     if (target.startsWith("/")) goto(target);
     else hardNavigate(target);
+  }
+
+  function continueWithPlane() {
+    const p = currentPlane();
+    if (p) void beginSignIn(p, { returnTo: returnTarget() });
   }
 
   async function handleEmailSubmit(e: Event) {
@@ -158,6 +173,8 @@
         <p class="mt-1 text-sm text-muted-foreground">
           {#if step === "setup"}
             Connect to your hub
+          {:else if plane}
+            Sign in
           {:else if authMode === "signin"}
             Sign in
           {:else}
@@ -211,88 +228,94 @@
           {@render errorBanner(auth.error)}
         {/if}
 
-        <!-- Email/Password Form -->
-        <form onsubmit={handleEmailSubmit} class="space-y-4">
-          {#if authMode === "signup"}
-            <Field label="Name" for="name">
+        {#if plane}
+          <Button class="w-full" onclick={continueWithPlane}>
+            Continue with your Super Jackfruit account
+          </Button>
+        {:else}
+          <!-- Email/Password Form -->
+          <form onsubmit={handleEmailSubmit} class="space-y-4">
+            {#if authMode === "signup"}
+              <Field label="Name" for="name">
+                <Input
+                  id="name"
+                  name="name"
+                  type="text"
+                  placeholder="Your name"
+                  autocomplete="name"
+                  bind:value={name}
+                  required
+                  disabled={auth.isLoading}
+                />
+              </Field>
+            {/if}
+
+            <Field label="Email" for="email">
               <Input
-                id="name"
-                name="name"
-                type="text"
-                placeholder="Your name"
-                autocomplete="name"
-                bind:value={name}
+                id="email"
+                name="email"
+                type="email"
+                placeholder="you@example.com"
+                autocomplete="email"
+                spellcheck={false}
+                bind:value={email}
                 required
                 disabled={auth.isLoading}
               />
             </Field>
-          {/if}
 
-          <Field label="Email" for="email">
-            <Input
-              id="email"
-              name="email"
-              type="email"
-              placeholder="you@example.com"
-              autocomplete="email"
-              spellcheck={false}
-              bind:value={email}
-              required
-              disabled={auth.isLoading}
-            />
-          </Field>
+            <Field
+              label="Password"
+              for="password"
+              description={authMode === "signup" ? "Minimum 8 characters" : undefined}
+            >
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                autocomplete={authMode === "signup" ? "new-password" : "current-password"}
+                bind:value={password}
+                required
+                minlength={8}
+                disabled={auth.isLoading}
+              />
+            </Field>
 
-          <Field
-            label="Password"
-            for="password"
-            description={authMode === "signup" ? "Minimum 8 characters" : undefined}
-          >
-            <Input
-              id="password"
-              name="password"
-              type="password"
-              placeholder="••••••••"
-              autocomplete={authMode === "signup" ? "new-password" : "current-password"}
-              bind:value={password}
-              required
-              minlength={8}
-              disabled={auth.isLoading}
-            />
-          </Field>
+            <Button type="submit" class="w-full" disabled={auth.isLoading}>
+              {#if auth.isLoading}
+                <Spinner size="sm" class="text-primary-foreground" />
+                {authMode === "signin" ? "Signing in…" : "Creating…"}
+              {:else}
+                {authMode === "signin" ? "Sign in" : "Create account"}
+              {/if}
+            </Button>
+          </form>
 
-          <Button type="submit" class="w-full" disabled={auth.isLoading}>
-            {#if auth.isLoading}
-              <Spinner size="sm" class="text-primary-foreground" />
-              {authMode === "signin" ? "Signing in…" : "Creating…"}
+          <!-- Toggle auth mode -->
+          <div class="text-center text-sm">
+            {#if signupEnabled}
+              {#if authMode === "signin"}
+                <span class="text-muted-foreground">No account? </span>
+                <button type="button" class="text-primary hover:underline" onclick={toggleAuthMode}>
+                  Create one
+                </button>
+              {:else}
+                <span class="text-muted-foreground">Have an account? </span>
+                <button type="button" class="text-primary hover:underline" onclick={toggleAuthMode}>
+                  Sign in
+                </button>
+              {/if}
             {:else}
-              {authMode === "signin" ? "Sign in" : "Create account"}
+              <!-- Signup disabled message -->
+              <div class="rounded-lg border bg-muted/30 p-3">
+                <p class="text-xs text-muted-foreground">
+                  {signupMessage || "Public registration is disabled. Contact an administrator to create an account."}
+                </p>
+              </div>
             {/if}
-          </Button>
-        </form>
-
-        <!-- Toggle auth mode -->
-        <div class="text-center text-sm">
-          {#if signupEnabled}
-            {#if authMode === "signin"}
-              <span class="text-muted-foreground">No account? </span>
-              <button type="button" class="text-primary hover:underline" onclick={toggleAuthMode}>
-                Create one
-              </button>
-            {:else}
-              <span class="text-muted-foreground">Have an account? </span>
-              <button type="button" class="text-primary hover:underline" onclick={toggleAuthMode}>
-                Sign in
-              </button>
-            {/if}
-          {:else}
-            <!-- Signup disabled message -->
-            <div class="rounded-lg border bg-muted/30 p-3">
-              <p class="text-xs text-muted-foreground">
-                {signupMessage || "Public registration is disabled. Contact an administrator to create an account."}
-              </p>
-            </div>
-          {/if}
-        </div>
+          </div>
+        {/if}
 
         <!-- Change server -->
         <Button variant="ghost" class="w-full text-muted-foreground hover:text-foreground" onclick={disconnect}>
