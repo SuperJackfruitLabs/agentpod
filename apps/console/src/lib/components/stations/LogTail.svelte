@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { logsUrl } from "$lib/api/client";
+  import { logsUrl, socketToken, withToken } from "$lib/api/client";
   import { Button } from "$lib/components/ui/button";
   import { Empty } from "$lib/components/ui/empty";
   import { cn } from "$lib/utils";
@@ -63,6 +63,9 @@
     }
   }
 
+  let connectSeq = 0; // the latest connect(); an older one whose token arrives late stands down
+  let destroyed = false;
+
   function connect() {
     clearReconnectTimer();
     if (typeof EventSource === "undefined") {
@@ -73,11 +76,27 @@
 
     status = attempt === 0 ? "connecting" : "reconnecting";
 
-    const url = logsUrl(stationId);
-    // withCredentials so the Better Auth session cookie is sent on the
-    // cross-origin SSE request (console :1420 → hub :3001); without it the
-    // /logs endpoint returns 401.
-    es = new EventSource(url, { withCredentials: true });
+    // Legacy: null at once, and the stream opens synchronously on the cookie as it always did.
+    // Under the org plane: a fresh token first (EventSource cannot send headers, so `?token=`).
+    const pending = socketToken();
+    if (pending === null) {
+      openStream(null);
+      return;
+    }
+    const seq = ++connectSeq;
+    void pending.then((token) => {
+      // Superseded (a retry, another connect) or unmounted while the token was on its way.
+      if (seq !== connectSeq || destroyed) return;
+      openStream(token);
+    });
+  }
+
+  function openStream(token: string | null) {
+    const url = withToken(logsUrl(stationId), token);
+    // With no token, withCredentials so the Better Auth session cookie is sent
+    // on the cross-origin SSE request (console :1420 → hub :3001); without it
+    // the /logs endpoint returns 401. With a token, no cookie.
+    es = new EventSource(url, { withCredentials: token === null });
 
     es.onopen = () => {
       attempt = 0;
@@ -261,6 +280,7 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
     clearReconnectTimer();
     if (scrollTimer !== null) {
       clearTimeout(scrollTimer);

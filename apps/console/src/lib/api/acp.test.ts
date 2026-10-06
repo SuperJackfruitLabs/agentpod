@@ -114,6 +114,39 @@ test("https:// → wss:// in the ACP WebSocket URL", () => {
   expect(MockWebSocket.instance!.url).toBe("wss://hub.prod:443/api/acp/sessions/s2/ws");
 });
 
+test("a token rides the ACP socket URL as ?token=", () => {
+  createAcpSocket("s_1", "at1");
+  expect(MockWebSocket.instance!.url).toMatch(/\/api\/acp\/sessions\/s_1\/ws\?token=at1$/);
+});
+
+test("with a pending token the socket is usable at once: frames queue, isOpen is false, then it dials", async () => {
+  let resolve!: (t: string | null) => void;
+  const pending = new Promise<string | null>((r) => (resolve = r));
+  const s = createAcpSocket("s_1", pending);
+  s.send({ t: "subscribe", sinceSeq: 0 });
+  expect(s.isOpen).toBe(false);
+  expect(MockWebSocket.instance).toBeNull();
+  resolve("at1");
+  await pending;
+  await Promise.resolve();
+  const ws = MockWebSocket.instance!;
+  expect(ws.url).toMatch(/\?token=at1$/);
+  ws.open();
+  expect(s.isOpen).toBe(true);
+  expect(ws.sent.map((m) => JSON.parse(m).t)).toEqual(["subscribe"]);
+});
+
+test("an ACP socket closed before its token arrives never dials", async () => {
+  let resolve!: (t: string | null) => void;
+  const pending = new Promise<string | null>((r) => (resolve = r));
+  const s = createAcpSocket("s_1", pending);
+  s.close();
+  resolve("at1");
+  await pending;
+  await Promise.resolve();
+  expect(MockWebSocket.instance).toBeNull();
+});
+
 // ─── WebSocket: send ─────────────────────────────────────────────────────────
 
 test("send(msg) after open sends the JSON-encoded client message", () => {

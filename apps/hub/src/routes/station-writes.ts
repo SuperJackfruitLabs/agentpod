@@ -30,6 +30,7 @@ import { z } from "zod";
 import type { Capability } from "@agentpod/contract";
 import { db } from "../db/drizzle";
 import { requireGrantReach } from "../services/grant-reach";
+import type { Caller } from "../auth/caller-authority";
 import { isGrantReachDenied } from "../services/control-pair";
 import * as broker from "../services/broker";
 import { getStation } from "../services/station-registry";
@@ -65,12 +66,14 @@ export function gateCapability(station: StationRow, cap: string): boolean {
  */
 export async function refuseWithoutReach(
   c: Context,
-  userId: string,
+  caller: Caller,
   station: StationRow,
   cap: Capability
 ): Promise<Response | null> {
+  const userId = caller.id;
   try {
-    await requireGrantReach(userId, station, cap, "mutate");
+    // The caller, not its id: under the org plane its token is the grant (design §5.7).
+    await requireGrantReach(caller, station, cap, "mutate");
     return null;
   } catch (e) {
     if (!isGrantReachDenied(e)) throw e;
@@ -172,7 +175,7 @@ export const stationWriteRoutes = new Hono()
       //
       // After the capability gate on purpose — "this station cannot" and "you
       // may not" send an operator to different places.
-      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      const denial = await refuseWithoutReach(c, user, station, "fs.write");
       if (denial) return denial;
 
       const body = c.req.valid("json");
@@ -252,7 +255,7 @@ export const stationWriteRoutes = new Hono()
       //
       // After the capability gate on purpose — "this station cannot" and "you
       // may not" send an operator to different places.
-      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      const denial = await refuseWithoutReach(c, user, station, "fs.write");
       if (denial) return denial;
 
       const body = c.req.valid("json");
@@ -325,7 +328,7 @@ export const stationWriteRoutes = new Hono()
       //
       // After the capability gate on purpose — "this station cannot" and "you
       // may not" send an operator to different places.
-      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      const denial = await refuseWithoutReach(c, user, station, "fs.write");
       if (denial) return denial;
 
       const body = c.req.valid("json");
@@ -400,7 +403,7 @@ export const stationWriteRoutes = new Hono()
       //
       // After the capability gate on purpose — "this station cannot" and "you
       // may not" send an operator to different places.
-      const denial = await refuseWithoutReach(c, user.id, station, "fs.write");
+      const denial = await refuseWithoutReach(c, user, station, "fs.write");
       if (denial) return denial;
 
       const body = c.req.valid("json");

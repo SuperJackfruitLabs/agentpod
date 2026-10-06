@@ -11,10 +11,11 @@ import { vi, test, expect, beforeEach } from "vitest";
 vi.mock("./auth.svelte", () => ({
   setAuthApiUrl: vi.fn(),
   clearAuthSession: vi.fn(),
+  setPlane: vi.fn(),
 }));
 
 import { connect, disconnect, initConnection, connection } from "./connection.svelte";
-import { setAuthApiUrl, clearAuthSession } from "./auth.svelte";
+import { setAuthApiUrl, clearAuthSession, setPlane } from "./auth.svelte";
 
 const LS_KEY = "agentpod.apiUrl";
 
@@ -176,4 +177,44 @@ test("initConnection with no localStorage url but PUBLIC_HUB_URL set → connect
   expect(connection.isConnected).toBe(true);
   expect(connection.apiUrl).toBe("https://hub.agentpod.dev");
   expect(setAuthApiUrl).toHaveBeenCalledWith("https://hub.agentpod.dev");
+});
+
+// ---------------------------------------------------------------------------
+// Organization plane discovery (P3 Task 14)
+// ---------------------------------------------------------------------------
+
+const PLANE = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.test" };
+
+function hubAnswering(discovery: Response | null) {
+  return vi.fn(async (u: string) => {
+    if (u.endsWith("/health")) return new Response("ok", { status: 200 });
+    if (u.endsWith("/public/org-plane") && discovery) return discovery;
+    return new Response("not found", { status: 404 });
+  });
+}
+
+test("connect asks the hub which plane it trusts and hands it to auth", async () => {
+  const f = hubAnswering(new Response(JSON.stringify(PLANE), { status: 200 }));
+  vi.stubGlobal("fetch", f);
+  await connect("https://hub.test/");
+  expect(f).toHaveBeenCalledWith("https://hub.test/public/org-plane");
+  expect(setPlane).toHaveBeenCalledWith(PLANE);
+});
+
+test("initConnection discovers the plane too", async () => {
+  localStorage.setItem(LS_KEY, "https://hub.test");
+  vi.stubGlobal("fetch", hubAnswering(new Response(JSON.stringify(PLANE), { status: 200 })));
+  await initConnection();
+  expect(setPlane).toHaveBeenCalledWith(PLANE);
+});
+
+test("a legacy hub ({ issuer: null }) or an older hub (404) leaves auth in legacy mode", async () => {
+  vi.stubGlobal("fetch", hubAnswering(new Response(JSON.stringify({ issuer: null }), { status: 200 })));
+  await connect("https://hub.test");
+  expect(setPlane).toHaveBeenLastCalledWith(null);
+  await disconnect();
+  vi.stubGlobal("fetch", hubAnswering(null));
+  await connect("https://hub.test");
+  expect(setPlane).toHaveBeenLastCalledWith(null);
+  expect(connection.isConnected).toBe(true);
 });

@@ -10,6 +10,8 @@
  *   hub → client  {t:"exit"}
  */
 
+import { withToken } from "./client";
+
 /** Resolves the hub base URL the same way client.ts does. */
 function hubUrl(): string {
   const stored =
@@ -63,9 +65,21 @@ export interface TerminalClient {
   close(): void;
 }
 
-export function createTerminalClient(stationId: string): TerminalClient {
-  const wsUrl = `${hubUrl().replace(/^http/, "ws")}/api/stations/${stationId}/terminal`;
-  const ws = new WebSocket(wsUrl);
+/**
+ * Open the terminal socket.
+ *
+ * `token` is the console's plane token, sent as `?token=` because a browser WebSocket cannot carry
+ * an Authorization header. Pass `socketToken()` from client.ts: `null` in legacy mode (the cookie
+ * authenticates, and the socket is dialled at once, as it always was), or a promise under the
+ * plane — the client is returned at once, input and resizes queue, and the socket is dialled when
+ * the (fresh) token arrives. Closed before then, it never dials.
+ */
+export function createTerminalClient(
+  stationId: string,
+  token: string | null | Promise<string | null> = null,
+): TerminalClient {
+  const baseUrl = `${hubUrl().replace(/^http/, "ws")}/api/stations/${stationId}/terminal`;
+  let ws: WebSocket | null = null;
 
   let dataCallback: ((text: string) => void) | null = null;
   let closeCallback: ((reason: TerminalCloseReason) => void) | null = null;
@@ -84,44 +98,59 @@ export function createTerminalClient(stationId: string): TerminalClient {
     closeCallback?.(reason);
   }
 
-  ws.onopen = () => {
-    // Flush any messages that were sent before the socket opened
-    for (const payload of sendQueue) {
-      ws.send(payload);
-    }
-    sendQueue.length = 0;
-  };
+  function dial(t: string | null) {
+    const socket = new WebSocket(withToken(baseUrl, t));
+    ws = socket;
 
-  ws.onmessage = (event: MessageEvent) => {
-    let msg: { t: string; data?: string };
-    try {
-      msg = JSON.parse(event.data as string) as { t: string; data?: string };
-    } catch {
-      return;
-    }
+    socket.onopen = () => {
+      // Flush any messages that were sent before the socket opened
+      for (const payload of sendQueue) {
+        socket.send(payload);
+      }
+      sendQueue.length = 0;
+    };
 
-    if (msg.t === "data" && msg.data !== undefined) {
-      const text = decodeBase64(msg.data);
-      dataCallback?.(text);
-    } else if (msg.t === "exit") {
-      emitClose("exit");
-      ws.close();
-    }
-  };
+    socket.onmessage = (event: MessageEvent) => {
+      let msg: { t: string; data?: string };
+      try {
+        msg = JSON.parse(event.data as string) as { t: string; data?: string };
+      } catch {
+        return;
+      }
 
-  ws.onerror = () => {
-    emitClose("error");
-  };
+      if (msg.t === "data" && msg.data !== undefined) {
+        const text = decodeBase64(msg.data);
+        dataCallback?.(text);
+      } else if (msg.t === "exit") {
+        emitClose("exit");
+        socket.close();
+      }
+    };
 
-  ws.onclose = () => {
-    // Any close not already accounted for above (server/network drop) is a
-    // "closed" event, unless it was the direct result of us calling close().
-    emitClose("closed");
-  };
+    socket.onerror = () => {
+      emitClose("error");
+    };
+
+    socket.onclose = () => {
+      // Any close not already accounted for above (server/network drop) is a
+      // "closed" event, unless it was the direct result of us calling close().
+      emitClose("closed");
+    };
+  }
+
+  if (token instanceof Promise) {
+    void token
+      .catch(() => null)
+      .then((t) => {
+        if (!manualClose) dial(t);
+      });
+  } else {
+    dial(token);
+  }
 
   function sendRaw(payload: string) {
     // 1 = WebSocket.OPEN; use literal so the mock in tests doesn't need the static
-    if (ws.readyState === 1) {
+    if (ws && ws.readyState === 1) {
       ws.send(payload);
     } else {
       sendQueue.push(payload);
@@ -148,7 +177,7 @@ export function createTerminalClient(stationId: string): TerminalClient {
 
     close() {
       manualClose = true;
-      ws.close();
+      ws?.close();
     },
   };
 }

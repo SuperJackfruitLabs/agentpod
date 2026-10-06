@@ -4,6 +4,7 @@ vi.mock("./client", () => ({ http: vi.fn() }));
 
 import { http } from "./client";
 import { myReach, forgetMyReach } from "./my-grant";
+import * as authStore from "$lib/stores/auth.svelte";
 
 /**
  * What this browser's principal may do, according to the issuer.
@@ -26,6 +27,7 @@ function tokenWith(claims: Record<string, unknown>): string {
 beforeEach(() => {
   forgetMyReach();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 afterEach(() => forgetMyReach());
 
@@ -59,4 +61,19 @@ test("asks once per page load", async () => {
   await myReach();
 
   expect(http).toHaveBeenCalledTimes(1);
+});
+
+test("under the plane, reach is read from the console's own token, not GET /api/auth/token", async () => {
+  vi.spyOn(authStore, "currentPlane").mockReturnValue({ issuer: "i", url: "u", audience: "a" });
+  vi.spyOn(authStore, "getToken").mockResolvedValue(tokenWith({ mayGrantReach: false }));
+  forgetMyReach();
+  expect(await myReach()).toEqual({ mayGrantReach: false });
+  expect(http).not.toHaveBeenCalled();
+});
+
+test("legacy mode still asks GET /api/auth/token", async () => {
+  vi.spyOn(authStore, "currentPlane").mockReturnValue(null);
+  vi.mocked(http).mockResolvedValue({ token: tokenWith({ mayGrantReach: false }) });
+  expect(await myReach()).toEqual({ mayGrantReach: false });
+  expect(http).toHaveBeenCalledWith("/api/auth/token");
 });

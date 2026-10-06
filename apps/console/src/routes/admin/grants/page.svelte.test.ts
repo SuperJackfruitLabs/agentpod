@@ -339,3 +339,17 @@ test("an orphaned grant offers no suspend control — there is no principal row 
   expect(await findByText("prn_0000000000000000dead")).toBeTruthy();
   expect(queryByRole("button", { name: /suspend prn_0000000000000000dead/i })).toBeNull();
 });
+
+test("under the plane the hub answers 410 and the page links to where grants are managed", async () => {
+  const { ApiError } = await import("$lib/api/http-error");
+  vi.mocked(adminApi.listUsers).mockResolvedValue({ users: [], total: 0 } as never);
+  vi.mocked(grantsApi.listPrincipals).mockResolvedValue([] as never);
+  vi.mocked(grantsApi.listGrants).mockRejectedValue(
+    new ApiError("This is managed in your Super Jackfruit account.", {
+      status: 410, detail: "GET /api/admin/grants → 410", code: "managed_by_org_plane", url: "https://accounts.test/agents",
+    }),
+  );
+  const { findByRole } = render(GrantsPage);
+  const link = await findByRole("link", { name: /Super Jackfruit account/ });
+  expect(link.getAttribute("href")).toBe("https://accounts.test/agents");
+});

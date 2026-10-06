@@ -17,6 +17,7 @@ import { createLogger } from "../utils/logger";
 import { userIdForTokenSubject } from "../services/principals";
 import { verifyHubToken, verifyPlaneBearer } from "./hub-token";
 import { orgPlane, type OrgPlaneConfig } from "./org-plane/config";
+import { authorityFromClaims, type TokenAuthority } from "./caller-authority";
 
 const log = createLogger("auth-middleware");
 
@@ -55,6 +56,12 @@ export interface AuthUser {
    * membership lookup and nothing below this layer changes. See ./tenant.ts.
    */
   tenantId: string;
+  /**
+   * What the caller's org-plane token says they may do (contract §2). Set only by the plane
+   * branch below; absent in legacy mode and for the static API_TOKEN. Authorization checks read
+   * this through `auth/caller-authority.ts` instead of asking the plane (design §5.7).
+   */
+  authority?: TokenAuthority;
 }
 
 /**
@@ -168,6 +175,7 @@ async function planeAuth(c: Context, next: Next, verifyPlane: typeof verifyPlane
         ...(r.caller.claims.email ? { email: r.caller.claims.email } : {}),
         authType: "org_plane",
         tenantId: r.caller.tenantId,
+        authority: authorityFromClaims(r.caller.claims),
       });
       c.set("session", null);
       c.set("betterAuthUser", null);

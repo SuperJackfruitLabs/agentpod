@@ -10,7 +10,11 @@
  *  - Shows a "Sign out" control
  */
 
-import { test, expect, vi } from "vitest";
+import { test, expect, vi, beforeEach } from "vitest";
+
+const { planeState } = vi.hoisted(() => ({
+  planeState: { value: null as { issuer: string; url: string; audience: string } | null },
+}));
 import { render } from "@testing-library/svelte";
 
 // ---------------------------------------------------------------------------
@@ -38,6 +42,12 @@ vi.mock("$lib/stores/auth.svelte", () => ({
     email: "a@b.c",
   },
   logout: vi.fn(),
+  currentPlane: () => planeState.value,
+}));
+
+// The device list fetches on mount; stand it in so these cases stay about the page.
+vi.mock("$lib/components/device-list.svelte", async () => ({
+  default: (await import("./device-list-stub.test-host.svelte")).default,
 }));
 
 vi.mock("$lib/stores/connection.svelte", () => ({
@@ -90,6 +100,10 @@ vi.mock("$lib/themes/store.svelte", () => ({
 
 import SettingsPage from "./+page.svelte";
 
+beforeEach(() => {
+  planeState.value = null;
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -116,4 +130,18 @@ test("renders a Sign out control", () => {
 test("shows a 'Connected to' label for the hub URL", () => {
   const { getByText } = render(SettingsPage);
   expect(getByText("Connected to")).toBeTruthy();
+});
+
+test("legacy mode: the device list is shown", () => {
+  const { getByTestId, queryByText } = render(SettingsPage);
+  expect(getByTestId("device-list-stub")).toBeTruthy();
+  expect(queryByText(/managed in your Super Jackfruit account/)).toBeNull();
+});
+
+test("under the plane, devices are the plane's: a link instead of the list", () => {
+  planeState.value = { issuer: "https://accounts.test", url: "https://accounts.test", audience: "https://hub.x" };
+  const { queryByTestId, getByTestId, getByRole } = render(SettingsPage);
+  expect(queryByTestId("device-list-stub")).toBeNull();
+  expect(getByTestId("managed-by-plane").textContent?.replace(/\s+/g, " ")).toContain("Devices are managed in your Super Jackfruit account");
+  expect(getByRole("link", { name: /Super Jackfruit account/ }).getAttribute("href")).toBe("https://accounts.test");
 });

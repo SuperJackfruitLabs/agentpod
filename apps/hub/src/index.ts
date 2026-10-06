@@ -9,6 +9,7 @@ import { initDatabase } from './db/drizzle.ts';
 import { resetOrphanedOnlineNodes } from './services/node-registry.ts';
 import { auth } from './auth/drizzle-auth.ts';
 import { authMiddleware } from './auth/middleware.ts';
+import { orgPlaneOutageBody } from './auth/caller-authority.ts';
 // A human at a terminal exchanging a device credential for a short-lived token
 import { deviceRoutes } from './routes/devices.ts';
 import { serviceTokenRoutes } from './routes/service-token.ts';
@@ -631,6 +632,10 @@ app.onError((err, c) => {
     method: c.req.method,
     userId: c.get('user')?.id,
   });
+
+  // The plane was needed for an answer and could not be reached: say so, as a 503 (design §5.7).
+  const outage = orgPlaneOutageBody(err);
+  if (outage) return c.json(outage, 503);
 
   let status = 500;
   if ('status' in err && typeof err.status === 'number') {

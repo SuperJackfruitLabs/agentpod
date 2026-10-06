@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { apiError, networkError, ApiError } from "./http-error";
+import { apiError, networkError, ApiError, managedByPlaneUrl } from "./http-error";
 
 test("apiError: 500 with empty body → friendly server copy, technical line in detail", async () => {
   const res = new Response(null, { status: 500 });
@@ -65,4 +65,24 @@ test("networkError: fetch failure → reachability copy with cause in detail", (
   expect(err.message).toBe("Couldn't reach the hub — check your connection.");
   expect(err.status).toBeNull();
   expect(err.detail).toContain("Failed to fetch");
+});
+
+// ── Under the org plane (P3 Task 15): routes the plane now owns answer 410 ──────
+
+const managed = (body: unknown) =>
+  new Response(JSON.stringify(body), { status: 410, headers: { "content-type": "application/json" } });
+
+test("apiError: 410 managed_by_org_plane reads as a sentence and carries the plane's url", async () => {
+  const err = await apiError(managed({ error: "managed_by_org_plane", url: "https://accounts.test/workspaces" }), "GET /api/admin/users");
+  expect(err.status).toBe(410);
+  expect(err.code).toBe("managed_by_org_plane");
+  expect(err.url).toBe("https://accounts.test/workspaces");
+  expect(err.message).toBe("This is managed in your Super Jackfruit account.");
+  expect(managedByPlaneUrl(err)).toBe("https://accounts.test/workspaces");
+});
+
+test("managedByPlaneUrl: only an http(s) url from a managed refusal; anything else is null", async () => {
+  expect(managedByPlaneUrl(await apiError(managed({ error: "managed_by_org_plane", url: "javascript:alert(1)" }), "GET /x"))).toBeNull();
+  expect(managedByPlaneUrl(await apiError(managed({ error: "gone" }), "GET /x"))).toBeNull();
+  expect(managedByPlaneUrl(new Error("boom"))).toBeNull();
 });
