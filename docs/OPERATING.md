@@ -259,9 +259,12 @@ whose grant holds `transcripts:read`. `evidence:read` is not enough, and `transc
 nothing else. Another tenant's session answers 404.
 
 - **Redaction.** Every string is redacted before it leaves: this hub's own secrets (exact values,
-  12+ characters), common credential formats, the whole value of credential-named JSON keys
-  (`password`, `token`, `api_key`, `authorization`, `cookie`, `session_id`, …) and the operator's
-  rules (`HUB_REDACTION_RULES_FILE`, see `docs/DEPLOYMENT.md`). A hit reads `[redacted:<rule>]`.
+  12+ characters), common credential formats (including `redis://:password@…` URLs), the value of
+  an environment assignment to a credential-named variable (`export AWS_SECRET_ACCESS_KEY=…`
+  keeps the name), the whole value of credential-named JSON keys (`password`, `token`, `api_key`,
+  `access_key`, `authorization`, `cookie`, `session_id`, and camelCase ones such as `accessToken`,
+  `clientSecret`, `dbPassword`, …) and the operator's rules (`HUB_REDACTION_RULES_FILE`, see
+  `docs/DEPLOYMENT.md`). A hit reads `[redacted:<rule>]`.
   Stored events are never changed. Pages cut each field at 16 KiB; one item can be read whole up
   to 1 MiB (`?full=1`), else 413.
 - **Audit.** Every read writes a `station_audit` row with verb `evidence.transcript.read`: the

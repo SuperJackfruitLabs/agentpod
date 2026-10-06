@@ -8,8 +8,13 @@
  * Rules run in this order, and each hit becomes `[redacted:<rule-name>]`:
  *   1. the exact values of this hub's own secrets (12+ characters, so a short value cannot
  *      redact ordinary words);
- *   2. credential patterns;
- *   3. key names: in an object, the WHOLE value of a key that names a credential;
+ *   2. credential patterns, each named in its marker: anthropic-key, openai-key, aws-access-key,
+ *      github-token, slack-token, stripe-key, google-api-key, jwt, private-key, authorization,
+ *      url-credentials (with or without a user), service-credential, superpipeline-key,
+ *      query-secret, and env-assignment (`AWS_SECRET_ACCESS_KEY=…`, the name kept);
+ *   3. key names (`key-name`): in an object, the WHOLE value of a key that names a credential —
+ *      `db_password`, `X-Api-Key`, `aws_secret_access_key`, and camelCase `accessToken`,
+ *      `clientSecret`, `dbPassword`;
  *   4. the operator's rules, from `HUB_REDACTION_RULES_FILE`.
  *
  * A deny-list, and a deliberately weak one: a credential in no known shape, under no telling
@@ -99,7 +104,8 @@ export const PATTERN_RULES: readonly RedactionRule[] = [
   },
   { name: "authorization", pattern: /(authorization:[ \t]*)[^\r\n"]+/gi, keepPrefix: true },
   { name: "authorization", pattern: /(\b(?:bearer|basic)[ \t]+)(?=[A-Za-z0-9._~+/=-]*\d)[A-Za-z0-9._~+/=-]{8,}/gi, keepPrefix: true },
-  { name: "url-credentials", pattern: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/:@]{1,256}:[^\s/@]{1,256}(?=@)/gi, keepPrefix: true },
+  // The user half may be empty: `redis://:password@host`.
+  { name: "url-credentials", pattern: /(\b[a-z][a-z0-9+.-]{0,31}:\/\/)[^\s/:@]{0,256}:[^\s/@]{1,256}(?=@)/gi, keepPrefix: true },
   { name: "service-credential", pattern: /\bsvc_[0-9a-f]{20}:\S+/g },
   { name: "superpipeline-key", pattern: /\bspa_[A-Za-z0-9_-]{16,}/g },
   {
@@ -107,11 +113,32 @@ export const PATTERN_RULES: readonly RedactionRule[] = [
     pattern: new RegExp(`([?&](?:${SECRET_QUERY_PARAMS.join("|")})=)[^&\\s"'#]+`, "gi"),
     keepPrefix: true,
   },
+  {
+    // `export AWS_SECRET_ACCESS_KEY=…`, `DB_PASSWORD='…'`: an UPPER_SNAKE name with a credential
+    // word as one whole `_`-separated part (so `MAX_TOKENS=4096` is a count, not a token), then
+    // `=`. The name (and an opening quote) is kept. Every part is bounded, and `\b` means a
+    // start is tried only where a word begins, so the cost stays linear on megabytes of names.
+    // A value another rule already replaced is left alone, so it counts once.
+    name: "env-assignment",
+    pattern:
+      /(\b(?:[A-Z][A-Z0-9]{0,31}_){0,8}(?:SECRET|TOKEN|PASSWORD|PASSWD|API_KEY|ACCESS_KEY)(?:_[A-Z0-9]{1,32}){0,8}=["']?)(?!\[redacted:)[^\s"']{1,4096}/g,
+    keepPrefix: true,
+  },
 ];
 
-/** Rule 3. Case-insensitive, whole key: `db_password`, `X-Api-Key`, `sessionId`, `token`. */
+/** Rule 3. Case-insensitive, whole key: `db_password`, `X-Api-Key`, `sessionId`, `token`, `aws_secret_access_key`. */
 export const SECRET_KEY_NAME =
-  /^(.*[_-])?(password|passwd|secret|token|api[_-]?key|authorization|cookie|private[_-]?key|credential|session[_-]?id)$/i;
+  /^(.*[_-])?(password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization|cookie|private[_-]?key|credential|session[_-]?id)$/i;
+
+/**
+ * Rule 3, camelCase: `accessToken`, `clientSecret`, `dbPassword`, `secretAccessKey`. Case-
+ * sensitive, so the credential word must start a new hump at the end of the key: `tokenizer`,
+ * `secretary`, `tokens` and `passwordPolicy` are not credentials.
+ */
+export const SECRET_KEY_NAME_CAMEL =
+  /(?:^|[a-z0-9])(?:Password|Passwd|Secret|Token|ApiKey|AccessKey|PrivateKey|Credential|SessionId)$/;
+
+export const isSecretKeyName = (k: string): boolean => SECRET_KEY_NAME.test(k) || SECRET_KEY_NAME_CAMEL.test(k);
 
 export class RedactionRulesError extends Error {}
 
@@ -192,7 +219,7 @@ export function createRedactor(opts: { secrets: string[]; operatorRules: Redacti
       for (const [k, x] of Object.entries(v)) {
         const key = string(k);
         count += key.count;
-        if (SECRET_KEY_NAME.test(k) && x !== null && x !== undefined && x !== "") {
+        if (isSecretKeyName(k) && x !== null && x !== undefined && x !== "") {
           out[key.value] = "[redacted:key-name]";
           count += 1;
           continue;

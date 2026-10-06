@@ -587,7 +587,7 @@ here and nowhere else.
 ### Transcript redaction
 
 The hub redacts session content before it leaves as evidence (`GET /api/evidence/sessions/:id/transcript…`).
-Its built-in rules cover the hub's own secrets, common credential formats and credential-named JSON keys.
+Its built-in rules cover the hub's own secrets, common credential formats, environment assignments to credential-named variables (`AWS_SECRET_ACCESS_KEY=…`) and credential-named JSON keys, camelCase ones included.
 An operator can add rules:
 
 | Variable | Meaning |
@@ -599,6 +599,8 @@ echo '[{"name":"ticket","pattern":"TKT-[0-9]{6}"}]' | sudo tee /etc/agentpod/red
 echo 'HUB_REDACTION_RULES_FILE=/etc/agentpod/redaction-rules.json' | sudo tee -a /etc/agentpod/hub.env
 sudo systemctl restart agentpod-hub
 ```
+
+Operator rules apply to every string in an item, including ids, tool names and status words, so a pattern must be specific: a loose one such as `[0-9]{6}` also redacts the ids a reader needs.
 
 Stored events are never modified; redaction applies to what the evidence routes return.
 

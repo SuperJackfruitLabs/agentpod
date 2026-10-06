@@ -33,9 +33,15 @@ const RULES: Array<[string, string, string]> = [
   ["authorization", j("Authorization: ", "Bearer abc.def"), "the authorization header is required"],
   ["authorization", j("Bearer ", "abc123def456"), "Basic understanding, from the bearer of bad news"],
   ["url-credentials", j("postgres://", "user:pw", "@db:5432/x"), "https://example.com:8080/a@b"],
+  // A password with no user (Redis, and any `scheme://:password@host`).
+  ["url-credentials", j("redis://", ":s3cretPassw0rd", "@redis:6379/0"), "redis://redis:6379/0"],
   ["service-credential", j("svc_", "0123456789abcdef0123", ":rest"), j("svc_", "0123456789abcdef012", ":rest")],
   ["superpipeline-key", j("spa_", a(16)), j("spa_", a(15))],
   ["query-secret", j("GET /x?access", "_token=abc123&ok=1"), "GET /x?tokens=abc"],
+  // A shell or .env assignment to a credential-named variable. The near-miss is a count:
+  // the keyword must be a whole `_`-separated part of the name, so `MAX_TOKENS` is not `TOKEN`.
+  ["env-assignment", j("export AWS_SECRET", "_ACCESS_KEY=abc123xyz"), "MAX_TOKENS=4096"],
+  ["env-assignment", j("GITHUB_", "TOKEN=", a(8)), "TOKEN_COUNT is 5"],
 ];
 
 describe("pattern rules: one hit and one near-miss each", () => {
@@ -51,6 +57,17 @@ describe("pattern rules: one hit and one near-miss each", () => {
   test("a labelled credential keeps its label", () => {
     expect(r.string(j("Authorization: ", "Bearer x1y2z3w4v5")).value).toBe("Authorization: [redacted:authorization]");
     expect(r.string(j("https://", "me:pw", "@host/p")).value).toBe("https://[redacted:url-credentials]@host/p");
+    expect(r.string(j("export AWS_SECRET", "_ACCESS_KEY=abc123xyz")).value).toBe(
+      "export AWS_SECRET_ACCESS_KEY=[redacted:env-assignment]",
+    );
+    expect(r.string(j("DB_PASSWORD=", "'hunter2hunter2'")).value).toBe("DB_PASSWORD='[redacted:env-assignment]'");
+  });
+
+  test("an assignment whose value another rule already redacted counts once", () => {
+    expect(r.string(j("GITHUB_TOKEN=", "gh", "p_", a(36)))).toEqual({
+      value: "GITHUB_TOKEN=[redacted:github-token]",
+      count: 1,
+    });
   });
 });
 
@@ -102,8 +119,19 @@ describe("key names", () => {
     });
   });
 
-  test("a key that merely contains a word is not one: tokenizer, secretary", () => {
-    expect(r.value({ tokenizer: "bpe", secretary: "x" })).toEqual({ value: { tokenizer: "bpe", secretary: "x" }, count: 0 });
+  test("a key that merely contains a word is not one: tokenizer, secretary, tokens, passwordPolicy", () => {
+    const near = { tokenizer: "bpe", secretary: "x", tokens: 42, passwordPolicy: "strict", maxTokens: 10 };
+    expect(r.value(near)).toEqual({ value: near, count: 0 });
+  });
+
+  test("camelCase and access-key names are credential keys too", () => {
+    const keys = [
+      "accessToken", "clientSecret", "refreshToken", "dbPassword", "apiKey", "privateKey", "sessionId", "authToken",
+      "secretAccessKey", "aws_secret_access_key", "AWS_SECRET_ACCESS_KEY",
+    ];
+    for (const k of keys) {
+      expect({ k, got: r.value({ [k]: "v" }).value }).toEqual({ k, got: { [k]: "[redacted:key-name]" } });
+    }
   });
 });
 
@@ -117,6 +145,11 @@ describe("cost: no rule is quadratic", () => {
     ["a label", "Bearer " + "a".repeat(1024 * 1024)],
     ["repeated JWT prefixes", "eyJ-".repeat(512 * 1024)],
     ["repeated key headers with no end", j("-----BEGIN ", "PRIVATE KEY-----").repeat(Math.ceil((2 * 1024 * 1024) / 27))],
+    ["a credential keyword with no assignment", "TOKEN".repeat((2 * 1024 * 1024) / 5)],
+    ["credential name parts with no assignment", "A_SECRET_".repeat(Math.ceil((2 * 1024 * 1024) / 9))],
+    ["spaced credential names with no assignment", "X_TOKEN ".repeat((2 * 1024 * 1024) / 8)],
+    ["one assignment with a 2 MiB value", "X_TOKEN=" + "a".repeat(2 * 1024 * 1024)],
+    ["a password-only URL prefix", "redis://:" + "p".repeat(1024 * 1024)],
   ] as const) {
     test(`2 MiB of ${label} redacts in well under a second`, () => {
       const t = performance.now();
